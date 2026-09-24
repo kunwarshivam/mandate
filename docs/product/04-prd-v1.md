@@ -173,7 +173,7 @@ instrument, size, price, or thesis.
 | FR-7.3 | Timeline per agent with filters (event type, time, outcome) | P0 |
 | FR-7.4 | Export as JSON and CSV for a time range | P0 |
 | FR-7.5 | Chain verification tool that detects any modified or missing event | P1 |
-| FR-7.6 | Trading records retained at least 6 years; organizations may extend, not shorten; legal hold ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
+| FR-7.6 | Trading records retained 6 years after the later of creation and the closing of the supported position, lot, or account, in write-once storage; organizations may extend, not shorten; legal hold ([DEC-33](../project/04-decision-log.md#decisions); [spec §13](../specs/trading-domain.md#13-records-retention-dec-33)) | P0 |
 | FR-7.7 | Daily per-workspace surveillance report (self-trade checks, order-to-fill ratios, close-window activity, concentration), retained as a record | P0 |
 
 ### 6.8 Monitoring and controls

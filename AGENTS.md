@@ -51,8 +51,10 @@ stop and ask; do not silently pick one.
     parameters.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
     directly; opening orders are limit orders in the regular session; no short sales in v1.
-13. **Risk reduction is never blocked by our own rules.** Exits, protective orders, and the kill
-    switch are exempt from conduct controls and day-trade budgets; only the broker can refuse them.
+13. **Risk reduction is never blocked by conduct controls, eligibility, day-trade budgets, buying
+    power, or opening-session rules.** Exits and protective orders may be held only by agent mode
+    `paused` or `stopped`, by an `Unknown` order in the same instrument, or by the broker. The kill
+    switch is always available and does not depend on model state.
 
 ## Safety-critical paths
 
