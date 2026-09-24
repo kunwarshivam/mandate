@@ -1,0 +1,80 @@
+# Quality and Release Plan
+
+| | |
+|---|---|
+| **Owner** | Project management, with the tech lead |
+| **Status** | Draft v0.1 |
+
+## Definition of Ready (story)
+
+- Linked to an epic and PRD requirement.
+- Acceptance criteria written and testable.
+- Dependencies identified; any open decision resolved or explicitly deferred.
+
+## Definition of Done (story)
+
+- Code reviewed and merged; CI green.
+- Unit tests for new logic; property-based tests for accounting and risk logic.
+- Journal events emitted for every new state change.
+- Documentation updated (user-facing and runbooks where relevant).
+- No new high-severity security findings.
+
+## Test strategy
+
+| Layer | What | Applies to |
+|---|---|---|
+| Unit | Pure logic: accounting, fills, risk checks, policy evaluation | All Rust and Python code |
+| Property-based | Invariants: cash + positions conserve value net of fees; risk gate never passes an order outside limits | Accounting, risk gate |
+| Simulation fuzzing | Random market paths and mandates through the full runtime; assert no limit violations | Runtime, decider, risk |
+| Replay | Re-run recorded journals and market data; assert identical decisions | Backtest, runtime determinism |
+| Fault injection | Kill the process at every step of order submission and approval handling; assert no duplicates and full reconciliation | Executor, connector, recovery |
+| Integration | Exchange testnet end to end | Connectors |
+| Soak | Several agents on testnet continuously, with forced restarts and escalations | Phase 1 and Phase 2 gates |
+| Security | Threat model, dependency scanning, secret scanning, penetration test | Platform |
+| Privacy | Capture relay and provider payloads; assert no sensitive content | Notifications |
+| Isolation | Cross-workspace access attempts at API, database, and messaging layers | Multi-tenancy |
+
+## Release gates
+
+### Phase 0 gate
+
+- Accounting matches hand-calculated reference cases.
+- Baseline backtest reproducible from inputs.
+- Journal verification detects tampering.
+
+### Phase 1 gate
+
+- Simulation fuzzing: zero limit violations.
+- Fault injection: zero duplicate orders; full reconciliation.
+- Testnet soak completed with forced restarts and escalations; report reviewed.
+
+### Phase 2 gate (design partners)
+
+- All PRD P0 requirements pass acceptance criteria.
+- Phase 1 gate suites still pass.
+- Isolation and privacy tests pass.
+- Penetration test completed; high-severity findings fixed.
+- Runbooks exist for every alert in PRD FR-8.3.
+- Terms of service and risk disclosures approved by counsel.
+- Hybrid install and upgrade verified on a clean environment.
+
+## Launch checklist (design partners)
+
+- [ ] Design-partner agreements signed (scope, support, feedback expectations)
+- [ ] Onboarding guide: connecting a trade-only key, first mandate, backtest, paper, going live
+- [ ] Status page and support channel
+- [ ] Alert routing and on-call rota
+- [ ] Billing plans configured
+- [ ] Analytics events verified (see [metrics](../product/06-metrics.md#instrumentation))
+- [ ] Rollback plan for each release
+
+## Incident management
+
+| Severity | Definition | Response |
+|---|---|---|
+| SEV-1 | Order outside mandate, duplicate order, credential exposure, or cross-tenant data access | Global or workspace kill switch as needed; notify affected customers; postmortem |
+| SEV-2 | Agents paused at scale, approvals not delivered, reconciliation failures | Immediate response; customer notification if impact persists |
+| SEV-3 | Degraded UI, delayed reports, single-agent issues | Fix in normal flow |
+
+Every SEV-1 and SEV-2 gets a written postmortem with root cause, timeline, and follow-up
+actions tracked in the [RAID log](03-raid-log.md).
