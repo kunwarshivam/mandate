@@ -767,10 +767,14 @@ The [journal spec](journal.md) defines the envelope, storage, hashing, and repla
 | `ClockAdvanced`, `TradingDayStarted`, `SettlementPosted`, `DividendPaid` | `advance_clock` (emits every due event in due order) |
 | `CorporateActionPrepared`, `CorporateActionApplied`, `CashInLieuPosted` | `corporate_action_prepare`, `corporate_action_applied`, `broker_cash_posting` |
 | `BrokerPositionObserved`, `ReconciliationRun`, `CompensatingEvent` | `broker_position_update`, reconciliation |
-| `AccountStateObserved`, `RejectObserved`, `AgentModeChanged` | `broker_account_update`, `broker_order_update` (reject) |
+| `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged`, `AgentModeApplied` (account-stream copy of the agent stream's `AgentModeChanged`) | `broker_account_update`, `broker_order_update` (reject) |
 | `ExternalActivityIngested`, `OwnerAcknowledged` | `broker_order_update` (external), `owner_ack` |
 | `ConductBreachDetected` | `conduct_breach` |
-| `AgentDeployed`, `DeploymentRejected`, `KillSwitchActivated`, `SnapshotUpdated` | `deploy_agent`, `kill_switch`, configuration changes |
+| `AgentDeployed`, `DeploymentRejected`, `KillSwitchActivated`, `ConfigSnapshotRegistered` | `deploy_agent`, `kill_switch`, configuration changes |
+
+Each stream folds only its own events ([journal spec §1, §2](journal.md#2-streams)): the executor
+copies gating facts from other streams (agent mode, trading-day start, time-driven events) into the
+account stream, and the risk gate is a pure library called by the executor.
 
 ## 13. Records retention ([DEC-33](../project/04-decision-log.md#decisions))
 
