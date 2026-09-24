@@ -14,6 +14,7 @@ This repository is at the design stage.
 ## Documents
 
 - [Documentation index](docs/README.md)
+- [AGENTS.md](AGENTS.md): rules for AI coding agents working in this repository
 - [High-Level Design](docs/HLD.md)
 - Product: [vision](docs/product/01-vision-and-strategy.md), [PRD v1](docs/product/04-prd-v1.md),
   [roadmap](docs/product/05-roadmap.md)

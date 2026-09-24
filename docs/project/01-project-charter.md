@@ -49,13 +49,15 @@ roadmap Phases 0–2 ([roadmap](../product/05-roadmap.md)).
 | Founder | Product direction, funding, first user (trades own capital) |
 | Design partners | Early access; influence on product; need safety and support |
 | External counsel | Regulatory posture, terms, disclosures |
-| Future team members | See [RACI](05-raci.md) for roles to fill |
+| AI coding agents | Build, test, and review under [`AGENTS.md`](../../AGENTS.md); see [RACI](05-raci.md) |
 | Exchanges / brokers | API terms, rate limits, testnet access |
 | Model providers | Jev (TypeSafe), Laya (open weights), LLM providers |
 
 ## Constraints
 
-- Small team at the start: the founder plus hires listed in the [RACI](05-raci.md).
+- Team: the founder plus AI coding agents; no hires planned for v1 ([RACI](05-raci.md)).
+  Founder review time is the scarcest resource, so work is sized into small, test-verified
+  changes.
 - Rust core with Python for research and model tooling (see [decision log](04-decision-log.md)).
 - No custody, no advice, no per-trade pricing ([compliance](../product/08-compliance-and-regulatory.md)).
 - Exchange availability depends on jurisdiction.
@@ -67,7 +69,8 @@ Tracked in the [RAID log](03-raid-log.md#assumptions).
 ## Key risks
 
 Tracked in the [RAID log](03-raid-log.md#risks). Highest: regulatory exposure, agent-caused
-losses, credential compromise, prompt injection, team capacity.
+losses, credential compromise, prompt injection, founder review bandwidth, and subtle errors in
+agent-written safety-critical code.
 
 ## Governance
 

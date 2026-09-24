@@ -27,6 +27,7 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | DEC-13 | Exchange testnet first, crypto perpetuals first | Accepted | Free, 24/7, safe onboarding | US equities first via Interactive Brokers |
 | DEC-14 | Build Phase 0 core from first principles, piece by piece | Accepted | Founder direction; deep understanding of trading mechanics | Start directly on NautilusTrader |
 | DEC-15 | Working name "Mandate" | Accepted | Matches the core concept; finance-native | Delegate, Autopilot, Principal |
+| DEC-21 | Build with the founder plus AI coding agents; no hires planned for v1. The founder approves all merges and holds all production secrets | Accepted | Founder direction; speed and cost | Hire a core engineering team |
 | DEC-16 | Restate for durable execution | Proposed | Single Rust binary; runs on the edge | Temporal |
 | DEC-17 | NATS JetStream for messaging | Proposed | Account model maps to workspaces; single binary on the edge | Kafka / Redpanda, Redis Streams |
 | DEC-18 | OIDC SSO in v1; SAML and SCIM later | Proposed | Covers Google, Okta, Entra for design partners | SAML from day one |
