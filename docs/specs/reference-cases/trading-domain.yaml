@@ -1,0 +1,227 @@
+# Reference cases for docs/specs/trading-domain.md
+#
+# Implementations must reproduce every expected value exactly.
+# All decimals are strings to avoid floating-point parsing.
+# Fee rates below are TEST VALUES ONLY, not current regulatory rates.
+# Changing or adding a case requires founder approval.
+
+version: 1
+
+test_config:
+  equities:
+    commission: "0"
+    sec_fee_rate: "0.00003"        # test value: fraction of sale proceeds
+    sec_fee_rounding: up_to_cent
+    taf_per_share: "0.0002"        # test value
+    taf_rounding: up_to_cent
+  crypto:
+    maker_bps: "15"                # Alpaca tier 1
+    taker_bps: "25"                # Alpaca tier 1
+    usd_fee_rounding: half_up_to_cent
+  backtest:
+    slippage_half_spread_bps: "1"
+    slippage_impact_bps: "2"
+    volume_cap_fraction: "0.10"
+
+cases:
+
+  - id: RC-01
+    title: Buy, partial sell, regulatory fees, marking, equity, conservation
+    account: { type: margin, starting_cash: "10000.00" }
+    steps:
+      - fill: { instrument: "us_equity:AAPL", side: buy, qty: "10", price: "150.00" }
+      - fill: { instrument: "us_equity:AAPL", side: sell, qty: "4", price: "160.00" }
+      - mark: { instrument: "us_equity:AAPL", price: "155.00" }
+    expected:
+      fees:
+        sec: "0.02"                # 640.00 x 0.00003 = 0.0192, rounded up
+        taf: "0.01"                # 4 x 0.0002 = 0.0008, rounded up
+        total: "0.03"
+      position: { qty: "6", avg_cost: "150.00" }
+      realized_pnl_gross: "40.00"
+      realized_pnl_net: "39.97"
+      unrealized_pnl: "30.00"
+      cash_total: "9139.97"
+      cash_unsettled: "639.97"     # sale proceeds net of fees until T+1
+      equity: "10069.97"
+      conservation_check: "69.97"  # equity change = 40.00 + 30.00 - 0.03
+
+  - id: RC-02
+    title: Averaging into a position; reducing keeps average cost
+    account: { type: margin, starting_cash: "100000.00" }
+    steps:
+      - fill: { instrument: "us_equity:MSFT", side: buy, qty: "10", price: "100.00" }
+      - fill: { instrument: "us_equity:MSFT", side: buy, qty: "10", price: "110.00" }
+      - fill: { instrument: "us_equity:MSFT", side: sell, qty: "5", price: "120.00" }
+    expected:
+      after_step_2: { qty: "20", avg_cost: "105.00" }
+      after_step_3: { qty: "15", avg_cost: "105.00" }
+      realized_pnl_gross: "75.00"
+
+  - id: RC-03
+    title: Flip from long to short; covering a short
+    account: { type: margin, starting_cash: "100000.00", shorting_enabled: true }
+    instrument_flags: { shortable: true, easy_to_borrow: true, fractionable: true }
+    steps:
+      - fill: { instrument: "us_equity:XYZ", side: buy, qty: "5", price: "50.00" }
+      - fill: { instrument: "us_equity:XYZ", side: sell, qty: "8", price: "55.00" }
+      - fill: { instrument: "us_equity:XYZ", side: buy, qty: "3", price: "52.00" }
+    expected:
+      after_step_2:
+        qty: "-3"
+        avg_cost: "55.00"
+        realized_pnl_gross_this_step: "25.00"   # (55 - 50) x 5 on the closed long
+      after_step_3:
+        qty: "0"
+        realized_pnl_gross_this_step: "9.00"    # (55 - 52) x 3 on the covered short
+      realized_pnl_gross_total: "34.00"
+    notes: Fees omitted from expected P&L; see RC-01 for fee handling.
+
+  - id: RC-04
+    title: Forward split 4-for-1
+    account: { type: margin, starting_cash: "0.00" }
+    initial_position: { instrument: "us_equity:ABC", qty: "10", avg_cost: "400.00" }
+    initial_open_orders: 1
+    steps:
+      - mark: { instrument: "us_equity:ABC", price: "400.00" }
+      - corporate_action: { type: split, ratio: "4", ex_date: "2026-09-21" }
+      - mark: { instrument: "us_equity:ABC", price: "100.00" }
+    expected:
+      position: { qty: "40", avg_cost: "100.00" }
+      market_value_before: "4000.00"
+      market_value_after: "4000.00"
+      realized_pnl_change: "0.00"
+      open_orders_after: 0         # canceled on the ex-date
+
+  - id: RC-05
+    title: Reverse split 1-for-10 with cash in lieu (non-fractionable instrument)
+    account: { type: margin, starting_cash: "0.00" }
+    instrument_flags: { fractionable: false }
+    initial_position: { instrument: "us_equity:LOW", qty: "25", avg_cost: "2.00" }
+    steps:
+      - corporate_action: { type: split, ratio: "0.1", ex_date: "2026-09-21", cash_in_lieu_price: "19.00" }
+    expected:
+      position_before_fraction_removal: { qty: "2.5", avg_cost: "20.00" }
+      position: { qty: "2", avg_cost: "20.00" }
+      cash_in_lieu: "9.50"         # 0.5 x 19.00
+      realized_pnl_gross: "-0.50"  # (19.00 - 20.00) x 0.5
+
+  - id: RC-06
+    title: Cash dividend, long and short
+    dividend: { instrument: "us_equity:DIV", amount_per_share: "0.25", ex_date: "2026-09-21", pay_date: "2026-10-01" }
+    variants:
+      - name: long
+        position_at_prior_close: { qty: "100" }
+        expected:
+          on_ex_date: { receivable: "25.00", cash_change: "0.00" }
+          on_pay_date: { receivable: "0.00", cash_change: "25.00" }
+          income: "25.00"
+          realized_trading_pnl_change: "0.00"
+      - name: short
+        position_at_prior_close: { qty: "-100" }
+        expected:
+          on_ex_date: { receivable: "-25.00", cash_change: "0.00" }
+          on_pay_date: { receivable: "0.00", cash_change: "-25.00" }
+          income: "-25.00"
+
+  - id: RC-07
+    title: Crypto buy and sell with fees charged in the received asset
+    account: { type: margin, starting_cash: "100000.00" }
+    steps:
+      - fill: { instrument: "crypto:BTC/USD", side: buy, qty: "0.5", price: "60000.00", liquidity: taker }
+      - fill: { instrument: "crypto:BTC/USD", side: sell, qty: "0.49875", price: "62000.00", liquidity: taker }
+    expected:
+      after_step_1:
+        cash_change: "-30000.00"
+        fee_asset: "BTC"
+        fee_qty: "0.00125"         # 0.5 x 25 bps
+        fee_usd: "75.00"           # valued at the fill price
+        position: { qty: "0.49875", avg_cost: "60000.00" }
+      after_step_2:
+        proceeds: "30922.50"
+        fee_asset: "USD"
+        fee_usd: "77.31"           # 30922.50 x 25 bps = 77.30625, half-up to cent
+        cash_change: "30845.19"
+        position: { qty: "0" }
+        realized_pnl_gross: "997.50"   # (62000 - 60000) x 0.49875
+      total:
+        fees_usd: "152.31"
+        net_pnl: "845.19"
+        cash_change: "845.19"
+        conservation_check: "845.19"
+      day_trade_counted: false     # crypto never counts as a day trade
+
+  - id: RC-08
+    title: Cash-account settlement and buying power (US equities, T+1)
+    account: { type: cash, starting_settled_cash: "1000.00" }
+    calendar_note: 2026-09-21 is a Monday; 2026-09-22 is a trading day
+    steps:
+      - at: "2026-09-21T14:00:00-04:00"
+        fill: { instrument: "us_equity:XYZ", side: buy, qty: "5", price: "100.00" }
+      - at: "2026-09-21T15:00:00-04:00"
+        fill: { instrument: "us_equity:XYZ", side: sell, qty: "5", price: "110.00" }
+      - at: "2026-09-21T15:30:00-04:00"
+        proposed_order: { instrument: "us_equity:QQQ", side: buy, notional: "600.00", type: market }
+      - at: "2026-09-22T09:31:00-04:00"
+        check_balances: true
+    expected:
+      after_step_1: { settled_cash: "500.00", unsettled_cash: "0.00", buying_power: "500.00" }
+      after_step_2:
+        sale_fees: "0.03"          # SEC 0.0165 -> 0.02; TAF 0.001 -> 0.01
+        settled_cash: "500.00"
+        unsettled_cash: "549.97"
+        unsettled_settles_on: "2026-09-22"
+        buying_power: "500.00"
+      step_3_decision: deny         # would use unsettled proceeds
+      step_3_reason: insufficient_settled_buying_power
+      after_step_4: { settled_cash: "1049.97", unsettled_cash: "0.00", buying_power: "1049.97" }
+
+  - id: RC-09
+    title: Day-trade blocking under the legacy regime; crypto excluded
+    account:
+      type: margin
+      equity: "10000.00"
+      day_trading_regime: legacy_pdt
+      legacy_pdt_equity_threshold: "25000.00"
+      day_trades_in_last_5_business_days: 3
+    steps:
+      - at: "2026-09-21T10:00:00-04:00"
+        fill: { instrument: "us_equity:AAPL", side: buy, qty: "10", price: "150.00" }
+      - at: "2026-09-21T10:05:00-04:00"
+        fill: { instrument: "crypto:BTC/USD", side: buy, qty: "0.01", price: "60000.00" }
+      - at: "2026-09-21T14:00:00-04:00"
+        proposed_order: { instrument: "us_equity:AAPL", side: sell, qty: "10", type: market }
+      - at: "2026-09-21T14:05:00-04:00"
+        proposed_order: { instrument: "crypto:BTC/USD", side: sell, qty: "0.01", type: market }
+    expected:
+      step_3_decision: deny
+      step_3_reason: legacy_pdt_fourth_day_trade
+      step_3_notify_owner: true
+      step_4_decision: allow       # crypto is not subject to day-trade rules
+      day_trades_after: 3
+    variant_intraday_margin:
+      account_change: { day_trading_regime: intraday_margin }
+      expected: { step_3_decision: allow }
+
+  - id: RC-10
+    title: Backtest fills - no look-ahead, slippage, limit through, volume cap
+    bars:                          # 1-minute bars, regular session
+      - { t: 0, open: "99.90", high: "100.20", low: "99.80", close: "100.00", volume: "20000" }
+      - { t: 1, open: "100.00", high: "100.10", low: "99.50", close: "99.70", volume: "5000" }
+      - { t: 2, open: "99.70", high: "99.90", low: "99.40", close: "99.60", volume: "8000" }
+    orders:
+      - name: market_buy
+        decided_at_close_of_bar: 0
+        order: { side: buy, type: market, qty: "100" }
+        expected: { fill_bar: 1, fill_price: "100.0300", fill_qty: "100" }   # 100.00 x (1 + 3 bps)
+      - name: limit_buy_touch_is_not_fill
+        decided_at_close_of_bar: 0
+        order: { side: buy, type: limit, limit_price: "99.50", qty: "100" }
+        expected: { no_fill_bar: 1, fill_bar: 2, fill_price: "99.50", fill_qty: "100" }
+      - name: volume_cap
+        decided_at_close_of_bar: 0
+        order: { side: buy, type: market, qty: "1000" }
+        expected:
+          fills:
+            - { bar: 1, qty: "500", price: "100.0300" }   # 10% of 5000; 100.00 x (1 + 3 bps)
+            - { bar: 2, qty: "500", price: "99.72991" }   # remainder, under 10% of 8000; 99.70 x (1 + 3 bps)
