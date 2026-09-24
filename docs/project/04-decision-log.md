@@ -31,6 +31,7 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | DEC-22 | Serve the United States first | Accepted | Founder direction; largest market | Global crypto venues first |
 | DEC-23 | First connector: **Alpaca** (US stocks, ETFs, crypto spot; paper trading; OAuth connections). Second: **Kraken Derivatives US** (CFTC-regulated crypto perpetuals). Later: Coinbase US futures, Interactive Brokers | Accepted | Alpaca: free paper trading on the same API as live, four asset classes in one integration, OAuth for third-party apps, market data through each user's own account. Kraken: the CFTC-regulated perpetuals venue for US users with a self-service demo environment | Kraken perpetuals first; Coinbase first (static sandbox only); Interactive Brokers first (heavier onboarding) |
 | DEC-24 | v1 asset scope on Alpaca: US stocks, ETFs, and crypto spot; options later | Proposed | Keeps v1 accounting and risk to spot instruments | Include options in v1 |
+| DEC-25 | Trading domain conventions: average-cost P&L; fees recorded separately in USD (asset-denominated fees valued at fill price); backtests on raw prices plus explicit corporate actions; cash accounts use settled cash only; v1 leverage capped at 1×; shorting off by default | Proposed | Simple, auditable, and cannot create account violations by construction ([trading domain spec](../specs/trading-domain.md)) | FIFO P&L; adjusted-price backtests; margin in v1 |
 | DEC-16 | Restate for durable execution | Proposed | Single Rust binary; runs on the edge | Temporal |
 | DEC-17 | NATS JetStream for messaging | Proposed | Account model maps to workspaces; single binary on the edge | Kafka / Redpanda, Redis Streams |
 | DEC-18 | OIDC SSO in v1; SAML and SCIM later | Proposed | Covers Google, Okta, Entra for design partners | SAML from day one |
@@ -48,3 +49,5 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | OD-05 | Mobile access to on-site approval services: customer VPN, end-to-end encrypted relay, or both | M10 | Design-partner security requirements |
 | OD-06 | Minimum identity data held by the global control plane in hybrid mode | M8 | Privacy review; billing needs |
 | OD-07 | Whether Kraken's self-service demo environment covers the US (Bitnomial-listed) perpetual contracts, or a UAT account is needed | Phase 3 | Kraken documentation and support |
+| OD-08 | Which day-trading regime Alpaca applies (legacy pattern-day-trader or intraday margin) and from when; whether Alpaca offers cash accounts | M5 | Alpaca documentation and support ([spec §12](../specs/trading-domain.md#12-open-questions)) |
+| OD-09 | Current SEC Section 31 and FINRA TAF rates and rounding rules for the fee configuration | M3 | SEC and FINRA publications |

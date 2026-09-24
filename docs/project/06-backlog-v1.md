@@ -98,7 +98,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   de-risking.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
-- **E6-6 (Must)** As an owner, I want US account rules (pattern day trading, settlement, short
+- **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
 

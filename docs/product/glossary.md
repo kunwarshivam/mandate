@@ -36,7 +36,9 @@
 | **Testnet / demo environment** | A venue's test environment with fake funds (for example, Kraken's derivatives demo) |
 | **OAuth connection** | Connecting a user's brokerage account by authorization through the broker, granting scoped access without sharing API keys |
 | **Cash account / settlement** | An account without margin; sale proceeds cannot be reused until the trade settles |
-| **Pattern day trader (PDT) rule** | US rule limiting day trades in margin accounts below a regulatory equity threshold |
+| **Pattern day trader (PDT) rule** | Former FINRA rule limiting day trades in margin accounts below $25,000 equity. Replaced by the intraday margin standard (SEC approval April 14, 2026; effective June 4, 2026; broker phase-in until October 20, 2027) |
+| **Intraday margin standard** | FINRA's replacement for the PDT rule: accounts must hold margin equity matching their intraday exposure, regardless of day-trade count |
+| **Day-trading regime** | Which of the two rule sets a broker applies to an account: `legacy_pdt` or `intraday_margin` |
 | **Wash sale** | Selling at a loss and rebuying a substantially identical security within a window, which defers the tax loss |
 | **Corporate actions** | Splits, dividends, and similar events that change share counts or cash and must be applied to positions and price history |
 | **CFTC-regulated perpetual** | A perpetual future listed on a US exchange regulated by the Commodity Futures Trading Commission (for example, via Kraken Derivatives US) |

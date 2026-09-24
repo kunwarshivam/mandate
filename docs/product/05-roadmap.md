@@ -41,7 +41,7 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 - Agent runtime: perception, memory, quant advisors, decider, autonomy policy.
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
-- US market rules in the risk gate: pattern-day-trader limits, settlement, short-sale rules,
+- US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
   market hours.
 - Escalation v0: email and one chat channel, deadlines, safe defaults.
 - Command-line control.

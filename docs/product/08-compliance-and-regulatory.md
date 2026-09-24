@@ -38,7 +38,7 @@ for retail users.
 | Templates are starting points users must review, not recommendations | Mandate authoring |
 | No platform-generated "you should trade X" suggestions | Product policy |
 | Trading-only OAuth scopes; reject API keys that can withdraw or transfer | Connections (PRD FR-2.2) |
-| Enforce US market rules (pattern day trading, settlement, short sales, market hours) | Risk gate (PRD FR-5.10) |
+| Enforce US market rules (day-trading regime, settlement, short sales, market hours) | Risk gate (PRD FR-5.10) |
 | No per-trade or outcome-based pricing | [Pricing](07-pricing-and-packaging.md) |
 | No marketing of expected returns; performance shown as the user's own historical results with disclosures | Product and marketing policy |
 | Complete records of decisions, approvals, and configuration changes | Journal (PRD 6.7) |
@@ -67,11 +67,13 @@ Questions for counsel, by regulator:
 ### US market rules the product must enforce
 
 These are rules on the **user's account** that an autonomous agent could otherwise break. The
-risk gate enforces them (PRD FR-5.10), and the trading domain spec (next to be written) will
-define them precisely:
+risk gate enforces them (PRD FR-5.10), and the
+[trading domain spec §9](../specs/trading-domain.md#9-account-rules-risk-gate) defines them
+precisely:
 
-- **Pattern day trading:** margin accounts below the regulatory equity threshold are limited in
-  day trades within a rolling window.
+- **Day trading:** FINRA replaced the pattern-day-trader rule with an intraday margin standard
+  (effective June 4, 2026, with broker phase-in until October 20, 2027). Until each broker
+  transitions, the legacy limits may still apply; the risk gate supports both regimes.
 - **Settlement:** cash accounts cannot trade with unsettled proceeds.
 - **Short sales:** locate and borrow requirements and short-sale price restrictions apply.
 - **Market hours:** regular, extended, and overnight sessions differ by asset; crypto trades
