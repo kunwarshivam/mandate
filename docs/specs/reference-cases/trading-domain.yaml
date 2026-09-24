@@ -1,62 +1,106 @@
-# Reference cases for docs/specs/trading-domain.md (spec v0.2)
+# Reference cases for docs/specs/trading-domain.md (spec v0.3)
 #
-# Schema v2
-# - Decimals are strings and compare by decimal value (not string form).
+# SCHEMA v3 - HARNESS RULES
+#
+# Values and comparison
+# - Decimals are strings and compare by decimal value, not string form.
 # - Keys absent from an `expect` block are not checked.
-# - Expected values are cumulative since the start of the case unless under `delta`.
-# - Steps are processed in list order; the list index is the event sequence number.
+# - Expected values are cumulative since the start of the case.
 # - Fee rates in `configs` are TEST VALUES ONLY, not current regulatory rates.
-# - Changing or adding a case requires founder approval.
-# - Variants: `overrides.steps` replaces the case's steps entirely; all other override keys are
-#   merged into the case (JSON merge patch). `expect_overrides.step_N` (1-based) merges into the
-#   expectation of step N.
-# - Gate cases assume a fresh, sane quote whose midpoint equals the order's limit price (so the
-#   price collar and mark-freshness checks pass), unless the case supplies quotes.
 #
-# Expectation vocabulary
+# Ordering and indices
+# - Steps run in list order; the list index is the event sequence number.
+# - `step_N` in `expect_overrides` is 1-based. Bar indices are 0-based.
+#
+# Time model
+# - The harness emits only the events listed in the case. It never fires time-driven events on
+#   its own, except that `advance_clock` emits every `SettlementPosted`, `DividendPaid`, and
+#   `TradingDayStarted` due at or before its `at`, in due order.
+# - `fees_charged`, corporate actions, and broker postings are explicit steps only.
+#
+# Simulated broker (executor and gate cases)
+# - Confirms cancels and accepts submissions immediately, unless the case supplies a
+#   `broker_order_update` for that order.
+# - Account `buying_power` equals the model's buying power unless the case supplies it.
+#
+# Fixture defaults (apply unless the case supplies the field)
+# - Instruments pass every §3.2 floor: absent `prior_close`, `median_dollar_volume_20d`, or
+#   crypto volume fields pass; absent `leveraged_or_inverse` is false; absent `ipo` is false.
+# - Account: `status: ACTIVE`, `crypto_status: ACTIVE`, flags false. The alpaca profile also
+#   defaults `type: margin`, `multiplier: 1`, `regime: intraday_margin`.
+# - Conduct-control volume checks pass; no concentration cap; agents: one agent `agent_a` whose
+#   universe is every instrument in the case.
+# - Gate cases assume a fresh, sane quote whose midpoint equals the order's limit price, unless
+#   the step's `data.quote` supplies bid and ask (applies to that step only).
+#
+# Variants
+# - `overrides.steps` replaces the case's steps. Other override keys merge into the case:
+#   objects merge recursively; arrays of objects that have `id` or `name` merge by that key;
+#   other arrays are replaced. `expect_overrides.step_N` merges into step N's expectation.
+#
+# Other rules
+# - A fill without `client_order_id` is its own order (for per-order fee caps).
+# - Fee reservations are rounded per order (spec §2.1).
+# - Reason codes follow the gate evaluation order in spec §9.1; the first failing check wins.
+#
+# EXPECTATION VOCABULARY
 #   positions.<instrument>: {qty, cost_basis, avg_cost}
 #   cash: {settled, unsettled: [{settles_on, amount}], total}
-#   receivables, fees: {accrued, charged, total_usd}, realized_pnl_gross, income,
-#   unrealized_pnl, equity, buying_power
+#   receivables            net signed (receivables minus payables)
+#   fees: {accrued, charged, total_usd}   total_usd = charged + accrued + USD value of asset fees
+#   realized_pnl_gross, realized_pnl_net, income, unrealized_pnl, equity, buying_power
+#   marks.<instrument>     current mark after the step
 #   decision: {verdict: allow|deny, reason_code}
-#   orders.<name>: {state, ...}
-#   actions: ordered list of executor actions
-#   agent_mode: normal | exits_only | paused
-#   trade_date, settles_on, day_trade_count, fills: [{bar, qty, price}]
+#   orders.<name>: {state}
+#   actions                ordered list of executor actions
+#   agent_mode             normal | exits_only | paused | stopped
+#   trade_date, settles_on, day_trade_count
+#   fills: [{bar, qty, price, leg, liquidity}]      canceled_legs: [...]
+#   conservation: {delta_equity, realized_gross, unrealized, income, fees}
+#   reconciliation: {status, broker_qty_before_fee_posting, tolerance_qty}
+#   protective_sell_qty
+#
+# Changing or adding a case requires founder approval.
 
-schema_version: 2
+schema_version: 3
 
 configs:
   test_default:
     fees:
       effective_from: "2026-01-01"
       equities:
-        sec_rate: "0.00003"            # test value, fraction of sale proceeds
+        sec_rate: "0.00003"            # test value
         taf_per_share: "0.0002"        # test value
-        taf_cap_per_order: "9.79"      # test value
+        taf_cap: "9.79"                # test value
+        taf_cap_basis: per_execution
         cat_per_share: "0.00001"       # test value, buys and sells
-        accrual: per_fill_full_precision
-        charge: account_day_total
-        charge_rounding: { scale: 2, mode: ceiling }
+        charge: { time: "20:00 America/New_York", rounding: { scale: 2, mode: ceiling } }
       crypto:
         maker_bps: "15"
         taker_bps: "25"
         asset_fee_rounding: { scale: 9, mode: half_up }
         usd_fee_rounding: { scale: 2, mode: half_up }
+        charge: { time: "00:00 UTC" }
     backtest:
       decision_latency_ms: 0
       approval_latency_ms: 0
       slippage: { half_spread_bps: "1", impact_model: fixed, impact_bps: "2" }
-      volume_cap: { fraction: "0.10", reference: previous_bar }
+      volume_cap: { fraction: "0.10", reference: previous_bar_same_session, first_bar: median_same_minute_20_sessions }
       fill_price_tick_rounding: none
     gate:
+      data_profile: sip
       price_floor: "5.00"
-      min_median_dollar_volume_20d: "1000000"
-      mark_staleness_ms: 2000
-      fee_reservation: accrued_rounded_up
+      liquidity_floor_usd: "1000000"
+      collar: { liquid_threshold_usd: "50000000", liquid_x: "0.01", other_x: "0.02", crypto_x: "0.02", passive_band: "0.20" }
+      opposite_fill_interval_s: 60
+      order_to_fill: { max: "10", min_orders: 20 }
+      unexplained_403_threshold: 3
+      crypto_stop_limit_offset_bps: "50"
+      protective_replace_buffer_trading_days: 2
       legacy_pdt_equity_threshold: "25000.00"
     accounting:
       basis_reduction: { scale: 12, mode: half_even }
+      mark_adjustment: { scale: 12, mode: half_even }
   no_fees:
     extends: test_default
     fees:
@@ -64,38 +108,61 @@ configs:
 
 calendars:
   us_2026:
-    trading_holidays: ["2026-11-26"]
-    early_closes: ["2026-11-27"]
-    settlement_holidays: ["2026-10-12", "2026-11-11"]   # bank holidays: NYSE open, no settlement
+    valid_from: "2026-09-01"
+    valid_to: "2026-12-31"
+    rule: weekdays not listed as holidays are trading days
+    trading_holidays: ["2026-11-26", "2026-12-25"]
+    early_closes: ["2026-11-27", "2026-12-24"]
+    settlement_holidays: ["2026-10-12", "2026-11-11"]   # NYSE open, no settlement
 
 reason_codes:
-  - insufficient_buying_power
-  - insufficient_settled_buying_power
-  - would_cross_zero
-  - legacy_pdt_day_trade_budget
-  - add_blocked_by_protective_order
+  # account and agent
   - account_restricted
   - account_trading_blocked
+  - crypto_account_inactive
+  - agent_exits_only
+  - agent_paused
+  - agent_stopped
+  # eligibility and concentration
+  - not_in_universe
   - ineligible_exchange
+  - ipo_not_tradable
   - below_price_floor
   - below_liquidity_floor
   - leveraged_etp_not_enabled
-  - ipo_not_tradable
-  - not_in_universe
-  - instrument_claimed
-  - market_order_not_allowed
+  - concentration_limit
+  # session and halts
   - session_not_allowed
+  - extended_hours_opening_not_allowed
+  - auction_window
   - instrument_halted
+  # order constraints
+  - would_cross_zero
+  - sell_exceeds_available
+  - working_order_limit
+  - add_blocked_by_protective_order
+  - unknown_order_in_flight
+  - market_order_not_allowed
+  # marks and conduct
   - stale_mark
   - price_outside_collar
-  - order_rate_limited
+  - min_resting_time
+  - opposite_fill_interval
   - conduct_limit_breached
-  - concentration_limit
+  - order_rate_limited
+  # exposure and buying power
+  - gross_exposure_limit
+  - insufficient_buying_power
+  - insufficient_settled_buying_power
+  # day trading
+  - legacy_pdt_day_trade_budget
+  # deployment
+  - instrument_claimed
 
 cases:
 
   - id: RC-01
-    title: Buy, partial sell, fee accrual and daily charge, marks, equity, settlement, conservation
+    title: Buy, partial sell, fee accrual and daily charge, equity, settlement, conservation
     scope: [accounting]
     broker_profile: alpaca
     config: test_default
@@ -103,7 +170,7 @@ cases:
     instruments:
       AAPL: { asset_class: us_equity, exchange: NASDAQ, fractionable: true }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "10000.00" } }
+      account: { cash: { settled: "10000.00" } }
     steps:
       - at: "2026-09-21T10:00:00-04:00"
         event: fill
@@ -118,24 +185,23 @@ cases:
           positions: { AAPL: { qty: "6", cost_basis: "900.00", avg_cost: "150.00" } }
           realized_pnl_gross: "40.00"
           cash: { settled: "8500.00", unsettled: [{ settles_on: "2026-09-22", amount: "640.00" }] }
-          fees: { accrued: "0.02014" }       # 0.0001 + 0.0192 + 0.0008 + 0.00004
+          fees: { accrued: "0.02014" }
       - at: "2026-09-21T15:59:00-04:00"
         event: mark
         data: { instrument: AAPL, price: "155.00", source: quote }
-        expect:
-          unrealized_pnl: "30.00"
-          equity: "10069.97986"              # 8500 + 640 + 930 - 0.02014
+        expect: { unrealized_pnl: "30.00", equity: "10069.97986" }
       - at: "2026-09-21T20:00:00-04:00"
         event: fees_charged
+        data: { family: equities, trade_date: "2026-09-21" }
         expect:
-          fees: { accrued: "0", charged: "0.03", total_usd: "0.03" }   # ceiling of 0.02014
+          fees: { accrued: "0", charged: "0.03", total_usd: "0.03" }
           cash: { settled: "8499.97", total: "9139.97" }
           equity: "10069.97"
       - at: "2026-09-22T00:00:00-04:00"
         event: advance_clock
         expect:
           cash: { settled: "9139.97", unsettled: [], total: "9139.97" }
-          equity: "10069.97"
+          realized_pnl_net: "39.97"
           conservation: { delta_equity: "69.97", realized_gross: "40.00", unrealized: "30.00", fees: "0.03" }
 
   - id: RC-02
@@ -147,7 +213,7 @@ cases:
     instruments:
       MSFT: { asset_class: us_equity, exchange: NASDAQ }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "100000.00" } }
+      account: { cash: { settled: "100000.00" } }
     steps:
       - at: "2026-09-21T10:00:00-04:00"
         event: fill
@@ -155,8 +221,7 @@ cases:
       - at: "2026-09-21T10:30:00-04:00"
         event: fill
         data: { instrument: MSFT, side: buy, qty_gross: "10", price: "110.00" }
-        expect:
-          positions: { MSFT: { qty: "20", cost_basis: "2100.00", avg_cost: "105.00" } }
+        expect: { positions: { MSFT: { qty: "20", cost_basis: "2100.00", avg_cost: "105.00" } } }
       - at: "2026-09-21T11:00:00-04:00"
         event: fill
         data: { instrument: MSFT, side: sell, qty_gross: "5", price: "120.00" }
@@ -166,9 +231,8 @@ cases:
           fees: { accrued: "0.01925" }
       - at: "2026-09-21T20:00:00-04:00"
         event: fees_charged
-        expect:
-          fees: { charged: "0.02" }
-          cash: { total: "98499.98" }
+        data: { family: equities, trade_date: "2026-09-21" }
+        expect: { fees: { charged: "0.02" }, cash: { total: "98499.98" } }
 
   - id: RC-03
     title: Flip in fills (accounting); the gate rejects a zero-crossing order
@@ -177,30 +241,23 @@ cases:
     config: no_fees
     calendar: us_2026
     instruments:
-      XYZ: { asset_class: us_equity, exchange: NYSE, shortable: true, easy_to_borrow: true }
+      XYZ: { asset_class: us_equity, exchange: NYSE }
     initial:
       account: { type: margin, cash: { settled: "100000.00" } }
     steps:
-      - at: "2026-09-21T10:00:00-04:00"
-        event: fill
-        data: { instrument: XYZ, side: buy, qty_gross: "5", price: "50.00" }
+      - { at: "2026-09-21T10:00:00-04:00", event: fill, data: { instrument: XYZ, side: buy, qty_gross: "5", price: "50.00" } }
       - at: "2026-09-21T11:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "5", price: "55.00" }
-        expect:
-          positions: { XYZ: { qty: "0", cost_basis: "0" } }
-          realized_pnl_gross: "25.00"
+        expect: { positions: { XYZ: { qty: "0", cost_basis: "0" } }, realized_pnl_gross: "25.00" }
       - at: "2026-09-21T11:00:01-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "3", price: "55.00" }
-        expect:
-          positions: { XYZ: { qty: "-3", cost_basis: "-165.00", avg_cost: "55.00" } }
+        expect: { positions: { XYZ: { qty: "-3", cost_basis: "-165.00", avg_cost: "55.00" } } }
       - at: "2026-09-21T14:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: buy, qty_gross: "3", price: "52.00" }
-        expect:
-          positions: { XYZ: { qty: "0", cost_basis: "0" } }
-          realized_pnl_gross: "34.00"        # 25 + (-(3 x 52) - (-165)) = 25 + 9
+        expect: { positions: { XYZ: { qty: "0", cost_basis: "0" } }, realized_pnl_gross: "34.00" }
     variants:
       - name: gate_rejects_zero_crossing_order
         overrides:
@@ -213,18 +270,25 @@ cases:
               expect: { decision: { verdict: deny, reason_code: would_cross_zero } }
 
   - id: RC-04
-    title: Forward split 4-for-1; order cancellation and protective re-derivation
-    scope: [accounting, executor]
+    title: Forward split 4-for-1 - OCO cancel, mark adjustment, broker-posting gate, protection re-derived
+    scope: [accounting, executor, reconciliation]
     broker_profile: alpaca
     config: no_fees
     calendar: us_2026
     instruments:
       ABC: { asset_class: us_equity, exchange: NYSE, fractionable: true }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "0.00" } }
+      account: { cash: { settled: "0.00" } }
       positions: [{ instrument: ABC, qty: "10", cost_basis: "4000.00" }]
       open_orders:
-        - { name: stop_1, instrument: ABC, side: sell, type: stop, stop_price: "380.00", qty: "10", tif: gtc, purpose: protective }
+        - name: oco_1
+          instrument: ABC
+          type: oco
+          tif: gtc
+          purpose: protective
+          legs:
+            - { side: sell, type: limit, limit_price: "440.00", qty: "10" }
+            - { side: sell, type: stop, stop_price: "380.00", qty: "10" }
     steps:
       - at: "2026-09-21T16:00:00-04:00"
         event: mark
@@ -234,22 +298,35 @@ cases:
         event: corporate_action_prepare
         data: { instrument: ABC, type: split, ex_date: "2026-09-22" }
         expect:
-          actions: [{ cancel: stop_1 }, { await_cancel_confirmed: stop_1 }]
-          orders: { stop_1: { state: Canceled } }
+          actions: [{ cancel: oco_1 }, { await_cancel_confirmed: oco_1 }]
+          orders: { oco_1: { state: Canceled } }
       - at: "2026-09-21T20:00:00-04:00"
         event: corporate_action_applied
         data: { instrument: ABC, type: split, ratio: { new: 4, old: 1 }, ex_date: "2026-09-22" }
         expect:
           positions: { ABC: { qty: "40", cost_basis: "4000.00", avg_cost: "100.00" } }
+          marks: { ABC: "100.00" }
+          equity: "4000.00"
           realized_pnl_gross: "0.00"
-          actions: [{ submit_protective: { type: stop, stop_price: "95.00", qty: "40", tif: gtc } }]
+          actions: []                           # no protection until the broker posts the split
+      - at: "2026-09-21T20:05:00-04:00"
+        event: reconciliation
+        data: { broker_positions: { ABC: "10" } }
+        expect: { reconciliation: { status: pending_corporate_action }, agent_mode: normal }
+      - at: "2026-09-22T07:00:00-04:00"
+        event: broker_position_update
+        data: { broker_positions: { ABC: "40" } }
+        expect:
+          reconciliation: { status: ok }
+          actions:
+            - submit_protective: { type: oco, tif: gtc, qty: "40", take_profit: "110.00", stop: "95.00" }
       - at: "2026-09-22T09:31:00-04:00"
         event: mark
         data: { instrument: ABC, price: "100.00", source: quote }
         expect: { equity: "4000.00", unrealized_pnl: "0.00" }
 
   - id: RC-05
-    title: Reverse split 1-for-10 with cash in lieu (non-fractionable)
+    title: Reverse split 1-for-10 with cash in lieu and adjusted mark (non-fractionable)
     scope: [accounting]
     broker_profile: alpaca
     config: no_fees
@@ -257,7 +334,7 @@ cases:
     instruments:
       LOW: { asset_class: us_equity, exchange: NASDAQ, fractionable: false }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "0.00" } }
+      account: { cash: { settled: "0.00" } }
       positions: [{ instrument: LOW, qty: "25", cost_basis: "50.00" }]
     steps:
       - at: "2026-09-21T16:00:00-04:00"
@@ -269,19 +346,17 @@ cases:
         data: { instrument: LOW, type: split, ratio: { new: 1, old: 10 }, ex_date: "2026-09-22", cash_in_lieu_price_per_new_share: "19.00" }
         expect:
           positions: { LOW: { qty: "2", cost_basis: "40.00", avg_cost: "20.00" } }
-          receivables: "9.50"                # 0.5 x 19.00, until posted
-          realized_pnl_gross: "-0.50"        # 9.50 - half_even(50 x 0.5 / 2.5, 12)
-      - at: "2026-09-22T09:31:00-04:00"
-        event: mark
-        data: { instrument: LOW, price: "20.00", source: quote }
-        expect: { equity: "49.50", unrealized_pnl: "0.00" }
+          marks: { LOW: "20.00" }
+          receivables: "9.50"
+          realized_pnl_gross: "-0.50"
+          equity: "49.50"
       - at: "2026-09-24T09:00:00-04:00"
         event: broker_cash_posting
         data: { type: cash_in_lieu, instrument: LOW, amount: "9.50" }
         expect: { receivables: "0.00", cash: { settled: "9.50" }, equity: "49.50" }
 
   - id: RC-06
-    title: Cash dividend; equity unchanged across the ex-date
+    title: Cash dividend - equity unchanged across the ex-date; DividendPaid on the pay date
     scope: [accounting]
     broker_profile: alpaca
     config: no_fees
@@ -289,7 +364,7 @@ cases:
     instruments:
       DIV: { asset_class: us_equity, exchange: NYSE }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "5000.00" } }
+      account: { cash: { settled: "5000.00" } }
       positions: [{ instrument: DIV, qty: "100", cost_basis: "5000.00" }]
     steps:
       - at: "2026-09-21T16:00:00-04:00"
@@ -305,7 +380,7 @@ cases:
         data: { instrument: DIV, price: "49.75", source: quote }
         expect: { equity: "10000.00", unrealized_pnl: "-25.00" }
       - at: "2026-10-01T00:00:00-04:00"
-        event: advance_clock
+        event: advance_clock                  # emits DividendPaid
         expect: { receivables: "0.00", cash: { settled: "5025.00" }, equity: "10000.00" }
     variants:
       - name: short_position_generic_broker
@@ -329,14 +404,14 @@ cases:
     instruments:
       BTCUSD: { asset_class: crypto, symbol: "BTC/USD", min_trade_increment: "0.000000001" }
     initial:
-      account: { type: margin, multiplier: 1, crypto_status: ACTIVE, cash: { settled: "100000.00" } }
+      account: { cash: { settled: "100000.00" } }
     steps:
       - at: "2026-09-21T10:00:00-04:00"
         event: fill
         data: { instrument: BTCUSD, side: buy, qty_gross: "0.5", price: "60000.00", liquidity: taker }
         expect:
           positions: { BTCUSD: { qty: "0.49875", cost_basis: "29925.00", avg_cost: "60000.00" } }
-          fees: { total_usd: "75.00" }       # 0.00125 BTC valued at the fill price
+          fees: { accrued: "0", total_usd: "75.00" }
           cash: { settled: "70000.00" }
           reconciliation: { broker_qty_before_fee_posting: "0.5", tolerance_qty: "0.00125", status: ok }
       - at: "2026-09-21T14:00:00-04:00"
@@ -345,11 +420,12 @@ cases:
         expect:
           positions: { BTCUSD: { qty: "0" } }
           realized_pnl_gross: "997.50"
-          fees: { accrued: "77.31", total_usd: "152.31" }   # 77.30625 half-up
+          fees: { accrued: "77.31", total_usd: "152.31" }
           cash: { settled: "100922.50" }
           equity: "100845.19"
-      - at: "2026-09-21T20:00:00-04:00"
+      - at: "2026-09-22T00:00:00Z"
         event: fees_charged
+        data: { family: crypto, day: "2026-09-21" }
         expect:
           fees: { accrued: "0" }
           cash: { settled: "100845.19" }
@@ -371,7 +447,7 @@ cases:
       - at: "2026-09-21T14:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: buy, qty_gross: "5", price: "100.00" }
-        expect: { cash: { settled: "500.00" }, buying_power: "499.99" }   # 500 - ceil(0.00005)
+        expect: { cash: { settled: "500.00" }, buying_power: "499.99" }
       - at: "2026-09-21T15:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "5", price: "110.00" }
@@ -385,6 +461,7 @@ cases:
         expect: { decision: { verdict: deny, reason_code: insufficient_settled_buying_power } }
       - at: "2026-09-21T20:00:00-04:00"
         event: fees_charged
+        data: { family: equities, trade_date: "2026-09-21" }
         expect: { fees: { charged: "0.02" }, cash: { settled: "499.98" } }
       - at: "2026-09-22T00:00:00-04:00"
         event: advance_clock
@@ -414,7 +491,7 @@ cases:
         event: propose_order
         data: { instrument: AAPL, side: buy, type: limit, qty: "10", limit_price: "150.00", purpose: open }
         expect:
-          day_trade_count: 3                 # window 09-15 .. 09-21
+          day_trade_count: 3                   # window 2026-09-15 .. 2026-09-21; remaining 0
           decision: { verdict: deny, reason_code: legacy_pdt_day_trade_budget }
       - at: "2026-09-21T10:05:00-04:00"
         event: fill
@@ -422,9 +499,7 @@ cases:
       - at: "2026-09-21T14:05:00-04:00"
         event: propose_order
         data: { instrument: BTCUSD, side: sell, type: limit, qty: "0.009975", limit_price: "60000.00", purpose: close }
-        expect:
-          decision: { verdict: allow }       # crypto is not subject to day-trade rules
-          day_trade_count: 3
+        expect: { decision: { verdict: allow }, day_trade_count: 3 }
     variants:
       - name: alpaca_intraday_margin
         overrides:
@@ -434,7 +509,7 @@ cases:
           step_1: { decision: { verdict: allow } }
 
   - id: RC-09B
-    title: Legacy regime - exits are never denied; open same-day positions limit new openings
+    title: Legacy regime - exits never denied; open same-day positions limit openings
     scope: [gate]
     broker_profile: generic
     config: test_default
@@ -455,14 +530,12 @@ cases:
       - at: "2026-09-21T10:00:00-04:00"
         event: propose_order
         data: { instrument: AAPL, side: buy, type: limit, qty: "10", limit_price: "150.00", purpose: open }
-        expect: { day_trade_count: 2, decision: { verdict: allow } }   # budget 1 >= 1 + 0
-      - at: "2026-09-21T10:01:00-04:00"
-        event: fill
-        data: { instrument: AAPL, side: buy, qty_gross: "10", price: "150.00" }
+        expect: { day_trade_count: 2, decision: { verdict: allow } }     # remaining 1 >= required 1
+      - { at: "2026-09-21T10:01:00-04:00", event: fill, data: { instrument: AAPL, side: buy, qty_gross: "10", price: "150.00" } }
       - at: "2026-09-21T11:00:00-04:00"
         event: propose_order
         data: { instrument: MSFT, side: buy, type: limit, qty: "5", limit_price: "400.00", purpose: open }
-        expect: { decision: { verdict: deny, reason_code: legacy_pdt_day_trade_budget } }   # budget 1 < 1 + 1
+        expect: { decision: { verdict: deny, reason_code: legacy_pdt_day_trade_budget } }   # required 1 + 1 open same-day
       - at: "2026-09-21T14:00:00-04:00"
         event: propose_order
         data: { instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "151.00", purpose: close }
@@ -473,40 +546,40 @@ cases:
         expect: { day_trade_count: 3 }
 
   - id: RC-10
-    title: Backtest - timing, slippage, limit through, marketable limit, volume cap
+    title: Backtest - timing, slippage, touch vs through, marketable limit, volume cap
     scope: [backtest]
     broker_profile: backtest
     config: test_default
     calendar: us_2026
     instruments:
       TST: { asset_class: us_equity, exchange: NASDAQ }
-    isolation: per_order                     # each order is simulated alone against the bars
-    bars:                                    # 1-minute SIP bars, regular session; start timestamps
+    isolation: per_order
+    bars:
       - { start: "2026-09-21T09:40:00-04:00", open: "99.90", high: "100.20", low: "99.80", close: "100.00", volume: "5000" }
       - { start: "2026-09-21T09:41:00-04:00", open: "100.00", high: "100.50", low: "99.60", close: "100.40", volume: "8000" }
       - { start: "2026-09-21T09:42:00-04:00", open: "100.40", high: "100.60", low: "100.10", close: "100.30", volume: "6000" }
     orders:
       - name: market_sell_exit
         initial_position: { qty: "100" }
-        decided_at: "2026-09-21T09:41:00-04:00"   # close of the first bar
+        decided_at: "2026-09-21T09:41:00-04:00"
         order: { side: sell, type: market, qty: "100", purpose: close }
-        expect: { fills: [{ bar: 1, qty: "100", price: "99.97" }] }                 # 100.00 x (1 - 3 bps)
+        expect: { fills: [{ bar: 1, qty: "100", price: "99.97" }] }
       - name: limit_sell_touch_is_not_fill
         initial_position: { qty: "100" }
         decided_at: "2026-09-21T09:41:00-04:00"
         order: { side: sell, type: limit, limit_price: "100.50", qty: "100", purpose: close }
-        expect: { fills: [{ bar: 2, qty: "100", price: "100.50" }] }                # bar 1 high equals the limit: no fill
+        expect: { fills: [{ bar: 2, qty: "100", price: "100.50", liquidity: maker }] }
       - name: marketable_limit_buy
         decided_at: "2026-09-21T09:41:00-04:00"
         order: { side: buy, type: limit, limit_price: "100.10", qty: "100", purpose: open }
-        expect: { fills: [{ bar: 1, qty: "100", price: "100.03", liquidity: taker }] }   # min(100.10, 100.00 x 1.0003)
+        expect: { fills: [{ bar: 1, qty: "100", price: "100.03", liquidity: taker }] }
       - name: volume_cap
         decided_at: "2026-09-21T09:41:00-04:00"
         order: { side: buy, type: limit, limit_price: "100.60", qty: "1000", purpose: open }
         expect:
           fills:
-            - { bar: 1, qty: "500", price: "100.03" }       # cap 10% of previous bar volume 5000
-            - { bar: 2, qty: "500", price: "100.43012" }    # cap 800; 100.40 x 1.0003
+            - { bar: 1, qty: "500", price: "100.03", liquidity: taker }
+            - { bar: 2, qty: "500", price: "100.43012", liquidity: taker }
 
   - id: RC-11
     title: Settlement calendar with bank holidays; overnight trade date
@@ -517,28 +590,28 @@ cases:
     instruments:
       XYZ: { asset_class: us_equity, exchange: NYSE }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "0.00" } }
+      account: { cash: { settled: "0.00" } }
       positions: [{ instrument: XYZ, qty: "4", cost_basis: "40.00" }]
     steps:
-      - at: "2026-09-21T21:00:00-04:00"      # overnight session: next trading day
+      - at: "2026-09-21T21:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "1", price: "10.00", source: external }
-        expect: { trade_date: "2026-09-22", settles_on: "2026-09-23" }
-      - at: "2026-10-09T10:00:00-04:00"      # Friday; Monday 10-12 is a bank holiday
+        expect: { trade_date: "2026-09-22", settles_on: "2026-09-23", agent_mode: exits_only }
+      - at: "2026-10-09T10:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "1", price: "10.00" }
         expect: { trade_date: "2026-10-09", settles_on: "2026-10-13" }
-      - at: "2026-10-12T10:00:00-04:00"      # NYSE open, banks closed
+      - at: "2026-10-12T10:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "1", price: "10.00" }
         expect: { trade_date: "2026-10-12", settles_on: "2026-10-13" }
-      - at: "2026-11-10T10:00:00-05:00"      # Wednesday 11-11 is a bank holiday
+      - at: "2026-11-10T10:00:00-05:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "1", price: "10.00" }
         expect: { trade_date: "2026-11-10", settles_on: "2026-11-12" }
 
   - id: RC-12
-    title: Backtest stops, gaps, stop-limit, adverse-first, extended-hours non-trigger
+    title: Backtest stops, gaps (continuous vs auction), stop-limit, OCO ordering
     scope: [backtest]
     broker_profile: backtest
     config: test_default
@@ -553,14 +626,14 @@ cases:
         bars:
           - { start: "2026-09-21T10:00:00-04:00", open: "99.60", high: "99.80", low: "99.40", close: "99.50", volume: "9000" }
           - { start: "2026-09-21T10:01:00-04:00", open: "99.50", high: "99.60", low: "98.80", close: "98.90", volume: "9000" }
-        expect: { fills: [{ bar: 1, qty: "100", price: "98.9703" }] }    # 99.00 x (1 - 3 bps)
+        expect: { fills: [{ bar: 1, qty: "100", price: "98.9703" }] }
       - name: stop_gap_through
         initial_position: { qty: "100" }
         order: { side: sell, type: stop, stop_price: "99.00", qty: "100", purpose: protective, resting_since_bar: 0 }
         bars:
           - { start: "2026-09-21T10:00:00-04:00", open: "99.60", high: "99.80", low: "99.40", close: "99.50", volume: "9000" }
           - { start: "2026-09-21T10:01:00-04:00", open: "98.50", high: "98.90", low: "98.20", close: "98.60", volume: "9000" }
-        expect: { fills: [{ bar: 1, qty: "100", price: "98.47045" }] }   # open 98.50 x (1 - 3 bps)
+        expect: { fills: [{ bar: 1, qty: "100", price: "98.47045" }] }
       - name: stop_limit_gap_rests_as_limit
         initial_position: { qty: "100" }
         order: { side: sell, type: stop_limit, stop_price: "99.00", limit_price: "98.80", qty: "100", purpose: protective, resting_since_bar: 0 }
@@ -568,46 +641,63 @@ cases:
           - { start: "2026-09-21T10:00:00-04:00", open: "99.60", high: "99.80", low: "99.40", close: "99.50", volume: "9000" }
           - { start: "2026-09-21T10:01:00-04:00", open: "98.50", high: "98.70", low: "98.20", close: "98.60", volume: "9000" }
           - { start: "2026-09-21T10:02:00-04:00", open: "98.60", high: "98.90", low: "98.40", close: "98.85", volume: "9000" }
-        expect: { fills: [{ bar: 2, qty: "100", price: "98.80" }] }      # bar 1 gaps below the limit: no fill
-      - name: adverse_first_oco
+        expect: { fills: [{ bar: 2, qty: "100", price: "98.80", liquidity: maker }] }
+      - name: oco_both_reachable_stop_first
         initial_position: { qty: "100" }
         order:
           type: oco
+          resting_since_bar: 0
           legs:
             - { side: sell, type: limit, limit_price: "101.00", qty: "100" }
             - { side: sell, type: stop, stop_price: "99.00", qty: "100" }
-          resting_since_bar: 0
         bars:
           - { start: "2026-09-21T10:00:00-04:00", open: "100.00", high: "100.20", low: "99.80", close: "100.00", volume: "9000" }
           - { start: "2026-09-21T10:01:00-04:00", open: "100.00", high: "101.50", low: "98.70", close: "100.00", volume: "9000" }
-        expect:
-          fills: [{ bar: 1, leg: stop, qty: "100", price: "98.9703" }]
-          canceled_legs: [limit]
-      - name: resting_limit_gap_through_fills_at_open
+        expect: { fills: [{ bar: 1, leg: stop, qty: "100", price: "98.9703" }], canceled_legs: [limit] }
+      - name: oco_open_reaches_take_profit
+        initial_position: { qty: "100" }
+        order:
+          type: oco
+          resting_since_bar: 0
+          legs:
+            - { side: sell, type: limit, limit_price: "101.00", qty: "100" }
+            - { side: sell, type: stop, stop_price: "99.00", qty: "100" }
+        bars:
+          - { start: "2026-09-21T10:00:00-04:00", open: "100.00", high: "100.20", low: "99.80", close: "100.00", volume: "9000" }
+          - { start: "2026-09-21T10:01:00-04:00", open: "101.20", high: "101.50", low: "98.70", close: "100.00", volume: "9000" }
+        expect: { fills: [{ bar: 1, leg: limit, qty: "100", price: "101.00", liquidity: maker }], canceled_legs: [stop] }
+      - name: resting_limit_gap_through_continuous_fills_at_limit
         order: { side: buy, type: limit, limit_price: "99.00", qty: "100", purpose: open, resting_since_bar: 0 }
         bars:
           - { start: "2026-09-21T10:00:00-04:00", open: "99.40", high: "99.60", low: "99.10", close: "99.30", volume: "9000" }
           - { start: "2026-09-21T10:01:00-04:00", open: "98.50", high: "98.80", low: "98.40", close: "98.70", volume: "9000" }
-        expect: { fills: [{ bar: 1, qty: "100", price: "98.50" }] }
+        expect: { fills: [{ bar: 1, qty: "100", price: "99.00", liquidity: maker }] }
+      - name: resting_limit_gap_through_auction_fills_at_open
+        order: { side: buy, type: limit, limit_price: "99.00", qty: "100", purpose: open, resting_since: previous_trading_day }
+        first_bar_reference_volume: "9000"
+        bars:
+          - { start: "2026-09-21T09:30:00-04:00", open: "98.50", high: "98.80", low: "98.40", close: "98.70", volume: "30000", session: regular }
+        expect: { fills: [{ bar: 0, qty: "100", price: "98.50" }] }
       - name: stop_not_triggered_in_extended_hours
         initial_position: { qty: "100" }
         order: { side: sell, type: stop, stop_price: "99.00", qty: "100", purpose: protective, resting_since_bar: 0 }
+        first_bar_reference_volume: "9000"
         bars:
           - { start: "2026-09-21T09:00:00-04:00", open: "99.50", high: "99.60", low: "98.00", close: "99.30", volume: "2000", session: pre_market }
           - { start: "2026-09-21T09:30:00-04:00", open: "99.20", high: "99.50", low: "99.10", close: "99.40", volume: "9000", session: regular }
         expect: { fills: [] }
 
   - id: RC-13
-    title: Partial fills - TAF cap per order, daily fee rounding
+    title: Partial fills - TAF cap per execution; daily fee rounding
     scope: [accounting]
     broker_profile: alpaca
     config: test_default
-    config_overrides: { fees: { equities: { taf_cap_per_order: "0.05" } } }   # test cap to exercise capping
+    config_overrides: { fees: { equities: { taf_cap: "0.015" } } }   # test cap to exercise capping
     calendar: us_2026
     instruments:
       XYZ: { asset_class: us_equity, exchange: NYSE }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "20000.00" } }
+      account: { cash: { settled: "20000.00" } }
     steps:
       - at: "2026-09-21T10:00:00-04:00"
         event: fill
@@ -616,25 +706,22 @@ cases:
       - at: "2026-09-21T11:00:00-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "100", price: "50.00", client_order_id: "01S-1" }
-        expect: { fees: { accrued: "0.174" } }   # + SEC 0.15 + TAF 0.02 + CAT 0.001
+        expect: { fees: { accrued: "0.169" } }     # + SEC 0.15 + TAF min(0.02, 0.015) + CAT 0.001
       - at: "2026-09-21T11:00:01-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "100", price: "50.00", client_order_id: "01S-1" }
-        expect: { fees: { accrued: "0.345" } }   # + 0.15 + 0.02 + 0.001
+        expect: { fees: { accrued: "0.335" } }
       - at: "2026-09-21T11:00:02-04:00"
         event: fill
         data: { instrument: XYZ, side: sell, qty_gross: "100", price: "50.00", client_order_id: "01S-1" }
-        expect:
-          fees: { accrued: "0.506" }             # + 0.15 + 0.01 (TAF cap 0.05 reached) + 0.001
-          realized_pnl_gross: "300.00"
+        expect: { fees: { accrued: "0.501" }, realized_pnl_gross: "300.00" }
       - at: "2026-09-21T20:00:00-04:00"
         event: fees_charged
-        expect:
-          fees: { charged: "0.51" }
-          realized_pnl_net: "299.49"
+        data: { family: equities, trade_date: "2026-09-21" }
+        expect: { fees: { charged: "0.51" }, realized_pnl_net: "299.49" }
 
   - id: RC-14
-    title: Exit sequence with protective OCO; plain add blocked; add via bracket; kill switch
+    title: Equity exit sequence with protective OCO; plain add blocked; add via bracket; kill switch
     scope: [executor, gate]
     broker_profile: alpaca
     config: test_default
@@ -642,7 +729,7 @@ cases:
     instruments:
       AAPL: { asset_class: us_equity, exchange: NASDAQ }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "20000.00" } }
+      account: { cash: { settled: "20000.00" } }
       positions: [{ instrument: AAPL, qty: "10", cost_basis: "1500.00" }]
       open_orders:
         - name: oco_1
@@ -671,7 +758,7 @@ cases:
         expect:
           positions: { AAPL: { qty: "0" } }
           realized_pnl_gross: "50.00"
-          actions: [{ journal: unprotected_window_end }]   # position closed: nothing to re-place
+          actions: [{ journal: unprotected_window_end }]
     variants:
       - name: plain_add_blocked
         overrides:
@@ -689,14 +776,16 @@ cases:
                 name: bracket_2
                 instrument: AAPL
                 type: bracket
+                tif: gtc
                 entry: { side: buy, type: limit, qty: "5", limit_price: "151.00" }
-                take_profit: { limit_price: "170.00" }
+                take_profit: { limit_price: "170.00" }    # protective legs are not subject to the collar
                 stop_loss: { stop_price: "140.00" }
                 purpose: increase
-              expect:
-                decision: { verdict: allow }
-                actions: [{ submit: bracket_2 }]
-                protective_sell_qty_after_entry_fill: "15"
+              expect: { decision: { verdict: allow }, actions: [{ submit: bracket_2 }] }
+            - at: "2026-09-22T11:00:05-04:00"
+              event: broker_order_update
+              data: { name: bracket_2, leg: entry, status: filled, fill: { qty: "5", price: "151.00" } }
+              expect: { positions: { AAPL: { qty: "15" } }, protective_sell_qty: "15" }
       - name: kill_switch
         overrides:
           steps:
@@ -708,10 +797,10 @@ cases:
                   - { cancel_all_orders: agent }
                   - { await_cancel_confirmed: all }
                   - { close_all_positions: agent }
-                agent_mode: paused
+                agent_mode: stopped
 
   - id: RC-15
-    title: Account restrictions - exits-only and paused; external order
+    title: Restrictions detected from rejects and status; external order
     scope: [gate]
     broker_profile: alpaca
     config: test_default
@@ -720,13 +809,16 @@ cases:
       AAPL: { asset_class: us_equity, exchange: NASDAQ }
       MSFT: { asset_class: us_equity, exchange: NASDAQ }
     initial:
-      account: { type: margin, multiplier: 1, status: ACTIVE, cash: { settled: "20000.00" } }
+      account: { cash: { settled: "20000.00" } }
       positions: [{ instrument: AAPL, qty: "10", cost_basis: "1500.00" }]
-      agents: [{ id: agent_a, universe: [AAPL, MSFT] }]
     steps:
       - at: "2026-09-22T10:00:00-04:00"
-        event: broker_account_update
-        data: { restriction: closing_only }
+        event: propose_order
+        data: { name: ord_1, instrument: MSFT, side: buy, type: limit, qty: "5", limit_price: "400.00", purpose: open }
+        expect: { decision: { verdict: allow }, actions: [{ submit: ord_1 }] }
+      - at: "2026-09-22T10:00:01-04:00"
+        event: broker_order_update
+        data: { name: ord_1, status: rejected, http_status: 403, reject: { mapped_as: closing_only, message: "account restricted to closing transactions" } }
         expect: { agent_mode: exits_only, actions: [{ alert_owner: account_restricted }] }
       - at: "2026-09-22T10:01:00-04:00"
         event: propose_order
@@ -737,17 +829,26 @@ cases:
         data: { instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "155.00", purpose: close }
         expect: { decision: { verdict: allow } }
     variants:
-      - name: trading_blocked
+      - name: status_not_active
         overrides:
           steps:
             - at: "2026-09-22T10:00:00-04:00"
               event: broker_account_update
-              data: { trading_blocked: true }
+              data: { status: ACCOUNT_UPDATED }
               expect: { agent_mode: paused, actions: [{ alert_owner: account_trading_blocked }] }
             - at: "2026-09-22T10:02:00-04:00"
               event: propose_order
               data: { instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "155.00", purpose: close }
               expect: { decision: { verdict: deny, reason_code: account_trading_blocked } }
+      - name: unexplained_403s
+        overrides:
+          steps:
+            - { at: "2026-09-22T10:00:00-04:00", event: broker_order_update, data: { client_order_id: "A-1", status: rejected, http_status: 403, reject: { mapped_as: unknown } }, expect: { agent_mode: normal } }
+            - { at: "2026-09-22T10:00:10-04:00", event: broker_order_update, data: { client_order_id: "A-2", status: rejected, http_status: 403, reject: { mapped_as: unknown } }, expect: { agent_mode: normal } }
+            - at: "2026-09-22T10:00:20-04:00"
+              event: broker_order_update
+              data: { client_order_id: "A-3", status: rejected, http_status: 403, reject: { mapped_as: unknown } }
+              expect: { agent_mode: exits_only, actions: [{ refresh_account: true }, { alert_owner: account_restricted }] }
       - name: external_order_detected
         overrides:
           steps:
@@ -759,7 +860,7 @@ cases:
                 actions: [{ journal: external_activity }, { alert_owner: external_activity }]
 
   - id: RC-16
-    title: Eligibility floor and exits outside the universe
+    title: Eligibility floor; exits outside the universe
     scope: [gate]
     broker_profile: alpaca
     config: test_default
@@ -773,7 +874,7 @@ cases:
       IPON: { asset_class: us_equity, exchange: NASDAQ, ipo: true }
       OUTU: { asset_class: us_equity, exchange: NYSE, prior_close: "30.00", median_dollar_volume_20d: "9000000" }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "50000.00" } }
+      account: { cash: { settled: "50000.00" } }
       positions: [{ instrument: OUTU, qty: "10", cost_basis: "300.00" }]
       agents: [{ id: agent_a, universe: [GOOD, OTCX, LOWP, ILLQ, LEV3, IPON], leveraged_etps_enabled: false }]
     steps:
@@ -788,7 +889,8 @@ cases:
     variants:
       - name: leveraged_etps_enabled
         overrides:
-          initial: { agents: [{ id: agent_a, leveraged_etps_enabled: true, risk_disclosure_acknowledged: true }] }
+          initial:
+            agents: [{ id: agent_a, universe: [GOOD, OTCX, LOWP, ILLQ, LEV3, IPON], leveraged_etps_enabled: true, risk_disclosure_acknowledged: true }]
         expect_overrides:
           step_5: { decision: { verdict: allow } }
 
@@ -799,24 +901,18 @@ cases:
     config: test_default
     calendar: us_2026
     instruments:
-      AAPL: { asset_class: us_equity, exchange: NASDAQ, prior_close: "150.00", median_dollar_volume_20d: "9000000000" }
-      MSFT: { asset_class: us_equity, exchange: NASDAQ, prior_close: "450.00", median_dollar_volume_20d: "9000000000" }
+      AAPL: { asset_class: us_equity, exchange: NASDAQ }
+      MSFT: { asset_class: us_equity, exchange: NASDAQ }
     initial:
-      account: { type: margin, multiplier: 1, cash: { settled: "10000.00" } }
+      account: { cash: { settled: "10000.00" } }
       agents: [{ id: agent_a, universe: [AAPL] }]
     steps:
-      - at: "2026-09-22T09:00:00-04:00"
-        event: deploy_agent
-        data: { id: agent_b, universe: [AAPL, MSFT] }
-        expect: { decision: { verdict: deny, reason_code: instrument_claimed } }
-      - at: "2026-09-22T09:01:00-04:00"
-        event: deploy_agent
-        data: { id: agent_c, universe: [MSFT] }
-        expect: { decision: { verdict: allow } }
+      - { at: "2026-09-22T09:00:00-04:00", event: deploy_agent, data: { id: agent_b, universe: [AAPL, MSFT] }, expect: { decision: { verdict: deny, reason_code: instrument_claimed } } }
+      - { at: "2026-09-22T09:01:00-04:00", event: deploy_agent, data: { id: agent_c, universe: [MSFT] }, expect: { decision: { verdict: allow } } }
       - at: "2026-09-22T10:00:00-04:00"
         event: propose_order
         data: { agent: agent_a, instrument: AAPL, side: buy, type: limit, qty: "40", limit_price: "150.00", purpose: open }
-        expect: { decision: { verdict: allow }, buying_power: "3999.99" }   # 10000 - 6000 - fee reservation 0.01
+        expect: { decision: { verdict: allow }, buying_power: "3999.99" }
       - at: "2026-09-22T10:00:01-04:00"
         event: propose_order
         data: { agent: agent_c, instrument: MSFT, side: buy, type: limit, qty: "10", limit_price: "450.00", purpose: open }
@@ -825,3 +921,267 @@ cases:
         event: propose_order
         data: { agent: agent_c, instrument: MSFT, side: buy, type: limit, qty: "8", limit_price: "450.00", purpose: open }
         expect: { decision: { verdict: allow }, buying_power: "399.98" }
+
+  - id: RC-18
+    title: Margin account reuses unsettled proceeds (DEC-34); cash-account variant denies
+    scope: [gate, accounting]
+    broker_profile: alpaca
+    config: test_default
+    calendar: us_2026
+    instruments:
+      XYZ: { asset_class: us_equity, exchange: NYSE }
+      QQQ: { asset_class: us_equity, exchange: NASDAQ }
+    initial:
+      account: { cash: { settled: "1000.00" } }
+    steps:
+      - { at: "2026-09-21T14:00:00-04:00", event: fill, data: { instrument: XYZ, side: buy, qty_gross: "5", price: "100.00" } }
+      - at: "2026-09-21T15:00:00-04:00"
+        event: fill
+        data: { instrument: XYZ, side: sell, qty_gross: "5", price: "110.00" }
+        expect: { buying_power: "1049.98", fees: { accrued: "0.0176" } }
+      - at: "2026-09-21T15:30:00-04:00"
+        event: propose_order
+        data: { name: buy_q, instrument: QQQ, side: buy, type: limit, qty: "6", limit_price: "100.00", purpose: open }
+        expect: { decision: { verdict: allow }, buying_power: "449.97" }    # reservation 600 + fee 0.01
+      - at: "2026-09-21T15:30:05-04:00"
+        event: broker_order_update
+        data: { name: buy_q, status: filled, fill: { qty: "6", price: "100.00" } }
+        expect:
+          cash: { settled: "-100.00", unsettled: [{ settles_on: "2026-09-22", amount: "550.00" }], total: "450.00" }
+          fees: { accrued: "0.01766" }
+          buying_power: "449.98"
+      - at: "2026-09-21T20:00:00-04:00"
+        event: fees_charged
+        data: { family: equities, trade_date: "2026-09-21" }
+        expect: { fees: { charged: "0.02" }, cash: { settled: "-100.02", total: "449.98" } }
+      - at: "2026-09-22T00:00:00-04:00"
+        event: advance_clock
+        expect: { cash: { settled: "449.98", unsettled: [], total: "449.98" } }
+    variants:
+      - name: generic_cash_account
+        overrides:
+          broker_profile: generic
+          initial: { account: { type: cash } }
+          steps:
+            - { at: "2026-09-21T14:00:00-04:00", event: fill, data: { instrument: XYZ, side: buy, qty_gross: "5", price: "100.00" } }
+            - at: "2026-09-21T15:00:00-04:00"
+              event: fill
+              data: { instrument: XYZ, side: sell, qty_gross: "5", price: "110.00" }
+              expect: { buying_power: "499.98" }
+            - at: "2026-09-21T15:30:00-04:00"
+              event: propose_order
+              data: { instrument: QQQ, side: buy, type: limit, qty: "6", limit_price: "100.00", purpose: open }
+              expect: { decision: { verdict: deny, reason_code: insufficient_settled_buying_power } }
+
+  - id: RC-19
+    title: Backtest - resting limit fills on its arrival bar; marketable remainder becomes resting
+    scope: [backtest]
+    broker_profile: backtest
+    config: test_default
+    calendar: us_2026
+    instruments:
+      TST: { asset_class: us_equity, exchange: NASDAQ }
+    isolation: per_order
+    bars:
+      - { start: "2026-09-21T09:40:00-04:00", open: "99.90", high: "100.20", low: "99.80", close: "100.00", volume: "5000" }
+      - { start: "2026-09-21T09:41:00-04:00", open: "100.00", high: "100.10", low: "99.60", close: "99.80", volume: "8000" }
+      - { start: "2026-09-21T09:42:00-04:00", open: "100.40", high: "100.60", low: "100.10", close: "100.30", volume: "6000" }
+      - { start: "2026-09-21T09:43:00-04:00", open: "100.20", high: "100.30", low: "99.90", close: "100.00", volume: "7000" }
+    orders:
+      - name: resting_fills_on_arrival_bar
+        decided_at: "2026-09-21T09:41:00-04:00"
+        order: { side: buy, type: limit, limit_price: "99.70", qty: "100", purpose: open }
+        expect: { fills: [{ bar: 1, qty: "100", price: "99.70", liquidity: maker }] }
+      - name: marketable_remainder_becomes_resting
+        decided_at: "2026-09-21T09:41:00-04:00"
+        order: { side: buy, type: limit, limit_price: "100.05", qty: "1000", purpose: open }
+        expect:
+          fills:
+            - { bar: 1, qty: "500", price: "100.03", liquidity: taker }   # cap 10% of 5000
+            - { bar: 3, qty: "500", price: "100.05", liquidity: maker }   # bar 2 opens above the limit: resting; bar 3 low 99.90 < 100.05
+      - name: touch_on_arrival_is_not_fill
+        decided_at: "2026-09-21T09:41:00-04:00"
+        order: { side: buy, type: limit, limit_price: "99.60", qty: "100", purpose: open }
+        expect: { fills: [] }
+
+  - id: RC-20
+    title: Crypto protection with a simple stop-limit - add and exit sequences (DEC-36)
+    scope: [executor]
+    broker_profile: alpaca
+    config: test_default
+    calendar: us_2026
+    instruments:
+      BTCUSD: { asset_class: crypto, symbol: "BTC/USD", min_trade_increment: "0.000000001" }
+    initial:
+      account: { cash: { settled: "50000.00" } }
+      positions: [{ instrument: BTCUSD, qty: "0.5", cost_basis: "30000.00" }]
+      open_orders:
+        - { name: sl_1, instrument: BTCUSD, side: sell, type: stop_limit, stop_price: "55000.00", limit_price: "54725.00", qty: "0.5", tif: gtc, purpose: protective }
+    steps:
+      - at: "2026-09-22T10:00:00-04:00"
+        event: propose_order
+        data: { name: add_1, instrument: BTCUSD, side: buy, type: limit, qty: "0.1", limit_price: "60000.00", purpose: increase }
+        expect:
+          decision: { verdict: allow }
+          actions:
+            - { cancel: sl_1 }
+            - { await_cancel_confirmed: sl_1 }
+            - { journal: unprotected_window_start }
+            - { rerun_gate: add_1 }
+            - { submit: add_1 }
+      - at: "2026-09-22T10:00:05-04:00"
+        event: broker_order_update
+        data: { name: add_1, status: filled, fill: { qty: "0.1", price: "60000.00", liquidity: taker } }
+        expect:
+          positions: { BTCUSD: { qty: "0.59975" } }          # 0.1 gross - 0.00025 fee
+          actions:
+            - submit_protective: { name: sl_2, type: stop_limit, tif: gtc, qty: "0.59975", stop: "55000.00", limit: "54725.00" }
+            - { journal: unprotected_window_end }
+      - at: "2026-09-22T14:00:00-04:00"
+        event: propose_order
+        data: { name: exit_1, instrument: BTCUSD, side: sell, type: limit, qty: "0.59975", limit_price: "58000.00", purpose: close }
+        expect:
+          decision: { verdict: allow }
+          actions:
+            - { cancel: sl_2 }
+            - { await_cancel_confirmed: sl_2 }
+            - { journal: unprotected_window_start }
+            - { rerun_gate: exit_1 }
+            - { submit: exit_1 }
+
+  - id: RC-21
+    title: Bracket partly filled - OCO for the filled quantity; re-placement before expiry
+    scope: [executor]
+    broker_profile: alpaca
+    config: test_default
+    calendar: us_2026
+    instruments:
+      AAPL: { asset_class: us_equity, exchange: NASDAQ }
+    initial:
+      account: { cash: { settled: "50000.00" } }
+    steps:
+      - at: "2026-09-22T10:00:00-04:00"
+        event: propose_order
+        data:
+          name: bracket_1
+          instrument: AAPL
+          type: bracket
+          tif: gtc
+          entry: { side: buy, type: limit, qty: "100", limit_price: "150.00" }
+          take_profit: { limit_price: "170.00" }
+          stop_loss: { stop_price: "140.00" }
+          purpose: open
+        expect: { decision: { verdict: allow }, actions: [{ submit: bracket_1 }] }
+      - at: "2026-09-22T10:05:00-04:00"
+        event: broker_order_update
+        data: { name: bracket_1, leg: entry, status: partially_filled, fill: { qty: "60", price: "150.00" } }
+        expect: { positions: { AAPL: { qty: "60" } }, protective_sell_qty: "0" }   # legs held until the entry completes
+      - at: "2026-09-22T15:00:00-04:00"
+        event: broker_order_update
+        data: { name: bracket_1, leg: entry, status: canceled }
+        expect:
+          actions:
+            - submit_protective: { name: oco_2, type: oco, tif: gtc, qty: "60", take_profit: "170.00", stop: "140.00" }
+      - at: "2026-12-17T09:31:00-05:00"
+        event: advance_clock
+        data: { note: "oco_2 created 2026-09-22 expires 2026-12-21; buffer 2 trading days" }
+        expect:
+          actions:
+            - { cancel: oco_2 }
+            - { await_cancel_confirmed: oco_2 }
+            - submit_protective: { name: oco_3, type: oco, tif: gtc, qty: "60", take_profit: "170.00", stop: "140.00" }
+
+  - id: RC-22
+    title: Conduct controls - collar on aggressiveness only; exits exempt; exits-only on breach
+    scope: [gate, executor]
+    broker_profile: alpaca
+    config: test_default
+    calendar: us_2026
+    instruments:
+      AAPL: { asset_class: us_equity, exchange: NASDAQ, median_dollar_volume_20d: "9000000000" }
+    initial:
+      account: { cash: { settled: "50000.00" } }
+      positions: [{ instrument: AAPL, qty: "10", cost_basis: "1500.00" }]
+    steps:
+      - at: "2026-09-22T10:00:00-04:00"
+        event: propose_order
+        data: { instrument: AAPL, side: buy, type: limit, qty: "1", limit_price: "153.10", purpose: increase, quote: { bid: "149.95", ask: "150.05" } }
+        expect: { decision: { verdict: deny, reason_code: price_outside_collar } }   # > ask x 1.01 = 151.5505
+      - at: "2026-09-22T10:00:01-04:00"
+        event: propose_order
+        data: { name: buy_passive, instrument: AAPL, side: buy, type: limit, qty: "1", limit_price: "142.00", purpose: increase, quote: { bid: "149.95", ask: "150.05" } }
+        expect: { decision: { verdict: allow } }                                        # passive, within the 20% band
+      - at: "2026-09-22T10:00:10-04:00"
+        event: propose_order
+        data: { name: exit_1, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "149.95", purpose: close }
+        expect:
+          decision: { verdict: allow }
+          actions:
+            - { cancel: buy_passive }
+            - { await_cancel_confirmed: buy_passive }
+            - { rerun_gate: exit_1 }
+            - { submit: exit_1 }
+      - at: "2026-09-22T10:01:00-04:00"
+        event: broker_order_update
+        data: { name: exit_1, status: filled, fill: { qty: "10", price: "149.95" } }
+        expect: { positions: { AAPL: { qty: "0" } } }
+      - at: "2026-09-22T10:01:30-04:00"
+        event: propose_order
+        data: { instrument: AAPL, side: buy, type: limit, qty: "1", limit_price: "150.00", purpose: open }
+        expect: { decision: { verdict: deny, reason_code: opposite_fill_interval } }  # within 60 s of the sell fill
+      - at: "2026-09-22T10:02:30-04:00"
+        event: propose_order
+        data: { instrument: AAPL, side: buy, type: limit, qty: "1", limit_price: "150.00", purpose: open }
+        expect: { decision: { verdict: allow } }
+      - at: "2026-09-22T10:05:00-04:00"
+        event: conduct_breach
+        data: { control: order_to_fill, agent: agent_a, instrument: AAPL }
+        expect: { agent_mode: exits_only, actions: [{ alert_owner: conduct_limit_breached }] }
+      - at: "2026-09-22T10:06:00-04:00"
+        event: propose_order
+        data: { instrument: AAPL, side: buy, type: limit, qty: "1", limit_price: "150.00", purpose: open }
+        expect: { decision: { verdict: deny, reason_code: agent_exits_only } }
+
+  - id: RC-23
+    title: Fractionable split residual; non-terminating adjusted mark
+    scope: [accounting]
+    broker_profile: alpaca
+    config: no_fees
+    calendar: us_2026
+    instruments:
+      LOWF: { asset_class: us_equity, exchange: NASDAQ, fractionable: true }
+    initial:
+      account: { cash: { settled: "0.00" } }
+      positions: [{ instrument: LOWF, qty: "10", cost_basis: "100.00" }]
+    steps:
+      - at: "2026-09-21T16:00:00-04:00"
+        event: mark
+        data: { instrument: LOWF, price: "30.00", source: official_close }
+        expect: { equity: "300.00", unrealized_pnl: "200.00" }
+      - at: "2026-09-21T20:00:00-04:00"
+        event: corporate_action_applied
+        data: { instrument: LOWF, type: split, ratio: { new: 1, old: 3 }, ex_date: "2026-09-22" }   # no cash in lieu posted
+        expect:
+          positions: { LOWF: { qty: "3.333333333", cost_basis: "99.99999999" } }
+          marks: { LOWF: "90.00" }
+          realized_pnl_gross: "-0.00000001"        # R = round(100 x f / Q_raw, 12) = 0.00000001
+          unrealized_pnl: "199.99999998"
+          equity: "299.99999997"
+          conservation: { delta_equity: "-0.00000003", realized_gross: "-0.00000001", unrealized: "-0.00000002" }
+    variants:
+      - name: forward_3_for_1_non_terminating_mark
+        overrides:
+          initial: { positions: [{ instrument: LOWF, qty: "10", cost_basis: "1000.00" }] }
+          steps:
+            - at: "2026-09-21T16:00:00-04:00"
+              event: mark
+              data: { instrument: LOWF, price: "100.00", source: official_close }
+              expect: { equity: "1000.00" }
+            - at: "2026-09-21T20:00:00-04:00"
+              event: corporate_action_applied
+              data: { instrument: LOWF, type: split, ratio: { new: 3, old: 1 }, ex_date: "2026-09-22" }
+              expect:
+                positions: { LOWF: { qty: "30", cost_basis: "1000.00" } }
+                marks: { LOWF: "33.333333333333" }
+                equity: "999.99999999999"          # |delta MV| = 1e-11 <= 30 x 5e-13 (I3 bound)
+                realized_pnl_gross: "0.00"
