@@ -57,7 +57,7 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 | Replay | Re-run recorded journals and market data; assert identical decisions | Backtest, runtime determinism |
 | Fault injection | Kill the process at every step of order submission and approval handling; assert no duplicates and full reconciliation | Executor, connector, recovery |
 | Integration | Alpaca paper environment end to end (Kraken demo when that connector ships) | Connectors |
-| Market rules | Simulated scenarios for pattern day trading, settlement, short sales, and market hours | Risk gate |
+| Market rules | Simulated scenarios for both day-trading regimes, settlement, short sales, and market hours; trading-domain reference cases | Risk gate, accounting |
 | Soak | Several agents on Alpaca paper continuously, with forced restarts and escalations | Phase 1 and Phase 2 gates |
 | Security | Threat model, dependency scanning, secret scanning, penetration test | Platform |
 | Privacy | Capture relay and provider payloads; assert no sensitive content | Notifications |

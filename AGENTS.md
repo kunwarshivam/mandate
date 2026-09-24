@@ -21,6 +21,7 @@ stop and ask; do not silently pick one.
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
+| What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
 
@@ -41,8 +42,9 @@ stop and ask; do not silently pick one.
    production secrets.
 9. **Accepted decisions are binding.** To deviate, stop and propose a new decision-log entry
    for the founder instead of implementing the deviation.
-10. **Enforce US account rules.** Pattern day trading, settlement, short-sale, and market-hours
-    rules are part of the risk gate, not optional checks.
+10. **Enforce US account rules.** Day-trading regime, settlement, short-sale, and market-hours
+    rules are part of the risk gate, not optional checks
+    ([trading domain spec §9](docs/specs/trading-domain.md#9-account-rules-risk-gate)).
 
 ## Safety-critical paths
 
