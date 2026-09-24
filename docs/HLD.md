@@ -75,18 +75,46 @@ Design principles:
 
 ## 3. Core concepts
 
+```mermaid
+erDiagram
+    ORGANIZATION ||--o{ WORKSPACE : contains
+    ORGANIZATION ||--o{ MEMBER : "has users"
+    ORGANIZATION ||--|| POLICY : "sets org limits"
+    WORKSPACE ||--o{ MEMBER : "grants roles to"
+    WORKSPACE ||--o{ CONNECTION : owns
+    WORKSPACE ||--o{ AGENT : owns
+    WORKSPACE ||--|| POLICY : "tightens"
+    AGENT ||--o{ AGENT_VERSION : "versioned as"
+    AGENT_VERSION ||--o{ DEPLOYMENT : "runs as"
+    DEPLOYMENT }o--|| CONNECTION : "trades through"
+    DEPLOYMENT ||--o{ EVENT : journals
 ```
-Organization   billing, SSO config, org-wide policies and limits, audit
- └─ Workspace  THE TENANT: members, connections, agents, data, encryption keys
-     ├─ Connection      broker/exchange account + credential reference + granted scopes
-     ├─ Agent           versioned definition (the "spec")
-     │   └─ Deployment  running instance of one agent version, with a lifecycle
-     │       └─ Events  observation → analysis → decision → approval → order → fill → position
-     └─ Policy          risk limits + autonomy rules
-```
+
+| Entity | What it is |
+|---|---|
+| Organization | Billing, SSO configuration, org-wide policies and limits, audit |
+| Workspace | **The tenant.** Members, connections, agents, data, encryption keys |
+| Connection | A broker / exchange account, a reference to its stored credential, and the scopes granted to agents |
+| Agent / Agent version | A versioned definition (the "spec") |
+| Deployment | A running instance of one agent version, with a lifecycle |
+| Event | One journaled step: observation, analysis, decision, approval, order, fill, or position change |
 
 **Policies inherit downward and can only tighten.** An organization sets a maximum; a
 workspace may lower it; an agent may lower it further. Nothing below can loosen what is above.
+
+```mermaid
+flowchart LR
+    org["Organization policy<br/>sets the maximum"] -->|can only tighten| ws["Workspace policy"]
+    ws -->|can only tighten| spec["Agent spec"]
+    spec -->|enforced by| gate["Risk gate<br/>on every order"]
+```
+
+Every deployment journals a causal chain of events:
+
+```mermaid
+flowchart LR
+    obs[Observation] --> ana[Analysis] --> dec[Decision] --> appr["Approval<br/>(if required)"] --> ord[Order] --> fill[Fill] --> pos[Position]
+```
 
 ### The agent spec
 
@@ -126,24 +154,54 @@ Goal types the spec supports:
 
 The system is split into three planes.
 
-```
-                ┌──────────────── CONTROL PLANE (ours, multi-tenant SaaS) ────────────────┐
- Web / Mobile ─►│ API gateway · Identity (SSO, SCIM, roles) · Org & workspace management  │
- Public API   ─►│ Agent registry + spec compiler · Policy service · Deployment manager    │
-                │ Notifications & approvals · Billing & metering · Audit explorer         │
-                │ Connector catalog · Model registry · Edge fleet management              │
-                └──────────▲──────────────────────────────────────▲───────────────────────┘
-                           │ mutual TLS, outbound connections only │
-     ┌─────────────────────┴───────────────┐       ┌───────────────┴───────────────────────┐
-     │ DATA PLANE: managed "cell"           │       │ DATA PLANE: customer edge / on-prem   │
-     │  per workspace: agent runtimes,      │       │  identical components; credentials    │
-     │  risk engine, execution gateway,     │       │  and trading data never leave the     │
-     │  event store, secrets vault,         │       │  customer; only health, usage, and    │
-     │  model gateway                       │       │  optional summaries go upstream       │
-     └──────┬────────────────────▲─────────┘       └───────────────────────────────────────┘
-            │ orders              │ optional shared signals
-     Brokers / exchanges   SHARED INTELLIGENCE PLANE (managed only): market data,
-                           news and filings, judgments on public events, research outputs
+```mermaid
+flowchart TB
+    users["Users<br/>web · mobile · public API"]
+
+    subgraph CP["Control plane: ours, multi-tenant SaaS"]
+        direction LR
+        gw["API gateway"]
+        idp["Identity<br/>SSO · SCIM · roles"]
+        tenancy["Org & workspace<br/>management"]
+        registry["Agent registry<br/>+ spec compiler"]
+        policy["Policy service"]
+        deploy["Deployment manager"]
+        approvals["Notifications<br/>& approvals"]
+        billing["Billing & metering"]
+        auditx["Audit explorer"]
+        catalog["Connector catalog<br/>· model registry"]
+        fleet["Edge fleet<br/>management"]
+    end
+
+    subgraph MC["Data plane: managed cell"]
+        direction LR
+        mrt["Agent runtimes<br/>one process per deployment"]
+        mexec["Risk engine +<br/>execution gateway"]
+        mstore[("Event store<br/>· secrets vault")]
+        mmodel["Model gateway"]
+    end
+
+    subgraph EDGE["Data plane: customer edge / on-prem"]
+        direction LR
+        ert["Same components as a managed cell<br/>credentials and trading data stay here"]
+    end
+
+    subgraph SI["Shared intelligence plane: managed only"]
+        direction LR
+        md["Market data"]
+        news["News & filings"]
+        judg["Public-event judgments<br/>· research outputs"]
+    end
+
+    venues[("Brokers / exchanges")]
+
+    users --> gw
+    CP <-->|"deployments and policies down; health, usage, events up<br/>over mTLS connections opened outbound by the data plane"| MC
+    CP <-->|"same channel; only health, usage,<br/>and optional summaries go up"| EDGE
+    SI -->|shared signals| MC
+    SI -.->|optional subscription| EDGE
+    MC <-->|"orders / market data, fills"| venues
+    EDGE <-->|"orders / market data, fills"| venues
 ```
 
 ### Control plane
@@ -175,20 +233,44 @@ or run their own.
 
 Written in Rust. One process per agent deployment.
 
-```
-Perception ─► Memory ─► Advisors ─────────────────────────► Decider ─► Autonomy policy
-(market data,  (positions, (quant: in-process            (weights advisors  ├─ AUTO ─┐
- news, account  theses,     fast models: Laya in-process   by track record,   ├─ ASK ──► Escalation manager
- events,        track       or Jev via the model gateway   sizes positions,   └─ DENY    (durable wait) ─┐
- timers)        records)    LLM: asynchronous, never       proposes action               │               │
-                            blocks)                        + confidence)                 ▼               ▼
-                                                                          HARD RISK GATE ─► Executor ─► Execution gateway ─► Broker
-Every step ─► Journal: written BEFORE acting, hash-chained, each event linked to its causes
+```mermaid
+flowchart TB
+    per["Perception<br/>market data · news ·<br/>account events · timers"]
+    mem["Memory<br/>positions · theses ·<br/>track records"]
+
+    subgraph ADV["Advisors"]
+        direction TB
+        quant["Quant models<br/>in-process"]
+        fast["Fast decision models<br/>Laya in-process · Jev via gateway"]
+        llm["LLM research<br/>async, never blocks"]
+    end
+
+    dec["Decider<br/>weights by track record,<br/>sizes, proposes action<br/>+ confidence"]
+    pol{"Autonomy<br/>policy"}
+    esc["Escalation manager<br/>durable wait"]
+    deny["Denied"]
+    risk["HARD RISK GATE"]
+    exe["Executor<br/>idempotency keys"]
+    xgw["Execution gateway"]
+    broker[("Broker /<br/>exchange")]
+    journal[("Journal<br/>append-only, hash-chained")]
+
+    per --> mem --> ADV --> dec --> pol
+    pol -->|AUTO| risk
+    pol -->|ASK| esc
+    pol -->|DENY| deny
+    esc -->|"approved, or<br/>safe default"| risk
+    risk --> exe --> xgw --> broker
+
+    dec -.->|record| journal
+    esc -.->|record| journal
+    deny -.->|record| journal
+    exe -.->|"record intent<br/>BEFORE sending"| journal
 ```
 
 | Component | Responsibility |
 |---|---|
-| Perception | Subscribes to market data, news, account events, and timers |
+| Perception | Subscribes to market data, news, account events, and timers; fills and position updates from the broker arrive here, closing the loop |
 | Memory | Positions, theses (why each position exists and what would invalidate it), advisor track records, lessons |
 | Advisors | Produce opinions in a common signal format: quant models, fast decision models, LLM research |
 | Decider | Weights advisors by earned track record, sizes positions from calibrated confidence, proposes an action |
@@ -217,6 +299,31 @@ Every step ─► Journal: written BEFORE acting, hash-chained, each event linke
 - **Venue-side protection:** protective stop orders rest at the exchange, so positions stay
   protected even if the entire platform is down.
 
+### Agent lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Draft: spec compiled and reviewed
+    Draft --> Backtest: validate against org and workspace limits
+    Backtest --> Paper: backtest passes
+    Backtest --> Draft: revise spec
+    Paper --> Live: paper run passes and owner approves
+    Paper --> Draft: revise spec
+    Live --> Paused: owner, risk breaker, or anomaly
+    Paused --> Live: owner resumes
+    Live --> Recovering: crash or restart
+    Recovering --> Live: journal replayed and broker reconciled
+    Recovering --> Paused: unexplained orders or positions
+    Live --> Completed: goal met or end date reached
+    Live --> Stopped: owner stops or kill switch
+    Paused --> Stopped: owner stops
+    Completed --> [*]
+    Stopped --> [*]
+```
+
+Waiting for an approval is not a separate lifecycle state: a live agent can have pending
+approvals for some actions while it keeps managing everything else.
+
 ---
 
 ## 6. Key flows
@@ -231,6 +338,24 @@ Every step ─► Journal: written BEFORE acting, hash-chained, each event linke
 4. A **backtest and a paper-trading run are required** before the agent may trade live.
 5. User deploys; the deployment manager schedules the runtime in the right cell or on the customer's edge.
 
+```mermaid
+flowchart TD
+    sso["Sign in via SSO"] --> ws["Create or join org, then workspace"]
+    ws --> connect["Connect broker / exchange account"]
+    connect --> check{"Key allows<br/>withdrawals?"}
+    check -->|yes| reject["Reject key,<br/>ask for a trade-only key"]
+    reject --> connect
+    check -->|no| describe["Describe agent in plain language"]
+    describe --> compile["LLM compiles spec"]
+    compile --> review{"Owner reviews spec;<br/>within org and<br/>workspace limits?"}
+    review -->|no| describe
+    review -->|yes| bt["Backtest"]
+    bt --> paper["Paper trading run"]
+    paper --> approve{"Owner approves<br/>going live?"}
+    approve -->|no| describe
+    approve -->|yes| deploy["Deployment manager schedules runtime<br/>in a managed cell or on the edge"]
+```
+
 ### B. Decision cycle
 
 1. An event arrives: price move, news, fill, or timer.
@@ -239,6 +364,36 @@ Every step ─► Journal: written BEFORE acting, hash-chained, each event linke
 4. The autonomy policy classifies it as AUTO, ASK, or DENY.
 5. The risk gate checks it.
 6. The executor places the order. Every step is journaled with links to its causes.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant S as Event source
+    participant A as Advisors
+    participant D as Decider
+    participant P as Autonomy policy
+    participant R as Risk gate
+    participant E as Executor
+    participant B as Broker
+    participant J as Journal
+
+    S->>A: Price move, news, fill, or timer
+    A->>D: Opinions (signal, conviction, horizon, thesis)
+    D->>J: Record decision and its inputs
+    D->>P: Proposed action + confidence
+    alt AUTO
+        P->>R: Check against hard limits
+        R->>E: Approved
+        E->>J: Record order intent with idempotency key
+        E->>B: Place order
+        B-->>E: Acknowledgement and fills
+        E->>J: Record fills
+    else ASK
+        P->>J: Record approval request (see flow C)
+    else DENY
+        P->>J: Record denial and reason
+    end
+```
 
 ### C. Escalation: unsure → ask → wait → act
 
@@ -256,10 +411,59 @@ Every step ─► Journal: written BEFORE acting, hash-chained, each event linke
 7. On timeout, the safe default is applied.
 8. Every step is journaled: who approved, when, through which channel, and how they authenticated.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Agent runtime
+    participant J as Journal
+    participant N as Notification service
+    participant U as Approver
+    participant R as Risk gate
+    participant B as Broker
+
+    A->>A: Confidence below threshold, or rule requires approval
+    A->>J: Record approval request (action, alternatives, evidence, risk impact, deadline, default)
+    A->>N: Request approval
+    N->>U: Push notification
+    opt No response at this escalation step
+        N->>U: SMS, then phone call (respecting quiet hours)
+    end
+    Note over A: Keeps managing other positions.<br/>Risk-reducing actions stay automatic.
+    alt Approver responds before the deadline
+        U->>N: Approve or reject (step-up auth for high-risk actions)
+        N->>A: Response
+        A->>J: Record who, when, channel, and auth method
+        A->>A: Re-validate price and risk drift since the request
+        alt Approved and drift within tolerance
+            A->>R: Submit action
+            R->>B: Place order
+            B-->>A: Fills
+            A->>J: Record order and fills
+        else Rejected
+            A->>J: Record rejection
+        else Drift beyond tolerance
+            A->>N: Re-ask, or apply the safe default
+        end
+    else Deadline passes
+        A->>J: Record timeout
+        A->>A: Apply the safe default
+    end
+```
+
 ### D. Crash recovery
 
 The process restarts, replays its journal, reconciles with the broker, and resumes. Any
 orders or positions it cannot account for trigger an alert and pause the agent.
+
+```mermaid
+flowchart TD
+    crash["Process crashes or restarts"] --> replay["Replay journal to rebuild state:<br/>positions, theses, open intents, pending approvals"]
+    replay --> reconcile["Reconcile with broker:<br/>actual positions and open orders"]
+    reconcile --> match{"Everything<br/>accounted for?"}
+    match -->|yes| resume["Resume trading;<br/>durable timers and pending approvals continue"]
+    match -->|no| pause["Pause agent and alert owner"]
+    pause --> review["Owner reviews in the audit explorer"]
+```
 
 ---
 
