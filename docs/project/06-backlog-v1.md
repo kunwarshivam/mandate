@@ -80,9 +80,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 - **E5-1 (Must)** As an auditor, I want every event appended to a hash-chained journal with
   causal links so that history cannot be silently altered.
-  *Accepted when:* the [journal test vectors](../specs/reference-cases/journal.yaml) reproduce byte
-  for byte, and the verification tool reports each tamper case's expected first failure
-  ([journal spec](../specs/journal.md)).
+  *Accepted when:* the [journal test vectors](../specs/reference-cases/journal.yaml) (chain, string
+  escaping, decimals, export line, Merkle anchor) reproduce byte for byte; the verification tool
+  reports each tamper case's expected first failure; and the append protocol returns each append
+  case's expected outcome ([journal spec](../specs/journal.md)).
+- **E5-3 (Must)** As an operator, I want the Postgres journal hardened (body stored as exact
+  canonical bytes with a hash check, append-only roles and triggers including TRUNCATE, stream
+  heads with writer fencing) so that records cannot be altered by application code.
 - **E5-2 (Must)** As an engineer, I want large artifacts stored by content hash so that the
   journal stays small and verifiable.
 
