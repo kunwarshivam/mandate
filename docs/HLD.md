@@ -364,7 +364,7 @@ flowchart TB
 - **Venue-side protection:** protective exits rest at the broker as OCO or bracket orders, so
   positions keep protection if the platform is down, within limits: equity stops trigger only in
   the regular session, crypto stop-limits can miss on gaps, and exits briefly remove protection
-  while they run ([trading domain spec §5.4](specs/trading-domain.md#54-protective-exits-dec-28)).
+  while they run ([trading domain spec §5.4](specs/trading-domain.md#54-protective-exits-dec-28-dec-36)).
 
 ### Agent lifecycle
 
