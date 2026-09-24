@@ -748,7 +748,7 @@ is journaled.
 
 ## 12. Journal events
 
-The journal spec (next) defines the envelope and storage. This spec requires:
+The [journal spec](journal.md) defines the envelope, storage, hashing, and replay. This spec requires:
 
 - Envelope: gapless per-stream `seq` (the only ordering key), `event_time` and `recorded_at`
   (informational), causation ID, previous hash, and configuration references (fee configuration,
