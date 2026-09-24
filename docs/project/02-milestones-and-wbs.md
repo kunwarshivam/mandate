@@ -18,7 +18,7 @@ flowchart TD
     M0 --> M4["M4 Journal"]
     M3 --> M5["M5 Agent runtime<br/>+ risk"]
     M4 --> M5
-    M5 --> M6["M6 Exchange connector<br/>testnet + recovery"]
+    M5 --> M6["M6 Alpaca connector<br/>paper + recovery"]
     M6 --> M7["M7 Escalation v0"]
     M7 --> G1{{"Gate: Phase 1 exit"}}
     G1 --> M8["M8 Control plane<br/>+ workspace services"]
@@ -42,24 +42,24 @@ flowchart TD
 | WP | Deliverable | Depends on | Exit criteria |
 |---|---|---|---|
 | M0 Foundations | Rust workspace, Python package, CI (build, test, lint), coding conventions, ADR template | None | CI green on main; conventions documented |
-| M1 Market data | Core types (trade, bar, funding); Binance public-data downloader; Parquet storage; `download` and `inspect` commands (coverage, gaps, duplicates, statistics) | M0 | BTC and ETH perpetual history downloaded and inspected; gap detection tested |
-| M2 Accounting | Positions, cash, fees, funding, realized and unrealized P&L; property-based tests | M1 | Matches hand-calculated reference cases, including funding and partial fills |
+| M1 Market data | Core types (trade, bar, corporate action); Alpaca historical-data downloader for US stocks, ETFs, and crypto; Parquet storage; `download` and `inspect` commands (coverage, gaps, duplicates, market sessions, statistics) | M0 | A stock/ETF basket and BTC/USD history downloaded and inspected; gap and session handling tested |
+| M2 Accounting | Spot accounting: positions, cash, fees, corporate actions (splits, dividends), settlement, realized and unrealized P&L; property-based tests | M1 | Matches hand-calculated reference cases, including splits, dividends, partial fills, and unsettled cash |
 | M3 Simulated execution + backtest | Fill model (market, limit), slippage and fee models, event loop, baseline strategy, metrics report | M2 | Baseline backtest reproducible bit-for-bit from inputs |
 | M4 Journal | Append-only, hash-chained event log; causal links; verification tool | M0 | Tampering with any event is detected |
 
-### Phase 1: One autonomous agent on testnet
+### Phase 1: One autonomous agent on Alpaca paper
 
 | WP | Deliverable | Depends on | Exit criteria |
 |---|---|---|---|
-| M5 Agent runtime + risk | Perception, memory, quant advisors, decider, autonomy policy, risk gate, drawdown ladder, kill switch; mandate schema v0 | M3, M4 | Agent never exceeds limits in simulation fuzzing |
-| M6 Exchange connector | Testnet connector; key-permission check; idempotent order intents; reconciliation; crash recovery | M5 | Fault injection at every step: zero duplicates, full reconciliation |
-| M7 Escalation v0 | Approval requests, deadlines, safe defaults, drift re-validation; email and one chat channel; CLI control | M6 | Continuous testnet soak with forced restarts and escalations passes |
+| M5 Agent runtime + risk | Perception, memory, quant advisors, decider, autonomy policy, risk gate (including US market rules), drawdown ladder, kill switch; mandate schema v0 | M3, M4 | Agent never exceeds limits or breaks US account rules in simulation fuzzing |
+| M6 Alpaca connector | Paper connector (API keys for the founder's own account in Phase 1; OAuth arrives in M8); idempotent order intents; reconciliation; crash recovery | M5 | Fault injection at every step: zero duplicates, full reconciliation |
+| M7 Escalation v0 | Approval requests, deadlines, safe defaults, drift re-validation; email and one chat channel; CLI control | M6 | Continuous Alpaca paper soak with forced restarts and escalations passes |
 
 ### Phase 2: Platform v1
 
 | WP | Deliverable | Depends on | Exit criteria |
 |---|---|---|---|
-| M8 Control plane + workspace services | Global control plane (directory, licensing, fleet, relay); workspace services (mandate registry and compiler, policy, deployment manager, approvals, audit backend, connections); OIDC SSO, roles, step-up auth | Phase 1 gate | Multi-workspace isolation tests pass; policy hierarchy enforced |
+| M8 Control plane + workspace services | Global control plane (directory, licensing, fleet, relay); workspace services (mandate registry and compiler, policy, deployment manager, approvals, audit backend, connections with Alpaca OAuth); OIDC SSO, roles, step-up auth | Phase 1 gate | Multi-workspace isolation tests pass; policy hierarchy enforced; OAuth requests trading scopes only |
 | M9 Web app | Workspaces, connections, mandate authoring, backtest and paper views, dashboard, audit explorer | Phase 1 gate | Journey J1 completed end to end by a non-team user |
 | M10 Private approvals + channels | Opaque notifications; details served from the workspace deployment; web push, email, chat; escalation chains, quiet hours | M8, M9 | No sensitive content in any relay or provider payload |
 | M11 Hybrid installer | Helm chart and Docker Compose; outbound-only connectivity; signed releases; upgrade without state loss | M8 | Journey J4 completed on a clean cluster; upgrade preserves agents |
@@ -71,5 +71,5 @@ flowchart TD
 | Gate | Criteria | Sign-off |
 |---|---|---|
 | Phase 0 exit | M1–M4 exit criteria met | Founder |
-| Phase 1 exit | M5–M7 exit criteria met; testnet soak report reviewed | Founder |
+| Phase 1 exit | M5–M7 exit criteria met; Alpaca paper soak report reviewed | Founder |
 | Phase 2 exit | PRD release criteria; design partners onboarded | Founder, counsel (terms) |

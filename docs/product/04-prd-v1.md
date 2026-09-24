@@ -15,8 +15,8 @@ all-or-nothing, and decisions cannot be explained or audited. See
 
 ## 2. Goals
 
-1. A user can take an agent from a plain-language idea to **live trading on a crypto
-   exchange**, with the agent provably unable to act outside its mandate.
+1. A US user can take an agent from a plain-language idea to **live trading through Alpaca**
+   (US stocks, ETFs, crypto spot), with the agent provably unable to act outside its mandate.
 2. Agents **escalate selectively**: they act alone when confident and within limits, and ask
    the right person, with evidence, when not.
 3. Every decision is **traceable** from a fill back to the observations behind it.
@@ -25,7 +25,9 @@ all-or-nothing, and decisions cannot be explained or audited. See
 ## 3. Non-goals (v1)
 
 - Retail launch (pending legal review; see [Compliance](08-compliance-and-regulatory.md)).
-- US equities / Interactive Brokers (next release).
+- Users outside the United States.
+- Options trading (see [DEC-24](../project/04-decision-log.md#decisions)).
+- Interactive Brokers and Coinbase connectors (later releases).
 - Fully on-prem / air-gapped control plane.
 - Native mobile apps (web push, email, SMS, and chat cover approvals in v1).
 - User-supplied code (WebAssembly plug-ins).
@@ -76,14 +78,15 @@ parent is rejected with a message naming the parent limit.
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-2.1 | Connect at least one crypto exchange (testnet and live); first exchange per [decision log](../project/04-decision-log.md#open-decisions) OD-01 | P0 |
-| FR-2.2 | Query key permissions at connect time; **reject keys with withdrawal permission** | P0 |
+| FR-2.1 | Connect an **Alpaca** account (paper and live) through Alpaca's OAuth flow ([DEC-23](../project/04-decision-log.md#decisions)) | P0 |
+| FR-2.2 | **Never hold fund-movement permissions:** OAuth connections request trading scopes only; API-key connections have permissions checked at connect time and keys that allow withdrawals or transfers are rejected | P0 |
 | FR-2.3 | Grant a connection to specific agents with scopes (instruments, maximum notional) | P0 |
-| FR-2.4 | Credentials stored only in the workspace deployment's vault; never shown again after entry | P0 |
-| FR-2.5 | Second exchange | P1 |
+| FR-2.4 | Tokens and credentials stored only in the workspace deployment's vault; never shown again after entry | P0 |
+| FR-2.5 | **Kraken Derivatives US** connector for CFTC-regulated crypto perpetuals (demo and live) | P1 |
 
-**Acceptance criteria (FR-2.2):** a key with withdrawal rights is rejected before storage, with
-instructions for creating a trade-only key; the rejection is journaled without the key value.
+**Acceptance criteria (FR-2.2):** the Alpaca OAuth request contains no scopes beyond trading and
+account read; an API key with withdrawal or transfer rights is rejected before storage with
+instructions for creating a trading-only key; rejections are journaled without secret values.
 
 ### 6.3 Mandate authoring
 
@@ -95,7 +98,7 @@ instructions for creating a trade-only key; the rejection is journaled without t
 | FR-3.4 | Show a plain-language summary of the compiled mandate for confirmation | P0 |
 | FR-3.5 | Mandates are versioned; deployments pin a version; diffs between versions are viewable | P0 |
 | FR-3.6 | Goal types: accumulate/distribute, return target under risk limits, maintain exposure | P0 (accumulate, return target), P1 (exposure) |
-| FR-3.7 | Advisor library: momentum, mean reversion, funding/carry (quant); LLM research; one fast decision-model advisor | P0 quant, P1 LLM and fast model |
+| FR-3.7 | Advisor library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision-model advisor | P0 quant, P1 LLM and fast model |
 | FR-3.8 | Templates for common mandates | P1 |
 
 **Acceptance criteria (FR-3.1, FR-3.4):** for a set of reference descriptions, the compiled
@@ -106,9 +109,9 @@ from the description is highlighted for review.
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-4.1 | Backtest a mandate version on historical data with fees, funding, and slippage | P0 |
+| FR-4.1 | Backtest a mandate version on historical data with fees, slippage, corporate actions (splits, dividends), and funding for perpetuals | P0 |
 | FR-4.2 | Report: return, volatility, Sharpe, maximum drawdown, turnover, fees, versus buy-and-hold | P0 |
-| FR-4.3 | Paper trade on the exchange testnet using the same runtime as live | P0 |
+| FR-4.3 | Paper trade on Alpaca's paper environment using the same runtime as live | P0 |
 | FR-4.4 | Going live requires a completed backtest and a paper run of at least a configurable duration, plus owner approval with step-up auth | P0 |
 | FR-4.5 | Backtests are reproducible from the recorded mandate version and data snapshot | P1 |
 
@@ -125,6 +128,12 @@ from the description is highlighted for review.
 | FR-5.7 | On restart, the agent replays its journal, reconciles with the exchange, and resumes; unexplained differences pause the agent and alert the owner | P0 |
 | FR-5.8 | Protective stop orders rest at the exchange for open positions | P1 |
 | FR-5.9 | Calibrated confidence per advisor, updated from realized outcomes | P1 |
+| FR-5.10 | **US market rules enforced by the risk gate:** pattern-day-trader limits for margin accounts under the threshold, cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class | P0 |
+| FR-5.11 | Flag potential wash sales to the user in reports (informational, not tax advice) | P2 |
+
+**Acceptance criteria (FR-5.10):** in simulation, an agent on a cash account never trades with
+unsettled funds, and an agent on a margin account under the pattern-day-trader threshold never
+exceeds the allowed day trades; blocked orders are journaled with the rule that blocked them.
 
 **Acceptance criteria (FR-5.6, FR-5.7):** in fault-injection tests that kill the runtime at every
 step of order submission, no order is ever duplicated and every position is reconciled.
@@ -220,7 +229,7 @@ See [Quality and release plan](../project/07-quality-and-release.md).
 
 ## 10. Open questions
 
-1. First exchange (depends on founder and design-partner jurisdictions).
+1. Whether options join v1 or wait ([DEC-24](../project/04-decision-log.md#decisions), proposed: wait).
 2. Which fast decision model ships first: Laya (self-hosted) or Jev (hosted, early access).
 3. Minimum paper-trading duration before live.
 4. Whether LLM research is P0 for design partners or can follow.

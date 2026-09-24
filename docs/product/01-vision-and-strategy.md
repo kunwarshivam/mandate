@@ -39,7 +39,7 @@ Autonomous trading is becoming possible, but not trustworthy:
 
 | Segment | Stage | Why they buy |
 |---|---|---|
-| Professional individual traders (systematic, crypto first) | v1 design partners | Want agents that trade 24/7 with hard limits and a phone ping when it matters |
+| Professional individual traders in the US (systematic; stocks and crypto) | v1 design partners | Want agents that trade around the clock with hard limits and a phone ping when it matters |
 | Emerging managers and small funds | v1 design partners | Need autonomy plus approvals, audit, and SSO without building infrastructure |
 | Prop firms, funds, and trading desks | Later | Many agents, strict controls, on-prem deployment, compliance evidence |
 | Retail investors (managed) | Later, after legal review | Simplified agents with conservative presets |
@@ -75,8 +75,11 @@ See [Competitive landscape](03-competitive-landscape.md).
 
 ### Where we play
 
-- **Asset classes:** crypto perpetual futures and spot first (24/7 markets, free data, testnets
-  for safe onboarding); US equities through Interactive Brokers next.
+- **Geography:** the United States first ([DEC-22](../project/04-decision-log.md#decisions)).
+- **Asset classes and venues:** US stocks, ETFs, and crypto spot through Alpaca first (free
+  paper trading on the same API as live; OAuth connections); CFTC-regulated crypto perpetuals
+  through Kraken Derivatives US next; options, Interactive Brokers, and Coinbase US futures
+  later ([DEC-23](../project/04-decision-log.md#decisions)).
 - **Customers:** professionals and small funds first, larger firms next, retail last.
 - **Deployment:** managed and hybrid first; fully on-prem / air-gapped after.
 
@@ -92,7 +95,7 @@ See [Competitive landscape](03-competitive-landscape.md).
 ### What we will not do
 
 - Recommend trades, sell signals, or run a marketplace of strategies (at least initially).
-- Hold customer funds or accept withdrawal-enabled API keys.
+- Hold customer funds, or hold any permission that can move them (withdrawal or transfer).
 - Charge per trade or as a percentage of assets or profits.
 - Promise returns. The product makes agents safe and accountable; outcomes depend on the
   user's mandate and markets.
@@ -110,6 +113,6 @@ Software subscription billed per organization: plan (seats and agents) plus usag
 | Users will let agents run unattended if the mandate is enforceable and escalation is selective | Design partners run agents live; most decisions are autonomous; escalations are judged warranted |
 | Selective escalation is a feature users value, not friction | Approval response times are short; users do not disable escalation |
 | Firms will pay for deploy-anywhere and audit | Hybrid deployments requested by design partners; audit export used |
-| Crypto is the right first market | Fast onboarding on testnets; paper-to-live conversion |
+| Alpaca paper trading is the fastest path to real usage in the US | Fast onboarding; paper-to-live conversion |
 
 Related: [Metrics](06-metrics.md), [Roadmap](05-roadmap.md), [HLD](../HLD.md).

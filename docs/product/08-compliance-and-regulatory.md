@@ -14,7 +14,8 @@
 Mandate is a **software platform**. Users define their agents' mandates and connect their own
 accounts. The platform:
 
-- does **not** hold customer funds or accept withdrawal-enabled credentials;
+- does **not** hold customer funds, or any permission that can move them (withdrawals or
+  transfers);
 - does **not** recommend trades, provide personalized advice, or sell signals;
 - does **not** charge per trade or on assets or profits;
 - does **not** route orders for compensation per transaction.
@@ -36,7 +37,8 @@ for retail users.
 | Users author and approve every mandate; the compiler's output is always shown for confirmation | Mandate authoring (PRD 6.3) |
 | Templates are starting points users must review, not recommendations | Mandate authoring |
 | No platform-generated "you should trade X" suggestions | Product policy |
-| Reject withdrawal-enabled keys | Connections (PRD FR-2.2) |
+| Trading-only OAuth scopes; reject API keys that can withdraw or transfer | Connections (PRD FR-2.2) |
+| Enforce US market rules (pattern day trading, settlement, short sales, market hours) | Risk gate (PRD FR-5.10) |
 | No per-trade or outcome-based pricing | [Pricing](07-pricing-and-packaging.md) |
 | No marketing of expected returns; performance shown as the user's own historical results with disclosures | Product and marketing policy |
 | Complete records of decisions, approvals, and configuration changes | Journal (PRD 6.7) |
@@ -48,14 +50,43 @@ Retail managed accounts are out of scope until counsel confirms the model. Expec
 additional requirements for retail include suitability-style guardrails (conservative
 presets, leverage caps), clearer disclosures, education, and jurisdiction checks.
 
-## Jurisdictions and venues
+## United States
 
-- Several crypto exchanges restrict users by country (for example, Binance and Bybit restrict
-  US persons). Connectors must respect venue terms; the platform should warn when a
-  connection's venue is not available in the user's declared jurisdiction.
-- Equities connectors depend on the broker's own onboarding and KYC; Mandate does not perform
-  KYC for trading accounts.
-- Crypto rules vary by jurisdiction and are changing; review per launch market.
+Mandate serves the United States first ([DEC-22](../project/04-decision-log.md#decisions)).
+Questions for counsel, by regulator:
+
+| Area | Applies to | Question for counsel |
+|---|---|---|
+| SEC: Investment Advisers Act; state adviser rules | US stocks and ETFs (Alpaca) | Does a platform where users define mandates and agents trade in the user's own brokerage account constitute advice or discretion? Which product constraints keep it tooling? |
+| SEC / FINRA: broker-dealer | Order flow | Confirm that flat subscription pricing and no per-transaction compensation keep Mandate outside broker-dealer activity |
+| CFTC / NFA: commodity trading advisor | Crypto perpetuals (Kraken Derivatives US), later CME futures | Does automated trading software acting on user-defined mandates fall within the commodity trading advisor definition, and do any exemptions apply? |
+| State money transmission | All | Confirm no-custody design avoids money-transmitter licensing |
+| New York (BitLicense) | Crypto spot | Confirm software without custody is outside "virtual currency business activity" |
+| Broker and venue terms | Alpaca, Kraken | Confirm third-party platform use; Alpaca OAuth app requirements; Kraken API terms for platforms acting for users |
+
+### US market rules the product must enforce
+
+These are rules on the **user's account** that an autonomous agent could otherwise break. The
+risk gate enforces them (PRD FR-5.10), and the trading domain spec (next to be written) will
+define them precisely:
+
+- **Pattern day trading:** margin accounts below the regulatory equity threshold are limited in
+  day trades within a rolling window.
+- **Settlement:** cash accounts cannot trade with unsettled proceeds.
+- **Short sales:** locate and borrow requirements and short-sale price restrictions apply.
+- **Market hours:** regular, extended, and overnight sessions differ by asset; crypto trades
+  continuously.
+- **Wash sales:** tax consequences for the user; surfaced as information, not advice.
+
+## Venues and eligibility
+
+- **Alpaca:** users open and verify accounts with Alpaca, which performs KYC; Mandate connects
+  through OAuth and never performs KYC for trading accounts.
+- **Kraken Derivatives US:** eligibility (identity verification, futures eligibility check, some
+  state restrictions) is determined by Kraken; Mandate surfaces eligibility errors clearly.
+- **Non-US venues** that exclude US persons (for example, Binance, Bybit, OKX, Hyperliquid) are
+  not supported.
+- Crypto rules are changing; review before each new asset class or venue.
 
 ## Data protection
 
