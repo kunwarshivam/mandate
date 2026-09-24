@@ -1,4 +1,4 @@
-# High-Level Design: Autonomous Trading Agents Platform
+# Mandate: High-Level Design
 
 | | |
 |---|---|
