@@ -33,7 +33,7 @@ flowchart LR
 3. **Independent review.** A separate agent run reviews every change before the founder sees it.
 4. **Founder approval.** Nothing merges without founder approval; safety-critical paths get
    line-by-line founder review.
-5. **No live secrets for agents.** Agents use testnet keys and fixtures only.
+5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
 6. **Decisions go through the log.** An agent that needs to deviate from an accepted decision
    stops and proposes a decision-log entry instead.
 
@@ -56,8 +56,9 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 | Simulation fuzzing | Random market paths and mandates through the full runtime; assert no limit violations | Runtime, decider, risk |
 | Replay | Re-run recorded journals and market data; assert identical decisions | Backtest, runtime determinism |
 | Fault injection | Kill the process at every step of order submission and approval handling; assert no duplicates and full reconciliation | Executor, connector, recovery |
-| Integration | Exchange testnet end to end | Connectors |
-| Soak | Several agents on testnet continuously, with forced restarts and escalations | Phase 1 and Phase 2 gates |
+| Integration | Alpaca paper environment end to end (Kraken demo when that connector ships) | Connectors |
+| Market rules | Simulated scenarios for pattern day trading, settlement, short sales, and market hours | Risk gate |
+| Soak | Several agents on Alpaca paper continuously, with forced restarts and escalations | Phase 1 and Phase 2 gates |
 | Security | Threat model, dependency scanning, secret scanning, penetration test | Platform |
 | Privacy | Capture relay and provider payloads; assert no sensitive content | Notifications |
 | Isolation | Cross-workspace access attempts at API, database, and messaging layers | Multi-tenancy |
@@ -74,7 +75,8 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 
 - Simulation fuzzing: zero limit violations.
 - Fault injection: zero duplicate orders; full reconciliation.
-- Testnet soak completed with forced restarts and escalations; report reviewed.
+- US market-rule scenarios pass.
+- Alpaca paper soak completed with forced restarts and escalations; report reviewed.
 
 ### Phase 2 gate (design partners)
 
@@ -89,7 +91,7 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 ## Launch checklist (design partners)
 
 - [ ] Design-partner agreements signed (scope, support, feedback expectations)
-- [ ] Onboarding guide: connecting a trade-only key, first mandate, backtest, paper, going live
+- [ ] Onboarding guide: connecting Alpaca through OAuth, first mandate, backtest, paper, going live
 - [ ] Status page and support channel
 - [ ] Alert routing and on-call rota
 - [ ] Billing plans configured

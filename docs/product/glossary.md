@@ -32,8 +32,14 @@
 | **Notification relay** | Delivers push notifications carrying only an opaque ID and generic text |
 | **Fast decision model** | A model that returns typed answers with probabilities in tens to hundreds of milliseconds (for example, Laya, Jev) |
 | **Calibration** | Adjusting a model's stated confidence so it matches how often it is actually right |
-| **Paper trading** | Trading against a live market with simulated or testnet funds |
-| **Testnet** | An exchange's test environment with fake funds |
+| **Paper trading** | Trading against a live market with simulated funds; for Alpaca, a separate paper environment with the same API as live |
+| **Testnet / demo environment** | A venue's test environment with fake funds (for example, Kraken's derivatives demo) |
+| **OAuth connection** | Connecting a user's brokerage account by authorization through the broker, granting scoped access without sharing API keys |
+| **Cash account / settlement** | An account without margin; sale proceeds cannot be reused until the trade settles |
+| **Pattern day trader (PDT) rule** | US rule limiting day trades in margin accounts below a regulatory equity threshold |
+| **Wash sale** | Selling at a loss and rebuying a substantially identical security within a window, which defers the tax loss |
+| **Corporate actions** | Splits, dividends, and similar events that change share counts or cash and must be applied to positions and price history |
+| **CFTC-regulated perpetual** | A perpetual future listed on a US exchange regulated by the Commodity Futures Trading Commission (for example, via Kraken Derivatives US) |
 | **Shadow mode** | Running a new mandate version alongside the live one without real orders, to compare decisions |
 | **Perpetual future (perp)** | A futures contract with no expiry, kept near spot price through funding payments |
 | **Funding** | Periodic payments between long and short perpetual holders |

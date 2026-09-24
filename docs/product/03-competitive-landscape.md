@@ -94,7 +94,9 @@ Placement is qualitative, based on public descriptions.
 
 ## Competitive risks
 
-- A broker (for example, Alpaca) adds guardrails and approvals to its own agent tooling.
+- A broker adds guardrails and approvals to its own agent tooling. Alpaca is both our first
+  connector ([DEC-23](../project/04-decision-log.md#decisions)) and the maker of an MCP server
+  for AI trading, so it is a partner and a potential competitor.
 - A well-funded consumer app (Scalar Field, Conviction) moves upmarket with controls and audit.
 - NautilusTrader or QuantConnect adds an agent layer.
 

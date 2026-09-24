@@ -33,7 +33,7 @@ roadmap Phases 0–2 ([roadmap](../product/05-roadmap.md)).
 
 1. Core engine: market data, accounting, simulated execution, backtesting, journal.
 2. Agent runtime with risk gate, drawdown ladder, reconciliation, and recovery.
-3. Exchange connector (testnet and live) for the first exchange.
+3. Alpaca connector (paper and live, OAuth) with US market rules enforced.
 4. Escalation and private approval flow across the v1 channels.
 5. Thin global control plane and workspace control services.
 6. Web app: workspaces, connections, mandate authoring, backtest and paper, dashboard,
@@ -50,7 +50,7 @@ roadmap Phases 0–2 ([roadmap](../product/05-roadmap.md)).
 | Design partners | Early access; influence on product; need safety and support |
 | External counsel | Regulatory posture, terms, disclosures |
 | AI coding agents | Build, test, and review under [`AGENTS.md`](../../AGENTS.md); see [RACI](05-raci.md) |
-| Exchanges / brokers | API terms, rate limits, testnet access |
+| Brokers and venues (Alpaca; Kraken Derivatives US next) | API and OAuth app terms, rate limits, paper and demo access |
 | Model providers | Jev (TypeSafe), Laya (open weights), LLM providers |
 
 ## Constraints
@@ -60,7 +60,8 @@ roadmap Phases 0–2 ([roadmap](../product/05-roadmap.md)).
   changes.
 - Rust core with Python for research and model tooling (see [decision log](04-decision-log.md)).
 - No custody, no advice, no per-trade pricing ([compliance](../product/08-compliance-and-regulatory.md)).
-- Exchange availability depends on jurisdiction.
+- United States only at first; venues limited to those available to US persons
+  ([DEC-22, DEC-23](04-decision-log.md#decisions)).
 
 ## Assumptions
 

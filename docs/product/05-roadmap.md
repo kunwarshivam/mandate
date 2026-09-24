@@ -10,7 +10,7 @@ the previous phase's exit criteria are met.
 
 ```mermaid
 flowchart LR
-    P0["Phase 0<br/>Core engine"] --> P1["Phase 1<br/>One autonomous agent<br/>on testnet"]
+    P0["Phase 0<br/>Core engine"] --> P1["Phase 1<br/>One autonomous agent<br/>on Alpaca paper"]
     P1 --> P2["Phase 2<br/>Platform v1<br/>design partners"]
     P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>learning loop"]
     P3 --> P4["Phase 4<br/>Equities, mobile,<br/>enterprise identity, on-prem"]
@@ -23,24 +23,30 @@ flowchart LR
 
 Build the trading core from first principles, piece by piece.
 
-- Market data: types, historical download (Binance public data), storage, quality checks.
-- Accounting: positions, cash, fees, funding, realized and unrealized P&L.
+- Market data: types, historical download from Alpaca (US stocks, ETFs, crypto), storage,
+  quality checks, corporate actions (splits, dividends).
+- Accounting for spot instruments: positions, cash, fees, corporate actions, settlement,
+  realized and unrealized P&L. Perpetuals accounting (funding, margin) arrives with Kraken in
+  Phase 3.
 - Simulated execution: fills, slippage, fees.
 - Backtest loop with a deliberately simple baseline strategy and evaluation metrics.
 - Journal: append-only, hash-chained event log.
 
-**Exit criteria:** a baseline strategy backtests reproducibly on BTC and ETH perpetuals with
+**Exit criteria:** a baseline strategy backtests reproducibly on a basket of US stocks and ETFs
+and on BTC/USD spot, with
 correct accounting (verified against hand-calculated cases) and a complete journal.
 
-### Phase 1: One autonomous agent on testnet
+### Phase 1: One autonomous agent on Alpaca paper
 
 - Agent runtime: perception, memory, quant advisors, decider, autonomy policy.
 - Risk gate, drawdown ladder, kill switch.
-- Exchange connector (testnet), reconciliation, idempotent order intents, crash recovery.
+- Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
+- US market rules in the risk gate: pattern-day-trader limits, settlement, short-sale rules,
+  market hours.
 - Escalation v0: email and one chat channel, deadlines, safe defaults.
 - Command-line control.
 
-**Exit criteria:** an agent trades a testnet account unattended through a continuous soak,
+**Exit criteria:** an agent trades an Alpaca paper account unattended through a continuous soak,
 survives forced restarts with no duplicate orders, and escalates and applies defaults
 correctly.
 
@@ -66,7 +72,9 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Fast decision models (Laya in-process, Jev optional) with deadlines.
 - Calibration service; advisor scorecards; trust-weighted decider.
 - Shadow mode for new mandate versions.
-- Second exchange; SMS and phone escalation; two-approver rule.
+- Kraken Derivatives US connector: CFTC-regulated crypto perpetuals, with perpetuals accounting
+  (funding, margin, liquidation thresholds) and a funding/carry advisor.
+- SMS and phone escalation; two-approver rule.
 
 **Exit criteria:** escalation precision and autonomy-rate targets met across design partners;
 at least one hybrid customer in production.
@@ -75,7 +83,8 @@ at least one hybrid customer in production.
 
 ### Phase 4: Equities, mobile, enterprise
 
-- Interactive Brokers connector (US equities), Alpaca connector.
+- Options on Alpaca.
+- Interactive Brokers connector (CME futures, professional accounts); Coinbase US futures.
 - Native mobile app for approvals.
 - SAML and SCIM; separation of duties; fully on-prem / air-gapped packaging.
 - SOC 2 readiness.

@@ -37,7 +37,7 @@ These stay with the founder regardless of how capable agents become:
    reconciliation, connectors, credential handling, authentication, tenant isolation, and
    notification payloads.
 3. **Holding secrets:** live exchange keys, production credentials, signing keys. Agents work
-   only with testnet keys and local test fixtures.
+   only with paper and demo credentials and local test fixtures.
 4. **Approving changes to accepted decisions** in the [decision log](04-decision-log.md).
 5. **Signing off phase gates** ([milestones](02-milestones-and-wbs.md#phase-gates)).
 6. **Anything with legal or financial consequence:** terms, disclosures, design-partner

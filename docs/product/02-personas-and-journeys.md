@@ -11,8 +11,9 @@ Personas are hypotheses to validate with design partners.
 
 ### 1. Alex: professional systematic trader
 
-- **Profile:** trades crypto perpetual futures full-time or alongside a job; has written bots;
-  trades their own capital across two or three exchanges.
+- **Profile:** US-based; trades US stocks, ETFs, and crypto full-time or alongside a job; has
+  written bots; trades their own capital on Alpaca and wants crypto perpetuals through a
+  US-regulated venue.
 - **Goals:** run strategies 24/7 without watching screens; never wake up to a blown account;
   know why the bot did what it did.
 - **Frustrations:** scripts break silently; no guardrails beyond exchange limits; LLM-based
@@ -90,14 +91,14 @@ journey
     title Alex takes an agent from idea to live
     section Set up
       Sign up and create workspace: 4: Alex
-      Connect exchange testnet key: 3: Alex
-      Key with withdrawal rights rejected, trade-only key accepted: 4: Alex
+      Connect Alpaca paper account through OAuth: 4: Alex
+      Grant trading access only, no transfers: 4: Alex
     section Define the agent
       Describe goal in plain language: 5: Alex
       Review compiled mandate and adjust limits: 4: Alex
     section Prove it
       Backtest on historical data: 4: Alex
-      Paper trade on testnet: 4: Alex
+      Paper trade on Alpaca: 4: Alex
     section Go live
       Approve going live with step-up auth: 4: Alex
       Agent trades autonomously: 5: Alex
