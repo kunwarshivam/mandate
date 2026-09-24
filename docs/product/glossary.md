@@ -40,6 +40,15 @@
 | **Intraday margin standard** | FINRA's replacement for the PDT rule: accounts must hold margin equity matching their intraday exposure, regardless of day-trade count |
 | **Day-trading regime** | Which of the two rule sets a broker applies to an account: `legacy_pdt` or `intraday_margin` |
 | **Wash sale** | Selling at a loss and rebuying a substantially identical security within a window, which defers the tax loss |
+| **Account ledger** | The single, serialized record of an account's buying power, reservations, orders, and positions that every agent on that broker account goes through |
+| **Exits-only** | Agent mode in which only risk-reducing orders are allowed |
+| **OCO order** | One-cancels-other: a take-profit and a stop resting together; when one fills, the other is canceled |
+| **Bracket order** | An entry order with attached take-profit and stop legs that activate when the entry fills |
+| **Tranche model** | Each protected entry is its own bracket order; adding to a position is a new bracket |
+| **Price collar** | Maximum distance of a limit price from the reference price (NBBO midpoint) |
+| **Settlement calendar** | Days that are both NYSE trading days and Federal Reserve business days; used for T+1 settlement |
+| **Cost basis** | Signed total amount paid (long) or received (short) for a position; average cost is derived from it |
+| **Shadow ledger** | Model-side record of regulatory fees and dividends that Alpaca paper trading does not simulate |
 | **Corporate actions** | Splits, dividends, and similar events that change share counts or cash and must be applied to positions and price history |
 | **CFTC-regulated perpetual** | A perpetual future listed on a US exchange regulated by the Commodity Futures Trading Commission (for example, via Kraken Derivatives US) |
 | **Shadow mode** | Running a new mandate version alongside the live one without real orders, to compare decisions |

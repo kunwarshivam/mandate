@@ -27,6 +27,8 @@ all-or-nothing, and decisions cannot be explained or audited. See
 - Retail launch (pending legal review; see [Compliance](08-compliance-and-regulatory.md)).
 - Users outside the United States.
 - Options trading (see [DEC-24](../project/04-decision-log.md#decisions)).
+- Short sales, margin borrowing, and the overnight session
+  ([DEC-30, DEC-32](../project/04-decision-log.md#decisions)).
 - Interactive Brokers and Coinbase connectors (later releases).
 - Fully on-prem / air-gapped control plane.
 - Native mobile apps (web push, email, SMS, and chat cover approvals in v1).
@@ -80,7 +82,8 @@ parent is rejected with a message naming the parent limit.
 |---|---|---|
 | FR-2.1 | Connect an **Alpaca** account (paper and live) through Alpaca's OAuth flow ([DEC-23](../project/04-decision-log.md#decisions)) | P0 |
 | FR-2.2 | **Never hold fund-movement permissions:** OAuth connections request trading scopes only; API-key connections have permissions checked at connect time and keys that allow withdrawals or transfers are rejected | P0 |
-| FR-2.3 | Grant a connection to specific agents with scopes (instruments, maximum notional) | P0 |
+| FR-2.3 | Grant a connection to specific agents with scopes (instruments, maximum notional); **one agent per instrument per broker account**, coordinated by one account ledger; activity not originated by Mandate switches the account's agents to exits-only ([DEC-26](../project/04-decision-log.md#decisions)) | P0 |
+| FR-2.6 | Verify at connect and daily that the account trades at 1× buying power; pause agents and prompt the owner otherwise | P0 |
 | FR-2.4 | Tokens and credentials stored only in the workspace deployment's vault; never shown again after entry | P0 |
 | FR-2.5 | **Kraken Derivatives US** connector for CFTC-regulated crypto perpetuals (demo and live) | P1 |
 
@@ -103,7 +106,8 @@ instructions for creating a trading-only key; rejections are journaled without s
 
 **Acceptance criteria (FR-3.1, FR-3.4):** for a set of reference descriptions, the compiled
 mandate matches the intended fields, and every field the compiler inferred rather than read
-from the description is highlighted for review.
+from the description is highlighted for review and **stays inactive until the user confirms it**
+([DEC-33](../project/04-decision-log.md#decisions)).
 
 ### 6.4 Backtest and paper trading
 
@@ -126,15 +130,19 @@ from the description is highlighted for review.
 | FR-5.5 | Risk-reducing actions never require approval | P0 |
 | FR-5.6 | Order intents are journaled before sending, with idempotency keys | P0 |
 | FR-5.7 | On restart, the agent replays its journal, reconciles with the exchange, and resumes; unexplained differences pause the agent and alert the owner | P0 |
-| FR-5.8 | Protective stop orders rest at the exchange for open positions | P1 |
+| FR-5.8 | Protective exits rest at the broker as OCO or bracket orders (regular session only for equities), with defined exit and kill-switch sequences ([DEC-28](../project/04-decision-log.md#decisions)) | P0 |
+| FR-5.12 | Opening orders are limit orders within a price collar; market orders only for risk-reducing exits in the regular session; no short sales; overnight session disabled ([DEC-29, DEC-30, DEC-32](../project/04-decision-log.md#decisions)) | P0 |
+| FR-5.13 | Instrument eligibility floor and market-conduct controls enforced by the risk gate ([DEC-31](../project/04-decision-log.md#decisions); [spec §3.2, §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)) | P0 |
+| FR-5.14 | Account restrictions and trading halts are checked before every order; restrictions switch all agents on the account to exits-only or pause them | P0 |
 | FR-5.9 | Calibrated confidence per advisor, updated from realized outcomes | P1 |
-| FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (legacy pattern-day-trader limits or the new intraday margin standard), cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-account-rules-risk-gate) | P0 |
+| FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (legacy pattern-day-trader limits or the new intraday margin standard), cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-risk-gate-account-rules) | P0 |
 | FR-5.11 | Flag potential wash sales to the user in reports (informational, not tax advice) | P2 |
 
-**Acceptance criteria (FR-5.10):** in simulation, an agent on a cash account never trades with
-unsettled funds, and an agent on a margin account under the legacy regime never exceeds the
-allowed day trades; reference cases RC-08 and RC-09 pass; blocked orders are journaled with the
-rule that blocked them.
+**Acceptance criteria (FR-5.8 to FR-5.14):** all
+[trading domain reference cases](../specs/reference-cases/trading-domain.yaml) pass, including
+RC-08, RC-09, RC-09B (account rules), RC-14 (protective exits), RC-15 (restrictions), RC-16
+(eligibility), and RC-17 (account ledger); every gate decision, including allows, is journaled
+with the rule that produced it.
 
 **Acceptance criteria (FR-5.6, FR-5.7):** in fault-injection tests that kill the runtime at every
 step of order submission, no order is ever duplicated and every position is reconciled.
@@ -144,7 +152,7 @@ step of order submission, no order is ever duplicated and every position is reco
 | ID | Requirement | Priority |
 |---|---|---|
 | FR-6.1 | Triggers: confidence below threshold, rule requires approval, order above size threshold, unusual market input | P0 |
-| FR-6.2 | Approval request contains proposed action, alternatives, evidence, risk impact, deadline, and default | P0 |
+| FR-6.2 | Approval request contains the agent's proposed action, the mandate rule it follows, evidence, risk impact, deadline, and default; never platform-authored alternatives ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
 | FR-6.3 | Channels: web push, email, SMS, Slack or Telegram; escalation chain with quiet hours | P0 (web push, email, one chat), P1 (SMS, phone call) |
 | FR-6.4 | Notifications carry only an opaque ID and generic text; details load from the workspace deployment | P0 |
 | FR-6.5 | Before executing an approved action, re-validate price and risk drift; re-ask or apply default if beyond tolerance | P0 |
@@ -164,7 +172,8 @@ instrument, size, price, or thesis.
 | FR-7.3 | Timeline per agent with filters (event type, time, outcome) | P0 |
 | FR-7.4 | Export as JSON and CSV for a time range | P0 |
 | FR-7.5 | Chain verification tool that detects any modified or missing event | P1 |
-| FR-7.6 | Retention settings per organization | P1 |
+| FR-7.6 | Trading records retained at least 6 years; organizations may extend, not shorten; legal hold ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
+| FR-7.7 | Daily per-workspace surveillance report (self-trade checks, order-to-fill ratios, close-window activity, concentration), retained as a record | P0 |
 
 ### 6.8 Monitoring and controls
 
