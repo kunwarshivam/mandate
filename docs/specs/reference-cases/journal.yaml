@@ -1,118 +1,475 @@
-# Test vectors for docs/specs/journal.md
+# Test vectors for docs/specs/journal.md (spec v0.2) - version 2
 #
-# Implementations must reproduce `canonical` byte for byte (UTF-8) from `envelope`, and `hash`
-# = lowercase hex SHA-256 of `canonical`. `envelope` omits `hash`; `prev_hash` chains to the
-# previous vector. Changing these vectors requires founder approval.
+# Implementations must reproduce, byte for byte:
+# - `chain[].canonical`: the canonical body of `chain[].body` (UTF-8), and `chain[].hash` =
+#   lowercase hex SHA-256 of those bytes; each body's `prev_hash` chains to the previous hash.
+# - `export_line_seq_1`: the export line for seq 1 (the body is an exact byte slice of it).
+# - `string_escaping.canonical_utf8_hex`: canonical bytes of `string_escaping.object`.
+# - `merkle`: leaf hashes, root, and timestamp imprint.
+# Decimal cases must normalize or reject exactly as listed. Tamper cases apply to the Postgres
+# store (rows with columns) and give the expected first verification failure (spec §11). Append
+# cases give the expected outcome (spec §5.1). Changing these vectors requires founder approval.
 
-version: 1
+version: 2
 hash_algorithm: sha256
-genesis_prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-
+genesis_prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
 decimal_normalization:
-  - { input: "150.00", canonical: "150" }
-  - { input: "0.020140", canonical: "0.02014" }
-  - { input: "0.00", canonical: "0" }
-  - { input: "-0.50", canonical: "-0.5" }
-  - { input: "1.0E-8", canonical: "0.00000001" }
-
-vectors:
-  - seq: 1
-    envelope:
-      event_id: "01J8Z3K9Q0000000000000000A"
-      stream_id: "acct:ws_01J8Z2:alp_PA1234"
-      seq: 1
-      prev_hash: "0000000000000000000000000000000000000000000000000000000000000000"
-      event_type: StreamOpened
-      schema_version: 1
-      event_time: "2026-09-21T13:00:00.000000000Z"
-      recorded_at: "2026-09-21T13:00:00.000120000Z"
-      clock_source: local
-      causation_id: null
-      correlation_id: null
-      actor: { kind: system, id: executor, version: "0.1.0" }
-      config_refs: {}
-      payload: { stream_type: account, workspace_id: ws_01J8Z2, broker: alpaca, account_ref: alp_PA1234 }
-      artifact_refs: []
-      pii_refs: []
-    canonical: |-
-      {"actor":{"id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"event_id":"01J8Z3K9Q0000000000000000A","event_time":"2026-09-21T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"alp_PA1234","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T13:00:00.000120000Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:alp_PA1234"}
-    hash: "67eb3b0885b64bc7f8614c2b9bda0b9203ee3d27f3141ec11d9cf8f7c371008d"
-
-  - seq: 2
-    envelope:
-      event_id: "01J8Z3M2R0000000000000000B"
-      stream_id: "acct:ws_01J8Z2:alp_PA1234"
-      seq: 2
-      prev_hash: "67eb3b0885b64bc7f8614c2b9bda0b9203ee3d27f3141ec11d9cf8f7c371008d"
-      event_type: GateDecided
-      schema_version: 1
-      event_time: "2026-09-21T14:00:00.000000000Z"
-      recorded_at: "2026-09-21T14:00:00.000850000Z"
-      clock_source: local
-      causation_id: "01J8Z3M1P0000000000000000X"
-      correlation_id: "01J8Z3M1P0000000000000000X"
-      actor: { kind: system, id: risk_gate, version: "0.1.0" }
-      config_refs:
-        fee_config: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-        rule_set: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-      payload:
-        intent_id: "01J8Z3M1P0000000000000000X"
-        agent_id: agent_a
-        instrument_id: "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
-        side: buy
-        type: limit
-        qty: "10"
-        limit_price: "150"
-        verdict: allow
-        reason_code: null
-        checks: [account, agent_mode, eligibility, session, constraints, collar, conduct, buying_power, gross_exposure, day_trade_budget]
-      artifact_refs: []
-      pii_refs: []
-    canonical: |-
-      {"actor":{"id":"risk_gate","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1P0000000000000000X","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222"},"correlation_id":"01J8Z3M1P0000000000000000X","event_id":"01J8Z3M2R0000000000000000B","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"GateDecided","payload":{"agent_id":"agent_a","checks":["account","agent_mode","eligibility","session","constraints","collar","conduct","buying_power","gross_exposure","day_trade_budget"],"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8Z3M1P0000000000000000X","limit_price":"150","qty":"10","reason_code":null,"side":"buy","type":"limit","verdict":"allow"},"pii_refs":[],"prev_hash":"67eb3b0885b64bc7f8614c2b9bda0b9203ee3d27f3141ec11d9cf8f7c371008d","recorded_at":"2026-09-21T14:00:00.000850000Z","schema_version":1,"seq":2,"stream_id":"acct:ws_01J8Z2:alp_PA1234"}
-    hash: "b5ffd2f94f4a72cfddf354c586097ebce6aac7ab0c9ed9f5452d923a0a1662ed"
-
-  - seq: 3
-    envelope:
-      event_id: "01J8Z3M3S0000000000000000C"
-      stream_id: "acct:ws_01J8Z2:alp_PA1234"
-      seq: 3
-      prev_hash: "b5ffd2f94f4a72cfddf354c586097ebce6aac7ab0c9ed9f5452d923a0a1662ed"
-      event_type: FillApplied
-      schema_version: 1
-      event_time: "2026-09-21T14:00:01.250000000Z"
-      recorded_at: "2026-09-21T14:00:01.251400000Z"
-      clock_source: broker
-      causation_id: "01J8Z3M2R0000000000000000B"
-      correlation_id: "01J8Z3M1P0000000000000000X"
-      actor: { kind: broker, id: alpaca, version: v2 }
-      config_refs:
-        fee_config: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-      payload:
-        fill_id: exec-7f3a
-        client_order_id: "01J8Z3M1P0000000000000000X-1"
-        instrument_id: "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
-        side: buy
-        qty_gross: "10"
-        price: "150"
-        trade_date: "2026-09-21"
-        fees: [{ kind: cat, amount: "0.0001", asset: USD, status: accrued }]
-      artifact_refs: []
-      pii_refs: []
-    canonical: |-
-      {"actor":{"id":"alpaca","kind":"broker","version":"v2"},"artifact_refs":[],"causation_id":"01J8Z3M2R0000000000000000B","clock_source":"broker","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111"},"correlation_id":"01J8Z3M1P0000000000000000X","event_id":"01J8Z3M3S0000000000000000C","event_time":"2026-09-21T14:00:01.250000000Z","event_type":"FillApplied","payload":{"client_order_id":"01J8Z3M1P0000000000000000X-1","fees":[{"amount":"0.0001","asset":"USD","kind":"cat","status":"accrued"}],"fill_id":"exec-7f3a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","price":"150","qty_gross":"10","side":"buy","trade_date":"2026-09-21"},"pii_refs":[],"prev_hash":"b5ffd2f94f4a72cfddf354c586097ebce6aac7ab0c9ed9f5452d923a0a1662ed","recorded_at":"2026-09-21T14:00:01.251400000Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:alp_PA1234"}
-    hash: "41714847472e4b8e2801021a9b987f5c7940f63c113f2995d661f68a17be5867"
-
+  accept:
+  - input: '150.00'
+    canonical: '150'
+  - input: '0.020140'
+    canonical: '0.02014'
+  - input: '0.00'
+    canonical: '0'
+  - input: '-0'
+    canonical: '0'
+  - input: '-0.00'
+    canonical: '0'
+  - input: '-0.50'
+    canonical: '-0.5'
+  - input: 1e3
+    canonical: '1000'
+  - input: 1E+3
+    canonical: '1000'
+  - input: '.5'
+    canonical: '0.5'
+  - input: '007.50'
+    canonical: '7.5'
+  - input: '1.0E-8'
+    canonical: '0.00000001'
+  reject:
+  - NaN
+  - Infinity
+  - '+1'
+  - '1_000'
+  - ' 1'
+  - 1e-30
+  - 8e28
+string_escaping:
+  object:
+    message: "caf\xE9 \"q\" a/b\nline\x1Fend \U0001F600 \Lx\x7F"
+    code: x
+  canonical_utf8_hex: 7b22636f6465223a2278222c226d657373616765223a22636166c3a9205c22715c2220612f625c6e6c696e655c7530303166656e6420f09f988020e280a8787f227d
+  hash: 876d71ad278c88d66d357c90c8c0c799fa780bb6010b4d7c42b6b5ee53249de4
+chain:
+- seq: 1
+  event_type: StreamOpened
+  body:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z3K9Q0000000000000000A
+    stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 1
+    event_type: StreamOpened
+    schema_version: 1
+    event_time: '2026-09-21T13:00:00.000000000Z'
+    recorded_at: '2026-09-21T13:00:00.000120000Z'
+    clock_source: local
+    causation_id: null
+    correlation_id: null
+    actor:
+      kind: system
+      id: executor
+      version: 0.1.0
+      build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    config_refs: {}
+    payload:
+      stream_type: account
+      workspace_id: ws_01J8Z2
+      broker: alpaca
+      account_ref: 01J8Z2ACCT00000000000000A1
+    artifact_refs: []
+    pii_refs: []
+    prev_hash: '0000000000000000000000000000000000000000000000000000000000000000'
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3K9Q0000000000000000A","event_time":"2026-09-21T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A1","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T13:00:00.000120000Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f
+- seq: 2
+  event_type: IntentReceived
+  body:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z3M2A0000000000000000B
+    stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 2
+    event_type: IntentReceived
+    schema_version: 1
+    event_time: '2026-09-21T14:00:00.000000000Z'
+    recorded_at: '2026-09-21T14:00:00.000300000Z'
+    clock_source: local
+    causation_id: 01J8Z3M1P0000000000000000X
+    correlation_id: 01J8Z3M1P0000000000000000X
+    actor:
+      kind: system
+      id: executor
+      version: 0.1.0
+      build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    config_refs:
+      mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+    payload:
+      intent_id: 01J8Z3M1P0000000000000000X
+      agent_id: agent_a
+      instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+      side: buy
+      type: limit
+      tif: day
+      qty: '10'
+      limit_price: '150'
+      purpose: open
+    artifact_refs: []
+    pii_refs: []
+    prev_hash: 01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1P0000000000000000X","clock_source":"local","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2A0000000000000000B","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentReceived","payload":{"agent_id":"agent_a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","intent_id":"01J8Z3M1P0000000000000000X","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f","recorded_at":"2026-09-21T14:00:00.000300000Z","schema_version":1,"seq":2,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713
+- seq: 3
+  event_type: GateDecided
+  body:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z3M2R0000000000000000C
+    stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 3
+    event_type: GateDecided
+    schema_version: 1
+    event_time: '2026-09-21T14:00:00.000000000Z'
+    recorded_at: '2026-09-21T14:00:00.000850000Z'
+    clock_source: local
+    causation_id: 01J8Z3M2A0000000000000000B
+    correlation_id: 01J8Z3M1P0000000000000000X
+    actor:
+      kind: system
+      id: executor
+      version: 0.1.0
+      build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    config_refs:
+      fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+      mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      rule_set: sha256:2222222222222222222222222222222222222222222222222222222222222222
+      trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+    payload:
+      intent_id: 01J8Z3M1P0000000000000000X
+      verdict: allow
+      reason_code: null
+      data_profile: iex
+      quotes_used:
+      - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        bid: '149.98'
+        ask: '150.02'
+        as_of: '2026-09-21T13:59:59.900000000Z'
+        feed: iex
+      marks_used:
+      - instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        price: '149.98'
+        source: quote
+        kind: risk
+      checks:
+      - id: account_status
+        result: pass
+        inputs:
+          status: ACTIVE
+          restriction: none
+        computed: {}
+      - id: agent_mode
+        result: pass
+        inputs:
+          mode: normal
+        computed: {}
+      - id: eligibility
+        result: pass
+        inputs:
+          exchange: NASDAQ
+          prior_close: '149.5'
+          median_dollar_volume_20d: '9000000000'
+        computed: {}
+      - id: concentration
+        result: pass
+        inputs:
+          cap: '0.2'
+        computed:
+          position_value_after: '1500'
+      - id: session
+        result: pass
+        inputs:
+          session: regular
+        computed: {}
+      - id: halt
+        result: pass
+        inputs:
+          status_feed: current
+          halted: false
+        computed: {}
+      - id: order_constraints
+        result: pass
+        inputs: {}
+        computed: {}
+      - id: mark_freshness
+        result: pass
+        inputs:
+          age_ms: '100'
+          threshold_ms: '5000'
+        computed: {}
+      - id: collar
+        result: pass
+        inputs:
+          x: '0.01'
+        computed:
+          max_buy_limit: '151.5202'
+      - id: conduct
+        result: pass
+        inputs: {}
+        computed: {}
+      - id: buying_power
+        result: pass
+        inputs:
+          buying_power: '10000'
+        computed:
+          order_cost: '1500'
+          fee_reservation: '0.01'
+      - id: gross_exposure
+        result: pass
+        inputs:
+          equity: '10000'
+        computed:
+          exposure_after: '1500'
+      - id: day_trade_budget
+        result: not_applicable
+        inputs:
+          regime: intraday_margin
+        computed: {}
+    artifact_refs: []
+    pii_refs: []
+    prev_hash: acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2A0000000000000000B","clock_source":"local","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555","rule_set":"sha256:2222222222222222222222222222222222222222222222222222222222222222","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2R0000000000000000C","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"GateDecided","payload":{"checks":[{"computed":{},"id":"account_status","inputs":{"restriction":"none","status":"ACTIVE"},"result":"pass"},{"computed":{},"id":"agent_mode","inputs":{"mode":"normal"},"result":"pass"},{"computed":{},"id":"eligibility","inputs":{"exchange":"NASDAQ","median_dollar_volume_20d":"9000000000","prior_close":"149.5"},"result":"pass"},{"computed":{"position_value_after":"1500"},"id":"concentration","inputs":{"cap":"0.2"},"result":"pass"},{"computed":{},"id":"session","inputs":{"session":"regular"},"result":"pass"},{"computed":{},"id":"halt","inputs":{"halted":false,"status_feed":"current"},"result":"pass"},{"computed":{},"id":"order_constraints","inputs":{},"result":"pass"},{"computed":{},"id":"mark_freshness","inputs":{"age_ms":"100","threshold_ms":"5000"},"result":"pass"},{"computed":{"max_buy_limit":"151.5202"},"id":"collar","inputs":{"x":"0.01"},"result":"pass"},{"computed":{},"id":"conduct","inputs":{},"result":"pass"},{"computed":{"fee_reservation":"0.01","order_cost":"1500"},"id":"buying_power","inputs":{"buying_power":"10000"},"result":"pass"},{"computed":{"exposure_after":"1500"},"id":"gross_exposure","inputs":{"equity":"10000"},"result":"pass"},{"computed":{},"id":"day_trade_budget","inputs":{"regime":"intraday_margin"},"result":"not_applicable"}],"data_profile":"iex","intent_id":"01J8Z3M1P0000000000000000X","marks_used":[{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","kind":"risk","price":"149.98","source":"quote"}],"quotes_used":[{"as_of":"2026-09-21T13:59:59.900000000Z","ask":"150.02","bid":"149.98","feed":"iex","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"}],"reason_code":null,"verdict":"allow"},"pii_refs":[],"prev_hash":"acb1845de10ec0c9986d3877e9504883d5011e2ff16285b51c8eb05fdbe4f713","recorded_at":"2026-09-21T14:00:00.000850000Z","schema_version":1,"seq":3,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724
+- seq: 4
+  event_type: OrderSubmitted
+  body:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z3M2S0000000000000000D
+    stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 4
+    event_type: OrderSubmitted
+    schema_version: 1
+    event_time: '2026-09-21T14:00:00.001000000Z'
+    recorded_at: '2026-09-21T14:00:00.001200000Z'
+    clock_source: local
+    causation_id: 01J8Z3M2R0000000000000000C
+    correlation_id: 01J8Z3M1P0000000000000000X
+    actor:
+      kind: system
+      id: executor
+      version: 0.1.0
+      build: sha256:3333333333333333333333333333333333333333333333333333333333333333
+    config_refs: {}
+    payload:
+      client_order_id: 01J8Z3M1P0000000000000000X-1
+      attempt: 1
+      instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+      side: buy
+      type: limit
+      tif: day
+      qty: '10'
+      limit_price: '150'
+    artifact_refs: []
+    pii_refs: []
+    prev_hash: 313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724
+  canonical: '{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M2R0000000000000000C","clock_source":"local","config_refs":{},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M2S0000000000000000D","event_time":"2026-09-21T14:00:00.001000000Z","event_type":"OrderSubmitted","payload":{"attempt":1,"client_order_id":"01J8Z3M1P0000000000000000X-1","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"313d989c7cd883675d6d976d6e8f529da0743b04c0481b1b4f59eb991ff85724","recorded_at":"2026-09-21T14:00:00.001200000Z","schema_version":1,"seq":4,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9
+- seq: 5
+  event_type: FillApplied
+  body:
+    envelope_version: 1
+    environment: paper
+    event_id: 01J8Z3M3T0000000000000000E
+    stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 5
+    event_type: FillApplied
+    schema_version: 1
+    event_time: '2026-09-21T14:00:01.250000000Z'
+    recorded_at: '2026-09-21T14:00:01.251400000Z'
+    clock_source: broker
+    causation_id: 01J8Z3M2S0000000000000000D
+    correlation_id: 01J8Z3M1P0000000000000000X
+    actor:
+      kind: broker
+      id: alpaca
+      version: v2
+      build: null
+    config_refs:
+      fee_config: sha256:1111111111111111111111111111111111111111111111111111111111111111
+      instrument_snapshot: sha256:4444444444444444444444444444444444444444444444444444444444444444
+      settlement_calendar: sha256:6666666666666666666666666666666666666666666666666666666666666666
+      trading_calendar: sha256:7777777777777777777777777777777777777777777777777777777777777777
+    payload:
+      fill_id: exec-7f3a
+      client_order_id: 01J8Z3M1P0000000000000000X-1
+      instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+      side: buy
+      qty_gross: '10'
+      price: '150'
+      trade_date: '2026-09-21'
+      fees:
+      - kind: cat
+        amount: '0.0001'
+        asset: USD
+        status: accrued
+    artifact_refs: []
+    pii_refs: []
+    prev_hash: 09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9
+  canonical: '{"actor":{"build":null,"id":"alpaca","kind":"broker","version":"v2"},"artifact_refs":[],"causation_id":"01J8Z3M2S0000000000000000D","clock_source":"broker","config_refs":{"fee_config":"sha256:1111111111111111111111111111111111111111111111111111111111111111","instrument_snapshot":"sha256:4444444444444444444444444444444444444444444444444444444444444444","settlement_calendar":"sha256:6666666666666666666666666666666666666666666666666666666666666666","trading_calendar":"sha256:7777777777777777777777777777777777777777777777777777777777777777"},"correlation_id":"01J8Z3M1P0000000000000000X","envelope_version":1,"environment":"paper","event_id":"01J8Z3M3T0000000000000000E","event_time":"2026-09-21T14:00:01.250000000Z","event_type":"FillApplied","payload":{"client_order_id":"01J8Z3M1P0000000000000000X-1","fees":[{"amount":"0.0001","asset":"USD","kind":"cat","status":"accrued"}],"fill_id":"exec-7f3a","instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","price":"150","qty_gross":"10","side":"buy","trade_date":"2026-09-21"},"pii_refs":[],"prev_hash":"09ed5093652d7bd8f0640469c64b96165f6e4961608ad6b4e9251dac6c82c5a9","recorded_at":"2026-09-21T14:00:01.251400000Z","schema_version":1,"seq":5,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"}'
+  hash: 418d61aa8cb6dcb7c9324ab1f32ba86112137c0d897c03aa0b2ff4cdca695ac7
+export_line_seq_1: '{"body":{"actor":{"build":"sha256:3333333333333333333333333333333333333333333333333333333333333333","id":"executor","kind":"system","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"local","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3K9Q0000000000000000A","event_time":"2026-09-21T13:00:00.000000000Z","event_type":"StreamOpened","payload":{"account_ref":"01J8Z2ACCT00000000000000A1","broker":"alpaca","stream_type":"account","workspace_id":"ws_01J8Z2"},"pii_refs":[],"prev_hash":"0000000000000000000000000000000000000000000000000000000000000000","recorded_at":"2026-09-21T13:00:00.000120000Z","schema_version":1,"seq":1,"stream_id":"acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1"},"hash":"01ef3fc029357c2338b64726b8d1baba4710571c82271b0e80731c1a4640113f"}'
+merkle:
+  leaves:
+  - stream_id: acct:ws_01J8Z2:01J8Z2ACCT00000000000000A1
+    seq: 5
+    hash: 418d61aa8cb6dcb7c9324ab1f32ba86112137c0d897c03aa0b2ff4cdca695ac7
+  - stream_id: agent:ws_01J8Z2:agent_a
+    seq: 12
+    hash: '8888888888888888888888888888888888888888888888888888888888888888'
+  - stream_id: ctl:ws_01J8Z2
+    seq: 7
+    hash: '9999999999999999999999999999999999999999999999999999999999999999'
+  leaf_hashes:
+  - 794b97a56e96a0f08d1da5f9960a89abc8cc34050c9e00c45ceba1400990e2c2
+  - 42042dcb7a4a07c5f4f2a854f3616ccdb6b978bb80c1840296abdb9e6e4db0a3
+  - 0003c9675ac0c43101293f562cebe3019c5f7a808d0a819c6b7e5ab95c2fe125
+  root: 17b59eb18e2146adf0a79705950e75f67d591634227b140b4c5eea3e638f381c
+  tsa_imprint: 4b14e27c7b08c006e6e257a6b405ef37c8f1391b7a46624e18011f38d575849a
+  note: 'leaf = SHA-256(0x00 || canonical(leaf)); node = SHA-256(0x01 || left || right); 3 leaves: root = node(node(l0, l1), l2)'
 tamper_cases:
-  - name: payload_modified
-    change: "vector seq 2: payload.qty '10' -> '11' (stored hash unchanged)"
-    expect: { verification: fail, first_failure: { seq: 2, check: rehash_mismatch } }
-  - name: event_deleted
-    change: "vector seq 2 removed"
-    expect: { verification: fail, first_failure: { seq: 3, check: seq_gap } }
-  - name: seq_values_swapped
-    change: "the seq values of vectors 2 and 3 are swapped; all other bytes and stored hashes unchanged"
-    expect: { verification: fail, first_failure: { seq: 2, check: rehash_mismatch } }
-  - name: prev_hash_rewritten
-    change: "vector seq 3: prev_hash replaced and its hash recomputed so it re-hashes correctly"
-    expect: { verification: fail, first_failure: { seq: 3, check: prev_hash_mismatch } }
+- name: payload_modified
+  change: 'seq 3 body: payload.verdict ''allow'' -> ''deny''; stored hash unchanged'
+  expect:
+    seq: 3
+    check: rehash_mismatch
+- name: event_deleted
+  change: row seq 3 deleted
+  expect:
+    seq: 4
+    check: seq_gap
+- name: seq_values_swapped
+  change: the seq members inside bodies 2 and 3 are swapped; rows and columns stay in seq order
+  expect:
+    seq: 2
+    check: column_mismatch
+- name: prev_hash_changed_without_rehash
+  change: 'seq 4: prev_hash replaced in body and column; stored hash unchanged'
+  expect:
+    seq: 4
+    check: rehash_mismatch
+- name: prev_hash_rewritten_and_rehashed
+  change: 'seq 4: prev_hash replaced in body and column; hash recomputed'
+  expect:
+    seq: 4
+    check: prev_hash_mismatch
+- name: whitespace_inserted_and_rehashed
+  change: 'seq 2: a space inserted after the opening brace of the body; hash recomputed'
+  expect:
+    seq: 2
+    check: non_canonical
+- name: column_altered
+  change: 'seq 5: event_type column changed to ''FillReversed'''
+  expect:
+    seq: 5
+    check: column_mismatch
+- name: tail_truncated_after_anchor
+  change: anchor covers the account stream at seq 5 (merkle leaf 0); row seq 5 deleted and head reset to 4
+  expect:
+    per_event: pass
+    range_check: anchor_head_mismatch
+- name: chain_rewritten_from_seq_3
+  change: events 3-5 rewritten with recomputed hashes and columns
+  expect:
+    per_event: pass
+    range_check: anchor_head_mismatch
+append_cases:
+  stream_state:
+    head_seq: 5
+    head_hash: 418d61aa8cb6dcb7c9324ab1f32ba86112137c0d897c03aa0b2ff4cdca695ac7
+    writer_epoch: 1
+  cases:
+  - name: identical_retry_with_stale_head
+    request:
+      expected_head: 4
+      writer_epoch: 1
+      drafts:
+      - draft of seq 5 (event_id 01J8Z3M3T0000000000000000E), unchanged
+    expect:
+      outcome: AlreadyCommitted
+      returns_seq: 5
+  - name: retry_with_equivalent_decimal
+    request:
+      expected_head: 4
+      writer_epoch: 1
+      drafts:
+      - draft of seq 5 with payload.price '150.00'
+    expect:
+      outcome: AlreadyCommitted
+      returns_seq: 5
+  - name: same_event_id_different_content
+    request:
+      expected_head: 5
+      writer_epoch: 1
+      drafts:
+      - draft of seq 5 with payload.qty_gross '11'
+    expect:
+      outcome: IdempotencyConflict
+      stored_seq: 5
+  - name: partial_overlap_batch
+    request:
+      expected_head: 5
+      writer_epoch: 1
+      drafts:
+      - draft of seq 5, unchanged
+      - new draft F
+    expect:
+      outcome: IdempotencyConflict
+  - name: stale_head
+    request:
+      expected_head: 4
+      writer_epoch: 1
+      drafts:
+      - new draft F
+    expect:
+      outcome: HeadMismatch
+      actual_seq: 5
+      actual_hash: 418d61aa8cb6dcb7c9324ab1f32ba86112137c0d897c03aa0b2ff4cdca695ac7
+  - name: fenced_writer
+    request:
+      expected_head: 5
+      writer_epoch: 0
+      drafts:
+      - new draft F
+    expect:
+      outcome: Fenced
+      current_epoch: 1
+  - name: committed
+    request:
+      expected_head: 5
+      writer_epoch: 1
+      drafts:
+      - new draft F
+    expect:
+      outcome: Committed
+      seq: 6
+      prev_hash: 418d61aa8cb6dcb7c9324ab1f32ba86112137c0d897c03aa0b2ff4cdca695ac7
+  - name: float_rejected
+    request:
+      expected_head: 5
+      writer_epoch: 1
+      drafts:
+      - new draft with payload.price as the JSON number 150.0
+    expect:
+      outcome: Invalid
+      reason: float
+  - name: missing_required_config_ref
+    request:
+      expected_head: 5
+      writer_epoch: 1
+      drafts:
+      - new GateDecided draft without config_refs.rule_set
+    expect:
+      outcome: Invalid
+      reason: missing_config_ref
