@@ -185,6 +185,8 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 18. In managed mode, the platform's runtime consumes consolidated (SIP) market data licensed to the
     user's Alpaca account. Is that vendor processing, non-display use, or redistribution under
     exchange data agreements, and what licensing does Mandate need?
+19. When a customer revokes a bring-your-own key, or runs in hybrid mode, what defense copy of
+    records (if any) may the platform retain, and under what contract terms?
 
 ## Data protection
 
