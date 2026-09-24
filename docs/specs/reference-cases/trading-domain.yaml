@@ -1,4 +1,4 @@
-# Reference cases for docs/specs/trading-domain.md (spec v0.3)
+# Reference cases for docs/specs/trading-domain.md (spec v0.4)
 #
 # SCHEMA v3 - HARNESS RULES
 #
@@ -38,8 +38,25 @@
 #   objects merge recursively; arrays of objects that have `id` or `name` merge by that key;
 #   other arrays are replaced. `expect_overrides.step_N` merges into step N's expectation.
 #
+# Attribution of fills and broker events
+# - A `fill` step is a Mandate-originated fill of the most recent approved order for that agent and
+#   instrument (or its own order if none), unless `data.source: external`.
+# - A `broker_order_update` with an unknown `client_order_id` is external activity only if it
+#   carries a fill; unknown-ID rejects count only toward the 403 threshold (spec §7.3).
+#
+# Backtest fields
+# - `decided_at`: decision time; eligibility starts at the first bar starting at or after it.
+# - `resting_since_bar: N` / `resting_since: previous_trading_day`: the order was eligible before
+#   that bar and is resting at its start, so the marketable-on-arrival test does not apply.
+# - `first_bar_reference_volume`: the 20-session same-minute median for the session's first bar.
+# - `initial_position`: position held when the order is simulated.
+# - `isolation: per_order`: each order is simulated alone against the bars.
+#
 # Other rules
 # - A fill without `client_order_id` is its own order (for per-order fee caps).
+# - `non_marginable_buying_power` equals the model value unless supplied.
+# - GTC expiry = creation date + 90 calendar days; `advance_clock` across a `TradingDayStarted`
+#   that reaches the re-placement buffer triggers protective re-placement (spec §5.4).
 # - Fee reservations are rounded per order (spec §2.1).
 # - Reason codes follow the gate evaluation order in spec §9.1; the first failing check wins.
 #
@@ -97,6 +114,13 @@ configs:
       unexplained_403_threshold: 3
       crypto_stop_limit_offset_bps: "50"
       protective_replace_buffer_trading_days: 2
+      bracket_partial_fill_timeout_s: 60
+      max_unprotected_s: 60
+      exit_ladder:
+        step_s: 5
+        liquid: { offset: "0.005", step: "0.005", max: "0.03" }
+        other: { offset: "0.01", step: "0.01", max: "0.05" }
+        crypto: { offset: "0.01", step: "0.01", max: "0.05" }
       legacy_pdt_equity_threshold: "25000.00"
     accounting:
       basis_reduction: { scale: 12, mode: half_even }
@@ -383,6 +407,23 @@ cases:
         event: advance_clock                  # emits DividendPaid
         expect: { receivables: "0.00", cash: { settled: "5025.00" }, equity: "10000.00" }
     variants:
+      - name: protective_orders_kept_through_dividend
+        overrides:
+          initial:
+            open_orders:
+              - name: oco_1
+                instrument: DIV
+                type: oco
+                tif: gtc
+                purpose: protective
+                legs:
+                  - { side: sell, type: limit, limit_price: "60.00", qty: "100" }
+                  - { side: sell, type: stop, stop_price: "45.00", qty: "100" }
+          steps:
+            - at: "2026-09-21T19:45:00-04:00"
+              event: corporate_action_prepare
+              data: { instrument: DIV, type: cash_dividend, ex_date: "2026-09-22" }
+              expect: { actions: [], orders: { oco_1: { state: Accepted } } }
       - name: short_position_generic_broker
         overrides:
           broker_profile: generic
@@ -743,8 +784,8 @@ cases:
     steps:
       - at: "2026-09-22T11:00:00-04:00"
         event: propose_order
-        data: { name: exit_1, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "155.00", purpose: close }
-        expect:
+        data: { name: exit_1, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "155.00", purpose: close, quote: { bid: "155.00", ask: "155.10" } }
+        expect:                                  # marketable exit (limit at the bid)
           decision: { verdict: allow }
           actions:
             - { cancel: oco_1 }
@@ -760,6 +801,18 @@ cases:
           realized_pnl_gross: "50.00"
           actions: [{ journal: unprotected_window_end }]
     variants:
+      - name: passive_exit_becomes_oco_take_profit
+        overrides:
+          steps:
+            - at: "2026-09-22T11:00:00-04:00"
+              event: propose_order
+              data: { name: exit_p, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "160.00", purpose: close, quote: { bid: "155.00", ask: "155.10" } }
+              expect:
+                decision: { verdict: allow }
+                actions:
+                  - { cancel: oco_1 }
+                  - { await_cancel_confirmed: oco_1 }
+                  - submit_protective: { name: oco_2, type: oco, tif: gtc, qty: "10", take_profit: "160.00", stop: "140.00" }
       - name: plain_add_blocked
         overrides:
           steps:
@@ -1020,7 +1073,7 @@ cases:
     steps:
       - at: "2026-09-22T10:00:00-04:00"
         event: propose_order
-        data: { name: add_1, instrument: BTCUSD, side: buy, type: limit, qty: "0.1", limit_price: "60000.00", purpose: increase }
+        data: { name: add_1, instrument: BTCUSD, side: buy, type: limit, tif: ioc, qty: "0.1", limit_price: "60000.00", purpose: increase, quote: { bid: "59990.00", ask: "60000.00" } }
         expect:
           decision: { verdict: allow }
           actions:
@@ -1039,7 +1092,7 @@ cases:
             - { journal: unprotected_window_end }
       - at: "2026-09-22T14:00:00-04:00"
         event: propose_order
-        data: { name: exit_1, instrument: BTCUSD, side: sell, type: limit, qty: "0.59975", limit_price: "58000.00", purpose: close }
+        data: { name: exit_1, instrument: BTCUSD, side: sell, type: limit, qty: "0.59975", limit_price: "58000.00", purpose: close, quote: { bid: "58000.00", ask: "58010.00" } }
         expect:
           decision: { verdict: allow }
           actions:
@@ -1075,13 +1128,18 @@ cases:
       - at: "2026-09-22T10:05:00-04:00"
         event: broker_order_update
         data: { name: bracket_1, leg: entry, status: partially_filled, fill: { qty: "60", price: "150.00" } }
-        expect: { positions: { AAPL: { qty: "60" } }, protective_sell_qty: "0" }   # legs held until the entry completes
-      - at: "2026-09-22T15:00:00-04:00"
-        event: broker_order_update
-        data: { name: bracket_1, leg: entry, status: canceled }
+        expect:
+          positions: { AAPL: { qty: "60" } }
+          protective_sell_qty: "0"                 # legs held until the entry completes
+          actions: [{ journal: unprotected_window_start }]
+      - at: "2026-09-22T10:06:00-04:00"
+        event: advance_clock                       # bracket_partial_fill_timeout (60 s) reached
         expect:
           actions:
+            - { cancel_remainder: bracket_1 }
+            - { await_cancel_confirmed: bracket_1 }
             - submit_protective: { name: oco_2, type: oco, tif: gtc, qty: "60", take_profit: "170.00", stop: "140.00" }
+            - { journal: unprotected_window_end }
       - at: "2026-12-17T09:31:00-05:00"
         event: advance_clock
         data: { note: "oco_2 created 2026-09-22 expires 2026-12-21; buffer 2 trading days" }
@@ -1113,7 +1171,7 @@ cases:
         expect: { decision: { verdict: allow } }                                        # passive, within the 20% band
       - at: "2026-09-22T10:00:10-04:00"
         event: propose_order
-        data: { name: exit_1, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "149.95", purpose: close }
+        data: { name: exit_1, instrument: AAPL, side: sell, type: limit, qty: "10", limit_price: "149.95", purpose: close, quote: { bid: "149.95", ask: "150.05" } }
         expect:
           decision: { verdict: allow }
           actions:
@@ -1185,3 +1243,46 @@ cases:
                 marks: { LOWF: "33.333333333333" }
                 equity: "999.99999999999"          # |delta MV| = 1e-11 <= 30 x 5e-13 (I3 bound)
                 realized_pnl_gross: "0.00"
+
+  - id: RC-24
+    title: Exit price ladder in extended hours; presumed-halt variant
+    scope: [executor]
+    broker_profile: alpaca
+    config: no_fees
+    calendar: us_2026
+    instruments:
+      AAPL: { asset_class: us_equity, exchange: NASDAQ, median_dollar_volume_20d: "9000000000" }   # liquid tier
+    initial:
+      account: { cash: { settled: "10000.00" } }
+      positions: [{ instrument: AAPL, qty: "10", cost_basis: "1500.00" }]
+    steps:
+      - at: "2026-09-22T17:00:00-04:00"                # after-hours: exits only, limit orders
+        event: propose_order
+        data: { name: exit_1, instrument: AAPL, side: sell, qty: "10", purpose: close, pricing: marketable, quote: { bid: "150.00", ask: "150.20" } }
+        expect:
+          decision: { verdict: allow }
+          actions:
+            - submit: { name: exit_1, type: limit, limit_price: "149.25", extended_hours: true, tif: day }   # 150.00 x (1 - 0.5%)
+      - at: "2026-09-22T17:00:05-04:00"
+        event: advance_clock                         # exit_step_s reached, unfilled
+        data: { quote: { bid: "150.00", ask: "150.20" } }
+        expect:
+          actions:
+            - { cancel: exit_1 }
+            - { await_cancel_confirmed: exit_1 }
+            - submit: { name: exit_1b, type: limit, limit_price: "148.50", extended_hours: true, tif: day }  # offset 1.0%
+      - at: "2026-09-22T17:00:07-04:00"
+        event: broker_order_update
+        data: { name: exit_1b, status: filled, fill: { qty: "10", price: "148.50" } }
+        expect: { positions: { AAPL: { qty: "0" } }, realized_pnl_gross: "-15.00" }
+    variants:
+      - name: presumed_halt_regular_session
+        overrides:
+          steps:
+            - at: "2026-09-22T11:00:00-04:00"
+              event: propose_order
+              data: { name: exit_1, instrument: AAPL, side: sell, qty: "10", purpose: close, pricing: marketable, status_feed: stale, last_good_quote: { bid: "150.00", ask: "150.20", age_s: 120 } }
+              expect:
+                decision: { verdict: allow }
+                actions:
+                  - submit: { name: exit_1, type: limit, limit_price: "149.25", tif: day }   # no market order without current status data
