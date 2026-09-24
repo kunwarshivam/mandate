@@ -1,5 +1,8 @@
 # Mandate documentation
 
+Mandate is built by the founder working with AI coding agents. Agents follow
+[AGENTS.md](../AGENTS.md).
+
 ## Architecture
 
 - [High-Level Design](HLD.md): architecture, agent runtime, deployment modes, key flows,
