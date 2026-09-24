@@ -80,7 +80,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 - **E5-1 (Must)** As an auditor, I want every event appended to a hash-chained journal with
   causal links so that history cannot be silently altered.
-  *Accepted when:* the verification tool detects any modified, reordered, or missing event.
+  *Accepted when:* the [journal test vectors](../specs/reference-cases/journal.yaml) reproduce byte
+  for byte, and the verification tool reports each tamper case's expected first failure
+  ([journal spec](../specs/journal.md)).
 - **E5-2 (Must)** As an engineer, I want large artifacts stored by content hash so that the
   journal stays small and verifiable.
 
