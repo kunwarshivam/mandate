@@ -84,6 +84,7 @@ parent is rejected with a message naming the parent limit.
 | FR-2.2 | **Never hold fund-movement permissions:** OAuth connections request trading scopes only; API-key connections have permissions checked at connect time and keys that allow withdrawals or transfers are rejected | P0 |
 | FR-2.3 | Grant a connection to specific agents with scopes (instruments, maximum notional); **one agent per instrument per broker account**, coordinated by one account ledger; activity not originated by Mandate switches the account's agents to exits-only ([DEC-26](../project/04-decision-log.md#decisions)) | P0 |
 | FR-2.6 | Verify at connect and daily that the account trades at 1× buying power; pause agents and prompt the owner otherwise | P0 |
+| FR-2.7 | Paper trading uses the IEX data profile; **live equity agents require consolidated (SIP) market data** on the user's Alpaca account; runtimes subscribe to trading-status and LULD channels ([DEC-35](../project/04-decision-log.md#decisions)) | P0 |
 | FR-2.4 | Tokens and credentials stored only in the workspace deployment's vault; never shown again after entry | P0 |
 | FR-2.5 | **Kraken Derivatives US** connector for CFTC-regulated crypto perpetuals (demo and live) | P1 |
 
@@ -131,18 +132,18 @@ from the description is highlighted for review and **stays inactive until the us
 | FR-5.6 | Order intents are journaled before sending, with idempotency keys | P0 |
 | FR-5.7 | On restart, the agent replays its journal, reconciles with the exchange, and resumes; unexplained differences pause the agent and alert the owner | P0 |
 | FR-5.8 | Protective exits rest at the broker as OCO or bracket orders (regular session only for equities), with defined exit and kill-switch sequences ([DEC-28](../project/04-decision-log.md#decisions)) | P0 |
-| FR-5.12 | Opening orders are limit orders within a price collar; market orders only for risk-reducing exits in the regular session; no short sales; overnight session disabled ([DEC-29, DEC-30, DEC-32](../project/04-decision-log.md#decisions)) | P0 |
+| FR-5.12 | Opening orders are limit orders within a price collar, in the regular session only; market orders only for risk-reducing exits in the regular session; no short sales; no overnight trading ([DEC-29, DEC-30, DEC-32, DEC-37](../project/04-decision-log.md#decisions)) | P0 |
 | FR-5.13 | Instrument eligibility floor and market-conduct controls enforced by the risk gate ([DEC-31](../project/04-decision-log.md#decisions); [spec §3.2, §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)) | P0 |
 | FR-5.14 | Account restrictions and trading halts are checked before every order; restrictions switch all agents on the account to exits-only or pause them | P0 |
 | FR-5.9 | Calibrated confidence per advisor, updated from realized outcomes | P1 |
-| FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (legacy pattern-day-trader limits or the new intraday margin standard), cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-risk-gate-account-rules) | P0 |
+| FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (Alpaca: intraday margin; legacy rules for other brokers), 1× buying power with no debit (margin accounts may reuse unsettled proceeds; cash accounts use settled cash only), sessions, auction windows, and halts. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-risk-gate) | P0 |
 | FR-5.11 | Flag potential wash sales to the user in reports (informational, not tax advice) | P2 |
 
 **Acceptance criteria (FR-5.8 to FR-5.14):** all
 [trading domain reference cases](../specs/reference-cases/trading-domain.yaml) pass, including
-RC-08, RC-09, RC-09B (account rules), RC-14 (protective exits), RC-15 (restrictions), RC-16
-(eligibility), and RC-17 (account ledger); every gate decision, including allows, is journaled
-with the rule that produced it.
+RC-08, RC-09, RC-09B, RC-18 (account rules and buying power), RC-14, RC-20, RC-21 (protective
+exits), RC-15 (restrictions), RC-16 (eligibility), RC-17 (account ledger), and RC-22 (conduct
+controls); every gate decision, including allows, is journaled with the checks that produced it.
 
 **Acceptance criteria (FR-5.6, FR-5.7):** in fault-injection tests that kill the runtime at every
 step of order submission, no order is ever duplicated and every position is reconciled.

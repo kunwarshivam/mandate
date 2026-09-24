@@ -44,12 +44,15 @@ stop and ask; do not silently pick one.
    for the founder instead of implementing the deviation.
 10. **Enforce US account rules.** Day-trading regime, settlement, market-hours, eligibility,
     market-conduct, and account-restriction rules are part of the risk gate, not optional checks
-    ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate-account-rules)).
-11. **Mandate never originates a trade idea.** Every order traces to a user-confirmed mandate
-    version; platform defaults may only restrict trading; inferred mandate fields stay inactive
-    until confirmed.
+    ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate)).
+11. **Mandate does not choose instruments, strategy, sizing, or limits.** They come from
+    user-confirmed mandate fields; platform defaults may only restrict trading; inferred mandate
+    fields stay inactive until confirmed; templates carry no platform-chosen instruments or
+    parameters.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
-    directly; opening orders are limit orders; no short sales in v1.
+    directly; opening orders are limit orders in the regular session; no short sales in v1.
+13. **Risk reduction is never blocked by our own rules.** Exits, protective orders, and the kill
+    switch are exempt from conduct controls and day-trade budgets; only the broker can refuse them.
 
 ## Safety-critical paths
 

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product, with external counsel |
-| **Status** | Draft v0.1 |
+| **Status** | Draft v0.3 (aligned with trading domain spec v0.3) |
 
 > This document records product positions and open questions. It is not legal advice.
 > Every position below must be confirmed by securities and data-protection counsel before
@@ -35,10 +35,10 @@ for retail users.
 | Requirement | Where enforced |
 |---|---|
 | Users author and approve every mandate; the compiler's output is always shown for confirmation | Mandate authoring (PRD 6.3) |
-| Templates are starting points users must review, not recommendations | Mandate authoring |
+| Templates are starting points users must review, not recommendations; they never ship with platform-chosen instruments or parameters ([DEC-38](../project/04-decision-log.md#decisions)) | Mandate authoring |
 | No platform-generated "you should trade X" suggestions | Product policy |
 | Trading-only OAuth scopes; reject API keys that can withdraw or transfer | Connections (PRD FR-2.2) |
-| Enforce US market rules (day-trading regime, settlement, short sales, market hours) | Risk gate (PRD FR-5.10) |
+| Enforce US market rules (day-trading regime, buying power and settlement, sessions, halts; no short sales) | Risk gate (PRD FR-5.10) |
 | No per-trade or outcome-based pricing | [Pricing](07-pricing-and-packaging.md) |
 | No marketing of expected returns; performance shown as the user's own historical results with disclosures | Product and marketing policy |
 | Complete records of decisions, approvals, and configuration changes | Journal (PRD 6.7) |
@@ -68,16 +68,20 @@ Questions for counsel, by regulator:
 
 These are rules on the **user's account** that an autonomous agent could otherwise break. The
 risk gate enforces them (PRD FR-5.10), and the
-[trading domain spec §9](../specs/trading-domain.md#9-risk-gate-account-rules) defines them
+[trading domain spec §9](../specs/trading-domain.md#9-risk-gate) defines them
 precisely:
 
 - **Day trading:** FINRA replaced the pattern-day-trader rule with an intraday margin standard
-  (effective June 4, 2026, with broker phase-in until October 20, 2027). Until each broker
-  transitions, the legacy limits may still apply; the risk gate supports both regimes.
-- **Settlement:** cash accounts cannot trade with unsettled proceeds.
-- **Short sales:** locate and borrow requirements and short-sale price restrictions apply.
-- **Market hours:** regular, extended, and overnight sessions differ by asset; crypto trades
-  continuously.
+  (effective June 4, 2026, with broker phase-in until October 20, 2027). Alpaca applies the new
+  standard; if the broker reports a deficit, the call must be met within 2 business days and an
+  account unmet by the 5th business day is frozen for 90 days. The risk gate also supports the
+  legacy rules for brokers that have not transitioned.
+- **Buying power and settlement:** agents trade at 1× gross exposure with no debit balance. In
+  margin accounts (all Alpaca accounts) unsettled proceeds may be reused; in cash accounts
+  (other brokers) only settled cash is used, preventing good-faith and free-riding violations.
+- **No short sales in v1** ([DEC-32](../project/04-decision-log.md#decisions)).
+- **Sessions:** openings in the regular session only; exits may use extended hours; no overnight
+  trading; no market orders in auction windows or halts.
 - **Wash sales:** tax consequences for the user; surfaced as information, not advice.
 
 ## Venues and eligibility
@@ -95,8 +99,11 @@ precisely:
 From the risk and compliance review of the trading domain spec
 ([DEC-33](../project/04-decision-log.md#decisions)):
 
-- **Mandate never originates a trade idea.** Every order traces to a user-confirmed mandate
-  version; platform defaults only restrict trading.
+- **Mandate does not choose instruments, strategy, sizing, or limits**
+  ([DEC-38](../project/04-decision-log.md#decisions)); these come from user-confirmed mandate
+  fields, and advisors are tools the user selects. Every order traces to a user-confirmed mandate
+  version; platform defaults only restrict trading; templates carry no platform-chosen
+  instruments or parameters.
 - Compiler-inferred mandate fields are **inactive until the user confirms them**.
 - Calibration changes autonomy only within user-approved bounds; each change is journaled.
 - Approval requests show the agent's proposal and the mandate rule it follows, **not
@@ -105,19 +112,25 @@ From the risk and compliance review of the trading domain spec
 ## Market conduct
 
 Autonomous agents can produce wash-trade, layering, or marking-the-close patterns without intent.
-The risk gate enforces conduct controls (one working order per side, minimum resting time,
-price collars, participation caps, order-to-fill limits, close-window restrictions, and
-self-trade prevention across a workspace's accounts), and a daily surveillance report is
-retained ([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)).
-Instrument eligibility excludes OTC, IPO-day, low-priced, and illiquid names; leveraged and
-inverse ETPs require explicit opt-in ([spec §3.2](../specs/trading-domain.md#32-platform-eligibility-floor-dec-31)).
+The risk gate enforces conduct controls on **opening and increasing orders** (one side at a time,
+minimum resting time, a price collar on aggressiveness, participation caps, order-to-fill limits,
+close-window restrictions, and self-trade prevention across an owner-declared group of related
+accounts). The controls never block exits, protective orders, or the kill switch
+([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)). A daily surveillance
+report is generated; threshold breaches are routed to the owner, whose acknowledgment is
+journaled. **The platform does not supervise users' trading.** Instrument eligibility excludes
+OTC, IPO-day, low-priced, and illiquid names; complex, leveraged, inverse, and volatility ETPs and
+ETNs require explicit opt-in ([spec §3.2](../specs/trading-domain.md#32-eligibility-floor-dec-31)).
 
 ## Records retention
 
-Trading records (intents, every risk-gate decision including allows, mandate and model versions,
-raw broker requests and responses, fills, account snapshots, reconciliations, approvals with
-authentication method, surveillance reports) are retained **at least 6 years**; organizations may
-extend but not shorten; legal holds override deletion
+Trading records (intents; every risk-gate decision including allows, with the quotes and marks
+used; mandate and model versions; LLM prompts and outputs that informed decisions; raw broker
+requests and responses; fills; account snapshots; reconciliations; approvals with authentication
+method; owner acknowledgments; surveillance reports) are retained **6 years after the later of
+their creation and the closing of the position, lot, or account they support**, in write-once
+storage; organizations may extend but not shorten; legal holds override deletion; in hybrid mode
+the customer attests to the floor
 ([spec §13](../specs/trading-domain.md#13-records-retention-dec-33)). Counsel to confirm the period
 against adviser customers' obligations (Advisers Act Rule 204-2) and the platform's own needs.
 
@@ -127,8 +140,8 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
    constitute a recommendation or advice under the Advisers Act or state law, given that a
    user-authored mandate triggered it?
 2. Do the platform-supplied advisor library (momentum, mean reversion, trend), the LLM research
-   advisor, and compiler-inferred mandate fields make Mandate the source of advice? Are the
-   posture safeguards above sufficient?
+   advisor, mandate templates, and compiler-inferred mandate fields make Mandate the source of
+   advice? Is the posture statement above accurate, and are the safeguards sufficient?
 3. Is autonomous (AUTO) execution under a user mandate discretion by Mandate or by the user? Is
    per-field confirmation plus versioned mandates enough?
 4. Should design partners be limited to entities, qualified clients, or accredited investors,
@@ -154,6 +167,17 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     other state issues?
 12. How enforceable is the liability limit if a risk-gate defect gets a user's account restricted
     or causes losses, and what errors-and-omissions insurance is needed before live capital?
+13. Can adviser users run several client accounts in one workspace, given cross-trade
+    (Advisers Act §206(3)), allocation, and aggregation obligations?
+14. Do suitability-like gates (the eligibility floor, the leveraged-ETP acknowledgment) create an
+    implied duty of care, or liability if they fail?
+15. Who owns review of the surveillance report, and does retaining it without platform review
+    create exposure, given that the platform states it does not supervise users' trading?
+16. Retention: is "6 years after the later of creation and closing of the supported position, lot,
+    or account" sufficient given Rule 204-2 and tax periods, and can hybrid mode satisfy it through
+    customer attestation?
+17. Does the platform take on any duty when the broker reports intraday margin deficits or
+    restrictions caused by the user's trading outside Mandate?
 
 ## Data protection
 

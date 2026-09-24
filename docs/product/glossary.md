@@ -41,7 +41,12 @@
 | **Day-trading regime** | Which of the two rule sets a broker applies to an account: `legacy_pdt` or `intraday_margin` |
 | **Wash sale** | Selling at a loss and rebuying a substantially identical security within a window, which defers the tax loss |
 | **Account ledger** | The single, serialized record of an account's buying power, reservations, orders, and positions that every agent on that broker account goes through |
-| **Exits-only** | Agent mode in which only risk-reducing orders are allowed |
+| **Agent modes** | `normal`; `exits_only` (risk-reducing and protective orders only); `paused` (no new orders, protection stays); `stopped` (terminal, after the kill switch) |
+| **Exits-only** | Agent mode in which only risk-reducing and protective orders are allowed |
+| **Data profile** | Market-data rules per environment: `sip` (backtests, live equities), `iex` (paper), `crypto` |
+| **Auction window** | Opening (09:28–09:30 ET) and closing (last minutes of the session) periods with no opening orders and no market orders |
+| **Related-accounts group** | Owner-declared set of accounts across which self-trade prevention applies |
+| **Abandoned** | Terminal state of an order intent that was never confirmed at the broker and failed its gate re-check or aged out |
 | **OCO order** | One-cancels-other: a take-profit and a stop resting together; when one fills, the other is canceled |
 | **Bracket order** | An entry order with attached take-profit and stop legs that activate when the entry fills |
 | **Tranche model** | Each protected entry is its own bracket order; adding to a position is a new bracket |
