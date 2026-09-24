@@ -1,0 +1,32 @@
+# Mandate documentation
+
+## Architecture
+
+- [High-Level Design](HLD.md): architecture, agent runtime, deployment modes, key flows,
+  audit, multi-tenancy, intelligence layer, billing, technology.
+
+## Product
+
+| Document | Purpose |
+|---|---|
+| [Vision and strategy](product/01-vision-and-strategy.md) | Why Mandate exists, who it is for, principles, positioning, strategy |
+| [Personas and journeys](product/02-personas-and-journeys.md) | Target users, roles, key journeys |
+| [Competitive landscape](product/03-competitive-landscape.md) | Open-source frameworks, infrastructure, YC companies, differentiators |
+| [PRD: v1](product/04-prd-v1.md) | Requirements for the design-partner release |
+| [Roadmap](product/05-roadmap.md) | Phases, exit criteria, what is not planned |
+| [Metrics](product/06-metrics.md) | North star, input and guardrail metrics, instrumentation |
+| [Pricing and packaging](product/07-pricing-and-packaging.md) | Plans, price levers, questions to validate |
+| [Compliance and regulatory](product/08-compliance-and-regulatory.md) | Regulatory posture and derived requirements (not legal advice) |
+| [Glossary](product/glossary.md) | Shared vocabulary |
+
+## Project
+
+| Document | Purpose |
+|---|---|
+| [Project charter](project/01-project-charter.md) | Objectives, scope, deliverables, stakeholders, governance |
+| [Milestones and WBS](project/02-milestones-and-wbs.md) | Milestone map, work packages, critical path, phase gates |
+| [RAID log](project/03-raid-log.md) | Risks, assumptions, issues, dependencies |
+| [Decision log](project/04-decision-log.md) | Accepted, proposed, and open decisions |
+| [Roles and RACI](project/05-raci.md) | Roles to fill and responsibilities |
+| [Backlog: v1](project/06-backlog-v1.md) | Epics and user stories with acceptance criteria |
+| [Quality and release plan](project/07-quality-and-release.md) | Definitions of ready and done, test strategy, release gates, incidents |
