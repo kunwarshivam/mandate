@@ -19,7 +19,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E4 Simulated execution and backtest | M3 | 6.4 | Must |
 | E5 Journal | M4 | 6.7 | Must |
 | E6 Agent runtime and risk | M5 | 6.5 | Must |
-| E7 Exchange connector and recovery | M6 | 6.2, 6.5 | Must |
+| E7 Alpaca connector and recovery | M6, M8 | 6.2, 6.5 | Must |
 | E8 Escalation and approvals | M7, M10 | 6.6 | Must |
 | E9 Identity, tenancy, and policy | M8 | 6.1 | Must |
 | E10 Mandate authoring | M8, M9 | 6.3 | Must |
@@ -28,6 +28,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E13 Hybrid deployment | M11 | 6.9 | Must |
 | E14 Billing | M12 | 6.10 | Must |
 | E15 Advisors: LLM and fast models, calibration | Phase 3 | 6.3, 6.5 | Should |
+| E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 
 ## Stories
 
@@ -41,9 +42,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 ### E2 Market data
 
-- **E2-1 (Must)** As a researcher, I want to download historical BTC and ETH perpetual bars,
-  trades, and funding for a date range so that I can backtest.
-  *Accepted when:* `download` fetches Binance public data into Parquet; re-running is idempotent.
+- **E2-1 (Must)** As a researcher, I want to download historical bars and trades for US stocks,
+  ETFs, and crypto (starting with a stock/ETF basket and BTC/USD) for a date range so that I can
+  backtest.
+  *Accepted when:* `download` fetches Alpaca historical data into Parquet; re-running is idempotent.
+- **E2-4 (Must)** As a researcher, I want corporate actions (splits, dividends) and market
+  sessions recorded with the data so that stock history and gaps are interpreted correctly.
+  *Accepted when:* `inspect` distinguishes session closures from true gaps; split-adjusted and
+  raw prices are both available.
 - **E2-2 (Must)** As a researcher, I want to inspect a dataset for coverage, gaps, duplicates,
   and summary statistics so that I trust it before using it.
   *Accepted when:* `inspect` reports gaps with exact timestamps; tests cover gap and duplicate detection.
@@ -56,8 +62,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   computed correctly so that every later number is right.
   *Accepted when:* property-based tests and hand-calculated cases pass, including partial fills
   and position flips.
-- **E3-2 (Must)** As a trader, I want funding payments applied to perpetual positions so that
-  P&L reflects carry.
+- **E3-2 (Must)** As a trader, I want splits and dividends applied to positions and cash so that
+  stock P&L is correct.
+- **E3-3 (Must)** As a trader, I want settlement tracked for cash accounts so that the system
+  knows which cash is available to trade.
 
 ### E4 Simulated execution and backtest
 
@@ -90,12 +98,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   de-risking.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
+- **E6-6 (Must)** As an owner, I want US account rules (pattern day trading, settlement, short
+  sales, market hours) enforced by the risk gate so that agents never get my account restricted.
+  *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
 
-### E7 Exchange connector and recovery
+### E7 Alpaca connector and recovery
 
-- **E7-1 (Must)** As an operator, I want to connect a testnet and live account with a
-  trade-only key so that agents can trade.
-  *Accepted when:* withdrawal-enabled keys are rejected before storage.
+- **E7-1 (Must)** As an operator, I want to connect my Alpaca paper and live accounts through
+  OAuth, granting trading access only, so that agents can trade without Mandate ever being able
+  to move my funds.
+  *Accepted when:* the OAuth request contains only trading and account-read scopes; tokens are
+  stored only in the workspace vault.
 - **E7-2 (Must)** As an owner, I want order intents journaled with idempotency keys so that
   crashes never duplicate orders.
 - **E7-3 (Must)** As an owner, I want the agent to reconcile with the exchange after a restart
@@ -179,7 +192,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   shown in scorecards.
 - **E15-4 (Could)** As an operator, I want shadow mode for a new mandate version.
 
+### E16 Kraken Derivatives US connector (Phase 3)
+
+- **E16-1 (Should)** As an operator, I want to connect a Kraken Derivatives US account (demo and
+  live) with a trading-only key so that agents can trade CFTC-regulated crypto perpetuals.
+  *Accepted when:* keys with withdrawal or transfer permissions are rejected before storage.
+- **E16-2 (Should)** As a trader, I want perpetuals accounting (funding every eight hours,
+  margin, liquidation thresholds) so that perpetual P&L and risk are correct.
+- **E16-3 (Should)** As an operator, I want a funding/carry advisor for perpetuals.
+
 ## Won't (v1)
 
-Retail launch; equities connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
+Retail launch; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
 fully on-prem control plane; shared intelligence plane; strategy marketplace.

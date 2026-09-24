@@ -36,21 +36,24 @@ stop and ask; do not silently pick one.
 6. **No sensitive content in notifications.** Notification payloads carry only opaque IDs and
    generic text.
 7. **Credentials never leave the vault**, never appear in logs, and are never committed.
-8. **Never place real orders.** Use exchange testnets and local fixtures only. Never ask for,
-   read, or use live keys or production secrets.
+8. **Never place real orders.** Use broker paper environments (Alpaca paper), venue demo
+   environments, and local fixtures only. Never ask for, read, or use live credentials or
+   production secrets.
 9. **Accepted decisions are binding.** To deviate, stop and propose a new decision-log entry
    for the founder instead of implementing the deviation.
+10. **Enforce US account rules.** Pattern day trading, settlement, short-sale, and market-hours
+    rules are part of the risk gate, not optional checks.
 
 ## Safety-critical paths
 
 Changes here require tests written or verified against founder-approved reference cases
 before implementation, and always receive line-by-line founder review:
 
-- Accounting (positions, cash, fees, funding, P&L)
-- Risk gate, drawdown ladder, kill switches
+- Accounting (positions, cash, fees, corporate actions, settlement, funding, P&L)
+- Risk gate, US account rules, drawdown ladder, kill switches
 - Autonomy policy (AUTO / ASK / DENY)
 - Executor, idempotency, reconciliation, crash recovery
-- Exchange connectors and key-permission checks
+- Broker and exchange connectors, OAuth scopes, and key-permission checks
 - Credential handling and the vault
 - Authentication, step-up authentication, roles, tenant isolation
 - Notification payloads and the approval flow

@@ -129,8 +129,8 @@ agent: btc-accumulator
 goal:
   objective: "Accumulate 2 BTC at an average price below $58k"
   done_when: position >= 2 BTC            # or: forever | a date | a return target
-universe: [BTC-PERP, BTC-SPOT]
-connection: conn_bybit_testnet
+universe: [BTC/USD]
+connection: conn_alpaca_paper
 behavior:
   description: "Buy dips, avoid trading 30 min around major macro news"
   advisors: [quant.mean_reversion, fast.news_materiality, llm.research]
@@ -396,8 +396,10 @@ approvals for some actions while it keeps managing everything else.
 ### A. Onboarding to first deployment
 
 1. User signs in via SSO and creates or joins an organization, then a workspace.
-2. User connects an account. At connection time the platform **queries the key's permissions
-   from the exchange and rejects any key that allows withdrawals**.
+2. User connects an account. **The platform never holds permissions that can move funds:**
+   OAuth connections (Alpaca) request trading and account-read scopes only; for API-key
+   connections (Kraken Derivatives US), the platform queries the key's permissions from the venue
+   and rejects any key that allows withdrawals or transfers.
 3. User creates an agent: plain-language description → compiled spec → review. Risk and
    autonomy rules are validated against organization and workspace limits.
 4. A **backtest and a paper-trading run are required** before the agent may trade live.
@@ -406,9 +408,9 @@ approvals for some actions while it keeps managing everything else.
 ```mermaid
 flowchart TD
     sso["Sign in via SSO"] --> ws["Create or join org, then workspace"]
-    ws --> connect["Connect broker / exchange account"]
-    connect --> check{"Key allows<br/>withdrawals?"}
-    check -->|yes| reject["Reject key,<br/>ask for a trade-only key"]
+    ws --> connect["Connect account<br/>Alpaca via OAuth, or venue API key"]
+    connect --> check{"Access can<br/>move funds?"}
+    check -->|yes| reject["Reject; request<br/>trading-only access"]
     reject --> connect
     check -->|no| describe["Describe agent in plain language"]
     describe --> compile["LLM compiles spec"]
@@ -646,10 +648,13 @@ Speed tiers:
    particularly statically linked Rust, carries relinking obligations. Decide whether to use
    its connectors or write our own.
 3. **Market data redistribution.** Passing equities exchange data to tenants requires vendor
-   and exchange licenses. Public crypto data is simpler.
+   and exchange licenses. In v1, each user's market data comes through their own Alpaca
+   account, so Mandate does not redistribute it; any shared data offering needs licensing first.
 4. **Custom code in v1.** Declarative specs only, or also WebAssembly plug-ins?
-5. **First connectors.** Crypto exchange testnets first, then Interactive Brokers, then an
-   Alpaca connector we would write ourselves.
+5. **First connectors (decided, [DEC-23](project/04-decision-log.md#decisions)).** Alpaca
+   first (US stocks, ETFs, crypto spot; paper trading; OAuth), Kraken Derivatives US second
+   (CFTC-regulated crypto perpetuals), then Interactive Brokers and Coinbase US futures. The
+   platform serves the United States first.
 6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
 7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
    approval service through the customer's VPN, through our relay with end-to-end encryption,

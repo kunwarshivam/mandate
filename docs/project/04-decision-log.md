@@ -6,7 +6,7 @@
 | **Status** | Living document |
 
 Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), **Open**
-(not yet decided). Changing an accepted decision requires a new entry that supersedes it.
+(not yet decided), **Superseded** (replaced by a later decision). Changing an accepted decision requires a new entry that supersedes it.
 
 ## Decisions
 
@@ -24,10 +24,13 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | DEC-10 | Thin global control plane; sensitive services run with the data plane; three deployment modes from one installer | Accepted | Strategy and trading intent stay on the customer's site; on-prem as packaging | Full hosted control plane with edge data plane only |
 | DEC-11 | Notifications carry only opaque IDs; approval details load from the workspace deployment | Accepted | Privacy of trading intent | Full details in notifications |
 | DEC-12 | Never price per trade or on assets or profits | Accepted | Regulatory posture; neutral incentives | Per-trade fees; performance fees |
-| DEC-13 | Exchange testnet first, crypto perpetuals first | Accepted | Free, 24/7, safe onboarding | US equities first via Interactive Brokers |
+| DEC-13 | Exchange testnet first, crypto perpetuals first | **Superseded by DEC-23** | Free, 24/7, safe onboarding. Superseded because the major perpetuals venues exclude US persons | US equities first via Interactive Brokers |
 | DEC-14 | Build Phase 0 core from first principles, piece by piece | Accepted | Founder direction; deep understanding of trading mechanics | Start directly on NautilusTrader |
 | DEC-15 | Working name "Mandate" | Accepted | Matches the core concept; finance-native | Delegate, Autopilot, Principal |
 | DEC-21 | Build with the founder plus AI coding agents; no hires planned for v1. The founder approves all merges and holds all production secrets | Accepted | Founder direction; speed and cost | Hire a core engineering team |
+| DEC-22 | Serve the United States first | Accepted | Founder direction; largest market | Global crypto venues first |
+| DEC-23 | First connector: **Alpaca** (US stocks, ETFs, crypto spot; paper trading; OAuth connections). Second: **Kraken Derivatives US** (CFTC-regulated crypto perpetuals). Later: Coinbase US futures, Interactive Brokers | Accepted | Alpaca: free paper trading on the same API as live, four asset classes in one integration, OAuth for third-party apps, market data through each user's own account. Kraken: the CFTC-regulated perpetuals venue for US users with a self-service demo environment | Kraken perpetuals first; Coinbase first (static sandbox only); Interactive Brokers first (heavier onboarding) |
+| DEC-24 | v1 asset scope on Alpaca: US stocks, ETFs, and crypto spot; options later | Proposed | Keeps v1 accounting and risk to spot instruments | Include options in v1 |
 | DEC-16 | Restate for durable execution | Proposed | Single Rust binary; runs on the edge | Temporal |
 | DEC-17 | NATS JetStream for messaging | Proposed | Account model maps to workspaces; single binary on the edge | Kafka / Redpanda, Redis Streams |
 | DEC-18 | OIDC SSO in v1; SAML and SCIM later | Proposed | Covers Google, Okta, Entra for design partners | SAML from day one |
@@ -38,9 +41,10 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 
 | ID | Question | Needed by | Inputs |
 |---|---|---|---|
-| OD-01 | First exchange (Bybit, Binance, OKX, Hyperliquid, Kraken, Coinbase) | M6 | Founder and design-partner jurisdictions; testnet quality; API terms |
+| ~~OD-01~~ | ~~First exchange~~ | — | **Resolved by DEC-23** (Alpaca first, Kraken Derivatives US second) |
 | OD-02 | First fast decision model: Laya (self-hosted) or Jev (hosted, early access) | Phase 3 (P1 in v1) | Bake-off on labeled financial decisions: accuracy, calibration, latency, cost |
 | OD-03 | Adopt NautilusTrader connectors later, or keep our own | Phase 3 | LGPL review; connector coverage |
 | OD-04 | Minimum paper-trading duration before live | M9 | Design-partner feedback; risk appetite |
 | OD-05 | Mobile access to on-site approval services: customer VPN, end-to-end encrypted relay, or both | M10 | Design-partner security requirements |
 | OD-06 | Minimum identity data held by the global control plane in hybrid mode | M8 | Privacy review; billing needs |
+| OD-07 | Whether Kraken's self-service demo environment covers the US (Bitnomial-listed) perpetual contracts, or a UAT account is needed | Phase 3 | Kraken documentation and support |
