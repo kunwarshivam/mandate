@@ -157,8 +157,10 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 7. For adviser customers, is Mandate's journal a required record under Rule 204-2? What retention
    floor, integrity standard, and access undertakings should we commit to in managed and hybrid
    modes?
-8. Can GDPR or CCPA deletion requests be declined for trading records under legal-obligation
-   exemptions, with personal data stored by reference?
+8. Can GDPR or CCPA deletion requests be declined for trading records and the identity records
+   they depend on (who placed, approved, or acknowledged an action) for the retention period, under
+   the legal-obligation and legal-claims exemptions, with personal data stored by reference and
+   erased only after retention ends?
 9. Do Alpaca's OAuth and third-party app terms permit autonomous order entry, reading or setting
    account configuration (margin multiplier), and multiple agents on one account? Does Alpaca view
    Mandate as a vendor within its market-access controls?

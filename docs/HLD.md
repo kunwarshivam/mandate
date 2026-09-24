@@ -557,12 +557,15 @@ flowchart TD
   content-addressed by hash; events store the hash.
 - **Storage tiers:**
   - Hot (queryable): Postgres, moving to ClickHouse at scale.
-  - Cold (retention): Parquet on object storage with write-once (object lock) retention.
+  - Cold (retention): canonical JSON Lines segments on object storage with write-once (object lock,
+    compliance mode) retention, so bytes remain verifiable ([journal spec §6.2](specs/journal.md#62-cold-store-segments-and-retention)).
   - Anchoring: the chain's root hash is periodically published externally so tampering is detectable.
 - **Location:** the event store and the audit explorer backend run in the workspace
   deployment, so in hybrid and on-prem modes audit content never leaves the customer's site.
   The audit explorer UI reads directly from that backend.
-- **Export** to the customer's SIEM or storage bucket; retention configured per organization.
+- **Export** to the customer's SIEM or storage bucket; retention has a platform floor (6 years after
+  the later of creation and closing of the supported position, lot, or account) that organizations
+  may extend but not shorten.
 - **Privacy:** personal data is encrypted with per-user keys. Deleting a key erases the person
   without breaking the immutable log (crypto-shredding).
 
