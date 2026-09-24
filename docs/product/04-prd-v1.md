@@ -128,12 +128,13 @@ from the description is highlighted for review.
 | FR-5.7 | On restart, the agent replays its journal, reconciles with the exchange, and resumes; unexplained differences pause the agent and alert the owner | P0 |
 | FR-5.8 | Protective stop orders rest at the exchange for open positions | P1 |
 | FR-5.9 | Calibrated confidence per advisor, updated from realized outcomes | P1 |
-| FR-5.10 | **US market rules enforced by the risk gate:** pattern-day-trader limits for margin accounts under the threshold, cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class | P0 |
+| FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (legacy pattern-day-trader limits or the new intraday margin standard), cash-account settlement (no trading on unsettled funds), short-sale restrictions, and market hours per asset class. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-account-rules-risk-gate) | P0 |
 | FR-5.11 | Flag potential wash sales to the user in reports (informational, not tax advice) | P2 |
 
 **Acceptance criteria (FR-5.10):** in simulation, an agent on a cash account never trades with
-unsettled funds, and an agent on a margin account under the pattern-day-trader threshold never
-exceeds the allowed day trades; blocked orders are journaled with the rule that blocked them.
+unsettled funds, and an agent on a margin account under the legacy regime never exceeds the
+allowed day trades; reference cases RC-08 and RC-09 pass; blocked orders are journaled with the
+rule that blocked them.
 
 **Acceptance criteria (FR-5.6, FR-5.7):** in fault-injection tests that kill the runtime at every
 step of order submission, no order is ever duplicated and every position is reconciled.

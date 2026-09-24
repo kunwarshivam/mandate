@@ -8,6 +8,13 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 - [High-Level Design](HLD.md): architecture, agent runtime, deployment modes, key flows,
   audit, multi-tenancy, intelligence layer, billing, technology.
 
+## Specs
+
+| Document | Purpose |
+|---|---|
+| [Trading domain spec](specs/trading-domain.md) | Exact rules for instruments, orders, fills, fees, accounting, settlement, corporate actions, and US account rules |
+| [Trading domain reference cases](specs/reference-cases/trading-domain.yaml) | Machine-readable worked examples that implementations must reproduce |
+
 ## Product
 
 | Document | Purpose |
