@@ -68,7 +68,7 @@ Questions for counsel, by regulator:
 
 These are rules on the **user's account** that an autonomous agent could otherwise break. The
 risk gate enforces them (PRD FR-5.10), and the
-[trading domain spec §9](../specs/trading-domain.md#9-account-rules-risk-gate) defines them
+[trading domain spec §9](../specs/trading-domain.md#9-risk-gate-account-rules) defines them
 precisely:
 
 - **Day trading:** FINRA replaced the pattern-day-trader rule with an intraday margin standard
@@ -89,6 +89,71 @@ precisely:
 - **Non-US venues** that exclude US persons (for example, Binance, Bybit, OKX, Hyperliquid) are
   not supported.
 - Crypto rules are changing; review before each new asset class or venue.
+
+## Posture safeguards in the product
+
+From the risk and compliance review of the trading domain spec
+([DEC-33](../project/04-decision-log.md#decisions)):
+
+- **Mandate never originates a trade idea.** Every order traces to a user-confirmed mandate
+  version; platform defaults only restrict trading.
+- Compiler-inferred mandate fields are **inactive until the user confirms them**.
+- Calibration changes autonomy only within user-approved bounds; each change is journaled.
+- Approval requests show the agent's proposal and the mandate rule it follows, **not
+  platform-authored alternatives**.
+
+## Market conduct
+
+Autonomous agents can produce wash-trade, layering, or marking-the-close patterns without intent.
+The risk gate enforces conduct controls (one working order per side, minimum resting time,
+price collars, participation caps, order-to-fill limits, close-window restrictions, and
+self-trade prevention across a workspace's accounts), and a daily surveillance report is
+retained ([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)).
+Instrument eligibility excludes OTC, IPO-day, low-priced, and illiquid names; leveraged and
+inverse ETPs require explicit opt-in ([spec §3.2](../specs/trading-domain.md#32-platform-eligibility-floor-dec-31)).
+
+## Records retention
+
+Trading records (intents, every risk-gate decision including allows, mandate and model versions,
+raw broker requests and responses, fills, account snapshots, reconciliations, approvals with
+authentication method, surveillance reports) are retained **at least 6 years**; organizations may
+extend but not shorten; legal holds override deletion
+([spec §13](../specs/trading-domain.md#13-records-retention-dec-33)). Counsel to confirm the period
+against adviser customers' obligations (Advisers Act Rule 204-2) and the platform's own needs.
+
+## Questions for counsel
+
+1. Does an approval request that presents an agent-generated proposed trade, with evidence,
+   constitute a recommendation or advice under the Advisers Act or state law, given that a
+   user-authored mandate triggered it?
+2. Do the platform-supplied advisor library (momentum, mean reversion, trend), the LLM research
+   advisor, and compiler-inferred mandate fields make Mandate the source of advice? Are the
+   posture safeguards above sufficient?
+3. Is autonomous (AUTO) execution under a user mandate discretion by Mandate or by the user? Is
+   per-field confirmation plus versioned mandates enough?
+4. Should design partners be limited to entities, qualified clients, or accredited investors,
+   given that individual users trading their own money are retail in substance?
+5. Could order-handling logic (order types, sequencing, stop placement) or usage metering by
+   agent-hours and model usage be characterized as effecting transactions or transaction-based
+   compensation?
+6. What is Mandate's exposure if an agent produces wash, spoofing-like, or closing-price patterns
+   in securities, or in crypto spot under CEA §6(c)(1) and CFTC Rule 180.1? Does the right to halt
+   agents create a duty to surveil?
+7. For adviser customers, is Mandate's journal a required record under Rule 204-2? What retention
+   floor, integrity standard, and access undertakings should we commit to in managed and hybrid
+   modes?
+8. Can GDPR or CCPA deletion requests be declined for trading records under legal-obligation
+   exemptions, with personal data stored by reference?
+9. Do Alpaca's OAuth and third-party app terms permit autonomous order entry, reading or setting
+   account configuration (margin multiplier), and multiple agents on one account? Does Alpaca view
+   Mandate as a vendor within its market-access controls?
+10. What does the SEC Marketing Rule require when adviser users show Mandate backtests or live
+    results to investors, and can Mandate's own marketing use aggregated user results?
+11. Does pending crypto wash-sale legislation (retroactive if enacted) change what we must record
+    or disclose now? Does acting on users' Alpaca Crypto accounts raise New York BitLicense or
+    other state issues?
+12. How enforceable is the liability limit if a risk-gate defect gets a user's account restricted
+    or causes losses, and what errors-and-omissions insurance is needed before live capital?
 
 ## Data protection
 

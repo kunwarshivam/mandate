@@ -42,9 +42,14 @@ stop and ask; do not silently pick one.
    production secrets.
 9. **Accepted decisions are binding.** To deviate, stop and propose a new decision-log entry
    for the founder instead of implementing the deviation.
-10. **Enforce US account rules.** Day-trading regime, settlement, short-sale, and market-hours
-    rules are part of the risk gate, not optional checks
-    ([trading domain spec §9](docs/specs/trading-domain.md#9-account-rules-risk-gate)).
+10. **Enforce US account rules.** Day-trading regime, settlement, market-hours, eligibility,
+    market-conduct, and account-restriction rules are part of the risk gate, not optional checks
+    ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate-account-rules)).
+11. **Mandate never originates a trade idea.** Every order traces to a user-confirmed mandate
+    version; platform defaults may only restrict trading; inferred mandate fields stay inactive
+    until confirmed.
+12. **All account-level actions go through the account ledger.** Agents never call the broker
+    directly; opening orders are limit orders; no short sales in v1.
 
 ## Safety-critical paths
 
@@ -52,7 +57,8 @@ Changes here require tests written or verified against founder-approved referenc
 before implementation, and always receive line-by-line founder review:
 
 - Accounting (positions, cash, fees, corporate actions, settlement, funding, P&L)
-- Risk gate, US account rules, drawdown ladder, kill switches
+- Risk gate, US account rules, eligibility, market-conduct controls, drawdown ladder, kill switches
+- Account ledger, reservations, and protective-exit sequencing
 - Autonomy policy (AUTO / ASK / DENY)
 - Executor, idempotency, reconciliation, crash recovery
 - Broker and exchange connectors, OAuth scopes, and key-permission checks

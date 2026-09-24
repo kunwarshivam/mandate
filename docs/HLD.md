@@ -361,8 +361,10 @@ flowchart TB
 - **Durable timers:** long waits (an approval pending for hours, "run until December") use a
   durable-execution engine. Restate is preferred because it ships as a single Rust binary that
   also runs on the edge; Temporal is the established alternative.
-- **Venue-side protection:** protective stop orders rest at the exchange, so positions stay
-  protected even if the entire platform is down.
+- **Venue-side protection:** protective exits rest at the broker as OCO or bracket orders, so
+  positions keep protection if the platform is down, within limits: equity stops trigger only in
+  the regular session, crypto stop-limits can miss on gaps, and exits briefly remove protection
+  while they run ([trading domain spec §5.4](specs/trading-domain.md#54-protective-exits-dec-28)).
 
 ### Agent lifecycle
 

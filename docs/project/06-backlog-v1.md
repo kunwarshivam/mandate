@@ -101,6 +101,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
   sales, market hours) enforced by the risk gate so that agents never get my account restricted.
   *Accepted when:* simulation tests for each rule pass; blocked orders are journaled with the rule.
+- **E6-7 (Must)** As an owner, I want an instrument eligibility floor (exchange-listed, no OTC or
+  IPO-day, price and liquidity floors, leveraged ETPs only with opt-in) so that agents stay in
+  liquid, suitable instruments. *Accepted when:* RC-16 passes.
+- **E6-8 (Must)** As an owner, I want market-conduct controls (one working order per side,
+  minimum resting time, price collars, participation caps, order-to-fill limits, close-window
+  rules, workspace self-trade prevention) and a daily surveillance report, so that agents cannot
+  produce manipulation-like patterns.
+- **E6-9 (Must)** As an owner, I want account restrictions and trading halts checked before every
+  order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
+  RC-15 passes.
 
 ### E7 Alpaca connector and recovery
 
@@ -115,8 +125,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   so that its state matches reality.
   *Accepted when:* fault injection at every submission step yields zero duplicates and full
   reconciliation; mismatches pause the agent and alert.
-- **E7-4 (Should)** As an owner, I want protective stops resting at the exchange so that
-  positions are protected if the platform is down.
+- **E7-4 (Must)** As an owner, I want protective exits resting at the broker as OCO or bracket
+  orders, with defined exit and kill-switch sequences, so that positions keep protection if the
+  platform is down.
+  *Accepted when:* RC-14 passes; unprotected windows are journaled and alerted beyond the limit.
+- **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
+  instrument per account, so that agents never overspend or cross each other.
+  *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
 
 ### E8 Escalation and approvals
 
