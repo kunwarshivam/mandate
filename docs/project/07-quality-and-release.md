@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Owner** | Project management, with the tech lead |
+| **Owner** | Project management (founder) |
 | **Status** | Draft v0.1 |
 
 ## Definition of Ready (story)
@@ -11,9 +11,37 @@
 - Acceptance criteria written and testable.
 - Dependencies identified; any open decision resolved or explicitly deferred.
 
+## Development workflow (founder + agents)
+
+```mermaid
+flowchart LR
+    story["Story from backlog<br/>with acceptance criteria"] --> impl["Implementation agent<br/>branch, tests first"]
+    impl --> ci{"CI: build, tests,<br/>lint, secret scan"}
+    ci -->|fail| impl
+    ci -->|pass| review["Review agent<br/>bugs, security, AGENTS.md"]
+    review -->|changes needed| impl
+    review -->|clean| founder{"Founder review<br/>(always for safety-critical paths)"}
+    founder -->|changes needed| impl
+    founder -->|approve| merge["Merge to main"]
+```
+
+1. **One story per change.** Each change implements one backlog story and cites the HLD section
+   and PRD requirement it serves.
+2. **Tests first for safety-critical code.** For accounting, the risk gate, idempotency,
+   reconciliation, and authentication, the founder writes or verifies the reference test cases
+   before an agent writes the implementation.
+3. **Independent review.** A separate agent run reviews every change before the founder sees it.
+4. **Founder approval.** Nothing merges without founder approval; safety-critical paths get
+   line-by-line founder review.
+5. **No live secrets for agents.** Agents use testnet keys and fixtures only.
+6. **Decisions go through the log.** An agent that needs to deviate from an accepted decision
+   stops and proposes a decision-log entry instead.
+
+Full agent rules: [`AGENTS.md`](../../AGENTS.md).
+
 ## Definition of Done (story)
 
-- Code reviewed and merged; CI green.
+- Review agent pass and founder approval; merged; CI green.
 - Unit tests for new logic; property-based tests for accounting and risk logic.
 - Journal events emitted for every new state change.
 - Documentation updated (user-facing and runbooks where relevant).
