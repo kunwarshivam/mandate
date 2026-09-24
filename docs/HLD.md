@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.1 |
+| **Status** | Draft v0.2 |
 | **Last updated** | 2026-09-24 |
-| **Scope** | Production service for deploying autonomous trading agents, managed or on customer edge / on-prem |
+| **Scope** | Production service for deploying autonomous trading agents: fully managed, hybrid, or fully on-prem / air-gapped |
 
 ## Contents
 
@@ -34,9 +34,9 @@ answers. Every observation, analysis, decision, approval, order, and fill is rec
 tamper-evident log.
 
 The platform is multi-tenant (**Organization → Workspace → Agents**), supports SSO, bills per
-organization, and runs either on our managed infrastructure or on the customer's own
-edge / on-prem environment. It serves both retail users (managed) and businesses
-(managed or on-prem).
+organization, and runs in three modes: fully managed on our infrastructure, hybrid (a thin
+hosted control plane with everything sensitive on the customer's side), or fully on-prem /
+air-gapped. It serves both retail users (managed) and businesses (any mode).
 
 Design principles:
 
@@ -45,7 +45,9 @@ Design principles:
 - **Reducing risk never needs approval; increasing risk beyond agreed limits always does.**
 - **Safe defaults everywhere.** Timeouts, outages, and ambiguity resolve to "don't add risk".
 - **Record before acting.** Intent is journaled before any order leaves the system.
-- **One runtime, many deployment modes.** The same data-plane software runs managed or on the edge.
+- **One installer, three deployment modes.** The same software runs managed, hybrid, or fully
+  on-prem. In hybrid and on-prem modes, strategy, approvals, audit data, and credentials never
+  leave the customer's site.
 
 ---
 
@@ -61,7 +63,7 @@ Design principles:
 - **Lifetime:** run forever, until a date, or until the goal is met.
 - **Escalation:** when unsure, notify the user, wait with a deadline, then execute the response or the safe default.
 - **Audit:** everything recorded, queryable, and replayable.
-- **Deployment modes:** managed SaaS, customer edge / on-prem, or hybrid.
+- **Deployment modes:** fully managed; hybrid (thin hosted control plane, everything sensitive on the customer's side); fully on-prem / air-gapped.
 
 ### Non-functional
 
@@ -152,79 +154,142 @@ Goal types the spec supports:
 
 ## 4. Architecture
 
-The system is split into three planes.
+The control plane is split in two. A **thin global control plane** holds only non-sensitive
+metadata. Everything that reveals strategy or trading intent lives in the **workspace
+deployment**, next to the agents, wherever that deployment runs.
 
 ```mermaid
 flowchart TB
+    subgraph GCP["Global control plane: thin, metadata only"]
+        direction LR
+        dir["Org directory<br/>& identity federation"]
+        lic["Licensing, billing<br/>& metering"]
+        fleet["Fleet health<br/>& update distribution"]
+        relay["Notification relay<br/>opaque IDs only"]
+        cat["Connector catalog<br/>· model registry"]
+    end
+
+    subgraph SITE["Workspace deployment: managed cell, or customer edge / on-prem"]
+        direction TB
+        subgraph WCS["Workspace control services"]
+            direction LR
+            spec["Agent registry<br/>+ spec compiler"]
+            pol["Policy service"]
+            dep["Deployment manager"]
+            appr["Approval service<br/>holds approval content"]
+            audx["Audit explorer<br/>backend"]
+            conn["Connection manager"]
+        end
+        subgraph DP["Data plane"]
+            direction LR
+            rt["Agent runtimes<br/>one process per deployment"]
+            exec["Risk engine +<br/>execution gateway"]
+            store[("Journal · state ·<br/>secrets vault")]
+            mg["Model gateway"]
+        end
+        WCS --> DP
+    end
+
     users["Users<br/>web · mobile · public API"]
-
-    subgraph CP["Control plane: ours, multi-tenant SaaS"]
-        direction LR
-        gw["API gateway"]
-        idp["Identity<br/>SSO · SCIM · roles"]
-        tenancy["Org & workspace<br/>management"]
-        registry["Agent registry<br/>+ spec compiler"]
-        policy["Policy service"]
-        deploy["Deployment manager"]
-        approvals["Notifications<br/>& approvals"]
-        billing["Billing & metering"]
-        auditx["Audit explorer"]
-        catalog["Connector catalog<br/>· model registry"]
-        fleet["Edge fleet<br/>management"]
-    end
-
-    subgraph MC["Data plane: managed cell"]
-        direction LR
-        mrt["Agent runtimes<br/>one process per deployment"]
-        mexec["Risk engine +<br/>execution gateway"]
-        mstore[("Event store<br/>· secrets vault")]
-        mmodel["Model gateway"]
-    end
-
-    subgraph EDGE["Data plane: customer edge / on-prem"]
-        direction LR
-        ert["Same components as a managed cell<br/>credentials and trading data stay here"]
-    end
-
-    subgraph SI["Shared intelligence plane: managed only"]
-        direction LR
-        md["Market data"]
-        news["News & filings"]
-        judg["Public-event judgments<br/>· research outputs"]
-    end
-
+    idp["Customer identity provider"]
+    phone["Approver's phone"]
     venues[("Brokers / exchanges")]
+    SI["Shared intelligence plane<br/>managed, optional"]
 
-    users --> gw
-    CP <-->|"deployments and policies down; health, usage, events up<br/>over mTLS connections opened outbound by the data plane"| MC
-    CP <-->|"same channel; only health, usage,<br/>and optional summaries go up"| EDGE
-    SI -->|shared signals| MC
-    SI -.->|optional subscription| EDGE
-    MC <-->|"orders / market data, fills"| venues
-    EDGE <-->|"orders / market data, fills"| venues
+    users --> WCS
+    WCS -->|"SSO"| idp
+    SITE -->|"outbound mTLS: health,<br/>usage counts, version"| GCP
+    GCP -->|"signed updates,<br/>licenses"| SITE
+    appr -->|"'approval needed'<br/>+ opaque ID"| relay
+    relay -->|push| phone
+    phone <-->|"fetch details and respond,<br/>end-to-end encrypted"| appr
+    DP <-->|"orders / market data, fills"| venues
+    SI -.->|shared signals| DP
 ```
 
-### Control plane
+### Global control plane (thin)
 
-Identity, permissions, agent definitions, deployments, approvals, billing, and the audit
-explorer. It never sits in the path of a trade.
+Holds only what is safe to keep outside the customer's site:
 
-### Data plane
+- **Org directory and identity federation:** organizations, workspace IDs, user IDs, and roles,
+  for seat counts and routing. Authentication itself happens against the customer's identity
+  provider, directly from the workspace deployment.
+- **Licensing, billing, and metering:** usage counts, never content.
+- **Fleet health and update distribution:** versions, heartbeats, signed release bundles.
+- **Notification relay:** delivers push notifications to phones through Apple's and Google's
+  push services. Payloads carry only an opaque ID and generic text.
+- **Connector catalog and model registry:** downloadable connectors and model artifacts.
 
-Where agents run and trade. The same software runs in both modes:
+It never sits in the path of a trade, and it never holds strategy, approval content, audit
+data, positions, or credentials.
 
-- **Managed:** organized into **cells**, each hosting many workspaces. Cells bound the blast
-  radius of failures and allow data residency by region. Large customers get a dedicated cell.
-- **Edge / on-prem:** the customer's data plane makes **outbound-only** connections to the
-  control plane over mutual TLS; no inbound ports are opened. Credentials and trading data stay
-  on the customer's side. A fully **air-gapped** variant, including an on-prem control plane,
-  is available under an enterprise license.
+### Workspace deployment
+
+Workspace control services and the data plane always run together:
+
+- **Workspace control services:** agent registry and spec compiler, policy service,
+  deployment manager, approval service, audit explorer backend, connection manager.
+- **Data plane:** agent runtimes, risk engine, execution gateway, journal and state, secrets
+  vault, model gateway.
+
+In managed mode, workspace deployments are grouped into **cells**, each hosting many
+workspaces. Cells bound the blast radius of failures and allow data residency by region.
+Large customers get a dedicated cell. On the customer's side, the deployment makes
+**outbound-only** connections to the global control plane over mutual TLS; no inbound ports
+are opened.
+
+### Deployment modes
+
+| Component | Managed | Hybrid | Fully on-prem / air-gapped |
+|---|---|---|---|
+| Global control plane | Ours | Ours | Customer's (same software) |
+| Workspace control services | Ours | Customer's | Customer's |
+| Data plane | Ours | Customer's | Customer's |
+| Shared intelligence | Ours | Optional subscription | Optional offline feed, or none |
+| Typical customer | Retail, small teams | Most businesses | Banks, funds with strict policies |
+
+What changes in fully on-prem / air-gapped mode:
+
+- **Identity:** SSO directly against the customer's identity provider.
+- **Notifications:** through the customer's own channels (mail server, Teams or Slack, their
+  SMS gateway), or push through our relay if they allow that single outbound connection.
+- **Billing:** a signed license file plus periodic usage reports delivered offline.
+- **Updates:** signed release bundles the customer installs.
+
+**Engineering rule:** every component ships from the same installer and runs in our cloud or
+theirs. No hosted-only dependency is allowed in a core path, so fully on-prem is a packaging
+choice, not a separate product.
+
+### Where data lives
+
+| Data | Sensitivity | Managed | Hybrid | Fully on-prem |
+|---|---|---|---|---|
+| Org directory: org, workspace, and user IDs, roles | Low | Ours | Ours (IDs only) | Customer's |
+| Usage counts, versions, heartbeats | Low | Ours | Ours | Customer's; offline reports |
+| Agent specs: goals, instruments, limits, behavior | **High (strategy)** | Ours | Customer's | Customer's |
+| Approval requests and responses | **High (trading intent)** | Ours | Customer's | Customer's |
+| Journal, audit data, positions, orders, fills | **High** | Ours | Customer's | Customer's |
+| Model prompts and outputs | **High** | Ours | Customer's | Customer's |
+| Broker / exchange credentials | **Critical** | Our vault | Customer's vault | Customer's vault |
+| Notification payloads through the relay | Low (opaque IDs) | Ours | Ours | Customer's, or our relay if allowed |
+
+External model calls (Jev, hosted LLMs) send prompt content to those providers. Each
+workspace's policy decides which providers are allowed; hybrid and on-prem deployments can
+be restricted to local models only.
+
+### Behavior when the global control plane is unavailable
+
+- **Trading continues** in every mode; the global control plane is never in the trade path.
+- **Approvals continue** in hybrid mode through the customer-side channels configured as
+  fallbacks (email via their mail server, Teams or Slack); only relay-delivered push is lost.
+  Approvers authenticate against the customer's identity provider, not against us.
+- **Deferred:** usage reports and updates queue until the connection returns.
 
 ### Shared intelligence plane
 
 Market data ingestion and judgments about public events (for example, "is this filing
 material to this company?") are computed once and fanned out to all subscribed workspaces.
-This is the main cost lever for the managed offering. Edge deployments can subscribe to it
+This is the main cost lever for the managed offering. Hybrid and on-prem deployments can subscribe to it
 or run their own.
 
 ---
@@ -336,7 +401,7 @@ approvals for some actions while it keeps managing everything else.
 3. User creates an agent: plain-language description → compiled spec → review. Risk and
    autonomy rules are validated against organization and workspace limits.
 4. A **backtest and a paper-trading run are required** before the agent may trade live.
-5. User deploys; the deployment manager schedules the runtime in the right cell or on the customer's edge.
+5. User deploys; the deployment manager in the workspace deployment starts the runtime, in a managed cell or on the customer's site.
 
 ```mermaid
 flowchart TD
@@ -353,7 +418,7 @@ flowchart TD
     bt --> paper["Paper trading run"]
     paper --> approve{"Owner approves<br/>going live?"}
     approve -->|no| describe
-    approve -->|yes| deploy["Deployment manager schedules runtime<br/>in a managed cell or on the edge"]
+    approve -->|yes| deploy["Deployment manager starts runtime<br/>in a managed cell or on the customer's site"]
 ```
 
 ### B. Decision cycle
@@ -402,10 +467,16 @@ sequenceDiagram
 2. The runtime creates an **approval request** containing the proposed action, alternatives,
    supporting evidence, risk impact, deadline, and the default applied on timeout.
 3. The agent keeps managing everything else while it waits. **Risk-reducing actions stay automatic.**
-4. The notification service fans out according to user preferences and an escalation chain
-   (push → SMS → phone call), respecting quiet hours. Large actions can require **two approvers**.
-5. Users respond through the app, an SMS reply, or a signed, short-lived email link.
-   **High-risk approvals require step-up authentication** (passkey or biometrics).
+4. The **approval service**, which runs in the workspace deployment, sends notifications
+   according to user preferences and an escalation chain (push → SMS → phone call), respecting
+   quiet hours. **Notifications carry only an opaque ID and generic text** ("Agent
+   btc-accumulator needs approval"), never the trade itself. Push goes through our relay; SMS,
+   email, and chat can go through the customer's own gateways. Large actions can require
+   **two approvers**.
+5. The approver opens the request. The app fetches the details **directly from the approval
+   service**, over the customer's VPN or through the relay with end-to-end encryption, so the
+   relay cannot read them. The approver authenticates against the customer's identity provider;
+   **high-risk approvals require step-up authentication** (passkey or biometrics).
 6. Before executing, the runtime **re-validates** that price and risk have not drifted beyond a
    tolerance since the request was created. If they have, it re-asks or applies the default.
 7. On timeout, the safe default is applied.
@@ -414,24 +485,30 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     autonumber
-    participant A as Agent runtime
-    participant J as Journal
-    participant N as Notification service
-    participant U as Approver
-    participant R as Risk gate
+    box Customer site in hybrid and on-prem modes
+        participant A as Agent runtime
+        participant J as Journal
+        participant S as Approval service
+        participant R as Risk gate
+    end
+    participant L as Notification relay
+    participant U as Approver's phone
     participant B as Broker
 
     A->>A: Confidence below threshold, or rule requires approval
     A->>J: Record approval request (action, alternatives, evidence, risk impact, deadline, default)
-    A->>N: Request approval
-    N->>U: Push notification
+    A->>S: Create approval request (content stays on site)
+    S->>L: Notify with opaque ID and generic text only
+    L->>U: Push notification
     opt No response at this escalation step
-        N->>U: SMS, then phone call (respecting quiet hours)
+        S->>U: SMS, email, or call via configured channels (no trade details)
     end
     Note over A: Keeps managing other positions.<br/>Risk-reducing actions stay automatic.
     alt Approver responds before the deadline
-        U->>N: Approve or reject (step-up auth for high-risk actions)
-        N->>A: Response
+        U->>S: Fetch request details (VPN, or relay with end-to-end encryption)
+        S-->>U: Proposed action, evidence, risk impact
+        U->>S: Approve or reject (customer SSO, step-up auth for high-risk actions)
+        S->>A: Response
         A->>J: Record who, when, channel, and auth method
         A->>A: Re-validate price and risk drift since the request
         alt Approved and drift within tolerance
@@ -442,7 +519,7 @@ sequenceDiagram
         else Rejected
             A->>J: Record rejection
         else Drift beyond tolerance
-            A->>N: Re-ask, or apply the safe default
+            A->>S: Re-ask, or apply the safe default
         end
     else Deadline passes
         A->>J: Record timeout
@@ -478,6 +555,9 @@ flowchart TD
   - Hot (queryable): Postgres, moving to ClickHouse at scale.
   - Cold (retention): Parquet on object storage with write-once (object lock) retention.
   - Anchoring: the chain's root hash is periodically published externally so tampering is detectable.
+- **Location:** the event store and the audit explorer backend run in the workspace
+  deployment, so in hybrid and on-prem modes audit content never leaves the customer's site.
+  The audit explorer UI reads directly from that backend.
 - **Export** to the customer's SIEM or storage bucket; retention configured per organization.
 - **Privacy:** personal data is encrypted with per-user keys. Deleting a key erases the person
   without breaking the immutable log (crypto-shredding).
@@ -489,18 +569,20 @@ flowchart TD
 | Concern | Design |
 |---|---|
 | Tenant boundary | The workspace. Every record carries a workspace ID; row-level security in the database; per-workspace encryption keys; bring-your-own-key for businesses |
-| Isolation tiers | Retail: shared cells with logical isolation. Business: dedicated database or dedicated cell. Edge: physically separate |
+| Isolation tiers | Retail: shared cells with logical isolation. Business on managed: dedicated database or dedicated cell. Hybrid and on-prem: physically separate |
 | Processes | Agent processes are never shared across workspaces |
 | Messaging | NATS JetStream; its account model maps to workspaces, and it runs as a single binary on the edge |
 | Roles | Org owner, org admin, billing admin, workspace admin, operator, **approver**, viewer, auditor. Optional separation of duties: an agent's creator cannot be its sole approver for large actions |
 | Agent identity | Each agent has its own service identity and scoped tokens; every action is attributed to a specific agent |
-| Credentials | Managed: vault backed by a key management service. Edge: local vault; **credentials never leave the customer's environment** |
+| Credentials | Managed: vault backed by a key management service. Hybrid and on-prem: local vault; **credentials never leave the customer's environment** |
+| Data location | Sensitive data stays in the workspace deployment; the global control plane holds only IDs, counts, and versions (see [Where data lives](#where-data-lives)) |
+| Authentication | Workspace deployments authenticate users directly against the customer's identity provider, so logins and approvals keep working without the global control plane |
 | Step-up authentication | Required to connect accounts, raise limits, approve large trades, or go live |
 | Quotas | Per workspace: agents, model spend, API rate, data subscriptions |
 
 **Kill switches at every level:** agent, connection, workspace, organization, and a global
-switch for the managed service. Edge customers control their own; the managed global switch
-cannot reach into customer deployments.
+switch for the managed service. Hybrid and on-prem customers control their own; the managed
+global switch cannot reach into customer deployments.
 
 ---
 
@@ -508,12 +590,12 @@ cannot reach into customer deployments.
 
 - **Model gateway:** routes calls to Jev (hosted decision model), a Laya pool or in-process
   Laya (open-weight decision model), and LLM providers. Handles deadlines, fallbacks, and
-  caching, and meters cost per workspace and per agent. Edge deployments can be restricted to
-  **local models only**.
+  caching, and meters cost per workspace and per agent. Hybrid and on-prem deployments can be
+  restricted to **local models only**.
 - **Calibration service:** recalibrates each model's confidence against realized outcomes, per
   agent. Calibrated confidence is what determines whether an agent is "unsure".
 - **Market data service:** normalized live streams plus a point-in-time historical store.
-  Managed deployments ingest once and share; edge deployments connect directly to venues.
+  Managed deployments ingest once and share; hybrid and on-prem deployments connect directly to venues.
 
 Speed tiers:
 
@@ -529,10 +611,11 @@ Speed tiers:
 
 - **Billed entity:** the organization.
 - **Components:** plan (seats and agents), usage (agent-hours, decisions, model tokens at cost
-  plus margin, data), and edge licenses.
-- **Pipeline:** data planes emit usage events → metering pipeline → billing provider
-  (Stripe Billing, Orb, or Metronome). Edge deployments send signed usage reports; air-gapped
-  deployments use license tiers.
+  plus margin, data), and hybrid / on-prem licenses.
+- **Pipeline:** workspace deployments emit usage counts (never content) → metering pipeline in
+  the global control plane → billing provider (Stripe Billing, Orb, or Metronome). Hybrid
+  deployments send signed usage reports over their outbound connection; air-gapped deployments
+  use a signed license file plus periodic offline usage reports.
 - **Pricing constraint:** never charge per trade or as a percentage of assets. This keeps the
   platform a software business and away from broker-dealer and investment-adviser models.
 
@@ -547,7 +630,8 @@ Speed tiers:
 | Web app / mobile approvals | Next.js / React Native with push notifications |
 | Storage | Postgres, object storage (S3, or MinIO on the edge), ClickHouse at scale |
 | Messaging / durable execution | NATS JetStream / Restate (or Temporal) |
-| Orchestration | Kubernetes cells (managed); Helm chart or single-node k3s (edge) |
+| Orchestration | Kubernetes cells (managed); Helm chart or single-node k3s (customer site) |
+| Packaging | One installer deploys the global control plane, workspace control services, and data plane in any mode; signed release bundles for air-gapped sites |
 | Sandboxing | WebAssembly plug-ins; Firecracker for heavier workloads |
 | Observability | OpenTelemetry; agent traces double as part of the audit record |
 
@@ -557,7 +641,7 @@ Speed tiers:
 
 1. **Managed retail regulation.** Agents trading retail users' accounts is the riskiest
    combination, even when users define the agents. Obtain a legal review before launching
-   retail. Business customers on edge are the safest starting point.
+   retail. Business customers in hybrid or on-prem mode are the safest starting point.
 2. **NautilusTrader licensing.** It is LGPL-3.0. Distributing it inside on-prem software,
    particularly statically linked Rust, carries relinking obligations. Decide whether to use
    its connectors or write our own.
@@ -567,3 +651,8 @@ Speed tiers:
 5. **First connectors.** Crypto exchange testnets first, then Interactive Brokers, then an
    Alpaca connector we would write ourselves.
 6. **Approval channels in v1.** A native mobile app for push, or SMS, email, and Slack / Telegram first.
+7. **Mobile access to on-site approval services.** Whether approvers reach the customer's
+   approval service through the customer's VPN, through our relay with end-to-end encryption,
+   or both; and how the mobile app is distributed to firms that require device management.
+8. **Directory data in hybrid mode.** The minimum identity data the global control plane needs
+   for seat billing and routing (for example, hashed user IDs instead of names and emails).
