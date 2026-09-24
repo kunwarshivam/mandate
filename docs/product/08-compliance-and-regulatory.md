@@ -73,9 +73,10 @@ precisely:
 
 - **Day trading:** FINRA replaced the pattern-day-trader rule with an intraday margin standard
   (effective June 4, 2026, with broker phase-in until October 20, 2027). Alpaca applies the new
-  standard; if the broker reports a deficit, the call must be met within 2 business days and an
-  account unmet by the 5th business day is frozen for 90 days. The risk gate also supports the
-  legacy rules for brokers that have not transitioned.
+  standard. Under Alpaca's policy, a call must be met within 2 business days and an account unmet
+  by the 5th business day is frozen for 90 days; the rule itself (FINRA Rule 4210(d)(2)) requires
+  satisfaction as promptly as possible, with the freeze applying to a practice of failing to meet
+  deficits. The risk gate also supports the legacy rules for brokers that have not transitioned.
 - **Buying power and settlement:** agents trade at 1× gross exposure with no debit balance. In
   margin accounts (all Alpaca accounts) unsettled proceeds may be reused; in cash accounts
   (other brokers) only settled cash is used, preventing good-faith and free-riding violations.
@@ -150,8 +151,9 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
    agent-hours and model usage be characterized as effecting transactions or transaction-based
    compensation?
 6. What is Mandate's exposure if an agent produces wash, spoofing-like, or closing-price patterns
-   in securities, or in crypto spot under CEA §6(c)(1) and CFTC Rule 180.1? Does the right to halt
-   agents create a duty to surveil?
+   in securities, or in crypto spot under CEA §6(c)(1) and CFTC Rule 180.1, including wash or
+   self-trades across a declared related-accounts group? Does the right to halt agents, or the
+   owner's declaration of related accounts, create knowledge that implies a duty to surveil?
 7. For adviser customers, is Mandate's journal a required record under Rule 204-2? What retention
    floor, integrity standard, and access undertakings should we commit to in managed and hybrid
    modes?
@@ -178,6 +180,9 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     customer attestation?
 17. Does the platform take on any duty when the broker reports intraday margin deficits or
     restrictions caused by the user's trading outside Mandate?
+18. In managed mode, the platform's runtime consumes consolidated (SIP) market data licensed to the
+    user's Alpaca account. Is that vendor processing, non-display use, or redistribution under
+    exchange data agreements, and what licensing does Mandate need?
 
 ## Data protection
 
