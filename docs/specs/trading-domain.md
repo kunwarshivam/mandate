@@ -2,13 +2,22 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.3: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.4: requires founder approval before implementation (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.4:** third three-role review (all "approve with changes"; all 24 cases recomputed
+  exactly). Consistency fixes, no new decisions: when exits may be held (principle 4); order-
+  constraint exemptions for risk-reducing orders at first gate decision; exit price ladder
+  (§5.6); bounded unprotected intervals, partial-bracket timeout, passive exits as OCO take-profit,
+  crypto adds as IOC; cash dividends keep protective orders; restriction detection stored as
+  account state with reason codes; related-accounts coordinator for exits; ETP classification
+  fails closed; crypto liquidity minimum; uncleared deposits excluded; buying power before gross
+  exposure; I3 corrected; single-division residual formula; expiry definition; backtest halt
+  source; Alpaca margin policy labeled. Reference cases: 25 cases (RC-24 exit ladder).
 - **v0.3:** second three-role review (all "approve with changes"). Applies
   [DEC-34 to DEC-38](../project/04-decision-log.md#decisions): margin buying power on total cash;
   IEX paper profile and SIP for live equities; crypto protection with simple orders; no
@@ -29,9 +38,12 @@
    from broker APIs or effective-dated configuration, never code.
 3. **Unknown means stop.** An unrecognized corporate action, status, account condition, or data
    fault pauses the affected agents and alerts the owner.
-4. **Conservative when in doubt,** except that **risk reduction is never blocked by a
-   conservative rule** (§9.6, §9.2): exits, protective orders, and the kill switch always proceed
-   unless the broker itself refuses them.
+4. **Conservative when in doubt,** except that **risk reduction is never blocked by conduct
+   controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Exits and
+   protective orders may be held only by agent mode `paused` or `stopped` (state integrity), by an
+   `Unknown` order in the same instrument, or by the broker. **The kill switch is always
+   available** and uses the broker's cancel-all and close-position endpoints without depending on
+   model state.
 5. **Mandate does not choose instruments, strategy, sizing, or limits**
    ([DEC-38](../project/04-decision-log.md#decisions)). These come from user-confirmed mandate
    fields; advisors are tools the user selects. Platform defaults only restrict trading. Inferred
@@ -121,10 +133,12 @@ An **opening or increasing** order is allowed only if all hold, checked in this 
 5. 20-day median daily dollar volume ≥ liquidity floor (organization setting; platform minimum
    1,000,000 USD).
 6. **Complex, leveraged, inverse, or volatility ETPs and ETNs** only if the mandate enables them and
-   the owner acknowledged the risk disclosure. Identified from a maintained reference list; an
-   instrument missing from the list is treated as not complex.
+   the owner acknowledged the risk disclosure. Every listed security's ETP status comes from a
+   source that flags all ETFs (for example, the Nasdaq Trader symbol directory's ETF column) plus an
+   ETN list; **an ETP not yet classified is treated as complex** (fails closed). If the
+   classification data is older than the configured age, ETP openings are denied.
 7. Crypto: USD pairs only; account `crypto_status = ACTIVE`; 30-day median daily dollar volume ≥
-   the crypto liquidity floor.
+   the crypto liquidity floor (organization setting; platform minimum 1,000,000 USD).
 
 Risk-reducing orders for held positions are allowed regardless of the floor or universe. A held
 instrument that becomes non-tradable pauses the agent and alerts the owner.
@@ -190,11 +204,11 @@ used.
 | Purpose | Allowed |
 |---|---|
 | Opening or increasing (equities) | Regular session only; **limit orders** within the price collar; plain, or **bracket** (entry + take-profit + stop) |
-| Opening or increasing (crypto) | Limit orders within the collar (simple orders only) |
-| Reducing or closing | Limit orders in any session the instrument allows; market orders only in the regular session outside auction windows and with current status data |
+| Opening or increasing (crypto) | Limit orders within the collar (simple orders only); adds to a protected position are limit IOC (§5.4) |
+| Reducing or closing | Limit orders in any session the instrument allows (marketable exits priced per §5.6); market orders only in the regular session outside auction windows and with current status data |
 | Protective (equities) | **OCO** or bracket legs, whole shares only, TIF GTC ([§5.4](#54-protective-exits-dec-28-dec-36)) |
 | Protective (crypto) | **One simple GTC stop-limit** for the whole position ([DEC-36](../project/04-decision-log.md#decisions)) |
-| Not used in v1 | IOC, FOK, trailing stops, replace/amend (except broker-initiated), notional market buys, options, short sales |
+| Not used in v1 | IOC (except crypto adds), FOK, trailing stops, replace/amend (except broker-initiated), notional market buys, options, short sales |
 
 ### 5.2 Alpaca capability matrix
 
@@ -204,7 +218,7 @@ used.
 | Equities, fractional or notional | market, limit, stop, stop-limit | day only; **not allowed in OCO or bracket orders** |
 | Equities, extended hours | limit only, `extended_hours = true` | day, gtc (fractional: day) |
 | Equities, OCO and bracket | all legs share one TIF; no extended hours | day, gtc |
-| Crypto | market, limit; stop-limit (GTC only); **simple orders only** | gtc, ioc |
+| Crypto | market, limit, stop-limit; **simple orders only** (Mandate uses stop-limit as GTC only) | gtc, ioc |
 | Crypto | maximum 200,000 USD notional per order | — |
 
 GTC equity orders expire 90 days after creation. Orders not eligible for the current session are
@@ -224,10 +238,16 @@ queued by the broker for the next eligible session.
 6. At most one working non-protective order per instrument per account (`working_order_limit`).
 7. Fractional and notional equity orders use TIF day; no fractional short sales.
 8. **Self-crossing:** the broker rejects orders that could interact with the account's own
-   opposite-side orders (OCO, bracket, and trailing-stop orders are exempt; crypto included). A
-   risk-increasing order never cancels a protective order (§5.4).
+   opposite-side orders (OCO, bracket, and trailing-stop orders are exempt; crypto included). For
+   **equities**, a risk-increasing order never cancels a protective order (§5.4); crypto adds follow
+   the DEC-36 sequence.
 9. An `Unknown` order reserves its maximum cost and counts as filled for exposure and
    concentration; no new orders in that instrument (`unknown_order_in_flight`) until resolved.
+
+**Risk-reducing orders at the first gate decision:** rules 4–6 exclude the agent's own protective
+orders and resting opening orders in the instrument, because the executor cancels them first
+(rule 5, §5.4); the gate re-run immediately before submission applies every rule in full. Bracket
+protective legs are checked against position + entry quantity.
 
 ### 5.4 Protective exits ([DEC-28](../project/04-decision-log.md#decisions), [DEC-36](../project/04-decision-log.md#decisions))
 
@@ -235,16 +255,26 @@ queued by the broker for the next eligible session.
 
 - **Tranche model:** each protected entry is a **GTC bracket order**. Adding to a position is a new
   bracket; Σ protective sell quantity ≤ position.
-- **Bracket legs are held until the entry is completely filled.** If an entry reaches a terminal
-  state partly filled (canceled or expired), the broker cancels its legs; the executor then
-  submits a **GTC OCO for the filled quantity** at the bracket's prices.
-- **Expiry:** protective orders are re-placed before `expires_at` (buffer configured): cancel,
-  confirm, submit a new OCO.
+- **Bracket legs are held until the entry is completely filled.** The unprotected interval starts
+  at the first partial fill. If the entry is not complete within `bracket_partial_fill_timeout`
+  (default 60 seconds, and always before the closing auction window), the executor cancels the
+  entry remainder, confirms, and submits a **GTC OCO for the filled quantity** at the bracket's
+  prices. The same OCO is submitted if the entry reaches a terminal state partly filled.
+- **Expiry:** GTC orders expire 90 calendar days after the creation date. Protection is re-placed
+  (cancel, confirm, new OCO) at the first `TradingDayStarted` on or after the trading day that is
+  `protective_replace_buffer_trading_days` trading days before the expiry date.
 - A plain risk-increasing order in an instrument with resting protective orders is denied
   (`add_blocked_by_protective_order`).
-- **Exit sequence:** cancel all protective orders in the instrument → confirm → re-run the gate on
-  fresh state → submit the exit → after a terminal state, re-place protection for any remaining
-  quantity. The unprotected interval is journaled; beyond the configured limit the owner is alerted.
+- **Passive exits** (a sell limit above the bid) are placed as the take-profit leg of a new OCO
+  that keeps the existing stop: cancel the OCO, confirm, submit the new OCO. Protection is never
+  removed for a passive exit.
+- **Marketable exit sequence:** cancel all protective orders in the instrument → confirm → re-run
+  the gate on fresh state → submit the exit, priced marketable per §5.6 → after a terminal state,
+  re-place protection for any remaining quantity. **Orders submitted while protection is canceled
+  must be marketable at submission.**
+- **Bounded unprotected intervals:** every interval is journaled from start to end. If an interval
+  reaches `max_unprotected_s` (default 60 seconds) with the order unfilled, the executor cancels it,
+  confirms, re-places protection for the held quantity, and alerts the owner.
 - **Fractional positions:** only the whole-share part can be protected; the fraction is
   unprotected and disclosed.
 - Protection triggers in the regular session only (stops do not trigger in extended hours).
@@ -252,19 +282,42 @@ queued by the broker for the next eligible session.
 **Crypto (simple orders only):**
 
 - One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `crypto_stop_limit_offset_bps`).
-- Take-profit is managed by the runtime, not a resting order.
+- Take-profit is managed by the runtime (it watches price and submits a marketable exit when the
+  target is reached), not a resting order.
 - **Adds and exits:** cancel the stop-limit → confirm → submit the order → after a terminal state,
-  re-place the stop-limit for the new net quantity. The unprotected interval is journaled.
+  re-place the stop-limit for the new net quantity. **Adds are limit IOC orders within the collar;
+  exits are marketable** (§5.6). The unprotected interval is bounded as for equities.
 - A stop-limit may not fill on a gap; disclosed to the owner.
 
 ### 5.5 Kill switch
 
-Cancel all open orders in scope → confirm → close all positions in scope (close-position endpoint;
-market orders only in the regular session outside auction windows with current status data;
-marketable limit orders otherwise) → journal each step → agent mode `stopped`. The kill switch
-never waits for approval and is exempt from §9.6.
+Cancel all open orders in scope (broker cancel-all endpoint; `Unknown` orders included) → confirm
+→ close all positions in scope (close-position endpoint; market orders only in the regular session
+outside auction windows with current status data; otherwise the exit price ladder in §5.6) →
+journal each step → agent mode `stopped`. The kill switch never waits for approval, does not
+depend on model state, and is exempt from §9.6.
 
-### 5.6 Order lifecycle
+### 5.6 Exit pricing
+
+Where an exit must be marketable but a market order is not allowed (extended hours, auction
+windows, presumed halts, the kill switch outside those conditions, and any exit submitted while
+protection is canceled), the executor uses the **exit price ladder** (sell; buy is symmetric):
+
+1. Limit = reference bid × (1 − `exit_offset`), rounded per §2.1. Reference bid = the best bid from
+   a fresh, sane quote; if none, the last sane bid within the last 5 minutes; if none, the last
+   trade.
+2. If unfilled after `exit_step_s` (default 5 seconds), cancel, confirm, and resubmit with the offset
+   increased by `exit_offset_step`, repricing from the current reference bid.
+3. The offset never exceeds `max_exit_offset`. At the floor, the order rests and the owner is
+   alerted.
+
+| Tier | `exit_offset` | `exit_offset_step` | `max_exit_offset` |
+|---|---|---|---|
+| Equities, 20-day median dollar volume ≥ 50 M USD | 0.5% | 0.5% | 3% |
+| Other equities | 1% | 1% | 5% |
+| Crypto | 1% | 1% | 5% |
+
+### 5.7 Order lifecycle
 
 ```mermaid
 stateDiagram-v2
@@ -292,8 +345,12 @@ stateDiagram-v2
     PendingCancel --> Filled: filled first
     PendingCancel --> PriorState: cancel rejected
     Accepted --> PendingReplace: broker replace pending
-    PendingReplace --> Accepted: replace rejected
+    PartiallyFilled --> PendingReplace: broker replace pending
+    PendingReplace --> PriorState: replace rejected
     PendingReplace --> Replaced: replaced (new order linked)
+    PendingReplace --> Filled: filled first
+    PendingReplace --> Canceled: canceled
+    PendingReplace --> Expired: expired
     Accepted --> Canceled: broker-initiated
     PartiallyFilled --> Canceled: broker-initiated
     Accepted --> Expired: TIF or broker expiry
@@ -306,8 +363,8 @@ stateDiagram-v2
     Abandoned --> [*]
 ```
 
-`PriorState` means the state before `PendingCancel` (Accepted or PartiallyFilled); fills during
-`PendingCancel` update filled quantity without leaving the state.
+`PriorState` means the state before `PendingCancel` or `PendingReplace` (Accepted or
+PartiallyFilled); fills during either pending state update filled quantity without leaving it.
 
 **Broker status mapping (Alpaca):**
 
@@ -394,6 +451,8 @@ source.
      below the limit (continuous trading cannot print through a resting limit). **Exception:** on
      an **auction bar** (the first regular-session bar of the day, or the first bar after a halt
      reopens), a resting limit the open gaps through fills at the open. A touch is not a fill.
+     Halts in backtests come from a trading-status dataset or fixture; without one, only the first
+     regular-session bar of the day is an auction bar.
 6. **Stop orders** (sell stop S; buy symmetric). Equities trigger in the regular session only.
    If open ≤ S: fill at open × (1 − s). Else if low ≤ S: fill at S × (1 − s).
 7. **Stop-limit** (sell, stop S, limit L): if the bar opens below L, no fill; the order rests as a
@@ -410,7 +469,11 @@ source.
 - One ledger per broker account, owned by one serialized executor; all account-level rules use it.
   Agents submit intents; they never call the broker.
 - **One agent per instrument per account** (`instrument_claimed` on deployment).
-- An agent may cancel only its own orders.
+- An agent may cancel only its own orders, with one exception: before a risk-reducing order, the
+  **related-accounts coordinator** cancels resting opposite-side *opening* orders in that
+  instrument across the owner's related-accounts group (§9.6) and waits for confirmation.
+  Canceling an opening order never adds risk, and this prevents self-trades between related
+  accounts that the broker's per-account protection cannot see.
 - **External activity** (orders or fills not originated by Mandate) is ingested as unattributed,
   journaled, switches every agent on the account to `exits_only` until the owner acknowledges, and
   blocks claiming that instrument until acknowledged.
@@ -436,8 +499,9 @@ of the model and the broker:
 | Margin account, crypto | min(equity model above, broker `non_marginable_buying_power`) |
 | Cash account (generic brokers) | settled − reservations − round(accrued, 2, ceiling) |
 
-Uncleared deposits count as unsettled. The gate includes paper-mode simulated fees (§10) in
-accrued fees.
+**Uncleared deposits are excluded** from model buying power (a returned deposit would otherwise
+create a debit). The fee reservation for crypto buys is 0 (the fee is paid in the asset). The gate
+includes paper-mode simulated fees (§10) in accrued fees.
 
 ### 7.3 Account restrictions
 
@@ -445,12 +509,18 @@ The gate requires `status = ACTIVE`, `trading_blocked = false`, `account_blocked
 `trade_suspended_by_user = false` (and `crypto_status = ACTIVE` for crypto). **Alpaca exposes no
 closing-only field**, so restrictions are also detected from rejects:
 
-| Signal | Effect |
-|---|---|
-| Any status other than `ACTIVE`, `trading_blocked`, `account_blocked`, `trade_suspended_by_user` | All agents on the account `paused`; owner alerted |
-| Reject whose code or message indicates closing-only or restricted trading (mapped in the connector's reject table) | All agents on the account `exits_only`; owner alerted |
-| N consecutive 403 rejects without a known order-level cause (configured) | All agents `exits_only`; account refreshed; owner alerted |
-| Broker notice of an intraday margin call or freeze | All agents `exits_only`; owner alerted |
+Detected restrictions are stored as **account state** (evaluated in §9.1 check 1, before agent
+mode) until the owner acknowledges and the account is refreshed:
+
+| Signal | Account state | Agent effect | Reason code |
+|---|---|---|---|
+| Any status other than `ACTIVE`, `trading_blocked`, `account_blocked`, `trade_suspended_by_user` | `blocked` | All agents `paused` | `account_trading_blocked` |
+| Reject whose code or message indicates closing-only or restricted trading (connector reject table) | `closing_only` | All agents `exits_only` | `account_restricted` |
+| N consecutive 403 rejects without a known order-level cause (configured) | `closing_only` | All agents `exits_only`; account refreshed | `account_restricted` |
+| Broker notice of an intraday margin call or freeze | `closing_only` | All agents `exits_only` | `account_restricted` |
+
+Rejects for unknown `client_order_id`s count toward the 403 threshold only; they are not external
+activity unless they carry a fill.
 
 ### 7.4 Agent modes
 
@@ -458,7 +528,7 @@ closing-only field**, so restrictions are also detected from rejects:
 |---|---|
 | `normal` | Everything the mandate and gate allow |
 | `exits_only` | Risk-reducing and protective orders only |
-| `paused` | No new orders; resting protective orders stay; the kill switch still works |
+| `paused` | No new orders except re-placing protection before expiry; resting protective orders stay; the kill switch still works |
 | `stopped` | Terminal (after the kill switch or a stop); no orders |
 
 ## 8. Accounting
@@ -523,9 +593,9 @@ before the ex-date**.
 
 | Action | Treatment |
 |---|---|
-| **Split** (integer ratio new:old) | Q_raw = Q × new ÷ old; B and realized unchanged. Fractionable: Q' = truncate(Q_raw, 9). Non-fractionable: Q' = whole shares. Residual f = Q_raw − Q' (either case) is removed: R = round(B × f ÷ Q_raw, 12, half_even), B' = B − R, cash in lieu = f × broker price per post-split share (0 if none posted), realized += cash in lieu − R. **Every stored mark is replaced by round(mark × old ÷ new, 12, half_even)** (source unchanged). Cash in lieu is a receivable until `CashInLieuPosted` |
+| **Split** (integer ratio new:old) | Q_raw = Q × new ÷ old; B and realized unchanged. Fractionable: Q' = truncate(Q_raw, 9). Non-fractionable: Q' = whole shares. Residual f = Q_raw − Q' (either case) is removed: R = round(B × (Q·new − Q'·old) ÷ (Q·new), 12, half_even) (a single division of terminating inputs, equal to B × f ÷ Q_raw), B' = B − R, cash in lieu = f × broker price per post-split share (0 if none posted), realized += cash in lieu − R. **Every stored mark is replaced by round(mark × old ÷ new, 12, half_even)** (source unchanged). Cash in lieu is a receivable until `CashInLieuPosted` |
 | **Cash dividend** (d per share) | Entitlement = position after all fills with **trade date before the ex-date**; receivable (payable for shorts) = round(Q × d, 2, half_even); **income on the ex-date**; `DividendPaid` on the pay date |
-| Orders | At preparation, cancel the agent's open orders in the instrument (protective included) and require confirmation; an unconfirmed cancel at 20:00 alerts the owner, and a pre-action protective leg still live at 09:25 pauses the agent. Bracket and OCO legs are never adjusted by Alpaca, so they must be canceled. Broker-initiated `replaced` orders are linked and re-checked |
+| Orders | **Splits:** at preparation, cancel the agent's open orders in the instrument (protective included) and require confirmation; an unconfirmed cancel at 20:00 alerts the owner, and a pre-split protective leg still live at 09:25 pauses the agent. Bracket and OCO legs are never adjusted by Alpaca, so they must be canceled. **Cash dividends:** cancel only non-protective orders; protective legs stay (an unadjusted sell stop is conservative by the dividend amount). Broker-initiated `replaced` orders are linked and re-checked |
 | Pending action state | Between application and the broker's posting of the action (split activity or updated position), reconciliation treats the expected difference as `pending_corporate_action`, not a mismatch |
 | Protection re-derivation | After the broker's position reflects the split: stop' and take-profit' = price × old ÷ new, rounded per §2.1 by side; quantity per §5.4; re-placed as OCO (equities) or stop-limit (crypto) |
 | Tax lots | Split: lot quantity × new ÷ old; residual removed first-in first-out; basis per the split rule |
@@ -538,8 +608,9 @@ Evaluated after every event; exact unless stated.
 - **I1 Conservation.** With no deposits or withdrawals: Δequity = Δrealized + Δunrealized + Δincome
   − Δfees (fees include accruals and the rounding difference when charged), except as bounded in I3.
 - **I2 Reducing fills.** Removed basis = round(B × |q| ÷ |Q|, 12, half_even).
-- **I3 Splits.** Q', B', and realized are exact per §8.5. |ΔMV| ≤ |Q'| × 5 × 10⁻¹³ from mark
-  rounding; equality is exact when mark × old ÷ new terminates within 12 places.
+- **I3 Splits.** Q', B', and realized are exact per §8.5. |ΔMV + f × mark'| ≤ |Q'| × 5 × 10⁻¹³
+  (mark rounding only, where f is the residual removed and mark' the adjusted mark); exact when
+  mark × old ÷ new terminates within 12 places.
 - **I4 Cash.** Total cash = settled + Σ unsettled. After `SettlementPosted` for date D, no unsettled
   bucket is dated ≤ D. No-debit rule per §8.3 holds after every order the gate approved.
 - **I5 Quantity.** Q = the fold, in `seq` order, of signed received fill quantities (gross minus
@@ -561,7 +632,7 @@ including allows, is journaled with the checks evaluated.
 4. Order constraints (§5.3, in list order)
 5. Mark freshness and price collar (§8.2, §9.6)
 6. Market-conduct controls (§9.6)
-7. Gross exposure and buying power (§9.3, §9.5)
+7. Buying power (§9.5), then gross exposure (§9.3)
 8. Day-trade budget (§9.2)
 
 Reason codes are registered in the reference-case file.
@@ -573,10 +644,12 @@ April 14, 2026; effective June 4, 2026; broker phase-in until October 20, 2027).
 
 **`intraday_margin` (Alpaca):** never create an intraday margin deficit. With 1× long-only exposure
 an approved order cannot create one; broker-reported maintenance excess is also checked. If the
-broker reports a deficit: a margin call must be met within **2 business days**; if unmet by the
-**5th business day**, the account is frozen for 90 days from increasing debits; de minimis
-deficits (lesser of 1,000 USD or 5% of equity) do not trigger a call. Agents go `exits_only` and
-the owner is alerted.
+broker reports a deficit, agents go `exits_only` and the owner is alerted. **Alpaca's policy:** a
+call must be met within 2 business days; an account unmet by the 5th business day is frozen for
+90 days from increasing debits; calls are generally not triggered below the lesser of 1,000 USD or
+5% of equity. **The rule itself** (FINRA Rule 4210(d)(2); Regulatory Notice 26-10) requires
+satisfaction as promptly as possible, and the 90-day freeze applies to a practice of failing to
+meet deficits.
 
 **`legacy_pdt` (generic brokers not yet transitioned):**
 
@@ -595,8 +668,8 @@ Crypto never counts. Fractional day trades count.
 
 ### 9.3 Leverage and short sales
 
-1× gross exposure: Σ |market value| + Σ maximum cost of open opening orders ≤ equity. **No short
-sales in v1** ([DEC-32](../project/04-decision-log.md#decisions)).
+1× gross exposure: Σ |market value| + Σ maximum cost of open opening orders, **including the
+proposed order**, ≤ equity. **No short sales in v1** ([DEC-32](../project/04-decision-log.md#decisions)).
 
 ### 9.4 Sessions
 
@@ -618,7 +691,7 @@ orders, protective orders, or the kill switch;** oversize exits are sliced, neve
 | Control | Default |
 |---|---|
 | One side at a time; one working non-protective order per instrument per account | §5.3 rules 5–6 |
-| Minimum resting time before canceling a non-marketable opening order | 2 seconds |
+| Minimum resting time before canceling a non-marketable opening order (does not apply to cancels that precede a risk-reducing order) | 2 seconds |
 | **Price collar (aggressiveness only):** buy limit ≤ ask × (1 + x); sell limit ≥ bid × (1 − x). Passive prices are allowed within a wider passive band | x = 1% for equities with 20-day median dollar volume ≥ 50 M USD, 2% otherwise, 2% for crypto; passive band 20% |
 | Order size vs trailing 5-minute volume | ≤ 5% |
 | Daily participation vs 20-day average daily volume | ≤ 5% |
@@ -744,6 +817,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 | RC-21 | Bracket partly filled → OCO for filled quantity; protective re-placement before expiry | Executor |
 | RC-22 | Conduct controls: collar on aggressiveness only; exemptions for exits; exits-only on breach | Gate |
 | RC-23 | Fractionable split residual; non-terminating adjusted mark | Accounting |
+| RC-24 | Exit price ladder in extended hours; presumed-halt variant | Executor |
 
 ## 15. Open questions
 
@@ -754,6 +828,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 5. Source for the complex/leveraged/inverse/volatility ETP and ETN reference list (§3.2).
 6. Whether Alpaca applies the TAF cap per execution or per order (fee activity check).
 7. Whether pending crypto wash-sale legislation changes what must be recorded now.
+8. The data source and refresh cadence for ETP and ETN classification (§3.2 item 6).
 
 ## 16. Out of scope for v1
 
