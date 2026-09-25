@@ -15,7 +15,6 @@ fn reason(draft: &[u8]) -> (InvalidReason, String) {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn valid_drafts_parse() {
     let d = Draft::parse(&mark_draft(1, "150.010")).unwrap();
     assert_eq!(d.event_id(), event_id(1));
@@ -32,7 +31,6 @@ fn valid_drafts_parse() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn draft_rejections() {
     use InvalidReason::*;
     let m = mark_draft(1, "1");
@@ -259,7 +257,6 @@ fn draft_rejections() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn accepted_variants() {
     let m = mark_draft(1, "1");
     let digest = format!("\"sha256:{}\"", "a".repeat(64));
@@ -289,7 +286,6 @@ fn accepted_variants() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn gate_decided_checks_are_from_the_spec_list() {
     let gate = |check: &str| {
         format!(
@@ -317,7 +313,6 @@ fn gate_decided_checks_are_from_the_spec_list() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn stream_ids() {
     for (text, kind) in [
         ("acct:ws_1:01J8Z2ACCT00000000000000A1", StreamType::Account),
@@ -351,7 +346,6 @@ fn stream_ids() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn stream_rules() {
     let s = stream();
     let mut j = MemoryJournal::new();
@@ -481,7 +475,6 @@ fn stream_rules() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn ownership_and_fencing() {
     let s = stream();
     let mut j = journal_with(2);
@@ -510,7 +503,6 @@ fn ownership_and_fencing() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn seal_bounds_and_names() {
     let d = Draft::parse(&mark_draft(1, "1")).unwrap();
     assert_eq!(

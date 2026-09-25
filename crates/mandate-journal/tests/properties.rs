@@ -67,7 +67,6 @@ fn assert_chain(rows: &[StoredEvent]) -> Result<(), TestCaseError> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-1"]
     fn appends_are_append_only_gapless_fenced_and_idempotent(ops in vec(op(), 1..25)) {
         let s = stream();
         let mut j = journal_with(0);
@@ -189,7 +188,6 @@ fn tamper() -> impl Strategy<Value = Tamper> {
 proptest! {
     /// M4 exit criterion: tampering with any event is detected (with the head anchored).
     #[test]
-    #[ignore = "pending E5-1"]
     fn any_tampering_is_detected(marks in 0u64..6, t in tamper()) {
         let mut rows = journal_with(marks).rows(&stream()).to_vec();
         let anchor = anchored(&rows);
@@ -227,7 +225,6 @@ proptest! {
 
     /// A consistent rewrite passes the per-event checks by design; only the anchor catches it.
     #[test]
-    #[ignore = "pending E5-1"]
     fn rewritten_chains_pass_per_event_checks_and_fail_the_anchor(marks in 1u64..6, from in any::<usize>()) {
         let mut rows = journal_with(marks).rows(&stream()).to_vec();
         let anchor = anchored(&rows);
@@ -249,7 +246,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn merkle_root_matches_bottom_up_construction(
         heads in proptest::collection::btree_map("[a-z]{1,6}:[A-Za-z0-9_-]{1,8}", (0u64..1 << 53, any::<[u8; 32]>()), 1..20)
     ) {
@@ -282,7 +278,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn equivalent_decimals_are_the_same_draft() {
     let s = stream();
     let mut j = journal_with(0);

@@ -12,7 +12,6 @@ use mandate_journal::{
 };
 
 #[test]
-#[ignore = "pending E5-1"]
 fn trusted_start_mid_stream() {
     let j = journal_with(4);
     let rows = j.rows(&stream());
@@ -59,7 +58,6 @@ fn trusted_start_mid_stream() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn check_order_and_columns() {
     let rows = journal_with(1).rows(&stream()).to_vec();
     let failure = |rows: &[mandate_journal::StoredEvent]| {
@@ -101,7 +99,6 @@ fn check_order_and_columns() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn artifacts_are_checked() {
     let s = stream();
     let content = b"model response".to_vec();
@@ -136,7 +133,6 @@ fn artifacts_are_checked() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn anchors() {
     let rows = journal_with(2).rows(&stream()).to_vec();
     let head = rows.last().unwrap();
@@ -253,7 +249,6 @@ fn anchors() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn export_lines_embed_the_exact_body() {
     let rows = journal_with(2).rows(&stream()).to_vec();
     let segment = export_segment(&rows);

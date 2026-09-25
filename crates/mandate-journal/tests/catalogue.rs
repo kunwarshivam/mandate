@@ -143,7 +143,6 @@ fn draft(event_type: &str, kind: &str, refs: &[&str]) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn stream_types_and_required_config_refs_match_the_spec() {
     for (event_type, streams, required) in SPEC {
         for kind in [ACCT, AGENT, CTL, CLOCK] {
@@ -191,7 +190,6 @@ fn with_payload(event_type: &str, refs: &[&str], payload: &str) -> Vec<u8> {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn registered_schemas_accept_their_payloads() {
     let intent = event_id(7);
     let cases = [
@@ -256,7 +254,6 @@ fn registered_schemas_accept_their_payloads() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn artifact_refs_cover_references_nested_in_arrays() {
     let digest = format!("sha256:{}", "a".repeat(64));
     let gate = |artifacts: &str| {

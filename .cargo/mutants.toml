@@ -1,0 +1,7 @@
+# cargo-mutants configuration (ADR-0001 ES-11). Founder-owned: every exclusion is an approved
+# equivalent mutant, with the reason no test can tell it apart from the real code.
+exclude_re = [
+    # Every registered payload schema is version 1, so a valid draft's schema_version is 1 until
+    # the first version 2 schema exists.
+    "replace Draft::schema_version -> u64 with 1",
+]

@@ -12,17 +12,17 @@
 //! E5-1): draft validation (§3, §4, §9), the append protocol (§5.1), verification (§11), Merkle
 //! anchoring (§10), and export lines (§6.2). Storage here is in memory; the Postgres store (E5-3)
 //! implements the same protocol over the same `Draft` and `seal`.
-//!
-//! API stubs for the E5-1 tests PR (DEC-77); the implementation PR replaces the bodies.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
-use mandate_canon::{Digest, ParseErrorKind};
+use mandate_canon::{Digest, Int, Key, ParseErrorKind, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
+mod catalogue;
 mod draft;
 mod merkle;
+mod schema;
 mod verify;
 
 pub use draft::Draft;
@@ -76,8 +76,23 @@ pub struct StreamId {
 }
 
 impl StreamId {
-    pub fn parse(_s: &str) -> Option<Self> {
-        None
+    pub fn parse(s: &str) -> Option<Self> {
+        let parts: Vec<&str> = s.split(':').collect();
+        let stream_type = match parts.as_slice() {
+            ["acct", _, _] => StreamType::Account,
+            ["agent", _, _] => StreamType::Agent,
+            ["ctl", _] => StreamType::Control,
+            ["clock", _] => StreamType::Scheduler,
+            _ => return None,
+        };
+        parts
+            .iter()
+            .skip(1)
+            .all(|segment| schema::is_ident(segment))
+            .then(|| Self {
+                text: s.to_owned(),
+                stream_type,
+            })
     }
 
     pub fn as_str(&self) -> &str {
@@ -186,26 +201,71 @@ pub struct StoredEvent {
     pub body: Vec<u8>,
 }
 
+/// Fields the journal assigns at append; the rest of the body is the writer's draft (spec §3).
+const JOURNAL_FIELDS: [&str; 3] = ["prev_hash", "recorded_at", "seq"];
+
 /// Adds the journal-assigned fields to `draft` and hashes the canonical body.
 pub fn seal(
-    _draft: &Draft,
-    _seq: u64,
-    _prev_hash: Digest,
-    _recorded_at: UtcNanos,
+    draft: &Draft,
+    seq: u64,
+    prev_hash: Digest,
+    recorded_at: UtcNanos,
 ) -> Result<StoredEvent, Invalid> {
-    Err(Invalid::new(InvalidReason::Schema, ""))
+    let seq_value =
+        Int::new(seq).ok_or_else(|| Invalid::new(InvalidReason::NonCanonical, "seq"))?;
+    let key = |name: &str| Key::new(name).map_err(|_| Invalid::new(InvalidReason::Schema, name));
+    let mut body = draft.fields().clone();
+    body.insert(key("seq")?, Value::Int(seq_value));
+    body.insert(key("prev_hash")?, Value::Str(prev_hash.to_hex()));
+    body.insert(key("recorded_at")?, Value::Str(recorded_at.to_string()));
+    let body = to_canonical(&Value::Object(body));
+    Ok(StoredEvent {
+        stream_id: draft.stream_id().as_str().to_owned(),
+        seq,
+        event_id: draft.event_id().to_owned(),
+        event_type: draft.event_type().to_owned(),
+        schema_version: draft.schema_version(),
+        environment: draft.environment().as_str().to_owned(),
+        recorded_at: recorded_at.to_string(),
+        prev_hash,
+        hash: Digest::of(&body),
+        body,
+    })
+}
+
+/// The canonical draft inside a stored body: the body without the journal-assigned fields.
+fn stored_draft(row: &StoredEvent) -> Option<Vec<u8>> {
+    let Value::Object(mut body) = parse(&row.body).ok()? else {
+        return None;
+    };
+    for field in JOURNAL_FIELDS {
+        body.remove(field)?;
+    }
+    Some(to_canonical(&Value::Object(body)))
 }
 
 /// The export line for one event (journal spec §6.2): the canonical form of
 /// `{"body": <body>, "hash": "<hex>"}`, without the line feed. `"body"` sorts before `"hash"`, so
 /// the body bytes are an exact slice of the line.
-pub fn export_line(_row: &StoredEvent) -> Vec<u8> {
-    Vec::new()
+pub fn export_line(row: &StoredEvent) -> Vec<u8> {
+    let mut line = Vec::with_capacity(row.body.len().saturating_add(84));
+    line.extend_from_slice(b"{\"body\":");
+    line.extend_from_slice(&row.body);
+    line.extend_from_slice(b",\"hash\":\"");
+    line.extend_from_slice(row.hash.to_hex().as_bytes());
+    line.extend_from_slice(b"\"}");
+    line
 }
 
 /// A segment file: one export line per event, each followed by a line feed.
-pub fn export_segment(_rows: &[StoredEvent]) -> Vec<u8> {
-    Vec::new()
+pub fn export_segment(rows: &[StoredEvent]) -> Vec<u8> {
+    rows.iter()
+        .flat_map(|row| {
+            let mut line = export_line(row);
+            line.push(b'\n');
+            line
+        })
+        .collect()
 }
 
 /// The result of an append (journal spec §5.1).
@@ -318,12 +378,105 @@ impl MemoryJournal {
     /// sequencing, chaining, and hashing. All events of a batch share `recorded_at`.
     pub fn append(
         &mut self,
-        _stream: &StreamId,
-        _expected_head: u64,
-        _writer_epoch: u64,
-        _recorded_at: UtcNanos,
-        _drafts: &[&[u8]],
+        stream: &StreamId,
+        expected_head: u64,
+        writer_epoch: u64,
+        recorded_at: UtcNanos,
+        drafts: &[&[u8]],
     ) -> AppendOutcome {
-        AppendOutcome::Unavailable
+        let invalid = |draft: usize, reason: InvalidReason, path: &str| AppendOutcome::Invalid {
+            draft,
+            error: Invalid::new(reason, path),
+        };
+        if drafts.is_empty() {
+            return invalid(0, InvalidReason::EmptyBatch, "");
+        }
+        let mut batch: Vec<Draft> = Vec::with_capacity(drafts.len());
+        for (i, bytes) in drafts.iter().enumerate() {
+            let draft = match Draft::parse(bytes) {
+                Ok(d) => d,
+                Err(error) => return AppendOutcome::Invalid { draft: i, error },
+            };
+            if draft.stream_id() != stream {
+                return invalid(i, InvalidReason::StreamMismatch, "stream_id");
+            }
+            if batch.iter().any(|d| d.event_id() == draft.event_id()) {
+                return invalid(i, InvalidReason::DuplicateEventId, "event_id");
+            }
+            batch.push(draft);
+        }
+
+        let stored: Vec<Option<&StoredEvent>> =
+            batch.iter().map(|d| self.event(d.event_id())).collect();
+        if let Some(first) = stored.iter().flatten().next() {
+            for (draft, row) in batch.iter().zip(&stored) {
+                if let Some(row) = row
+                    && stored_draft(row).as_deref() != Some(draft.canonical_bytes())
+                {
+                    return AppendOutcome::IdempotencyConflict {
+                        stored_seq: row.seq,
+                    };
+                }
+            }
+            if stored.iter().any(Option::is_none) {
+                return AppendOutcome::IdempotencyConflict {
+                    stored_seq: first.seq,
+                };
+            }
+            return AppendOutcome::AlreadyCommitted(
+                stored.into_iter().flatten().cloned().collect(),
+            );
+        }
+
+        let head = self.head(stream);
+        if writer_epoch != head.writer_epoch {
+            return AppendOutcome::Fenced {
+                current_epoch: head.writer_epoch,
+            };
+        }
+        if expected_head != head.seq {
+            return AppendOutcome::HeadMismatch {
+                actual_seq: head.seq,
+                actual_hash: head.hash,
+            };
+        }
+
+        let mut environment = self
+            .rows(stream)
+            .first()
+            .and_then(|r| Environment::parse(&r.environment));
+        let mut sealed = Vec::with_capacity(batch.len());
+        let mut prev_hash = head.hash;
+        let mut seq = head.seq;
+        for (i, draft) in batch.iter().enumerate() {
+            let Some(next) = seq.checked_add(1) else {
+                return invalid(i, InvalidReason::NonCanonical, "seq");
+            };
+            seq = next;
+            let opening = draft.event_type() == "StreamOpened";
+            if seq == 1 && !opening {
+                return invalid(i, InvalidReason::NotStreamOpened, "event_type");
+            }
+            if seq > 1 && opening {
+                return invalid(i, InvalidReason::StreamAlreadyOpened, "event_type");
+            }
+            if *environment.get_or_insert(draft.environment()) != draft.environment() {
+                return invalid(i, InvalidReason::EnvironmentMismatch, "environment");
+            }
+            let row = match seal(draft, seq, prev_hash, recorded_at) {
+                Ok(row) => row,
+                Err(error) => return AppendOutcome::Invalid { draft: i, error },
+            };
+            prev_hash = row.hash;
+            sealed.push(row);
+        }
+
+        let state = self.streams.entry(stream.as_str().to_owned()).or_default();
+        for row in &sealed {
+            self.event_ids
+                .insert(row.event_id.clone(), (row.stream_id.clone(), row.seq));
+            state.rows.push(row.clone());
+        }
+        AppendOutcome::Committed(sealed)
     }
 }
