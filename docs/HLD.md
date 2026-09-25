@@ -656,7 +656,7 @@ Speed tiers:
 | Orchestration | Kubernetes cells (managed); Helm chart or single-node k3s (customer site) |
 | Packaging | One installer deploys the global control plane, workspace control services, and data plane in any mode; signed release bundles for air-gapped sites |
 | Sandboxing | WebAssembly plug-ins; Firecracker for heavier workloads |
-| Observability | OpenTelemetry; agent traces double as part of the audit record |
+| Observability | OpenTelemetry API with a Prometheus pull exporter (M6); the journal is the audit record, never telemetry ([DEC-73](project/04-decision-log.md#decisions)) |
 
 ---
 

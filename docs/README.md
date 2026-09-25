@@ -8,6 +8,12 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 - [High-Level Design](HLD.md): architecture, agent runtime, deployment modes, key flows,
   audit, multi-tenancy, intelligence layer, billing, technology.
 
+## Architecture decisions
+
+| Document | Purpose |
+|---|---|
+| [ADR-0001: Engineering setup](adr/0001-engineering-setup.md) | Repository, crates, toolchain, numeric and time types, tests, CI, merge policy, supply chain |
+
 ## Specs
 
 | Document | Purpose |
