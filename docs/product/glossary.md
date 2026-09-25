@@ -3,14 +3,18 @@
 | Term | Meaning |
 |---|---|
 | **Mandate** (product) | Working name of the platform |
-| **mandate** (object) | An agent's binding specification: goal, done condition, instruments, connection, behavior, advisors, cadence, risk limits, autonomy rules, notifications. Called the "agent spec" in the HLD |
+| **mandate** (object) | An agent's binding specification: goal, instruments, capital, connection, signal models, sizing, cadence, protection, risk limits, autonomy rules, notifications ([mandate spec](../specs/mandate.md)). Called the "agent spec" in the HLD |
 | **Agent** | A versioned mandate plus the logic that executes it |
 | **Deployment** | A running instance of one agent version |
 | **Organization** | Billing and SSO entity; sets org-wide limits |
 | **Workspace** | The tenant: members, connections, agents, data, encryption keys |
 | **Connection** | A broker or exchange account, its stored credential, and the scopes granted to agents |
-| **Advisor** | A component that produces an opinion (signal, conviction, horizon, thesis): quant model, fast decision model, or LLM research |
-| **Decider** | Combines advisor opinions, weighted by track record, into a proposed action with a confidence level |
+| **Signal model** | A registered component the user selects that produces an output (conviction, confidence, horizon, thesis): quant model, fast decision model, or LLM research. Never places orders. Formerly "advisor" |
+| **Order builder** | Combines signal-model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score. Formerly "decider" |
+| **Combined score** | The order builder's weighted average of model confidences; an input to autonomy rules, not a probability of profit |
+| **Judgment field** | A mandate field that expresses a trading decision (instruments, goal, allocation, models, sizing, protection, limits, `auto`); only the user sets it |
+| **Risk exit / discretionary exit** | An exit from the risk engine (limits, flatten, kill switch, stop watchdog), exempt from all controls; an exit from the order builder, goal, or owner, paced by conduct controls but never denied |
+| **Lifetime loss floor** | Equity level (contributed capital × (1 − `max_loss_from_allocation`)) at which an agent flattens and pauses permanently unless the owner loosens the mandate |
 | **Autonomy policy** | Rules that classify each proposed action as AUTO, ASK, or DENY |
 | **Risk gate** | Independent code on the order path that enforces limits regardless of agent logic |
 | **Risk envelope** | The set of limits an agent must stay within |
@@ -31,7 +35,7 @@
 | **Managed / hybrid / on-prem** | Deployment modes: all ours; thin control plane ours and the rest the customer's; all the customer's |
 | **Notification relay** | Delivers push notifications carrying only an opaque ID and generic text |
 | **Fast decision model** | A model that returns typed answers with probabilities in tens to hundreds of milliseconds (for example, Laya, Jev) |
-| **Calibration** | Adjusting a model's stated confidence so it matches how often it is actually right |
+| **Calibration** | Adjusting a model's stated confidence so it matches how often it is actually right. Measured for reporting only in v1; never changes behavior ([DEC-47](../project/04-decision-log.md#decisions)) |
 | **Paper trading** | Trading against a live market with simulated funds; for Alpaca, a separate paper environment with the same API as live |
 | **Testnet / demo environment** | A venue's test environment with fake funds (for example, Kraken's derivatives demo) |
 | **OAuth connection** | Connecting a user's brokerage account by authorization through the broker, granting scoped access without sharing API keys |

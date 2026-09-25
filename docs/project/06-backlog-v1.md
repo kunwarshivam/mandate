@@ -27,7 +27,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E12 Audit explorer | M9 | 6.7 | Must |
 | E13 Hybrid deployment | M11 | 6.9 | Must |
 | E14 Billing | M12 | 6.10 | Must |
-| E15 Advisors: LLM and fast models, calibration | Phase 3 | 6.3, 6.5 | Should |
+| E15 Signal models: LLM and fast models, scorecards | Phase 3 | 6.3, 6.5 | Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 
 ## Stories
@@ -96,13 +96,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   trades without supervision.
 - **E6-2 (Must)** As an operator, I want every proposed action classified AUTO, ASK, or DENY
   per the mandate so that autonomy matches my rules. *Accepted when:* mandate reference cases
-  MC-A01 to MC-A09 and MC-D01 to MC-D08 pass.
+  MC-A01 to MC-A11 and MC-B01 to MC-B23 pass.
 - **E6-3 (Must)** As an owner, I want an independent risk gate enforcing all limits so that no
   agent logic can exceed them.
   *Accepted when:* simulation fuzzing across random market paths and mandates never produces
-  an order outside limits; mandate reference cases MC-G01 to MC-G07 pass.
+  an order outside limits; mandate reference cases MC-G01 to MC-G11 and MC-F01 to MC-F02 pass.
 - **E6-4 (Must)** As an owner, I want a daily-loss limit and a drawdown ladder so that losses
-  trigger automatic de-risking. *Accepted when:* MC-R01 to MC-R03 pass.
+  trigger automatic de-risking. *Accepted when:* MC-R01 to MC-R10, MC-T01 to MC-T05, and MC-L01
+  to MC-L07 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
@@ -171,10 +172,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-1 (Must)** As an operator, I want to describe an agent in plain language and get a
   compiled mandate with inferred fields highlighted. *Accepted when:* compiled mandates validate
   against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
-  cases MC-S, MC-V, and MC-P pass).
+  cases MC-S, MC-V, and MC-P pass); unstated judgment fields are left blank, never filled.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
-  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C14 pass.
+  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C31 pass.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
@@ -208,12 +209,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E14-2 (Must)** As an org owner, I want a hybrid license key tied to my organization.
 - **E14-3 (Should)** As an org owner, I want usage metering visible in the app.
 
-### E15 Advisors: LLM and fast models, calibration
+### E15 Signal models: LLM and fast models, scorecards
 
-- **E15-1 (Should)** As an operator, I want an LLM research advisor that writes theses
+- **E15-1 (Should)** As an operator, I want an LLM research signal model that writes theses
   asynchronously without blocking trading.
-- **E15-2 (Should)** As an operator, I want a fast decision-model advisor with a hard deadline.
-- **E15-3 (Should)** As an operator, I want advisor confidence calibrated against outcomes and
+- **E15-2 (Should)** As an operator, I want a fast decision model with a hard deadline.
+- **E15-3 (Should)** As an operator, I want each signal model's confidence measured against outcomes and
   shown in scorecards.
 - **E15-4 (Could)** As an operator, I want shadow mode for a new mandate version.
 
@@ -224,7 +225,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* keys with withdrawal or transfer permissions are rejected before storage.
 - **E16-2 (Should)** As a trader, I want perpetuals accounting (funding every eight hours,
   margin, liquidation thresholds) so that perpetual P&L and risk are correct.
-- **E16-3 (Should)** As an operator, I want a funding/carry advisor for perpetuals.
+- **E16-3 (Should)** As an operator, I want a funding/carry signal model for perpetuals.
 
 ## Won't (v1)
 

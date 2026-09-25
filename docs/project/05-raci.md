@@ -54,7 +54,7 @@ These stay with the founder regardless of how capable agents become:
 | Core engine (Phase 0) | A | R | R | R | C | I | I | I |
 | Agent runtime and risk gate | A/R (review) | R | R | R | I | I | I | I |
 | Exchange connectors | A/R (review) | R | R | R | C | I | I | I |
-| Advisors and calibration | A | R | R | R | C | I | I | C |
+| Signal models and scorecards | A | R | R | R | C | I | I | C |
 | Control plane and workspace services | A | R | R | R | I | I | C | I |
 | Web app and approvals UX | A | R | R | R | I | I | I | C |
 | Hybrid installer | A | R | R | R | I | I | I | C |

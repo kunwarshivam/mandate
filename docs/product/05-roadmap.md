@@ -38,7 +38,7 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 
 ### Phase 1: One autonomous agent on Alpaca paper
 
-- Agent runtime: perception, memory, quant advisors, decider, autonomy policy.
+- Agent runtime: perception, memory, quant signal models, order builder, autonomy policy.
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
 - US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
@@ -70,10 +70,10 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 
 - Hybrid deployments hardened (upgrades, health, fallback approval channels).
 - Fast decision models (Laya in-process, Jev optional) with deadlines.
-- Calibration service; advisor scorecards; trust-weighted decider.
+- Signal-model scorecards (reporting); user-selectable sizing methods; calibration only as a user-selected, versioned method (DEC-47).
 - Shadow mode for new mandate versions.
 - Kraken Derivatives US connector: CFTC-regulated crypto perpetuals, with perpetuals accounting
-  (funding, margin, liquidation thresholds) and a funding/carry advisor.
+  (funding, margin, liquidation thresholds) and a funding/carry signal model.
 - SMS and phone escalation; two-approver rule.
 
 **Exit criteria:** escalation precision and autonomy-rate targets met across design partners;

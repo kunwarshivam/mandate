@@ -124,7 +124,7 @@ third party; if she had ignored it, the safe default would have applied.
 ### J3. "Why did this happen?" (Dana)
 
 1. Dana opens a fill in the audit explorer.
-2. She follows the causal trace: fill → order → approval (if any) → decision → advisor
+2. She follows the causal trace: fill → order → approval (if any) → decision → signal-model
    opinions → observations.
 3. She exports the trace for the period under review.
 

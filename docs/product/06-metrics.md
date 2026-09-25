@@ -43,7 +43,7 @@ live, keep them running, and the platform keeps them inside their mandates.
 Reported to users per agent, never marketed as expected returns:
 
 - Return, volatility, maximum drawdown, Sharpe, versus a buy-and-hold baseline.
-- Per-advisor hit rate and calibration.
+- Per-signal-model hit rate and calibration measurement (reporting only).
 
 ## Business metrics
 

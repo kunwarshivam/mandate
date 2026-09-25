@@ -53,7 +53,7 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 |---|---|---|
 | Unit | Pure logic: accounting, fills, risk checks, policy evaluation | All Rust and Python code |
 | Property-based | Invariants: cash + positions conserve value net of fees; risk gate never passes an order outside limits | Accounting, risk gate |
-| Simulation fuzzing | Random market paths and mandates through the full runtime; assert no limit violations | Runtime, decider, risk |
+| Simulation fuzzing | Random market paths and mandates through the full runtime; assert no limit violations | Runtime, order builder, risk |
 | Replay | Re-run recorded journals and market data; assert identical decisions | Backtest, runtime determinism |
 | Fault injection | Kill the process at every step of order submission and approval handling; assert no duplicates and full reconciliation | Executor, connector, recovery |
 | Integration | Alpaca paper environment end to end (Kraken demo when that connector ships) | Connectors |

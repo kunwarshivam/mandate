@@ -15,7 +15,7 @@ and accountable for every decision it makes.
 ## Mission
 
 Make autonomous trading agents **safe enough to trust with real capital** by combining three
-things no existing tool combines: a binding mandate the agent cannot exceed, calibrated
+things no existing tool combines: a binding mandate the agent cannot exceed, rule-based
 escalation to a human only when it matters, and a complete, tamper-evident record of every
 decision.
 
@@ -51,7 +51,7 @@ See [Personas and journeys](02-personas-and-journeys.md).
 1. **The mandate is the contract.** An agent can never act outside the goal, instruments, risk
    limits, and autonomy rules its owner approved.
 2. **Reducing risk never needs approval; increasing risk beyond agreed limits always does.**
-3. **Ask only when it matters.** Escalation is driven by calibrated confidence and explicit
+3. **Ask only when it matters.** Escalation is driven by the user's autonomy rules and explicit
    rules, not by habit. Every unnecessary ping erodes trust.
 4. **Safe by default.** Timeouts, outages, and ambiguity resolve to "don't add risk".
 5. **Everything is recorded.** Every observation, analysis, decision, approval, order, and fill.
@@ -87,7 +87,7 @@ See [Competitive landscape](03-competitive-landscape.md).
 
 | Lever | What it means |
 |---|---|
-| Trust | Mandates, calibrated escalation, hard risk gates, full audit. The reason a user lets an agent run unattended |
+| Trust | Mandates, rule-based escalation, hard risk gates, full audit. The reason a user lets an agent run unattended |
 | Speed | Rust core; fast decision models (30–300 ms) for real-time judgments; LLMs never block trading |
 | Deployment | The only agent platform that runs fully on the customer's side with the same product |
 | Accountability | Causal decision trace from any fill back to the observations behind it |

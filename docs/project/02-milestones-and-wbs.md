@@ -51,7 +51,7 @@ flowchart TD
 
 | WP | Deliverable | Depends on | Exit criteria |
 |---|---|---|---|
-| M5 Agent runtime + risk | Perception, memory, quant advisors, decider, autonomy policy, risk gate (including US market rules), drawdown ladder, kill switch; mandate schema v0 | M3, M4 | Agent never exceeds limits or breaks US account rules in simulation fuzzing |
+| M5 Agent runtime + risk | Perception, memory, quant signal models, order builder, autonomy policy, risk gate (including US market rules), drawdown ladder, kill switch; mandate schema v0 | M3, M4 | Agent never exceeds limits or breaks US account rules in simulation fuzzing |
 | M6 Alpaca connector | Paper connector (API keys for the founder's own account in Phase 1; OAuth arrives in M8); idempotent order intents; reconciliation; crash recovery | M5 | Fault injection at every step: zero duplicates, full reconciliation |
 | M7 Escalation v0 | Approval requests, deadlines, safe defaults, drift re-validation; email and one chat channel; CLI control | M6 | Continuous Alpaca paper soak with forced restarts and escalations passes |
 

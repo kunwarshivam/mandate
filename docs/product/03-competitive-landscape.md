@@ -87,7 +87,7 @@ Placement is qualitative, based on public descriptions.
 ## Differentiators to defend
 
 1. **Mandate enforcement** outside agent logic (policy hierarchy plus hard risk gate).
-2. **Calibrated, selective escalation** with safe defaults and drift re-validation.
+2. **Rule-based, selective escalation** under user-set autonomy rules, with safe defaults and re-checks before execution.
 3. **Causal decision audit**, tamper-evident, exportable.
 4. **Deploy anywhere** with strategy, approvals, audit, and credentials on the customer's side.
 5. **Speed tiers**: Rust hot path and fast decision models, with LLMs off the critical path.
