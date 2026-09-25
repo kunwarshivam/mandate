@@ -355,8 +355,6 @@ fn merkle(fx: &Json, _: &str) -> Result<(), String> {
     )
 }
 
-// ------------------------------------------------------------------ tamper cases
-
 type Tamper = fn(&mut Vec<StoredEvent>) -> Result<(), String>;
 
 /// (name, the vector's `change` text, the interpretation).
@@ -512,8 +510,6 @@ fn tamper(fx: &Json, name: &str) -> Result<(), String> {
         }
     }
 }
-
-// ------------------------------------------------------------------ append cases
 
 type Drafts = fn(&Json) -> Result<Vec<Vec<u8>>, String>;
 

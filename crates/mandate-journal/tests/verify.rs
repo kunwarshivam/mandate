@@ -65,15 +65,17 @@ fn check_order_and_columns() {
             .err()
             .map(|f| (f.seq, f.check))
     };
-    // A body that is valid JSON but not canonical fails check 1 even with a matching hash.
     let mut spaced = rows.clone();
     spaced[1].body.insert(1, b' ');
     spaced[1].hash = Digest::of(&spaced[1].body);
-    assert_eq!(failure(&spaced), Some((2, EventCheck::NonCanonical)));
+    assert_eq!(
+        failure(&spaced),
+        Some((2, EventCheck::NonCanonical)),
+        "valid JSON that is not canonical fails check 1 even with a matching hash"
+    );
     let mut garbage = rows.clone();
     garbage[0].body = b"not json".to_vec();
     assert_eq!(failure(&garbage), Some((1, EventCheck::NonCanonical)));
-    // Every stored column is compared with the body.
     type Alter = fn(&mut mandate_journal::StoredEvent);
     let alterations: [Alter; 8] = [
         |r| r.stream_id = "acct:ws_1:X".into(),
@@ -90,7 +92,8 @@ fn check_order_and_columns() {
         alter(&mut altered[1]);
         assert_eq!(
             failure(&altered),
-            Some((altered[1].seq, EventCheck::ColumnMismatch))
+            Some((altered[1].seq, EventCheck::ColumnMismatch)),
+            "every stored column is compared with the body"
         );
     }
     let mut stale_hash = rows.clone();
@@ -178,10 +181,10 @@ fn anchors() {
         Err(RangeCheck::AnchorRootMismatch)
     );
 
-    // The head check runs first and needs the anchored seq with the anchored hash.
     assert_eq!(
         verify_anchor(&bad_root, &stream(), &rows[..2]),
-        Err(RangeCheck::AnchorHeadMismatch)
+        Err(RangeCheck::AnchorHeadMismatch),
+        "the head check runs before the root check"
     );
     let mut moved = rows.clone();
     moved[2].stream_id = "acct:ws_1:OTHER".into();
@@ -196,10 +199,13 @@ fn anchors() {
         Err(RangeCheck::AnchorHeadMismatch)
     );
 
-    // An anchor without a leaf for this stream checks only its root.
     let other = Anchor::compute(vec![leaf("ctl:ws_1", 4, Digest::of(b"c"))]).unwrap();
     assert_eq!(other.root, other.leaves[0].leaf_hash().unwrap());
-    assert_eq!(verify_anchor(&other, &stream(), &[]), Ok(()));
+    assert_eq!(
+        verify_anchor(&other, &stream(), &[]),
+        Ok(()),
+        "an anchor without a leaf for this stream checks only its root"
+    );
 
     assert_eq!(Anchor::compute(vec![]), None);
     assert_eq!(

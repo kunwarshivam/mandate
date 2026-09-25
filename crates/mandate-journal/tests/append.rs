@@ -408,7 +408,6 @@ fn stream_rules() {
     );
     assert_eq!(j.rows(&s).len(), 0, "rejected batches write nothing");
 
-    // Epoch 0 may write an unclaimed stream; a batch commits all-or-nothing and chains in order.
     let AppendOutcome::Committed(rows) = j.append(
         &s,
         0,
@@ -420,7 +419,7 @@ fn stream_rules() {
             &mark_draft(2, "2"),
         ],
     ) else {
-        panic!("not committed")
+        panic!("epoch 0 may write an unclaimed stream, and a batch commits all-or-nothing")
     };
     assert_eq!(rows.iter().map(|r| r.seq).collect::<Vec<_>>(), [1, 2, 3]);
     assert_eq!(rows[0].prev_hash, Digest::ZERO);
@@ -449,7 +448,6 @@ fn stream_rules() {
         (0, InvalidReason::EnvironmentMismatch)
     );
 
-    // Retrying a committed batch returns the stored events in batch order.
     let AppendOutcome::AlreadyCommitted(again) = j.append(
         &s,
         0,
@@ -457,11 +455,10 @@ fn stream_rules() {
         now(),
         &[&mark_draft(2, "2"), &mark_draft(1, "1.0")],
     ) else {
-        panic!("not already committed")
+        panic!("retrying a committed batch returns the stored events in batch order")
     };
     assert_eq!(again, vec![rows[2].clone(), rows[1].clone()]);
 
-    // The same event_id in another stream is a conflict: event IDs are global.
     let elsewhere = edit(
         &opened_draft("paper"),
         "stream_id",
@@ -470,7 +467,8 @@ fn stream_rules() {
     let elsewhere = edit(&elsewhere, "payload.account_ref", Some("\"OTHER\""));
     assert_eq!(
         j.append(&other, 0, 0, now(), &[&elsewhere]),
-        AppendOutcome::IdempotencyConflict { stored_seq: 1 }
+        AppendOutcome::IdempotencyConflict { stored_seq: 1 },
+        "event IDs are global: the same event_id in another stream is a conflict"
     );
 }
 

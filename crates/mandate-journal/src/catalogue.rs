@@ -31,10 +31,11 @@ const AGENT: &[StreamType] = &[Agent];
 const CONTROL: &[StreamType] = &[Control];
 const NONE: &[&str] = &[];
 
+/// The catalogue entry for `event_type`. `TradingDayStarted` and `ClockAdvanced` are owned by the
+/// scheduler and copied into account streams by the executor (spec §2).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
         "StreamOpened" => entry(&[Account, Agent, Control, Scheduler], NONE),
-        // Copied by the executor into the account stream (spec §2) and owned by the scheduler.
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
 
