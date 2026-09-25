@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc c9f26ec41f2dca2fd892ae806e9b854276d6d9d82d6d73079822a5500f0fc000 # shrinks to (negative, int, frac) = (false, "0", ""), shift = 0, lead = 0, trail = 0, style = 0
-cc fe230d55ebd33b660f1314a4529b2374623a2f4d5d14b194abf96d9e90ce51d7 # shrinks to negative = false, int = "79000000000000000000000000000", frac = "", shift = 0, style = 0
-cc 838f9faeab4a27c00f4057cd4c25b57b7f2a2679dd8cf55a4289ff2a8277b017 # shrinks to negative = false, int = "0", frac = "00000000000000000000000000001", shift = 0, style = 0
