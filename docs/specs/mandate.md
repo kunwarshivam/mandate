@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.3: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.4: requires founder approval before implementation (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
-| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-62](../project/04-decision-log.md#decisions) |
+| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-69](../project/04-decision-log.md#decisions) (DEC-63 to DEC-69 proposed) |
 
 A **mandate** is the binding specification the owner sets for an agent: its goal, instruments,
 capital, signal models, sizing, protection, risk limits, autonomy rules, and notifications. This
@@ -38,10 +38,10 @@ changes, acknowledgments, and version changes (AGENTS.md, "Getting it right the 
 
 | ID | Invariant |
 |---|---|
-| MI-1 | Risk reduction is never denied: `risk_exit`, `protective`, and `owner_exit` orders pass every mandate limit; `discretionary_exit` orders are allowed or deferred, never denied |
-| MI-2 | An applied allocation change never triggers, lifts, or starts confirming a limit, never lowers drawdown, the daily loss fraction, or floor headroom, and never raises agent return |
+| MI-1 | Risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction: `risk_exit` and `protective` orders are allowed; `owner_exit` is allowed (outside the regular session, once the bid is confirmed); `discretionary_exit` is allowed or deferred. Exits may be held only by agent mode `paused` or `stopped`, an `Unknown` order, or the broker (trading spec principle 4) |
+| MI-2 | An applied allocation change never triggers or lifts a limit, never lowers drawdown or the daily loss fraction, and never raises floor headroom or agent return |
 | MI-3 | Latched limits lift only by their defined path (§5.8): drawdown by owner acknowledgment once flat; daily loss by a new risk day plus `daily_breach_min_s`; the lifetime floor only by a loosening version (§5.7) |
-| MI-4 | The lifetime floor bounds cumulative loss: it latches once its breach has accumulated `breach_confirm_s` of breach time, or immediately at 1.25 × its loss level |
+| MI-4 | The lifetime floor bounds cumulative loss: it latches once its breach has accumulated `breach_confirm_s` of breach time, or when 1.25 × its loss level holds on two sane quotes at least min(`breach_confirm_s`, 10 s) apart (checked against an independent oracle) |
 | MI-5 | H ≥ E and 0 ≤ DD < 1 |
 | MI-6 | The effective mode is the strictest active restriction; `AgentModeApplied` is journaled exactly when it changes |
 | MI-7 | Allocation increases are rejected while any limit is latched |
@@ -49,8 +49,9 @@ changes, acknowledgments, and version changes (AGENTS.md, "Getting it right the 
 | MI-9 | An order-builder proposal never fails a mandate size limit (position, order size, gross exposure) |
 | MI-10 | A missing model output never increases the order builder's buy value |
 | MI-11 | A version classified risk-reducing or neutral never makes any autonomy decision less strict |
-| MI-12 | Every judgment field is user-sourced and confirmed; every `auto` is user-entered (V-020, V-022) |
+| MI-12 | Every judgment field is user-sourced and confirmed; every `auto` is user-entered (V-020, V-022; checked by the semantic cases, not fuzzed) |
 | MI-13 | Dropping clock ticks that emitted no events changes no other result, so only ticks with events need journaling (§5.2) |
+| MI-14 | The loss carried to the connection at retirement is the net dollar loss (net contributed − E), whatever withdrawals came first (§5.7) |
 
 ## 2. Lifecycle
 
@@ -140,7 +141,7 @@ it. `null` means no end.
 |---|---|---|---|---|
 | `continuous` | `end_date`, `on_complete` | Trades the universe | `end_date` passes | `on_complete` |
 | `accumulate` | instrument, `target_qty`, `max_avg_price` (or null), `max_spend_usd`, `end_date`, `on_complete` | Buys only the goal instrument; the universe is exactly that instrument (V-003). **Discretionary exits are disabled**; risk exits and protection apply. Buys are clipped (§8.3) | Remaining quantity (`target_qty` − position) is below one increment or below the minimum order; remaining spend is below the minimum order; or `end_date` passes | `on_complete` |
-| `profit_stop` | `profit_level`, `end_date` | Trades the universe | Agent return reaches the level, confirmed per §5.6: E − C ≥ `profit_level` × C (C = capital base, §5.1); or `end_date` passes | Discretionary exit of every position, then Retired (`AgentStopped`, reason `profit_stop_reached` or `end_date`) |
+| `profit_stop` | `profit_level`, `end_date` | Trades the universe | Agent return reaches the level, confirmed in the risk state by breach time per §5.6 with no hard trigger: E − C ≥ `profit_level` × C (C = capital base, §5.1); or `end_date` passes | Discretionary exit of every position, then Retired (`AgentStopped`, reason `profit_stop_reached` or `end_date`) |
 
 - `profit_stop` is a stop condition, not a target: the UI shows `profit_level` as the level at
   which the agent stops, never as progress toward a goal.
@@ -193,6 +194,7 @@ and is recorded in `MandateConfirmed`.
 | V-030 | `end_date`, if set, is not before the validation date |
 | V-031 | `environment` and `connection_id` equal the previous version's |
 | V-032 | The connection's loss carry (§5.7) is below `max_loss_from_allocation` × allocation; otherwise deployment is rejected |
+| V-033 | `scale_action: trim_to_target` is not allowed with an `accumulate` goal (trims would consume `max_spend_usd` without adding units) |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -229,9 +231,11 @@ limits, never pre-filled as values.
 - **Retail profile** (platform level, applied to retail workspaces; **all values pending counsel**,
   [compliance questions 20 to 30](../product/08-compliance-and-regulatory.md)): `auto_allowed:
   false`, `signal_model_types: [quant]`, `leveraged_etps_allowed: false`, `protection_required:
-  true`, `approval_timeout_s ≥ 120`, `max_loss_from_allocation ≤ 0.2`. A workspace is retail when
-  it is owned by an individual's account in managed mode; the assignment and its basis are
-  journaled as `WorkspaceProfileAssigned`.
+  true`, `approval_timeout_s ≥ 120`, `max_loss_from_allocation ≤ 0.2`. **A workspace is retail
+  unless its owning organization is a verified entity other than an individual's personal
+  investment vehicle, or meets the investor-status test counsel sets (question 4).** Deployment
+  mode does not affect the profile; an unassigned workspace is treated as retail. Each assignment
+  or change and its basis are journaled as `WorkspaceProfileAssigned` (DEC-68).
 - `independent_approval_required` (maker-checker): deployment, risk-increasing changes,
   high-water-mark resets, and loosening a latched lifetime floor need approval by a user other than
   the requester.
@@ -252,6 +256,8 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   agents' losses make Σ allocations exceed account equity, the owner is alerted and allocation
   increases are rejected; account-level buying power still binds every order.
 - **Capital base** C: starts at the initial allocation and scales with allocation changes (below).
+- **Net contributed** N: the initial allocation plus every applied allocation change, in dollars
+  (withdrawals are negative). It measures the dollar loss carried to the connection (§5.7).
 - **Agent equity** E = A + agent realized P&L (net of fees) + agent income + agent market value at
   risk marks − cost basis. Cost basis follows trading spec §8.1 (reductions rounded half-even to 12
   places). The agent sub-ledger is the account ledger filtered to the agent's orders.
@@ -260,9 +266,10 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   1. **Rejected** if Δ > 0 while any limit is latched; if E + Δ ≤ 0; if E + Δ < the agent's gross
      exposure (Σ |MV| + working opening orders); or if, after scaling, any limit condition would be
      newly true (`would_trigger_limit`).
-  2. Otherwise, with k = (E + Δ) ÷ E: A′ = A + Δ; H′, E₀′, C′, and the inherited loss L′ are H, E₀,
-     C, and L multiplied by k, rounded **up** to 12 places (so drawdown and loss fractions never
-     fall). Drawdown, the daily loss fraction, floor headroom, and agent return are preserved (MI-2).
+  2. Otherwise, with k = (E + Δ) ÷ E: A′ = A + Δ, N′ = N + Δ; H′, E₀′, C′, and the inherited loss L′
+     are H, E₀, C, and L multiplied by k, rounded **up** to 12 places (so drawdown and loss fractions
+     never fall). Drawdown, the daily loss fraction, floor headroom, and agent return are preserved,
+     up to that conservative rounding (MI-2).
 
 ### 5.2 Inputs, the risk clock, and determinism
 
@@ -270,10 +277,12 @@ stream** fold (journal spec §2). It belongs to the agent and survives restarts 
   `LateFillApplied`, `FeesCharged`, `CorporateActionApplied` (splits, and dividend receivables on
   the ex-date per trading spec §8.3), `CashInLieuPosted`, `CompensatingEvent`,
   `MandateVersionApplied`, `RiskDayStarted`, copied `ClockAdvanced`, and owner acknowledgments.
-- **The risk clock** is the scheduler's `ClockAdvanced` time (monotone). The scheduler ticks every
-  second; the executor evaluates every tick but journals a copied `ClockAdvanced` in the account
-  stream only when the evaluation emits an event (or the tick crosses midnight). Every other input
-  records the risk-clock value it was evaluated at. `event_time` is never used for risk timing.
+- **The risk clock** is the scheduler's `ClockAdvanced` time, in whole seconds and monotone. The
+  scheduler ticks every second; the executor evaluates every tick but journals a copied
+  `ClockAdvanced` in the account stream only when the evaluation emits an event (or the tick
+  crosses midnight). **Every other risk input carries a required `risk_clock` field** (the latest
+  tick the executor had seen); the journal rejects a `risk_clock` that decreases along `seq`.
+  `event_time` is never used for risk timing. Durations are integer seconds.
 - **Durations** (confirmation, lift delays, cooldowns, staleness) are sums over intervals between
   evaluations, each credited according to the state at the **start** of the interval. Conditions
   change only at inputs, never at ticks, so unjournaled ticks do not change any result (MI-13).
@@ -311,9 +320,11 @@ exits, and the kill switch are never denied by them (MI-1).
 - The **risk day** runs from 00:00 to 00:00 America/New_York (23 or 25 hours on daylight-saving
   change days). The executor journals `RiskDayStarted` when the copied `ClockAdvanced` crosses
   midnight, and sets E₀ = E.
-- **Breach:** E − E₀ ≤ −`max_daily_loss` × E₀, confirmed per §5.6. **At the rollover, a breach that
-  is pending confirmation and still true is latched** (reason `resolved_at_rollover`), never
-  discarded. The action is `daily_loss_action`:
+- **Breach:** E − E₀ ≤ −`max_daily_loss` × E₀, confirmed per §5.6. **A breach still confirming at
+  the rollover keeps confirming against the previous day's E₀** (at most `breach_confirm_s`, so at
+  most 300 s): it latches (reason `resolved_at_rollover`) if it confirms, and is discarded if the
+  condition stays false for `breach_confirm_s`. A flash print just before midnight therefore
+  latches nothing. The action is `daily_loss_action`:
   - `exits_only`: restriction `daily_loss` (mode `exits_only`).
   - `flatten_and_pause`: the agent-scoped kill switch (§5.5), restriction `daily_loss` (mode
     `paused`). Once the agent is flat, owner acknowledgment (step-up) changes it to `exits_only`.
@@ -329,7 +340,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Action | Trigger | Effect | Lifts when |
 |---|---|---|---|
-| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, any position with MV > factor × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
+| `scale_sizes` | Immediately | Size factor = product of active rungs' factors. `scale_action: limit_buys`: order-builder targets are multiplied by it. `trim_to_target`: also, a position with MV − factor × cap ≥ `rebalance_band` × cap is sold down to factor × cap as a `risk_exit` (quantity rounded up to the increment) at the next evaluation, only once the rung has been active for `breach_confirm_s`, only if the order meets the minimum, for equities only in the regular session, and never while Holding (DEC-65) | H − E < (`at` − `hysteresis`) × H for `scale_lift_after_s` of regular-session time (crypto: all time) |
 | `exits_only` | Confirmed (§5.6) | Restriction `drawdown_exits_only` (mode `exits_only`) | Owner acknowledgment (§5.8) |
 | `flatten_and_pause` | Confirmed (§5.6) | Agent-scoped kill switch; restriction `drawdown_flatten` (mode `paused`) | Owner acknowledgment once flat (§5.8) |
 
@@ -350,9 +361,14 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
   ≥ `breach_confirm_s`.
 - Breach time resets to 0 only after the condition has been false continuously for
   `breach_confirm_s`, so a brief bounce does not restart confirmation.
-- **Hard trigger:** a loss of at least 1.25 × the limit's loss level triggers immediately (for a
-  rung, H − E ≥ 1.25 × `at` × H; daily, E − E₀ ≤ −1.25 × `max_daily_loss` × E₀; floor,
-  E ≤ C × (1 − 1.25 × `max_loss_from_allocation`) + L).
+- **Hard trigger** (DEC-63): a loss of at least 1.25 × the limit's loss level (for a rung,
+  H − E ≥ 1.25 × `at` × H; daily, E − E₀ ≤ −1.25 × `max_daily_loss` × E₀; floor,
+  E ≤ C × (1 − 1.25 × `max_loss_from_allocation`) + L) on a sane quote immediately applies
+  restriction `hard_breach` (mode `exits_only`, reason `hard_breach_pending`). The limit itself
+  latches (reason `hard_trigger`) when the hard level holds on a second sane quote at least
+  min(`breach_confirm_s`, 10 s) later. A sane quote below the hard level clears `hard_breach`
+  (`hard_breach_cleared`), and normal confirmation continues. One bad print therefore never
+  latches or flattens anything.
 - Confirmation continues on clock ticks when no marks arrive (for example after the close).
   `breach_confirm_s` is at most 300 s; 0 triggers on the first breaching input.
 - Limits with breach time accumulating are shown in the agent's state (`pending`); they are
@@ -363,13 +379,17 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 - **Breach:** E ≤ C × (1 − `max_loss_from_allocation`) + L, confirmed per §5.6. The result is the
   agent-scoped kill switch and restriction `lifetime_floor` (mode `paused`).
 - **It cannot be acknowledged or reset.** It lifts only when a version raising
-  `max_loss_from_allocation` enough that E is above the new floor applies. While the floor is
-  latched, that version needs independent approval (a second user). In a single-user workspace it
-  applies only after one full risk day has passed since it was confirmed.
+  `max_loss_from_allocation` to f′ applies with E > C × (1 − f′) + L (strictly), journaled as
+  `RiskLimitLifted` with reason `version_loosened`; confirmation then starts afresh. While the floor
+  is latched, that version needs independent approval (a second user). In a single-user workspace
+  it applies only once the first full risk day after the confirmation day has ended; earlier it is
+  rejected (`waiting_period`), as is a version that leaves E at or below the new floor
+  (`still_below_new_floor`) or does not loosen (`not_loosening`).
 - **Inherited loss L.** Each connection keeps a **loss carry**: the sum, over agents retired on it
-  in the last 90 days, of max(0, C − E) at retirement. A new agent on the connection starts with
-  L = the carry, so retiring and redeploying cannot reset the floor. Deployment is rejected if the
-  carry ≥ `max_loss_from_allocation` × allocation (V-032).
+  in the last 90 days, of their **net dollar loss** max(0, N − E) at retirement (§5.1). Withdrawals
+  lower N and E equally, so withdrawing before retiring cannot shrink the carry (MI-14). A new agent
+  on the connection starts with L = the carry, so retiring and redeploying cannot reset the floor.
+  Deployment is rejected if the carry ≥ `max_loss_from_allocation` × allocation (V-032).
 - The platform caps `max_loss_from_allocation` (§4.3).
 
 ### 5.8 Acknowledgment and high-water-mark reset (DEC-44, DEC-57)
@@ -391,7 +411,7 @@ Applies to `exits_only` and `flatten_and_pause` rungs, daily loss, the lifetime 
 ### 5.9 Restrictions and the effective mode
 
 Agent restrictions each have a mode and lift independently: `daily_loss`, `drawdown_exits_only`,
-`drawdown_flatten`, `lifetime_floor`, `goal_complete`, and the trading spec's account,
+`drawdown_flatten`, `lifetime_floor`, `hard_breach`, `goal_complete`, and the trading spec's account,
 external-activity, reconciliation, and rate-limit restrictions (§7.3, §7.4, §9.7). The **effective
 mode** is the strictest (`normal` < `exits_only` < `paused` < `stopped`); `AgentModeApplied` is
 journaled only when it changes (MI-6). On entering `exits_only` or stricter, the executor cancels
@@ -409,7 +429,8 @@ removed instruments) block opening and increasing orders in that instrument only
 | `AgentModeApplied` | account | The effective mode changes | agent, from, to, restrictions; copied by the agent runtime into the agent stream as `AgentModeChanged` |
 | `KillSwitchActivated` | account | A flatten | scope, initiator, orders canceled, sells submitted or deferred |
 | `InstrumentRestrictionChanged` | account | `stale_mark` set or cleared | agent, instrument, restriction, active |
-| `GoalCompleted` | account | A goal completes (§3.1) | agent, reason, `on_complete` applied |
+| `GoalCompleted` | account | A goal completes (§3.1) | agent, reason (`profit_stop_reached`, `target_qty`, `max_spend`, `end_date`), `on_complete` applied |
+| `AgentStopped` | workspace control | The agent retires | agent, reason, net dollar loss added to the connection's loss carry |
 | `OwnerExitRequested` | agent | The owner closes a position or triggers a kill switch | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 | `PositionReleased` | account | Release (§3.1) | agent, instrument, quantity, protective orders canceled, warning shown (artifact), user (opaque), step-up evidence |
 
@@ -425,7 +446,7 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 |---|---|---|---|
 | `open`, `increase` | Order builder | Autonomy rules (§6.2) | Apply (trading spec §9.6) |
 | `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments | Built-in AUTO; never denied | **Paced, never denied:** price collar, participation caps, the close window; equities in the regular session only (verdict `defer`) |
-| `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction (step-up); never denied | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid; otherwise they wait for the session |
+| `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction (step-up); never denied | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
 | `risk_exit` | Risk engine: limits, flatten, `trim_to_target`, stop watchdog (trading spec §5.4) | Built-in AUTO; never denied | Exempt |
 | `protective` | Executor: placing and re-placing protection | Built-in AUTO; never denied | Exempt |
 
@@ -520,8 +541,14 @@ otherwise evade (for example, `bought_today_usd gt 2000 → ask`).
 ### 8.1 Signal model contract (DEC-52)
 
 - A signal model is a registered component with an id (`quant.`, `fast.`, or `llm.` prefix), a
-  semantic version, and a **content hash** of its code, prompt, and parameter schema; the mandate
-  pins all three (V-007). **Signal models never place orders.**
+  semantic version, and a **content hash** of its code, prompt, parameter schema, and underlying
+  model identity (provider, model name, and version, or weights hash); the mandate pins all three
+  (V-007). **Signal models never place orders.**
+- **The model gateway never substitutes a model** (DEC-67): a fallback may route only to another
+  endpoint serving the identical pinned model; otherwise the call fails and the output counts as
+  missing (§8.3). The platform withdraws a model version only through a journaled
+  `PlatformOperatorAction` (`model_withdrawn`, with reason); owners are alerted and the withdrawn
+  model's outputs count as missing.
 - **Parameter schemas have no defaults;** every parameter is set by the user. **Documentation
   describes methodology only,** with no performance claims, rankings, or "recommended" labels.
   Each model carries an authorship label (platform-authored; user-authored later).
@@ -629,6 +656,7 @@ is asserted by fuzzing random autonomy changes against random actions.
 | `MandateVersionCreated` | workspace control | Source text (artifact); compiled fields; provenance per path with quoted spans; template id and version; policy-set hashes in effect; validation results, warnings, and worst-case figures; classification against the previous version; diff |
 | `MandateConfirmed` | workspace control | Version hash; confirmed paths; the rendered confirmation screen (artifact) and UI build; warnings acknowledged; step-up evidence; confirming user (opaque) |
 | `DisclosureAccepted` | workspace control | Disclosure document and version hash; user (opaque); step-up evidence |
+| `AgentDeployed` | workspace control | Mandate version; the rendered go-live screen (artifact) and UI build; the `BacktestRunRecorded` and paper-run IDs shown; the hypothetical-performance legend and disclosure versions shown; approving user(s), including the independent approver where policy requires one; step-up evidence |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | workspace control | Level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `MandateVersionApplied`, `HighWaterMarkReset`, `PositionReleased` | account | §5.10 |
 | `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10; content shown (artifact), bound quantity and price, approvers, step-up evidence |
@@ -639,24 +667,25 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 209 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 215 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
-and `fuzz.py` asserts the invariants of §1.1.
+`fuzz.py` asserts the invariants of §1.1 against independent oracles, and `mutants.py` confirms
+the fuzz catches seeded bugs.
 
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S23 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age |
-| Semantic | MC-V01 to MC-V50 | Every V-rule and warning, the closed platform-default list, loss carry |
+| Semantic | MC-V01 to MC-V51 | Every V-rule and warning, the closed platform-default list, loss carry |
 | Policy | MC-P01 to MC-P13 | Nearest-level reporting, each key kind, the retail profile, platform maximums |
-| Risk state | MC-R01 to MC-R17 | Ladder, time-in-breach confirmation, hard triggers, clock ticks, rollover, renewal, reset and stepwise lifts, the floor with carry, allocation scaling and rejections, staleness, `on_complete` |
+| Risk state | MC-R01 to MC-R23 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
 | Gate | MC-G01 to MC-G13 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt |
-| Order builder | MC-B01 to MC-B29 | Exit and buy conviction, freshness, clipping, band, trim, deferral, averaging down, accumulate clips with fees |
+| Order builder | MC-B01 to MC-B32 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A11 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers |
-| Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with and without bid confirmation |
-| Goal | MC-L01 to MC-L09 | `profit_stop` confirmation, capital base, `accumulate` completion, `on_complete`, end date |
+| Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
+| Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |
 | Change | MC-C01 to MC-C35 | Every classification row, including rule addition, removal, and reordering |
 
 ## 12. Open questions
@@ -668,6 +697,7 @@ and `fuzz.py` asserts the invariants of §1.1.
    risk-increasing (DEC-47).
 5. Additional sizing methods (partial trims, volatility scaling) and rule fields (event windows,
    minutes to close, spread).
-6. Whether small passive limit exits may rest in the close window instead of deferring.
+6. **Close-window deferral (OD-10):** a discretionary exit deferred at 15:51 can become an
+   overnight hold, and may not recur at the open if its outputs have expired.
 7. A crypto-spot disclosure, and an acceptable-use rule on material nonpublic information for
    user-supplied data feeds.

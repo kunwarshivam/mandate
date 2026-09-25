@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema version 1 (spec Draft v0.3). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
+  "description": "Binding agent specification, schema version 1 (spec Draft v0.4). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [
