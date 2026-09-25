@@ -11,12 +11,16 @@
 //! Canonical JSON for everything that gets hashed ([journal spec §4](../../../docs/specs/journal.md#4-canonical-serialization),
 //! ADR-0001 ES-07): a strict parser, a value tree sorted by key bytes, a writer, the journal decimal
 //! grammar, and SHA-256. `serde_json` never touches bytes that get hashed.
-//!
-//! API stubs for the E5-1 tests PR (DEC-77); the implementation PR replaces the bodies.
 
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
 use std::fmt;
+
+use sha2::Digest as _;
+
+mod dec;
+mod parse;
+mod write;
 
 /// Largest integer the canonical form admits (journal spec §4.4).
 pub const MAX_INT: u64 = (1 << 53) - 1;
@@ -78,8 +82,15 @@ impl Value {
 pub struct Key(String);
 
 impl Key {
-    pub fn new(_key: &str) -> Result<Self, InvalidKey> {
-        Err(InvalidKey)
+    pub fn new(key: &str) -> Result<Self, InvalidKey> {
+        let mut bytes = key.bytes();
+        let first_ok = bytes.next().is_some_and(|b| b.is_ascii_lowercase());
+        let rest_ok = bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if first_ok && rest_ok && key.len() <= 64 {
+            Ok(Self(key.to_owned()))
+        } else {
+            Err(InvalidKey)
+        }
     }
 
     pub fn as_str(&self) -> &str {
@@ -108,8 +119,8 @@ pub struct InvalidKey;
 pub struct Int(u64);
 
 impl Int {
-    pub fn new(_n: u64) -> Option<Self> {
-        None
+    pub fn new(n: u64) -> Option<Self> {
+        (n <= MAX_INT).then_some(Self(n))
     }
 
     pub fn get(self) -> u64 {
@@ -120,16 +131,15 @@ impl Int {
 /// Parses JSON text strictly: duplicate keys, floats, integers outside `0 ..= 2^53 − 1`, keys
 /// outside the key grammar, lone surrogates, invalid UTF-8, and trailing data are all rejected.
 /// Insignificant whitespace is accepted; use [`to_canonical`] to compare forms.
-pub fn parse(_input: &[u8]) -> Result<Value, ParseError> {
-    Err(ParseError {
-        kind: ParseErrorKind::Syntax,
-        offset: 0,
-    })
+pub fn parse(input: &[u8]) -> Result<Value, ParseError> {
+    parse::parse(input)
 }
 
 /// The canonical bytes of `value` (journal spec §4, RFC 8785).
-pub fn to_canonical(_value: &Value) -> Vec<u8> {
-    Vec::new()
+pub fn to_canonical(value: &Value) -> Vec<u8> {
+    let mut out = Vec::new();
+    write::write(value, &mut out);
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -187,8 +197,8 @@ pub struct DecStr(String);
 impl DecStr {
     /// Normalizes `input` (exponent removed, leading and trailing zeros and a trailing point
     /// removed, `-0` → `0`). Values outside the bounds or not parseable are rejected, never rounded.
-    pub fn parse(_input: &str) -> Result<Self, DecError> {
-        Err(DecError::Syntax)
+    pub fn parse(input: &str) -> Result<Self, DecError> {
+        dec::normalize(input).map(Self)
     }
 
     pub fn as_str(&self) -> &str {
@@ -233,8 +243,12 @@ impl Digest {
     }
 
     /// The digest of the concatenation of `parts`.
-    pub fn of_parts(_parts: &[&[u8]]) -> Self {
-        Self::ZERO
+    pub fn of_parts(parts: &[&[u8]]) -> Self {
+        let mut hasher = sha2::Sha256::new();
+        for part in parts {
+            hasher.update(part);
+        }
+        Self(hasher.finalize().into())
     }
 
     pub fn from_bytes(bytes: [u8; 32]) -> Self {
@@ -246,8 +260,18 @@ impl Digest {
     }
 
     /// Accepts exactly 64 lowercase hex characters.
-    pub fn from_hex(_hex: &str) -> Option<Self> {
-        None
+    pub fn from_hex(hex: &str) -> Option<Self> {
+        if hex.len() != 64 {
+            return None;
+        }
+        let mut out = [0u8; 32];
+        let (pairs, _) = hex.as_bytes().as_chunks::<2>();
+        for (byte, [hi, lo]) in out.iter_mut().zip(pairs) {
+            *byte = hex_value(*hi)?
+                .checked_mul(16)?
+                .checked_add(hex_value(*lo)?)?;
+        }
+        Some(Self(out))
     }
 
     pub fn to_hex(&self) -> String {
@@ -256,7 +280,15 @@ impl Digest {
 }
 
 impl fmt::Display for Digest {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.iter().try_for_each(|b| write!(f, "{b:02x}"))
+    }
+}
+
+fn hex_value(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => c.checked_sub(b'0'),
+        b'a'..=b'f' => c.checked_sub(b'a')?.checked_add(10),
+        _ => None,
     }
 }
