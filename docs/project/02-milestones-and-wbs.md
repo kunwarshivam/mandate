@@ -70,6 +70,7 @@ flowchart TD
 
 | Gate | Criteria | Sign-off |
 |---|---|---|
+| Tier 1 specs | Trading domain (v0.8), journal (v0.2), and mandate (v0.5) specs with their reference cases approved | Founder: **passed 2026-09-25** (DEC-71) |
 | Phase 0 exit | M1–M4 exit criteria met | Founder |
 | Phase 1 exit | M5–M7 exit criteria met; Alpaca paper soak report reviewed | Founder |
 | Phase 2 exit | PRD release criteria; design partners onboarded | Founder, counsel (terms) |
