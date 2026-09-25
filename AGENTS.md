@@ -111,13 +111,14 @@ agent needs the same correction twice, put the rule on the highest rung that can
 
 1. **Unrepresentable:** types, private fields, and crate boundaries (`xtask/layers.toml`).
 2. **Checked:** clippy lints, xtask checks, and CI. Today these include debt markers
-   (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a pending story,
+   and plain comments (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a
+   pending story,
    feature-map drift, and mutants on the diff of safety-critical crates.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
 Leave the code in a state you would want the next agent to copy: one paved path per task, no
-workarounds explained in comments, and debt either fixed or recorded in the backlog.
+workarounds, and debt either fixed or recorded in the backlog.
 
 ## Getting it right the first time (specs and safety-critical design)
 
@@ -176,7 +177,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   order paths.
 - Timestamps are UTC with nanosecond precision.
 - Imports at the top of files; no inline imports.
-- Comments explain constraints the code cannot show, not what the next line does.
+- No plain comments (`//`, `/* */`) in Rust code (DEC-80). Put the reason in a name, a type, a
+  test, an assertion message, or the item's doc comment (`///`, `//!`); `cargo xtask markers`
+  enforces it.
 - Commits: imperative, descriptive subject lines; one logical change per commit.
 
 ## Do not

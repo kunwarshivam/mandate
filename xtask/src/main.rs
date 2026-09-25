@@ -24,6 +24,7 @@ commands:
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
+/// The two required checks (DEC-76), so each pays the setup cost once.
 const FAST_JOB: [&str; 3] = ["lint", "test", "spec-guard"];
 const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "mutants"];
 const PR_JOBS: [&str; 7] = [
@@ -194,7 +195,6 @@ fn ci(job: &str) -> Result<()> {
         }
         "spec-guard" => spec_guard(),
         "mutants" => mutants(),
-        // The two required checks (DEC-76): each pays the setup cost once.
         "fast" => {
             for part in FAST_JOB {
                 ci(part)?;
@@ -220,8 +220,6 @@ fn ci(job: &str) -> Result<()> {
         other => bail!("unknown CI job: {other}"),
     }
 }
-
-// ---------------------------------------------------------------- processes
 
 fn sh(program: &str, args: &[&str]) -> Result<()> {
     eprintln!("    $ {program} {}", args.join(" "));
@@ -285,8 +283,6 @@ fn repo_root() -> Result<PathBuf> {
         .context("xtask has no parent directory")
 }
 
-// ---------------------------------------------------------------- cargo metadata
-
 #[derive(Deserialize)]
 struct Metadata {
     packages: Vec<Package>,
@@ -336,8 +332,6 @@ fn workspace_has_library() -> Result<bool> {
         .iter()
         .any(|p| p.targets.iter().any(|t| t.kind.iter().any(|k| k == "lib"))))
 }
-
-// ---------------------------------------------------------------- layers
 
 #[derive(Deserialize)]
 struct Layers {
@@ -443,15 +437,13 @@ fn layers() -> Result<()> {
     report(problems, "layers")
 }
 
-// ---------------------------------------------------------------- dependency registry
-
+/// Rows of `docs/dependencies.md` shaped `| `name` | ecosystem | ...`.
 fn registry() -> Result<BTreeSet<(String, String)>> {
     let text =
         fs::read_to_string("docs/dependencies.md").context("reading docs/dependencies.md")?;
     let mut entries = BTreeSet::new();
     for line in text.lines() {
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        // | `name` | ecosystem | ...
         if let [_, name, ecosystem, ..] = cells.as_slice()
             && let Some(name) = name.strip_prefix('`').and_then(|n| n.strip_suffix('`'))
         {
@@ -524,8 +516,6 @@ fn deps() -> Result<()> {
     report(problems, "deps")
 }
 
-// ---------------------------------------------------------------- reference-case fixtures
-
 fn refcases(write: bool) -> Result<()> {
     if write {
         return uv_tools(&[
@@ -571,12 +561,9 @@ fn refcases(write: bool) -> Result<()> {
     report(problems, "refcases")
 }
 
-// ---------------------------------------------------------------- trust ladder
-//
-// Each check below turns a correction agents needed more than once into a failing build
-// (AGENTS.md, "The trust ladder").
-
-/// Debt markers get copied as precedent; `#[ignore]` without a pending story hides a test forever.
+/// Debt markers get copied as precedent, `#[ignore]` without a pending story hides a test forever,
+/// and plain comments become the justification agents copy for workarounds (AGENTS.md, "The trust
+/// ladder"; DEC-80).
 fn markers() -> Result<()> {
     eprintln!("    markers: checking for debt markers and unexplained #[ignore]");
     let debt = [
@@ -602,6 +589,12 @@ fn markers() -> Result<()> {
         let Ok(text) = fs::read_to_string(file) else {
             continue;
         };
+        for n in plain_comment_lines(&text) {
+            problems.push(format!(
+                "{file}:{n}: plain comment; put the reason in a name, a type, a test, an assertion \
+                 message, or the item's doc comment (DEC-80)"
+            ));
+        }
         for (n, line) in (1..).zip(text.lines()) {
             for word in debt.iter().filter(|w| contains_word(line, w)) {
                 problems.push(format!(
@@ -616,6 +609,107 @@ fn markers() -> Result<()> {
         }
     }
     report(problems, "markers")
+}
+
+/// Line numbers (1-based) where a plain `//` or `/* */` comment starts, skipping doc comments
+/// (`///`, `//!`, `/** */`, `/*! */`) and anything inside string, raw-string, or char literals.
+fn plain_comment_lines(src: &str) -> Vec<usize> {
+    let chars: Vec<char> = src.chars().collect();
+    let at = |i: usize| chars.get(i).copied();
+    let is_ident = |c: Option<char>| c.is_some_and(|c| c.is_alphanumeric() || c == '_');
+    let raw_prefix = |before: Option<char>, before_that: Option<char>| {
+        !is_ident(before) || (before == Some('b') && !is_ident(before_that))
+    };
+    let mut found = Vec::new();
+    let (mut i, mut line) = (0, 1);
+    while let Some(c) = at(i) {
+        match (c, at(i + 1)) {
+            ('\n', _) => line += 1,
+            ('/', Some('/')) => {
+                let doc =
+                    (at(i + 2) == Some('/') && at(i + 3) != Some('/')) || at(i + 2) == Some('!');
+                if !doc {
+                    found.push(line);
+                }
+                while at(i).is_some_and(|c| c != '\n') {
+                    i += 1;
+                }
+                continue;
+            }
+            ('/', Some('*')) => {
+                let doc =
+                    (at(i + 2) == Some('*') && at(i + 3) != Some('/')) || at(i + 2) == Some('!');
+                if !doc {
+                    found.push(line);
+                }
+                let mut depth = 0usize;
+                while let Some(c) = at(i) {
+                    match (c, at(i + 1)) {
+                        ('/', Some('*')) => {
+                            depth += 1;
+                            i += 1;
+                        }
+                        ('*', Some('/')) => {
+                            depth -= 1;
+                            i += 1;
+                            if depth == 0 {
+                                i += 1;
+                                break;
+                            }
+                        }
+                        ('\n', _) => line += 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                continue;
+            }
+            ('r', _)
+                if raw_prefix(i.checked_sub(1).and_then(at), i.checked_sub(2).and_then(at)) =>
+            {
+                let mut j = i + 1;
+                while at(j) == Some('#') {
+                    j += 1;
+                }
+                if at(j) == Some('"') {
+                    let closing: Vec<char> = std::iter::once('"')
+                        .chain(std::iter::repeat_n('#', j - i - 1))
+                        .collect();
+                    i = j + 1;
+                    while i < chars.len() && !chars[i..].starts_with(&closing) {
+                        if chars[i] == '\n' {
+                            line += 1;
+                        }
+                        i += 1;
+                    }
+                    i += closing.len();
+                    continue;
+                }
+            }
+            ('"', _) => {
+                i += 1;
+                while let Some(c) = at(i) {
+                    match c {
+                        '\\' => i += 1,
+                        '"' => break,
+                        '\n' => line += 1,
+                        _ => {}
+                    }
+                    i += 1;
+                }
+            }
+            ('\'', Some('\\')) => {
+                i += 2;
+                while at(i).is_some_and(|c| c != '\'') {
+                    i += 1;
+                }
+            }
+            ('\'', Some(_)) if at(i + 2) == Some('\'') => i += 2,
+            _ => {}
+        }
+        i += 1;
+    }
+    found
 }
 
 fn contains_word(line: &str, word: &str) -> bool {
@@ -744,10 +838,9 @@ fn mutated_source_dirs() -> Result<Vec<String>> {
     Ok(dirs)
 }
 
-// ---------------------------------------------------------------- spec guard
-
+/// The commit a change is compared against. An all-zero `MANDATE_BASE_REF` is what a forge sends
+/// for a branch's first push, meaning there is no base.
 fn base_ref() -> Option<String> {
-    // An all-zero SHA is what a forge sends for a branch's first push: there is no base.
     if let Ok(base) = env::var("MANDATE_BASE_REF")
         && !base.is_empty()
     {
@@ -822,7 +915,29 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{backticked_paths, classify, contains_dec_id, contains_word, is_pending_marker};
+    use super::{
+        backticked_paths, classify, contains_dec_id, contains_word, is_pending_marker,
+        plain_comment_lines,
+    };
+
+    #[test]
+    fn finds_plain_comments_but_not_docs_or_literals() {
+        let src = concat!(
+            "//! crate docs\n",
+            "/// item docs\n",
+            "fn f() {} // trailing\n",
+            "let url = \"https://example.com\"; let c = '/'; let r = r#\"a // b\"#;\n",
+            "//// four slashes is a plain comment\n",
+            "/* block */ let x = 1;\n",
+            "/** doc block */ /*! inner doc */\n",
+            "fn g<'a>(s: &'a str) -> char { '\\'' } // after lifetimes\n",
+            "let s = \"escaped \\\" // still a string\";\n",
+            "/* outer /* nested */ still comment */ let y = 2;\n",
+            "let b = b\"bytes // here\"; let e = br#\"raw \" // bytes\"#;\n",
+            "let w = wr\"not raw\"; // counted\n",
+        );
+        assert_eq!(plain_comment_lines(src), [3, 5, 6, 8, 10, 12]);
+    }
 
     #[test]
     fn debt_markers_match_whole_words_only() {

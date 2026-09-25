@@ -63,10 +63,10 @@ pub fn merkle_root(leaves: &[AnchorLeaf]) -> Option<Digest> {
     root_of(&hashes)
 }
 
+/// With no leaves, `split_at_checked` fails and the root is `None`.
 fn root_of(hashes: &[Digest]) -> Option<Digest> {
     match hashes {
         [single] => Some(*single),
-        // No leaves: `split_at_checked` below returns `None`.
         _ => {
             let mut split = 1usize;
             while split.checked_mul(2)? < hashes.len() {
