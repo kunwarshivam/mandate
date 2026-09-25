@@ -1,9 +1,12 @@
 # Playbook: change a spec, schema, reference case, or the reference implementation
 
-These paths are protected (ES-22) and founder-owned. A change needs a DEC and ships without code.
+These paths are protected (ES-22). A change needs a DEC and ships without code. Agents accept the
+DEC themselves unless it weakens an approved safety invariant, which is reserved for the founder
+(DEC-79).
 
-1. Separate decisions from defects. List design choices for the founder before drafting; fix only
-   defects without asking. After an external review, fix only blockers and majors (freeze rule).
+1. Separate decisions from defects. List the design choices before drafting and record each per
+   `SKILL.md` ("Decide, record, continue"). After an external review, fix only blockers and majors
+   (freeze rule).
 2. Write or update the invariants first, then the rules (AGENTS.md "Getting it right the first
    time").
 3. Make every new claim a test in `reference/mandate/`, with an independent oracle shown to fail

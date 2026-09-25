@@ -43,6 +43,6 @@ exist.
 3. A test only counts if it fails without the change. For a new check or oracle, plant the bug it
    should catch, show it failing, and revert.
 4. Safety-critical code: `cargo xtask ci mutants` with zero missed mutants. An equivalent mutant is
-   excluded only in `.cargo/mutants.toml`, with its reason, for the founder to approve.
+   excluded only in `.cargo/mutants.toml`, with its reason, which the review agent checks.
 5. Changes to the reference-case harness (`mandate-refcases`) are proven by seeding bugs in the
    code it tests and showing the expected case fails; mutating the harness itself proves nothing.

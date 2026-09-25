@@ -8,7 +8,8 @@ Instructions for AI coding agents working in this repository. Humans: see
 Mandate is a platform for deploying autonomous trading agents that trade on users' own
 exchange and brokerage accounts, bound by an enforceable mandate, escalating to a human when
 unsure, and recording every decision. It is built by the founder working with AI coding
-agents. The founder approves every merge.
+agents. Agents land their own changes once they pass CI and an independent agent review; the
+founder reviews after the fact and can revert (DEC-79).
 
 ## Sources of truth
 
@@ -43,8 +44,10 @@ stop and ask; do not silently pick one.
 8. **Never place real orders.** Use broker paper environments (Alpaca paper), venue demo
    environments, and local fixtures only. Never ask for, read, or use live credentials or
    production secrets.
-9. **Accepted decisions are binding.** To deviate, stop and propose a new decision-log entry
-   for the founder instead of implementing the deviation.
+9. **Accepted decisions are binding.** To deviate, write a new decision-log entry. Agents accept
+   reversible engineering and process decisions themselves and proceed; decisions reserved for the
+   founder (DEC-79: live money, spending, legal and compliance text, weakening a safety rule) stay
+   Proposed while agents continue with the most conservative option.
 10. **Enforce US account rules.** Day-trading regime, settlement, market-hours, eligibility,
     market-conduct, and account-restriction rules are part of the risk gate, not optional checks
     ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate)).
@@ -68,8 +71,9 @@ stop and ask; do not silently pick one.
 
 ## Safety-critical paths
 
-Changes here require tests written or verified against founder-approved reference cases
-before implementation, and always receive line-by-line founder review:
+Changes here require tests written or verified against approved reference cases before
+implementation, and before merge an independent review by an agent on a different model, zero
+missed mutants, and green CI (DEC-79):
 
 - Accounting (positions, cash, fees, corporate actions, settlement, funding, P&L)
 - Risk gate, US account rules, eligibility, market-conduct controls, drawdown ladder, kill switches
@@ -94,7 +98,7 @@ before implementation, and always receive line-by-line founder review:
 ## Working with agents
 
 Start non-trivial work with the `mandate-mode` skill (`.cursor/skills/mandate-mode/SKILL.md`): it
-picks the playbook, lists the gates that always need the founder, and routes to the pstack and
+picks the playbook, lists the few decisions reserved for the founder, and routes to the pstack and
 cursor-team-kit plugins, which `.cursor/settings.json` enables for this repository. Prove work with
 the `verify-mandate` skill; its feature map says which code, tests, and commands cover each
 feature. Where a plugin skill conflicts with this file, this file wins.
@@ -110,7 +114,7 @@ agent needs the same correction twice, put the rule on the highest rung that can
    (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a pending story,
    feature-map drift, and mutants on the diff of safety-critical crates.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
-4. **Reviewed:** the PR template and the founder's review, which is the last resort, not the plan.
+4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
 
 Leave the code in a state you would want the next agent to copy: one paved path per task, no
 workarounds explained in comments, and debt either fixed or recorded in the backlog.
@@ -129,7 +133,7 @@ safety-critical design for review.
 | **Cross-spec contracts not traced.** The agent flatten reused the account-wide kill switch (cancel-all, close-position); units differed (basis points vs fraction); two specs gave different outcomes for the same limit | **Trace every reference.** For each rule that relies on another spec, read that section and confirm scope, units, and outcome match; update both sides in the same change |
 | **Lifecycles not finished.** Nothing said what happens after a flatten, after a goal completes, after an acknowledgment, or at a time boundary | **Walk every state to its exit.** For each state and limit: how it is entered, what it blocks, how it ends, who can end it, and what happens at session close, midnight, restart, and version change |
 | **No adversary.** Order splitting, redeploying to reset limits, deposits to lift rungs, one bad tick, and a model outage enlarging orders were all found by reviewers | **Attack it yourself.** Before review, list how a careless user, a bad model, a malicious insider, and a bad market tick could exceed intended risk or imply platform advice; each must be blocked or disclosed |
-| **Decisions hidden inside drafts, and scope creep.** About a third of each round were design choices only the founder can make, and each round added features that became new surface | **Separate decisions from defects.** List open design choices for the founder before drafting. While fixing findings, add no features; propose them separately |
+| **Decisions hidden inside drafts, and scope creep.** About a third of each round were design choices only the founder can make, and each round added features that became new surface | **Separate decisions from defects.** List open design choices before drafting and record each in the decision log (agents decide all but those DEC-79 reserves for the founder). While fixing findings, add no features; propose them separately |
 | **Tests that pass while checking nothing.** Fuzz checks that reused the implementation's own predicate, or reset their own timer on every bounce, could not catch the regressions they named | **Independent oracles.** A property test computes the expected result its own way (a separate accumulator, state derived from journaled events), and each oracle is shown to fail on a seeded bug before it is trusted |
 
 **Before external review:**
