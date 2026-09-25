@@ -96,18 +96,19 @@ instructions for creating a trading-only key; rejections are journaled without s
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, done condition, instruments, connection, behavior, advisors, cadence, risk, autonomy, notifications) | P0 |
+| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting only values the user stated ([mandate spec §7](../specs/mandate.md#7-compiler-dec-45)) | P0 |
 | FR-3.2 | Edit the mandate in a form and as YAML; both stay in sync | P0 |
-| FR-3.3 | Validate against org and workspace limits before saving | P0 |
+| FR-3.3 | Validate against platform, org, and workspace policy before saving | P0 |
 | FR-3.4 | Show a plain-language summary of the compiled mandate for confirmation | P0 |
 | FR-3.5 | Mandates are versioned; deployments pin a version; diffs between versions are viewable | P0 |
-| FR-3.6 | Goal types: accumulate/distribute, return target under risk limits, maintain exposure | P0 (accumulate, return target), P1 (exposure) |
-| FR-3.7 | Advisor library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision-model advisor | P0 quant, P1 LLM and fast model |
-| FR-3.8 | Templates for common mandates | P1 |
+| FR-3.6 | Goal types: continuous, accumulate, profit stop (a stopping level, not a target); maintain exposure later ([DEC-46](../project/04-decision-log.md#decisions)) | P0 (continuous, accumulate, profit stop), P2 (exposure) |
+| FR-3.7 | Signal-model library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision model. Parameters have no defaults; documentation describes methodology only ([DEC-52](../project/04-decision-log.md#decisions)) | P0 quant, P1 LLM and fast model |
+| FR-3.8 | Templates for common mandate structures (which fields and rules are present, never values) | P1 |
 
 **Acceptance criteria (FR-3.1, FR-3.4):** for a set of reference descriptions, the compiled
-mandate matches the intended fields, and every field the compiler inferred rather than read
-from the description is highlighted for review and **stays inactive until the user confirms it**
+mandate contains exactly the values the description states, each with its quoted source; every
+judgment field the description does not state is **left blank for the user to enter**, and no
+field is active until the user confirms it
 ([DEC-33](../project/04-decision-log.md#decisions)).
 
 ### 6.4 Backtest and paper trading
@@ -126,16 +127,16 @@ from the description is highlighted for review and **stays inactive until the us
 |---|---|---|
 | FR-5.1 | Agents run continuously until stopped, a date, or the done condition | P0 |
 | FR-5.2 | Autonomy policy classifies each proposed action as AUTO, ASK, or DENY per the mandate | P0 |
-| FR-5.3 | Independent risk gate enforces position, leverage, daily-loss, and drawdown limits on every order | P0 |
-| FR-5.4 | Drawdown ladder: configurable rungs (for example, halve sizes → exits only → flatten and notify) | P0 |
-| FR-5.5 | Risk-reducing actions never require approval | P0 |
+| FR-5.3 | Independent risk gate enforces position, order-size, exposure, order-count, cooldown, daily-loss, drawdown, and lifetime-loss limits ([mandate spec §5](../specs/mandate.md#5-risk-state-and-limits)) | P0 |
+| FR-5.4 | Drawdown ladder: user-set rungs (for example, halve sizes → exits only → flatten and pause) with breach confirmation; lifting exits-only or flatten requires owner acknowledgment and resets the high-water mark; a lifetime loss floor is never reset ([DEC-44, DEC-49](../project/04-decision-log.md#decisions)) | P0 |
+| FR-5.5 | Risk-reducing actions never require approval; discretionary exits are paced by conduct controls ([DEC-48](../project/04-decision-log.md#decisions)) | P0 |
 | FR-5.6 | Order intents are journaled before sending, with idempotency keys | P0 |
 | FR-5.7 | On restart, the agent replays its journal, reconciles with the exchange, and resumes; unexplained differences pause the agent and alert the owner | P0 |
 | FR-5.8 | Protective exits rest at the broker as OCO or bracket orders (regular session only for equities), with defined exit and kill-switch sequences ([DEC-28](../project/04-decision-log.md#decisions)) | P0 |
 | FR-5.12 | Opening orders are limit orders within a price collar, in the regular session only; market orders only for risk-reducing exits in the regular session; no short sales; no overnight trading ([DEC-29, DEC-30, DEC-32, DEC-37](../project/04-decision-log.md#decisions)) | P0 |
 | FR-5.13 | Instrument eligibility floor and market-conduct controls enforced by the risk gate ([DEC-31](../project/04-decision-log.md#decisions); [spec §3.2, §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)) | P0 |
 | FR-5.14 | Account restrictions and trading halts are checked before every order; restrictions switch all agents on the account to exits-only or pause them | P0 |
-| FR-5.9 | Calibrated confidence per advisor, updated from realized outcomes | P1 |
+| FR-5.9 | Calibration (post-v1): a user-selected, versioned method; every change journaled and treated as a risk-increasing mandate change. v1 has fixed user-set weights ([DEC-47](../project/04-decision-log.md#decisions)) | P2 |
 | FR-5.10 | **US market rules enforced by the risk gate:** day-trading rules for the broker's regime (Alpaca: intraday margin; legacy rules for other brokers), 1× buying power with no debit (margin accounts may reuse unsettled proceeds; cash accounts use settled cash only), sessions, auction windows, and halts. Exact rules: [trading domain spec §9](../specs/trading-domain.md#9-risk-gate) | P0 |
 | FR-5.11 | Flag potential wash sales to the user in reports (informational, not tax advice) | P2 |
 
@@ -152,11 +153,11 @@ step of order submission, no order is ever duplicated and every position is reco
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-6.1 | Triggers: confidence below threshold, rule requires approval, order above size threshold, unusual market input | P0 |
-| FR-6.2 | Approval request contains the agent's proposed action, the mandate rule it follows, evidence, risk impact, deadline, and default; never platform-authored alternatives ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
+| FR-6.1 | Triggers are the user's autonomy rules (for example, combined score below a threshold, order or daily buying above a size, unusual market input); orders the gate would deny are never sent for approval | P0 |
+| FR-6.2 | Approval request contains the agent's proposed action, the mandate rule that triggered it, model outputs with authorship, the combined score labeled as not a probability of profit, the deadline, and the default (skip); never platform-authored alternatives or profit estimates ([DEC-33](../project/04-decision-log.md#decisions)) | P0 |
 | FR-6.3 | Channels: web push, email, SMS, Slack or Telegram; escalation chain with quiet hours | P0 (web push, email, one chat), P1 (SMS, phone call) |
 | FR-6.4 | Notifications carry only an opaque ID and generic text; details load from the workspace deployment | P0 |
-| FR-6.5 | Before executing an approved action, re-validate price and risk drift; re-ask or apply default if beyond tolerance | P0 |
+| FR-6.5 | An approval binds quantity, limit price, and mandate version; the gate re-runs before executing and skips on deny | P0 |
 | FR-6.6 | On timeout, apply the safe default | P0 |
 | FR-6.7 | Two-approver rule above a configurable threshold | P1 |
 | FR-6.8 | The agent continues managing other positions while an approval is pending | P0 |
@@ -183,7 +184,7 @@ instrument, size, price, or thesis.
 | FR-8.1 | Dashboard: agents, state, positions, P&L, open approvals, recent decisions | P0 |
 | FR-8.2 | Pause, resume, stop per agent; kill switch per workspace and per connection | P0 |
 | FR-8.3 | Alerts: risk rung reached, reconciliation mismatch, data feed stale, agent paused | P0 |
-| FR-8.4 | Per-advisor scorecards (hit rate, calibration) | P1 |
+| FR-8.4 | Per-signal-model scorecards (hit rate, calibration measurement) for the user's review; they never change weights | P1 |
 
 ### 6.9 Deployment
 
@@ -206,7 +207,7 @@ instrument, size, price, or thesis.
 | Area | Requirement |
 |---|---|
 | Safety | Zero orders outside the mandate in all tests; kill switches take effect within one decision cycle |
-| Latency | Risk gate and order path add under 1 ms; fast-decision advisors respond within their configured deadline or are skipped |
+| Latency | Risk gate and order path add under 1 ms; fast decision models respond within their configured deadline or are skipped |
 | Reliability | Zero duplicate orders under fault injection; agents recover automatically after restart |
 | Security | Credentials never leave the vault; step-up auth for sensitive actions; per-workspace encryption keys |
 | Privacy | In hybrid mode, no mandate, approval, journal, or credential content reaches the global control plane |

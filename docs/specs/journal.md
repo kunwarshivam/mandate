@@ -40,7 +40,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 | Stream type | `stream_id` | Owner (single writer) | Contents |
 |---|---|---|---|
 | Account | `acct:{workspace_id}:{account_ref}` | The account's executor (trading spec §7.1); the risk gate is a pure library it calls | Intents received, gate decisions, orders, fills, fees, cash, settlement, corporate actions, reconciliation, account state, restrictions, protection changes, copies of gating facts from other streams |
-| Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, advisor opinions, decisions, intents proposed, approvals, agent mode changes |
+| Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
 | Workspace control | `ctl:{workspace_id}` | Workspace control services | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments and alerts, surveillance reports, anchors, verification, records lifecycle, access and export |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
 
@@ -49,8 +49,12 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **No global order** across streams. Relationships use `causation_id` and `correlation_id`;
   cross-stream displays sort by `recorded_at` for readability only.
 - **Cross-stream facts are copied by the owner** into the consuming stream with a `causation_id`:
-  the executor writes `AgentModeApplied` (from `AgentModeChanged`) and `TradingDayStarted` and time-
-  driven events (from the scheduler) into the account stream. A user's kill switch is a **command**
+  the executor writes `AgentModeApplied` (from the agent stream's `AgentModeChanged`) and
+  `TradingDayStarted`, `RiskDayStarted`, and time-driven events (from the scheduler) into the
+  account stream. A mode change that **originates** on the account stream (account restrictions,
+  mandate risk limits) is journaled there first as `AgentModeApplied`, and the agent runtime
+  copies it into the agent stream as `AgentModeChanged`; the `causation_id` always points to the
+  originating event. A user's kill switch is a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
   environment.
@@ -87,7 +91,7 @@ The canonical form is JSON per **RFC 8785** (JCS), with these constraints that m
 implementation-independent:
 
 1. **Keys** match `^[a-z][a-z0-9_]{0,63}$` (so code-point and UTF-16 ordering agree). Maps keyed by
-   data (for example, advisor weights) are encoded as arrays of `{key, value}` sorted by key bytes.
+   data (for example, signal-model weights) are encoded as arrays of `{key, value}` sorted by key bytes.
 2. **Presence:** envelope fields and schema-declared payload fields are always present, `null` when
    empty. Map-valued objects (such as `config_refs`) omit absent keys and never contain `null`.
    Empty collections are `[]` or `{}`, never `null`. Schemas use `required` and
@@ -96,7 +100,7 @@ implementation-independent:
    lowercase `\u00xx` otherwise; `/`, U+007F, U+2028, U+2029, and all non-ASCII characters are raw
    UTF-8; no Unicode normalization. **Lone surrogates are rejected** at ingest.
 4. **Integers** only for listed fields (`envelope_version`, `seq`, `schema_version`, `attempt`,
-   counts), in `0 … 2^53 − 1`, no leading zeros. **Money, quantities, and prices are never integers.**
+   counts and whole-second durations declared as integers in a schema), in `0 … 2^53 − 1`, no leading zeros. **Money, quantities, and prices are never integers.**
 5. **Booleans** are `true` / `false`. **Floating-point numbers are rejected.**
 6. **Decimals are strings** matching `^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$`, excluding `-0`, with at
    most 28 fractional digits and absolute value below 7.9 × 10²⁸. Inputs are normalized (exponent
@@ -268,8 +272,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged` | — | status, flags, reject code and message, restriction |
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
-| `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | copies of gating facts (with `causation_id`); kill-switch scope and initiator |
-| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted` | man | agent risk state ([mandate spec §5.5](mandate.md#55-journal-events)): versions and allocation change; day-start equity; limit, action, E, H, drawdown, E₀ |
+| `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
+| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, contributed capital; reset evidence; released positions |
 
 **Agent stream** (owner: agent runtime)
 
@@ -278,20 +282,20 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
-| `AdvisorOpinionRecorded` | man | advisor, version, instrument, signal, conviction, horizon, thesis (artifact) |
-| `DecisionMade` | man | proposed action, confidence, advisor weights, autonomy classification |
+| `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, conviction, confidence, horizon, thesis (artifact); `ignored` reason if not used |
+| `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID) |
-| `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut` | man | content shown (artifact), channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result |
+| `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut`, `ApprovalCanceled` | man | content shown (artifact), bound quantity, limit price, and mandate version, cancel reason, channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
 
 **Workspace control stream** (owner: workspace services)
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
-| `MandateVersionCreated`, `MandateConfirmed` | — | source text (artifact), compiled fields, inferred fields, diff, confirming user (opaque) |
+| `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-45-dec-51): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
 | `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
-| `DisclosureAccepted` | — | document and version hash, user (opaque) |
+| `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |

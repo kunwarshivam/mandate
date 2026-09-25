@@ -2,13 +2,21 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.4: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.5: requires founder approval before implementation (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.5:** alignment with [mandate spec v0.2](mandate.md) and
+  [DEC-44 to DEC-52](../project/04-decision-log.md#decisions). Agent-scoped kill switch cancels and
+  sells only the agent's orders and sub-ledger quantity (§5.5); exits split into risk exits and
+  discretionary exits, with discretionary exits paced by conduct controls and a new close-window
+  control (§9.6, verdict `defer`); the gate assigns purpose from side and position (§9.1);
+  triggered-stop watchdog (§5.4); crypto stop-limit offset is the mandate fraction; instrument
+  groups for claims (§7.1); mandate order-count limit denies while platform rate limits switch to
+  `exits_only` (§9.7). Reference cases: RC-25; exit purposes in existing cases are `risk_exit`.
 - **v0.4:** third three-role review (all "approve with changes"; all 24 cases recomputed
   exactly). Consistency fixes, no new decisions: when exits may be held (principle 4); order-
   constraint exemptions for risk-reducing orders at first gate decision; exit price ladder
@@ -38,19 +46,20 @@
    from broker APIs or effective-dated configuration, never code.
 3. **Unknown means stop.** An unrecognized corporate action, status, account condition, or data
    fault pauses the affected agents and alerts the owner.
-4. **Conservative when in doubt,** except that **risk reduction is never blocked by conduct
-   controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Exits and
-   protective orders may be held only by agent mode `paused` or `stopped` (state integrity), by an
-   `Unknown` order in the same instrument, or by the broker. **The kill switch is always
-   available** and uses the broker's cancel-all and close-position endpoints without depending on
-   model state.
+4. **Conservative when in doubt,** except that **risk reduction is never denied by conduct
+   controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Risk exits,
+   protective orders, and the kill switch are exempt from all of them; discretionary exits (signal
+   or goal driven) are paced by conduct controls but never denied (§9.6). Exits and protective
+   orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
+   order in the same instrument, or by the broker. **The kill switch is always available** and
+   does not depend on model state (§5.5).
 5. **Mandate does not choose instruments, strategy, sizing, or limits**
    ([DEC-38](../project/04-decision-log.md#decisions)). These come from user-confirmed mandate
-   fields; advisors are tools the user selects. Platform defaults only restrict trading. Inferred
-   mandate fields are inactive until confirmed. Templates never ship with platform-chosen
-   instruments or parameters. Calibration changes autonomy only within user-approved bounds, and
-   each change is journaled. Approval requests show the agent's proposal and the mandate rule it
-   follows, not platform-authored alternatives.
+   fields; signal models are tools the user selects, and the user selects the sizing method. The
+   compiler only extracts values the user stated; unstated judgment fields stay blank until the
+   user enters them ([mandate spec §7](mandate.md#7-compiler-dec-45)). Templates set structure,
+   never values. There is no calibration in v1. Approval requests show the agent's proposal and the
+   mandate rule it follows, not platform-authored alternatives.
 
 ## 2. Conventions
 
@@ -278,10 +287,14 @@ protective legs are checked against position + entry quantity.
 - **Fractional positions:** only the whole-share part can be protected; the fraction is
   unprotected and disclosed.
 - Protection triggers in the regular session only (stops do not trigger in extended hours).
+- **Triggered-stop watchdog:** if a sane risk mark has been at or below a resting stop's stop price
+  for `stop_watchdog_s` (default 60 seconds) in a session where the stop can trigger, with no fill,
+  or is below a stop-limit's limit price, the executor cancels it, confirms, and exits the held
+  quantity through the exit price ladder (§5.6) as a `risk_exit`, and alerts the owner.
 
 **Crypto (simple orders only):**
 
-- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `crypto_stop_limit_offset_bps`).
+- One **GTC stop-limit sell** for the whole position; limit = stop × (1 − `crypto_stop_limit_offset`), the mandate's fraction.
 - Take-profit is managed by the runtime (it watches price and submits a marketable exit when the
   target is reached), not a resting order.
 - **Adds and exits:** cancel the stop-limit → confirm → submit the order → after a terminal state,
@@ -291,11 +304,18 @@ protective legs are checked against position + entry quantity.
 
 ### 5.5 Kill switch
 
-Cancel all open orders in scope (broker cancel-all endpoint; `Unknown` orders included) → confirm
-→ close all positions in scope (close-position endpoint; market orders only in the regular session
+| Scope | Cancel | Close |
+|---|---|---|
+| Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
+| Agent (user kill switch, `flatten_and_pause`, lifetime floor) | Only the agent's orders, by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+
+Sequence: apply the final mode first (agent scope: the mode the initiator sets, `paused` for mandate
+limits; otherwise `stopped`) → cancel → confirm → close (market orders only in the regular session
 outside auction windows with current status data; otherwise the exit price ladder in §5.6) →
-journal each step → agent mode `stopped`. The kill switch never waits for approval, does not
-depend on model state, and is exempt from §9.6.
+journal each step. **Equity sells outside the regular session wait for the regular session**,
+with protection left in place; crypto sells go immediately. Kill-switch orders are `risk_exit`,
+are exempt from the agent's mode and from §9.6, never wait for approval, and do not depend on model
+state.
 
 ### 5.6 Exit pricing
 
@@ -468,7 +488,12 @@ source.
 
 - One ledger per broker account, owned by one serialized executor; all account-level rules use it.
   Agents submit intents; they never call the broker.
-- **One agent per instrument per account** (`instrument_claimed` on deployment).
+- **One agent per instrument group per account** (`instrument_claimed` on deployment). An
+  **instrument group** joins instruments with the same economic exposure: share classes of one
+  issuer (GOOG, GOOGL), funds tracking the same index (SPY, VOO, IVV), and a crypto asset with its
+  spot ETPs (BTC/USD, IBIT, FBTC). Groups come from the effective-dated instrument snapshot
+  (config `ins`); an ungrouped instrument is its own group. A claim is held until the agent is flat
+  in every instrument of the group.
 - An agent may cancel only its own orders, with one exception: before a risk-reducing order, the
   **related-accounts coordinator** cancels resting opposite-side *opening* orders in that
   instrument across the owner's related-accounts group (§9.6) and waits for confirmation.
@@ -530,6 +555,9 @@ activity unless they carry a fill.
 | `exits_only` | Risk-reducing and protective orders only |
 | `paused` | No new orders except re-placing protection before expiry; resting protective orders stay; the kill switch still works |
 | `stopped` | Terminal (after the kill switch or a stop); no orders |
+
+An agent's mode is the strictest of its active restrictions, each lifting independently
+([mandate spec §5.9](mandate.md#59-restrictions-and-the-effective-mode)).
 
 ## 8. Accounting
 
@@ -628,17 +656,25 @@ including allows, is journaled with the checks evaluated.
 
 1. Account status (§7.3) → agent mode (§7.4)
 2. Eligibility floor (§3.2, in list order), concentration (§3.3, including the mandate
-   per-instrument position limit), then mandate order size
-   ([mandate spec §5.2](mandate.md#52-position-exposure-order-size-and-order-count))
+   per-instrument position limit), mandate order size, then re-entry cooldown
+   ([mandate spec §5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown))
 3. Session, auction window, and halt (§4.3, §4.4)
 4. Order constraints (§5.3, in list order)
 5. Mark freshness and price collar (§8.2, §9.6)
-6. Market-conduct controls (§9.6, including the mandate's orders per day)
+6. Market-conduct controls (§9.6, including the close window and the mandate's orders per day)
 7. Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate
    limit)
 8. Day-trade budget (§9.2)
 
 Reason codes are registered in the reference-case file.
+
+**Purpose is assigned by the gate** from side and position, never taken from the proposer: a buy is
+`open` or `increase`; a sell of at most the agent's position is an exit, typed by its originating
+component (`risk_exit` from the risk engine, kill switch, and stop watchdog; `discretionary_exit`
+from the order builder, goal completion, removed instruments, and owner closes); protective orders
+are `protective`. A sell above the position is denied (`would_cross_zero`). **Verdicts** are
+`allow`, `deny`, or `defer` (discretionary exits only: re-evaluated at the next evaluation or
+when the deferring condition ends; never converted to a deny).
 
 ### 9.2 Day-trading regime
 
@@ -688,8 +724,11 @@ the order is terminal**, then is released.
 
 ### 9.6 Market-conduct controls ([DEC-31](../project/04-decision-log.md#decisions))
 
-**These controls restrict opening and increasing orders only. They never block risk-reducing
-orders, protective orders, or the kill switch;** oversize exits are sliced, never denied.
+**These controls deny opening and increasing orders. Risk exits, protective orders, and the kill
+switch are exempt. Discretionary exits are paced, never denied:** the collar prices them, the
+participation caps slice them (remaining slices continue in later intervals or on later days), the
+close window and sessions defer them (verdict `defer`). Equity discretionary exits run in the
+regular session only ([DEC-48](../project/04-decision-log.md#decisions)).
 
 | Control | Default |
 |---|---|
@@ -700,6 +739,7 @@ orders, protective orders, or the kill switch;** oversize exits are sliced, neve
 | Daily participation vs 20-day average daily volume | ≤ 5% |
 | Order-to-fill ratio per agent per instrument per day: orders ÷ max(fills, 1), evaluated after ≥ 20 orders; exit-sequence and kill-switch cancels excluded | ≤ 10; breach → agent `exits_only` |
 | No opening order within 60 seconds after an opposite-side fill in the same instrument | 60 seconds |
+| **Close window:** no opening orders (`close_window`, deny) and no discretionary exits (`close_window`, defer) in the last minutes of the regular session; no market-on-close or limit-on-close orders | 10 minutes (15:50–16:00 ET on full days; the last 10 minutes on early-close days) |
 | **Self-trade prevention across related accounts:** opening orders are blocked if an opposite-side order rests in the same instrument in any account of the owner-declared related-accounts group (organization level; default: all accounts in the workspace) | On |
 
 **Surveillance report:** generated daily per workspace (self-trade checks, order-to-fill ratios,
@@ -709,8 +749,11 @@ responsible for reviewing their reports.
 
 ### 9.7 Order-rate limits
 
-Per-agent and per-account limits on orders per second and per day, within broker limits; breaches
-switch the agent to `exits_only` (risk-reducing orders continue).
+Platform per-agent and per-account limits on orders per second and per day, within broker
+limits; breaches switch the agent to `exits_only` (restriction `rate_limit`; risk-reducing orders
+continue). The mandate's `max_orders_per_day` is separate: it denies the order
+(`max_orders_per_day`) without changing the mode
+([mandate spec §5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown)).
 
 ### 9.8 Wash sales (informational)
 
@@ -770,7 +813,7 @@ The [journal spec](journal.md) defines the envelope, storage, hashing, and repla
 | `ClockAdvanced`, `TradingDayStarted`, `SettlementPosted`, `DividendPaid` | `advance_clock` (emits every due event in due order) |
 | `CorporateActionPrepared`, `CorporateActionApplied`, `CashInLieuPosted` | `corporate_action_prepare`, `corporate_action_applied`, `broker_cash_posting` |
 | `BrokerPositionObserved`, `ReconciliationRun`, `CompensatingEvent` | `broker_position_update`, reconciliation |
-| `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged`, `AgentModeApplied` (account-stream copy of the agent stream's `AgentModeChanged`) | `broker_account_update`, `broker_order_update` (reject) |
+| `AccountStateObserved`, `RejectObserved`, `AccountRestrictionChanged`, `AgentModeApplied` (copied from the agent stream's `AgentModeChanged`, or originated here for account restrictions and mandate risk limits; journal spec §2) | `broker_account_update`, `broker_order_update` (reject) |
 | `ExternalActivityIngested`, `OwnerAcknowledged` | `broker_order_update` (external), `owner_ack` |
 | `ConductBreachDetected` | `conduct_breach` |
 | `AgentDeployed`, `DeploymentRejected`, `KillSwitchActivated`, `ConfigSnapshotRegistered` | `deploy_agent`, `kill_switch`, configuration changes |
@@ -825,6 +868,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 | RC-22 | Conduct controls: collar on aggressiveness only; exemptions for exits; exits-only on breach | Gate |
 | RC-23 | Fractionable split residual; non-terminating adjusted mark | Accounting |
 | RC-24 | Exit price ladder in extended hours; presumed-halt variant | Executor |
+| RC-25 | Close window and sessions: openings denied, discretionary exits deferred, risk exits allowed | Gate |
 
 ## 15. Open questions
 

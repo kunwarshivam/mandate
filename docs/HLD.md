@@ -121,34 +121,43 @@ flowchart LR
 ### The agent spec
 
 Users describe an agent in plain language or through a form. An LLM **compiles** the
-description into a structured spec, which the user reviews and approves. The spec is the
-contract: the agent cannot act outside it.
+description into a structured spec, extracting only values the user stated; the user enters any
+judgment field left blank and confirms every one. The spec is binding: the agent cannot act
+outside it. The exact format is the [mandate spec](specs/mandate.md); an abbreviated example:
 
 ```yaml
-agent: btc-accumulator
-goal:
-  objective: "Accumulate 2 BTC at an average price below $58k"
-  done_when: position >= 2 BTC            # or: forever | a date | a return target
-universe: [BTC/USD]
-connection: conn_alpaca_paper
+name: btc-accumulator
+environment: paper
+connection_id: conn_alpaca_paper_01
+capital: { allocation_usd: "10000", max_loss_from_allocation: "0.1" }
+goal: { type: accumulate, instrument: BTC/USD, target_qty: "0.15", max_avg_price: "58000",
+        max_spend_usd: "9000", end_date: "2026-12-31" }   # or: continuous | profit_stop
+universe: { instruments: [BTC/USD], leveraged_etps_enabled: false }
 behavior:
-  description: "Buy dips, avoid trading 30 min around major macro news"
-  advisors: [quant.mean_reversion, fast.news_materiality, llm.research]
-  cadence: event-driven + every 15 min
-risk:   { max_position_usd: 150000, max_leverage: 1, max_daily_loss_pct: 2, max_drawdown_pct: 8 }
+  description: "Buy dips; avoid trading 30 minutes around major macro releases."
+  signal_models: [{ id: quant.mean_reversion, version: 1.0.0, weight: "1", params: [...] }]
+  cadence: { interval_s: 900, event_sources: [news, price] }
+  sizing: { method: conviction_linear, entry_threshold: "0.3", exit_threshold: "0.3", rebalance_band: "0.05" }
+protection: { enabled: true, stop_distance: "0.08", crypto_stop_limit_offset: "0.005" }
+risk: { max_position_usd: "10000", max_order_usd: "1000", max_daily_loss: "0.02", max_drawdown: "0.08",
+        drawdown_ladder: [...], breach_confirm_s: 60, reentry_cooldown_s: 3600, ... }
 autonomy:
-  auto: [reduce_risk, orders_below_usd: 5000]
-  ask:  [orders_above_usd: 5000, confidence_below: 0.65, unusual_market_input]
-  on_timeout: { after: 10m, default: skip }   # the default is always the safe option
-notify: { approvers: [role:approver], channels: [push, sms, email], quiet_hours: "23:00-07:00" }
+  rules:                                   # first match wins; risk reduction is always automatic
+    - { id: large_orders, when: { field: order_usd, op: gt, value: "900" }, then: ask }
+    - { id: low_score, when: { field: combined_score, op: lt, value: "0.65" }, then: ask }
+    - { id: routine, when: { field: purpose, op: in, value: [increase, open] }, then: auto }
+  default: ask
+  approval: { timeout_s: 600, on_timeout: skip, approvers: [role:approver] }   # timeout always skips
+notifications: { channels: [email, web_push], quiet_hours: { start: "23:00", end: "07:00" } }
 ```
 
 Goal types the spec supports:
 
-- **Accumulate / distribute** a position within price and time constraints.
-- **Return target** under risk limits (e.g. target return with a maximum drawdown).
-- **Mandate** (hedge, rebalance, or maintain an exposure).
-- **Event-driven** (act on defined event classes such as earnings, filings, or macro releases).
+- **Continuous:** trade the universe until stopped or an end date.
+- **Accumulate** a position within quantity, spend, average-price, and time constraints.
+- **Profit stop:** trade the universe and stop, flat, when agent return reaches a user-set level
+  (a stopping level, not a target).
+- Later: maintain an exposure (hedge, rebalance) and event-driven goals.
 
 ---
 
@@ -303,14 +312,14 @@ flowchart TB
     per["Perception<br/>market data · news ·<br/>account events · timers"]
     mem["Memory<br/>positions · theses ·<br/>track records"]
 
-    subgraph ADV["Advisors"]
+    subgraph ADV["Signal models"]
         direction TB
         quant["Quant models<br/>in-process"]
         fast["Fast decision models<br/>Laya in-process · Jev via gateway"]
         llm["LLM research<br/>async, never blocks"]
     end
 
-    dec["Decider<br/>weights by track record,<br/>sizes, proposes action<br/>+ confidence"]
+    dec["Order builder<br/>user-selected sizing,<br/>clips to limits, proposes<br/>action + combined score"]
     pol{"Autonomy<br/>policy"}
     esc["Escalation manager<br/>durable wait"]
     deny["Denied"]
@@ -336,9 +345,9 @@ flowchart TB
 | Component | Responsibility |
 |---|---|
 | Perception | Subscribes to market data, news, account events, and timers; fills and position updates from the broker arrive here, closing the loop |
-| Memory | Positions, theses (why each position exists and what would invalidate it), advisor track records, lessons |
-| Advisors | Produce opinions in a common signal format: quant models, fast decision models, LLM research |
-| Decider | Weights advisors by earned track record, sizes positions from calibrated confidence, proposes an action |
+| Memory | Positions, theses (why each position exists and what would invalidate it), signal-model track records, lessons |
+| Signal models | Produce outputs in a common format (conviction, confidence, horizon, thesis): quant models, fast decision models, LLM research. They never place orders |
+| Order builder | Combines model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score |
 | Autonomy policy | Classifies each proposed action as AUTO, ASK, or DENY according to the spec |
 | Escalation manager | Creates approval requests, waits durably, applies responses or safe defaults |
 | Risk gate | Independent code on the execution path that enforces the policy hierarchy |
@@ -428,8 +437,8 @@ flowchart TD
 ### B. Decision cycle
 
 1. An event arrives: price move, news, fill, or timer.
-2. Advisors produce opinions.
-3. The decider proposes an action with a confidence level.
+2. Signal models produce outputs.
+3. The order builder proposes an action with a combined score.
 4. The autonomy policy classifies it as AUTO, ASK, or DENY.
 5. The risk gate checks it.
 6. The executor places the order. Every step is journaled with links to its causes.
@@ -438,8 +447,8 @@ flowchart TD
 sequenceDiagram
     autonumber
     participant S as Event source
-    participant A as Advisors
-    participant D as Decider
+    participant A as Signal models
+    participant D as Order builder
     participant P as Autonomy policy
     participant R as Risk gate
     participant E as Executor
@@ -447,9 +456,9 @@ sequenceDiagram
     participant J as Journal
 
     S->>A: Price move, news, fill, or timer
-    A->>D: Opinions (signal, conviction, horizon, thesis)
+    A->>D: Outputs (conviction, confidence, horizon, thesis)
     D->>J: Record decision and its inputs
-    D->>P: Proposed action + confidence
+    D->>P: Proposed action + combined score
     alt AUTO
         P->>R: Check against hard limits
         R->>E: Approved
@@ -466,10 +475,12 @@ sequenceDiagram
 
 ### C. Escalation: unsure → ask → wait → act
 
-1. **Triggers:** confidence below threshold, a rule that requires approval, an unusual market
-   input (distribution drift), or a trade too large to take alone.
-2. The runtime creates an **approval request** containing the proposed action, alternatives,
-   supporting evidence, risk impact, deadline, and the default applied on timeout.
+1. **Triggers:** the user's autonomy rules, for example a combined score below a threshold, an
+   order above a size, or an unusual market input (distribution drift). Orders the risk gate would
+   deny are never sent for approval.
+2. The runtime creates an **approval request** containing the proposed action, the rule that
+   triggered it, the model outputs with their authorship, the deadline, and the default applied on
+   timeout (skip). It never contains platform-authored alternatives or profit estimates.
 3. The agent keeps managing everything else while it waits. **Risk-reducing actions stay automatic.**
 4. The **approval service**, which runs in the workspace deployment, sends notifications
    according to user preferences and an escalation chain (push → SMS → phone call), respecting
@@ -481,8 +492,8 @@ sequenceDiagram
    service**, over the customer's VPN or through the relay with end-to-end encryption, so the
    relay cannot read them. The approver authenticates against the customer's identity provider;
    **high-risk approvals require step-up authentication** (passkey or biometrics).
-6. Before executing, the runtime **re-validates** that price and risk have not drifted beyond a
-   tolerance since the request was created. If they have, it re-asks or applies the default.
+6. An approval binds the quantity, limit price, and mandate version. Before executing, the risk
+   gate runs again on current state; if it denies, the action is skipped.
 7. On timeout, the safe default is applied.
 8. Every step is journaled: who approved, when, through which channel, and how they authenticated.
 
@@ -499,8 +510,8 @@ sequenceDiagram
     participant U as Approver's phone
     participant B as Broker
 
-    A->>A: Confidence below threshold, or rule requires approval
-    A->>J: Record approval request (action, alternatives, evidence, risk impact, deadline, default)
+    A->>A: An autonomy rule requires approval
+    A->>J: Record approval request (action, rule, model outputs, deadline, default)
     A->>S: Create approval request (content stays on site)
     S->>L: Notify with opaque ID and generic text only
     L->>U: Push notification
@@ -599,8 +610,9 @@ global switch cannot reach into customer deployments.
   Laya (open-weight decision model), and LLM providers. Handles deadlines, fallbacks, and
   caching, and meters cost per workspace and per agent. Hybrid and on-prem deployments can be
   restricted to **local models only**.
-- **Calibration service:** recalibrates each model's confidence against realized outcomes, per
-  agent. Calibrated confidence is what determines whether an agent is "unsure".
+- **Model scorecards:** measure each signal model's realized hit rate and calibration for the
+  user's review. They never change weights or approval routing; in v1 weights are fixed by the
+  user and there is no calibration ([DEC-47](project/04-decision-log.md#decisions)).
 - **Market data service:** normalized live streams plus a point-in-time historical store.
   Managed deployments ingest once and share; hybrid and on-prem deployments connect directly to venues.
 

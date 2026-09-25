@@ -22,7 +22,7 @@ stop and ask; do not silently pick one.
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
-| What is a mandate, and how are limits, autonomy, and the decider defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [JSON Schema](schemas/mandate.schema.json), and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
+| What is a mandate, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
@@ -47,16 +47,21 @@ stop and ask; do not silently pick one.
 10. **Enforce US account rules.** Day-trading regime, settlement, market-hours, eligibility,
     market-conduct, and account-restriction rules are part of the risk gate, not optional checks
     ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate)).
-11. **Mandate does not choose instruments, strategy, sizing, or limits.** They come from
-    user-confirmed mandate fields; platform defaults may only restrict trading; inferred mandate
-    fields stay inactive until confirmed; templates carry no platform-chosen instruments or
-    parameters.
+11. **Mandate does not choose instruments, strategy, sizing, or limits.** The user enters and
+    confirms every judgment field; the compiler only extracts values the user stated and never
+    proposes instruments, signal models, numbers, or `auto`; platform defaults exist only for the
+    non-judgment fields listed in the mandate spec §7; templates set structure, never values; no
+    calibration in v1.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
     directly; opening orders are limit orders in the regular session; no short sales in v1.
-13. **Risk reduction is never blocked by conduct controls, eligibility, day-trade budgets, buying
-    power, or opening-session rules.** Exits and protective orders may be held only by agent mode
-    `paused` or `stopped`, by an `Unknown` order in the same instrument, or by the broker. The kill
-    switch is always available and does not depend on model state.
+13. **Risk reduction is never denied by conduct controls, eligibility, day-trade budgets, buying
+    power, or opening-session rules.** Risk exits, protective orders, and the kill switch are exempt
+    from all of them. Discretionary exits (signal or goal driven) are paced by conduct controls and,
+    for equities, wait for the regular session, but are never denied. Exits and protective orders
+    may be held only by agent mode `paused` or `stopped`, by an `Unknown` order in the same
+    instrument, or by the broker. The kill switch is always available, touches only its scope (an
+    agent-scoped kill switch never uses cancel-all or close-position), and does not depend on model
+    state.
 
 ## Safety-critical paths
 
