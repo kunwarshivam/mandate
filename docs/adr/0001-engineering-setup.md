@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-72](../project/04-decision-log.md#decisions); ES-24 latency budget [DEC-74](../project/04-decision-log.md#decisions); ES-01, ES-12, ES-13 amended by [DEC-75](../project/04-decision-log.md#decisions): GitHub is the home and GitHub Actions the CI; ES-12 job layout amended by [DEC-76](../project/04-decision-log.md#decisions)) |
+| **Status** | Accepted ([DEC-72](../project/04-decision-log.md#decisions); ES-24 latency budget [DEC-74](../project/04-decision-log.md#decisions); ES-01, ES-12, ES-13 amended by [DEC-75](../project/04-decision-log.md#decisions): GitHub is the home and GitHub Actions the CI; ES-12 job layout amended by [DEC-76](../project/04-decision-log.md#decisions); ES-13 and ES-15 review and merge amended by [DEC-79](../project/04-decision-log.md#decisions): agents merge after CI and an independent agent review) |
 | **Date** | 2026-09-25 |
 | **Deciders** | Engineering panel of three principal engineers (systems and correctness; agent productivity and CI; operations, security, and supply chain), under founder delegation |
 | **Process** | Independent proposals, then one voting round on 14 disputed points. Every decision below is unanimous or a majority that the others accept; no adopted option is one a panelist rejected. Versions were verified on 2026-09-25 |

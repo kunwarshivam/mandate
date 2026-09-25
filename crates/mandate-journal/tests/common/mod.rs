@@ -1,5 +1,8 @@
 //! Draft builders shared by the journal tests.
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "each test crate that includes this module uses a different subset"
+)]
 
 use mandate_canon::{Key, Value, parse, to_canonical};
 use mandate_journal::{AppendOutcome, MemoryJournal, StreamId};
