@@ -211,8 +211,9 @@ pub fn seal(
     prev_hash: Digest,
     recorded_at: UtcNanos,
 ) -> Result<StoredEvent, Invalid> {
-    let seq_value =
-        Int::new(seq).ok_or_else(|| Invalid::new(InvalidReason::NonCanonical, "seq"))?;
+    let seq_value = Int::new(seq)
+        .filter(|_| seq >= 1)
+        .ok_or_else(|| Invalid::new(InvalidReason::NonCanonical, "seq"))?;
     let key = |name: &str| Key::new(name).map_err(|_| Invalid::new(InvalidReason::Schema, name));
     let mut body = draft.fields().clone();
     body.insert(key("seq")?, Value::Int(seq_value));

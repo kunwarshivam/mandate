@@ -509,6 +509,11 @@ fn seal_bounds_and_names() {
         seal(&d, 1 << 53, Digest::ZERO, now()).unwrap_err().reason,
         InvalidReason::NonCanonical
     );
+    assert_eq!(
+        seal(&d, 0, Digest::ZERO, now()).unwrap_err().reason,
+        InvalidReason::NonCanonical,
+        "seq starts at 1 (journal spec §3)"
+    );
     let row = seal(&d, (1 << 53) - 1, Digest::ZERO, now()).unwrap();
     assert_eq!(row.hash, Digest::of(&row.body));
     let names: Vec<&str> = [
