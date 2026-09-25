@@ -4,6 +4,7 @@
 use std::collections::BTreeSet;
 
 use mandate_canon::{Object, Value, parse, to_canonical};
+use mandate_time::UtcNanos;
 
 use crate::schema::{Ty, normalize, normalize_record, parse_digest_ref, payload_schema};
 use crate::{Environment, Invalid, InvalidReason, StreamId, StreamType, catalogue};
@@ -150,6 +151,15 @@ impl Draft {
 
     pub fn environment(&self) -> Environment {
         self.environment
+    }
+
+    /// The payload's `risk_clock`, which every risk input carries (mandate spec §5.2).
+    pub fn risk_clock(&self) -> Option<UtcNanos> {
+        self.fields
+            .get("payload")
+            .and_then(|p| p.get("risk_clock"))
+            .and_then(Value::as_str)
+            .and_then(|t| UtcNanos::parse(t).ok())
     }
 
     /// The canonical bytes of the normalized draft; idempotency compares these (spec §5.1).

@@ -19,6 +19,8 @@ pub(crate) enum Ty {
     Decimal,
     Int,
     Timestamp,
+    /// A timestamp on a whole second: the risk clock (mandate spec §5.2).
+    RiskClock,
     Date,
     /// `sha256:` followed by 64 lowercase hex characters.
     DigestRef,
@@ -28,6 +30,9 @@ pub(crate) enum Ty {
     Record(&'static [(&'static str, Ty)]),
     /// Any object; its values are kept as written.
     OpenObject,
+    /// A record field that may be missing. Only `FillApplied.risk_clock` uses it, while the version 2
+    /// vectors still omit that field (DEC-81); the version 3 vectors make it required.
+    MayBeAbsent(&'static Ty),
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -50,6 +55,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             .map_err(|_| non_canonical()),
         Ty::Int => value.as_int().map(|_| value.clone()).ok_or_else(schema),
         Ty::Timestamp => checked(UtcNanos::parse(text()?).is_ok()),
+        Ty::RiskClock => checked(UtcNanos::parse(text()?).is_ok_and(|t| t.nanos() == 0)),
         Ty::Date => checked(Date::parse(text()?).is_ok()),
         Ty::DigestRef => checked(parse_digest_ref(text()?).is_some()),
         Ty::OneOf(options) => checked(options.contains(&text()?)),
@@ -69,6 +75,7 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             normalize_record(fields, value.as_object().ok_or_else(schema)?, path).map(Value::Object)
         }
         Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
+        Ty::MayBeAbsent(inner) => normalize(inner, value, path),
     }
 }
 
@@ -92,10 +99,13 @@ pub(crate) fn normalize_record(
     }
     let mut out = Object::new();
     for (name, ty) in fields {
-        let (key, value) = object
-            .get_key_value(*name)
-            .ok_or_else(|| Invalid::new(InvalidReason::Schema, join(name)))?;
-        out.insert(key.clone(), normalize(ty, value, &join(name))?);
+        match (object.get_key_value(*name), ty) {
+            (Some((key, value)), _) => {
+                out.insert(key.clone(), normalize(ty, value, &join(name))?);
+            }
+            (None, Ty::MayBeAbsent(_)) => {}
+            (None, _) => return Err(Invalid::new(InvalidReason::Schema, join(name))),
+        }
     }
     Ok(out)
 }
@@ -224,6 +234,7 @@ static FILL_APPLIED_V1: Ty = Ty::Record(&[
     ("qty_gross", Ty::Decimal),
     ("price", Ty::Decimal),
     ("trade_date", Ty::Date),
+    ("risk_clock", Ty::MayBeAbsent(&Ty::RiskClock)),
     (
         "fees",
         Ty::List(&Ty::Record(&[
@@ -240,4 +251,5 @@ static MARK_UPDATED_V1: Ty = Ty::Record(&[
     ("price", Ty::Decimal),
     ("source", Ty::Str),
     ("feed", Ty::Str),
+    ("risk_clock", Ty::RiskClock),
 ]);

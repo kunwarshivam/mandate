@@ -15,7 +15,9 @@ use serde_json::json;
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
-const FIXTURE_VERSION: u64 = 2;
+/// Version 3 adds `risk_clock` to the `FillApplied` vector (DEC-81); version 2 is accepted until
+/// the version 3 vectors land.
+const FIXTURE_VERSIONS: [u64; 2] = [2, 3];
 /// `recorded_at` for appends the vectors do not time.
 const APPEND_TIME: &str = "2026-09-21T14:00:02.000000000Z";
 /// Event IDs for the new drafts the append cases call F and "new GateDecided draft".
@@ -91,7 +93,10 @@ pub fn cases(fixture: &Arc<Json>) -> Vec<Case> {
 }
 
 fn version(fx: &Json, _: &str) -> Result<(), String> {
-    expect_eq("fixture version", u64_at(fx, "version")?, FIXTURE_VERSION)?;
+    let version = u64_at(fx, "version")?;
+    ensure(FIXTURE_VERSIONS.contains(&version), || {
+        format!("fixture version {version} is not one of {FIXTURE_VERSIONS:?}")
+    })?;
     expect_eq("hash algorithm", str_at(fx, "hash_algorithm")?, "sha256")?;
     expect_eq(
         "genesis prev_hash",
@@ -641,6 +646,7 @@ fn draft_f(fx: &Json) -> Result<Json, String> {
                 "price": "150.01",
                 "source": "quote",
                 "feed": "iex",
+                "risk_clock": "2026-09-21T14:00:02.000000000Z",
             }),
         ),
     ] {
