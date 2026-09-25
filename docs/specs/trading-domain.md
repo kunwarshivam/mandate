@@ -2,13 +2,18 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.5: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.6: requires founder approval before implementation (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.6:** alignment with [mandate spec v0.3](mandate.md) and
+  [DEC-53 to DEC-62](../project/04-decision-log.md#decisions): owner exits (`owner_exit`) may sell
+  equities in extended hours through the exit price ladder after the owner confirms the displayed
+  bid; only automated flattens wait for the regular session (§5.5); deferred discretionary exits
+  are not stored, but re-proposed (§9.1). RC-25 gains owner-exit steps.
 - **v0.5:** alignment with [mandate spec v0.2](mandate.md) and
   [DEC-44 to DEC-52](../project/04-decision-log.md#decisions). Agent-scoped kill switch cancels and
   sells only the agent's orders and sub-ledger quantity (§5.5); exits split into risk exits and
@@ -48,8 +53,9 @@
    fault pauses the affected agents and alerts the owner.
 4. **Conservative when in doubt,** except that **risk reduction is never denied by conduct
    controls, eligibility, day-trade budgets, buying power, or opening-session rules.** Risk exits,
-   protective orders, and the kill switch are exempt from all of them; discretionary exits (signal
-   or goal driven) are paced by conduct controls but never denied (§9.6). Exits and protective
+   protective orders, and automated kill switches are exempt from all of them; owner exits are paced
+   only by participation caps; discretionary exits (signal or goal driven) are paced by conduct
+   controls but never denied (§9.6). Exits and protective
    orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
    order in the same instrument, or by the broker. **The kill switch is always available** and
    does not depend on model state (§5.5).
@@ -307,15 +313,20 @@ protective legs are checked against position + entry quantity.
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (user kill switch, `flatten_and_pause`, lifetime floor) | Only the agent's orders, by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
-Sequence: apply the final mode first (agent scope: the mode the initiator sets, `paused` for mandate
-limits; otherwise `stopped`) → cancel → confirm → close (market orders only in the regular session
-outside auction windows with current status data; otherwise the exit price ladder in §5.6) →
-journal each step. **Equity sells outside the regular session wait for the regular session**,
-with protection left in place; crypto sells go immediately. Kill-switch orders are `risk_exit`,
-are exempt from the agent's mode and from §9.6, never wait for approval, and do not depend on model
-state.
+Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
+switch) → cancel → confirm → close (market orders only in the regular session outside auction
+windows with current status data; otherwise the exit price ladder in §5.6) → journal each step.
+
+- **Automated** kill switches (mandate limits) sell equities only in the regular session, leaving
+  protection in place until then; crypto sells go immediately. Their orders are `risk_exit`.
+- **Owner** kill switches and closes are `owner_exit`: outside the regular session they sell
+  equities through the exit price ladder once the owner has confirmed the displayed bid
+  (`OwnerExitRequested`); without that confirmation, equity sells wait for the session.
+- Kill-switch orders are exempt from the agent's mode, never wait for approval, and do not depend on
+  model state. `risk_exit` orders are exempt from §9.6; `owner_exit` orders are paced only by the
+  participation caps.
 
 ### 5.6 Exit pricing
 
@@ -670,11 +681,13 @@ Reason codes are registered in the reference-case file.
 
 **Purpose is assigned by the gate** from side and position, never taken from the proposer: a buy is
 `open` or `increase`; a sell of at most the agent's position is an exit, typed by its originating
-component (`risk_exit` from the risk engine, kill switch, and stop watchdog; `discretionary_exit`
-from the order builder, goal completion, removed instruments, and owner closes); protective orders
-are `protective`. A sell above the position is denied (`would_cross_zero`). **Verdicts** are
-`allow`, `deny`, or `defer` (discretionary exits only: re-evaluated at the next evaluation or
-when the deferring condition ends; never converted to a deny).
+component (`risk_exit` from the risk engine, automated kill switches, `trim_to_target`, and the stop
+watchdog; `discretionary_exit` from the order builder, goal completion, and removed instruments;
+`owner_exit` from the owner's close or kill switch); protective orders are `protective`. A sell
+above the position is denied (`would_cross_zero`). **Verdicts** are `allow`, `deny`, or `defer`
+(discretionary exits only; never converted to a deny). A deferred intent is not stored: the order
+builder proposes again at each evaluation, and at the regular-session open and the end of the close
+window ([mandate spec §6.2](mandate.md#62-evaluation)).
 
 ### 9.2 Day-trading regime
 
@@ -724,8 +737,9 @@ the order is terminal**, then is released.
 
 ### 9.6 Market-conduct controls ([DEC-31](../project/04-decision-log.md#decisions))
 
-**These controls deny opening and increasing orders. Risk exits, protective orders, and the kill
-switch are exempt. Discretionary exits are paced, never denied:** the collar prices them, the
+**These controls deny opening and increasing orders. Risk exits, protective orders, and automated
+kill switches are exempt; owner exits are paced by the participation caps only. Discretionary exits
+are paced, never denied:** the collar prices them, the
 participation caps slice them (remaining slices continue in later intervals or on later days), the
 close window and sessions defer them (verdict `defer`). Equity discretionary exits run in the
 regular session only ([DEC-48](../project/04-decision-log.md#decisions)).
@@ -868,7 +882,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 | RC-22 | Conduct controls: collar on aggressiveness only; exemptions for exits; exits-only on breach | Gate |
 | RC-23 | Fractionable split residual; non-terminating adjusted mark | Accounting |
 | RC-24 | Exit price ladder in extended hours; presumed-halt variant | Executor |
-| RC-25 | Close window and sessions: openings denied, discretionary exits deferred, risk exits allowed | Gate |
+| RC-25 | Close window and sessions: openings denied, discretionary exits deferred, risk exits allowed, owner exits allowed after bid confirmation | Gate |
 
 ## 15. Open questions
 

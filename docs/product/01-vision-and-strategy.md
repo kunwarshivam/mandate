@@ -42,7 +42,7 @@ Autonomous trading is becoming possible, but not trustworthy:
 | Professional individual traders in the US (systematic; stocks and crypto) | v1 design partners | Want agents that trade around the clock with hard limits and a phone ping when it matters |
 | Emerging managers and small funds | v1 design partners | Need autonomy plus approvals, audit, and SSO without building infrastructure |
 | Prop firms, funds, and trading desks | Later | Many agents, strict controls, on-prem deployment, compliance evidence |
-| Retail investors (managed) | Later, after legal review | Simplified agents with conservative presets |
+| Retail investors (managed) | Later, after legal review | The retail policy profile (platform ceilings), education, and disclosures |
 
 See [Personas and journeys](02-personas-and-journeys.md).
 

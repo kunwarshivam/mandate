@@ -16,6 +16,7 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | [Trading domain reference cases](specs/reference-cases/trading-domain.yaml) | Machine-readable worked examples that implementations must reproduce |
 | [Mandate spec](specs/mandate.md) | Mandate structure, validation, policy hierarchy, risk state and limits, autonomy rules, signal models and the order builder, versioning, records |
 | [Mandate JSON Schema](../schemas/mandate.schema.json) | Structural rules for mandate documents (JSON Schema 2020-12) |
+| [Mandate reference implementation](../reference/mandate/ref.py) | Generator, invariant fuzz, and case checks for the mandate spec |
 | [Mandate reference cases](specs/reference-cases/mandate.yaml) | Computed cases for validation, policy, risk state, gate limits, the order builder, autonomy, flatten, goals, and change classification |
 | [Journal spec](specs/journal.md) | Streams, event envelope, canonical serialization, hash chain, storage, replay, verification, export |
 | [Journal test vectors](specs/reference-cases/journal.yaml) | Exact canonical bytes and hashes, plus tamper cases |

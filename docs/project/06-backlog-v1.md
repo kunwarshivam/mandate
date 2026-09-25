@@ -96,14 +96,15 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   trades without supervision.
 - **E6-2 (Must)** As an operator, I want every proposed action classified AUTO, ASK, or DENY
   per the mandate so that autonomy matches my rules. *Accepted when:* mandate reference cases
-  MC-A01 to MC-A11 and MC-B01 to MC-B23 pass.
+  MC-A01 to MC-A11 and MC-B01 to MC-B29 pass.
 - **E6-3 (Must)** As an owner, I want an independent risk gate enforcing all limits so that no
   agent logic can exceed them.
   *Accepted when:* simulation fuzzing across random market paths and mandates never produces
-  an order outside limits; mandate reference cases MC-G01 to MC-G11 and MC-F01 to MC-F02 pass.
+  an order outside limits; the mandate invariants MI-1 to MI-11 hold under property-based tests;
+  mandate reference cases MC-G01 to MC-G13 and MC-F01 to MC-F04 pass.
 - **E6-4 (Must)** As an owner, I want a daily-loss limit and a drawdown ladder so that losses
-  trigger automatic de-risking. *Accepted when:* MC-R01 to MC-R10, MC-T01 to MC-T05, and MC-L01
-  to MC-L07 pass.
+  trigger automatic de-risking. *Accepted when:* MC-R01 to MC-R15, MC-T01 to MC-T05, and MC-L01
+  to MC-L09 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
@@ -175,7 +176,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   cases MC-S, MC-V, and MC-P pass); unstated judgment fields are left blank, never filled.
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
-  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C31 pass.
+  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C35 pass.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
@@ -230,4 +231,4 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 ## Won't (v1)
 
 Retail launch; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
-fully on-prem control plane; shared intelligence plane; strategy marketplace.
+fully on-prem control plane; shared data plane; strategy marketplace.
