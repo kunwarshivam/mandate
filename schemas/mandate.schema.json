@@ -2,79 +2,174 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema version 1 (spec Draft v0.2). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
+  "description": "Binding agent specification, schema version 1 (spec Draft v0.3). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "mandate_schema_version", "name", "source_text_ref", "environment", "connection_id", "capital",
-    "goal", "universe", "behavior", "protection", "risk", "autonomy", "notifications"
+    "mandate_schema_version",
+    "name",
+    "source_text_ref",
+    "environment",
+    "connection_id",
+    "capital",
+    "goal",
+    "universe",
+    "behavior",
+    "protection",
+    "risk",
+    "autonomy",
+    "notifications"
   ],
   "properties": {
-    "mandate_schema_version": { "const": 1 },
-    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
-    "source_text_ref": { "oneOf": [{ "$ref": "#/$defs/content_ref" }, { "type": "null" }] },
-    "environment": { "enum": ["paper", "live"] },
-    "connection_id": { "$ref": "#/$defs/id" },
+    "mandate_schema_version": {
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    },
+    "source_text_ref": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/content_ref"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "environment": {
+      "enum": [
+        "paper",
+        "live"
+      ]
+    },
+    "connection_id": {
+      "$ref": "#/$defs/id"
+    },
     "capital": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allocation_usd", "max_loss_from_allocation"],
+      "required": [
+        "allocation_usd",
+        "max_loss_from_allocation"
+      ],
       "properties": {
-        "allocation_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_loss_from_allocation": { "$ref": "#/$defs/open_fraction" }
+        "allocation_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_loss_from_allocation": {
+          "$ref": "#/$defs/open_fraction"
+        }
       }
     },
-    "goal": { "$ref": "#/$defs/goal" },
+    "goal": {
+      "$ref": "#/$defs/goal"
+    },
     "universe": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["instruments", "leveraged_etps_enabled", "leveraged_etp_disclosure_version"],
+      "required": [
+        "instruments",
+        "leveraged_etps_enabled",
+        "leveraged_etp_disclosure_version"
+      ],
       "properties": {
         "instruments": {
           "type": "array",
           "minItems": 1,
           "maxItems": 50,
-          "items": { "$ref": "#/$defs/instrument_ref" }
+          "items": {
+            "$ref": "#/$defs/instrument_ref"
+          }
         },
-        "leveraged_etps_enabled": { "type": "boolean" },
-        "leveraged_etp_disclosure_version": { "oneOf": [{ "$ref": "#/$defs/content_ref" }, { "type": "null" }] }
+        "leveraged_etps_enabled": {
+          "type": "boolean"
+        },
+        "leveraged_etp_disclosure_version": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/content_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "behavior": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["description", "signal_models", "max_output_age_s", "cadence", "sizing"],
+      "required": [
+        "description",
+        "signal_models",
+        "cadence",
+        "sizing"
+      ],
       "properties": {
-        "description": { "type": "string", "maxLength": 4000 },
+        "description": {
+          "type": "string",
+          "maxLength": 4000
+        },
         "signal_models": {
           "type": "array",
           "minItems": 1,
           "maxItems": 10,
-          "items": { "$ref": "#/$defs/signal_model" }
+          "items": {
+            "$ref": "#/$defs/signal_model"
+          }
         },
-        "max_output_age_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
         "cadence": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["interval_s", "event_sources"],
+          "required": [
+            "interval_s",
+            "event_sources"
+          ],
           "properties": {
-            "interval_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
+            "interval_s": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400
+            },
             "event_sources": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "enum": ["fills", "filings", "news", "price", "schedule"] }
+              "items": {
+                "enum": [
+                  "fills",
+                  "filings",
+                  "news",
+                  "price",
+                  "schedule"
+                ]
+              }
             }
           }
         },
         "sizing": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["method", "entry_threshold", "exit_threshold", "rebalance_band"],
+          "required": [
+            "method",
+            "entry_threshold",
+            "exit_threshold",
+            "rebalance_band"
+          ],
           "properties": {
-            "method": { "const": "conviction_linear" },
-            "entry_threshold": { "$ref": "#/$defs/unit_positive" },
-            "exit_threshold": { "$ref": "#/$defs/unit_positive" },
-            "rebalance_band": { "$ref": "#/$defs/fraction" }
+            "method": {
+              "const": "conviction_linear"
+            },
+            "entry_threshold": {
+              "$ref": "#/$defs/unit_positive"
+            },
+            "exit_threshold": {
+              "$ref": "#/$defs/unit_positive"
+            },
+            "rebalance_band": {
+              "$ref": "#/$defs/fraction"
+            }
           }
         }
       }
@@ -82,67 +177,211 @@
     "protection": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "stop_distance", "take_profit_distance", "crypto_stop_limit_offset"],
+      "required": [
+        "enabled",
+        "stop_distance",
+        "take_profit_distance",
+        "crypto_stop_limit_offset"
+      ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "stop_distance": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] },
-        "take_profit_distance": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
-        "crypto_stop_limit_offset": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "stop_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "take_profit_distance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crypto_stop_limit_offset": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       },
-      "if": { "properties": { "enabled": { "const": true } } },
-      "then": { "properties": { "stop_distance": { "$ref": "#/$defs/open_fraction" } } }
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stop_distance": {
+            "$ref": "#/$defs/open_fraction"
+          }
+        }
+      }
     },
     "risk": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "max_position_usd", "max_position_fraction", "max_gross_exposure_usd", "max_order_usd",
-        "max_orders_per_day", "max_daily_loss", "daily_loss_action", "max_drawdown", "drawdown_ladder",
-        "hysteresis", "breach_confirm_s", "daily_breach_min_s", "scale_lift_after_s", "reentry_cooldown_s"
+        "max_position_usd",
+        "max_position_fraction",
+        "max_gross_exposure_usd",
+        "max_order_usd",
+        "max_orders_per_day",
+        "max_daily_loss",
+        "daily_loss_action",
+        "max_drawdown",
+        "drawdown_ladder",
+        "hysteresis",
+        "breach_confirm_s",
+        "daily_breach_min_s",
+        "scale_lift_after_s",
+        "reentry_cooldown_s",
+        "scale_action"
       ],
       "properties": {
-        "max_position_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_position_fraction": { "$ref": "#/$defs/unit_positive" },
-        "max_gross_exposure_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_order_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_orders_per_day": { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "max_daily_loss": { "$ref": "#/$defs/open_fraction" },
-        "daily_loss_action": { "enum": ["exits_only", "flatten_and_pause"] },
-        "max_drawdown": { "$ref": "#/$defs/open_fraction" },
+        "max_position_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_position_fraction": {
+          "$ref": "#/$defs/unit_positive"
+        },
+        "max_gross_exposure_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_order_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_orders_per_day": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_daily_loss": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "daily_loss_action": {
+          "enum": [
+            "exits_only",
+            "flatten_and_pause"
+          ]
+        },
+        "max_drawdown": {
+          "$ref": "#/$defs/open_fraction"
+        },
         "drawdown_ladder": {
           "type": "array",
           "minItems": 1,
           "maxItems": 5,
-          "items": { "$ref": "#/$defs/ladder_rung" }
+          "items": {
+            "$ref": "#/$defs/ladder_rung"
+          }
         },
-        "hysteresis": { "$ref": "#/$defs/open_fraction" },
-        "breach_confirm_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
-        "daily_breach_min_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
-        "scale_lift_after_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
-        "reentry_cooldown_s": { "type": "integer", "minimum": 0, "maximum": 604800 }
+        "hysteresis": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "breach_confirm_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "daily_breach_min_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "scale_lift_after_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "reentry_cooldown_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 604800
+        },
+        "scale_action": {
+          "enum": [
+            "limit_buys",
+            "trim_to_target"
+          ]
+        }
       }
     },
     "autonomy": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["rules", "default", "approval"],
+      "required": [
+        "rules",
+        "default",
+        "approval"
+      ],
       "properties": {
-        "rules": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/rule" } },
-        "default": { "enum": ["ask", "deny", "auto"] },
+        "rules": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/rule"
+          }
+        },
+        "default": {
+          "enum": [
+            "ask",
+            "deny",
+            "auto"
+          ]
+        },
         "approval": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["timeout_s", "on_timeout", "approvers", "two_approver_above_usd"],
+          "required": [
+            "timeout_s",
+            "on_timeout",
+            "approvers",
+            "two_approver_above_usd"
+          ],
           "properties": {
-            "timeout_s": { "type": "integer", "minimum": 30, "maximum": 86400 },
-            "on_timeout": { "const": "skip" },
+            "timeout_s": {
+              "type": "integer",
+              "minimum": 30,
+              "maximum": 86400
+            },
+            "on_timeout": {
+              "const": "skip"
+            },
             "approvers": {
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^(role:(approver|owner|workspace_admin)|user:[A-Za-z0-9_-]{1,64})$" }
+              "items": {
+                "type": "string",
+                "pattern": "^(role:(approver|owner|workspace_admin)|user:[A-Za-z0-9_-]{1,64})$"
+              }
             },
-            "two_approver_above_usd": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] }
+            "two_approver_above_usd": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/positive_decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
           }
         }
       }
@@ -150,25 +389,49 @@
     "notifications": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["channels", "quiet_hours"],
+      "required": [
+        "channels",
+        "quiet_hours"
+      ],
       "properties": {
         "channels": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["email", "phone", "slack", "sms", "telegram", "web_push"] }
+          "items": {
+            "enum": [
+              "email",
+              "phone",
+              "slack",
+              "sms",
+              "telegram",
+              "web_push"
+            ]
+          }
         },
         "quiet_hours": {
           "oneOf": [
-            { "type": "null" },
+            {
+              "type": "null"
+            },
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["start", "end", "timezone"],
+              "required": [
+                "start",
+                "end",
+                "timezone"
+              ],
               "properties": {
-                "start": { "$ref": "#/$defs/hhmm" },
-                "end": { "$ref": "#/$defs/hhmm" },
-                "timezone": { "const": "America/New_York" }
+                "start": {
+                  "$ref": "#/$defs/hhmm"
+                },
+                "end": {
+                  "$ref": "#/$defs/hhmm"
+                },
+                "timezone": {
+                  "const": "America/New_York"
+                }
               }
             }
           ]
@@ -180,59 +443,165 @@
     "decimal": {
       "type": "string",
       "pattern": "^-?(0|[1-9][0-9]{0,27})(\\.[0-9]{0,27}[1-9])?$",
-      "not": { "const": "-0" }
+      "not": {
+        "const": "-0"
+      }
     },
-    "positive_decimal": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|[1-9][0-9]{0,27}(\\.[0-9]{0,27}[1-9])?)$" },
-    "fraction": { "type": "string", "pattern": "^(0|0\\.[0-9]{0,27}[1-9]|1)$" },
-    "open_fraction": { "type": "string", "pattern": "^0\\.[0-9]{0,27}[1-9]$" },
-    "unit_positive": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|1)$" },
-    "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
-    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
-    "content_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-    "date": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" },
-    "hhmm": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+    "positive_decimal": {
+      "type": "string",
+      "pattern": "^(0\\.[0-9]{0,27}[1-9]|[1-9][0-9]{0,27}(\\.[0-9]{0,27}[1-9])?)$"
+    },
+    "fraction": {
+      "type": "string",
+      "pattern": "^(0|0\\.[0-9]{0,27}[1-9]|1)$"
+    },
+    "open_fraction": {
+      "type": "string",
+      "pattern": "^0\\.[0-9]{0,27}[1-9]$"
+    },
+    "unit_positive": {
+      "type": "string",
+      "pattern": "^(0\\.[0-9]{0,27}[1-9]|1)$"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,64}$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "content_ref": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
+    "hhmm": {
+      "type": "string",
+      "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+    },
     "instrument_ref": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["asset_id", "symbol", "asset_class"],
+      "required": [
+        "asset_id",
+        "symbol",
+        "asset_class"
+      ],
       "properties": {
-        "asset_id": { "$ref": "#/$defs/uuid" },
-        "symbol": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "asset_class": { "enum": ["crypto", "us_equity"] }
+        "asset_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "symbol": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "asset_class": {
+          "enum": [
+            "crypto",
+            "us_equity"
+          ]
+        }
       }
     },
     "signal_model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version", "content_hash", "params", "weight"],
+      "required": [
+        "id",
+        "version",
+        "content_hash",
+        "params",
+        "weight",
+        "max_output_age_s"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^(fast|llm|quant)\\.[a-z0-9_]{1,48}$" },
-        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$" },
-        "content_hash": { "$ref": "#/$defs/content_ref" },
+        "id": {
+          "type": "string",
+          "pattern": "^(fast|llm|quant)\\.[a-z0-9_]{1,48}$"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$"
+        },
+        "content_hash": {
+          "$ref": "#/$defs/content_ref"
+        },
         "params": {
           "type": "array",
           "maxItems": 32,
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["key", "value"],
+            "required": [
+              "key",
+              "value"
+            ],
             "properties": {
-              "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
-              "value": { "anyOf": [{ "$ref": "#/$defs/decimal" }, { "type": "boolean" }, { "type": "string", "maxLength": 200 }] }
+              "key": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "value": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/decimal"
+                  },
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                ]
+              }
             }
           }
         },
-        "weight": { "$ref": "#/$defs/unit_positive" }
+        "weight": {
+          "$ref": "#/$defs/unit_positive"
+        },
+        "max_output_age_s": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        }
       }
     },
     "ladder_rung": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["at", "action", "factor"],
+      "required": [
+        "at",
+        "action",
+        "factor"
+      ],
       "properties": {
-        "at": { "$ref": "#/$defs/open_fraction" },
-        "action": { "enum": ["scale_sizes", "exits_only", "flatten_and_pause"] },
-        "factor": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] }
+        "at": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "action": {
+          "enum": [
+            "scale_sizes",
+            "exits_only",
+            "flatten_and_pause"
+          ]
+        },
+        "factor": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/open_fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
       }
     },
     "goal": {
@@ -240,33 +609,113 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "end_date"],
+          "required": [
+            "type",
+            "end_date",
+            "on_complete"
+          ],
           "properties": {
-            "type": { "const": "continuous" },
-            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+            "type": {
+              "const": "continuous"
+            },
+            "end_date": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/date"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "on_complete": {
+              "enum": [
+                "hold_protected",
+                "release",
+                "disarm_ladder"
+              ]
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "instrument", "target_qty", "max_avg_price", "max_spend_usd", "end_date"],
+          "required": [
+            "type",
+            "instrument",
+            "target_qty",
+            "max_avg_price",
+            "max_spend_usd",
+            "end_date",
+            "on_complete"
+          ],
           "properties": {
-            "type": { "const": "accumulate" },
-            "instrument": { "$ref": "#/$defs/uuid" },
-            "target_qty": { "$ref": "#/$defs/positive_decimal" },
-            "max_avg_price": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
-            "max_spend_usd": { "$ref": "#/$defs/positive_decimal" },
-            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+            "type": {
+              "const": "accumulate"
+            },
+            "instrument": {
+              "$ref": "#/$defs/uuid"
+            },
+            "target_qty": {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            "max_avg_price": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/positive_decimal"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_spend_usd": {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            "end_date": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/date"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "on_complete": {
+              "enum": [
+                "hold_protected",
+                "release",
+                "disarm_ladder"
+              ]
+            }
           }
         },
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "profit_level", "end_date"],
+          "required": [
+            "type",
+            "profit_level",
+            "end_date"
+          ],
           "properties": {
-            "type": { "const": "profit_stop" },
-            "profit_level": { "$ref": "#/$defs/positive_decimal" },
-            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+            "type": {
+              "const": "profit_stop"
+            },
+            "profit_level": {
+              "$ref": "#/$defs/positive_decimal"
+            },
+            "end_date": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/date"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
           }
         }
       ]
@@ -274,43 +723,133 @@
     "rule": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "when", "then"],
+      "required": [
+        "id",
+        "when",
+        "then"
+      ],
       "properties": {
-        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
-        "when": { "$ref": "#/$defs/condition" },
-        "then": { "enum": ["auto", "ask", "deny"] }
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,31}$"
+        },
+        "when": {
+          "$ref": "#/$defs/condition"
+        },
+        "then": {
+          "enum": [
+            "auto",
+            "ask",
+            "deny"
+          ]
+        }
       }
     },
     "condition": {
       "oneOf": [
         {
-          "type": "object", "additionalProperties": false, "required": ["all"],
-          "properties": { "all": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/condition" } } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "all"
+          ],
+          "properties": {
+            "all": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            }
+          }
         },
         {
-          "type": "object", "additionalProperties": false, "required": ["any"],
-          "properties": { "any": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/condition" } } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "any"
+          ],
+          "properties": {
+            "any": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 10,
+              "items": {
+                "$ref": "#/$defs/condition"
+              }
+            }
+          }
         },
         {
-          "type": "object", "additionalProperties": false, "required": ["not"],
-          "properties": { "not": { "$ref": "#/$defs/condition" } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "not"
+          ],
+          "properties": {
+            "not": {
+              "$ref": "#/$defs/condition"
+            }
+          }
         },
         {
-          "type": "object", "additionalProperties": false, "required": ["field", "op", "value"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "field",
+            "op",
+            "value"
+          ],
           "properties": {
             "field": {
               "enum": [
-                "asset_class", "bought_today_usd", "combined_score", "daily_pnl_fraction", "drawdown",
-                "first_trade_in_instrument", "gross_usd_after", "instrument", "order_usd",
-                "position_pnl_fraction", "position_usd_after", "purpose", "session", "unusual_input"
+                "asset_class",
+                "bought_today_usd",
+                "combined_score",
+                "daily_pnl_fraction",
+                "drawdown",
+                "first_trade_in_instrument",
+                "gross_usd_after",
+                "instrument",
+                "order_usd",
+                "position_pnl_fraction",
+                "position_usd_after",
+                "purpose",
+                "session",
+                "unusual_input"
               ]
             },
-            "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"] },
+            "op": {
+              "enum": [
+                "eq",
+                "ne",
+                "gt",
+                "gte",
+                "lt",
+                "lte",
+                "in",
+                "not_in"
+              ]
+            },
             "value": {
               "anyOf": [
-                { "type": "boolean" },
-                { "type": "string", "maxLength": 64 },
-                { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "maxLength": 64 } }
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "maxItems": 50,
+                  "items": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                }
               ]
             }
           }

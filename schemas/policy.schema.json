@@ -5,52 +5,195 @@
   "description": "Platform, organization, or workspace policy (mandate spec §4.3). Every key is optional; an absent key imposes no limit at that level.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["policy_schema_version", "level", "values"],
+  "required": [
+    "policy_schema_version",
+    "level",
+    "values"
+  ],
   "properties": {
-    "policy_schema_version": { "const": 1 },
-    "level": { "enum": ["platform", "organization", "workspace"] },
-    "profile": { "oneOf": [{ "const": "retail" }, { "type": "null" }] },
+    "policy_schema_version": {
+      "const": 1
+    },
+    "level": {
+      "enum": [
+        "platform",
+        "organization",
+        "workspace"
+      ]
+    },
+    "profile": {
+      "oneOf": [
+        {
+          "const": "retail"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "values": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "allocation_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_loss_from_allocation": { "$ref": "#/$defs/open_fraction" },
-        "max_position_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_position_fraction": { "$ref": "#/$defs/unit_positive" },
-        "max_gross_exposure_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_order_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_orders_per_day": { "type": "integer", "minimum": 1, "maximum": 10000 },
-        "max_daily_loss": { "$ref": "#/$defs/open_fraction" },
-        "max_drawdown": { "$ref": "#/$defs/open_fraction" },
-        "breach_confirm_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
-        "max_output_age_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "exit_threshold": { "$ref": "#/$defs/unit_positive" },
-        "stop_distance_max": { "$ref": "#/$defs/open_fraction" },
-        "exits_only_at_max": { "$ref": "#/$defs/open_fraction" },
-        "two_approver_above_usd": { "$ref": "#/$defs/positive_decimal" },
-        "entry_threshold": { "$ref": "#/$defs/unit_positive" },
-        "hysteresis": { "$ref": "#/$defs/open_fraction" },
-        "cadence_interval_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "approval_timeout_s": { "type": "integer", "minimum": 30, "maximum": 86400 },
-        "reentry_cooldown_s": { "type": "integer", "minimum": 0, "maximum": 604800 },
-        "daily_breach_min_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
-        "scale_lift_after_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
-        "leveraged_etps_allowed": { "type": "boolean" },
-        "auto_allowed": { "type": "boolean" },
-        "protection_required": { "type": "boolean" },
-        "independent_approval_required": { "type": "boolean" },
-        "asset_classes": { "$ref": "#/$defs/set", "items": { "enum": ["crypto", "us_equity"] } },
-        "signal_model_types": { "$ref": "#/$defs/set", "items": { "enum": ["fast", "llm", "quant"] } },
-        "goal_types": { "$ref": "#/$defs/set", "items": { "enum": ["accumulate", "continuous", "profit_stop"] } },
-        "channels": { "$ref": "#/$defs/set", "items": { "enum": ["email", "phone", "slack", "sms", "telegram", "web_push"] } }
+        "allocation_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_loss_from_allocation": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "max_position_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_position_fraction": {
+          "$ref": "#/$defs/unit_positive"
+        },
+        "max_gross_exposure_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_order_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "max_orders_per_day": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "max_daily_loss": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "max_drawdown": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "breach_confirm_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300
+        },
+        "max_output_age_s": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "exit_threshold": {
+          "$ref": "#/$defs/unit_positive"
+        },
+        "stop_distance_max": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "exits_only_at_max": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "two_approver_above_usd": {
+          "$ref": "#/$defs/positive_decimal"
+        },
+        "entry_threshold": {
+          "$ref": "#/$defs/unit_positive"
+        },
+        "hysteresis": {
+          "$ref": "#/$defs/open_fraction"
+        },
+        "cadence_interval_s": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 86400
+        },
+        "approval_timeout_s": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 86400
+        },
+        "reentry_cooldown_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 604800
+        },
+        "daily_breach_min_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "scale_lift_after_s": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 86400
+        },
+        "leveraged_etps_allowed": {
+          "type": "boolean"
+        },
+        "auto_allowed": {
+          "type": "boolean"
+        },
+        "protection_required": {
+          "type": "boolean"
+        },
+        "independent_approval_required": {
+          "type": "boolean"
+        },
+        "asset_classes": {
+          "$ref": "#/$defs/set",
+          "items": {
+            "enum": [
+              "crypto",
+              "us_equity"
+            ]
+          }
+        },
+        "signal_model_types": {
+          "$ref": "#/$defs/set",
+          "items": {
+            "enum": [
+              "fast",
+              "llm",
+              "quant"
+            ]
+          }
+        },
+        "goal_types": {
+          "$ref": "#/$defs/set",
+          "items": {
+            "enum": [
+              "accumulate",
+              "continuous",
+              "profit_stop"
+            ]
+          }
+        },
+        "channels": {
+          "$ref": "#/$defs/set",
+          "items": {
+            "enum": [
+              "email",
+              "phone",
+              "slack",
+              "sms",
+              "telegram",
+              "web_push"
+            ]
+          }
+        },
+        "rebalance_band": {
+          "type": "string",
+          "pattern": "^(0|0\\.[0-9]{0,27}[1-9]|1)$"
+        }
       }
     }
   },
   "$defs": {
-    "positive_decimal": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|[1-9][0-9]{0,27}(\\.[0-9]{0,27}[1-9])?)$" },
-    "open_fraction": { "type": "string", "pattern": "^0\\.[0-9]{0,27}[1-9]$" },
-    "unit_positive": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|1)$" },
-    "set": { "type": "array", "uniqueItems": true }
+    "positive_decimal": {
+      "type": "string",
+      "pattern": "^(0\\.[0-9]{0,27}[1-9]|[1-9][0-9]{0,27}(\\.[0-9]{0,27}[1-9])?)$"
+    },
+    "open_fraction": {
+      "type": "string",
+      "pattern": "^0\\.[0-9]{0,27}[1-9]$"
+    },
+    "unit_positive": {
+      "type": "string",
+      "pattern": "^(0\\.[0-9]{0,27}[1-9]|1)$"
+    },
+    "set": {
+      "type": "array",
+      "uniqueItems": true
+    }
   }
 }
