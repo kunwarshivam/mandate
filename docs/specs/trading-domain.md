@@ -2,13 +2,16 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.7: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.8: requires founder approval before implementation (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.8:** discretionary exits are allowed in the close window as marketable limit orders within the
+  collar and participation caps; openings stay blocked and MOC/LOC orders stay banned (§9.6,
+  [DEC-70](../project/04-decision-log.md#decisions); OD-10 resolved).
 - **v0.7:** owner exits confirm a floor price below which the exit price ladder never goes (§5.5,
   [DEC-66](../project/04-decision-log.md#decisions)).
 - **v0.6:** alignment with [mandate spec v0.3](mandate.md) and
@@ -691,8 +694,8 @@ watchdog; `discretionary_exit` from the order builder, goal completion, and remo
 `owner_exit` from the owner's close or kill switch); protective orders are `protective`. A sell
 above the position is denied (`would_cross_zero`). **Verdicts** are `allow`, `deny`, or `defer`
 (discretionary exits only; never converted to a deny). A deferred intent is not stored: the order
-builder proposes again at each evaluation, and at the regular-session open and the end of the close
-window ([mandate spec §6.2](mandate.md#62-evaluation)).
+builder proposes again at each evaluation and at the regular-session open
+([mandate spec §6.2](mandate.md#62-evaluation)).
 
 ### 9.2 Day-trading regime
 
@@ -744,10 +747,10 @@ the order is terminal**, then is released.
 
 **These controls deny opening and increasing orders. Risk exits, protective orders, and automated
 kill switches are exempt; owner exits are paced by the participation caps only. Discretionary exits
-are paced, never denied:** the collar prices them, the
-participation caps slice them (remaining slices continue in later intervals or on later days), the
-close window and sessions defer them (verdict `defer`). Equity discretionary exits run in the
-regular session only ([DEC-48](../project/04-decision-log.md#decisions)).
+are paced, never denied:** the collar prices them, the participation caps slice them (remaining
+slices continue in later intervals or on later days), and in the close window they are sent only
+as marketable limit orders. Equity discretionary exits run in the regular session only; outside it
+they are deferred (verdict `defer`) ([DEC-48, DEC-70](../project/04-decision-log.md#decisions)).
 
 | Control | Default |
 |---|---|
@@ -758,7 +761,7 @@ regular session only ([DEC-48](../project/04-decision-log.md#decisions)).
 | Daily participation vs 20-day average daily volume | ≤ 5% |
 | Order-to-fill ratio per agent per instrument per day: orders ÷ max(fills, 1), evaluated after ≥ 20 orders; exit-sequence and kill-switch cancels excluded | ≤ 10; breach → agent `exits_only` |
 | No opening order within 60 seconds after an opposite-side fill in the same instrument | 60 seconds |
-| **Close window:** no opening orders (`close_window`, deny) and no discretionary exits (`close_window`, defer) in the last minutes of the regular session; no market-on-close or limit-on-close orders | 10 minutes (15:50–16:00 ET on full days; the last 10 minutes on early-close days) |
+| **Close window:** no opening or increasing orders (`close_window`, deny) in the last minutes of the regular session; exits there only as marketable limit orders within the collar and participation caps; no market-on-close or limit-on-close orders ([DEC-70](../project/04-decision-log.md#decisions)) | 10 minutes (15:50–16:00 ET on full days; the last 10 minutes on early-close days) |
 | **Self-trade prevention across related accounts:** opening orders are blocked if an opposite-side order rests in the same instrument in any account of the owner-declared related-accounts group (organization level; default: all accounts in the workspace) | On |
 
 **Surveillance report:** generated daily per workspace (self-trade checks, order-to-fill ratios,
@@ -887,7 +890,7 @@ header defines harness rules (time model, simulated broker, fixture defaults, vo
 | RC-22 | Conduct controls: collar on aggressiveness only; exemptions for exits; exits-only on breach | Gate |
 | RC-23 | Fractionable split residual; non-terminating adjusted mark | Accounting |
 | RC-24 | Exit price ladder in extended hours; presumed-halt variant | Executor |
-| RC-25 | Close window and sessions: openings denied, discretionary exits deferred, risk exits allowed, owner exits allowed after bid confirmation | Gate |
+| RC-25 | Close window and sessions: openings denied in the window, discretionary exits allowed in the window and deferred after hours, risk exits allowed, owner exits allowed after bid confirmation | Gate |
 
 ## 15. Open questions
 

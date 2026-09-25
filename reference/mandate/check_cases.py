@@ -144,7 +144,7 @@ req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after 
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
 req("MC-B21", B["MC-B21"]["autonomy"]["decision"] == "skipped", "dry run")
 req("MC-B22", B["MC-B22"]["gate_dry_run"]["verdict"] == "defer", "defer session")
-req("MC-B23", B["MC-B23"]["gate_dry_run"]["reason"] == "close_window", "defer window")
+req("MC-B23", B["MC-B23"]["gate_dry_run"]["verdict"] == "allow" and B["MC-B23"].get("order_type") == "marketable_limit", "exit in window")
 req("MC-B24", B["MC-B24"]["autonomy"]["decision"] == "deny", "averaging down denied")
 req("MC-B25", B["MC-B25"]["autonomy"]["decision"] == "auto", "re-entry, no averaging rule hit")
 req("MC-B26", "goal" in B["MC-B26"]["clipped_by"] and B["MC-B26"]["qty"] == "0.01", "target clip")
