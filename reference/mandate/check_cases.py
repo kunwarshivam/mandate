@@ -1,0 +1,175 @@
+"""Asserts that every reference case demonstrates what its title claims (AGENTS.md: validate fixtures)."""
+import pathlib
+import yaml
+d = yaml.safe_load(open(pathlib.Path(__file__).resolve().parents[2] / "docs/specs/reference-cases/mandate.yaml"))
+C = {c["id"]: c for c in d["cases"]}
+bad = []
+
+def req(cid, ok, why):
+    if not ok:
+        bad.append((cid, why))
+
+def steps(cid):
+    return [s["expect"] for s in C[cid]["steps"]]
+
+def journ(x):
+    return [(j["type"], j.get("limit"), j.get("reason")) for j in x["journal"]]
+
+for c in d["cases"]:
+    cid, k, e = c["id"], c["kind"], c.get("expect")
+    if k == "schema":
+        req(cid, e["schema_valid"] == (cid == "MC-S01"), "only S01 is valid")
+    if k == "semantic":
+        code = {"V-01": None}
+        t = c["title"].lower()
+        passes = any(w in t for w in ("passes", "exactly equal", "with the accepted", "is fine", "platform defaults on listed",
+                                      "user-entered and confirmed", "with two approvers", "equal to the validation",
+                                      "below the floor budget", "is a warning", "shadowed", "(warning w-003)"))
+        req(cid, (e["violations"] == []) == passes, f"violations {e['violations']} vs title")
+    if k == "policy":
+        t = c["title"].lower()
+        req(cid, e["valid"] == ("equal to" in t or "conforms" in t), "validity vs title")
+        if "nearest" in t:
+            req(cid, e["violations"][0]["limit_level"] == "workspace", "nearest level")
+
+# policy specifics
+req("MC-P05", {v["key"] for v in C["MC-P05"]["expect"]["violations"]} == {"auto_allowed", "signal_model_types"}, "retail violations")
+req("MC-P04", C["MC-P04"]["expect"]["violations"][0]["level"] == "workspace", "workspace itself invalid")
+# semantic specifics
+exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006", "MC-V09": "V-007", "MC-V10": "V-007",
+       "MC-V11": "V-008", "MC-V12": "V-008", "MC-V14": "V-009", "MC-V15": "V-009", "MC-V16": "V-010", "MC-V17": "V-010",
+       "MC-V18": "V-011", "MC-V19": "V-012", "MC-V20": "V-013", "MC-V21": "V-014", "MC-V22": "V-015", "MC-V23": "V-016",
+       "MC-V24": "V-017", "MC-V25": "V-018", "MC-V26": "V-020", "MC-V27": "V-020", "MC-V29": "V-020", "MC-V30": "V-020",
+       "MC-V31": "V-022", "MC-V33": "V-023", "MC-V34": "V-023", "MC-V35": "V-023", "MC-V36": "V-023", "MC-V37": "V-023",
+       "MC-V38": "V-023", "MC-V39": "V-024", "MC-V41": "V-030", "MC-V43": "V-031", "MC-V44": "V-032",
+       "MC-V49": "V-020", "MC-V50": "V-020"}
+for cid, code in exp.items():
+    req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
+req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
+req("MC-V46", "W-001" in C["MC-V46"]["expect"]["warnings"], "W-001")
+req("MC-V47", "W-005" in C["MC-V47"]["expect"]["warnings"], "W-005")
+req("MC-V48", len(C["MC-V48"]["expect"]["violations"]) >= 3, "multiple")
+
+# risk state
+s = steps("MC-R01")
+req("MC-R01", s[1]["size_factor"] == "0.5" and s[4]["size_factor"] == "0.5" and s[5]["size_factor"] == "1", "scale then hysteresis lift at 103 not 102.9")
+req("MC-R01", s[6]["agent_mode"] == "exits_only" and s[7]["agent_mode"] == "paused", "exits_only then flatten")
+s = steps("MC-R02")
+req("MC-R02", s[3]["pending"] == ["drawdown_ladder[1]"] and s[5]["agent_mode"] == "exits_only" and s[4]["agent_mode"] == "normal", "short recovery keeps accumulating")
+s = steps("MC-R03")
+req("MC-R03", s[4]["agent_mode"] == "normal" and s[5]["agent_mode"] == "exits_only", "long recovery restarts: trigger 60 s after 14:03:40")
+s = steps("MC-R04")
+req("MC-R04", s[1]["agent_mode"] == "normal" and ("RiskLimitTriggered", "drawdown_ladder[1]", "hard_trigger") in journ(s[2]), "hard trigger")
+s = steps("MC-R05")
+req("MC-R05", s[2]["agent_mode"] == "normal" and s[3]["agent_mode"] == "exits_only", "confirmed on clock after close")
+s = steps("MC-R06")
+req("MC-R06", ("RiskLimitTriggered", "max_daily_loss", "resolved_at_rollover") in journ(s[2]) and s[3]["agent_mode"] == "exits_only"
+    and s[4]["agent_mode"] == "normal", "resolved at rollover, lifts after min")
+s = steps("MC-R07")
+req("MC-R07", s[3]["agent_mode"] == "exits_only" and s[4]["agent_mode"] == "normal", "lift waits 3600 s")
+s = steps("MC-R08")
+req("MC-R08", ("RiskLimitTriggered", "max_daily_loss", "new_day_breach") in journ(s[3]) and s[4]["agent_mode"] == "exits_only", "renewed")
+s = steps("MC-R09")
+req("MC-R09", s[2].get("error") == "flatten_in_progress" and s[4]["high_water_mark"] == s[4]["agent_equity"]
+    and s[4]["size_factor"] == "0.375", "reject then reset with all scale rungs active")
+req("MC-R09", s[5]["size_factor"] == "0.375" and s[6]["size_factor"] == "0.75" and s[7]["size_factor"] == "0.75" and s[8]["size_factor"] == "1",
+    "higher rung lifts at reset + 600 s (14:20), lower 600 s later (14:30)")
+s = steps("MC-R10")
+req("MC-R10", "lifetime_floor" in s[1]["restrictions"] and s[2].get("error") == "not_acknowledgeable", "floor with carry; not ackable")
+s = steps("MC-R11")
+req("MC-R11", s[1]["restrictions"] == [] and s[1]["drawdown"] == s[0]["drawdown"] and s[2]["drawdown"] == s[0]["drawdown"], "no trip, DD preserved")
+s = steps("MC-R12")
+req("MC-R12", s[2].get("error") == "increase_blocked_while_latched" and s[3].get("error") == "equity_below_exposure", "rejections")
+s = steps("MC-R13")
+req("MC-R13", s[2]["agent_equity"] == s[1]["agent_equity"] and s[2]["instrument_restrictions"] == [] and
+    s[3]["instrument_restrictions"] == ["stale_mark"] and s[4]["instrument_restrictions"] == [] and s[5]["instrument_restrictions"] == ["stale_mark"],
+    "pre-market ignored, failed mark stale, fresh clears, age 120 s stale")
+s = steps("MC-R14")
+req("MC-R14", s[1]["agent_mode"] == "paused" and s[3]["agent_mode"] == "exits_only" and s[4]["agent_mode"] == "normal", "daily flatten ack")
+s = steps("MC-R15")
+req("MC-R15", s[3]["agent_mode"] == "exits_only" and s[3]["restrictions"] == ["drawdown_exits_only"], "stricter holds")
+
+s = steps("MC-R16")
+req("MC-R16", s[0]["agent_mode"] == "exits_only" and s[1]["restrictions"] == ["goal_complete"] and "lifetime_floor" in s[2]["restrictions"],
+    "disarmed ladder and daily; floor armed")
+s = steps("MC-R17")
+req("MC-R17", s[0]["agent_mode"] == "stopped" and any(j["type"] == "PositionReleased" for j in s[0]["journal"]), "released")
+# gate
+for cid, reason in {"MC-G01": "concentration_limit", "MC-G03": "max_order_size", "MC-G04": "gross_exposure_limit",
+                    "MC-G05": "concentration_limit", "MC-G06": "gross_exposure_limit", "MC-G07": "max_orders_per_day",
+                    "MC-G11": "reentry_cooldown", "MC-G12": "reentry_cooldown"}.items():
+    req(cid, C[cid]["expect"]["reason"] == reason, reason)
+req("MC-G05", C["MC-G05"]["expect"]["computed"]["cap"] == "1425", "fraction cap binds")
+req("MC-G06", C["MC-G06"]["expect"]["computed"]["gross_limit"] == "9500", "E caps gross")
+for cid in ("MC-G02", "MC-G08", "MC-G09", "MC-G10", "MC-G13"):
+    req(cid, C[cid]["expect"]["verdict"] == "allow", "allow")
+
+# builder
+B = {cid: C[cid]["expect"] for cid in C if cid.startswith("MC-B")}
+req("MC-B01", B["MC-B01"]["action"] == "buy" and B["MC-B01"]["autonomy"]["decision"] == "auto", "auto open")
+req("MC-B02", B["MC-B02"]["order_usd"] == "300", "factor halves")
+req("MC-B03", B["MC-B03"]["reason"] == "between_thresholds", "hold")
+req("MC-B04", B["MC-B04"]["purpose"] == "discretionary_exit" and B["MC-B04"]["autonomy"]["decision"] == "auto", "exit")
+req("MC-B05", B["MC-B05"]["purpose"] == "increase", "increase")
+req("MC-B06", B["MC-B06"]["action"] == "hold" and B["MC-B06"]["buy_conviction"] < B["MC-B06"]["combined_conviction"], "missing bearish for buys")
+req("MC-B07", B["MC-B07"]["purpose"] == "discretionary_exit", "missing zero for exits")
+req("MC-B08", B["MC-B08"]["autonomy"]["decision"] == "ask", "ask")
+req("MC-B09", B["MC-B09"]["action"] == "buy", "future ignored")
+req("MC-B10", B["MC-B10"]["outputs_used"] == ["llm.news_research"], "old ignored")
+req("MC-B11", B["MC-B11"]["order_usd"] == B["MC-B01"]["order_usd"], "latest wins")
+req("MC-B12", B["MC-B12"]["outputs_used"] == ["quant.momentum"], "wrong version ignored")
+req("MC-B13", B["MC-B13"]["combined_score"] == "0.65" and B["MC-B13"]["autonomy"]["decision"] == "auto", "rounded then compared")
+req("MC-B14", B["MC-B14"]["order_usd"] == "1000" and "limits" in B["MC-B14"]["clipped_by"], "clipped")
+req("MC-B15", B["MC-B15"]["action"] == "hold", "working counted")
+req("MC-B16", B["MC-B16"]["reason"] == "at_or_above_target", "no trim")
+req("MC-B17", B["MC-B17"]["purpose"] == "risk_exit" and B["MC-B17"]["reason"] == "trim_to_target", "trim")
+req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
+req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
+req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
+req("MC-B21", B["MC-B21"]["autonomy"]["decision"] == "skipped", "dry run")
+req("MC-B22", B["MC-B22"]["gate_dry_run"]["verdict"] == "defer", "defer session")
+req("MC-B23", B["MC-B23"]["gate_dry_run"]["reason"] == "close_window", "defer window")
+req("MC-B24", B["MC-B24"]["autonomy"]["decision"] == "deny", "averaging down denied")
+req("MC-B25", B["MC-B25"]["autonomy"]["decision"] == "auto", "re-entry, no averaging rule hit")
+req("MC-B26", "goal" in B["MC-B26"]["clipped_by"] and B["MC-B26"]["qty"] == "0.01", "target clip")
+req("MC-B27", "goal" in B["MC-B27"]["clipped_by"] and B["MC-B27"]["qty"] == "0.005", "avg clip")
+req("MC-B28", B["MC-B28"]["qty"] != "0.01" and "goal" in B["MC-B28"]["clipped_by"], "fees change the clip")
+req("MC-B29", B["MC-B29"]["reason"] == "discretionary_exits_disabled", "no sells")
+# autonomy
+for cid, dec in {"MC-A01": "auto", "MC-A02": "auto", "MC-A03": "auto", "MC-A04": "auto", "MC-A05": "ask", "MC-A06": "ask",
+                 "MC-A07": "auto", "MC-A08": "auto", "MC-A09": "ask", "MC-A10": "ask", "MC-A11": "ask"}.items():
+    req(cid, C[cid]["expect"]["decision"] == dec, dec)
+req("MC-A10", C["MC-A10"]["expect"]["approvers_required"] == 2, "two approvers")
+# flatten
+F = {cid: C[cid]["expect"] for cid in ("MC-F01", "MC-F02", "MC-F03", "MC-F04")}
+for cid, f in F.items():
+    req(cid, f["cancel_client_order_ids"] == ["a-1", "a-2"] and not f["cancel_all_endpoint"] and not f["close_position_endpoint"], "agent scope")
+req("MC-F02", len(F["MC-F02"]["deferred_sells"]) == 1, "equity deferred")
+req("MC-F03", F["MC-F03"]["deferred_sells"] == [] and F["MC-F03"]["purpose"] == "owner_exit", "owner sells now")
+req("MC-F04", len(F["MC-F04"]["deferred_sells"]) == 1, "owner unconfirmed waits")
+# goals
+req("MC-L01", C["MC-L01"]["expect"]["done"] and C["MC-L01"]["expect"]["stop_reason"] == "profit_stop_reached", "done")
+req("MC-L02", not C["MC-L02"]["expect"]["done"] and C["MC-L02"]["expect"]["pending_confirmation"], "pending")
+for cid in ("MC-L03", "MC-L04", "MC-L09"):
+    req(cid, not C[cid]["expect"]["done"], "not done")
+for cid in ("MC-L05", "MC-L06", "MC-L07", "MC-L08"):
+    req(cid, C[cid]["expect"]["done"] and C[cid]["expect"]["then"] == "hold_protected", "done, on_complete")
+# change
+inc = {"MC-C01", "MC-C02", "MC-C04", "MC-C08", "MC-C10", "MC-C12", "MC-C14", "MC-C15", "MC-C17", "MC-C18", "MC-C19", "MC-C20",
+       "MC-C21", "MC-C22", "MC-C24", "MC-C25", "MC-C26", "MC-C29", "MC-C30", "MC-C31", "MC-C33", "MC-C35"}
+red = {"MC-C03", "MC-C05", "MC-C06", "MC-C11", "MC-C13", "MC-C16", "MC-C27", "MC-C28", "MC-C32"}
+neu = {"MC-C07", "MC-C09", "MC-C23"}
+for cid in inc:
+    req(cid, C[cid]["expect"]["classification"] == "risk_increasing", "increasing")
+for cid in red:
+    req(cid, C[cid]["expect"]["classification"] == "risk_reducing", "reducing")
+for cid in neu:
+    req(cid, C[cid]["expect"]["classification"] == "neutral", "neutral")
+req("MC-C34", C["MC-C34"]["expect"]["classification"] == "invalid", "invalid")
+# risk days
+req("MC-T02", C["MC-T02"]["expect"]["length_s"] == 82800, "23 h")
+req("MC-T04", C["MC-T04"]["expect"]["length_s"] == 90000, "25 h")
+
+print("cases", len(C), "title assertion failures", len(bad))
+for b in bad:
+    print(" ", b)

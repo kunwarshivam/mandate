@@ -1,0 +1,1088 @@
+"""Reference implementation of docs/specs/mandate.md (Draft v0.3). Not production code."""
+import copy, hashlib, json, pathlib
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from decimal import Decimal as D, getcontext, ROUND_HALF_EVEN, ROUND_DOWN, ROUND_UP, ROUND_CEILING
+import jsonschema
+
+getcontext().prec = 60
+ROOT = str(pathlib.Path(__file__).resolve().parents[2])
+SCHEMA = json.load(open(f"{ROOT}/schemas/mandate.schema.json"))
+PSCHEMA = json.load(open(f"{ROOT}/schemas/policy.schema.json"))
+jsonschema.Draft202012Validator.check_schema(SCHEMA)
+V = jsonschema.Draft202012Validator(SCHEMA)
+PV = jsonschema.Draft202012Validator(PSCHEMA)
+DEC_V = jsonschema.Draft202012Validator(SCHEMA["$defs"]["decimal"])
+NY = ZoneInfo("America/New_York")
+HARD = D("1.25")
+
+# ------------------------------------------------------------------ numbers and time
+def canon(o):
+    return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+def version(m):
+    return "sha256:" + hashlib.sha256(canon(m).encode()).hexdigest()
+
+def norm(x):
+    x = D(x)
+    if x == 0:
+        return "0"
+    s = format(x, "f")
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+def r12(x):
+    return D(x).quantize(D("1e-12"), rounding=ROUND_HALF_EVEN)
+
+def c12(x):
+    return D(x).quantize(D("1e-12"), rounding=ROUND_CEILING)
+
+def q12(x):
+    return norm(r12(x))
+
+def T(s):
+    assert len(s) == 30 and s.endswith("Z"), s
+    return datetime.strptime(s[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+
+def fmt(dt):
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") + ".000000000Z"
+
+def regular_seconds(t0, t1):
+    """Seconds of the regular session (09:30-16:00 America/New_York, weekdays) in [t0, t1)."""
+    total = 0.0
+    d = t0.astimezone(NY).date()
+    end = t1.astimezone(NY).date()
+    while d <= end:
+        if d.weekday() < 5:
+            o = datetime(d.year, d.month, d.day, 9, 30, tzinfo=NY)
+            c = datetime(d.year, d.month, d.day, 16, 0, tzinfo=NY)
+            lo, hi = max(o, t0), min(c, t1)
+            if hi > lo:
+                total += (hi - lo).total_seconds()
+        d += timedelta(days=1)
+    return total
+
+def risk_day(instant):
+    local = T(instant).astimezone(NY)
+    day = local.date()
+    start = datetime(day.year, day.month, day.day, tzinfo=NY)
+    n = start + timedelta(days=1)
+    nxt = datetime(n.year, n.month, n.day, tzinfo=NY)
+    return {"risk_day": day.isoformat(), "starts_at": fmt(start), "ends_at": fmt(nxt),
+            "length_s": int((nxt.astimezone(timezone.utc) - start.astimezone(timezone.utc)).total_seconds())}
+
+# ------------------------------------------------------------------ JSON Patch (RFC 6902 subset)
+def ptr(path):
+    return [p.replace("~1", "/").replace("~0", "~") for p in path.lstrip("/").split("/")] if path else []
+
+def get(doc, path):
+    for p in ptr(path):
+        doc = doc[int(p)] if isinstance(doc, list) else doc[p]
+    return doc
+
+def apply_patch(doc, patch):
+    doc = copy.deepcopy(doc)
+    for op in patch:
+        parts = ptr(op["path"])
+        parent = doc
+        for p in parts[:-1]:
+            parent = parent[int(p)] if isinstance(parent, list) else parent[p]
+        k = parts[-1]
+        v = copy.deepcopy(op.get("value"))
+        if op["op"] == "replace":
+            if isinstance(parent, list):
+                parent[int(k)] = v
+            else:
+                assert k in parent, op
+                parent[k] = v
+        elif op["op"] == "add":
+            if isinstance(parent, list):
+                parent.append(v) if k == "-" else parent.insert(int(k), v)
+            else:
+                parent[k] = v
+        elif op["op"] == "remove":
+            del parent[int(k) if isinstance(parent, list) else k]
+        else:
+            raise ValueError(op)
+    return doc
+
+# ------------------------------------------------------------------ conditions (§6.3)
+FIELD_TYPES = {
+    "purpose": "enum", "session": "enum", "asset_class": "enum", "instrument": "string",
+    "order_usd": "decimal", "position_usd_after": "decimal", "gross_usd_after": "decimal",
+    "bought_today_usd": "decimal", "daily_pnl_fraction": "decimal", "position_pnl_fraction": "decimal",
+    "combined_score": "unit", "drawdown": "unit",
+    "unusual_input": "bool", "first_trade_in_instrument": "bool",
+}
+ENUMS = {"purpose": {"open", "increase"}, "session": {"pre_market", "regular", "after_hours", "crypto"},
+         "asset_class": {"us_equity", "crypto"}}
+REDUCING = {"discretionary_exit", "risk_exit", "protective", "owner_exit"}
+UNAVAILABLE_FIELDS = {"unusual_input"}
+
+def comparisons(c, depth=1):
+    if "all" in c or "any" in c:
+        for x in c.get("all", c.get("any")):
+            yield from comparisons(x, depth + 1)
+    elif "not" in c:
+        yield from comparisons(c["not"], depth + 1)
+    else:
+        yield c, depth
+
+def is_dec(v):
+    return isinstance(v, str) and DEC_V.is_valid(v)
+
+def type_ok(field, op, value):
+    t = FIELD_TYPES[field]
+    if t == "bool":
+        return op in ("eq", "ne") and isinstance(value, bool)
+    if t in ("decimal", "unit"):
+        if op in ("in", "not_in") or not is_dec(value):
+            return False
+        return t != "unit" or D(0) <= D(value) <= D(1)
+    if op in ("gt", "gte", "lt", "lte"):
+        return False
+    if op in ("in", "not_in") and not isinstance(value, list):
+        return False
+    if op in ("eq", "ne") and not isinstance(value, str):
+        return False
+    vals = value if op in ("in", "not_in") else [value]
+    if t == "enum":
+        return all(isinstance(v, str) and v in ENUMS[field] for v in vals)
+    return all(isinstance(v, str) for v in vals)
+
+def cond(c, a):
+    if "all" in c:
+        return all(cond(x, a) for x in c["all"])
+    if "any" in c:
+        return any(cond(x, a) for x in c["any"])
+    if "not" in c:
+        return not cond(c["not"], a)
+    f, op, v = c["field"], c["op"], c["value"]
+    x = a[f]
+    if FIELD_TYPES[f] in ("decimal", "unit"):
+        x, v = D(x), D(v)
+    return {"eq": lambda: x == v, "ne": lambda: x != v, "gt": lambda: x > v, "gte": lambda: x >= v,
+            "lt": lambda: x < v, "lte": lambda: x <= v, "in": lambda: x in v, "not_in": lambda: x not in v}[op]()
+
+def is_catch_all(c):
+    return c.get("field") == "purpose" and c.get("op") == "in" and set(c.get("value", [])) >= {"open", "increase"}
+
+# ------------------------------------------------------------------ semantic validation (§4)
+SYSTEM_FIELDS = ["/mandate_schema_version", "/source_text_ref"]
+PLATFORM_DEFAULTABLE = {   # path -> required value (None = any value)
+    "/name": None, "/notifications": None, "/autonomy/approval/on_timeout": "skip",
+    "/autonomy/approval/approvers": None, "/autonomy/default": "ask",
+    "/universe/leveraged_etps_enabled": False, "/universe/leveraged_etp_disclosure_version": None,
+    "/environment": "paper",
+}
+
+def covered(path, prefixes):
+    return any(path == p or path.startswith(p + "/") for p in prefixes)
+
+def sorted_unique(xs):
+    return all(a < b for a, b in zip(xs, xs[1:]))
+
+def valid_date(s):
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+def worst_case(m):
+    r, p = m["risk"], m["protection"]
+    A = D(m["capital"]["allocation_usd"])
+    pos = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * A)
+    crypto = any(i["asset_class"] == "crypto" for i in m["universe"]["instruments"])
+    stop = (D(p["stop_distance"]) + (D(p["crypto_stop_limit_offset"] or 0) if crypto else 0)) if p["enabled"] else None
+    return {"one_position_at_stop_usd": norm(pos * stop) if stop is not None else None,
+            "daily_loss_budget_usd": norm(D(r["max_daily_loss"]) * A),
+            "flatten_trigger_loss_usd": norm(D(r["max_drawdown"]) * A),
+            "lifetime_floor_loss_usd": norm(D(m["capital"]["max_loss_from_allocation"]) * A)}
+
+def semantic(m, ctx):
+    errs, warns = set(), set()
+    inst = m["universe"]["instruments"]
+    ids = [i["asset_id"] for i in inst]
+    if ctx.get("connection_environment", m["environment"]) != m["environment"]:
+        errs.add("V-001")
+    if D(ctx["other_allocations_usd"]) + D(m["capital"]["allocation_usd"]) > D(ctx["account_equity_usd"]):
+        errs.add("V-002")
+    g = m["goal"]
+    if g["type"] == "accumulate" and ids != [g["instrument"]]:
+        errs.add("V-003")
+    if m["universe"]["leveraged_etps_enabled"]:
+        dv = m["universe"]["leveraged_etp_disclosure_version"]
+        if dv is None or dv not in ctx.get("disclosures_accepted", []):
+            errs.add("V-005")
+    groups = ctx.get("instrument_groups", {})
+    claimed = {groups.get(a, a) for a in ctx.get("claimed_by_other_agents", [])}
+    if any(groups.get(a, a) in claimed for a in ids):
+        errs.add("V-006")
+    reg = ctx.get("registry")
+    for sm in m["behavior"]["signal_models"]:
+        r0 = reg.get(sm["id"]) if reg is not None else None
+        if reg is not None and (r0 is None or r0["version"] != sm["version"] or r0["content_hash"] != sm["content_hash"]
+                                or sorted(r0["params"]) != [p["key"] for p in sm["params"]]):
+            errs.add("V-007")
+    p = m["protection"]
+    if p["enabled"]:
+        if any(i["asset_class"] == "crypto" for i in inst) and p["crypto_stop_limit_offset"] is None:
+            errs.add("V-008")
+    elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or p["crypto_stop_limit_offset"] is not None:
+        errs.add("V-008")
+    sms = m["behavior"]["signal_models"]
+    rule_ids = [x["id"] for x in m["autonomy"]["rules"]]
+    if not (sorted_unique(ids) and sorted_unique([s["id"] for s in sms]) and len(set(rule_ids)) == len(rule_ids)
+            and all(sorted_unique([q["key"] for q in s["params"]]) for s in sms)
+            and sorted_unique(m["behavior"]["cadence"]["event_sources"])
+            and sorted_unique(m["notifications"]["channels"])
+            and sorted_unique(m["autonomy"]["approval"]["approvers"])):
+        errs.add("V-009")
+    r = m["risk"]
+    lad = r["drawdown_ladder"]
+    ats = [D(x["at"]) for x in lad]
+    sev = {"scale_sizes": 0, "exits_only": 1, "flatten_and_pause": 2}
+    if any(b <= a for a, b in zip(ats, ats[1:])) or any(sev[b["action"]] < sev[a["action"]] for a, b in zip(lad, lad[1:])):
+        errs.add("V-010")
+    for x in lad:
+        if (x["action"] == "scale_sizes") != (x["factor"] is not None):
+            errs.add("V-010")
+    if lad[-1]["action"] != "flatten_and_pause" or D(lad[-1]["at"]) != D(r["max_drawdown"]) \
+            or sum(1 for x in lad if x["action"] == "flatten_and_pause") != 1:
+        errs.add("V-011")
+    if D(r["hysteresis"]) >= ats[0]:
+        errs.add("V-012")
+    if not (D(r["max_order_usd"]) <= D(r["max_position_usd"]) <= D(r["max_gross_exposure_usd"]) <= D(m["capital"]["allocation_usd"])):
+        errs.add("V-013")
+    if D(m["capital"]["max_loss_from_allocation"]) < D(r["max_drawdown"]):
+        errs.add("V-014")
+    if g.get("end_date") is not None and not valid_date(g["end_date"]):
+        errs.add("V-015")
+    q = m["notifications"]["quiet_hours"]
+    if q is not None and q["start"] == q["end"]:
+        errs.add("V-016")
+    for rule in m["autonomy"]["rules"]:
+        for c, depth in comparisons(rule["when"]):
+            if depth > 4:
+                errs.add("V-017")
+            if c["field"] in UNAVAILABLE_FIELDS:
+                errs.add("V-018")
+            if not type_ok(c["field"], c["op"], c["value"]):
+                errs.add("V-023")
+    prov = ctx.get("provenance", {})
+    multi = ctx.get("workspace_users", 1) > 1
+    for path, pv in prov.items():
+        if covered(path, SYSTEM_FIELDS):
+            continue
+        if pv["source"] == "platform_default":
+            allowed = next((k for k in PLATFORM_DEFAULTABLE if path == k or path.startswith(k + "/")), None)
+            if allowed is None or (PLATFORM_DEFAULTABLE[allowed] is not None and get(m, allowed) != PLATFORM_DEFAULTABLE[allowed]) \
+                    or (allowed == "/autonomy/approval/approvers" and multi):
+                errs.add("V-020")
+        elif pv["source"] not in ("user_stated", "user_entered") or not pv["confirmed"]:
+            errs.add("V-020")
+    autos = ["/autonomy/default"] if m["autonomy"]["default"] == "auto" else []
+    autos += [f"/autonomy/rules/{i}" for i, x in enumerate(m["autonomy"]["rules"]) if x["then"] == "auto"]
+    for a in autos:
+        pv = prov.get(a, {"source": "user_entered", "confirmed": True})
+        if pv["source"] != "user_entered" or not pv["confirmed"]:
+            errs.add("V-022")
+    ap = m["autonomy"]["approval"]
+    n_users = ctx.get("approver_users", 1)
+    if n_users < 1 or (ap["two_approver_above_usd"] is not None and n_users < 2):
+        errs.add("V-024")
+    if g.get("end_date") is not None and valid_date(g["end_date"]) and g["end_date"] < ctx["validation_date"]:
+        errs.add("V-030")
+    prev = ctx.get("previous_version")
+    if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]):
+        errs.add("V-031")
+    carry = D(ctx.get("connection_loss_carry_usd", "0"))
+    if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
+        errs.add("V-032")
+    if ctx.get("eligibility_failures"):
+        warns.add("W-001")
+    wc = worst_case(m)
+    if wc["one_position_at_stop_usd"] is not None and D(wc["one_position_at_stop_usd"]) > D(wc["daily_loss_budget_usd"]):
+        warns.add("W-002")
+    if not p["enabled"]:
+        warns.add("W-003")
+    rules = m["autonomy"]["rules"]
+    for i, rule in enumerate(rules):
+        if is_catch_all(rule["when"]) and i < len(rules) - 1:
+            warns.add("W-005")
+    return sorted(errs), sorted(warns)
+
+# ------------------------------------------------------------------ policy hierarchy (§4.3)
+MAND_PATH = {
+    "allocation_usd": "/capital/allocation_usd", "max_loss_from_allocation": "/capital/max_loss_from_allocation",
+    "max_position_usd": "/risk/max_position_usd", "max_position_fraction": "/risk/max_position_fraction",
+    "max_gross_exposure_usd": "/risk/max_gross_exposure_usd", "max_order_usd": "/risk/max_order_usd",
+    "max_orders_per_day": "/risk/max_orders_per_day", "max_daily_loss": "/risk/max_daily_loss",
+    "max_drawdown": "/risk/max_drawdown", "breach_confirm_s": "/risk/breach_confirm_s",
+    "exit_threshold": "/behavior/sizing/exit_threshold", "entry_threshold": "/behavior/sizing/entry_threshold",
+    "rebalance_band": "/behavior/sizing/rebalance_band", "hysteresis": "/risk/hysteresis",
+    "cadence_interval_s": "/behavior/cadence/interval_s", "approval_timeout_s": "/autonomy/approval/timeout_s",
+    "reentry_cooldown_s": "/risk/reentry_cooldown_s", "daily_breach_min_s": "/risk/daily_breach_min_s",
+    "scale_lift_after_s": "/risk/scale_lift_after_s",
+}
+P_MAX = ["allocation_usd", "max_loss_from_allocation", "max_position_usd", "max_position_fraction",
+         "max_gross_exposure_usd", "max_order_usd", "max_orders_per_day", "max_daily_loss", "max_drawdown",
+         "breach_confirm_s", "max_output_age_s", "exit_threshold", "stop_distance_max", "exits_only_at_max",
+         "two_approver_above_usd"]
+P_MIN = ["entry_threshold", "rebalance_band", "hysteresis", "cadence_interval_s", "approval_timeout_s",
+         "reentry_cooldown_s", "daily_breach_min_s", "scale_lift_after_s"]
+P_ENABLE = ["leveraged_etps_allowed", "auto_allowed"]
+P_REQUIRE = ["protection_required", "independent_approval_required"]
+P_SET = ["asset_classes", "signal_model_types", "goal_types", "channels"]
+RETAIL_PROFILE = {"auto_allowed": False, "signal_model_types": ["quant"], "leveraged_etps_allowed": False,
+                  "protection_required": True, "approval_timeout_s": 120, "max_loss_from_allocation": "0.2"}
+PLATFORM_BASE = {"max_loss_from_allocation": "0.5", "breach_confirm_s": 300}
+
+def mandate_policy_values(m):
+    v = {k: get(m, p) for k, p in MAND_PATH.items()}
+    v["max_output_age_s"] = max(s["max_output_age_s"] for s in m["behavior"]["signal_models"])
+    v["stop_distance_max"] = m["protection"]["stop_distance"]
+    v["exits_only_at_max"] = [x["at"] for x in m["risk"]["drawdown_ladder"] if x["action"] != "scale_sizes"][0]
+    v["two_approver_above_usd"] = m["autonomy"]["approval"]["two_approver_above_usd"]
+    v["leveraged_etps_allowed"] = m["universe"]["leveraged_etps_enabled"]
+    v["auto_allowed"] = m["autonomy"]["default"] == "auto" or any(r["then"] == "auto" for r in m["autonomy"]["rules"])
+    v["protection_required"] = m["protection"]["enabled"]
+    v["asset_classes"] = sorted({i["asset_class"] for i in m["universe"]["instruments"]})
+    v["signal_model_types"] = sorted({s["id"].split(".")[0] for s in m["behavior"]["signal_models"]})
+    v["goal_types"] = [m["goal"]["type"]]
+    v["channels"] = m["notifications"]["channels"]
+    return v
+
+def violates(key, child, parent):
+    if key in ("two_approver_above_usd", "stop_distance_max"):
+        return child is None or D(child) > D(parent)
+    if child is None:
+        return False
+    if key in P_MAX:
+        return D(child) > D(parent)
+    if key in P_MIN:
+        return D(child) < D(parent)
+    if key in P_ENABLE:
+        return child is True and parent is False
+    if key in P_REQUIRE:
+        return parent is True and child is not True
+    if key in P_SET:
+        return not set(child) <= set(parent)
+    raise KeyError(key)
+
+def policy_check(m, levels):
+    chain = levels + [("mandate", mandate_policy_values(m))]
+    out = []
+    for i in range(1, len(chain)):
+        cname, cvals = chain[i]
+        for key, cv in cvals.items():
+            for pname, pvals in reversed(chain[:i]):
+                if key in pvals and violates(key, cv, pvals[key]):
+                    out.append({"key": key, "level": cname, "value": cv, "limit_level": pname, "limit": pvals[key]})
+                    break
+    return out
+
+# ------------------------------------------------------------------ risk state (§5)
+SEVERITY = {"normal": 0, "exits_only": 1, "paused": 2, "stopped": 3}
+LATCHES = ("daily_loss", "drawdown_exits_only", "drawdown_flatten", "lifetime_floor")
+
+class Confirm:
+    """Time-in-breach confirmation (§5.6)."""
+    def __init__(self):
+        self.acc = 0.0
+        self.false_run = 0.0
+        self.prev = False
+
+    def update(self, breached, dt, need):
+        if self.prev:
+            self.acc += dt
+        else:
+            self.false_run += dt
+        if self.false_run >= need and not self.prev:
+            self.acc = 0.0
+        if breached:
+            self.false_run = 0.0
+        self.prev = breached
+        return breached and self.acc >= need
+
+    @property
+    def pending(self):
+        return self.prev or self.acc > 0
+
+class RiskState:
+    def __init__(self, m, qty, avg_cost, asset_class, start, inherited_loss="0", mark_max_age_s=120):
+        r = m["risk"]
+        self.m = m
+        self.A = D(m["capital"]["allocation_usd"])
+        self.C = self.A
+        self.L = D(inherited_loss)
+        self.f = D(m["capital"]["max_loss_from_allocation"])
+        self.qty = D(qty)
+        self.B = D(qty) * D(avg_cost)
+        self.realized = D(0)
+        self.mark = D(avg_cost)
+        self.cls = asset_class
+        self.lad = r["drawdown_ladder"]
+        self.hyst = D(r["hysteresis"])
+        self.mdl = D(r["max_daily_loss"])
+        self.daily_action = r["daily_loss_action"]
+        self.need = r["breach_confirm_s"]
+        self.daily_min = r["daily_breach_min_s"]
+        self.lift_after = r["scale_lift_after_s"]
+        self.max_age = mark_max_age_s
+        self.E = self.equity()
+        self.H = self.E
+        self.E0 = self.E
+        self.scale = {i: {"active": False, "lift_acc": 0.0, "lift_prev": False} for i, x in enumerate(self.lad) if x["action"] == "scale_sizes"}
+        self.reset_queue = []
+        self.conf = {}
+        self.latched = {}
+        self.daily = None
+        self.restrictions = {}
+        self.inst_restrictions = set()
+        self.mode = "normal"
+        self.t = T(start)
+        self.session = "regular" if asset_class == "us_equity" else "crypto"
+        self.mark_age = 0.0
+        self.disarmed = False
+
+    def equity(self):
+        return self.A + self.realized + self.qty * self.mark - self.B
+
+    def eff_mode(self):
+        return max(self.restrictions.values(), key=lambda x: SEVERITY[x], default="normal")
+
+    def counts(self, session):
+        return self.cls == "crypto" or session == "regular"
+
+    def conditions(self, E=None, H=None, E0=None, C=None):
+        E = self.E if E is None else E
+        H = self.H if H is None else H
+        E0 = self.E0 if E0 is None else E0
+        C = self.C if C is None else C
+        out = {}
+        for i, rung in enumerate(self.lad):
+            at = D(rung["at"])
+            out[f"drawdown_ladder[{i}]"] = (H - E >= at * H, H - E >= HARD * at * H)
+        out["max_daily_loss"] = (E - E0 <= -self.mdl * E0, E - E0 <= -HARD * self.mdl * E0)
+        out["lifetime_floor"] = (E <= C * (1 - self.f) + self.L, E <= C * (1 - HARD * self.f) + self.L)
+        return out
+
+    def latch(self, key, action, ev, reason=None):
+        e = {"type": "RiskLimitTriggered", "limit": key, "action": action}
+        if reason:
+            e["reason"] = reason
+        ev.append(e)
+
+    def step(self, s):
+        if s["event"] == "allocation_change" and T(s["at"]) > self.t:
+            first = self.step({"event": "clock", "at": s["at"], "session": s.get("session", self.session)})
+            second = self.step(s)
+            second["journal"] = first["journal"] + second["journal"]
+            return second
+        ev, err, extra = [], None, {}
+        t = T(s["at"])
+        dt = (t - self.t).total_seconds()
+        assert dt >= 0, "risk clock is monotone"
+        risk_dt = dt if self.cls == "crypto" else regular_seconds(self.t, t)
+        self.t = t
+        self.session = s.get("session", self.session)
+        kind = s["event"]
+        self._reset_now = False
+        inst_before = set(self.inst_restrictions)
+        # ---- stale-mark timer (advances before this input is applied)
+        if self.qty > 0:
+            self.mark_age += risk_dt
+            if self.mark_age >= self.max_age:
+                self.inst_restrictions.add("stale_mark")
+        # ---- apply the input
+        if kind == "mark":
+            if self.cls == "us_equity" and s["session"] != "regular":
+                pass
+            elif not s.get("sane", True):
+                if self.qty > 0:
+                    self.inst_restrictions.add("stale_mark")
+            else:
+                self.mark = D(s["bid"])
+                self.mark_age = 0.0
+                self.inst_restrictions.discard("stale_mark")
+        elif kind == "fill":
+            q, px = D(s["qty"]), D(s["price"])
+            if s["side"] == "sell":
+                red = self.B if q == self.qty else r12(self.B * q / self.qty)
+                self.realized += q * px - red
+                self.B -= red
+                self.qty -= q
+            else:
+                self.B += q * px
+                self.qty += q
+        elif kind == "risk_day_started":
+            E = self.equity()
+            dconf = self.conf.get("max_daily_loss")
+            if self.daily is None and dconf and dconf.pending and E - self.E0 <= -self.mdl * self.E0:
+                self.daily = {"at": t, "day_started": False, "acked": False}
+                self.latch("max_daily_loss", self.daily_action, ev, reason="resolved_at_rollover")
+                self._apply_daily(ev)
+            self.conf.pop("max_daily_loss", None)
+            self.E0 = E
+            ev.append({"type": "RiskDayStarted", "day_start_equity": norm(self.E0)})
+            if self.daily:
+                self.daily["day_started"] = True
+        elif kind == "owner_acknowledged":
+            err = self._ack(s["restriction"], ev, t)
+        elif kind == "allocation_change":
+            err = self._allocation(D(s["delta_usd"]), ev)
+        elif kind == "clock":
+            pass
+        elif kind == "goal_complete":
+            oc = self.m["goal"].get("on_complete", "hold_protected")
+            ev.append({"type": "GoalCompleted", "on_complete": oc})
+            if oc == "release":
+                ev.append({"type": "PositionReleased", "qty": norm(self.qty)})
+                self.restrictions["retired"] = "stopped"
+            else:
+                self.restrictions["goal_complete"] = "exits_only"
+                if oc == "disarm_ladder":
+                    self.disarmed = True
+        # ---- evaluate (§5.2 order)
+        self.E = self.equity()
+        self.H = max(self.H, self.E)
+        H, E = self.H, self.E
+        conds = self.conditions()
+        for i, rung in enumerate(self.lad):
+            if self.disarmed:
+                break
+            key = f"drawdown_ladder[{i}]"
+            hit, hard = conds[key]
+            at = D(rung["at"])
+            if rung["action"] == "scale_sizes":
+                st = self.scale[i]
+                if st["lift_prev"] and not self._reset_now:
+                    st["lift_acc"] += risk_dt
+                if hit:
+                    st["lift_acc"] = 0.0
+                    if not st["active"]:
+                        st["active"] = True
+                        if i in self.reset_queue:
+                            self.reset_queue.remove(i)
+                        ev.append({"type": "RiskLimitTriggered", "limit": key, "action": "scale_sizes"})
+                elif st["active"]:
+                    can_lift = H - E < (at - self.hyst) * H and (not self.reset_queue or self.reset_queue[0] == i)
+                    if not can_lift:
+                        st["lift_acc"] = 0.0
+                    elif st["lift_acc"] >= self.lift_after:
+                        st["active"] = False
+                        st["lift_acc"] = 0.0
+                        if self.reset_queue and self.reset_queue[0] == i:
+                            self.reset_queue.pop(0)
+                        ev.append({"type": "RiskLimitLifted", "limit": key, "action": "scale_sizes"})
+            elif key not in self.latched:
+                c = self.conf.setdefault(key, Confirm())
+                if c.update(hit, dt, self.need) or hard:
+                    self.conf.pop(key, None)
+                    self.latched[key] = True
+                    self.latch(key, rung["action"], ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                    if rung["action"] == "exits_only":
+                        self.restrictions["drawdown_exits_only"] = "exits_only"
+                    else:
+                        self.restrictions["drawdown_flatten"] = "paused"
+                        ev.append({"type": "KillSwitchActivated", "scope": "agent", "initiator": key})
+        for i, st in self.scale.items():
+            at_i = D(self.lad[i]["at"])
+            st["lift_prev"] = (st["active"] and not self.disarmed and H - E < (at_i - self.hyst) * H
+                               and (not self.reset_queue or self.reset_queue[0] == i))
+            if not st["lift_prev"]:
+                st["lift_acc"] = 0.0 if not st["active"] or H - E >= (at_i - self.hyst) * H else st["lift_acc"]
+        hit, hard = conds["max_daily_loss"]
+        if self.disarmed:
+            pass
+        elif self.daily is None:
+            c = self.conf.setdefault("max_daily_loss", Confirm())
+            if c.update(hit, dt, self.need) or hard:
+                self.conf.pop("max_daily_loss", None)
+                self.daily = {"at": t, "day_started": False, "acked": False}
+                self.latch("max_daily_loss", self.daily_action, ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                self._apply_daily(ev)
+        else:
+            if self.daily["day_started"]:
+                c = self.conf.setdefault("max_daily_loss", Confirm())
+                if c.update(hit, dt, self.need) or hard:
+                    self.conf.pop("max_daily_loss", None)
+                    self.daily = {"at": t, "day_started": False, "acked": self.daily["acked"] and self.daily_action == "exits_only"}
+                    self.latch("max_daily_loss", self.daily_action, ev, reason="new_day_breach")
+            if self.daily["day_started"] and (t - self.daily["at"]).total_seconds() >= self.daily_min \
+                    and (self.daily_action == "exits_only" or self.daily["acked"]):
+                self.daily = None
+                self.conf.pop("max_daily_loss", None)
+                self.restrictions.pop("daily_loss", None)
+                ev.append({"type": "RiskLimitLifted", "limit": "max_daily_loss"})
+        if "lifetime_floor" not in self.latched:
+            hit, hard = conds["lifetime_floor"]
+            c = self.conf.setdefault("lifetime_floor", Confirm())
+            if c.update(hit, dt, self.need) or hard:
+                self.conf.pop("lifetime_floor", None)
+                self.latched["lifetime_floor"] = True
+                self.restrictions["lifetime_floor"] = "paused"
+                self.latch("lifetime_floor", "flatten_and_pause", ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                ev.append({"type": "KillSwitchActivated", "scope": "agent", "initiator": "lifetime_floor"})
+        if inst_before != self.inst_restrictions:
+            ev.append({"type": "InstrumentRestrictionChanged", "restriction": "stale_mark",
+                       "active": "stale_mark" in self.inst_restrictions})
+        new = self.eff_mode()
+        if new != self.mode:
+            ev.append({"type": "AgentModeApplied", "from": self.mode, "to": new})
+            self.mode = new
+        out = self.snapshot()
+        out["journal"] = ev
+        if err:
+            out["error"] = err
+        out.update(extra)
+        return out
+
+    def _apply_daily(self, ev):
+        if self.daily_action == "exits_only":
+            self.restrictions["daily_loss"] = "exits_only"
+        else:
+            self.restrictions["daily_loss"] = "paused"
+            ev.append({"type": "KillSwitchActivated", "scope": "agent", "initiator": "max_daily_loss"})
+
+    def _ack(self, target, ev, t):
+        if target == "lifetime_floor":
+            return "not_acknowledgeable"
+        if target == "drawdown_ladder":
+            if not any(k.startswith("drawdown_ladder") for k in self.latched):
+                return "nothing_to_acknowledge"
+            if "drawdown_flatten" in self.restrictions and self.qty > 0:
+                return "flatten_in_progress"
+            self.E = self.equity()
+            ev.append({"type": "HighWaterMarkReset", "from": norm(self.H), "to": norm(self.E)})
+            self.H = self.E
+            for k in sorted(self.latched):
+                if k.startswith("drawdown_ladder"):
+                    del self.latched[k]
+                    ev.append({"type": "RiskLimitLifted", "limit": k, "reason": "owner_acknowledged"})
+            for k in list(self.conf):
+                if k.startswith("drawdown_ladder"):
+                    del self.conf[k]
+            self.restrictions.pop("drawdown_exits_only", None)
+            self.restrictions.pop("drawdown_flatten", None)
+            for i, st in self.scale.items():
+                if not st["active"]:
+                    st["active"] = True
+                    ev.append({"type": "RiskLimitTriggered", "limit": f"drawdown_ladder[{i}]", "action": "scale_sizes", "reason": "after_reset"})
+                st["lift_acc"] = 0.0
+            self.reset_queue = sorted(self.scale, key=lambda i: D(self.lad[i]["at"]), reverse=True)
+            self._reset_now = True
+            return None
+        if target == "daily_loss":
+            if not self.daily or self.daily_action != "flatten_and_pause" or self.daily["acked"]:
+                return "nothing_to_acknowledge"
+            if self.qty > 0:
+                return "flatten_in_progress"
+            self.daily["acked"] = True
+            self.restrictions["daily_loss"] = "exits_only"
+            return None
+        return "unknown_restriction"
+
+    def _allocation(self, d, ev):
+        E = self.equity()
+        E1 = E + d
+        gross = self.qty * self.mark
+        err = None
+        if d > 0 and (self.latched or self.daily is not None):
+            err = "increase_blocked_while_latched"
+        elif E1 <= 0 or E1 < gross:
+            err = "equity_below_exposure"
+        else:
+            H1, E01, C1, L1 = c12(self.H * E1 / E), c12(self.E0 * E1 / E), c12(self.C * E1 / E), c12(self.L * E1 / E)
+            before = self.conditions(E, self.H, self.E0, self.C)
+            L0, self.L = self.L, L1
+            after = self.conditions(E1, H1, E01, C1)
+            self.L = L0
+            if any(after[k][j] and not before[k][j] for k in after for j in (0, 1)):
+                err = "would_trigger_limit"
+        if err:
+            ev.append({"type": "MandateVersionApplied", "result": "rejected", "reason": err})
+            return err
+        self.H, self.E0, self.C, self.L = H1, E01, C1, L1
+        self.A += d
+        ev.append({"type": "MandateVersionApplied", "result": "applied", "allocation_change": norm(d)})
+        return None
+
+    def snapshot(self):
+        factor = D(1)
+        for i in sorted(self.scale):
+            if self.scale[i]["active"]:
+                factor *= D(self.lad[i]["factor"])
+        return {"agent_equity": norm(self.E), "high_water_mark": norm(self.H), "drawdown": q12((self.H - self.E) / self.H),
+                "day_start_equity": norm(self.E0), "daily_pnl": norm(self.E - self.E0),
+                "daily_pnl_fraction": q12((self.E - self.E0) / self.E0), "capital_base": norm(self.C),
+                "size_factor": norm(factor), "restrictions": sorted(self.restrictions), "agent_mode": self.mode,
+                "instrument_restrictions": sorted(self.inst_restrictions),
+                "pending": sorted(k for k, c in self.conf.items() if c.pending)}
+
+# ------------------------------------------------------------------ gate: mandate limits (§5.3)
+def gate(m, st, prop):
+    r = m["risk"]
+    if prop["purpose"] in REDUCING:
+        return {"verdict": "allow", "reason": None}
+    E = D(st["agent_equity"])
+    mv = {k: D(v) for k, v in st["positions_mv"].items()}
+    working = st.get("working_opening_orders", [])
+    order = D(prop["qty"]) * D(prop["limit_price"])
+    inst = prop["instrument"]
+    cap = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)
+    inst_total = mv.get(inst, D(0)) + sum(D(w["max_cost"]) for w in working if w["instrument"] == inst) + order
+    comp = {"instrument_total": norm(inst_total), "cap": norm(cap)}
+    if inst_total > cap:
+        return {"verdict": "deny", "reason": "concentration_limit", "computed": comp}
+    if order > D(r["max_order_usd"]):
+        return {"verdict": "deny", "reason": "max_order_size", "computed": {"order_usd": norm(order)}}
+    groups = st.get("instrument_groups", {})
+    g = groups.get(inst, inst)
+    for other, last in st.get("last_exit_fill_at", {}).items():
+        if groups.get(other, other) == g and (T(st["now"]) - T(last)).total_seconds() < r["reentry_cooldown_s"]:
+            return {"verdict": "deny", "reason": "reentry_cooldown", "computed": {"last_exit_fill_at": last, "instrument": other}}
+    if st.get("orders_today", 0) + 1 > r["max_orders_per_day"]:
+        return {"verdict": "deny", "reason": "max_orders_per_day", "computed": {"orders_today": st["orders_today"]}}
+    gross = sum(abs(v) for v in mv.values()) + sum(D(w["max_cost"]) for w in working) + order
+    glim = min(D(r["max_gross_exposure_usd"]), E)
+    comp.update({"gross": norm(gross), "gross_limit": norm(glim)})
+    if gross > glim:
+        return {"verdict": "deny", "reason": "gross_exposure_limit", "computed": comp}
+    return {"verdict": "allow", "reason": None, "computed": comp}
+
+# ------------------------------------------------------------------ autonomy (§6)
+STRICT = {"auto": 0, "ask": 1, "deny": 2}
+
+def autonomy(m, a):
+    au = m["autonomy"]
+    if a["purpose"] in REDUCING:
+        return {"decision": "auto", "by": "builtin_risk_reducing"}
+    res = None
+    for rule in au["rules"]:
+        if cond(rule["when"], a):
+            res = {"decision": rule["then"], "by": f"rule:{rule['id']}"}
+            break
+    if res is None:
+        res = {"decision": au["default"], "by": "default"}
+    if res["decision"] == "ask":
+        t = au["approval"]["two_approver_above_usd"]
+        res["approvers_required"] = 2 if t is not None and D(a["order_usd"]) > D(t) else 1
+        res["on_timeout"] = "skip"
+    return res
+
+# ------------------------------------------------------------------ order builder (§8.3)
+def trunc(x, inc):
+    return (x / inc).to_integral_value(rounding=ROUND_DOWN) * inc
+
+def ceil_inc(x, inc):
+    return (x / inc).to_integral_value(rounding=ROUND_UP) * inc
+
+def combine(m, inp):
+    beh = m["behavior"]
+    now = T(inp["now"])
+    models = {s["id"]: s for s in beh["signal_models"]}
+    W = sum(D(s["weight"]) for s in beh["signal_models"])
+    latest = {}
+    for i, o in enumerate(inp["outputs"]):
+        sm = models.get(o["model_id"])
+        if sm is None or o["model_version"] != sm["version"] or o["content_hash"] != sm["content_hash"]:
+            continue
+        a, e = T(o["as_of"]), T(o["expires_at"])
+        if not (a <= now < e) or (now - a).total_seconds() > sm["max_output_age_s"]:
+            continue
+        prev = latest.get(o["model_id"])
+        if prev is None or (a, i) > (T(prev[1]["as_of"]), prev[0]):
+            latest[o["model_id"]] = (i, o)
+    used = sorted(latest)
+    fresh = sum(D(models[k]["weight"]) * D(latest[k][1]["conviction"]) * D(latest[k][1]["confidence"]) for k in used)
+    missing = sum(D(sm["weight"]) for sm in beh["signal_models"] if sm["id"] not in latest)
+    c_exit = r12(fresh / W)
+    c_buy = r12((fresh - missing) / W)
+    s = r12(sum(D(models[k]["weight"]) * D(latest[k][1]["confidence"]) for k in used) / W)
+    return used, c_exit, c_buy, s
+
+def builder(m, inp):
+    r, beh = m["risk"], m["behavior"]
+    sz = beh["sizing"]
+    E = D(inp["agent_equity"])
+    cap = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)
+    factor = D(inp.get("size_factor", "1"))
+    qty = D(inp["position_qty"])
+    bid, ask = D(inp["quote"]["bid"]), D(inp["quote"]["ask"])
+    inc = D(inp["qty_increment"])
+    mv = qty * bid
+    working = sum(D(w["max_cost"]) for w in inp.get("working_opening_orders", []))
+    out = {"cap": norm(cap), "current_mv": norm(mv)}
+    # risk engine first: trim_to_target (§5.5)
+    if r["scale_action"] == "trim_to_target" and factor < 1 and mv > factor * cap:
+        sell = min(qty, ceil_inc((mv - factor * cap) / bid, inc))
+        out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",
+                    "qty": norm(sell), "limit_price": norm(bid), "order_usd": norm(sell * bid),
+                    "autonomy": {"decision": "auto", "by": "builtin_risk_reducing"}})
+        return out
+    used, c, c_buy, s = combine(m, inp)
+    out.update({"outputs_used": used, "combined_conviction": norm(c), "buy_conviction": norm(c_buy), "combined_score": norm(s)})
+    goal = m["goal"]
+    if not used:
+        out.update({"action": "hold", "reason": "no_fresh_outputs"})
+        return out
+    entry, exitt = D(sz["entry_threshold"]), D(sz["exit_threshold"])
+    equity_cls = inp["asset_class"] == "us_equity"
+    if c <= -exitt:
+        if goal["type"] == "accumulate":
+            out.update({"action": "hold", "reason": "discretionary_exits_disabled"})
+            return out
+        if qty == 0:
+            out.update({"action": "hold", "reason": "no_position"})
+            return out
+        out.update({"action": "sell", "purpose": "discretionary_exit", "qty": norm(qty), "limit_price": norm(bid),
+                    "order_usd": norm(qty * bid)})
+        sess = inp.get("session", "regular")
+        if equity_cls and sess != "regular":
+            out["gate_dry_run"] = {"verdict": "defer", "reason": "discretionary_exit_regular_session_only"}
+            out["autonomy"] = {"decision": "deferred", "by": "gate_dry_run"}
+        elif equity_cls and inp.get("in_close_window", False):
+            out["gate_dry_run"] = {"verdict": "defer", "reason": "close_window"}
+            out["autonomy"] = {"decision": "deferred", "by": "gate_dry_run"}
+        else:
+            out["gate_dry_run"] = {"verdict": "allow", "reason": None}
+            out["autonomy"] = autonomy(m, {"purpose": "discretionary_exit"})
+        return out
+    if c_buy < entry:
+        out.update({"action": "hold", "reason": "between_thresholds"})
+        return out
+    Tv = c_buy * cap * factor
+    out["target_value"] = q12(Tv)
+    delta = Tv - mv - working
+    out["delta"] = q12(delta)
+    band = D(sz["rebalance_band"]) * cap
+    if delta <= 0:
+        out.update({"action": "hold", "reason": "at_or_above_target"})
+        return out
+    if delta < band:
+        out.update({"action": "hold", "reason": "within_rebalance_band"})
+        return out
+    gross_now = D(inp.get("gross_usd", mv + working))
+    budget = min(delta, D(r["max_order_usd"]), cap - mv - working, min(D(r["max_gross_exposure_usd"]), E) - gross_now)
+    clips = ["limits"] if budget < delta else []
+    n = trunc(budget / ask, inc)
+    if n * ask < band:
+        out.update({"action": "hold", "reason": "below_band_after_clipping", "clipped_by": clips})
+        return out
+    if goal["type"] == "accumulate":
+        rc, ra = D(inp.get("fee_rate_cash", "0")), D(inp.get("fee_rate_asset", "0"))
+        a_unit, b_unit = ask * (1 + rc), 1 - ra
+        remaining = D(goal["target_qty"]) - qty
+        cands = [trunc(remaining / b_unit, inc)]
+        spent = D(inp.get("goal_spent_usd", "0"))
+        cands.append(trunc((D(goal["max_spend_usd"]) - spent) / a_unit, inc))
+        g = min(cands)
+        cb = D(inp.get("cost_basis_usd", "0"))
+        if goal["max_avg_price"] is not None:
+            mx = D(goal["max_avg_price"])
+            den = a_unit - mx * b_unit
+            if den > 0:
+                g = min(g, trunc((mx * qty - cb) / den, inc))
+        if g < n:
+            clips.append("goal")
+            n = max(g, D(0))
+        if goal["max_avg_price"] is not None and n > 0:
+            mx = D(goal["max_avg_price"])
+            if (cb + n * a_unit) > mx * (qty + n * b_unit):
+                out.update({"action": "hold", "reason": "would_exceed_max_avg_price", "clipped_by": clips})
+                return out
+    if n <= 0 or n * ask < D(inp["min_order_usd"]):
+        out.update({"action": "hold", "reason": "below_minimum_after_clipping", "clipped_by": clips})
+        return out
+    out.update({"action": "buy", "purpose": "open" if qty == 0 else "increase", "qty": norm(n),
+                "limit_price": norm(ask), "order_usd": norm(n * ask), "clipped_by": clips})
+    st = dict(inp["gate_state"], now=inp["now"])
+    dry = gate(m, st, {"instrument": inp["instrument"], "purpose": out["purpose"], "qty": out["qty"], "limit_price": out["limit_price"]})
+    out["gate_dry_run"] = {"verdict": dry["verdict"], "reason": dry["reason"]}
+    if dry["verdict"] == "deny":
+        out["autonomy"] = {"decision": "skipped", "by": "gate_dry_run"}
+        return out
+    order = n * ask
+    a = {"purpose": out["purpose"], "order_usd": norm(order), "combined_score": norm(s),
+         "instrument": inp["instrument"], "asset_class": inp["asset_class"], "session": inp.get("session", "regular"),
+         "unusual_input": False, "first_trade_in_instrument": not inp.get("has_prior_fill", qty > 0),
+         "drawdown": inp.get("drawdown", "0"), "daily_pnl_fraction": inp.get("daily_pnl_fraction", "0"),
+         "position_usd_after": norm(mv + working + order), "gross_usd_after": norm(gross_now + order),
+         "bought_today_usd": norm(D(inp.get("bought_today_usd", "0")) + order),
+         "position_pnl_fraction": inp.get("position_pnl_fraction", "0")}
+    out["autonomy"] = autonomy(m, a)
+    return out
+
+# ------------------------------------------------------------------ agent-scoped kill switch (trading §5.5)
+def agent_flatten(inp):
+    agent = inp["agent"]
+    owner = inp.get("initiator") == "owner"
+    confirmed = inp.get("owner_confirmed_bid", False)
+    cancels = sorted(o["client_order_id"] for o in inp["open_orders"] if o["agent"] == agent)
+    sells, deferred = [], []
+    for p in inp["agent_positions"]:
+        if p["agent"] != agent or D(p["qty"]) == 0:
+            continue
+        e = {"instrument": p["instrument"], "qty": p["qty"]}
+        if p["asset_class"] == "us_equity" and inp["session"] != "regular" and not (owner and confirmed):
+            deferred.append(dict(e, until="regular_session_open"))
+        else:
+            sells.append(dict(e, pricing="exit_price_ladder" if inp["session"] != "regular" else "market_or_ladder"))
+    return {"mode_applied_first": "stopped" if owner else "paused", "purpose": "owner_exit" if owner else "risk_exit",
+            "cancel_client_order_ids": cancels, "cancel_all_endpoint": False, "close_position_endpoint": False,
+            "sells": sells, "deferred_sells": deferred}
+
+# ------------------------------------------------------------------ goals (§3.1)
+def goal_status(m, st):
+    g = m["goal"]
+    now_day = risk_day(st["now"])["risk_day"]
+    oc = g.get("on_complete")
+    if g.get("end_date") is not None and now_day > g["end_date"]:
+        if g["type"] == "profit_stop":
+            return {"done": True, "reason": "end_date", "then": "discretionary_exit_all_then_retire", "stop_reason": "end_date"}
+        return {"done": True, "reason": "end_date", "then": oc, "stop_reason": "goal_complete"}
+    if g["type"] == "profit_stop":
+        E, C = D(st["agent_equity"]), D(st["capital_base"])
+        ret = r12((E - C) / C)
+        reached = E - C >= D(g["profit_level"]) * C
+        held = st.get("condition_held_s", 0) >= m["risk"]["breach_confirm_s"]
+        if reached and held:
+            return {"done": True, "reason": "profit_level", "agent_return": norm(ret),
+                    "then": "discretionary_exit_all_then_retire", "stop_reason": "profit_stop_reached"}
+        return {"done": False, "agent_return": norm(ret), "pending_confirmation": reached and not held}
+    if g["type"] == "accumulate":
+        inc = D(st["qty_increment"])
+        remaining = D(g["target_qty"]) - D(st["position_qty"])
+        if remaining < inc or remaining * D(st["ask"]) < D(st["min_order_usd"]):
+            return {"done": True, "reason": "target_qty", "then": oc, "stop_reason": "goal_complete"}
+        if D(g["max_spend_usd"]) - D(st["goal_spent_usd"]) < D(st["min_order_usd"]):
+            return {"done": True, "reason": "max_spend", "then": oc, "stop_reason": "goal_complete"}
+        return {"done": False}
+    return {"done": False}
+
+# ------------------------------------------------------------------ change classification (§9)
+NUM_MAX = ["/capital/allocation_usd", "/capital/max_loss_from_allocation", "/risk/max_position_usd",
+           "/risk/max_position_fraction", "/risk/max_gross_exposure_usd", "/risk/max_order_usd",
+           "/risk/max_orders_per_day", "/risk/max_daily_loss", "/risk/max_drawdown", "/risk/breach_confirm_s",
+           "/goal/target_qty", "/goal/max_spend_usd", "/goal/max_avg_price", "/goal/profit_level",
+           "/protection/stop_distance", "/behavior/sizing/exit_threshold"]
+NUM_MIN = ["/behavior/sizing/entry_threshold", "/behavior/sizing/rebalance_band", "/risk/hysteresis",
+           "/risk/reentry_cooldown_s", "/risk/daily_breach_min_s", "/risk/scale_lift_after_s"]
+NEUTRAL = ["/name", "/notifications/quiet_hours"]
+
+def rule_widen(a, b):
+    wa, wb = a["when"], b["when"]
+    if not ("field" in wa and "field" in wb and wa["field"] == wb["field"] and wa["op"] == wb["op"]):
+        return None
+    op, old, new = wa["op"], wa["value"], wb["value"]
+    if op in ("lt", "lte"):
+        return 1 if D(new) > D(old) else -1
+    if op in ("gt", "gte"):
+        return 1 if D(new) < D(old) else -1
+    if op in ("in", "not_in") and isinstance(old, list):
+        so, sn = set(old), set(new)
+        more = sn > so if op == "in" else sn < so
+        less = sn < so if op == "in" else sn > so
+        return 1 if more else (-1 if less else None)
+    return None
+
+def classify_autonomy(o, n):
+    oa, na = o["approval"], n["approval"]
+    if oa["approvers"] != na["approvers"] or oa["timeout_s"] != na["timeout_s"] or oa["on_timeout"] != na["on_timeout"]:
+        return "increasing"
+    ot, nt = oa["two_approver_above_usd"], na["two_approver_above_usd"]
+    if ot != nt and (nt is None or (ot is not None and D(nt) > D(ot))):
+        return "increasing"
+    if STRICT[n["default"]] < STRICT[o["default"]]:
+        return "increasing"
+    oids, nids = [r["id"] for r in o["rules"]], [r["id"] for r in n["rules"]]
+    common_o = [x for x in oids if x in nids]
+    common_n = [x for x in nids if x in oids]
+    if common_o != common_n:
+        return "increasing"
+    for i, ra in enumerate(o["rules"]):
+        if ra["id"] not in nids:
+            later = [STRICT[x["then"]] for x in o["rules"][i + 1:]] + [STRICT[o["default"]]]
+            if any(x < STRICT[ra["then"]] for x in later):
+                return "increasing"
+    orules = {r["id"]: r for r in o["rules"]}
+    for i, rb in enumerate(n["rules"]):
+        later = [STRICT[x["then"]] for x in n["rules"][i + 1:]] + [STRICT[n["default"]]]
+        ra = orules.get(rb["id"])
+        if ra is None:
+            if any(x > STRICT[rb["then"]] for x in later):
+                return "increasing"
+            continue
+        if ra == rb:
+            continue
+        if ra["when"] == rb["when"]:
+            if STRICT[rb["then"]] < STRICT[ra["then"]]:
+                return "increasing"
+            continue
+        if ra["then"] != rb["then"]:
+            return "increasing"
+        d = rule_widen(ra, rb)
+        if d is None:
+            return "increasing"
+        t = STRICT[ra["then"]]
+        if t == 0 and d > 0:
+            return "increasing"
+        if t > 0 and (d < 0 or any(x > t for x in later)):
+            return "increasing"
+    return "reducing"
+
+def diff_paths(a, b, base=""):
+    if isinstance(a, dict) and isinstance(b, dict):
+        for k in sorted(set(a) | set(b)):
+            yield from diff_paths(a.get(k), b.get(k), f"{base}/{k}")
+    elif a != b:
+        yield base
+
+def classify(old, new):
+    res = set()
+    paths = list(diff_paths(old, new))
+    for p in paths:
+        a, b = get(old, p), get(new, p)
+        if p in ("/environment", "/connection_id"):
+            return "invalid", paths
+        if any(p == x or p.startswith(x + "/") for x in NEUTRAL):
+            res.add("neutral")
+        elif p == "/notifications/channels":
+            res.add("increasing" if set(a) - set(b) else "neutral")
+        elif p in NUM_MAX:
+            res.add("increasing" if (b is None or (a is not None and D(b) > D(a))) else "reducing")
+        elif p in NUM_MIN:
+            res.add("increasing" if D(b) < D(a) else "reducing")
+        elif p == "/risk/scale_action":
+            res.add("reducing" if b == "trim_to_target" else "increasing")
+        elif p == "/risk/drawdown_ladder":
+            if [x["action"] for x in a] != [x["action"] for x in b]:
+                res.add("increasing")
+            else:
+                for x, y in zip(a, b):
+                    if D(y["at"]) > D(x["at"]) or (x["factor"] is not None and D(y["factor"]) > D(x["factor"])):
+                        res.add("increasing")
+                    elif x != y:
+                        res.add("reducing")
+        elif p == "/universe/instruments":
+            oi, ni = {i["asset_id"] for i in a}, {i["asset_id"] for i in b}
+            res.add("increasing" if ni - oi else ("reducing" if oi - ni else "neutral"))
+        elif p.startswith("/autonomy"):
+            res.add(classify_autonomy(old["autonomy"], new["autonomy"]))
+        elif p == "/goal/end_date":
+            res.add("increasing" if b is None or (a is not None and b > a) else "reducing")
+        elif p == "/protection/enabled":
+            res.add("increasing" if not b else "reducing")
+        elif p == "/universe/leveraged_etps_enabled":
+            res.add("increasing" if b else "reducing")
+        else:
+            res.add("increasing")
+    if "increasing" in res:
+        return "risk_increasing", paths
+    if "reducing" in res:
+        return "risk_reducing", paths
+    return "neutral", paths
