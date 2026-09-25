@@ -1,0 +1,10 @@
+# ADR-0001 ES-05, ES-21: core code never reads a clock or iterates hash maps.
+# Shell crates that legitimately need these allow the lint at the call site with a reason.
+disallowed-methods = [
+    { path = "std::time::SystemTime::now", reason = "time arrives as an input; use the injected WallClock (ES-05)" },
+    { path = "std::time::Instant::now", reason = "time arrives as an input; use the injected WallClock (ES-05)" },
+]
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "iteration order breaks replay; use BTreeMap (ES-21)" },
+    { path = "std::collections::HashSet", reason = "iteration order breaks replay; use BTreeSet (ES-21)" },
+]

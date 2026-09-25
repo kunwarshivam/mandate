@@ -1,0 +1,28 @@
+# Crate layering and dependency policy (ADR-0001 ES-02). Founder-owned (CODEOWNERS).
+#
+# Every workspace member must have an entry. Product crates have an integer `layer`; a crate may
+# depend only on workspace crates in strictly lower layers. `layer = "tool"` crates (xtask, test
+# harnesses) sit outside the product graph and no product crate may depend on them.
+#
+# `safety_critical = true` crates must:
+#   - list every external (non-workspace) dependency in `allowed_external`;
+#   - start `src/lib.rs` with the safety-critical lint header (see REQUIRED_HEADER in xtask).
+# `pure = true` crates (the core) may not depend on any crate in `impure_crates`.
+#
+# Planned crates and layers, created only when a story needs them:
+#   0  mandate-num, mandate-time, mandate-canon
+#   1  mandate-domain
+#   2  mandate-journal, mandate-accounting
+#   3  mandate-spec
+#   4  mandate-risk
+#   5  mandate-builder
+#   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-executor, mandate-alpaca
+#   7  mandate-cli
+#   tool  mandate-refcases, xtask
+
+impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
+
+[crates.xtask]
+layer = "tool"
+safety_critical = false
+pure = false
