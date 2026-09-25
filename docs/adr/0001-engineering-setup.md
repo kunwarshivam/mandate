@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-72](../project/04-decision-log.md#decisions)); ES-24 latency budget proposed for the founder ([DEC-74](../project/04-decision-log.md#decisions)) |
+| **Status** | Accepted ([DEC-72](../project/04-decision-log.md#decisions); ES-24 latency budget [DEC-74](../project/04-decision-log.md#decisions)) |
 | **Date** | 2026-09-25 |
 | **Deciders** | Engineering panel of three principal engineers (systems and correctness; agent productivity and CI; operations, security, and supply chain), under founder delegation |
 | **Process** | Independent proposals, then one voting round on 14 disputed points. Every decision below is unanimous or a majority that the others accept; no adopted option is one a panelist rejected. Versions were verified on 2026-09-25 |
@@ -81,7 +81,7 @@ Four findings shaped the decisions:
 | ES-21 Determinism rules | Safety-critical crates: no `f32`/`f64`; `BTreeMap` and `BTreeSet`, never `HashMap` or `HashSet` (clippy `disallowed-types`); no clock or randomness; `IdGen` injected; `fold_version` bumped whenever fold output changes; golden journals committed |
 | ES-22 Spec anti-drift | A PR touching `docs/specs/`, `schemas/`, `reference/`, `fixtures/refcases/`, or `status.toml` must cite a DEC ID and may not change code in the same PR; the Rust mandate parser must agree with `jsonschema` validation on every MC-S case and on fuzzed mandates; event schemas are exported to `schemas/events/` with a drift check |
 | ES-23 Vendor numbers and the paper/live boundary | Broker and market-data numbers never pass through `f64`: JSON numbers are read as raw text (`serde_json` `RawValue` or a string-number deserializer) and parsed by `mandate-num`; Parquet uses `Decimal128(38, s)` with the scale recorded per dataset. A stream's `environment` is fixed in `StreamOpened`, and appends with a different environment are rejected. Only the paper trading and data hosts are compiled in; a `live` cargo feature is forbidden in CI and release checks. Live credentials will come only from the vault (never environment variables), with a signed `live` build, a step-up-approved `AgentDeployed`, and the M13 penetration test |
-| ES-24 Latency budget | **Proposed to the founder ([DEC-74](../project/04-decision-log.md#decisions)):** the PRD's "under 1 ms" is p99 in-process time from receiving an input to the order bytes being ready (gate, order builder, draft canonicalization and hash). It excludes the durable journal append (journal spec §5.3 targets p99 under 5 ms) and the broker round trip, because "journal before acting" makes an end-to-end 1 ms impossible. Benchmarked from M5 |
+| ES-24 Latency budget | **Accepted ([DEC-74](../project/04-decision-log.md#decisions)):** the PRD's "under 1 ms" is p99 in-process time from receiving an input to the order bytes being ready (gate, order builder, draft canonicalization and hash). It excludes the durable journal append (journal spec §5.3 targets p99 under 5 ms) and the broker round trip, because "journal before acting" makes an end-to-end 1 ms impossible. Benchmarked from M5 |
 | ES-25 Required fixes before E3 and E5 | Confirm that `reference/mandate/` runs unchanged on Python 3.14. The canonicalizer and decimal grammar must pass every `journal.yaml` vector before the first stored event (M4) |
 
 ## Consequences

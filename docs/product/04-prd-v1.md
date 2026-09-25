@@ -207,7 +207,7 @@ instrument, size, price, or thesis.
 | Area | Requirement |
 |---|---|
 | Safety | Zero orders outside the mandate in all tests; kill switches take effect within one decision cycle |
-| Latency | Risk gate and order path add under 1 ms; fast decision models respond within their configured deadline or are skipped |
+| Latency | p99 under 1 ms in-process from input to order bytes ready (gate, order builder, canonicalization and hash), excluding the durable journal append (p99 under 5 ms) and the broker round trip ([DEC-74](../project/04-decision-log.md#decisions)); fast decision models respond within their configured deadline or are skipped |
 | Reliability | Zero duplicate orders under fault injection; agents recover automatically after restart |
 | Security | Credentials never leave the vault; step-up auth for sensitive actions; per-workspace encryption keys |
 | Privacy | In hybrid mode, no mandate, approval, journal, or credential content reaches the global control plane |
