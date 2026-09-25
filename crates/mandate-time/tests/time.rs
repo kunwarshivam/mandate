@@ -173,8 +173,7 @@ proptest! {
     fn order_is_chronological(a in 0i64..=253_402_300_799, an in 0u32..1_000_000_000,
                               b in 0i64..=253_402_300_799, bn in 0u32..1_000_000_000) {
         let (ta, tb) = (UtcNanos::from_parts(a, an).unwrap(), UtcNanos::from_parts(b, bn).unwrap());
-        // Fixed-width text sorts chronologically, independently of the struct's derived order.
-        prop_assert_eq!(ta.cmp(&tb), ta.to_string().cmp(&tb.to_string()));
+        prop_assert_eq!(ta.cmp(&tb), ta.to_string().cmp(&tb.to_string()), "fixed-width text sorts chronologically");
         prop_assert_eq!(UtcNanos::parse(&ta.to_string()).unwrap(), ta);
     }
 

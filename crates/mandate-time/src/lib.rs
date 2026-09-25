@@ -184,8 +184,9 @@ impl UtcNanos {
         self.nanos
     }
 
+    /// The calendar date. `from_parts` bounds `secs`, so the conversion cannot fail; the epoch's
+    /// date is the unreachable fallback.
     pub fn date(self) -> Date {
-        // from_parts bounds secs, so the conversion cannot fail; EPOCH's date is the fallback.
         self.secs
             .checked_div(SECS_PER_DAY)
             .and_then(Date::from_days_since_epoch)
