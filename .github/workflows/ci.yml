@@ -1,6 +1,5 @@
-# Per-PR checks (ADR-0001 ES-12). Each job is one `cargo xtask ci <job>`; run `cargo xtask check`
-# locally for the same set. Depot CI on Origin runs a converted copy in .depot/workflows/
-# (`depot ci migrate workflows --forge=origin`); this file is the source for both.
+# Per-PR checks (ADR-0001 ES-12, DEC-75). Each job is one `cargo xtask ci <job>`; run
+# `cargo xtask check` locally for the same set. The branch ruleset on main requires all six jobs.
 name: ci
 
 on:
