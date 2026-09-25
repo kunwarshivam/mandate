@@ -22,6 +22,7 @@ stop and ask; do not silently pick one.
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
+| What is a mandate, and how are limits, autonomy, and the decider defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [JSON Schema](schemas/mandate.schema.json), and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
@@ -65,7 +66,7 @@ before implementation, and always receive line-by-line founder review:
 - Accounting (positions, cash, fees, corporate actions, settlement, funding, P&L)
 - Risk gate, US account rules, eligibility, market-conduct controls, drawdown ladder, kill switches
 - Account ledger, reservations, and protective-exit sequencing
-- Autonomy policy (AUTO / ASK / DENY)
+- Autonomy policy (AUTO / ASK / DENY), mandate validation, and mandate change classification
 - Executor, idempotency, reconciliation, crash recovery
 - Broker and exchange connectors, OAuth scopes, and key-permission checks
 - Credential handling and the vault

@@ -255,7 +255,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 |---|---|---|
 | `StreamOpened` | — | stream type, subject, environment |
 | `IntentReceived` | man | intent ID, agent, instrument, side, type, TIF, quantity, limit, purpose |
-| `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile` |
+| `GateDecided` | fee, cal, ins, rule, man | intent ID, verdict, reason code, **`checks: [{id, result, inputs, computed}]`** with IDs matching trading spec §9.1 (`account_status`, `agent_mode`, `eligibility`, `concentration`, `order_size`, `session`, `halt`, `order_constraints`, `mark_freshness`, `collar`, `conduct`, `buying_power`, `gross_exposure`, `day_trade_budget`), `quotes_used`, `marks_used`, `data_profile` |
 | `OrderSubmitted`, `OrderStateChanged`, `OrderAbandoned` | — | client order ID, attempt, broker status, internal state |
 | `BrokerExchangeRecorded` | — | direction, endpoint, `raw` (or artifact), status; credentials redacted |
 | `FillApplied`, `LateFillApplied` | fee, cal, set, ins | fill ID, client order ID, gross quantity, price, fees, trade date |
@@ -269,6 +269,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | copies of gating facts (with `causation_id`); kill-switch scope and initiator |
+| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted` | man | agent risk state ([mandate spec §5.5](mandate.md#55-journal-events)): versions and allocation change; day-start equity; limit, action, E, H, drawdown, E₀ |
 
 **Agent stream** (owner: agent runtime)
 

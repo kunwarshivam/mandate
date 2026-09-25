@@ -627,12 +627,15 @@ Checks run in this order; the **first failing check's reason code** is reported.
 including allows, is journaled with the checks evaluated.
 
 1. Account status (§7.3) → agent mode (§7.4)
-2. Eligibility floor (§3.2, in list order) and concentration (§3.3)
+2. Eligibility floor (§3.2, in list order), concentration (§3.3, including the mandate
+   per-instrument position limit), then mandate order size
+   ([mandate spec §5.2](mandate.md#52-position-exposure-order-size-and-order-count))
 3. Session, auction window, and halt (§4.3, §4.4)
 4. Order constraints (§5.3, in list order)
 5. Mark freshness and price collar (§8.2, §9.6)
-6. Market-conduct controls (§9.6)
-7. Buying power (§9.5), then gross exposure (§9.3)
+6. Market-conduct controls (§9.6, including the mandate's orders per day)
+7. Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate
+   limit)
 8. Day-trade budget (§9.2)
 
 Reason codes are registered in the reference-case file.

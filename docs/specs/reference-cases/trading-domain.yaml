@@ -155,6 +155,7 @@ reason_codes:
   - below_liquidity_floor
   - leveraged_etp_not_enabled
   - concentration_limit
+  - max_order_size          # mandate spec §5.2
   # session and halts
   - session_not_allowed
   - extended_hours_opening_not_allowed
