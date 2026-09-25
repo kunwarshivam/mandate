@@ -1,0 +1,294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://mandate.dev/schemas/mandate/1",
+  "title": "Mandate",
+  "description": "Binding agent specification, schema version 1. See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) are in the spec.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mandate_schema_version", "name", "environment", "connection_id", "capital", "goal",
+    "universe", "behavior", "protection", "risk", "autonomy", "notifications", "source_text_ref"
+  ],
+  "properties": {
+    "mandate_schema_version": { "const": 1 },
+    "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "source_text_ref": { "oneOf": [{ "$ref": "#/$defs/content_ref" }, { "type": "null" }] },
+    "environment": { "enum": ["paper", "live"] },
+    "connection_id": { "$ref": "#/$defs/id" },
+    "capital": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allocation_usd"],
+      "properties": { "allocation_usd": { "$ref": "#/$defs/positive_decimal" } }
+    },
+    "goal": { "$ref": "#/$defs/goal" },
+    "universe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruments", "leveraged_etps_enabled", "leveraged_etp_disclosure_version"],
+      "properties": {
+        "instruments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/instrument_ref" }
+        },
+        "leveraged_etps_enabled": { "type": "boolean" },
+        "leveraged_etp_disclosure_version": { "oneOf": [{ "$ref": "#/$defs/content_ref" }, { "type": "null" }] }
+      }
+    },
+    "behavior": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "advisors", "cadence", "decision_threshold"],
+      "properties": {
+        "description": { "type": "string", "maxLength": 4000 },
+        "advisors": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/advisor" }
+        },
+        "cadence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["interval_s", "event_sources"],
+          "properties": {
+            "interval_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
+            "event_sources": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "enum": ["price", "news", "filings", "fills", "schedule"] }
+            }
+          }
+        },
+        "decision_threshold": { "$ref": "#/$defs/fraction" }
+      }
+    },
+    "protection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "stop_distance", "take_profit_distance", "crypto_stop_limit_offset"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "stop_distance": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] },
+        "take_profit_distance": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
+        "crypto_stop_limit_offset": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_position_usd", "max_position_fraction", "max_gross_exposure_usd", "max_order_usd",
+        "max_daily_loss", "max_drawdown", "drawdown_ladder", "hysteresis", "max_orders_per_day"
+      ],
+      "properties": {
+        "max_position_usd": { "$ref": "#/$defs/positive_decimal" },
+        "max_position_fraction": { "$ref": "#/$defs/fraction" },
+        "max_gross_exposure_usd": { "$ref": "#/$defs/positive_decimal" },
+        "max_order_usd": { "$ref": "#/$defs/positive_decimal" },
+        "max_daily_loss": { "$ref": "#/$defs/fraction" },
+        "max_drawdown": { "$ref": "#/$defs/fraction" },
+        "drawdown_ladder": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": { "$ref": "#/$defs/ladder_rung" }
+        },
+        "hysteresis": { "$ref": "#/$defs/fraction" },
+        "max_orders_per_day": { "type": "integer", "minimum": 1, "maximum": 10000 }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rules", "default", "approval"],
+      "properties": {
+        "rules": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/rule" } },
+        "default": { "enum": ["ask", "deny", "auto"] },
+        "approval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["timeout_s", "on_timeout", "approvers", "two_approver_above_usd"],
+          "properties": {
+            "timeout_s": { "type": "integer", "minimum": 30, "maximum": 86400 },
+            "on_timeout": { "const": "skip" },
+            "approvers": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^(role:(approver|owner|workspace_admin)|user:[A-Za-z0-9_-]+)$" }
+            },
+            "two_approver_above_usd": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] }
+          }
+        }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channels", "quiet_hours"],
+      "properties": {
+        "channels": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["web_push", "email", "slack", "telegram", "sms", "phone"] }
+        },
+        "quiet_hours": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["start", "end", "timezone"],
+              "properties": {
+                "start": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "timezone": { "const": "America/New_York" }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$", "not": { "const": "-0" } },
+    "positive_decimal": { "type": "string", "pattern": "^(0\\.[0-9]*[1-9]|[1-9][0-9]*(\\.[0-9]*[1-9])?)$" },
+    "fraction": { "type": "string", "pattern": "^(0|0\\.[0-9]*[1-9]|1)$" },
+    "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
+    "content_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "instrument_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_id", "symbol", "asset_class"],
+      "properties": {
+        "asset_id": { "$ref": "#/$defs/uuid" },
+        "symbol": { "type": "string", "maxLength": 32 },
+        "asset_class": { "enum": ["us_equity", "crypto"] }
+      }
+    },
+    "advisor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "params", "weight_min", "weight_max"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(quant|fast|llm)\\.[a-z0-9_]{1,48}$" },
+        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "params": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "value"],
+            "properties": {
+              "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+              "value": { "anyOf": [{ "$ref": "#/$defs/decimal" }, { "type": "integer" }, { "type": "boolean" }, { "type": "string", "maxLength": 200 }] }
+            }
+          }
+        },
+        "weight_min": { "$ref": "#/$defs/fraction" },
+        "weight_max": { "$ref": "#/$defs/fraction" }
+      }
+    },
+    "ladder_rung": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["at", "action", "factor"],
+      "properties": {
+        "at": { "$ref": "#/$defs/fraction" },
+        "action": { "enum": ["scale_sizes", "exits_only", "flatten_and_pause"] },
+        "factor": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] }
+      }
+    },
+    "goal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "instrument", "target_qty", "max_avg_price", "max_spend_usd", "end_date"],
+          "properties": {
+            "type": { "const": "accumulate" },
+            "instrument": { "$ref": "#/$defs/uuid" },
+            "target_qty": { "$ref": "#/$defs/positive_decimal" },
+            "max_avg_price": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
+            "max_spend_usd": { "$ref": "#/$defs/positive_decimal" },
+            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "instrument", "sell_qty", "min_avg_price", "end_date"],
+          "properties": {
+            "type": { "const": "distribute" },
+            "instrument": { "$ref": "#/$defs/uuid" },
+            "sell_qty": { "$ref": "#/$defs/positive_decimal" },
+            "min_avg_price": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
+            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "target_return", "end_date"],
+          "properties": {
+            "type": { "const": "return_target" },
+            "target_return": { "$ref": "#/$defs/positive_decimal" },
+            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+          }
+        }
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "when", "then"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" },
+        "when": { "$ref": "#/$defs/condition" },
+        "then": { "enum": ["auto", "ask", "deny"] }
+      }
+    },
+    "condition": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["all"],
+          "properties": { "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["any"],
+          "properties": { "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["not"],
+          "properties": { "not": { "$ref": "#/$defs/condition" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["field", "op", "value"],
+          "properties": {
+            "field": {
+              "enum": [
+                "purpose", "order_usd", "confidence", "instrument", "session", "unusual_input",
+                "first_trade_in_instrument", "drawdown", "daily_pnl_fraction"
+              ]
+            },
+            "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"] },
+            "value": {
+              "anyOf": [
+                { "$ref": "#/$defs/decimal" },
+                { "type": "boolean" },
+                { "type": "string", "maxLength": 64 },
+                { "type": "array", "maxItems": 50, "items": { "type": "string", "maxLength": 64 } }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
