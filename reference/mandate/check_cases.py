@@ -42,7 +42,7 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V24": "V-017", "MC-V25": "V-018", "MC-V26": "V-020", "MC-V27": "V-020", "MC-V29": "V-020", "MC-V30": "V-020",
        "MC-V31": "V-022", "MC-V33": "V-023", "MC-V34": "V-023", "MC-V35": "V-023", "MC-V36": "V-023", "MC-V37": "V-023",
        "MC-V38": "V-023", "MC-V39": "V-024", "MC-V41": "V-030", "MC-V43": "V-031", "MC-V44": "V-032",
-       "MC-V49": "V-020", "MC-V50": "V-020"}
+       "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
 req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
@@ -59,12 +59,13 @@ req("MC-R02", s[3]["pending"] == ["drawdown_ladder[1]"] and s[5]["agent_mode"] =
 s = steps("MC-R03")
 req("MC-R03", s[4]["agent_mode"] == "normal" and s[5]["agent_mode"] == "exits_only", "long recovery restarts: trigger 60 s after 14:03:40")
 s = steps("MC-R04")
-req("MC-R04", s[1]["agent_mode"] == "normal" and ("RiskLimitTriggered", "drawdown_ladder[1]", "hard_trigger") in journ(s[2]), "hard trigger")
+req("MC-R04", s[1]["agent_mode"] == "normal" and s[2]["restrictions"] == ["hard_breach"] and
+    ("RiskLimitTriggered", "drawdown_ladder[1]", "hard_trigger") in journ(s[3]), "hard trigger after a second quote")
 s = steps("MC-R05")
 req("MC-R05", s[2]["agent_mode"] == "normal" and s[3]["agent_mode"] == "exits_only", "confirmed on clock after close")
 s = steps("MC-R06")
-req("MC-R06", ("RiskLimitTriggered", "max_daily_loss", "resolved_at_rollover") in journ(s[2]) and s[3]["agent_mode"] == "exits_only"
-    and s[4]["agent_mode"] == "normal", "resolved at rollover, lifts after min")
+req("MC-R06", s[2]["agent_mode"] == "normal" and ("RiskLimitTriggered", "max_daily_loss", "resolved_at_rollover") in journ(s[3])
+    and s[4]["agent_mode"] == "exits_only", "keeps confirming after the rollover, then latches")
 s = steps("MC-R07")
 req("MC-R07", s[3]["agent_mode"] == "exits_only" and s[4]["agent_mode"] == "normal", "lift waits 3600 s")
 s = steps("MC-R08")
@@ -94,6 +95,18 @@ req("MC-R16", s[0]["agent_mode"] == "exits_only" and s[1]["restrictions"] == ["g
     "disarmed ladder and daily; floor armed")
 s = steps("MC-R17")
 req("MC-R17", s[0]["agent_mode"] == "stopped" and any(j["type"] == "PositionReleased" for j in s[0]["journal"]), "released")
+s = steps("MC-R18")
+req("MC-R18", s[1]["restrictions"] == ["hard_breach"] and s[2]["agent_mode"] == "exits_only" and s[3]["agent_mode"] == "paused", "two-quote flatten")
+s = steps("MC-R19")
+req("MC-R19", s[1]["agent_mode"] == "exits_only" and s[2]["restrictions"] == [] and s[2]["agent_mode"] == "normal", "flash print latches nothing")
+s = steps("MC-R20")
+req("MC-R20", all("daily_loss" not in x["restrictions"] for x in s), "flash at midnight discarded")
+s = steps("MC-R21")
+req("MC-R21", s[2].get("error") == "waiting_period" and s[3].get("error") == "not_loosening" and "lifetime_floor" not in s[4]["restrictions"], "loosen path")
+s = steps("MC-R22")
+req("MC-R22", not any(j["type"] == "GoalCompleted" for x in s[:3] for j in x["journal"]) and any(j.get("reason") == "profit_stop_reached" for j in s[3]["journal"]), "profit stop")
+s = steps("MC-R23")
+req("MC-R23", any(j["type"] == "AgentStopped" and float(j["loss_carry_usd"]) > 849 for j in s[3]["journal"]), "carry keeps dollar loss")
 # gate
 for cid, reason in {"MC-G01": "concentration_limit", "MC-G03": "max_order_size", "MC-G04": "gross_exposure_limit",
                     "MC-G05": "concentration_limit", "MC-G06": "gross_exposure_limit", "MC-G07": "max_orders_per_day",
@@ -123,6 +136,9 @@ req("MC-B14", B["MC-B14"]["order_usd"] == "1000" and "limits" in B["MC-B14"]["cl
 req("MC-B15", B["MC-B15"]["action"] == "hold", "working counted")
 req("MC-B16", B["MC-B16"]["reason"] == "at_or_above_target", "no trim")
 req("MC-B17", B["MC-B17"]["purpose"] == "risk_exit" and B["MC-B17"]["reason"] == "trim_to_target", "trim")
+req("MC-B30", B["MC-B30"].get("trim_withheld") == ["rung_not_confirmed"], "trim waits")
+req("MC-B31", set(B["MC-B31"].get("trim_withheld", [])) == {"holding", "regular_session_only"}, "trim guards")
+req("MC-B32", "trim_withheld" not in B["MC-B32"] and B["MC-B32"].get("purpose") != "risk_exit", "below band, no trim")
 req("MC-B18", B["MC-B18"]["reason"] == "within_rebalance_band", "band")
 req("MC-B19", B["MC-B19"]["reason"] == "below_band_after_clipping", "band after clipping")
 req("MC-B20", B["MC-B20"]["reason"] == "no_fresh_outputs", "none")
@@ -145,14 +161,12 @@ F = {cid: C[cid]["expect"] for cid in ("MC-F01", "MC-F02", "MC-F03", "MC-F04")}
 for cid, f in F.items():
     req(cid, f["cancel_client_order_ids"] == ["a-1", "a-2"] and not f["cancel_all_endpoint"] and not f["close_position_endpoint"], "agent scope")
 req("MC-F02", len(F["MC-F02"]["deferred_sells"]) == 1, "equity deferred")
-req("MC-F03", F["MC-F03"]["deferred_sells"] == [] and F["MC-F03"]["purpose"] == "owner_exit", "owner sells now")
+req("MC-F03", F["MC-F03"]["deferred_sells"] == [] and F["MC-F03"]["purpose"] == "owner_exit"
+    and F["MC-F03"]["sells"][0].get("floor_price") == "97", "owner sells now with a floor")
 req("MC-F04", len(F["MC-F04"]["deferred_sells"]) == 1, "owner unconfirmed waits")
 # goals
-req("MC-L01", C["MC-L01"]["expect"]["done"] and C["MC-L01"]["expect"]["stop_reason"] == "profit_stop_reached", "done")
-req("MC-L02", not C["MC-L02"]["expect"]["done"] and C["MC-L02"]["expect"]["pending_confirmation"], "pending")
-for cid in ("MC-L03", "MC-L04", "MC-L09"):
-    req(cid, not C[cid]["expect"]["done"], "not done")
-for cid in ("MC-L05", "MC-L06", "MC-L07", "MC-L08"):
+req("MC-L05", not C["MC-L05"]["expect"]["done"], "not done")
+for cid in ("MC-L01", "MC-L02", "MC-L03", "MC-L04"):
     req(cid, C[cid]["expect"]["done"] and C[cid]["expect"]["then"] == "hold_protected", "done, on_complete")
 # change
 inc = {"MC-C01", "MC-C02", "MC-C04", "MC-C08", "MC-C10", "MC-C12", "MC-C14", "MC-C15", "MC-C17", "MC-C18", "MC-C19", "MC-C20",
