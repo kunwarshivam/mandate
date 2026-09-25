@@ -24,3 +24,5 @@
 # Safety-critical crates (ADR-0001 ES-02)
 /crates/mandate-canon/      @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
+/crates/mandate-journal/    @kunwarshivam
+/crates/mandate-refcases/   @kunwarshivam

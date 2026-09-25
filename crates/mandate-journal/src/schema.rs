@@ -1,0 +1,243 @@
+//! Field types for the envelope and payloads, and the payload schemas registered so far. A payload
+//! schema is registered by the story that first emits the event; appending an event type without one
+//! is `Invalid` (`unknown_schema`).
+
+use mandate_canon::{DecStr, Digest, Object, Value};
+use mandate_time::{Date, UtcNanos};
+
+use crate::{Invalid, InvalidReason};
+
+/// The type of one field. Records have exactly the listed fields, each always present (journal
+/// spec §4.2).
+pub(crate) enum Ty {
+    /// A non-empty string (empty values are `null`, spec §4.2).
+    Str,
+    /// `[A-Za-z0-9_-]+` (spec §2).
+    Ident,
+    Ulid,
+    /// A journal decimal, normalized on the way in (spec §4.6).
+    Decimal,
+    Int,
+    Timestamp,
+    Date,
+    /// `sha256:` followed by 64 lowercase hex characters.
+    DigestRef,
+    OneOf(&'static [&'static str]),
+    Nullable(&'static Ty),
+    List(&'static Ty),
+    Record(&'static [(&'static str, Ty)]),
+    /// Any object; its values are kept as written.
+    OpenObject,
+}
+
+pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
+    let schema = || Invalid::new(InvalidReason::Schema, path);
+    let non_canonical = || Invalid::new(InvalidReason::NonCanonical, path);
+    let text = || value.as_str().ok_or_else(schema);
+    let checked = |ok: bool| {
+        if ok {
+            Ok(value.clone())
+        } else {
+            Err(non_canonical())
+        }
+    };
+    match ty {
+        Ty::Str => checked(!text()?.is_empty()),
+        Ty::Ident => checked(is_ident(text()?)),
+        Ty::Ulid => checked(is_ulid(text()?)),
+        Ty::Decimal => DecStr::parse(text()?)
+            .map(|d| Value::Str(d.as_str().to_owned()))
+            .map_err(|_| non_canonical()),
+        Ty::Int => value.as_int().map(|_| value.clone()).ok_or_else(schema),
+        Ty::Timestamp => checked(UtcNanos::parse(text()?).is_ok()),
+        Ty::Date => checked(Date::parse(text()?).is_ok()),
+        Ty::DigestRef => checked(parse_digest_ref(text()?).is_some()),
+        Ty::OneOf(options) => checked(options.contains(&text()?)),
+        Ty::Nullable(inner) => match value {
+            Value::Null => Ok(Value::Null),
+            _ => normalize(inner, value, path),
+        },
+        Ty::List(inner) => value
+            .as_array()
+            .ok_or_else(schema)?
+            .iter()
+            .enumerate()
+            .map(|(i, item)| normalize(inner, item, &format!("{path}[{i}]")))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Ty::Record(fields) => {
+            normalize_record(fields, value.as_object().ok_or_else(schema)?, path).map(Value::Object)
+        }
+        Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
+    }
+}
+
+pub(crate) fn normalize_record(
+    fields: &[(&str, Ty)],
+    object: &Object,
+    path: &str,
+) -> Result<Object, Invalid> {
+    let join = |name: &str| {
+        if path.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{path}.{name}")
+        }
+    };
+    if let Some(extra) = object
+        .keys()
+        .find(|k| !fields.iter().any(|(name, _)| *name == k.as_str()))
+    {
+        return Err(Invalid::new(InvalidReason::Schema, join(extra.as_str())));
+    }
+    let mut out = Object::new();
+    for (name, ty) in fields {
+        let (key, value) = object
+            .get_key_value(*name)
+            .ok_or_else(|| Invalid::new(InvalidReason::Schema, join(name)))?;
+        out.insert(key.clone(), normalize(ty, value, &join(name))?);
+    }
+    Ok(out)
+}
+
+pub(crate) fn is_ident(s: &str) -> bool {
+    !s.is_empty()
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// 26 characters of Crockford base32 (uppercase), the first at most `7` so the value fits 128 bits.
+pub(crate) fn is_ulid(s: &str) -> bool {
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    s.len() == 26
+        && s.bytes().all(|b| ALPHABET.contains(&b))
+        && s.bytes().next().is_some_and(|b| b <= b'7')
+}
+
+pub(crate) fn parse_digest_ref(s: &str) -> Option<Digest> {
+    s.strip_prefix("sha256:").and_then(Digest::from_hex)
+}
+
+/// The payload schema for `(event_type, schema_version)`, if one is registered.
+pub(crate) fn payload_schema(event_type: &str, schema_version: u64) -> Option<&'static Ty> {
+    match (event_type, schema_version) {
+        ("StreamOpened", 1) => Some(&STREAM_OPENED_V1),
+        ("IntentReceived", 1) => Some(&INTENT_RECEIVED_V1),
+        ("GateDecided", 1) => Some(&GATE_DECIDED_V1),
+        ("OrderSubmitted", 1) => Some(&ORDER_SUBMITTED_V1),
+        ("FillApplied", 1) => Some(&FILL_APPLIED_V1),
+        ("MarkUpdated", 1) => Some(&MARK_UPDATED_V1),
+        _ => None,
+    }
+}
+
+/// Account streams only for now; other stream types register their subject fields when their
+/// writers are built.
+static STREAM_OPENED_V1: Ty = Ty::Record(&[
+    ("stream_type", Ty::OneOf(&["account"])),
+    ("workspace_id", Ty::Ident),
+    ("broker", Ty::Str),
+    ("account_ref", Ty::Ident),
+]);
+
+static INTENT_RECEIVED_V1: Ty = Ty::Record(&[
+    ("intent_id", Ty::Ulid),
+    ("agent_id", Ty::Ident),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("type", Ty::Str),
+    ("tif", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+    ("purpose", Ty::Str),
+]);
+
+/// Check IDs from the trading domain spec §9.1, as listed in journal spec §9.
+const GATE_CHECK_IDS: &[&str] = &[
+    "account_status",
+    "agent_mode",
+    "eligibility",
+    "concentration",
+    "order_size",
+    "session",
+    "halt",
+    "order_constraints",
+    "mark_freshness",
+    "collar",
+    "conduct",
+    "buying_power",
+    "gross_exposure",
+    "day_trade_budget",
+];
+
+static GATE_DECIDED_V1: Ty = Ty::Record(&[
+    ("intent_id", Ty::Ulid),
+    ("verdict", Ty::Str),
+    ("reason_code", Ty::Nullable(&Ty::Str)),
+    ("data_profile", Ty::Str),
+    (
+        "quotes_used",
+        Ty::List(&Ty::Record(&[
+            ("instrument_id", Ty::Str),
+            ("bid", Ty::Decimal),
+            ("ask", Ty::Decimal),
+            ("as_of", Ty::Timestamp),
+            ("feed", Ty::Str),
+        ])),
+    ),
+    (
+        "marks_used",
+        Ty::List(&Ty::Record(&[
+            ("instrument_id", Ty::Str),
+            ("price", Ty::Decimal),
+            ("source", Ty::Str),
+            ("kind", Ty::Str),
+        ])),
+    ),
+    (
+        "checks",
+        Ty::List(&Ty::Record(&[
+            ("id", Ty::OneOf(GATE_CHECK_IDS)),
+            ("result", Ty::Str),
+            ("inputs", Ty::OpenObject),
+            ("computed", Ty::OpenObject),
+        ])),
+    ),
+]);
+
+static ORDER_SUBMITTED_V1: Ty = Ty::Record(&[
+    ("client_order_id", Ty::Str),
+    ("attempt", Ty::Int),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("type", Ty::Str),
+    ("tif", Ty::Str),
+    ("qty", Ty::Decimal),
+    ("limit_price", Ty::Nullable(&Ty::Decimal)),
+]);
+
+static FILL_APPLIED_V1: Ty = Ty::Record(&[
+    ("fill_id", Ty::Str),
+    ("client_order_id", Ty::Str),
+    ("instrument_id", Ty::Str),
+    ("side", Ty::Str),
+    ("qty_gross", Ty::Decimal),
+    ("price", Ty::Decimal),
+    ("trade_date", Ty::Date),
+    (
+        "fees",
+        Ty::List(&Ty::Record(&[
+            ("kind", Ty::Str),
+            ("amount", Ty::Decimal),
+            ("asset", Ty::Str),
+            ("status", Ty::Str),
+        ])),
+    ),
+]);
+
+static MARK_UPDATED_V1: Ty = Ty::Record(&[
+    ("instrument_id", Ty::Str),
+    ("price", Ty::Decimal),
+    ("source", Ty::Str),
+    ("feed", Ty::Str),
+]);

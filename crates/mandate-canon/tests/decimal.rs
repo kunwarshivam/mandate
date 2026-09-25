@@ -24,7 +24,6 @@ fn in_grammar(s: &str) -> bool {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn vector_cases() {
     let accept = [
         ("150.00", "150"),
@@ -48,7 +47,6 @@ fn vector_cases() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn more_accepts() {
     let cases = [
         ("0", "0"),
@@ -81,7 +79,6 @@ fn more_accepts() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn more_rejects() {
     let syntax = [
         "", "-", ".", "-.", "e3", "1e", "1e+", "1e-", "1.2.3", "1,000", "0x10", "\u{661}", "1 ",
@@ -193,7 +190,6 @@ fn respell(
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-1"]
     fn equivalent_spellings_normalize_to_the_canonical_form(
         (negative, int, frac) in canonical_parts(),
         shift in -40i64..40, lead in 0usize..3, trail in 0usize..3, style in any::<u8>()
@@ -206,7 +202,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn more_than_28_fraction_digits_are_rejected_not_rounded(
         negative in any::<bool>(), int in "0|[1-9][0-9]{0,5}", frac in "[0-9]{28,40}[1-9]",
         shift in -3i64..3, style in any::<u8>()
@@ -216,7 +211,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn magnitudes_from_the_limit_up_are_rejected(
         negative in any::<bool>(),
         int in prop_oneof!["79[0-9]{27}", "[89][0-9]{28}", "[1-9][0-9]{29,40}"],
