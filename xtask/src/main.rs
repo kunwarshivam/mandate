@@ -567,11 +567,7 @@ fn spec_guard() -> Result<()> {
         return Ok(());
     };
     let changed = output("git", &["diff", "--name-only", &format!("{base}...HEAD")])?;
-    let changed: Vec<&str> = changed.lines().collect();
-    let protected: Vec<&&str> = changed
-        .iter()
-        .filter(|f| PROTECTED_PATHS.iter().any(|p| f.starts_with(p)))
-        .collect();
+    let (protected, code) = classify(changed.lines());
     if protected.is_empty() {
         eprintln!("    spec-guard: no protected paths changed");
         return Ok(());
@@ -588,14 +584,25 @@ fn spec_guard() -> Result<()> {
             protected.len()
         ));
     }
-    let code: Vec<&&str> = changed
-        .iter()
-        .filter(|f| CODE_PATHS.iter().any(|p| f.starts_with(p)))
-        .collect();
     if !code.is_empty() {
         problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
     }
     report(problems, "spec-guard")
+}
+
+/// Splits changed paths into protected paths and code paths. A protected file under a code
+/// directory (`crates/mandate-refcases/status.toml`) counts only as protected.
+fn classify<'a>(changed: impl Iterator<Item = &'a str>) -> (Vec<&'a str>, Vec<&'a str>) {
+    let mut protected = Vec::new();
+    let mut code = Vec::new();
+    for file in changed {
+        if PROTECTED_PATHS.iter().any(|p| file.starts_with(p)) {
+            protected.push(file);
+        } else if CODE_PATHS.iter().any(|p| file.starts_with(p)) {
+            code.push(file);
+        }
+    }
+    (protected, code)
 }
 
 fn contains_dec_id(text: &str) -> bool {
@@ -617,7 +624,32 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::contains_dec_id;
+    use super::{classify, contains_dec_id};
+
+    #[test]
+    fn status_toml_is_protected_not_code() {
+        let (protected, code) = classify(
+            [
+                "crates/mandate-refcases/status.toml",
+                "crates/mandate-journal/src/lib.rs",
+                "docs/specs/journal.md",
+                "xtask/src/main.rs",
+                "docs/project/06-backlog-v1.md",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(
+            protected,
+            [
+                "crates/mandate-refcases/status.toml",
+                "docs/specs/journal.md"
+            ]
+        );
+        assert_eq!(
+            code,
+            ["crates/mandate-journal/src/lib.rs", "xtask/src/main.rs"]
+        );
+    }
 
     #[test]
     fn finds_dec_ids() {
