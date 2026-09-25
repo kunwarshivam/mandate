@@ -1,0 +1,50 @@
+# Reference-case status (ADR-0001 ES-11, DEC-77). Founder-owned: a case marked passing must pass
+# and never returns to pending. Cases not listed are pending and run only with --include-ignored.
+
+[journal]
+'version' = { status = "passing", story = "E5-1" }
+'decimal::accept::"150.00"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"0.020140"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"0.00"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"-0"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"-0.00"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"-0.50"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"1e3"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"1E+3"' = { status = "passing", story = "E5-1" }
+'decimal::accept::".5"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"007.50"' = { status = "passing", story = "E5-1" }
+'decimal::accept::"1.0E-8"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"NaN"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"Infinity"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"+1"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"1_000"' = { status = "passing", story = "E5-1" }
+'decimal::reject::" 1"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"1e-30"' = { status = "passing", story = "E5-1" }
+'decimal::reject::"8e28"' = { status = "passing", story = "E5-1" }
+'string_escaping' = { status = "passing", story = "E5-1" }
+'chain::seq_1' = { status = "passing", story = "E5-1" }
+'chain::seq_2' = { status = "passing", story = "E5-1" }
+'chain::seq_3' = { status = "passing", story = "E5-1" }
+'chain::seq_4' = { status = "passing", story = "E5-1" }
+'chain::seq_5' = { status = "passing", story = "E5-1" }
+'chain::append' = { status = "passing", story = "E5-1" }
+'export_line_seq_1' = { status = "passing", story = "E5-1" }
+'merkle' = { status = "passing", story = "E5-1" }
+'tamper::payload_modified' = { status = "passing", story = "E5-1" }
+'tamper::event_deleted' = { status = "passing", story = "E5-1" }
+'tamper::seq_values_swapped' = { status = "passing", story = "E5-1" }
+'tamper::prev_hash_changed_without_rehash' = { status = "passing", story = "E5-1" }
+'tamper::prev_hash_rewritten_and_rehashed' = { status = "passing", story = "E5-1" }
+'tamper::whitespace_inserted_and_rehashed' = { status = "passing", story = "E5-1" }
+'tamper::column_altered' = { status = "passing", story = "E5-1" }
+'tamper::tail_truncated_after_anchor' = { status = "passing", story = "E5-1" }
+'tamper::chain_rewritten_from_seq_3' = { status = "passing", story = "E5-1" }
+'append::identical_retry_with_stale_head' = { status = "passing", story = "E5-1" }
+'append::retry_with_equivalent_decimal' = { status = "passing", story = "E5-1" }
+'append::same_event_id_different_content' = { status = "passing", story = "E5-1" }
+'append::partial_overlap_batch' = { status = "passing", story = "E5-1" }
+'append::stale_head' = { status = "passing", story = "E5-1" }
+'append::fenced_writer' = { status = "passing", story = "E5-1" }
+'append::committed' = { status = "passing", story = "E5-1" }
+'append::float_rejected' = { status = "passing", story = "E5-1" }
+'append::missing_required_config_ref' = { status = "passing", story = "E5-1" }
