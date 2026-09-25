@@ -2,16 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.2 (founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | **Approved** v0.3 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
-| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 2) |
+| **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3) |
 
 The journal is the append-only, hash-chained record of everything the platform does: the source
 of truth for agent and account state (event-sourced), the audit trail, and the input to replay.
 
 ## Change history
 
+- **v0.3 ([DEC-81](../project/04-decision-log.md#decisions)):** `risk_clock` is required on every
+  account-stream risk input, named by reference to the mandate spec §5.2 list; `OwnerAcknowledged`
+  is copied into the account stream as a risk input; test vectors version 3 (the `FillApplied`
+  vector carries `risk_clock`).
 - **v0.2:** engineer review ("needs rework") and compliance review ("approve with changes").
   Stored bytes are exactly the hashed bytes; complete canonical rules (null vs absent, key charset,
   escaping, integer and decimal grammar, timestamps); writer/journal field split, idempotency order,
@@ -53,9 +57,14 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `TradingDayStarted`, `ClockAdvanced` (the risk clock, mandate spec §5.2: copied only when a tick
   emits an event or crosses midnight), and time-driven events
   (from the scheduler) into the account stream, and derives `RiskDayStarted` there from the copied
-  `ClockAdvanced` crossing midnight America/New_York. Every other account-stream event that is a
-  risk-state input carries a required `risk_clock` payload field (whole-second timestamp, the latest
-  tick the executor had seen); `append` rejects a `risk_clock` lower than the stream's last one. A mode change that **originates** on the account stream (account restrictions,
+  `ClockAdvanced` crossing midnight America/New_York. Every other account-stream risk input
+  ([mandate spec §5.2](mandate.md#52-inputs-the-risk-clock-and-determinism): `MarkUpdated`,
+  `FillApplied`, `LateFillApplied`, `FeesCharged`, `CorporateActionApplied`, `CashInLieuPosted`,
+  `CompensatingEvent`, `MandateVersionApplied`, `RiskDayStarted`, and the copied
+  `OwnerAcknowledged`) carries a required `risk_clock` payload field (whole-second timestamp, the
+  latest tick the executor had seen); `append` rejects a `risk_clock` lower than the stream's last
+  one. Owner acknowledgments are recorded in the control stream and copied by the executor into the
+  account stream as `OwnerAcknowledged`, with `causation_id` pointing to the original. A mode change that **originates** on the account stream (account restrictions,
   mandate risk limits) is journaled there first as `AgentModeApplied`, and the agent runtime
   copies it into the agent stream as `AgentModeChanged`; the `causation_id` always points to the
   originating event. A user's kill switch is a **command**
@@ -257,7 +266,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 `set` = `settlement_calendar`, `ins` = `instrument_snapshot`, `rule` = `rule_set`, `man` =
 `mandate_version`, `mod` = `model_version`).
 
-**Account stream** (owner: executor)
+**Account stream** (owner: executor). Risk inputs also carry `risk_clock` (§2).
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
@@ -277,6 +286,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
+| `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
 | `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N; reset evidence; released positions; stale-mark changes; goal completion |
 
 **Agent stream** (owner: agent runtime)
