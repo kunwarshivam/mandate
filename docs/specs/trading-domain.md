@@ -2,13 +2,15 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.6: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.7: requires founder approval before implementation (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.7:** owner exits confirm a floor price below which the exit price ladder never goes (§5.5,
+  [DEC-66](../project/04-decision-log.md#decisions), proposed).
 - **v0.6:** alignment with [mandate spec v0.3](mandate.md) and
   [DEC-53 to DEC-62](../project/04-decision-log.md#decisions): owner exits (`owner_exit`) may sell
   equities in extended hours through the exit price ladder after the owner confirms the displayed
@@ -322,8 +324,11 @@ windows with current status data; otherwise the exit price ladder in §5.6) → 
 - **Automated** kill switches (mandate limits) sell equities only in the regular session, leaving
   protection in place until then; crypto sells go immediately. Their orders are `risk_exit`.
 - **Owner** kill switches and closes are `owner_exit`: outside the regular session they sell
-  equities through the exit price ladder once the owner has confirmed the displayed bid
-  (`OwnerExitRequested`); without that confirmation, equity sells wait for the session.
+  equities through the exit price ladder once the owner has confirmed the displayed bid, bid size,
+  and a floor price (default: the confirmed bid × (1 − the ladder's maximum offset);
+  `OwnerExitRequested`). The ladder never prices below the floor; any remainder rests at the floor,
+  then waits for the session, and the owner is alerted. Without confirmation, equity sells wait for
+  the session.
 - Kill-switch orders are exempt from the agent's mode, never wait for approval, and do not depend on
   model state. `risk_exit` orders are exempt from §9.6; `owner_exit` orders are paced only by the
   participation caps.

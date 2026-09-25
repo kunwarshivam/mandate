@@ -92,7 +92,7 @@ before implementation, and always receive line-by-line founder review:
 
 ## Getting it right the first time (specs and safety-critical design)
 
-The mandate spec needed a rewrite after every review round (v0.1 to v0.3). The findings had seven
+The mandate spec needed a rewrite after every review round (v0.1 to v0.3). The findings had eight
 causes; each rule below closes one of them. Follow these before sending any spec, schema, or
 safety-critical design for review.
 
@@ -105,13 +105,15 @@ safety-critical design for review.
 | **Lifecycles not finished.** Nothing said what happens after a flatten, after a goal completes, after an acknowledgment, or at a time boundary | **Walk every state to its exit.** For each state and limit: how it is entered, what it blocks, how it ends, who can end it, and what happens at session close, midnight, restart, and version change |
 | **No adversary.** Order splitting, redeploying to reset limits, deposits to lift rungs, one bad tick, and a model outage enlarging orders were all found by reviewers | **Attack it yourself.** Before review, list how a careless user, a bad model, a malicious insider, and a bad market tick could exceed intended risk or imply platform advice; each must be blocked or disclosed |
 | **Decisions hidden inside drafts, and scope creep.** About a third of each round were design choices only the founder can make, and each round added features that became new surface | **Separate decisions from defects.** List open design choices for the founder before drafting. While fixing findings, add no features; propose them separately |
+| **Tests that pass while checking nothing.** Fuzz checks that reused the implementation's own predicate, or reset their own timer on every bounce, could not catch the regressions they named | **Independent oracles.** A property test computes the expected result its own way (a separate accumulator, state derived from journaled events), and each oracle is shown to fail on a seeded bug before it is trusted |
 
 **Before external review:**
 
 1. Run the invariant fuzz, schema and fixture validation, and a link check. For the mandate spec:
    `python3 reference/mandate/generate.py`, `python3 reference/mandate/check_cases.py`, and
-   `python3 reference/mandate/fuzz.py <seed>` for several seeds (requirements in
-   `reference/mandate/requirements.txt`).
+   `python3 reference/mandate/fuzz.py <seed>` for several seeds, and
+   `python3 reference/mandate/mutants.py` (every seeded bug must be caught); requirements in
+   `reference/mandate/requirements.txt`.
 2. Self-review against the three role checklists: engineer (determinism, ordering, time base,
    replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
    what, records, wording).
