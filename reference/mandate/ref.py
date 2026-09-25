@@ -1,4 +1,4 @@
-"""Reference implementation of docs/specs/mandate.md (Draft v0.4). Not production code."""
+"""Reference implementation of docs/specs/mandate.md (Draft v0.5). Not production code."""
 import copy, hashlib, json, pathlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -870,8 +870,6 @@ def order_decision(m, st, prop, mode, inst_restrictions, session, in_close_windo
     equity = asset_class == "us_equity"
     if p == "discretionary_exit" and equity and session != "regular":
         return {"verdict": "defer", "reason": "discretionary_exit_regular_session_only"}
-    if p == "discretionary_exit" and equity and in_close_window:
-        return {"verdict": "defer", "reason": "close_window"}
     if p == "owner_exit" and equity and session != "regular" and not owner_confirmed_bid:
         return {"verdict": "defer", "reason": "owner_confirmation_required"}
     if p in ("open", "increase") and equity and in_close_window:
@@ -982,8 +980,9 @@ def builder(m, inp):
             out["gate_dry_run"] = {"verdict": "defer", "reason": "discretionary_exit_regular_session_only"}
             out["autonomy"] = {"decision": "deferred", "by": "gate_dry_run"}
         elif equity_cls and inp.get("in_close_window", False):
-            out["gate_dry_run"] = {"verdict": "defer", "reason": "close_window"}
-            out["autonomy"] = {"decision": "deferred", "by": "gate_dry_run"}
+            out["order_type"] = "marketable_limit"
+            out["gate_dry_run"] = {"verdict": "allow", "reason": None}
+            out["autonomy"] = autonomy(m, {"purpose": "discretionary_exit"})
         else:
             out["gate_dry_run"] = {"verdict": "allow", "reason": None}
             out["autonomy"] = autonomy(m, {"purpose": "discretionary_exit"})
