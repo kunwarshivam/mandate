@@ -160,6 +160,8 @@ pub enum InvalidReason {
     ArtifactRefs,
     #[error("pii_refs is not a sorted set")]
     PiiRefs,
+    #[error("risk_clock is earlier than the stream's last risk_clock")]
+    RiskClockRegressed,
 }
 
 impl InvalidReason {
@@ -181,6 +183,7 @@ impl InvalidReason {
             Self::EmptyBatch => "empty_batch",
             Self::ArtifactRefs => "artifact_refs",
             Self::PiiRefs => "pii_refs",
+            Self::RiskClockRegressed => "risk_clock_regressed",
         }
     }
 }
@@ -326,6 +329,8 @@ pub struct Head {
 struct StreamState {
     rows: Vec<StoredEvent>,
     epoch: u64,
+    /// The latest `risk_clock` appended, which later risk inputs may not undercut (spec §2).
+    risk_clock: Option<UtcNanos>,
 }
 
 /// An in-memory journal implementing the append protocol. Streams exist implicitly with head 0
@@ -446,6 +451,7 @@ impl MemoryJournal {
             .rows(stream)
             .first()
             .and_then(|r| Environment::parse(&r.environment));
+        let mut risk_clock = self.streams.get(stream.as_str()).and_then(|s| s.risk_clock);
         let mut sealed = Vec::with_capacity(batch.len());
         let mut prev_hash = head.hash;
         let mut seq = head.seq;
@@ -464,6 +470,12 @@ impl MemoryJournal {
             if *environment.get_or_insert(draft.environment()) != draft.environment() {
                 return invalid(i, InvalidReason::EnvironmentMismatch, "environment");
             }
+            if let Some(clock) = draft.risk_clock() {
+                if risk_clock.is_some_and(|last| clock < last) {
+                    return invalid(i, InvalidReason::RiskClockRegressed, "payload.risk_clock");
+                }
+                risk_clock = Some(clock);
+            }
             let row = match seal(draft, seq, prev_hash, recorded_at) {
                 Ok(row) => row,
                 Err(error) => return AppendOutcome::Invalid { draft: i, error },
@@ -473,6 +485,7 @@ impl MemoryJournal {
         }
 
         let state = self.streams.entry(stream.as_str().to_owned()).or_default();
+        state.risk_clock = risk_clock;
         for row in &sealed {
             self.event_ids
                 .insert(row.event_id.clone(), (row.stream_id.clone(), row.seq));

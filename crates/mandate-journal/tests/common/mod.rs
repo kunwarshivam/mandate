@@ -30,13 +30,18 @@ pub fn opened_draft(env: &str) -> Vec<u8> {
 }
 
 pub fn mark_draft(n: u64, price: &str) -> Vec<u8> {
+    mark_draft_at(n, price, "2026-09-21T14:00:00.000000000Z")
+}
+
+/// A `MarkUpdated` draft whose payload carries `risk_clock`.
+pub fn mark_draft_at(n: u64, price: &str, risk_clock: &str) -> Vec<u8> {
     format!(
         r#"{{"envelope_version":1,"environment":"paper","event_id":"{}","stream_id":"{STREAM}",
         "event_type":"MarkUpdated","schema_version":1,"event_time":"{T}","clock_source":"local",
         "causation_id":null,"correlation_id":null,
         "actor":{{"kind":"system","id":"executor","version":"0.1.0","build":"sha256:{}"}},
         "config_refs":{{}},"payload":{{"instrument_id":"inst","price":"{price}","source":"quote",
-        "feed":"iex"}},"artifact_refs":[],"pii_refs":[]}}"#,
+        "feed":"iex","risk_clock":"{risk_clock}"}},"artifact_refs":[],"pii_refs":[]}}"#,
         event_id(n),
         "3".repeat(64)
     )
