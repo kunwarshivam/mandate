@@ -18,6 +18,7 @@ TOOLS=(
   "cargo-nextest 0.9.146 https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.146/cargo-nextest-0.9.146-x86_64-unknown-linux-gnu.tar.gz 682c21b777c333e96fd532e114d3a5a894e0729ab88d94c0a9f20f8419695428 cargo-nextest"
   "typos 1.50.2 https://github.com/crate-ci/typos/releases/download/v1.50.2/typos-v1.50.2-x86_64-unknown-linux-musl.tar.gz abcb3e257c7c2abeff4d903f7fe68071357637605bdb283ce2251f44bc70dc09 ./typos"
   "gitleaks 8.30.1 https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb gitleaks"
+  "cargo-mutants 27.1.0 https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e cargo-mutants"
 )
 
 installed_version() {
@@ -26,6 +27,7 @@ installed_version() {
     cargo-nextest) cargo-nextest nextest --version 2>/dev/null | awk 'NR==1 {print $2}' ;;
     typos) typos --version 2>/dev/null | awk '{print $2}' ;;
     gitleaks) gitleaks version 2>/dev/null ;;
+    cargo-mutants) cargo-mutants mutants --version 2>/dev/null | awk '{print $2}' ;;
   esac
 }
 
