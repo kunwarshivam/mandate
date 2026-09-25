@@ -203,7 +203,7 @@ flowchart TB
     idp["Customer identity provider"]
     phone["Approver's phone"]
     venues[("Brokers / exchanges")]
-    SI["Shared intelligence plane<br/>managed, optional"]
+    SI["Shared data plane<br/>managed, optional"]
 
     users --> WCS
     WCS -->|"SSO"| idp
@@ -213,7 +213,7 @@ flowchart TB
     relay -->|push| phone
     phone <-->|"fetch details and respond,<br/>end-to-end encrypted"| appr
     DP <-->|"orders / market data, fills"| venues
-    SI -.->|shared signals| DP
+    SI -.->|shared data| DP
 ```
 
 ### Global control plane (thin)
@@ -254,7 +254,7 @@ are opened.
 | Global control plane | Ours | Ours | Customer's (same software) |
 | Workspace control services | Ours | Customer's | Customer's |
 | Data plane | Ours | Customer's | Customer's |
-| Shared intelligence | Ours | Optional subscription | Optional offline feed, or none |
+| Shared data | Ours | Optional subscription | Optional offline feed, or none |
 | Typical customer | Retail, small teams | Most businesses | Banks, funds with strict policies |
 
 What changes in fully on-prem / air-gapped mode:
@@ -294,12 +294,14 @@ be restricted to local models only.
   Approvers authenticate against the customer's identity provider, not against us.
 - **Deferred:** usage reports and updates queue until the connection returns.
 
-### Shared intelligence plane
+### Shared data plane
 
-Market data ingestion and judgments about public events (for example, "is this filing
-material to this company?") are computed once and fanned out to all subscribed workspaces.
-This is the main cost lever for the managed offering. Hybrid and on-prem deployments can subscribe to it
-or run their own.
+Market data ingestion and factual classification of public events (filing type, entity tagging)
+are computed once and fanned out to subscribed workspaces. It emits no directional views: any
+directional output is a signal model the user selects and pins
+([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52);
+[DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
+offering. Hybrid and on-prem deployments can subscribe to it or run their own.
 
 ---
 
@@ -345,7 +347,7 @@ flowchart TB
 | Component | Responsibility |
 |---|---|
 | Perception | Subscribes to market data, news, account events, and timers; fills and position updates from the broker arrive here, closing the loop |
-| Memory | Positions, theses (why each position exists and what would invalidate it), signal-model track records, lessons |
+| Memory | Positions, theses (why each position exists and what would invalidate it), and signal-model track records, kept for the user's review. In v1 it does not feed signal models ([DEC-62](project/04-decision-log.md#decisions)) |
 | Signal models | Produce outputs in a common format (conviction, confidence, horizon, thesis): quant models, fast decision models, LLM research. They never place orders |
 | Order builder | Combines model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score |
 | Autonomy policy | Classifies each proposed action as AUTO, ASK, or DENY according to the spec |
@@ -621,7 +623,7 @@ Speed tiers:
 | Tier | Latency | What runs there |
 |---|---|---|
 | Hot | microseconds | Market data handling, risk gate, order management, kill switch |
-| Fast | 30–300 ms | Decision models (Laya, Jev) answering typed questions with probabilities |
+| Fast | 30–300 ms | Decision models (Laya, Jev) answering typed questions with typed scores |
 | Slow | seconds–minutes | LLM research: reading filings and news, writing theses; never blocks trading |
 
 ---

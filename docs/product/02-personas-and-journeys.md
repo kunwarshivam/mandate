@@ -68,8 +68,8 @@ Personas are hypotheses to validate with design partners.
 ### 6. Jordan: retail investor (managed)
 
 - Wants a simple, conservative agent (for example, "accumulate BTC on dips, never more than
-  10% of my account"). Requires presets, education, strong defaults, and legal review before
-  launch.
+  10% of my account"). Requires the retail policy profile (platform ceilings, not pre-filled
+  values), education, disclosures, and legal review before launch.
 
 ## Roles in the product
 

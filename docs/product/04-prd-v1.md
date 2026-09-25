@@ -34,7 +34,7 @@ all-or-nothing, and decisions cannot be explained or audited. See
 - Native mobile apps (web push, email, SMS, and chat cover approvals in v1).
 - User-supplied code (WebAssembly plug-ins).
 - Strategy marketplace, copy trading, or platform-provided trade recommendations.
-- Shared intelligence plane.
+- Shared data plane.
 - SAML and SCIM (OIDC SSO only).
 
 ## 4. Target users
@@ -184,7 +184,7 @@ instrument, size, price, or thesis.
 | FR-8.1 | Dashboard: agents, state, positions, P&L, open approvals, recent decisions | P0 |
 | FR-8.2 | Pause, resume, stop per agent; kill switch per workspace and per connection | P0 |
 | FR-8.3 | Alerts: risk rung reached, reconciliation mismatch, data feed stale, agent paused | P0 |
-| FR-8.4 | Per-signal-model scorecards (hit rate, calibration measurement) for the user's review; they never change weights | P1 |
+| FR-8.4 | Per-signal-model scorecards (hit rate, calibration measurement) from the user's own results only, for the user's review; never aggregated across users, shown in the model picker, or used in marketing; they never change weights | P1 |
 
 ### 6.9 Deployment
 

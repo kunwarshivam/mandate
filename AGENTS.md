@@ -22,7 +22,7 @@ stop and ask; do not silently pick one.
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
-| What is a mandate, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
+| What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
@@ -55,13 +55,15 @@ stop and ask; do not silently pick one.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
     directly; opening orders are limit orders in the regular session; no short sales in v1.
 13. **Risk reduction is never denied by conduct controls, eligibility, day-trade budgets, buying
-    power, or opening-session rules.** Risk exits, protective orders, and the kill switch are exempt
-    from all of them. Discretionary exits (signal or goal driven) are paced by conduct controls and,
-    for equities, wait for the regular session, but are never denied. Exits and protective orders
+    power, or opening-session rules.** Risk exits, protective orders, and automated kill switches
+    are exempt from all of them. Owner exits are paced only by participation caps. Discretionary
+    exits (signal or goal driven) are paced by conduct controls and, for equities, wait for the
+    regular session, but are never denied. Exits and protective orders
     may be held only by agent mode `paused` or `stopped`, by an `Unknown` order in the same
-    instrument, or by the broker. The kill switch is always available, touches only its scope (an
-    agent-scoped kill switch never uses cancel-all or close-position), and does not depend on model
-    state.
+    instrument, or by the broker. Owner exits may sell equities outside the regular session once the
+    owner confirms the displayed bid. The kill switch is always available, touches only its scope
+    (an agent-scoped kill switch never uses cancel-all or close-position), and does not depend on
+    model state.
 
 ## Safety-critical paths
 
@@ -106,7 +108,10 @@ safety-critical design for review.
 
 **Before external review:**
 
-1. Run the invariant fuzz, schema and fixture validation, and a link check.
+1. Run the invariant fuzz, schema and fixture validation, and a link check. For the mandate spec:
+   `python3 reference/mandate/generate.py`, `python3 reference/mandate/check_cases.py`, and
+   `python3 reference/mandate/fuzz.py <seed>` for several seeds (requirements in
+   `reference/mandate/requirements.txt`).
 2. Self-review against the three role checklists: engineer (determinism, ordering, time base,
    replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
    what, records, wording).
