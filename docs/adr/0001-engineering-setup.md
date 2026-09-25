@@ -1,0 +1,115 @@
+# ADR-0001: Engineering setup
+
+| | |
+|---|---|
+| **Status** | Accepted ([DEC-72](../project/04-decision-log.md#decisions)); ES-24 latency budget proposed for the founder ([DEC-74](../project/04-decision-log.md#decisions)) |
+| **Date** | 2026-09-25 |
+| **Deciders** | Engineering panel of three principal engineers (systems and correctness; agent productivity and CI; operations, security, and supply chain), under founder delegation |
+| **Process** | Independent proposals, then one voting round on 14 disputed points. Every decision below is unanimous or a majority that the others accept; no adopted option is one a panelist rejected. Versions were verified on 2026-09-25 |
+
+## Context
+
+The Tier 1 specs are approved ([DEC-71](../project/04-decision-log.md#decisions)). Before agents
+start E1 Foundations, the repository, crate boundaries, toolchain, numeric and time types, test and
+CI strategy, merge policy, and supply-chain rules must be fixed. Each is expensive to change once
+code and journaled data exist.
+
+Four findings shaped the decisions:
+
+1. `rust_decimal`'s `from_str` silently rounds, and it accepts `+1` and `1_000`, which the journal
+   spec requires to be rejected.
+2. The journal grammar admits values `rust_decimal` cannot hold. The Python reference also computes
+   at 60 digits, while `rust_decimal` holds about 28.
+3. `journal.yaml` has unquoted exponents (`1e3`, `8e28`). PyYAML, the reference's loader, reads them
+   as strings; YAML 1.2 loaders read them as floats.
+4. `serde_json` keeps the last of duplicate keys, and its `arbitrary_precision` feature changes
+   number handling for every crate in the build once any crate enables it.
+
+## Decisions
+
+### Repository and code structure
+
+| ID | Decision |
+|---|---|
+| ES-01 Repository | **One monorepo** on Origin, mirrored to GitHub. Top level: `crates/`, `xtask/`, `fuzz/` (its own workspace), `python/` (uv workspace), `reference/` (unchanged, founder-owned), `docs/` (with `docs/adr/`), `schemas/` (with generated `schemas/events/`), `migrations/`, `fixtures/refcases/`; `deploy/` from M6 and `web/` from M9. Root files: `rust-toolchain.toml`, `deny.toml`, `clippy.toml`, `Cargo.lock`, `CODEOWNERS` |
+| ES-02 Crates | **Foundations:** `mandate-num`, `mandate-time` (including trading calendars; the only crate that uses jiff), `mandate-canon`, `mandate-domain`. **Phase 0:** `mandate-journal`, `mandate-accounting`, `mandate-marketdata`, `mandate-sim`, `mandate-journal-pg`, `mandate-cli`, `mandate-refcases` (test harness). **Phase 1**, created when M5 starts: `mandate-spec` (mandate validation, policy, change classification, risk state), `mandate-risk` (the gate, a pure library), `mandate-builder` (order builder and autonomy), `mandate-executor`, `mandate-alpaca`. Each crate is created only when a story needs it |
+| ES-02 Dependency rules | num, time, canon → domain → journal, accounting → spec → risk → builder → sim, executor. Adapters depend on the core, never the reverse; nothing depends on a binary. The pure core has no I/O, tokio, filesystem, wall clock, randomness, or floats, and uses `forbid(unsafe_code)`. `cargo xtask layers` enforces this against `xtask/layers.toml`, which also lists the external dependencies each safety-critical crate may use |
+| ES-02 Safety-critical crates | Every pure-core crate, plus `mandate-journal-pg`, `mandate-executor`, `mandate-alpaca`, and `mandate-refcases` (a harness that checks nothing is a safety defect) |
+
+### Toolchain, numbers, time
+
+| ID | Decision |
+|---|---|
+| ES-03 Toolchain | Rust **1.98.1** pinned in `rust-toolchain.toml` (rustfmt, clippy, llvm-tools); **edition 2024**; `rust-version = "1.98"` (MSRV equals the pin because we ship binaries). Fuzzing uses a separately pinned dated nightly. Bump each new stable after two to three weeks and within twelve, in its own PR, gated on the nightly suite and byte-identical golden journals |
+| ES-04 Decimals | `rust_decimal` 1.43 (no default features) **for storage only**, behind private-field newtypes in `mandate-num` (`Price`, `Qty`, `SignedQty`, `Usd`, `CostBasis`, `Ratio`, `Bps`, `FeeRate`), with only meaningful operations (`Qty × Price → Usd`). Arithmetic is **exact or `Err`**: products, quotients, and spec formulas such as `round(B × part ÷ whole, 12, half_even)` compute on 256-bit intermediates (`ruint`) and round exactly once. The journal decimal grammar is our own text-level type (`canon::DecStr`); converting to `rust_decimal` is exact or an error. Raw `FromStr`, `from_scientific`, `*` and `/` on `Decimal` are banned outside `mandate-num` by clippy `disallowed-methods`. Engineering note: typed domain values stay within a 96-bit significand and scale ≤ 28; the journal grammar is unchanged |
+| ES-05 Time | Own `UtcNanos { secs: i64, nanos: u32 }` covering 1970–9999 (journal §4.7), with a hand-written parser and formatter for the 30-character form. `RiskSecond` is a separate whole-second type. jiff 0.2 is used only in `mandate-time`, with `tzdb-bundle-always`, so America/New_York rules never come from the host. Python pins `tzdata`. Core code never reads a clock: time arrives as inputs, and a `WallClock` trait exists only in shell code. `SystemTime::now`, `Instant::now`, and jiff's `now` are banned elsewhere |
+| ES-06 Runtime | tokio **~1.53** (the LTS line, supported to September 2027), in shell crates only. Core state machines are `handle(&mut State, Input) -> Vec<Effect>`. One task per broker account owns its ledger and reads a bounded queue, with a **priority channel** for kill-switch and risk-exit commands read first. The order in which inputs are processed is what gets journaled, and replay follows journal order; a test shows a priority command jumps a full queue. One fenced `StreamWriter` per stream; effects run only after `Committed` or `AlreadyCommitted`. Backtests and replay run the same state machines synchronously, without tokio. `IdGen` is injected |
+| ES-07 Canonical JSON | **Our own implementation** in `mandate-canon`: a strict parser (rejecting duplicate keys, floats, lone surrogates, disallowed key characters, and integers above 2⁵³−1), a value tree sorted by key bytes, a writer following journal §4, and SHA-256 via `sha2`. `serde_json` never touches bytes that get hashed. Verified by every `journal.yaml` vector byte for byte; by differential checks against `serde_json_canonicalizer` (dev-dependency only), Python `rfc8785`, and `ref.canon()`/`ref.version()`; by fuzzing (canonicalizing twice gives the same bytes); and by mutation testing |
+
+### Storage, errors, Python
+
+| ID | Decision |
+|---|---|
+| ES-08 Postgres | PostgreSQL **18** (17 as the floor for customer databases). **sqlx 0.9**, `default-features = false` (postgres, tokio, rustls, macros, migrate), with offline query metadata committed (`cargo sqlx prepare --check` in CI). Forward-only SQL migrations applied **only** by `mandate-cli db migrate` under the migration-owner role, never at startup (an xtask lint bans it). The application role has INSERT and SELECT only; triggers reject UPDATE, DELETE, and TRUNCATE; the body is `bytea` with `CHECK (hash = sha256(body))`; no NUMERIC or jsonb mapping for journal data. Tests use real Postgres and replay the tamper and append vectors |
+| ES-09 Errors and logging | `thiserror` 2 enums per library crate, matched exhaustively, each variant with a stable reason `code()`; `anyhow` only in binaries, xtask, and tests. `unsafe_code` is forbidden workspace-wide. Safety-critical crates deny `unwrap_used`, `expect_used`, `panic`, `indexing_slicing`, `arithmetic_side_effects`, `float_arithmetic`, `float_cmp`, and `as_conversions` (tests excepted). Release profile: `overflow-checks = true`, `panic = "abort"` (a crash recovers from the journal). `tracing` 0.1 with JSON output; log fields are opaque IDs only; `secrecy` for credentials and a redacting `Sensitive<T>`; a test scans log output for symbols, prices, and quantities |
+| ES-10 Python | CPython **3.14** via `.python-version`; **uv** 0.12 workspace with a hashed `uv.lock`; ruff, pytest, hypothesis, pyright. `reference/mandate/` stays byte-identical. Phase 0 Python: the reference-case fixture exporter, the differential-test driver (talking to Rust over a JSON-lines CLI), and research notebooks. **No PyO3 yet**. Trigger: the first SDK or research story that needs Rust inside a Python process |
+
+### Testing and CI
+
+| ID | Decision |
+|---|---|
+| ES-11 Tests | **Unit:** cargo-nextest. **Property:** proptest (and proptest-state-machine); every invariant (MI-n, I-n) and every "never"/"always" in the specs becomes a named test whose oracle computes the expected result independently and has been shown to fail on a seeded bug; 256 cases per PR, 100,000 nightly. **Reference cases:** a PyYAML exporter (the reference's own loader, with duplicate keys rejected, YAML 1.1 dates and `yes`/`no` booleans rejected, and numeric scalars kept as raw text) writes committed `fixtures/refcases/*.json`; CI regenerates and diffs them; Rust has no YAML dependency. `mandate-refcases` (libtest-mimic) makes one named test per case ID; a founder-owned `status.toml` marks each case passing or pending against a story, and a passing case never regresses. **Differential:** `mandate-cli oracle` driven by `reference/mandate/fuzz.py` generators, compared by decimal value and emitted events; a smoke run per PR, 20,000+ sequences nightly; divergences become minimized cases proposed to the founder. **Fuzzing:** cargo-fuzz nightly on the parsers, the verifier, the append state machine, and broker responses. **Mutation:** cargo-mutants `--in-diff` on safety-critical crates per PR (zero survivors unless the founder approves an exclusion); full run and `reference/mandate/mutants.py` nightly. **Benchmarks:** gungraun instruction counts per PR (fail above 5% regression); criterion with hdrhistogram p99 nightly. **Replay:** golden journals and the baseline backtest re-run on x86_64 and aarch64 with hashes compared |
+| ES-12 CI | Every job is one command, `cargo xtask ci <job>`; `cargo xtask check` runs the same set locally. **Platform: Depot CI on Origin**, reporting required checks to Origin rulesets. An E1-1 spike must prove that a failing check blocks a merge; otherwise fall back to GitHub Actions on the mirror, with a bridge posting results as required Origin checks. Workflows use GitHub Actions syntax, actions pinned by commit SHA, default `permissions: {}`, and no secrets in PR jobs. **Required per PR** (median target under 10 minutes; path-filtered jobs report success when skipped): lint (fmt, clippy `-D warnings`, layers, typos, ruff); test (nextest `--locked`, doctests, reference cases); fixture drift and the reference scripts when `reference/` changes; Postgres journal tests; differential smoke; mutants on the diff; supply chain (cargo-deny, the dependency registry, gitleaks); spec guard. **Nightly:** fuzzing, the full differential run, full mutants and `mutants.py`, 100,000-case properties, criterion, the aarch64 build and replay, Postgres 17, cargo-audit, a beta-toolchain canary, and a full-history secret scan. Required checks are never retried automatically; a flaky test is a determinism bug, quarantined only through a founder-owned list |
+| ES-13 Merge policy | Trunk-based, protected `main`, linear history, **squash merges** (one commit per story, story ID in the subject), no force-push; the founder is the only bypass actor and **signs merges with a hardware-backed key**. Branches `agent/<story>-<slug>`. **CODEOWNERS (founder):** safety-critical crates, `docs/specs/`, `schemas/`, `reference/`, `fixtures/refcases/`, `migrations/`, `deny.toml`, `docs/dependencies.md`, CI workflows, `xtask/`, `AGENTS.md`. Changes over 400 non-generated lines in safety-critical crates (800 elsewhere) are split into stacked PRs |
+| ES-15 Tasks and done | **Task brief** (`docs/project/templates/task.md`): story ID and acceptance criteria verbatim; PRD, HLD, and spec anchors and applicable DECs; reference case IDs to turn green; invariants touched; crates in and out of scope; allowed new dependencies (none by default); safety-critical flag; commands to run; size budget; stop conditions (spec ambiguity, a new dependency, a test that would have to weaken, any deviation), on which the agent stops and writes a DEC proposal. **Safety-critical work uses two PRs:** a tests PR (failing tests, cases marked pending) reviewed line by line by the founder, then an implementation PR that CI blocks from editing those tests, which flips the cases to passing and passes the mutation gate. **Done:** the cited cases pass; property tests with independent, seeded-bug-verified oracles cover touched invariants; journal events exist for new state changes; docs are updated; `xtask ci pr` is green; the PR includes a spec-clause-to-test table, a dependency section, what was not done, a decisions-needed list, a safety checklist (floats, clock, unwrap, ordering, replay, secrets, logging), and the review agent's report |
+| ES-16 ADRs | `docs/adr/NNNN-slug.md` in light MADR form (status, context, decision, consequences, alternatives, DEC link). The decision log stays the binding index; every ADR has a DEC row, checked by CI. This ADR is ADR-0001 |
+
+### Supply chain, operations, security
+
+| ID | Decision |
+|---|---|
+| ES-14 Supply chain | `Cargo.lock` and `uv.lock` committed; every build `--locked`. **cargo-deny:** advisories; licenses MIT, Apache-2.0, BSD-2/3, ISC, Unicode-3.0, Zlib, CC0, with MPL-2.0 only as named per-crate exceptions used unmodified; GPL, LGPL, AGPL, BUSL, and SSPL denied; crates.io only (no git dependencies); `openssl-sys`, `native-tls`, `serde_yaml`, and serde_json's `arbitrary_precision` feature banned. **Admission:** every direct dependency needs an entry in founder-owned `docs/dependencies.md` (purpose, alternatives, maintenance, license, transitive count), added in the same PR; CI fails on a direct dependency without an entry (this also blocks hallucinated crate names). A weekly agent PR batches `cargo update` and `uv lock --upgrade`. gitleaks in pre-commit, per PR, and nightly over full history. TLS via rustls. **Deferred:** cargo-vet (importing public audits), cargo-auditable, and a CycloneDX SBOM, with the trigger being the first artifact that leaves the founder's machine (M6) |
+| ES-17 Builds | **Now:** x86_64 Linux per PR and aarch64 Linux nightly; rustls only and no system C libraries beyond libc, so static builds stay possible; `--remap-path-prefix`; and a real **`actor.build` digest** from the first journaled event (the node hashes its own executable; a manifest maps digest to commit). **At M6:** `SOURCE_DATE_EPOCH`, a build container pinned by digest, and a nightly double-build reproducibility diff. **At M11 or the first external install:** musl vs glibc (measured against the latency budget), distroless images, Helm and Compose, cosign signing with a founder hardware key, build provenance, and the air-gapped bundle |
+| ES-18 Observability | **Now:** span names `component.operation`, ID-only fields, JSON logs to local files. **The journal is the audit record, not telemetry** ([DEC-73](../project/04-decision-log.md#decisions) amends the HLD). **At M6:** metrics through the OpenTelemetry API with a Prometheus pull exporter (works air-gapped, no collector). **At M8:** push export (OTLP) only under a data policy |
+| ES-19 Local secrets | `MANDATE_ALPACA_PAPER_KEY_ID` and `MANDATE_ALPACA_PAPER_SECRET` from the environment, the OS keychain, or `~/.config/mandate/paper.env` (mode 0600, outside the repo); `.env*` gitignored. Cloud agents get keys for a **separate, agent-only Alpaca paper account** through dashboard secrets, rotated monthly. Typed config (TOML with `MANDATE_*` overrides) in which `environment` accepts only `paper` or `backtest`. CI uses recorded fixtures; live paper-API tests are opt-in and nightly |
+| ES-20 DEC-16 and DEC-17 | Phase 0 needs neither: the Postgres journal is the durable log, and channels are in-process behind `IntentSink` and `TimerSource` traits. **DEC-17 (messaging) is decided at the start of M5**, because one process per agent deployment (DEC-08) means intents cross processes there; Postgres LISTEN/NOTIFY plus journal tailing is a named option beside NATS (Apache-2.0). **DEC-16 (durable execution) is decided before M7**, evaluating journaled deadlines re-armed by the scheduler first; Restate's server is BUSL-1.1, so bundling it on-prem needs counsel review. No message-bus-shaped abstractions in the core meanwhile |
+
+### Added by the panel
+
+| ID | Decision |
+|---|---|
+| ES-21 Determinism rules | Safety-critical crates: no `f32`/`f64`; `BTreeMap` and `BTreeSet`, never `HashMap` or `HashSet` (clippy `disallowed-types`); no clock or randomness; `IdGen` injected; `fold_version` bumped whenever fold output changes; golden journals committed |
+| ES-22 Spec anti-drift | A PR touching `docs/specs/`, `schemas/`, `reference/`, `fixtures/refcases/`, or `status.toml` must cite a DEC ID and may not change code in the same PR; the Rust mandate parser must agree with `jsonschema` validation on every MC-S case and on fuzzed mandates; event schemas are exported to `schemas/events/` with a drift check |
+| ES-23 Vendor numbers and the paper/live boundary | Broker and market-data numbers never pass through `f64`: JSON numbers are read as raw text (`serde_json` `RawValue` or a string-number deserializer) and parsed by `mandate-num`; Parquet uses `Decimal128(38, s)` with the scale recorded per dataset. A stream's `environment` is fixed in `StreamOpened`, and appends with a different environment are rejected. Only the paper trading and data hosts are compiled in; a `live` cargo feature is forbidden in CI and release checks. Live credentials will come only from the vault (never environment variables), with a signed `live` build, a step-up-approved `AgentDeployed`, and the M13 penetration test |
+| ES-24 Latency budget | **Proposed to the founder ([DEC-74](../project/04-decision-log.md#decisions)):** the PRD's "under 1 ms" is p99 in-process time from receiving an input to the order bytes being ready (gate, order builder, draft canonicalization and hash). It excludes the durable journal append (journal spec §5.3 targets p99 under 5 ms) and the broker round trip, because "journal before acting" makes an end-to-end 1 ms impossible. Benchmarked from M5 |
+| ES-25 Required fixes before E3 and E5 | Confirm that `reference/mandate/` runs unchanged on Python 3.14. The canonicalizer and decimal grammar must pass every `journal.yaml` vector before the first stored event (M4) |
+
+## Consequences
+
+- **Hardest to reverse, so verified most:** the canonical bytes and decimal grammar (every hash is
+  chained and retained six years); exact-or-error decimal semantics (they fix every journaled
+  number and agreement with the Python reference); and a pure core with a serialized executor per
+  account (replay, the reference harness, and differential testing all depend on it).
+- **Review load:** the founder reviews safety-critical tests once, in their own PR, and relies on
+  CI, mutation testing, and differential testing for implementations.
+- **Tooling risk:** Depot CI's Origin integration and Origin stacked PRs are young; all CI logic
+  lives in `cargo xtask`, so moving platforms changes one file.
+- **Deferred with triggers:** PyO3 (first SDK story), cargo-vet, SBOM, and cargo-auditable (M6),
+  packaging and signing (M11), push telemetry (M8), DEC-17 (M5), DEC-16 (before M7).
+
+## Alternatives rejected
+
+| Alternative | Why |
+|---|---|
+| Polyrepo | Cross-repo changes double founder reviews; hash-bearing formats drift |
+| One `core` crate | Cannot enforce purity or scope ownership |
+| `rust_decimal` arithmetic directly | Silent rounding breaks agreement with the reference |
+| Narrowing the journal decimal grammar | Reopens an approved, six-year audit format to fit one library |
+| `i64` nanosecond timestamps | Ends in 2262; journal §4.7 requires 1970–9999 |
+| `serde_jcs` or `serde_json_canonicalizer` in production | Lenient inputs; struct-order serialization; duplicate-key loss |
+| tokio-postgres with refinery | SQL mistakes surface only at runtime |
+| Rust loading YAML directly | YAML 1.2 turns exponent strings into floats |
+| CI on the mirror checked by hand | Nothing blocks a merge |
+| Single PR for safety-critical tests and code | Commit order can be forged; the founder reviews tests and code together |
+| cargo-vet now | Too much audit work for one reviewer before any artifact ships |
+| OpenTelemetry push now | Pre-1.0 and an exfiltration path before any data policy |
