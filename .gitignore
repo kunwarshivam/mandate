@@ -8,3 +8,4 @@ __pycache__/
 # Paper-trading keys never live in the repository (ADR-0001 ES-19).
 .env
 .env.*
+/mutants.out*/
