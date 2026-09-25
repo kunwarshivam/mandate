@@ -24,6 +24,7 @@ stop and ask; do not silently pick one.
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
 | What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
+| How is the code organized, and which tools and versions do we use? | [docs/adr/0001-engineering-setup.md](docs/adr/0001-engineering-setup.md) (ADR-0001) |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
 
@@ -122,7 +123,7 @@ safety-critical design for review.
 
 ## Conventions
 
-These apply once code exists; the first stories (E1) set them up.
+These apply once code exists; the first stories (E1) set them up as decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 
 - **Rust** for the core: runtime, risk, execution, connectors, market data, journal.
   `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` must pass.
