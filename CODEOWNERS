@@ -1,0 +1,21 @@
+# Founder-owned paths (ADR-0001 ES-13). Every change here needs the founder's review.
+# Safety-critical crates are added here as they are created (see xtask/layers.toml).
+
+/docs/specs/                @kunwarshivam
+/schemas/                   @kunwarshivam
+/reference/                 @kunwarshivam
+/fixtures/refcases/         @kunwarshivam
+/migrations/                @kunwarshivam
+/docs/dependencies.md       @kunwarshivam
+/docs/adr/                  @kunwarshivam
+/docs/project/04-decision-log.md @kunwarshivam
+/AGENTS.md                  @kunwarshivam
+/CODEOWNERS                 @kunwarshivam
+/deny.toml                  @kunwarshivam
+/clippy.toml                @kunwarshivam
+/rust-toolchain.toml        @kunwarshivam
+/Cargo.toml                 @kunwarshivam
+/xtask/                     @kunwarshivam
+/.github/                   @kunwarshivam
+/.depot/                    @kunwarshivam
+/.gitleaks.toml             @kunwarshivam
