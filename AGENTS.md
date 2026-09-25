@@ -98,10 +98,10 @@ missed mutants, and green CI (DEC-79):
 ## Working with agents
 
 Start non-trivial work with the `mandate-mode` skill (`.cursor/skills/mandate-mode/SKILL.md`): it
-picks the playbook, lists the few decisions reserved for the founder, and routes to the pstack and
-cursor-team-kit plugins, which `.cursor/settings.json` enables for this repository. Prove work with
-the `verify-mandate` skill; its feature map says which code, tests, and commands cover each
-feature. Where a plugin skill conflicts with this file, this file wins.
+picks the playbook, lists the few decisions reserved for the founder, and routes to the skills
+vendored from pstack and cursor-team-kit (`.cursor/third_party/README.md`). Prove work with the
+`verify-mandate` skill; its feature map says which code, tests, and commands cover each feature.
+Where a vendored skill conflicts with this file, this file wins.
 
 ### The trust ladder
 

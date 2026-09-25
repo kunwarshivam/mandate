@@ -12,7 +12,8 @@ into structure. The founder is not a gate (DEC-79).
 ## Precedence
 
 `AGENTS.md` and accepted decisions (`docs/project/04-decision-log.md`) come first, then this
-skill, then any plugin skill (pstack, cursor-team-kit).
+skill, then the vendored skills (`how`, `why`, `tdd`, `blast-radius`, `interrogate`, `unslop`,
+`technical-writing`, `deslop`; see `.cursor/third_party/README.md`).
 
 ## Decide, record, continue
 
@@ -45,18 +46,18 @@ code (the spec guard enforces it).
 | Change a spec, schema, reference case, or the reference implementation | [`playbooks/spec-change.md`](playbooks/spec-change.md) |
 | The founder or a review corrects something an agent should never repeat | [`playbooks/correction.md`](playbooks/correction.md) |
 | Ship any PR: independent review, then merge | [`playbooks/ship.md`](playbooks/ship.md) |
-| How does X work, why is Y built this way | pstack `how` and `why` |
-| A defect | pstack `tdd`: reproduce with a failing test, then fix the root cause |
-| A small diff you do not fully trust | pstack `blast-radius` |
+| How does X work, why is Y built this way | the `how` and `why` skills |
+| A defect | the `tdd` skill: reproduce with a failing test, then fix the root cause |
+| A small diff you do not fully trust | the `blast-radius` skill |
 
 ## Skills to reach for
 
 - **Verification:** the `verify-mandate` skill. No claim without the command that proves it.
-- **Design across a crate boundary:** pstack `architect`. The sketched API becomes the stub API of
-  the tests PR.
-- **Adversarial review of a safety-critical diff:** pstack `interrogate`, before opening the PR.
-- **Prose (docs, PR descriptions, commits):** pstack `unslop` and `technical-writing`.
-- **Before commit:** cursor-team-kit `deslop`.
+- **Design across a crate boundary:** write the caller's usage first, then the types and
+  signatures as stubs; that stub API is the tests PR. For a contested shape, sketch two and compare.
+- **Adversarial review of a safety-critical diff:** the `interrogate` skill, before opening the PR.
+- **Prose (docs, PR descriptions, commits):** the `unslop` and `technical-writing` skills.
+- **Before commit:** the `deslop` skill.
 
 ## Subagents
 

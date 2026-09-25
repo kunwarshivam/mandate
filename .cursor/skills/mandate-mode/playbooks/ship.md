@@ -11,8 +11,8 @@ decides.
    the PR number, the story or DEC, and this checklist; it must not have written the change:
    - check out the PR head and run `cargo xtask check`;
    - read the diff against the story's acceptance criteria, the specs it cites, and `AGENTS.md`;
-   - for safety-critical crates, confirm zero missed mutants in the `full` log and run pstack
-     `interrogate` on the diff;
+   - for safety-critical crates, confirm zero missed mutants in the `full` log and run the
+     `interrogate` skill on the diff;
    - return PASS or FAIL with file and line evidence for each finding.
 4. On FAIL, fix the findings in the same PR and repeat from step 2.
 5. On PASS, squash-merge through the GitHub API with the story ID in the title. Never force-push
