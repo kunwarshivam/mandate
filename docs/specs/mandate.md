@@ -6,7 +6,7 @@
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
-| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-69](../project/04-decision-log.md#decisions) (DEC-63 to DEC-69 proposed) |
+| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-69](../project/04-decision-log.md#decisions) |
 
 A **mandate** is the binding specification the owner sets for an agent: its goal, instruments,
 capital, signal models, sizing, protection, risk limits, autonomy rules, and notifications. This
