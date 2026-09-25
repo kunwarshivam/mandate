@@ -30,9 +30,6 @@ pub(crate) enum Ty {
     Record(&'static [(&'static str, Ty)]),
     /// Any object; its values are kept as written.
     OpenObject,
-    /// A record field that may be missing. Only `FillApplied.risk_clock` uses it, while the version 2
-    /// vectors still omit that field (DEC-81); the version 3 vectors make it required.
-    MayBeAbsent(&'static Ty),
 }
 
 pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Invalid> {
@@ -75,7 +72,6 @@ pub(crate) fn normalize(ty: &Ty, value: &Value, path: &str) -> Result<Value, Inv
             normalize_record(fields, value.as_object().ok_or_else(schema)?, path).map(Value::Object)
         }
         Ty::OpenObject => value.as_object().map(|_| value.clone()).ok_or_else(schema),
-        Ty::MayBeAbsent(inner) => normalize(inner, value, path),
     }
 }
 
@@ -99,13 +95,10 @@ pub(crate) fn normalize_record(
     }
     let mut out = Object::new();
     for (name, ty) in fields {
-        match (object.get_key_value(*name), ty) {
-            (Some((key, value)), _) => {
-                out.insert(key.clone(), normalize(ty, value, &join(name))?);
-            }
-            (None, Ty::MayBeAbsent(_)) => {}
-            (None, _) => return Err(Invalid::new(InvalidReason::Schema, join(name))),
-        }
+        let (key, value) = object
+            .get_key_value(*name)
+            .ok_or_else(|| Invalid::new(InvalidReason::Schema, join(name)))?;
+        out.insert(key.clone(), normalize(ty, value, &join(name))?);
     }
     Ok(out)
 }
@@ -234,7 +227,7 @@ static FILL_APPLIED_V1: Ty = Ty::Record(&[
     ("qty_gross", Ty::Decimal),
     ("price", Ty::Decimal),
     ("trade_date", Ty::Date),
-    ("risk_clock", Ty::MayBeAbsent(&Ty::RiskClock)),
+    ("risk_clock", Ty::RiskClock),
     (
         "fees",
         Ty::List(&Ty::Record(&[
