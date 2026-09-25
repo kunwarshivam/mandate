@@ -16,21 +16,24 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | spec-guard |
-                        refcases | reference | supply-chain
+                        refcases | reference | supply-chain | mutants
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
+  markers               check for debt markers and #[ignore] without a pending story
+  feature-map           check the verification skill's feature map against the workspace
   deps                  check every direct dependency against docs/dependencies.md
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
 const FAST_JOB: [&str; 3] = ["lint", "test", "spec-guard"];
-const FULL_JOB: [&str; 3] = ["refcases", "reference", "supply-chain"];
-const PR_JOBS: [&str; 6] = [
+const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "mutants"];
+const PR_JOBS: [&str; 7] = [
     "lint",
     "test",
     "refcases",
     "reference",
     "supply-chain",
     "spec-guard",
+    "mutants",
 ];
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
@@ -54,6 +57,23 @@ const PROTECTED_PATHS: [&str; 5] = [
     "crates/mandate-refcases/status.toml",
 ];
 const CODE_PATHS: [&str; 2] = ["crates/", "xtask/src/"];
+
+/// The verification skill's map of features to code, tests, and commands (AGENTS.md).
+const FEATURE_MAP: &str = ".cursor/skills/verify-mandate/feature-map.md";
+/// Top-level entries a feature-map path may start with.
+const REPO_ROOTS: [&str; 11] = [
+    ".cargo/",
+    ".cursor/",
+    ".github/",
+    "crates/",
+    "docs/",
+    "fixtures/",
+    "python/",
+    "reference/",
+    "schemas/",
+    "xtask/",
+    "AGENTS.md",
+];
 
 fn main() -> ExitCode {
     match run() {
@@ -83,6 +103,8 @@ fn run() -> Result<()> {
         }
         ["ci", job] => ci(job),
         ["layers"] => layers(),
+        ["markers"] => markers(),
+        ["feature-map"] => feature_map(),
         ["deps"] => deps(),
         ["refcases"] => refcases(false),
         ["refcases", "--write"] => refcases(true),
@@ -111,6 +133,8 @@ fn ci(job: &str) -> Result<()> {
                 ],
             )?;
             layers()?;
+            markers()?;
+            feature_map()?;
             sh("typos", &[])?;
             uv_tools(&["ruff", "check", "."])?;
             uv_tools(&["ruff", "format", "--check", "."])
@@ -169,6 +193,7 @@ fn ci(job: &str) -> Result<()> {
             }
         }
         "spec-guard" => spec_guard(),
+        "mutants" => mutants(),
         // The two required checks (DEC-76): each pays the setup cost once.
         "fast" => {
             for part in FAST_JOB {
@@ -546,6 +571,179 @@ fn refcases(write: bool) -> Result<()> {
     report(problems, "refcases")
 }
 
+// ---------------------------------------------------------------- trust ladder
+//
+// Each check below turns a correction agents needed more than once into a failing build
+// (AGENTS.md, "The trust ladder").
+
+/// Debt markers get copied as precedent; `#[ignore]` without a pending story hides a test forever.
+fn markers() -> Result<()> {
+    eprintln!("    markers: checking for debt markers and unexplained #[ignore]");
+    let debt = [
+        concat!("TO", "DO"),
+        concat!("FIX", "ME"),
+        concat!("X", "XX"),
+        concat!("HA", "CK"),
+    ];
+    let files = output(
+        "git",
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            "crates",
+            "xtask/src",
+        ],
+    )?;
+    let mut problems = Vec::new();
+    for file in files.lines().filter(|f| f.ends_with(".rs")) {
+        let Ok(text) = fs::read_to_string(file) else {
+            continue;
+        };
+        for (n, line) in (1..).zip(text.lines()) {
+            for word in debt.iter().filter(|w| contains_word(line, w)) {
+                problems.push(format!(
+                    "{file}:{n}: `{word}` marker; fix it now or add a backlog item instead"
+                ));
+            }
+            if line.trim_start().starts_with("#[ignore") && !is_pending_marker(line) {
+                problems.push(format!(
+                    "{file}:{n}: #[ignore] must be `#[ignore = \"pending E<n>-<n>\"]` (DEC-77)"
+                ));
+            }
+        }
+    }
+    report(problems, "markers")
+}
+
+fn contains_word(line: &str, word: &str) -> bool {
+    let is_word = |c: char| c.is_alphanumeric() || c == '_';
+    line.match_indices(word).any(|(i, _)| {
+        let before = line[..i].chars().next_back().is_none_or(|c| !is_word(c));
+        let after = line[i + word.len()..]
+            .chars()
+            .next()
+            .is_none_or(|c| !is_word(c));
+        before && after
+    })
+}
+
+fn is_pending_marker(line: &str) -> bool {
+    let Some(story) = line
+        .trim()
+        .strip_prefix("#[ignore = \"pending E")
+        .and_then(|rest| rest.strip_suffix("\"]"))
+    else {
+        return false;
+    };
+    matches!(story.split_once('-'), Some((epic, n))
+        if !epic.is_empty() && !n.is_empty()
+            && epic.chars().chain(n.chars()).all(|c| c.is_ascii_digit()))
+}
+
+/// The feature map names every crate and reference-case suite, and every path it names exists.
+fn feature_map() -> Result<()> {
+    eprintln!("    feature-map: checking {FEATURE_MAP} against the workspace");
+    let text = fs::read_to_string(FEATURE_MAP).with_context(|| format!("reading {FEATURE_MAP}"))?;
+    let mut problems = Vec::new();
+    for pkg in workspace_packages(&metadata()?) {
+        if !text.contains(&format!("`{}`", pkg.name)) {
+            problems.push(format!("crate `{}` has no entry", pkg.name));
+        }
+    }
+    for entry in fs::read_dir("fixtures/refcases")? {
+        let name = entry?.file_name().to_string_lossy().into_owned();
+        if !text.contains(&format!("fixtures/refcases/{name}")) {
+            problems.push(format!("fixtures/refcases/{name} has no entry"));
+        }
+    }
+    for path in backticked_paths(&text) {
+        if !Path::new(path).exists() {
+            problems.push(format!("names `{path}`, which does not exist"));
+        }
+    }
+    report(problems, "feature-map")
+}
+
+/// Code spans that look like repository paths: no spaces or globs, starting at a known root.
+fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
+    text.split('`').skip(1).step_by(2).filter(|span| {
+        !span.contains(char::is_whitespace)
+            && !span.contains(['*', '<', '{'])
+            && REPO_ROOTS.iter().any(|root| span.starts_with(root))
+    })
+}
+
+/// Mutation testing on the diff of safety-critical library crates (ADR-0001 ES-11, ES-12). Every
+/// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`.
+fn mutants() -> Result<()> {
+    let Some(base) = base_ref() else {
+        eprintln!("    mutants: HEAD is the base; nothing to check");
+        return Ok(());
+    };
+    let dirs = mutated_source_dirs()?;
+    let changed = output("git", &["diff", "--name-only", &format!("{base}...HEAD")])?;
+    let touched: Vec<&str> = changed
+        .lines()
+        .filter(|f| f.ends_with(".rs") && dirs.iter().any(|d| f.starts_with(d.as_str())))
+        .collect();
+    if touched.is_empty() {
+        eprintln!("    mutants: no safety-critical library source changed");
+        return Ok(());
+    }
+    let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
+    args.extend(touched.iter().map(|f| (*f).to_owned()));
+    let diff = output("git", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    let diff_file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
+    fs::write(&diff_file, diff)?;
+    let diff_path = diff_file
+        .to_str()
+        .context("non-UTF-8 temp path")?
+        .to_owned();
+    let result = sh(
+        "cargo",
+        &[
+            "mutants",
+            "--in-diff",
+            &diff_path,
+            "--test-tool",
+            "nextest",
+            "--jobs",
+            "2",
+            "--output",
+            "target",
+        ],
+    );
+    fs::remove_file(&diff_file).ok();
+    result
+}
+
+/// `src/` of every safety-critical product crate. The reference-case harness (a tool crate) is
+/// excluded: its checks are proven by bugs seeded in the code it tests, not by mutating it.
+fn mutated_source_dirs() -> Result<Vec<String>> {
+    let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
+        .context("parsing xtask/layers.toml")?;
+    let root = env::current_dir()?;
+    let mut dirs = Vec::new();
+    for pkg in workspace_packages(&metadata()?) {
+        let Some(own) = policy.crates.get(&pkg.name) else {
+            continue;
+        };
+        if own.safety_critical && matches!(layer_of(own, &pkg.name)?, Layer::Product(_)) {
+            let dir = pkg
+                .manifest_path
+                .parent()
+                .context("manifest without a directory")?
+                .strip_prefix(&root)
+                .context("crate outside the repository")?;
+            dirs.push(format!("{}/src/", dir.display()));
+        }
+    }
+    Ok(dirs)
+}
+
 // ---------------------------------------------------------------- spec guard
 
 fn base_ref() -> Option<String> {
@@ -624,7 +822,37 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify, contains_dec_id};
+    use super::{backticked_paths, classify, contains_dec_id, contains_word, is_pending_marker};
+
+    #[test]
+    fn debt_markers_match_whole_words_only() {
+        let marker = concat!("TO", "DO");
+        assert!(contains_word(&format!("// {marker}: later"), marker));
+        assert!(contains_word(marker, marker));
+        assert!(!contains_word(&format!("{marker}S"), marker));
+        assert!(!contains_word(&format!("my_{marker}"), marker));
+    }
+
+    #[test]
+    fn ignore_needs_a_pending_story() {
+        assert!(is_pending_marker("    #[ignore = \"pending E5-1\"]"));
+        assert!(is_pending_marker("#[ignore = \"pending E12-30\"]"));
+        assert!(!is_pending_marker("#[ignore]"));
+        assert!(!is_pending_marker("#[ignore = \"slow\"]"));
+        assert!(!is_pending_marker("#[ignore = \"pending E5\"]"));
+        assert!(!is_pending_marker("#[ignore = \"pending E-1\"]"));
+        assert!(!is_pending_marker("#[ignore = \"pending E5-x\"]"));
+    }
+
+    #[test]
+    fn feature_map_paths_are_repository_paths() {
+        let text =
+            "`crates/a/src/lib.rs` `cargo xtask check` `docs/*.md` `mandate-journal` `AGENTS.md`";
+        assert_eq!(
+            backticked_paths(text).collect::<Vec<_>>(),
+            ["crates/a/src/lib.rs", "AGENTS.md"]
+        );
+    }
 
     #[test]
     fn status_toml_is_protected_not_code() {

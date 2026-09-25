@@ -27,6 +27,8 @@ unsafe_code = "forbid"
 dbg_macro = "deny"
 todo = "deny"
 unimplemented = "deny"
+# Every exception states why, so agents cannot copy a silent one (AGENTS.md, trust ladder).
+allow_attributes_without_reason = "deny"
 
 # ADR-0001 ES-09: overflow is a bug, and a crash recovers from the journal rather than unwinding.
 [profile.release]
