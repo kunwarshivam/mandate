@@ -1,0 +1,71 @@
+---
+name: mandate-mode
+description: How agents work in the Mandate repository. Use at the start of any non-trivial task here (a backlog story, a spec change, a bug, a review, shipping a PR, or correcting a repeated agent mistake), and for /mandate-mode.
+---
+
+# Mandate mode
+
+The goal is work the founder can trust without watching: small verified changes that agents
+land themselves, decisions recorded rather than waited on, and every repeated correction turned
+into structure. The founder is not a gate (DEC-79).
+
+## Precedence
+
+`AGENTS.md` and accepted decisions (`docs/project/04-decision-log.md`) come first, then this
+skill, then the vendored skills (`how`, `why`, `tdd`, `blast-radius`, `interrogate`, `unslop`,
+`technical-writing`, `deslop`; see `.cursor/third_party/README.md`).
+
+## Decide, record, continue
+
+Do not wait for the founder. When a stop condition fires (a spec ambiguity or error, a new
+dependency, a deviation from an accepted decision), write the decision-log entry, choose, and keep
+going:
+
+- engineering and process decisions: record as "Accepted (agent)" with the rationale and
+  alternatives, then act on it;
+- decisions reserved for the founder: record as Proposed, continue with the most conservative
+  option, and list it at the top of your report.
+
+Reserved for the founder (DEC-79): anything involving live trading, live credentials, or real money
+(never do these; AGENTS.md rule 8); spending or new paid services; legal and compliance text; and
+weakening an approved safety invariant or an `AGENTS.md` non-negotiable. Never force-push `main`,
+rewrite published history, or delete data.
+
+Tests never get weaker to make a change pass. Protected paths still need a DEC and ship without
+code (the spec guard enforces it).
+
+## Start every task
+
+1. Match the task to a playbook and open a todo list whose first items are its steps.
+2. Read the documents the task touches (AGENTS.md "Sources of truth").
+3. Name the data shapes before writing logic.
+
+| Task | Playbook |
+|---|---|
+| Implement a backlog story | [`playbooks/story.md`](playbooks/story.md) |
+| Change a spec, schema, reference case, or the reference implementation | [`playbooks/spec-change.md`](playbooks/spec-change.md) |
+| The founder or a review corrects something an agent should never repeat | [`playbooks/correction.md`](playbooks/correction.md) |
+| Ship any PR: independent review, then merge | [`playbooks/ship.md`](playbooks/ship.md) |
+| How does X work, why is Y built this way | the `how` and `why` skills |
+| A defect | the `tdd` skill: reproduce with a failing test, then fix the root cause |
+| A small diff you do not fully trust | the `blast-radius` skill |
+
+## Skills to reach for
+
+- **Verification:** the `verify-mandate` skill. No claim without the command that proves it.
+- **Design across a crate boundary:** write the caller's usage first, then the types and
+  signatures as stubs; that stub API is the tests PR. For a contested shape, sketch two and compare.
+- **Adversarial review of a safety-critical diff:** the `interrogate` skill, before opening the PR.
+- **Prose (docs, PR descriptions, commits):** the `unslop` and `technical-writing` skills.
+- **Before commit:** the `deslop` skill.
+
+## Subagents
+
+Give each subagent file pointers and this skill, not pasted context. Review its diff yourself and
+write your own summary; do not pass on what it said. Anything touching GitHub goes through a cloud
+agent that holds the token, which it never prints or persists.
+
+## Reporting
+
+Lead with the outcome. Put evidence next to each claim (command and result). List the decisions
+you made and the founder-reserved ones you deferred, and say what was deliberately left out.

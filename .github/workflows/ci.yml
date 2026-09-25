@@ -17,6 +17,8 @@ env:
   CARGO_TERM_COLOR: always
   GITLEAKS_VERSION: "8.30.1"
   GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+  CARGO_MUTANTS_VERSION: "27.1.0"
+  CARGO_MUTANTS_SHA256: "dfe6dc37d0342c891d2829b5a695aa57c2d0edecef7e7d0399a30cc6e206411e"
 
 jobs:
   fast:
@@ -46,7 +48,8 @@ jobs:
 
   full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    # Mutants on a large safety-critical diff take several minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
     env:
@@ -62,12 +65,17 @@ jobs:
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         with:
-          tool: cargo-deny@0.20.2
+          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
       - name: Install gitleaks (checksum-verified)
         run: |
           curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      - name: Install cargo-mutants (checksum-verified)
+        run: |
+          curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
+          tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
