@@ -42,7 +42,6 @@ fn naive_secs(y: u16, mo: u8, d: u8, h: u8, mi: u8, s: u8) -> i64 {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn known_instants() {
     let cases = [
         ("1970-01-01T00:00:00.000000000Z", 0, 0),
@@ -67,7 +66,6 @@ fn known_instants() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn rejects_malformed_timestamps() {
     let syntax = [
         "",
@@ -114,7 +112,6 @@ fn rejects_malformed_timestamps() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn from_parts_bounds() {
     assert_eq!(UtcNanos::from_parts(-1, 0), Err(TimeError::OutOfRange));
     assert_eq!(
@@ -129,7 +126,6 @@ fn from_parts_bounds() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn dates() {
     for text in ["1970-01-01", "2024-02-29", "2026-09-21", "9999-12-31"] {
         assert_eq!(Date::parse(text).unwrap().to_string(), text);
@@ -161,7 +157,6 @@ fn civil() -> impl Strategy<Value = (u16, u8, u8)> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-1"]
     fn parse_matches_naive_count_and_round_trips(
         (y, mo, d) in civil(), h in 0u8..24, mi in 0u8..60, s in 0u8..60, n in 0u32..1_000_000_000
     ) {
@@ -175,7 +170,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn order_is_chronological(a in 0i64..=253_402_300_799, an in 0u32..1_000_000_000,
                               b in 0i64..=253_402_300_799, bn in 0u32..1_000_000_000) {
         let (ta, tb) = (UtcNanos::from_parts(a, an).unwrap(), UtcNanos::from_parts(b, bn).unwrap());
@@ -185,7 +179,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn invalid_days_are_rejected(y in 1970u16..=9999, m in 1u8..=12, extra in 1u8..=10) {
         let day = month_len(y, m) + extra;
         let text = format!("{y:04}-{m:02}-{day:02}");
