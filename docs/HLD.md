@@ -609,8 +609,10 @@ global switch cannot reach into customer deployments.
 ## 9. Intelligence layer
 
 - **Model gateway:** routes calls to Jev (hosted decision model), a Laya pool or in-process
-  Laya (open-weight decision model), and LLM providers. Handles deadlines, fallbacks, and
-  caching, and meters cost per workspace and per agent. Hybrid and on-prem deployments can be
+  Laya (open-weight decision model), and LLM providers. Handles deadlines and caching, and meters
+  cost per workspace and per agent. A fallback may route only to another endpoint serving the
+  identical pinned model; otherwise the call fails and the output counts as missing. The gateway
+  never substitutes a different model ([DEC-67](project/04-decision-log.md#decisions)). Hybrid and on-prem deployments can be
   restricted to **local models only**.
 - **Model scorecards:** measure each signal model's realized hit rate and calibration for the
   user's review. They never change weights or approval routing; in v1 weights are fixed by the

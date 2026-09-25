@@ -263,8 +263,8 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 |---|---|
 | Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; unusual inputs trigger escalation |
 | Model errors or hallucinated instruments | Typed outputs from decision models; instrument validation against the mandate universe |
-| Overconfident models | Self-reported confidence is labeled uncalibrated; combined-score thresholds in the user's autonomy rules; missing models count as zero; scorecards for the user's review |
-| Model provider changes | Model versions pinned per mandate version; changes create a new version |
+| Overconfident models | Self-reported confidence is labeled uncalibrated; combined-score thresholds in the user's autonomy rules; a missing model counts as fully bearish for buys and as zero for exits; scorecards for the user's review |
+| Model provider changes | The content hash pins the underlying model identity; the gateway never substitutes a model; withdrawals are journaled `PlatformOperatorAction` events and outputs then count as missing ([DEC-67](../project/04-decision-log.md#decisions)) |
 
 ## Terms and disclosures (to draft with counsel)
 
