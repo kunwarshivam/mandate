@@ -1,0 +1,4345 @@
+{
+ "schema_version": 3,
+ "configs": {
+  "test_default": {
+   "fees": {
+    "effective_from": "2026-01-01",
+    "equities": {
+     "sec_rate": "0.00003",
+     "taf_per_share": "0.0002",
+     "taf_cap": "9.79",
+     "taf_cap_basis": "per_execution",
+     "cat_per_share": "0.00001",
+     "charge": {
+      "time": "20:00 America/New_York",
+      "rounding": {
+       "scale": 2,
+       "mode": "ceiling"
+      }
+     }
+    },
+    "crypto": {
+     "maker_bps": "15",
+     "taker_bps": "25",
+     "asset_fee_rounding": {
+      "scale": 9,
+      "mode": "half_up"
+     },
+     "usd_fee_rounding": {
+      "scale": 2,
+      "mode": "half_up"
+     },
+     "charge": {
+      "time": "00:00 UTC"
+     }
+    }
+   },
+   "backtest": {
+    "decision_latency_ms": 0,
+    "approval_latency_ms": 0,
+    "slippage": {
+     "half_spread_bps": "1",
+     "impact_model": "fixed",
+     "impact_bps": "2"
+    },
+    "volume_cap": {
+     "fraction": "0.10",
+     "reference": "previous_bar_same_session",
+     "first_bar": "median_same_minute_20_sessions"
+    },
+    "fill_price_tick_rounding": "none"
+   },
+   "gate": {
+    "data_profile": "sip",
+    "price_floor": "5.00",
+    "liquidity_floor_usd": "1000000",
+    "collar": {
+     "liquid_threshold_usd": "50000000",
+     "liquid_x": "0.01",
+     "other_x": "0.02",
+     "crypto_x": "0.02",
+     "passive_band": "0.20"
+    },
+    "opposite_fill_interval_s": 60,
+    "order_to_fill": {
+     "max": "10",
+     "min_orders": 20
+    },
+    "unexplained_403_threshold": 3,
+    "crypto_stop_limit_offset": "0.005",
+    "stop_watchdog_s": 60,
+    "close_window_minutes": 10,
+    "protective_replace_buffer_trading_days": 2,
+    "bracket_partial_fill_timeout_s": 60,
+    "max_unprotected_s": 60,
+    "exit_ladder": {
+     "step_s": 5,
+     "liquid": {
+      "offset": "0.005",
+      "step": "0.005",
+      "max": "0.03"
+     },
+     "other": {
+      "offset": "0.01",
+      "step": "0.01",
+      "max": "0.05"
+     },
+     "crypto": {
+      "offset": "0.01",
+      "step": "0.01",
+      "max": "0.05"
+     }
+    },
+    "legacy_pdt_equity_threshold": "25000.00"
+   },
+   "accounting": {
+    "basis_reduction": {
+     "scale": 12,
+     "mode": "half_even"
+    },
+    "mark_adjustment": {
+     "scale": 12,
+     "mode": "half_even"
+    }
+   }
+  },
+  "no_fees": {
+   "extends": "test_default",
+   "fees": {
+    "equities": {
+     "sec_rate": "0",
+     "taf_per_share": "0",
+     "cat_per_share": "0"
+    }
+   }
+  }
+ },
+ "calendars": {
+  "us_2026": {
+   "valid_from": "2026-09-01",
+   "valid_to": "2026-12-31",
+   "rule": "weekdays not listed as holidays are trading days",
+   "trading_holidays": [
+    "2026-11-26",
+    "2026-12-25"
+   ],
+   "early_closes": [
+    "2026-11-27",
+    "2026-12-24"
+   ],
+   "settlement_holidays": [
+    "2026-10-12",
+    "2026-11-11"
+   ]
+  }
+ },
+ "reason_codes": [
+  "account_restricted",
+  "account_trading_blocked",
+  "crypto_account_inactive",
+  "agent_exits_only",
+  "agent_paused",
+  "agent_stopped",
+  "not_in_universe",
+  "ineligible_exchange",
+  "ipo_not_tradable",
+  "below_price_floor",
+  "below_liquidity_floor",
+  "leveraged_etp_not_enabled",
+  "concentration_limit",
+  "max_order_size",
+  "reentry_cooldown",
+  "session_not_allowed",
+  "extended_hours_opening_not_allowed",
+  "auction_window",
+  "instrument_halted",
+  "would_cross_zero",
+  "sell_exceeds_available",
+  "working_order_limit",
+  "add_blocked_by_protective_order",
+  "unknown_order_in_flight",
+  "market_order_not_allowed",
+  "stale_mark",
+  "price_outside_collar",
+  "min_resting_time",
+  "opposite_fill_interval",
+  "conduct_limit_breached",
+  "order_rate_limited",
+  "max_orders_per_day",
+  "close_window",
+  "discretionary_exit_regular_session_only",
+  "owner_confirmation_required",
+  "gross_exposure_limit",
+  "insufficient_buying_power",
+  "insufficient_settled_buying_power",
+  "legacy_pdt_day_trade_budget",
+  "instrument_claimed"
+ ],
+ "cases": [
+  {
+   "id": "RC-01",
+   "title": "Buy, partial sell, fee accrual and daily charge, equity, settlement, conservation",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "fractionable": true
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "10000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "qty_gross": "10",
+      "price": "150.00"
+     },
+     "expect": {
+      "cash": {
+       "settled": "8500.00",
+       "total": "8500.00"
+      },
+      "fees": {
+       "accrued": "0.0001"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "AAPL",
+      "side": "sell",
+      "qty_gross": "4",
+      "price": "160.00"
+     },
+     "expect": {
+      "positions": {
+       "AAPL": {
+        "qty": "6",
+        "cost_basis": "900.00",
+        "avg_cost": "150.00"
+       }
+      },
+      "realized_pnl_gross": "40.00",
+      "cash": {
+       "settled": "8500.00",
+       "unsettled": [
+        {
+         "settles_on": "2026-09-22",
+         "amount": "640.00"
+        }
+       ]
+      },
+      "fees": {
+       "accrued": "0.02014"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T15:59:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "AAPL",
+      "price": "155.00",
+      "source": "quote"
+     },
+     "expect": {
+      "unrealized_pnl": "30.00",
+      "equity": "10069.97986"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0",
+       "charged": "0.03",
+       "total_usd": "0.03"
+      },
+      "cash": {
+       "settled": "8499.97",
+       "total": "9139.97"
+      },
+      "equity": "10069.97"
+     }
+    },
+    {
+     "at": "2026-09-22T00:00:00-04:00",
+     "event": "advance_clock",
+     "expect": {
+      "cash": {
+       "settled": "9139.97",
+       "unsettled": [],
+       "total": "9139.97"
+      },
+      "realized_pnl_net": "39.97",
+      "conservation": {
+       "delta_equity": "69.97",
+       "realized_gross": "40.00",
+       "unrealized": "30.00",
+       "fees": "0.03"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-02",
+   "title": "Averaging in; reducing keeps average cost; daily fee total",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "MSFT": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "100000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "MSFT",
+      "side": "buy",
+      "qty_gross": "10",
+      "price": "100.00"
+     }
+    },
+    {
+     "at": "2026-09-21T10:30:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "MSFT",
+      "side": "buy",
+      "qty_gross": "10",
+      "price": "110.00"
+     },
+     "expect": {
+      "positions": {
+       "MSFT": {
+        "qty": "20",
+        "cost_basis": "2100.00",
+        "avg_cost": "105.00"
+       }
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "MSFT",
+      "side": "sell",
+      "qty_gross": "5",
+      "price": "120.00"
+     },
+     "expect": {
+      "positions": {
+       "MSFT": {
+        "qty": "15",
+        "cost_basis": "1575.00",
+        "avg_cost": "105.00"
+       }
+      },
+      "realized_pnl_gross": "75.00",
+      "fees": {
+       "accrued": "0.01925"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "charged": "0.02"
+      },
+      "cash": {
+       "total": "98499.98"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-03",
+   "title": "Flip in fills (accounting); the gate rejects a zero-crossing order",
+   "scope": [
+    "accounting",
+    "gate"
+   ],
+   "broker_profile": "generic",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    }
+   },
+   "initial": {
+    "account": {
+     "type": "margin",
+     "cash": {
+      "settled": "100000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "5",
+      "price": "50.00"
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "5",
+      "price": "55.00"
+     },
+     "expect": {
+      "positions": {
+       "XYZ": {
+        "qty": "0",
+        "cost_basis": "0"
+       }
+      },
+      "realized_pnl_gross": "25.00"
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:01-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "3",
+      "price": "55.00"
+     },
+     "expect": {
+      "positions": {
+       "XYZ": {
+        "qty": "-3",
+        "cost_basis": "-165.00",
+        "avg_cost": "55.00"
+       }
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T14:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "3",
+      "price": "52.00"
+     },
+     "expect": {
+      "positions": {
+       "XYZ": {
+        "qty": "0",
+        "cost_basis": "0"
+       }
+      },
+      "realized_pnl_gross": "34.00"
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "gate_rejects_zero_crossing_order",
+     "overrides": {
+      "broker_profile": "alpaca",
+      "initial": {
+       "positions": [
+        {
+         "instrument": "XYZ",
+         "qty": "5",
+         "cost_basis": "250.00"
+        }
+       ]
+      },
+      "steps": [
+       {
+        "at": "2026-09-22T10:00:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "instrument": "XYZ",
+         "side": "sell",
+         "type": "limit",
+         "qty": "8",
+         "limit_price": "55.00",
+         "purpose": "risk_exit"
+        },
+        "expect": {
+         "decision": {
+          "verdict": "deny",
+          "reason_code": "would_cross_zero"
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-04",
+   "title": "Forward split 4-for-1 - OCO cancel, mark adjustment, broker-posting gate, protection re-derived",
+   "scope": [
+    "accounting",
+    "executor",
+    "reconciliation"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "ABC": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE",
+     "fractionable": true
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "0.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "ABC",
+      "qty": "10",
+      "cost_basis": "4000.00"
+     }
+    ],
+    "open_orders": [
+     {
+      "name": "oco_1",
+      "instrument": "ABC",
+      "type": "oco",
+      "tif": "gtc",
+      "purpose": "protective",
+      "legs": [
+       {
+        "side": "sell",
+        "type": "limit",
+        "limit_price": "440.00",
+        "qty": "10"
+       },
+       {
+        "side": "sell",
+        "type": "stop",
+        "stop_price": "380.00",
+        "qty": "10"
+       }
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T16:00:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "ABC",
+      "price": "400.00",
+      "source": "official_close"
+     },
+     "expect": {
+      "equity": "4000.00"
+     }
+    },
+    {
+     "at": "2026-09-21T19:45:00-04:00",
+     "event": "corporate_action_prepare",
+     "data": {
+      "instrument": "ABC",
+      "type": "split",
+      "ex_date": "2026-09-22"
+     },
+     "expect": {
+      "actions": [
+       {
+        "cancel": "oco_1"
+       },
+       {
+        "await_cancel_confirmed": "oco_1"
+       }
+      ],
+      "orders": {
+       "oco_1": {
+        "state": "Canceled"
+       }
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "corporate_action_applied",
+     "data": {
+      "instrument": "ABC",
+      "type": "split",
+      "ratio": {
+       "new": 4,
+       "old": 1
+      },
+      "ex_date": "2026-09-22"
+     },
+     "expect": {
+      "positions": {
+       "ABC": {
+        "qty": "40",
+        "cost_basis": "4000.00",
+        "avg_cost": "100.00"
+       }
+      },
+      "marks": {
+       "ABC": "100.00"
+      },
+      "equity": "4000.00",
+      "realized_pnl_gross": "0.00",
+      "actions": []
+     }
+    },
+    {
+     "at": "2026-09-21T20:05:00-04:00",
+     "event": "reconciliation",
+     "data": {
+      "broker_positions": {
+       "ABC": "10"
+      }
+     },
+     "expect": {
+      "reconciliation": {
+       "status": "pending_corporate_action"
+      },
+      "agent_mode": "normal"
+     }
+    },
+    {
+     "at": "2026-09-22T07:00:00-04:00",
+     "event": "broker_position_update",
+     "data": {
+      "broker_positions": {
+       "ABC": "40"
+      }
+     },
+     "expect": {
+      "reconciliation": {
+       "status": "ok"
+      },
+      "actions": [
+       {
+        "submit_protective": {
+         "type": "oco",
+         "tif": "gtc",
+         "qty": "40",
+         "take_profit": "110.00",
+         "stop": "95.00"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T09:31:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "ABC",
+      "price": "100.00",
+      "source": "quote"
+     },
+     "expect": {
+      "equity": "4000.00",
+      "unrealized_pnl": "0.00"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-05",
+   "title": "Reverse split 1-for-10 with cash in lieu and adjusted mark (non-fractionable)",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "LOW": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "fractionable": false
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "0.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "LOW",
+      "qty": "25",
+      "cost_basis": "50.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T16:00:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "LOW",
+      "price": "2.00",
+      "source": "official_close"
+     },
+     "expect": {
+      "equity": "50.00"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "corporate_action_applied",
+     "data": {
+      "instrument": "LOW",
+      "type": "split",
+      "ratio": {
+       "new": 1,
+       "old": 10
+      },
+      "ex_date": "2026-09-22",
+      "cash_in_lieu_price_per_new_share": "19.00"
+     },
+     "expect": {
+      "positions": {
+       "LOW": {
+        "qty": "2",
+        "cost_basis": "40.00",
+        "avg_cost": "20.00"
+       }
+      },
+      "marks": {
+       "LOW": "20.00"
+      },
+      "receivables": "9.50",
+      "realized_pnl_gross": "-0.50",
+      "equity": "49.50"
+     }
+    },
+    {
+     "at": "2026-09-24T09:00:00-04:00",
+     "event": "broker_cash_posting",
+     "data": {
+      "type": "cash_in_lieu",
+      "instrument": "LOW",
+      "amount": "9.50"
+     },
+     "expect": {
+      "receivables": "0.00",
+      "cash": {
+       "settled": "9.50"
+      },
+      "equity": "49.50"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-06",
+   "title": "Cash dividend - equity unchanged across the ex-date; DividendPaid on the pay date",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "DIV": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "5000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "DIV",
+      "qty": "100",
+      "cost_basis": "5000.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T16:00:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "DIV",
+      "price": "50.00",
+      "source": "official_close"
+     },
+     "expect": {
+      "equity": "10000.00"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "corporate_action_applied",
+     "data": {
+      "instrument": "DIV",
+      "type": "cash_dividend",
+      "amount_per_share": "0.25",
+      "ex_date": "2026-09-22",
+      "pay_date": "2026-10-01"
+     },
+     "expect": {
+      "receivables": "25.00",
+      "income": "25.00",
+      "realized_pnl_gross": "0.00"
+     }
+    },
+    {
+     "at": "2026-09-22T09:31:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "DIV",
+      "price": "49.75",
+      "source": "quote"
+     },
+     "expect": {
+      "equity": "10000.00",
+      "unrealized_pnl": "-25.00"
+     }
+    },
+    {
+     "at": "2026-10-01T00:00:00-04:00",
+     "event": "advance_clock",
+     "expect": {
+      "receivables": "0.00",
+      "cash": {
+       "settled": "5025.00"
+      },
+      "equity": "10000.00"
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "protective_orders_kept_through_dividend",
+     "overrides": {
+      "initial": {
+       "open_orders": [
+        {
+         "name": "oco_1",
+         "instrument": "DIV",
+         "type": "oco",
+         "tif": "gtc",
+         "purpose": "protective",
+         "legs": [
+          {
+           "side": "sell",
+           "type": "limit",
+           "limit_price": "60.00",
+           "qty": "100"
+          },
+          {
+           "side": "sell",
+           "type": "stop",
+           "stop_price": "45.00",
+           "qty": "100"
+          }
+         ]
+        }
+       ]
+      },
+      "steps": [
+       {
+        "at": "2026-09-21T19:45:00-04:00",
+        "event": "corporate_action_prepare",
+        "data": {
+         "instrument": "DIV",
+         "type": "cash_dividend",
+         "ex_date": "2026-09-22"
+        },
+        "expect": {
+         "actions": [],
+         "orders": {
+          "oco_1": {
+           "state": "Accepted"
+          }
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "short_position_generic_broker",
+     "overrides": {
+      "broker_profile": "generic",
+      "initial": {
+       "account": {
+        "type": "margin",
+        "cash": {
+         "settled": "15000.00"
+        }
+       },
+       "positions": [
+        {
+         "instrument": "DIV",
+         "qty": "-100",
+         "cost_basis": "-5000.00"
+        }
+       ]
+      }
+     },
+     "expect_overrides": {
+      "step_1": {
+       "equity": "10000.00"
+      },
+      "step_2": {
+       "receivables": "-25.00",
+       "income": "-25.00"
+      },
+      "step_3": {
+       "equity": "10000.00",
+       "unrealized_pnl": "25.00"
+      },
+      "step_4": {
+       "receivables": "0.00",
+       "cash": {
+        "settled": "14975.00"
+       },
+       "equity": "10000.00"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-07",
+   "title": "Crypto fees in the received asset; unposted-fee reconciliation",
+   "scope": [
+    "accounting",
+    "reconciliation"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "BTCUSD": {
+     "asset_class": "crypto",
+     "symbol": "BTC/USD",
+     "min_trade_increment": "0.000000001"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "100000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "BTCUSD",
+      "side": "buy",
+      "qty_gross": "0.5",
+      "price": "60000.00",
+      "liquidity": "taker"
+     },
+     "expect": {
+      "positions": {
+       "BTCUSD": {
+        "qty": "0.49875",
+        "cost_basis": "29925.00",
+        "avg_cost": "60000.00"
+       }
+      },
+      "fees": {
+       "accrued": "0",
+       "total_usd": "75.00"
+      },
+      "cash": {
+       "settled": "70000.00"
+      },
+      "reconciliation": {
+       "broker_qty_before_fee_posting": "0.5",
+       "tolerance_qty": "0.00125",
+       "status": "ok"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T14:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "BTCUSD",
+      "side": "sell",
+      "qty_gross": "0.49875",
+      "price": "62000.00",
+      "liquidity": "taker"
+     },
+     "expect": {
+      "positions": {
+       "BTCUSD": {
+        "qty": "0"
+       }
+      },
+      "realized_pnl_gross": "997.50",
+      "fees": {
+       "accrued": "77.31",
+       "total_usd": "152.31"
+      },
+      "cash": {
+       "settled": "100922.50"
+      },
+      "equity": "100845.19"
+     }
+    },
+    {
+     "at": "2026-09-22T00:00:00Z",
+     "event": "fees_charged",
+     "data": {
+      "family": "crypto",
+      "day": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0"
+      },
+      "cash": {
+       "settled": "100845.19"
+      },
+      "equity": "100845.19",
+      "conservation": {
+       "delta_equity": "845.19",
+       "realized_gross": "997.50",
+       "fees": "152.31"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-08",
+   "title": "Cash-account settlement and buying power (generic broker; Alpaca has no cash accounts)",
+   "scope": [
+    "gate",
+    "accounting"
+   ],
+   "broker_profile": "generic",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    },
+    "QQQ": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "fractionable": true
+    }
+   },
+   "initial": {
+    "account": {
+     "type": "cash",
+     "cash": {
+      "settled": "1000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T14:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "5",
+      "price": "100.00"
+     },
+     "expect": {
+      "cash": {
+       "settled": "500.00"
+      },
+      "buying_power": "499.99"
+     }
+    },
+    {
+     "at": "2026-09-21T15:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "5",
+      "price": "110.00"
+     },
+     "expect": {
+      "cash": {
+       "settled": "500.00",
+       "unsettled": [
+        {
+         "settles_on": "2026-09-22",
+         "amount": "550.00"
+        }
+       ]
+      },
+      "fees": {
+       "accrued": "0.0176"
+      },
+      "buying_power": "499.98"
+     }
+    },
+    {
+     "at": "2026-09-21T15:30:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "QQQ",
+      "side": "buy",
+      "type": "limit",
+      "qty": "6",
+      "limit_price": "100.00",
+      "tif": "day",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "insufficient_settled_buying_power"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "charged": "0.02"
+      },
+      "cash": {
+       "settled": "499.98"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T00:00:00-04:00",
+     "event": "advance_clock",
+     "expect": {
+      "cash": {
+       "settled": "1049.98",
+       "unsettled": []
+      },
+      "buying_power": "1049.98"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-09",
+   "title": "Legacy day-trade budget blocks openings; Alpaca intraday-margin variant allows",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "generic",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    },
+    "BTCUSD": {
+     "asset_class": "crypto",
+     "symbol": "BTC/USD"
+    }
+   },
+   "initial": {
+    "account": {
+     "type": "margin",
+     "regime": "legacy_pdt",
+     "last_equity": "10000.00",
+     "cash": {
+      "settled": "10000.00"
+     },
+     "prior_day_trades": [
+      {
+       "date": "2026-09-15",
+       "instrument": "AAA"
+      },
+      {
+       "date": "2026-09-16",
+       "instrument": "BBB"
+      },
+      {
+       "date": "2026-09-18",
+       "instrument": "CCC"
+      }
+     ]
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "day_trade_count": 3,
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "legacy_pdt_day_trade_budget"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T10:05:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "BTCUSD",
+      "side": "buy",
+      "qty_gross": "0.01",
+      "price": "60000.00",
+      "liquidity": "taker"
+     }
+    },
+    {
+     "at": "2026-09-21T14:05:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "BTCUSD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "0.009975",
+      "limit_price": "60000.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "day_trade_count": 3
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "alpaca_intraday_margin",
+     "overrides": {
+      "broker_profile": "alpaca",
+      "initial": {
+       "account": {
+        "regime": "intraday_margin",
+        "multiplier": 1
+       }
+      }
+     },
+     "expect_overrides": {
+      "step_1": {
+       "decision": {
+        "verdict": "allow"
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-09B",
+   "title": "Legacy regime - exits never denied; open same-day positions limit openings",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "generic",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    },
+    "MSFT": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "type": "margin",
+     "regime": "legacy_pdt",
+     "last_equity": "10000.00",
+     "cash": {
+      "settled": "10000.00"
+     },
+     "prior_day_trades": [
+      {
+       "date": "2026-09-16",
+       "instrument": "BBB"
+      },
+      {
+       "date": "2026-09-18",
+       "instrument": "CCC"
+      }
+     ]
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "day_trade_count": 2,
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T10:01:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "qty_gross": "10",
+      "price": "150.00"
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "MSFT",
+      "side": "buy",
+      "type": "limit",
+      "qty": "5",
+      "limit_price": "400.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "legacy_pdt_day_trade_budget"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T14:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "151.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T14:00:05-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "AAPL",
+      "side": "sell",
+      "qty_gross": "10",
+      "price": "151.00"
+     },
+     "expect": {
+      "day_trade_count": 3
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-10",
+   "title": "Backtest - timing, slippage, touch vs through, marketable limit, volume cap",
+   "scope": [
+    "backtest"
+   ],
+   "broker_profile": "backtest",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "TST": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "isolation": "per_order",
+   "bars": [
+    {
+     "start": "2026-09-21T09:40:00-04:00",
+     "open": "99.90",
+     "high": "100.20",
+     "low": "99.80",
+     "close": "100.00",
+     "volume": "5000"
+    },
+    {
+     "start": "2026-09-21T09:41:00-04:00",
+     "open": "100.00",
+     "high": "100.50",
+     "low": "99.60",
+     "close": "100.40",
+     "volume": "8000"
+    },
+    {
+     "start": "2026-09-21T09:42:00-04:00",
+     "open": "100.40",
+     "high": "100.60",
+     "low": "100.10",
+     "close": "100.30",
+     "volume": "6000"
+    }
+   ],
+   "orders": [
+    {
+     "name": "market_sell_exit",
+     "initial_position": {
+      "qty": "100"
+     },
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "sell",
+      "type": "market",
+      "qty": "100",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "99.97"
+       }
+      ]
+     }
+    },
+    {
+     "name": "limit_sell_touch_is_not_fill",
+     "initial_position": {
+      "qty": "100"
+     },
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "sell",
+      "type": "limit",
+      "limit_price": "100.50",
+      "qty": "100",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 2,
+        "qty": "100",
+        "price": "100.50",
+        "liquidity": "maker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "marketable_limit_buy",
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "100.10",
+      "qty": "100",
+      "purpose": "open"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "100.03",
+        "liquidity": "taker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "volume_cap",
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "100.60",
+      "qty": "1000",
+      "purpose": "open"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "500",
+        "price": "100.03",
+        "liquidity": "taker"
+       },
+       {
+        "bar": 2,
+        "qty": "500",
+        "price": "100.43012",
+        "liquidity": "taker"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-11",
+   "title": "Settlement calendar with bank holidays; overnight trade date",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "0.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "XYZ",
+      "qty": "4",
+      "cost_basis": "40.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T21:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "1",
+      "price": "10.00",
+      "source": "external"
+     },
+     "expect": {
+      "trade_date": "2026-09-22",
+      "settles_on": "2026-09-23",
+      "agent_mode": "exits_only"
+     }
+    },
+    {
+     "at": "2026-10-09T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "1",
+      "price": "10.00"
+     },
+     "expect": {
+      "trade_date": "2026-10-09",
+      "settles_on": "2026-10-13"
+     }
+    },
+    {
+     "at": "2026-10-12T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "1",
+      "price": "10.00"
+     },
+     "expect": {
+      "trade_date": "2026-10-12",
+      "settles_on": "2026-10-13"
+     }
+    },
+    {
+     "at": "2026-11-10T10:00:00-05:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "1",
+      "price": "10.00"
+     },
+     "expect": {
+      "trade_date": "2026-11-10",
+      "settles_on": "2026-11-12"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-12",
+   "title": "Backtest stops, gaps (continuous vs auction), stop-limit, OCO ordering",
+   "scope": [
+    "backtest"
+   ],
+   "broker_profile": "backtest",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "TST": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "isolation": "per_order",
+   "orders": [
+    {
+     "name": "stop_triggers_intrabar",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "side": "sell",
+      "type": "stop",
+      "stop_price": "99.00",
+      "qty": "100",
+      "purpose": "protective",
+      "resting_since_bar": 0
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "99.60",
+       "high": "99.80",
+       "low": "99.40",
+       "close": "99.50",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "99.50",
+       "high": "99.60",
+       "low": "98.80",
+       "close": "98.90",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "98.9703"
+       }
+      ]
+     }
+    },
+    {
+     "name": "stop_gap_through",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "side": "sell",
+      "type": "stop",
+      "stop_price": "99.00",
+      "qty": "100",
+      "purpose": "protective",
+      "resting_since_bar": 0
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "99.60",
+       "high": "99.80",
+       "low": "99.40",
+       "close": "99.50",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "98.50",
+       "high": "98.90",
+       "low": "98.20",
+       "close": "98.60",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "98.47045"
+       }
+      ]
+     }
+    },
+    {
+     "name": "stop_limit_gap_rests_as_limit",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "side": "sell",
+      "type": "stop_limit",
+      "stop_price": "99.00",
+      "limit_price": "98.80",
+      "qty": "100",
+      "purpose": "protective",
+      "resting_since_bar": 0
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "99.60",
+       "high": "99.80",
+       "low": "99.40",
+       "close": "99.50",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "98.50",
+       "high": "98.70",
+       "low": "98.20",
+       "close": "98.60",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:02:00-04:00",
+       "open": "98.60",
+       "high": "98.90",
+       "low": "98.40",
+       "close": "98.85",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 2,
+        "qty": "100",
+        "price": "98.80",
+        "liquidity": "maker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "oco_both_reachable_stop_first",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "type": "oco",
+      "resting_since_bar": 0,
+      "legs": [
+       {
+        "side": "sell",
+        "type": "limit",
+        "limit_price": "101.00",
+        "qty": "100"
+       },
+       {
+        "side": "sell",
+        "type": "stop",
+        "stop_price": "99.00",
+        "qty": "100"
+       }
+      ]
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "100.00",
+       "high": "100.20",
+       "low": "99.80",
+       "close": "100.00",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "100.00",
+       "high": "101.50",
+       "low": "98.70",
+       "close": "100.00",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "leg": "stop",
+        "qty": "100",
+        "price": "98.9703"
+       }
+      ],
+      "canceled_legs": [
+       "limit"
+      ]
+     }
+    },
+    {
+     "name": "oco_open_reaches_take_profit",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "type": "oco",
+      "resting_since_bar": 0,
+      "legs": [
+       {
+        "side": "sell",
+        "type": "limit",
+        "limit_price": "101.00",
+        "qty": "100"
+       },
+       {
+        "side": "sell",
+        "type": "stop",
+        "stop_price": "99.00",
+        "qty": "100"
+       }
+      ]
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "100.00",
+       "high": "100.20",
+       "low": "99.80",
+       "close": "100.00",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "101.20",
+       "high": "101.50",
+       "low": "98.70",
+       "close": "100.00",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "leg": "limit",
+        "qty": "100",
+        "price": "101.00",
+        "liquidity": "maker"
+       }
+      ],
+      "canceled_legs": [
+       "stop"
+      ]
+     }
+    },
+    {
+     "name": "resting_limit_gap_through_continuous_fills_at_limit",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "99.00",
+      "qty": "100",
+      "purpose": "open",
+      "resting_since_bar": 0
+     },
+     "bars": [
+      {
+       "start": "2026-09-21T10:00:00-04:00",
+       "open": "99.40",
+       "high": "99.60",
+       "low": "99.10",
+       "close": "99.30",
+       "volume": "9000"
+      },
+      {
+       "start": "2026-09-21T10:01:00-04:00",
+       "open": "98.50",
+       "high": "98.80",
+       "low": "98.40",
+       "close": "98.70",
+       "volume": "9000"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "99.00",
+        "liquidity": "maker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "resting_limit_gap_through_auction_fills_at_open",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "99.00",
+      "qty": "100",
+      "purpose": "open",
+      "resting_since": "previous_trading_day"
+     },
+     "first_bar_reference_volume": "9000",
+     "bars": [
+      {
+       "start": "2026-09-21T09:30:00-04:00",
+       "open": "98.50",
+       "high": "98.80",
+       "low": "98.40",
+       "close": "98.70",
+       "volume": "30000",
+       "session": "regular"
+      }
+     ],
+     "expect": {
+      "fills": [
+       {
+        "bar": 0,
+        "qty": "100",
+        "price": "98.50"
+       }
+      ]
+     }
+    },
+    {
+     "name": "stop_not_triggered_in_extended_hours",
+     "initial_position": {
+      "qty": "100"
+     },
+     "order": {
+      "side": "sell",
+      "type": "stop",
+      "stop_price": "99.00",
+      "qty": "100",
+      "purpose": "protective",
+      "resting_since_bar": 0
+     },
+     "first_bar_reference_volume": "9000",
+     "bars": [
+      {
+       "start": "2026-09-21T09:00:00-04:00",
+       "open": "99.50",
+       "high": "99.60",
+       "low": "98.00",
+       "close": "99.30",
+       "volume": "2000",
+       "session": "pre_market"
+      },
+      {
+       "start": "2026-09-21T09:30:00-04:00",
+       "open": "99.20",
+       "high": "99.50",
+       "low": "99.10",
+       "close": "99.40",
+       "volume": "9000",
+       "session": "regular"
+      }
+     ],
+     "expect": {
+      "fills": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-13",
+   "title": "Partial fills - TAF cap per execution; daily fee rounding",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "config_overrides": {
+    "fees": {
+     "equities": {
+      "taf_cap": "0.015"
+     }
+    }
+   },
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "20000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T10:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "300",
+      "price": "49.00",
+      "client_order_id": "01B-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.003"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "100",
+      "price": "50.00",
+      "client_order_id": "01S-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.169"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:01-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "100",
+      "price": "50.00",
+      "client_order_id": "01S-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.335"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T11:00:02-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "100",
+      "price": "50.00",
+      "client_order_id": "01S-1"
+     },
+     "expect": {
+      "fees": {
+       "accrued": "0.501"
+      },
+      "realized_pnl_gross": "300.00"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "charged": "0.51"
+      },
+      "realized_pnl_net": "299.49"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-14",
+   "title": "Equity exit sequence with protective OCO; plain add blocked; add via bracket; kill switch",
+   "scope": [
+    "executor",
+    "gate"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "20000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "AAPL",
+      "qty": "10",
+      "cost_basis": "1500.00"
+     }
+    ],
+    "open_orders": [
+     {
+      "name": "oco_1",
+      "instrument": "AAPL",
+      "type": "oco",
+      "tif": "gtc",
+      "purpose": "protective",
+      "legs": [
+       {
+        "side": "sell",
+        "type": "limit",
+        "limit_price": "170.00",
+        "qty": "10"
+       },
+       {
+        "side": "sell",
+        "type": "stop",
+        "stop_price": "140.00",
+        "qty": "10"
+       }
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T11:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "exit_1",
+      "instrument": "AAPL",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "155.00",
+      "purpose": "risk_exit",
+      "quote": {
+       "bid": "155.00",
+       "ask": "155.10"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "cancel": "oco_1"
+       },
+       {
+        "await_cancel_confirmed": "oco_1"
+       },
+       {
+        "journal": "unprotected_window_start"
+       },
+       {
+        "rerun_gate": "exit_1"
+       },
+       {
+        "submit": "exit_1"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T11:00:03-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "exit_1",
+      "status": "filled",
+      "fill": {
+       "qty": "10",
+       "price": "155.00"
+      }
+     },
+     "expect": {
+      "positions": {
+       "AAPL": {
+        "qty": "0"
+       }
+      },
+      "realized_pnl_gross": "50.00",
+      "actions": [
+       {
+        "journal": "unprotected_window_end"
+       }
+      ]
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "passive_exit_becomes_oco_take_profit",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T11:00:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "name": "exit_p",
+         "instrument": "AAPL",
+         "side": "sell",
+         "type": "limit",
+         "qty": "10",
+         "limit_price": "160.00",
+         "purpose": "risk_exit",
+         "quote": {
+          "bid": "155.00",
+          "ask": "155.10"
+         }
+        },
+        "expect": {
+         "decision": {
+          "verdict": "allow"
+         },
+         "actions": [
+          {
+           "cancel": "oco_1"
+          },
+          {
+           "await_cancel_confirmed": "oco_1"
+          },
+          {
+           "submit_protective": {
+            "name": "oco_2",
+            "type": "oco",
+            "tif": "gtc",
+            "qty": "10",
+            "take_profit": "160.00",
+            "stop": "140.00"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "plain_add_blocked",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T11:00:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "instrument": "AAPL",
+         "side": "buy",
+         "type": "limit",
+         "qty": "5",
+         "limit_price": "151.00",
+         "purpose": "increase"
+        },
+        "expect": {
+         "decision": {
+          "verdict": "deny",
+          "reason_code": "add_blocked_by_protective_order"
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "add_via_bracket",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T11:00:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "name": "bracket_2",
+         "instrument": "AAPL",
+         "type": "bracket",
+         "tif": "gtc",
+         "entry": {
+          "side": "buy",
+          "type": "limit",
+          "qty": "5",
+          "limit_price": "151.00"
+         },
+         "take_profit": {
+          "limit_price": "170.00"
+         },
+         "stop_loss": {
+          "stop_price": "140.00"
+         },
+         "purpose": "increase"
+        },
+        "expect": {
+         "decision": {
+          "verdict": "allow"
+         },
+         "actions": [
+          {
+           "submit": "bracket_2"
+          }
+         ]
+        }
+       },
+       {
+        "at": "2026-09-22T11:00:05-04:00",
+        "event": "broker_order_update",
+        "data": {
+         "name": "bracket_2",
+         "leg": "entry",
+         "status": "filled",
+         "fill": {
+          "qty": "5",
+          "price": "151.00"
+         }
+        },
+        "expect": {
+         "positions": {
+          "AAPL": {
+           "qty": "15"
+          }
+         },
+         "protective_sell_qty": "15"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "kill_switch",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T11:00:00-04:00",
+        "event": "kill_switch",
+        "data": {
+         "scope": "agent"
+        },
+        "expect": {
+         "actions": [
+          {
+           "cancel_all_orders": "agent"
+          },
+          {
+           "await_cancel_confirmed": "all"
+          },
+          {
+           "close_all_positions": "agent"
+          }
+         ],
+         "agent_mode": "stopped"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-15",
+   "title": "Restrictions detected from rejects and status; external order",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    },
+    "MSFT": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "20000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "AAPL",
+      "qty": "10",
+      "cost_basis": "1500.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "ord_1",
+      "instrument": "MSFT",
+      "side": "buy",
+      "type": "limit",
+      "qty": "5",
+      "limit_price": "400.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "submit": "ord_1"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:01-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "ord_1",
+      "status": "rejected",
+      "http_status": 403,
+      "reject": {
+       "mapped_as": "closing_only",
+       "message": "account restricted to closing transactions"
+      }
+     },
+     "expect": {
+      "agent_mode": "exits_only",
+      "actions": [
+       {
+        "alert_owner": "account_restricted"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:01:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "MSFT",
+      "side": "buy",
+      "type": "limit",
+      "qty": "5",
+      "limit_price": "400.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "account_restricted"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:02:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "155.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "status_not_active",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T10:00:00-04:00",
+        "event": "broker_account_update",
+        "data": {
+         "status": "ACCOUNT_UPDATED"
+        },
+        "expect": {
+         "agent_mode": "paused",
+         "actions": [
+          {
+           "alert_owner": "account_trading_blocked"
+          }
+         ]
+        }
+       },
+       {
+        "at": "2026-09-22T10:02:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "instrument": "AAPL",
+         "side": "sell",
+         "type": "limit",
+         "qty": "10",
+         "limit_price": "155.00",
+         "purpose": "risk_exit"
+        },
+        "expect": {
+         "decision": {
+          "verdict": "deny",
+          "reason_code": "account_trading_blocked"
+         }
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "unexplained_403s",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T10:00:00-04:00",
+        "event": "broker_order_update",
+        "data": {
+         "client_order_id": "A-1",
+         "status": "rejected",
+         "http_status": 403,
+         "reject": {
+          "mapped_as": "unknown"
+         }
+        },
+        "expect": {
+         "agent_mode": "normal"
+        }
+       },
+       {
+        "at": "2026-09-22T10:00:10-04:00",
+        "event": "broker_order_update",
+        "data": {
+         "client_order_id": "A-2",
+         "status": "rejected",
+         "http_status": 403,
+         "reject": {
+          "mapped_as": "unknown"
+         }
+        },
+        "expect": {
+         "agent_mode": "normal"
+        }
+       },
+       {
+        "at": "2026-09-22T10:00:20-04:00",
+        "event": "broker_order_update",
+        "data": {
+         "client_order_id": "A-3",
+         "status": "rejected",
+         "http_status": 403,
+         "reject": {
+          "mapped_as": "unknown"
+         }
+        },
+        "expect": {
+         "agent_mode": "exits_only",
+         "actions": [
+          {
+           "refresh_account": true
+          },
+          {
+           "alert_owner": "account_restricted"
+          }
+         ]
+        }
+       }
+      ]
+     }
+    },
+    {
+     "name": "external_order_detected",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T10:00:00-04:00",
+        "event": "broker_order_update",
+        "data": {
+         "client_order_id": "manual-web-123",
+         "instrument": "MSFT",
+         "side": "buy",
+         "status": "filled",
+         "fill": {
+          "qty": "2",
+          "price": "400.00"
+         }
+        },
+        "expect": {
+         "agent_mode": "exits_only",
+         "actions": [
+          {
+           "journal": "external_activity"
+          },
+          {
+           "alert_owner": "external_activity"
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-16",
+   "title": "Eligibility floor; exits outside the universe",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "GOOD": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "prior_close": "120.00",
+     "median_dollar_volume_20d": "50000000"
+    },
+    "OTCX": {
+     "asset_class": "us_equity",
+     "exchange": "OTC",
+     "prior_close": "12.00",
+     "median_dollar_volume_20d": "5000000"
+    },
+    "LOWP": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE",
+     "prior_close": "3.50",
+     "median_dollar_volume_20d": "5000000"
+    },
+    "ILLQ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE",
+     "prior_close": "20.00",
+     "median_dollar_volume_20d": "200000"
+    },
+    "LEV3": {
+     "asset_class": "us_equity",
+     "exchange": "ARCA",
+     "prior_close": "40.00",
+     "median_dollar_volume_20d": "90000000",
+     "leveraged_or_inverse": true
+    },
+    "IPON": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "ipo": true
+    },
+    "OUTU": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE",
+     "prior_close": "30.00",
+     "median_dollar_volume_20d": "9000000"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "50000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "OUTU",
+      "qty": "10",
+      "cost_basis": "300.00"
+     }
+    ],
+    "agents": [
+     {
+      "id": "agent_a",
+      "universe": [
+       "GOOD",
+       "OTCX",
+       "LOWP",
+       "ILLQ",
+       "LEV3",
+       "IPON"
+      ],
+      "leveraged_etps_enabled": false
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "120.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:01-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "OTCX",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "12.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "ineligible_exchange"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:02-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "LOWP",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "3.50",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "below_price_floor"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:03-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "ILLQ",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "20.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "below_liquidity_floor"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:04-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "LEV3",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "40.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "leveraged_etp_not_enabled"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:05-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "IPON",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "25.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "ipo_not_tradable"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:06-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "OUTU",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "30.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "not_in_universe"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:07-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "OUTU",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "30.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "leveraged_etps_enabled",
+     "overrides": {
+      "initial": {
+       "agents": [
+        {
+         "id": "agent_a",
+         "universe": [
+          "GOOD",
+          "OTCX",
+          "LOWP",
+          "ILLQ",
+          "LEV3",
+          "IPON"
+         ],
+         "leveraged_etps_enabled": true,
+         "risk_disclosure_acknowledged": true
+        }
+       ]
+      }
+     },
+     "expect_overrides": {
+      "step_5": {
+       "decision": {
+        "verdict": "allow"
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-17",
+   "title": "Account ledger - instrument claims and shared buying power",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    },
+    "MSFT": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "10000.00"
+     }
+    },
+    "agents": [
+     {
+      "id": "agent_a",
+      "universe": [
+       "AAPL"
+      ]
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T09:00:00-04:00",
+     "event": "deploy_agent",
+     "data": {
+      "id": "agent_b",
+      "universe": [
+       "AAPL",
+       "MSFT"
+      ]
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "instrument_claimed"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T09:01:00-04:00",
+     "event": "deploy_agent",
+     "data": {
+      "id": "agent_c",
+      "universe": [
+       "MSFT"
+      ]
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "agent": "agent_a",
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "40",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "buying_power": "3999.99"
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:01-04:00",
+     "event": "propose_order",
+     "data": {
+      "agent": "agent_c",
+      "instrument": "MSFT",
+      "side": "buy",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "450.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "insufficient_buying_power"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:02-04:00",
+     "event": "propose_order",
+     "data": {
+      "agent": "agent_c",
+      "instrument": "MSFT",
+      "side": "buy",
+      "type": "limit",
+      "qty": "8",
+      "limit_price": "450.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "buying_power": "399.98"
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-18",
+   "title": "Margin account reuses unsettled proceeds (DEC-34); cash-account variant denies",
+   "scope": [
+    "gate",
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "XYZ": {
+     "asset_class": "us_equity",
+     "exchange": "NYSE"
+    },
+    "QQQ": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "1000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T14:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "buy",
+      "qty_gross": "5",
+      "price": "100.00"
+     }
+    },
+    {
+     "at": "2026-09-21T15:00:00-04:00",
+     "event": "fill",
+     "data": {
+      "instrument": "XYZ",
+      "side": "sell",
+      "qty_gross": "5",
+      "price": "110.00"
+     },
+     "expect": {
+      "buying_power": "1049.98",
+      "fees": {
+       "accrued": "0.0176"
+      }
+     }
+    },
+    {
+     "at": "2026-09-21T15:30:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "buy_q",
+      "instrument": "QQQ",
+      "side": "buy",
+      "type": "limit",
+      "qty": "6",
+      "limit_price": "100.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "buying_power": "449.97"
+     }
+    },
+    {
+     "at": "2026-09-21T15:30:05-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "buy_q",
+      "status": "filled",
+      "fill": {
+       "qty": "6",
+       "price": "100.00"
+      }
+     },
+     "expect": {
+      "cash": {
+       "settled": "-100.00",
+       "unsettled": [
+        {
+         "settles_on": "2026-09-22",
+         "amount": "550.00"
+        }
+       ],
+       "total": "450.00"
+      },
+      "fees": {
+       "accrued": "0.01766"
+      },
+      "buying_power": "449.98"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "fees_charged",
+     "data": {
+      "family": "equities",
+      "trade_date": "2026-09-21"
+     },
+     "expect": {
+      "fees": {
+       "charged": "0.02"
+      },
+      "cash": {
+       "settled": "-100.02",
+       "total": "449.98"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T00:00:00-04:00",
+     "event": "advance_clock",
+     "expect": {
+      "cash": {
+       "settled": "449.98",
+       "unsettled": [],
+       "total": "449.98"
+      }
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "generic_cash_account",
+     "overrides": {
+      "broker_profile": "generic",
+      "initial": {
+       "account": {
+        "type": "cash"
+       }
+      },
+      "steps": [
+       {
+        "at": "2026-09-21T14:00:00-04:00",
+        "event": "fill",
+        "data": {
+         "instrument": "XYZ",
+         "side": "buy",
+         "qty_gross": "5",
+         "price": "100.00"
+        }
+       },
+       {
+        "at": "2026-09-21T15:00:00-04:00",
+        "event": "fill",
+        "data": {
+         "instrument": "XYZ",
+         "side": "sell",
+         "qty_gross": "5",
+         "price": "110.00"
+        },
+        "expect": {
+         "buying_power": "499.98"
+        }
+       },
+       {
+        "at": "2026-09-21T15:30:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "instrument": "QQQ",
+         "side": "buy",
+         "type": "limit",
+         "qty": "6",
+         "limit_price": "100.00",
+         "purpose": "open"
+        },
+        "expect": {
+         "decision": {
+          "verdict": "deny",
+          "reason_code": "insufficient_settled_buying_power"
+         }
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-19",
+   "title": "Backtest - resting limit fills on its arrival bar; marketable remainder becomes resting",
+   "scope": [
+    "backtest"
+   ],
+   "broker_profile": "backtest",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "TST": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "isolation": "per_order",
+   "bars": [
+    {
+     "start": "2026-09-21T09:40:00-04:00",
+     "open": "99.90",
+     "high": "100.20",
+     "low": "99.80",
+     "close": "100.00",
+     "volume": "5000"
+    },
+    {
+     "start": "2026-09-21T09:41:00-04:00",
+     "open": "100.00",
+     "high": "100.10",
+     "low": "99.60",
+     "close": "99.80",
+     "volume": "8000"
+    },
+    {
+     "start": "2026-09-21T09:42:00-04:00",
+     "open": "100.40",
+     "high": "100.60",
+     "low": "100.10",
+     "close": "100.30",
+     "volume": "6000"
+    },
+    {
+     "start": "2026-09-21T09:43:00-04:00",
+     "open": "100.20",
+     "high": "100.30",
+     "low": "99.90",
+     "close": "100.00",
+     "volume": "7000"
+    }
+   ],
+   "orders": [
+    {
+     "name": "resting_fills_on_arrival_bar",
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "99.70",
+      "qty": "100",
+      "purpose": "open"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "100",
+        "price": "99.70",
+        "liquidity": "maker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "marketable_remainder_becomes_resting",
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "100.05",
+      "qty": "1000",
+      "purpose": "open"
+     },
+     "expect": {
+      "fills": [
+       {
+        "bar": 1,
+        "qty": "500",
+        "price": "100.03",
+        "liquidity": "taker"
+       },
+       {
+        "bar": 3,
+        "qty": "500",
+        "price": "100.05",
+        "liquidity": "maker"
+       }
+      ]
+     }
+    },
+    {
+     "name": "touch_on_arrival_is_not_fill",
+     "decided_at": "2026-09-21T09:41:00-04:00",
+     "order": {
+      "side": "buy",
+      "type": "limit",
+      "limit_price": "99.60",
+      "qty": "100",
+      "purpose": "open"
+     },
+     "expect": {
+      "fills": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-20",
+   "title": "Crypto protection with a simple stop-limit - add and exit sequences (DEC-36)",
+   "scope": [
+    "executor"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "BTCUSD": {
+     "asset_class": "crypto",
+     "symbol": "BTC/USD",
+     "min_trade_increment": "0.000000001"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "50000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "BTCUSD",
+      "qty": "0.5",
+      "cost_basis": "30000.00"
+     }
+    ],
+    "open_orders": [
+     {
+      "name": "sl_1",
+      "instrument": "BTCUSD",
+      "side": "sell",
+      "type": "stop_limit",
+      "stop_price": "55000.00",
+      "limit_price": "54725.00",
+      "qty": "0.5",
+      "tif": "gtc",
+      "purpose": "protective"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "add_1",
+      "instrument": "BTCUSD",
+      "side": "buy",
+      "type": "limit",
+      "tif": "ioc",
+      "qty": "0.1",
+      "limit_price": "60000.00",
+      "purpose": "increase",
+      "quote": {
+       "bid": "59990.00",
+       "ask": "60000.00"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "cancel": "sl_1"
+       },
+       {
+        "await_cancel_confirmed": "sl_1"
+       },
+       {
+        "journal": "unprotected_window_start"
+       },
+       {
+        "rerun_gate": "add_1"
+       },
+       {
+        "submit": "add_1"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:05-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "add_1",
+      "status": "filled",
+      "fill": {
+       "qty": "0.1",
+       "price": "60000.00",
+       "liquidity": "taker"
+      }
+     },
+     "expect": {
+      "positions": {
+       "BTCUSD": {
+        "qty": "0.59975"
+       }
+      },
+      "actions": [
+       {
+        "submit_protective": {
+         "name": "sl_2",
+         "type": "stop_limit",
+         "tif": "gtc",
+         "qty": "0.59975",
+         "stop": "55000.00",
+         "limit": "54725.00"
+        }
+       },
+       {
+        "journal": "unprotected_window_end"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T14:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "exit_1",
+      "instrument": "BTCUSD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "0.59975",
+      "limit_price": "58000.00",
+      "purpose": "risk_exit",
+      "quote": {
+       "bid": "58000.00",
+       "ask": "58010.00"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "cancel": "sl_2"
+       },
+       {
+        "await_cancel_confirmed": "sl_2"
+       },
+       {
+        "journal": "unprotected_window_start"
+       },
+       {
+        "rerun_gate": "exit_1"
+       },
+       {
+        "submit": "exit_1"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-21",
+   "title": "Bracket partly filled - OCO for the filled quantity; re-placement before expiry",
+   "scope": [
+    "executor"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "50000.00"
+     }
+    }
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "bracket_1",
+      "instrument": "AAPL",
+      "type": "bracket",
+      "tif": "gtc",
+      "entry": {
+       "side": "buy",
+       "type": "limit",
+       "qty": "100",
+       "limit_price": "150.00"
+      },
+      "take_profit": {
+       "limit_price": "170.00"
+      },
+      "stop_loss": {
+       "stop_price": "140.00"
+      },
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "submit": "bracket_1"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:05:00-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "bracket_1",
+      "leg": "entry",
+      "status": "partially_filled",
+      "fill": {
+       "qty": "60",
+       "price": "150.00"
+      }
+     },
+     "expect": {
+      "positions": {
+       "AAPL": {
+        "qty": "60"
+       }
+      },
+      "protective_sell_qty": "0",
+      "actions": [
+       {
+        "journal": "unprotected_window_start"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:06:00-04:00",
+     "event": "advance_clock",
+     "expect": {
+      "actions": [
+       {
+        "cancel_remainder": "bracket_1"
+       },
+       {
+        "await_cancel_confirmed": "bracket_1"
+       },
+       {
+        "submit_protective": {
+         "name": "oco_2",
+         "type": "oco",
+         "tif": "gtc",
+         "qty": "60",
+         "take_profit": "170.00",
+         "stop": "140.00"
+        }
+       },
+       {
+        "journal": "unprotected_window_end"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-12-17T09:31:00-05:00",
+     "event": "advance_clock",
+     "data": {
+      "note": "oco_2 created 2026-09-22 expires 2026-12-21; buffer 2 trading days"
+     },
+     "expect": {
+      "actions": [
+       {
+        "cancel": "oco_2"
+       },
+       {
+        "await_cancel_confirmed": "oco_2"
+       },
+       {
+        "submit_protective": {
+         "name": "oco_3",
+         "type": "oco",
+         "tif": "gtc",
+         "qty": "60",
+         "take_profit": "170.00",
+         "stop": "140.00"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-22",
+   "title": "Conduct controls - collar on aggressiveness only; exits exempt; exits-only on breach",
+   "scope": [
+    "gate",
+    "executor"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "median_dollar_volume_20d": "9000000000"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "50000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "AAPL",
+      "qty": "10",
+      "cost_basis": "1500.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "153.10",
+      "purpose": "increase",
+      "quote": {
+       "bid": "149.95",
+       "ask": "150.05"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "price_outside_collar"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:01-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "buy_passive",
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "142.00",
+      "purpose": "increase",
+      "quote": {
+       "bid": "149.95",
+       "ask": "150.05"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:00:10-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "exit_1",
+      "instrument": "AAPL",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "149.95",
+      "purpose": "risk_exit",
+      "quote": {
+       "bid": "149.95",
+       "ask": "150.05"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "cancel": "buy_passive"
+       },
+       {
+        "await_cancel_confirmed": "buy_passive"
+       },
+       {
+        "rerun_gate": "exit_1"
+       },
+       {
+        "submit": "exit_1"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:01:00-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "exit_1",
+      "status": "filled",
+      "fill": {
+       "qty": "10",
+       "price": "149.95"
+      }
+     },
+     "expect": {
+      "positions": {
+       "AAPL": {
+        "qty": "0"
+       }
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:01:30-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "opposite_fill_interval"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:02:30-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T10:05:00-04:00",
+     "event": "conduct_breach",
+     "data": {
+      "control": "order_to_fill",
+      "agent": "agent_a",
+      "instrument": "AAPL"
+     },
+     "expect": {
+      "agent_mode": "exits_only",
+      "actions": [
+       {
+        "alert_owner": "conduct_limit_breached"
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T10:06:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "AAPL",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "150.00",
+      "purpose": "open"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "agent_exits_only"
+      }
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-23",
+   "title": "Fractionable split residual; non-terminating adjusted mark",
+   "scope": [
+    "accounting"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "LOWF": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "fractionable": true
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "0.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "LOWF",
+      "qty": "10",
+      "cost_basis": "100.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-21T16:00:00-04:00",
+     "event": "mark",
+     "data": {
+      "instrument": "LOWF",
+      "price": "30.00",
+      "source": "official_close"
+     },
+     "expect": {
+      "equity": "300.00",
+      "unrealized_pnl": "200.00"
+     }
+    },
+    {
+     "at": "2026-09-21T20:00:00-04:00",
+     "event": "corporate_action_applied",
+     "data": {
+      "instrument": "LOWF",
+      "type": "split",
+      "ratio": {
+       "new": 1,
+       "old": 3
+      },
+      "ex_date": "2026-09-22"
+     },
+     "expect": {
+      "positions": {
+       "LOWF": {
+        "qty": "3.333333333",
+        "cost_basis": "99.99999999"
+       }
+      },
+      "marks": {
+       "LOWF": "90.00"
+      },
+      "realized_pnl_gross": "-0.00000001",
+      "unrealized_pnl": "199.99999998",
+      "equity": "299.99999997",
+      "conservation": {
+       "delta_equity": "-0.00000003",
+       "realized_gross": "-0.00000001",
+       "unrealized": "-0.00000002"
+      }
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "forward_3_for_1_non_terminating_mark",
+     "overrides": {
+      "initial": {
+       "positions": [
+        {
+         "instrument": "LOWF",
+         "qty": "10",
+         "cost_basis": "1000.00"
+        }
+       ]
+      },
+      "steps": [
+       {
+        "at": "2026-09-21T16:00:00-04:00",
+        "event": "mark",
+        "data": {
+         "instrument": "LOWF",
+         "price": "100.00",
+         "source": "official_close"
+        },
+        "expect": {
+         "equity": "1000.00"
+        }
+       },
+       {
+        "at": "2026-09-21T20:00:00-04:00",
+        "event": "corporate_action_applied",
+        "data": {
+         "instrument": "LOWF",
+         "type": "split",
+         "ratio": {
+          "new": 3,
+          "old": 1
+         },
+         "ex_date": "2026-09-22"
+        },
+        "expect": {
+         "positions": {
+          "LOWF": {
+           "qty": "30",
+           "cost_basis": "1000.00"
+          }
+         },
+         "marks": {
+          "LOWF": "33.333333333333"
+         },
+         "equity": "999.99999999999",
+         "realized_pnl_gross": "0.00"
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-24",
+   "title": "Exit price ladder in extended hours; presumed-halt variant",
+   "scope": [
+    "executor"
+   ],
+   "broker_profile": "alpaca",
+   "config": "no_fees",
+   "calendar": "us_2026",
+   "instruments": {
+    "AAPL": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "median_dollar_volume_20d": "9000000000"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "10000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "AAPL",
+      "qty": "10",
+      "cost_basis": "1500.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T17:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "name": "exit_1",
+      "instrument": "AAPL",
+      "side": "sell",
+      "qty": "10",
+      "purpose": "risk_exit",
+      "pricing": "marketable",
+      "quote": {
+       "bid": "150.00",
+       "ask": "150.20"
+      }
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      },
+      "actions": [
+       {
+        "submit": {
+         "name": "exit_1",
+         "type": "limit",
+         "limit_price": "149.25",
+         "extended_hours": true,
+         "tif": "day"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:05-04:00",
+     "event": "advance_clock",
+     "data": {
+      "quote": {
+       "bid": "150.00",
+       "ask": "150.20"
+      }
+     },
+     "expect": {
+      "actions": [
+       {
+        "cancel": "exit_1"
+       },
+       {
+        "await_cancel_confirmed": "exit_1"
+       },
+       {
+        "submit": {
+         "name": "exit_1b",
+         "type": "limit",
+         "limit_price": "148.50",
+         "extended_hours": true,
+         "tif": "day"
+        }
+       }
+      ]
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:07-04:00",
+     "event": "broker_order_update",
+     "data": {
+      "name": "exit_1b",
+      "status": "filled",
+      "fill": {
+       "qty": "10",
+       "price": "148.50"
+      }
+     },
+     "expect": {
+      "positions": {
+       "AAPL": {
+        "qty": "0"
+       }
+      },
+      "realized_pnl_gross": "-15.00"
+     }
+    }
+   ],
+   "variants": [
+    {
+     "name": "presumed_halt_regular_session",
+     "overrides": {
+      "steps": [
+       {
+        "at": "2026-09-22T11:00:00-04:00",
+        "event": "propose_order",
+        "data": {
+         "name": "exit_1",
+         "instrument": "AAPL",
+         "side": "sell",
+         "qty": "10",
+         "purpose": "risk_exit",
+         "pricing": "marketable",
+         "status_feed": "stale",
+         "last_good_quote": {
+          "bid": "150.00",
+          "ask": "150.20",
+          "age_s": 120
+         }
+        },
+        "expect": {
+         "decision": {
+          "verdict": "allow"
+         },
+         "actions": [
+          {
+           "submit": {
+            "name": "exit_1",
+            "type": "limit",
+            "limit_price": "149.25",
+            "tif": "day"
+           }
+          }
+         ]
+        }
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "RC-25",
+   "title": "Close window and sessions; openings denied, discretionary exits deferred, risk exits allowed",
+   "scope": [
+    "gate"
+   ],
+   "broker_profile": "alpaca",
+   "config": "test_default",
+   "calendar": "us_2026",
+   "instruments": {
+    "GOOD": {
+     "asset_class": "us_equity",
+     "exchange": "NASDAQ",
+     "prior_close": "120.00",
+     "median_dollar_volume_20d": "50000000"
+    }
+   },
+   "initial": {
+    "account": {
+     "cash": {
+      "settled": "50000.00"
+     }
+    },
+    "positions": [
+     {
+      "instrument": "GOOD",
+      "qty": "10",
+      "cost_basis": "1200.00"
+     }
+    ]
+   },
+   "steps": [
+    {
+     "at": "2026-09-22T15:49:59-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "120.00",
+      "purpose": "increase"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T15:50:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "buy",
+      "type": "limit",
+      "qty": "1",
+      "limit_price": "120.00",
+      "purpose": "increase"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "deny",
+       "reason_code": "close_window"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T15:52:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "discretionary_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T15:52:01-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "discretionary_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "defer",
+       "reason_code": "discretionary_exit_regular_session_only"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:01-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "risk_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:02-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "owner_exit",
+      "owner_confirmed_bid": true
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    },
+    {
+     "at": "2026-09-22T17:00:03-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "owner_exit",
+      "owner_confirmed_bid": false
+     },
+     "expect": {
+      "decision": {
+       "verdict": "defer",
+       "reason_code": "owner_confirmation_required"
+      }
+     }
+    },
+    {
+     "at": "2026-09-23T10:00:00-04:00",
+     "event": "propose_order",
+     "data": {
+      "instrument": "GOOD",
+      "side": "sell",
+      "type": "limit",
+      "qty": "10",
+      "limit_price": "120.00",
+      "purpose": "discretionary_exit"
+     },
+     "expect": {
+      "decision": {
+       "verdict": "allow"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
