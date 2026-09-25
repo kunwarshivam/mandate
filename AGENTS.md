@@ -125,9 +125,10 @@ safety-critical design for review.
 
 As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 
-- **Setup:** Rust comes from `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12
-  (`uv python install 3.14`); CI tools at the versions pinned in `.github/workflows/ci.yml`
-  (cargo-deny, cargo-nextest, typos, gitleaks).
+- **Setup:** `bash .cursor/install.sh` installs everything at the pinned versions and is idempotent;
+  Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
+  `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12; cargo-deny, cargo-nextest,
+  typos, and gitleaks at the versions in `.github/workflows/ci.yml` (keep the two in sync).
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
