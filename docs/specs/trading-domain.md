@@ -10,7 +10,7 @@
 ## Change history
 
 - **v0.7:** owner exits confirm a floor price below which the exit price ladder never goes (§5.5,
-  [DEC-66](../project/04-decision-log.md#decisions), proposed).
+  [DEC-66](../project/04-decision-log.md#decisions)).
 - **v0.6:** alignment with [mandate spec v0.3](mandate.md) and
   [DEC-53 to DEC-62](../project/04-decision-log.md#decisions): owner exits (`owner_exit`) may sell
   equities in extended hours through the exit price ladder after the owner confirms the displayed
