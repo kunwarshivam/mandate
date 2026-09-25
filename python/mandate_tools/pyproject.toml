@@ -1,0 +1,11 @@
+[project]
+name = "mandate-tools"
+version = "0.0.0"
+description = "Repository tools: the reference-case fixture exporter (ADR-0001 ES-11)"
+requires-python = ">=3.14,<3.15"
+# Same PyYAML as reference/mandate/requirements.txt, so fixtures read the YAML exactly as the reference does.
+dependencies = ["pyyaml==6.0.1"]
+
+[build-system]
+requires = ["uv_build>=0.12,<0.13"]
+build-backend = "uv_build"
