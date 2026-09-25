@@ -1,0 +1,29 @@
+# Python workspace (ADR-0001 ES-10). The frozen reference implementation in reference/mandate/ is
+# not part of this workspace; it runs in its own pinned environment.
+
+[tool.uv.workspace]
+members = ["mandate_tools"]
+
+[tool.uv.sources]
+mandate-tools = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "mandate-tools",
+    "pytest==9.1.1",
+    "ruff==0.16.9",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mandate_tools"]
+
+[tool.pytest.ini_options]
+testpaths = ["mandate_tools/tests"]
+addopts = "--strict-markers"
