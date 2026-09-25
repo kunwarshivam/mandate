@@ -2,12 +2,12 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema version 1. See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) are in the spec.",
+  "description": "Binding agent specification, schema version 1 (spec Draft v0.2). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "mandate_schema_version", "name", "environment", "connection_id", "capital", "goal",
-    "universe", "behavior", "protection", "risk", "autonomy", "notifications", "source_text_ref"
+    "mandate_schema_version", "name", "source_text_ref", "environment", "connection_id", "capital",
+    "goal", "universe", "behavior", "protection", "risk", "autonomy", "notifications"
   ],
   "properties": {
     "mandate_schema_version": { "const": 1 },
@@ -18,8 +18,11 @@
     "capital": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["allocation_usd"],
-      "properties": { "allocation_usd": { "$ref": "#/$defs/positive_decimal" } }
+      "required": ["allocation_usd", "max_loss_from_allocation"],
+      "properties": {
+        "allocation_usd": { "$ref": "#/$defs/positive_decimal" },
+        "max_loss_from_allocation": { "$ref": "#/$defs/open_fraction" }
+      }
     },
     "goal": { "$ref": "#/$defs/goal" },
     "universe": {
@@ -40,15 +43,16 @@
     "behavior": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["description", "advisors", "cadence", "decision_threshold"],
+      "required": ["description", "signal_models", "max_output_age_s", "cadence", "sizing"],
       "properties": {
         "description": { "type": "string", "maxLength": 4000 },
-        "advisors": {
+        "signal_models": {
           "type": "array",
           "minItems": 1,
           "maxItems": 10,
-          "items": { "$ref": "#/$defs/advisor" }
+          "items": { "$ref": "#/$defs/signal_model" }
         },
+        "max_output_age_s": { "type": "integer", "minimum": 60, "maximum": 86400 },
         "cadence": {
           "type": "object",
           "additionalProperties": false,
@@ -58,11 +62,21 @@
             "event_sources": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "enum": ["price", "news", "filings", "fills", "schedule"] }
+              "items": { "enum": ["fills", "filings", "news", "price", "schedule"] }
             }
           }
         },
-        "decision_threshold": { "$ref": "#/$defs/fraction" }
+        "sizing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["method", "entry_threshold", "exit_threshold", "rebalance_band"],
+          "properties": {
+            "method": { "const": "conviction_linear" },
+            "entry_threshold": { "$ref": "#/$defs/unit_positive" },
+            "exit_threshold": { "$ref": "#/$defs/unit_positive" },
+            "rebalance_band": { "$ref": "#/$defs/fraction" }
+          }
+        }
       }
     },
     "protection": {
@@ -71,33 +85,41 @@
       "required": ["enabled", "stop_distance", "take_profit_distance", "crypto_stop_limit_offset"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "stop_distance": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] },
+        "stop_distance": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] },
         "take_profit_distance": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
-        "crypto_stop_limit_offset": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] }
-      }
+        "crypto_stop_limit_offset": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "enabled": { "const": true } } },
+      "then": { "properties": { "stop_distance": { "$ref": "#/$defs/open_fraction" } } }
     },
     "risk": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "max_position_usd", "max_position_fraction", "max_gross_exposure_usd", "max_order_usd",
-        "max_daily_loss", "max_drawdown", "drawdown_ladder", "hysteresis", "max_orders_per_day"
+        "max_orders_per_day", "max_daily_loss", "daily_loss_action", "max_drawdown", "drawdown_ladder",
+        "hysteresis", "breach_confirm_s", "daily_breach_min_s", "scale_lift_after_s", "reentry_cooldown_s"
       ],
       "properties": {
         "max_position_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_position_fraction": { "$ref": "#/$defs/fraction" },
+        "max_position_fraction": { "$ref": "#/$defs/unit_positive" },
         "max_gross_exposure_usd": { "$ref": "#/$defs/positive_decimal" },
         "max_order_usd": { "$ref": "#/$defs/positive_decimal" },
-        "max_daily_loss": { "$ref": "#/$defs/fraction" },
-        "max_drawdown": { "$ref": "#/$defs/fraction" },
+        "max_orders_per_day": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "max_daily_loss": { "$ref": "#/$defs/open_fraction" },
+        "daily_loss_action": { "enum": ["exits_only", "flatten_and_pause"] },
+        "max_drawdown": { "$ref": "#/$defs/open_fraction" },
         "drawdown_ladder": {
           "type": "array",
           "minItems": 1,
           "maxItems": 5,
           "items": { "$ref": "#/$defs/ladder_rung" }
         },
-        "hysteresis": { "$ref": "#/$defs/fraction" },
-        "max_orders_per_day": { "type": "integer", "minimum": 1, "maximum": 10000 }
+        "hysteresis": { "$ref": "#/$defs/open_fraction" },
+        "breach_confirm_s": { "type": "integer", "minimum": 0, "maximum": 3600 },
+        "daily_breach_min_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "scale_lift_after_s": { "type": "integer", "minimum": 0, "maximum": 86400 },
+        "reentry_cooldown_s": { "type": "integer", "minimum": 0, "maximum": 604800 }
       }
     },
     "autonomy": {
@@ -118,7 +140,7 @@
               "type": "array",
               "minItems": 1,
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^(role:(approver|owner|workspace_admin)|user:[A-Za-z0-9_-]+)$" }
+              "items": { "type": "string", "pattern": "^(role:(approver|owner|workspace_admin)|user:[A-Za-z0-9_-]{1,64})$" }
             },
             "two_approver_above_usd": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] }
           }
@@ -134,7 +156,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "enum": ["web_push", "email", "slack", "telegram", "sms", "phone"] }
+          "items": { "enum": ["email", "phone", "slack", "sms", "telegram", "web_push"] }
         },
         "quiet_hours": {
           "oneOf": [
@@ -144,8 +166,8 @@
               "additionalProperties": false,
               "required": ["start", "end", "timezone"],
               "properties": {
-                "start": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
-                "end": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
+                "start": { "$ref": "#/$defs/hhmm" },
+                "end": { "$ref": "#/$defs/hhmm" },
                 "timezone": { "const": "America/New_York" }
               }
             }
@@ -155,44 +177,52 @@
     }
   },
   "$defs": {
-    "decimal": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]*[1-9])?$", "not": { "const": "-0" } },
-    "positive_decimal": { "type": "string", "pattern": "^(0\\.[0-9]*[1-9]|[1-9][0-9]*(\\.[0-9]*[1-9])?)$" },
-    "fraction": { "type": "string", "pattern": "^(0|0\\.[0-9]*[1-9]|1)$" },
+    "decimal": {
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,27})(\\.[0-9]{0,27}[1-9])?$",
+      "not": { "const": "-0" }
+    },
+    "positive_decimal": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|[1-9][0-9]{0,27}(\\.[0-9]{0,27}[1-9])?)$" },
+    "fraction": { "type": "string", "pattern": "^(0|0\\.[0-9]{0,27}[1-9]|1)$" },
+    "open_fraction": { "type": "string", "pattern": "^0\\.[0-9]{0,27}[1-9]$" },
+    "unit_positive": { "type": "string", "pattern": "^(0\\.[0-9]{0,27}[1-9]|1)$" },
     "id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
     "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" },
     "content_ref": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
-    "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+    "date": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$" },
+    "hhmm": { "type": "string", "pattern": "^([01][0-9]|2[0-3]):[0-5][0-9]$" },
     "instrument_ref": {
       "type": "object",
       "additionalProperties": false,
       "required": ["asset_id", "symbol", "asset_class"],
       "properties": {
         "asset_id": { "$ref": "#/$defs/uuid" },
-        "symbol": { "type": "string", "maxLength": 32 },
-        "asset_class": { "enum": ["us_equity", "crypto"] }
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 32 },
+        "asset_class": { "enum": ["crypto", "us_equity"] }
       }
     },
-    "advisor": {
+    "signal_model": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "version", "params", "weight_min", "weight_max"],
+      "required": ["id", "version", "content_hash", "params", "weight"],
       "properties": {
-        "id": { "type": "string", "pattern": "^(quant|fast|llm)\\.[a-z0-9_]{1,48}$" },
-        "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+        "id": { "type": "string", "pattern": "^(fast|llm|quant)\\.[a-z0-9_]{1,48}$" },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})$" },
+        "content_hash": { "$ref": "#/$defs/content_ref" },
         "params": {
           "type": "array",
+          "maxItems": 32,
           "items": {
             "type": "object",
             "additionalProperties": false,
             "required": ["key", "value"],
             "properties": {
               "key": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
-              "value": { "anyOf": [{ "$ref": "#/$defs/decimal" }, { "type": "integer" }, { "type": "boolean" }, { "type": "string", "maxLength": 200 }] }
+              "value": { "anyOf": [{ "$ref": "#/$defs/decimal" }, { "type": "boolean" }, { "type": "string", "maxLength": 200 }] }
             }
           }
         },
-        "weight_min": { "$ref": "#/$defs/fraction" },
-        "weight_max": { "$ref": "#/$defs/fraction" }
+        "weight": { "$ref": "#/$defs/unit_positive" }
       }
     },
     "ladder_rung": {
@@ -200,13 +230,22 @@
       "additionalProperties": false,
       "required": ["at", "action", "factor"],
       "properties": {
-        "at": { "$ref": "#/$defs/fraction" },
+        "at": { "$ref": "#/$defs/open_fraction" },
         "action": { "enum": ["scale_sizes", "exits_only", "flatten_and_pause"] },
-        "factor": { "oneOf": [{ "$ref": "#/$defs/fraction" }, { "type": "null" }] }
+        "factor": { "oneOf": [{ "$ref": "#/$defs/open_fraction" }, { "type": "null" }] }
       }
     },
     "goal": {
       "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "end_date"],
+          "properties": {
+            "type": { "const": "continuous" },
+            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
+          }
+        },
         {
           "type": "object",
           "additionalProperties": false,
@@ -223,22 +262,10 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["type", "instrument", "sell_qty", "min_avg_price", "end_date"],
+          "required": ["type", "profit_level", "end_date"],
           "properties": {
-            "type": { "const": "distribute" },
-            "instrument": { "$ref": "#/$defs/uuid" },
-            "sell_qty": { "$ref": "#/$defs/positive_decimal" },
-            "min_avg_price": { "oneOf": [{ "$ref": "#/$defs/positive_decimal" }, { "type": "null" }] },
-            "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
-          }
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["type", "target_return", "end_date"],
-          "properties": {
-            "type": { "const": "return_target" },
-            "target_return": { "$ref": "#/$defs/positive_decimal" },
+            "type": { "const": "profit_stop" },
+            "profit_level": { "$ref": "#/$defs/positive_decimal" },
             "end_date": { "oneOf": [{ "$ref": "#/$defs/date" }, { "type": "null" }] }
           }
         }
@@ -258,11 +285,11 @@
       "oneOf": [
         {
           "type": "object", "additionalProperties": false, "required": ["all"],
-          "properties": { "all": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } } }
+          "properties": { "all": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/condition" } } }
         },
         {
           "type": "object", "additionalProperties": false, "required": ["any"],
-          "properties": { "any": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/condition" } } }
+          "properties": { "any": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/condition" } } }
         },
         {
           "type": "object", "additionalProperties": false, "required": ["not"],
@@ -273,17 +300,17 @@
           "properties": {
             "field": {
               "enum": [
-                "purpose", "order_usd", "confidence", "instrument", "session", "unusual_input",
-                "first_trade_in_instrument", "drawdown", "daily_pnl_fraction"
+                "asset_class", "bought_today_usd", "combined_score", "daily_pnl_fraction", "drawdown",
+                "first_trade_in_instrument", "gross_usd_after", "instrument", "order_usd",
+                "position_pnl_fraction", "position_usd_after", "purpose", "session", "unusual_input"
               ]
             },
             "op": { "enum": ["eq", "ne", "gt", "gte", "lt", "lte", "in", "not_in"] },
             "value": {
               "anyOf": [
-                { "$ref": "#/$defs/decimal" },
                 { "type": "boolean" },
                 { "type": "string", "maxLength": 64 },
-                { "type": "array", "maxItems": 50, "items": { "type": "string", "maxLength": 64 } }
+                { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "string", "maxLength": 64 } }
               ]
             }
           }
