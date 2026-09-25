@@ -95,13 +95,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E6-1 (Must)** As an operator, I want an agent to run a mandate continuously so that it
   trades without supervision.
 - **E6-2 (Must)** As an operator, I want every proposed action classified AUTO, ASK, or DENY
-  per the mandate so that autonomy matches my rules.
+  per the mandate so that autonomy matches my rules. *Accepted when:* mandate reference cases
+  MC-A01 to MC-A09 and MC-D01 to MC-D08 pass.
 - **E6-3 (Must)** As an owner, I want an independent risk gate enforcing all limits so that no
   agent logic can exceed them.
   *Accepted when:* simulation fuzzing across random market paths and mandates never produces
-  an order outside limits.
-- **E6-4 (Must)** As an owner, I want a drawdown ladder so that losses trigger automatic
-  de-risking.
+  an order outside limits; mandate reference cases MC-G01 to MC-G07 pass.
+- **E6-4 (Must)** As an owner, I want a daily-loss limit and a drawdown ladder so that losses
+  trigger automatic de-risking. *Accepted when:* MC-R01 to MC-R03 pass.
 - **E6-5 (Must)** As an owner, I want kill switches per agent, connection, and workspace so
   that I can stop everything immediately.
 - **E6-6 (Must)** As an owner, I want US account rules (day-trading regime, settlement, short
@@ -168,9 +169,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 ### E10 Mandate authoring
 
 - **E10-1 (Must)** As an operator, I want to describe an agent in plain language and get a
-  compiled mandate with inferred fields highlighted.
+  compiled mandate with inferred fields highlighted. *Accepted when:* compiled mandates validate
+  against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
+  cases MC-S, MC-V, and MC-P pass).
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
-- **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs.
+- **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
+  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C14 pass.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
