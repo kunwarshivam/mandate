@@ -1,0 +1,54 @@
+# Per-PR checks (ADR-0001 ES-12). Each job is one `cargo xtask ci <job>`; run `cargo xtask check`
+# locally for the same set. Depot CI on Origin runs a converted copy in .depot/workflows/
+# (`depot ci migrate workflows --forge=origin`); this file is the source for both.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  GITLEAKS_VERSION: "8.30.1"
+  GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+jobs:
+  pr:
+    name: ${{ matrix.job }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        job: [lint, test, refcases, reference, supply-chain, spec-guard]
+    env:
+      MANDATE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+      MANDATE_PR_BODY: ${{ github.event.pull_request.body }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.19"
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        with:
+          tool: cargo-deny@0.20.2,cargo-nextest@0.9.146,typos@1.50.2
+      - name: Install gitleaks (checksum-verified)
+        run: |
+          curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
+          tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo xtask ci "${{ matrix.job }}"
