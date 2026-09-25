@@ -123,11 +123,24 @@ safety-critical design for review.
 
 ## Conventions
 
-These apply once code exists; the first stories (E1) set them up as decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
+As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 
+- **Setup:** Rust comes from `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12
+  (`uv python install 3.14`); CI tools at the versions pinned in `.github/workflows/ci.yml`
+  (cargo-deny, cargo-nextest, typos, gitleaks).
+- **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
+  clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
+  fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
+  registry, gitleaks), and the spec guard. `cargo xtask ci <job>` runs one job.
+- **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
+  get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
+- **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
+- **Reference-case fixtures** (`fixtures/refcases/`) are generated: after a founder-approved YAML
+  change, run `cargo xtask refcases --write`; never edit them by hand.
+- **Tasks** use `docs/project/templates/task.md`; PRs use `.github/pull_request_template.md`;
+  decisions use `docs/adr/template.md` plus a decision-log row.
 - **Rust** for the core: runtime, risk, execution, connectors, market data, journal.
-  `cargo fmt`, `cargo clippy -- -D warnings`, and `cargo test` must pass.
-- **Python** for research, model tooling, and the SDK. `ruff` and `pytest` must pass.
+- **Python** for research, model tooling, and the SDK.
 - No `unwrap()` or `expect()` in non-test Rust code on trading paths; return typed errors.
 - Money and quantities use fixed-point decimal types, never floating point, in accounting and
   order paths.
