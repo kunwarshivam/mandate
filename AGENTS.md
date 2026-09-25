@@ -131,7 +131,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
-  registry, gitleaks), and the spec guard. `cargo xtask ci <job>` runs one job.
+  registry, gitleaks), and the spec guard. CI runs them as two required checks: `cargo xtask ci fast`
+  (lint, test, spec guard) and `cargo xtask ci full` (fixtures, reference, supply chain).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).
