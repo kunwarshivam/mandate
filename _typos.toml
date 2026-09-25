@@ -1,0 +1,13 @@
+[files]
+# reference/ is frozen; fixtures and lockfiles are generated.
+extend-exclude = ["reference/", "fixtures/", "Cargo.lock", "python/uv.lock"]
+
+[default]
+extend-ignore-re = [
+    "[0-9a-f]{16,}",                # hashes
+    "\\\\x[0-9A-Fa-f]{2}",          # escaped bytes in test vectors
+]
+
+[default.extend-words]
+marginable = "marginable"           # Alpaca's term (non_marginable_buying_power)
+caf = "caf"                         # "café" split by an escaped byte in journal vectors

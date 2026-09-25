@@ -1,2 +1,10 @@
 agent-tools/
 __pycache__/
+/target/
+/fuzz/target/
+.venv/
+*.pyc
+
+# Paper-trading keys never live in the repository (ADR-0001 ES-19).
+.env
+.env.*

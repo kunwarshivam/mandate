@@ -1,0 +1,16 @@
+# Secret scanning (ADR-0001 ES-14). Extends the default rules with Alpaca key formats.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "alpaca-key-id"
+description = "Alpaca API key ID (live AK..., paper PK...)"
+regex = '''\b(AK|PK)[A-Z0-9]{18}\b'''
+keywords = ["ak", "pk"]
+
+[[rules]]
+id = "alpaca-secret"
+description = "Alpaca API secret assigned to a variable"
+regex = '''(?i)alpaca[a-z_]*secret[a-z_]*\s*[:=]\s*['"]?[A-Za-z0-9/+]{30,}'''
+keywords = ["alpaca"]

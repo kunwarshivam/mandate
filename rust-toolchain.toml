@@ -1,0 +1,5 @@
+[toolchain]
+# ADR-0001 ES-03: pinned; bump in its own PR after the nightly suite and golden journals pass.
+channel = "1.98.1"
+components = ["rustfmt", "clippy", "llvm-tools"]
+profile = "minimal"
