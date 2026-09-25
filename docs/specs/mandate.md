@@ -6,7 +6,7 @@
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.7), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1); backlog E6, E10 |
 | **Schema** | [schemas/mandate.schema.json](../../schemas/mandate.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
-| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-43](../project/04-decision-log.md#decisions) (proposed) |
+| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-43](../project/04-decision-log.md#decisions) |
 
 A **mandate** is the binding specification an agent runs under: its goal, instruments, capital,
 behavior, protection, risk limits, autonomy rules, and notifications. It is the contract between
@@ -138,7 +138,7 @@ the nearest level whose limit it breaks (for example, "max_drawdown 0.09 exceeds
 
 ## 5. Risk limits
 
-### 5.1 Agent capital and equity (proposed DEC-39)
+### 5.1 Agent capital and equity (DEC-39)
 
 - Each agent has a **capital allocation**. Σ allocations on an account ≤ account equity (V-002).
 - **Agent equity** E = allocation + agent realized P&L (net of fees) + agent income + agent
@@ -162,7 +162,7 @@ spec §9.6).
 | Agent gross exposure | Σ \|MV\| of the agent's positions + max cost of its working opening orders + the proposed order ≤ min(`max_gross_exposure_usd`, E) | 7 (gross exposure) | `gross_exposure_limit` |
 | Orders per day | Orders submitted by the agent in the risk day ≤ `max_orders_per_day` (exit-sequence and kill-switch orders excluded) | 6 (rate limits) | `order_rate_limited` |
 
-### 5.3 Daily loss (proposed DEC-40)
+### 5.3 Daily loss (DEC-40)
 
 - The **risk day** starts at 00:00 America/New_York. At the start, the runtime records day-start
   equity E₀ (`RiskDayStarted`, §5.5).
@@ -170,7 +170,7 @@ spec §9.6).
 - **Breach:** daily P&L ≤ −`max_daily_loss` × E₀ → agent mode `exits_only` until the next risk day
   (lifted automatically and journaled), owner alerted.
 
-### 5.4 Drawdown and the ladder (proposed DEC-41)
+### 5.4 Drawdown and the ladder (DEC-41)
 
 - **High-water mark** H = the maximum E since deployment (or since an owner reset, which requires
   step-up and is journaled), evaluated on every mark update and fill.
@@ -202,7 +202,7 @@ The executor computes E, H, DD, and E₀ from the account ledger, so the risk st
 | `AgentModeApplied` | A risk limit changes the agent mode (`reason: risk_limit` or `risk_limit_lifted`) | agent, from, to, reason; copied by the agent runtime into the agent stream as `AgentModeChanged` |
 | `KillSwitchActivated` | `flatten_and_pause` (`scope: agent`, initiator the rung) | as trading spec §5.5 |
 
-## 6. Autonomy rules (proposed DEC-42)
+## 6. Autonomy rules (DEC-42)
 
 ### 6.1 Evaluation
 
@@ -294,7 +294,7 @@ For each instrument at each evaluation:
    action with `purpose`, quantity, limit price (openings: the ask, within the collar), and
    confidence k, which then goes through autonomy (§6) and the risk gate.
 
-## 9. Versioning and change classification (proposed DEC-43)
+## 9. Versioning and change classification (DEC-43)
 
 - `mandate_version` = `sha256:` + SHA-256 of the mandate's canonical JSON (journal spec §4).
   Provenance is not part of the hashed document.
