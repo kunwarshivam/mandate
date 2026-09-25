@@ -7,6 +7,8 @@ const MAX_INTEGER_DIGITS: i64 = 29;
 /// 7.9 × 10²⁸, the exclusive bound on the absolute value; it has 29 integer digits.
 const LIMIT: &str = "79000000000000000000000000000";
 
+/// Parses sign, digits, and exponent, then writes value = digits × 10^exponent with the digits
+/// free of leading and trailing zeros.
 pub(crate) fn normalize(input: &str) -> Result<String, DecError> {
     let mut rest = input.as_bytes();
     let negative = eat(&mut rest, b'-');
@@ -44,7 +46,6 @@ pub(crate) fn normalize(input: &str) -> Result<String, DecError> {
         return Err(DecError::Syntax);
     }
 
-    // value = digits × 10^exponent, with digits free of leading and trailing zeros.
     let all: Vec<u8> = int.iter().chain(frac).copied().collect();
     let Some(first) = all.iter().position(|d| *d != b'0') else {
         return Ok("0".to_owned());

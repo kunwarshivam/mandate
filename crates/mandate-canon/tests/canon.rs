@@ -16,9 +16,9 @@ fn canonical(input: &str) -> String {
     String::from_utf8(to_canonical(&parse(input.as_bytes()).unwrap())).unwrap()
 }
 
+/// journal.yaml `string_escaping`: only `"`, `\`, and U+0000 to U+001F are escaped.
 #[test]
 fn string_escaping_vector() {
-    // journal.yaml string_escaping: only `"`, `\`, and U+0000-U+001F are escaped.
     let mut object = Object::new();
     object.insert(
         Key::new("message").unwrap(),
@@ -185,9 +185,11 @@ fn nesting_limit() {
         parse(objects.as_bytes()).unwrap_err().kind,
         ParseErrorKind::TooDeep
     );
-    // Depth is released on the way out, so siblings do not accumulate.
     let siblings = format!("[{}]", vec![nested(MAX_DEPTH - 1); 3].join(","));
-    assert!(parse(siblings.as_bytes()).is_ok());
+    assert!(
+        parse(siblings.as_bytes()).is_ok(),
+        "depth is released on the way out, so siblings do not accumulate"
+    );
 }
 
 #[test]
@@ -252,8 +254,6 @@ fn sha256_and_digests() {
         Some(vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef])
     );
 }
-
-// ------------------------------------------------------------------ properties
 
 fn text() -> impl Strategy<Value = String> {
     prop_oneof![

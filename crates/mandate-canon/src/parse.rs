@@ -247,6 +247,8 @@ impl<'a> Parser<'a> {
         })
     }
 
+    /// A `\uXXXX` escape, joining a surrogate pair. A lone low surrogate (U+DC00 to U+DFFF) fails
+    /// `char::from_u32`, so it is rejected with the lone high surrogates.
     fn unicode_escape(&mut self, here: usize) -> Result<char, ParseError> {
         let lone = at(Kind::LoneSurrogate, here);
         let unit = self.hex4(here)?;
@@ -268,7 +270,6 @@ impl<'a> Parser<'a> {
             }
             _ => unit,
         };
-        // A lone low surrogate (U+DC00–U+DFFF) is not a `char`.
         char::from_u32(code).ok_or(lone)
     }
 }
