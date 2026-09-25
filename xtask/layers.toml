@@ -26,3 +26,15 @@ impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"
 layer = "tool"
 safety_critical = false
 pure = false
+
+[crates.mandate-time]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-canon]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["sha2", "thiserror"]
