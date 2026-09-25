@@ -1,4 +1,4 @@
-"""Reference implementation of docs/specs/mandate.md (Draft v0.5). Not production code."""
+"""Reference implementation of docs/specs/mandate.md (v0.5, approved). Not production code."""
 import copy, hashlib, json, pathlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
