@@ -1,4 +1,4 @@
-"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.3."""
+"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.4."""
 import copy, json
 from collections import Counter
 import yaml
@@ -6,7 +6,7 @@ from ref import *  # noqa: F401,F403
 from ref import D, ROOT
 from bases import *  # noqa: F401,F403
 
-doc = {"version": 3, "spec": "docs/specs/mandate.md (Draft v0.3)",
+doc = {"version": 3, "spec": "docs/specs/mandate.md (Draft v0.4)",
        "schemas": ["schemas/mandate.schema.json", "schemas/policy.schema.json"],
        "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25"},
        "bases": {n: {"mandate": m, "canonical_sha256": version(m)} for n, m in BASES.items()},
@@ -115,6 +115,7 @@ SEM = [
      {"connection_environment": "live", "provenance": {"/environment": PU("platform_default")}}),
     ("MC-V50", "Connection is never a platform default", "btc_accumulator", [],
      {"provenance": {"/connection_id": PU("platform_default")}}),
+    ("MC-V51", "trim_to_target is invalid with accumulate", "btc_accumulator", [rep("/risk/scale_action", "trim_to_target")], {}),
     ("MC-V31", "auto rule extracted by the compiler (not user-entered)", "btc_accumulator", [],
      {"provenance": {"/autonomy/rules/2": PU("user_stated")}}),
     ("MC-V32", "Default auto that is user-entered and confirmed", "btc_accumulator", [rep("/autonomy/default", "auto")],
@@ -229,10 +230,11 @@ risk_case("MC-R03", "Recovery longer than breach_confirm_s restarts confirmation
           WIDE + ISO + [rep("/risk/scale_lift_after_s", 0)], "100", "100", "us_equity", at(14, 0),
           [mk(at(14, 1), "105"), mk(at(14, 2), "98.5"), mk(at(14, 2, 30), "99"), mk(at(14, 3, 40), "98.6"),
            mk(at(14, 4, 20), "98.6"), mk(at(14, 4, 40), "98.6")])
-risk_case("MC-R04", "Hard trigger at 1.25 x the rung skips confirmation", "two_stock_swing",
+risk_case("MC-R04", "Hard trigger at 1.25 x the rung: temporary exits_only, latched on a second quote", "two_stock_swing",
           WIDE + ISO + [rep("/risk/scale_lift_after_s", 0)], "100", "100", "us_equity", at(14, 0),
-          [mk(at(14, 1), "105"), mk(at(14, 2), "97.5"), mk(at(14, 2, 5), "97.1")],
-          note="exits_only hard level: H - E >= 1.25 x 0.06 x 10500 = 787.5, so E <= 9712.5.")
+          [mk(at(14, 1), "105"), mk(at(14, 2), "97.5"), mk(at(14, 2, 5), "97.1"), mk(at(14, 2, 15), "97")],
+          note="exits_only hard level: H - E >= 1.25 x 0.06 x 10500 = 787.5, so E <= 9712.5. The first hard quote (14:02:05) "
+               "applies a temporary exits_only; the second, 10 s later, latches the rung.")
 risk_case("MC-R05", "Confirmation continues on clock ticks after the close", "two_stock_swing",
           WIDE + [rep("/risk/scale_lift_after_s", 0), rep("/risk/daily_breach_min_s", 0)], "20", "150", "us_equity", at(4, 0),
           [{"event": "risk_day_started", "at": at(4, 0), "session": "after_hours"}, mk(at(19, 59, 30), "139.9"),
@@ -244,8 +246,8 @@ risk_case("MC-R06", "A pending daily breach is resolved at the risk-day rollover
           [{"event": "risk_day_started", "at": at(4, 0), "session": "crypto"}, mk(at(3, 59, 30, day=22), "57990", "crypto"),
            {"event": "risk_day_started", "at": at(4, 0, day=22), "session": "crypto"}, mk(at(4, 30, day=22), "58000", "crypto"),
            mk(at(5, 0, day=22), "58000", "crypto")],
-          note="The breach starts 30 s before midnight (breach_confirm_s 60). It is latched at the rollover rather than discarded, "
-               "then lifts after daily_breach_min_s (3600 s).")
+          note="The breach starts 30 s before midnight (breach_confirm_s 60). After the rollover it keeps confirming against the "
+               "previous day's E0 and latches (resolved_at_rollover) once it has 60 s of breach time; it lifts at the next midnight.")
 risk_case("MC-R07", "Daily loss: lift waits daily_breach_min_s after a late-night crypto breach", "btc_accumulator",
           [rep("/risk/breach_confirm_s", 0)], "0.1", "60000", "crypto", at(4, 0),
           [{"event": "risk_day_started", "at": at(4, 0), "session": "crypto"}, mk(at(3, 50, day=22), "57900", "crypto"),
@@ -313,6 +315,44 @@ risk_case("MC-R16", "on_complete disarm_ladder: holding with the ladder and dail
                "At 48000 E = 8950 <= floor 9000.")
 risk_case("MC-R17", "on_complete release: positions released and the agent retires", "btc_accumulator_release",
           [], "0.15", "55000", "crypto", at(14, 0), [{"event": "goal_complete", "at": at(14, 1), "session": "crypto"}])
+
+risk_case("MC-R18", "Flatten hard trigger needs a second quote: exits_only first, flatten 10 s later", "two_stock_swing",
+          WIDE + ISO + [rep("/risk/scale_lift_after_s", 0)], "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "105"), mk(at(14, 2), "94.4"), mk(at(14, 2, 5), "94.3"), mk(at(14, 2, 12), "94.2")],
+          note="Flatten hard level: H - E >= 1.25 x 0.08 x 10500 = 1050, so E <= 9450. The exits_only rung hard-triggers at once; "
+               "the flatten needs the hard level on a quote at least min(breach_confirm_s, 10) = 10 s after the first.")
+risk_case("MC-R19", "A single flash print does not flatten", "two_stock_swing",
+          WIDE + ISO + [rep("/risk/scale_lift_after_s", 0)], "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "105"), mk(at(14, 2), "94.4"), mk(at(14, 2, 1), "104")])
+risk_case("MC-R20", "A flash breach just before midnight is discarded after the rollover", "btc_accumulator",
+          [], "0.1", "60000", "crypto", at(4, 0),
+          [{"event": "risk_day_started", "at": at(4, 0), "session": "crypto"}, mk(at(3, 59, 59, day=22), "57990", "crypto"),
+           {"event": "risk_day_started", "at": at(4, 0, day=22), "session": "crypto"}, mk(at(4, 0, 1, day=22), "60000", "crypto"),
+           clk(at(4, 1, 30, day=22), "crypto")])
+risk_case("MC-R21", "Loosening a latched floor: waiting period, insufficient, then lifted", "two_stock_swing",
+          WIDE + ISO + [rep("/risk/breach_confirm_s", 0)], "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "90"),
+           {"event": "fill", "at": at(14, 2), "side": "sell", "qty": "100", "price": "90", "session": "regular"},
+           {"event": "floor_loosened", "at": at(14, 30), "new_max_loss_from_allocation": "0.2", "independent_approval": False,
+            "confirmed_at": at(14, 20), "session": "regular"},
+           {"event": "floor_loosened", "at": at(14, 31), "new_max_loss_from_allocation": "0.1", "independent_approval": True,
+            "confirmed_at": at(14, 20), "session": "regular"},
+           {"event": "floor_loosened", "at": at(14, 32), "new_max_loss_from_allocation": "0.2", "independent_approval": True,
+            "confirmed_at": at(14, 20), "session": "regular"}],
+          note="Floor 9000 at f = 0.1; E = 9000 latches it. Raising f to 0.2 moves the floor to 8000 (E > 8000, lifts) but a "
+               "single approver must wait one full risk day. The second attempt is not a loosening.")
+risk_case("MC-R22", "profit_stop confirms by time in breach inside the risk state", "two_stock_swing",
+          WIDE + ISO, "100", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "110"), mk(at(14, 1, 30), "109.9"), mk(at(14, 1, 40), "110.1"), mk(at(14, 2, 10), "110.2")],
+          note="profit_level 0.1: E - C >= 1000. In breach 14:01:00-14:01:30 (30 s) and from 14:01:40; the 10 s dip is shorter "
+               "than breach_confirm_s, so 30 + 30 = 60 s at 14:02:10.")
+risk_case("MC-R23", "Withdrawals cannot shrink the loss carried to the connection", "btc_accumulator",
+          [rep("/risk/breach_confirm_s", 0), rep("/risk/max_daily_loss", "0.5")], "0.15", "60000", "crypto", at(14, 0),
+          [mk(at(14, 1), "54333.34", "crypto"),
+           {"event": "fill", "at": at(14, 2), "side": "sell", "qty": "0.15", "price": "54333.34", "session": "crypto"},
+           {"event": "allocation_change", "at": at(14, 3), "delta_usd": "-9000", "session": "crypto"},
+           {"event": "agent_stopped", "at": at(14, 4), "session": "crypto"}],
+          note="Reviewer probe: the agent loses about 850, is flat, withdraws 9000, and retires. The carry is the net dollar loss.")
 
 # =========================================================== E. risk day boundaries
 for cid, title, instant in [
@@ -404,8 +444,15 @@ B = [
           gate_state=gst(working_opening_orders=[{"instrument": XYZ, "max_cost": "700"}]), outputs=TWO)),
     ("MC-B16", "Above target with positive conviction and limit_buys: hold", "two_stock_swing",
      dict(BI, position_qty="10", size_factor="0.5", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
-    ("MC-B17", "trim_to_target: scaled position is reduced as a risk exit", "two_stock_swing_trim",
-     dict(BI, position_qty="10", size_factor="0.5", gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B17", "trim_to_target: confirmed rung reduces the position as a risk exit", "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B30", "trim_to_target withheld until the rung is confirmed", "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=10, gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B31", "trim_to_target withheld outside the regular session and while holding", "two_stock_swing_trim",
+     dict(BI, position_qty="10", size_factor="0.5", scale_active_s=120, session="after_hours", holding=True,
+          gate_state=gst(positions_mv={XYZ: "999"}), outputs=TWO)),
+    ("MC-B32", "No trim when the excess is below the rebalance band", "two_stock_swing_trim",
+     dict(BI, position_qty="8", size_factor="0.5", scale_active_s=120, gate_state=gst(positions_mv={XYZ: "799.2"}), outputs=TWO)),
     ("MC-B18", "Delta within the rebalance band: hold", "two_stock_swing", dict(BI, position_qty="7", gate_state=gst(positions_mv={XYZ: "699.3"}), outputs=TWO)),
     ("MC-B19", "Value after limit clips below the band: hold", "two_stock_swing",
      dict(BI, gross_usd="1950", gate_state=gst(positions_mv={QRS: "1950"}), outputs=[out(MOM, "1", "1"), out(NEWS, "1", "1")])),
@@ -481,7 +528,8 @@ FLI = {"agent": "agent_a",
 for cid, title, extra in [
     ("MC-F01", "Automated flatten on a shared account touches only that agent", {"session": "regular", "initiator": "risk_limit"}),
     ("MC-F02", "Automated flatten after hours: equity sells wait; crypto sells go now", {"session": "after_hours", "initiator": "risk_limit"}),
-    ("MC-F03", "Owner kill switch after hours with the displayed bid confirmed: sells now", {"session": "after_hours", "initiator": "owner", "owner_confirmed_bid": True}),
+    ("MC-F03", "Owner kill switch after hours with the bid confirmed: sells now, never below the floor price",
+     {"session": "after_hours", "initiator": "owner", "owner_confirmed_bid": True, "confirmed_bid": "100", "max_exit_offset": "0.03"}),
     ("MC-F04", "Owner kill switch after hours without confirmation: equity sells wait", {"session": "after_hours", "initiator": "owner", "owner_confirmed_bid": False}),
 ]:
     inp = dict(FLI, **extra)
@@ -490,23 +538,15 @@ for cid, title, extra in [
 
 # =========================================================== J. goals
 GL = [
-    ("MC-L01", "profit_stop reached and confirmed", "two_stock_swing",
-     {"now": at(15, 0), "agent_equity": "11000", "capital_base": "10000", "condition_held_s": 60}),
-    ("MC-L02", "profit_stop reached but not yet confirmed", "two_stock_swing",
-     {"now": at(15, 0), "agent_equity": "11000", "capital_base": "10000", "condition_held_s": 20}),
-    ("MC-L03", "profit_stop not reached", "two_stock_swing",
-     {"now": at(15, 0), "agent_equity": "10999.99", "capital_base": "10000", "condition_held_s": 0}),
-    ("MC-L04", "profit_stop on the capital base (after an allocation change)", "two_stock_swing",
-     {"now": at(15, 0), "agent_equity": "16000", "capital_base": "15000", "condition_held_s": 600}),
-    ("MC-L05", "accumulate reaches target_qty", "btc_accumulator",
+    ("MC-L01", "accumulate reaches target_qty", "btc_accumulator",
      {"now": at(15, 0), "position_qty": "0.15", "goal_spent_usd": "8300", "min_order_usd": "1", "qty_increment": "0.0001", "ask": "55000"}),
-    ("MC-L06", "accumulate done when the remainder is below one increment (fees in the asset)", "btc_accumulator",
+    ("MC-L02", "accumulate done when the remainder is below one increment (fees in the asset)", "btc_accumulator",
      {"now": at(15, 0), "position_qty": "0.14995", "goal_spent_usd": "8300", "min_order_usd": "1", "qty_increment": "0.0001", "ask": "55000"}),
-    ("MC-L07", "accumulate spend exhausted", "btc_accumulator",
+    ("MC-L03", "accumulate spend exhausted", "btc_accumulator",
      {"now": at(15, 0), "position_qty": "0.14", "goal_spent_usd": "8999.5", "min_order_usd": "1", "qty_increment": "0.0001", "ask": "55000"}),
-    ("MC-L08", "End date passes at 00:00 America/New_York after end_date", "btc_accumulator",
+    ("MC-L04", "End date passes at 00:00 America/New_York after end_date", "btc_accumulator",
      {"now": "2027-01-01T05:00:00.000000000Z", "position_qty": "0.1", "goal_spent_usd": "5000", "min_order_usd": "1", "qty_increment": "0.0001", "ask": "55000"}),
-    ("MC-L09", "Still on end_date (23:59 New York)", "btc_accumulator",
+    ("MC-L05", "Still on end_date (23:59 New York)", "btc_accumulator",
      {"now": "2027-01-01T04:59:00.000000000Z", "position_qty": "0.1", "goal_spent_usd": "5000", "min_order_usd": "1", "qty_increment": "0.0001", "ask": "55000"}),
 ]
 for cid, title, base, st in GL:
@@ -571,7 +611,7 @@ for cid, title, base, patch in CH:
     cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch, "expect": e})
 
 # =========================================================== output
-HEADER = """# Reference cases for docs/specs/mandate.md (spec Draft v0.3)
+HEADER = """# Reference cases for docs/specs/mandate.md (spec Draft v0.4)
 #
 # Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-11
 # (spec 1.1); every expected value is computed, not typed.

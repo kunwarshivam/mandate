@@ -1,4 +1,4 @@
-"""Reference implementation of docs/specs/mandate.md (Draft v0.3). Not production code."""
+"""Reference implementation of docs/specs/mandate.md (Draft v0.4). Not production code."""
 import copy, hashlib, json, pathlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -298,6 +298,8 @@ def semantic(m, ctx):
     prev = ctx.get("previous_version")
     if prev is not None and (prev["environment"] != m["environment"] or prev["connection_id"] != m["connection_id"]):
         errs.add("V-031")
+    if r["scale_action"] == "trim_to_target" and g["type"] == "accumulate":
+        errs.add("V-033")
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
         errs.add("V-032")
@@ -447,6 +449,11 @@ class RiskState:
         self.session = "regular" if asset_class == "us_equity" else "crypto"
         self.mark_age = 0.0
         self.disarmed = False
+        self.hard_first = {}      # severe limit -> risk-clock time the 1.25x level was first seen on a quote
+        self.rollover = None      # previous day's pending daily breach, still confirming (§5.4)
+        self.net_contributed = self.A  # dollars allocated in, minus dollars withdrawn (§5.7)
+        self.retired = False
+        self.working = D(0)
 
     def equity(self):
         return self.A + self.realized + self.qty * self.mark - self.B
@@ -469,6 +476,45 @@ class RiskState:
         out["max_daily_loss"] = (E - E0 <= -self.mdl * E0, E - E0 <= -HARD * self.mdl * E0)
         out["lifetime_floor"] = (E <= C * (1 - self.f) + self.L, E <= C * (1 - HARD * self.f) + self.L)
         return out
+
+    def hard_wait(self):
+        return min(self.need, 10)
+
+    def severe(self, key):
+        """Every confirmable limit escalates on a second quote (DEC-63); kept as a hook for the text of §5.6."""
+        return True
+
+    def decide(self, key, hit, hard, t, dt, quote, ev):
+        """Returns the trigger reason (None = no trigger) for a confirmable limit (§5.6, DEC-63)."""
+        c = self.conf.setdefault(key, Confirm())
+        confirmed = c.update(hit, dt, self.need)
+        if confirmed:
+            self._clear_hard(key, ev, quiet=True)
+            return "confirmed"
+        if not hard:
+            if quote:
+                self._clear_hard(key, ev)
+            return None
+        if not self.severe(key):
+            return "hard_trigger"
+        if key not in self.hard_first:
+            if quote:
+                self.hard_first[key] = t
+                self.restrictions["hard_breach"] = "exits_only"
+                ev.append({"type": "RiskLimitTriggered", "limit": key, "action": "exits_only", "reason": "hard_breach_pending"})
+            return None
+        if quote and (t - self.hard_first[key]).total_seconds() >= self.hard_wait():
+            self._clear_hard(key, ev, quiet=True)
+            return "hard_trigger"
+        return None
+
+    def _clear_hard(self, key, ev, quiet=False):
+        if key in self.hard_first:
+            del self.hard_first[key]
+            if not quiet:
+                ev.append({"type": "RiskLimitLifted", "limit": key, "reason": "hard_breach_cleared"})
+            if not self.hard_first:
+                self.restrictions.pop("hard_breach", None)
 
     def latch(self, key, action, ev, reason=None):
         e = {"type": "RiskLimitTriggered", "limit": key, "action": action}
@@ -521,10 +567,8 @@ class RiskState:
         elif kind == "risk_day_started":
             E = self.equity()
             dconf = self.conf.get("max_daily_loss")
-            if self.daily is None and dconf and dconf.pending and E - self.E0 <= -self.mdl * self.E0:
-                self.daily = {"at": t, "day_started": False, "acked": False}
-                self.latch("max_daily_loss", self.daily_action, ev, reason="resolved_at_rollover")
-                self._apply_daily(ev)
+            if self.daily is None and dconf and dconf.pending:
+                self.rollover = {"E0": self.E0, "conf": dconf, "hard_first": self.hard_first.pop("max_daily_loss", None)}
             self.conf.pop("max_daily_loss", None)
             self.E0 = E
             ev.append({"type": "RiskDayStarted", "day_start_equity": norm(self.E0)})
@@ -536,6 +580,13 @@ class RiskState:
             err = self._allocation(D(s["delta_usd"]), ev)
         elif kind == "clock":
             pass
+        elif kind == "floor_loosened":
+            err = self._loosen_floor(s, ev, t)
+        elif kind == "agent_stopped":
+            ev.append({"type": "AgentStopped", "reason": s.get("reason", "owner_stop"),
+                       "loss_carry_usd": norm(max(D(0), self.net_contributed - self.equity()))})
+            self.restrictions["retired"] = "stopped"
+            self.retired = True
         elif kind == "goal_complete":
             oc = self.m["goal"].get("on_complete", "hold_protected")
             ev.append({"type": "GoalCompleted", "on_complete": oc})
@@ -547,6 +598,7 @@ class RiskState:
                 if oc == "disarm_ladder":
                     self.disarmed = True
         # ---- evaluate (§5.2 order)
+        quote = kind in ("mark", "fill") and (kind != "mark" or s.get("sane", True)) and not (kind == "mark" and self.cls == "us_equity" and s["session"] != "regular")
         self.E = self.equity()
         self.H = max(self.H, self.E)
         H, E = self.H, self.E
@@ -579,11 +631,11 @@ class RiskState:
                             self.reset_queue.pop(0)
                         ev.append({"type": "RiskLimitLifted", "limit": key, "action": "scale_sizes"})
             elif key not in self.latched:
-                c = self.conf.setdefault(key, Confirm())
-                if c.update(hit, dt, self.need) or hard:
+                why = self.decide(key, hit, hard, t, dt, quote, ev)
+                if why:
                     self.conf.pop(key, None)
                     self.latched[key] = True
-                    self.latch(key, rung["action"], ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                    self.latch(key, rung["action"], ev, reason=None if why == "confirmed" else why)
                     if rung["action"] == "exits_only":
                         self.restrictions["drawdown_exits_only"] = "exits_only"
                     else:
@@ -596,19 +648,31 @@ class RiskState:
             if not st["lift_prev"]:
                 st["lift_acc"] = 0.0 if not st["active"] or H - E >= (at_i - self.hyst) * H else st["lift_acc"]
         hit, hard = conds["max_daily_loss"]
+        if self.rollover and not self.disarmed:
+            ro = self.rollover
+            ohit = E - ro["E0"] <= -self.mdl * ro["E0"]
+            ohard = E - ro["E0"] <= -HARD * self.mdl * ro["E0"]
+            if ro["conf"].update(ohit, dt, self.need) or (ohard and not self.severe("max_daily_loss")):
+                self.rollover = None
+                if self.daily is None:
+                    self.daily = {"at": t, "day_started": False, "acked": False}
+                    self.latch("max_daily_loss", self.daily_action, ev, reason="resolved_at_rollover")
+                    self._apply_daily(ev)
+            elif not ro["conf"].pending:
+                self.rollover = None
         if self.disarmed:
             pass
         elif self.daily is None:
-            c = self.conf.setdefault("max_daily_loss", Confirm())
-            if c.update(hit, dt, self.need) or hard:
+            why = self.decide("max_daily_loss", hit, hard, t, dt, quote, ev)
+            if why:
                 self.conf.pop("max_daily_loss", None)
                 self.daily = {"at": t, "day_started": False, "acked": False}
-                self.latch("max_daily_loss", self.daily_action, ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                self.latch("max_daily_loss", self.daily_action, ev, reason=None if why == "confirmed" else why)
                 self._apply_daily(ev)
         else:
             if self.daily["day_started"]:
                 c = self.conf.setdefault("max_daily_loss", Confirm())
-                if c.update(hit, dt, self.need) or hard:
+                if c.update(hit, dt, self.need) or (hard and quote):
                     self.conf.pop("max_daily_loss", None)
                     self.daily = {"at": t, "day_started": False, "acked": self.daily["acked"] and self.daily_action == "exits_only"}
                     self.latch("max_daily_loss", self.daily_action, ev, reason="new_day_breach")
@@ -620,13 +684,23 @@ class RiskState:
                 ev.append({"type": "RiskLimitLifted", "limit": "max_daily_loss"})
         if "lifetime_floor" not in self.latched:
             hit, hard = conds["lifetime_floor"]
-            c = self.conf.setdefault("lifetime_floor", Confirm())
-            if c.update(hit, dt, self.need) or hard:
+            why = self.decide("lifetime_floor", hit, hard, t, dt, quote, ev)
+            if why:
                 self.conf.pop("lifetime_floor", None)
                 self.latched["lifetime_floor"] = True
                 self.restrictions["lifetime_floor"] = "paused"
-                self.latch("lifetime_floor", "flatten_and_pause", ev, reason="hard_trigger" if hard and not c.acc >= self.need else None)
+                self.latch("lifetime_floor", "flatten_and_pause", ev, reason=None if why == "confirmed" else why)
                 ev.append({"type": "KillSwitchActivated", "scope": "agent", "initiator": "lifetime_floor"})
+        # profit_stop confirmation (§3.1): time in breach, no hard trigger
+        g = self.m["goal"]
+        if g["type"] == "profit_stop" and "goal_complete" not in self.restrictions and not self.retired:
+            c = self.conf.setdefault("profit_stop", Confirm())
+            if c.update(E - self.C >= D(g["profit_level"]) * self.C, dt, self.need):
+                self.conf.pop("profit_stop", None)
+                self.restrictions["goal_complete"] = "exits_only"
+                ev.append({"type": "GoalCompleted", "reason": "profit_stop_reached", "then": "discretionary_exit_all_then_retire"})
+        if self.qty == 0:
+            self.inst_restrictions.discard("stale_mark")
         if inst_before != self.inst_restrictions:
             ev.append({"type": "InstrumentRestrictionChanged", "restriction": "stale_mark",
                        "active": "stale_mark" in self.inst_restrictions})
@@ -666,6 +740,9 @@ class RiskState:
             for k in list(self.conf):
                 if k.startswith("drawdown_ladder"):
                     del self.conf[k]
+            for k in list(self.hard_first):
+                if k.startswith("drawdown_ladder"):
+                    self._clear_hard(k, ev)
             self.restrictions.pop("drawdown_exits_only", None)
             self.restrictions.pop("drawdown_flatten", None)
             for i, st in self.scale.items():
@@ -689,7 +766,7 @@ class RiskState:
     def _allocation(self, d, ev):
         E = self.equity()
         E1 = E + d
-        gross = self.qty * self.mark
+        gross = self.qty * self.mark + self.working
         err = None
         if d > 0 and (self.latched or self.daily is not None):
             err = "increase_blocked_while_latched"
@@ -708,7 +785,32 @@ class RiskState:
             return err
         self.H, self.E0, self.C, self.L = H1, E01, C1, L1
         self.A += d
+        self.net_contributed += d
         ev.append({"type": "MandateVersionApplied", "result": "applied", "allocation_change": norm(d)})
+        return None
+
+    def _loosen_floor(self, s, ev, t):
+        f1 = D(s["new_max_loss_from_allocation"])
+        err = None
+        if f1 <= self.f:
+            err = "not_loosening"
+        elif "lifetime_floor" in self.latched and not s.get("independent_approval", False):
+            d1 = T(risk_day(s["confirmed_at"])["ends_at"])
+            d2 = T(risk_day(fmt(d1))["ends_at"])
+            if t < d2:
+                err = "waiting_period"
+        if not err and "lifetime_floor" in self.latched and not (self.equity() > self.C * (1 - f1) + self.L):
+            err = "still_below_new_floor"
+        if err:
+            ev.append({"type": "MandateVersionApplied", "result": "rejected", "reason": err})
+            return err
+        self.f = f1
+        ev.append({"type": "MandateVersionApplied", "result": "applied", "max_loss_from_allocation": norm(f1)})
+        if "lifetime_floor" in self.latched:
+            del self.latched["lifetime_floor"]
+            self.restrictions.pop("lifetime_floor", None)
+            self.conf.pop("lifetime_floor", None)
+            ev.append({"type": "RiskLimitLifted", "limit": "lifetime_floor", "reason": "version_loosened"})
         return None
 
     def snapshot(self):
@@ -721,7 +823,7 @@ class RiskState:
                 "daily_pnl_fraction": q12((self.E - self.E0) / self.E0), "capital_base": norm(self.C),
                 "size_factor": norm(factor), "restrictions": sorted(self.restrictions), "agent_mode": self.mode,
                 "instrument_restrictions": sorted(self.inst_restrictions),
-                "pending": sorted(k for k, c in self.conf.items() if c.pending)}
+                "pending": sorted(k for k, c in self.conf.items() if c.pending), "net_contributed": norm(self.net_contributed)}
 
 # ------------------------------------------------------------------ gate: mandate limits (§5.3)
 def gate(m, st, prop):
@@ -753,6 +855,28 @@ def gate(m, st, prop):
     if gross > glim:
         return {"verdict": "deny", "reason": "gross_exposure_limit", "computed": comp}
     return {"verdict": "allow", "reason": None, "computed": comp}
+
+# ------------------------------------------------------------------ order decision (§6.1, trading §7.4, §9)
+def order_decision(m, st, prop, mode, inst_restrictions, session, in_close_window, owner_confirmed_bid=False,
+                   asset_class="us_equity", kill_switch=False):
+    """Composition used by the fuzz for MI-1: agent mode, instrument restrictions, session, close window, limits."""
+    p = prop["purpose"]
+    if mode == "stopped" or (mode == "paused" and not (p == "protective" or (p in ("risk_exit", "owner_exit") and kill_switch))):
+        return {"verdict": "hold", "reason": f"agent_{mode}"}
+    if mode == "exits_only" and p in ("open", "increase"):
+        return {"verdict": "deny", "reason": "agent_exits_only"}
+    if p in ("open", "increase") and inst_restrictions:
+        return {"verdict": "deny", "reason": sorted(inst_restrictions)[0]}
+    equity = asset_class == "us_equity"
+    if p == "discretionary_exit" and equity and session != "regular":
+        return {"verdict": "defer", "reason": "discretionary_exit_regular_session_only"}
+    if p == "discretionary_exit" and equity and in_close_window:
+        return {"verdict": "defer", "reason": "close_window"}
+    if p == "owner_exit" and equity and session != "regular" and not owner_confirmed_bid:
+        return {"verdict": "defer", "reason": "owner_confirmation_required"}
+    if p in ("open", "increase") and equity and in_close_window:
+        return {"verdict": "deny", "reason": "close_window"}
+    return gate(m, st, prop)
 
 # ------------------------------------------------------------------ autonomy (§6)
 STRICT = {"auto": 0, "ask": 1, "deny": 2}
@@ -817,13 +941,25 @@ def builder(m, inp):
     mv = qty * bid
     working = sum(D(w["max_cost"]) for w in inp.get("working_opening_orders", []))
     out = {"cap": norm(cap), "current_mv": norm(mv)}
-    # risk engine first: trim_to_target (§5.5)
-    if r["scale_action"] == "trim_to_target" and factor < 1 and mv > factor * cap:
+    # risk engine first: trim_to_target (§5.5, DEC-65)
+    band_usd = D(beh["sizing"]["rebalance_band"]) * cap
+    if r["scale_action"] == "trim_to_target" and factor < 1 and mv - factor * cap >= band_usd:
         sell = min(qty, ceil_inc((mv - factor * cap) / bid, inc))
-        out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",
-                    "qty": norm(sell), "limit_price": norm(bid), "order_usd": norm(sell * bid),
-                    "autonomy": {"decision": "auto", "by": "builtin_risk_reducing"}})
-        return out
+        guards = []
+        if inp.get("scale_active_s", 0) < r["breach_confirm_s"]:
+            guards.append("rung_not_confirmed")
+        if inp.get("holding", False):
+            guards.append("holding")
+        if inp["asset_class"] == "us_equity" and inp.get("session", "regular") != "regular":
+            guards.append("regular_session_only")
+        if sell * bid < D(inp["min_order_usd"]):
+            guards.append("below_minimum_order")
+        if not guards:
+            out.update({"action": "sell", "purpose": "risk_exit", "origin": "risk_engine", "reason": "trim_to_target",
+                        "qty": norm(sell), "limit_price": norm(bid), "order_usd": norm(sell * bid),
+                        "autonomy": {"decision": "auto", "by": "builtin_risk_reducing"}})
+            return out
+        out["trim_withheld"] = guards
     used, c, c_buy, s = combine(m, inp)
     out.update({"outputs_used": used, "combined_conviction": norm(c), "buy_conviction": norm(c_buy), "combined_score": norm(s)})
     goal = m["goal"]
@@ -922,6 +1058,9 @@ def agent_flatten(inp):
     agent = inp["agent"]
     owner = inp.get("initiator") == "owner"
     confirmed = inp.get("owner_confirmed_bid", False)
+    floor = None
+    if owner and confirmed:
+        floor = D(inp.get("owner_floor_price") or D(inp["confirmed_bid"]) * (1 - D(inp["max_exit_offset"])))
     cancels = sorted(o["client_order_id"] for o in inp["open_orders"] if o["agent"] == agent)
     sells, deferred = [], []
     for p in inp["agent_positions"]:
@@ -930,6 +1069,9 @@ def agent_flatten(inp):
         e = {"instrument": p["instrument"], "qty": p["qty"]}
         if p["asset_class"] == "us_equity" and inp["session"] != "regular" and not (owner and confirmed):
             deferred.append(dict(e, until="regular_session_open"))
+        elif p["asset_class"] == "us_equity" and inp["session"] != "regular":
+            sells.append(dict(e, pricing="exit_price_ladder", floor_price=norm(floor),
+                              remainder="rests_at_floor_then_waits_for_open"))
         else:
             sells.append(dict(e, pricing="exit_price_ladder" if inp["session"] != "regular" else "market_or_ladder"))
     return {"mode_applied_first": "stopped" if owner else "paused", "purpose": "owner_exit" if owner else "risk_exit",
@@ -946,14 +1088,7 @@ def goal_status(m, st):
             return {"done": True, "reason": "end_date", "then": "discretionary_exit_all_then_retire", "stop_reason": "end_date"}
         return {"done": True, "reason": "end_date", "then": oc, "stop_reason": "goal_complete"}
     if g["type"] == "profit_stop":
-        E, C = D(st["agent_equity"]), D(st["capital_base"])
-        ret = r12((E - C) / C)
-        reached = E - C >= D(g["profit_level"]) * C
-        held = st.get("condition_held_s", 0) >= m["risk"]["breach_confirm_s"]
-        if reached and held:
-            return {"done": True, "reason": "profit_level", "agent_return": norm(ret),
-                    "then": "discretionary_exit_all_then_retire", "stop_reason": "profit_stop_reached"}
-        return {"done": False, "agent_return": norm(ret), "pending_confirmation": reached and not held}
+        return {"done": False, "note": "profit_stop is confirmed in the risk state (§3.1, §5.6)"}
     if g["type"] == "accumulate":
         inc = D(st["qty_increment"])
         remaining = D(g["target_qty"]) - D(st["position_qty"])
