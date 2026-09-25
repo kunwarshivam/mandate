@@ -1,4 +1,4 @@
-"""v0.3 base mandates and registry, shared by the generator and the fuzz."""
+"""Base mandates and the signal-model registry, shared by the generator and the fuzz."""
 import copy
 from ref import V, semantic
 
