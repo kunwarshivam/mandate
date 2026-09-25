@@ -232,3 +232,19 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 Retail launch; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
 fully on-prem control plane; shared data plane; strategy marketplace.
+
+## Spec follow-ups (minor review findings, deferred by the freeze rule)
+
+From the final review of mandate spec v0.3:
+
+- Tie the loss carry to the broker account rather than `connection_id`; show the carry and its
+  expiry at deployment.
+- On the `disarm_ladder` confirmation screen, state that the lifetime floor becomes the only
+  automated limit, as a percentage of the held position.
+- Set a platform or retail minimum for `scale_lift_after_s` (at 0, stepwise lifts happen at once).
+- Pace `trim_to_target` sells like discretionary exits (participation caps).
+- Define whether the 1.25× floor hard level scales C × f or the remaining loss budget when L > 0.
+- Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
+- Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
+- Roadmap: replace "learning loop" in Phase 3 with "scorecards and shadow mode".
+- Add fuzz coverage for multiple agents, trims, and owner exits.
