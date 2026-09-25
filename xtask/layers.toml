@@ -38,3 +38,15 @@ layer = 0
 safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
+
+[crates.mandate-journal]
+layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-refcases]
+layer = "tool"
+safety_critical = true
+pure = false
+allowed_external = ["libtest-mimic", "serde_json", "toml"]

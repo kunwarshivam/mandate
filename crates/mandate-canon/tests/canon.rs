@@ -17,7 +17,6 @@ fn canonical(input: &str) -> String {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn string_escaping_vector() {
     // journal.yaml string_escaping: only `"`, `\`, and U+0000-U+001F are escaped.
     let mut object = Object::new();
@@ -39,7 +38,6 @@ fn string_escaping_vector() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn writer_escapes() {
     assert_eq!(
         canonical(r#""\u0000\u0008\u000C\n\r\t\u001F\u0020\u007f\/\u00E9""#),
@@ -54,7 +52,6 @@ fn writer_escapes() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn accepts_and_canonicalizes() {
     assert_eq!(
         canonical(" { \"b\" : [ 1 , true , null ] ,\n\t\"a\":{\"z\":\"\",\"y\":0}}\r\n"),
@@ -71,7 +68,6 @@ fn accepts_and_canonicalizes() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn rejects() {
     use ParseErrorKind::*;
     let cases: &[(&str, ParseErrorKind)] = &[
@@ -136,7 +132,6 @@ fn rejects() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn error_offsets_and_codes() {
     let err = parse(br#"{"a":1,"a":2}"#).unwrap_err();
     assert_eq!((err.kind, err.offset), (ParseErrorKind::DuplicateKey, 7));
@@ -174,7 +169,6 @@ fn error_offsets_and_codes() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn nesting_limit() {
     let nested = |n: usize| format!("{}{}", "[".repeat(n), "]".repeat(n));
     assert!(parse(nested(MAX_DEPTH).as_bytes()).is_ok());
@@ -197,7 +191,6 @@ fn nesting_limit() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn keys_and_ints() {
     for ok in ["a", "z9", "a_b", "abc_123", &"x".repeat(64)] {
         assert_eq!(Key::new(ok).unwrap().as_str(), ok);
@@ -212,7 +205,6 @@ fn keys_and_ints() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn accessors() {
     let v = parse(br#"{"a":"x","b":7,"c":[null],"d":{}}"#).unwrap();
     assert_eq!(v.get("a").and_then(Value::as_str), Some("x"));
@@ -231,7 +223,6 @@ fn accessors() {
 }
 
 #[test]
-#[ignore = "pending E5-1"]
 fn sha256_and_digests() {
     assert_eq!(
         Digest::of(b"abc").to_hex(),
@@ -363,20 +354,17 @@ fn scrambled_str(s: &str, out: &mut String) {
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-1"]
     fn matches_independent_rfc8785_implementation(v in value()) {
         let expected = serde_json_canonicalizer::to_vec(&to_serde(&v)).unwrap();
         prop_assert_eq!(to_canonical(&v), expected);
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn parse_inverts_write(v in value()) {
         prop_assert_eq!(parse(&to_canonical(&v)).unwrap(), v);
     }
 
     #[test]
-    #[ignore = "pending E5-1"]
     fn whitespace_member_order_and_escapes_do_not_change_the_canonical_form(v in value()) {
         let mut text = String::new();
         scrambled(&v, &mut text);

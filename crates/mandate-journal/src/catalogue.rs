@@ -1,0 +1,115 @@
+//! The event catalogue (journal spec §9): which streams may hold each event type, and the
+//! `config_refs` keys each requires at append.
+
+use crate::StreamType::{self, Account, Agent, Control, Scheduler};
+
+pub(crate) const FEE: &str = "fee_config";
+pub(crate) const CAL: &str = "trading_calendar";
+pub(crate) const SET: &str = "settlement_calendar";
+pub(crate) const INS: &str = "instrument_snapshot";
+pub(crate) const RULE: &str = "rule_set";
+pub(crate) const MAN: &str = "mandate_version";
+pub(crate) const MOD: &str = "model_version";
+
+/// Every `config_refs` key the spec defines.
+pub(crate) const CONFIG_REF_KINDS: &[&str] = &[FEE, CAL, SET, INS, RULE, MAN, MOD];
+
+pub(crate) struct Entry {
+    pub(crate) streams: &'static [StreamType],
+    pub(crate) required_refs: &'static [&'static str],
+}
+
+const fn entry(streams: &'static [StreamType], required_refs: &'static [&'static str]) -> Entry {
+    Entry {
+        streams,
+        required_refs,
+    }
+}
+
+const ACCOUNT: &[StreamType] = &[Account];
+const AGENT: &[StreamType] = &[Agent];
+const CONTROL: &[StreamType] = &[Control];
+const NONE: &[&str] = &[];
+
+pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
+    let e = match event_type {
+        "StreamOpened" => entry(&[Account, Agent, Control, Scheduler], NONE),
+        // Copied by the executor into the account stream (spec §2) and owned by the scheduler.
+        "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
+        "KillSwitchActivated" => entry(&[Account, Agent], NONE),
+
+        "IntentReceived" => entry(ACCOUNT, &[MAN]),
+        "GateDecided" => entry(ACCOUNT, &[FEE, CAL, INS, RULE, MAN]),
+        "FillApplied" | "LateFillApplied" => entry(ACCOUNT, &[FEE, CAL, SET, INS]),
+        "FeesCharged" => entry(ACCOUNT, &[FEE]),
+        "SettlementPosted" | "DividendPaid" | "CashInLieuPosted" => entry(ACCOUNT, &[SET]),
+        "CorporateActionPrepared" | "CorporateActionApplied" => entry(ACCOUNT, &[INS]),
+        "ConductBreachDetected" => entry(ACCOUNT, &[RULE]),
+        "MandateVersionApplied"
+        | "RiskDayStarted"
+        | "RiskLimitTriggered"
+        | "RiskLimitLifted"
+        | "HighWaterMarkReset"
+        | "PositionReleased"
+        | "InstrumentRestrictionChanged"
+        | "GoalCompleted" => entry(ACCOUNT, &[MAN]),
+        "OrderSubmitted"
+        | "OrderStateChanged"
+        | "OrderAbandoned"
+        | "BrokerExchangeRecorded"
+        | "MarkUpdated"
+        | "ProtectionChanged"
+        | "BrokerPositionObserved"
+        | "ReconciliationRun"
+        | "CompensatingEvent"
+        | "AccountSnapshotRecorded"
+        | "AccountStateObserved"
+        | "RejectObserved"
+        | "AccountRestrictionChanged"
+        | "ExternalActivityIngested"
+        | "RelatedAccountsCoordination"
+        | "AgentModeApplied" => entry(ACCOUNT, NONE),
+
+        "ModelInvocationRecorded" => entry(AGENT, &[MOD]),
+        "ModelOutputRecorded"
+        | "DecisionMade"
+        | "IntentProposed"
+        | "ApprovalRequested"
+        | "ApprovalDelivered"
+        | "ApprovalResponded"
+        | "ApprovalTimedOut"
+        | "ApprovalCanceled"
+        | "OwnerExitRequested" => entry(AGENT, &[MAN]),
+        "ObservationRecorded" | "AgentModeChanged" => entry(AGENT, NONE),
+
+        "AgentDeployed" | "DeploymentRejected" | "AgentStopped" => entry(CONTROL, &[MAN]),
+        "SurveillanceReportGenerated" | "BacktestRunRecorded" => entry(CONTROL, &[RULE]),
+        "MandateVersionCreated"
+        | "MandateConfirmed"
+        | "PolicyChanged"
+        | "WorkspaceProfileAssigned"
+        | "ConnectionEstablished"
+        | "ConnectionRevoked"
+        | "DisclosureAccepted"
+        | "OwnerAlertSent"
+        | "OwnerAcknowledged"
+        | "ConfigSnapshotRegistered"
+        | "PlatformOperatorAction"
+        | "AnchorComputed"
+        | "VerificationRun"
+        | "IntegrityIncidentRecorded"
+        | "SegmentExported"
+        | "SegmentEvicted"
+        | "RetentionExtended"
+        | "LegalHoldChanged"
+        | "KeyRotated"
+        | "KeyRevoked"
+        | "RecordsAccessed"
+        | "ExportCreated"
+        | "PersonalDataErased" => entry(CONTROL, NONE),
+
+        "ClockOffsetRecorded" | "ClockToleranceExceeded" => entry(&[Scheduler], NONE),
+        _ => return None,
+    };
+    Some(e)
+}

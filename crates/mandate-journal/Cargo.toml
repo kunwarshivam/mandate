@@ -1,0 +1,18 @@
+[package]
+name = "mandate-journal"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The hash-chained journal: drafts, the append protocol, verification, and anchoring (journal spec, backlog E5-1)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
