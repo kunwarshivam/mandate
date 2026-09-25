@@ -91,6 +91,30 @@ before implementation, and always receive line-by-line founder review:
 6. Emit journal events for every new state change.
 7. Run the full local check before proposing the change (see below).
 
+## Working with agents
+
+Start non-trivial work with the `mandate-mode` skill (`.cursor/skills/mandate-mode/SKILL.md`): it
+picks the playbook, lists the gates that always need the founder, and routes to the pstack and
+cursor-team-kit plugins, which `.cursor/settings.json` enables for this repository. Prove work with
+the `verify-mandate` skill; its feature map says which code, tests, and commands cover each
+feature. Where a plugin skill conflicts with this file, this file wins.
+
+### The trust ladder
+
+Agents copy what the repository already contains, so a mistake that gets in once spreads. When an
+agent needs the same correction twice, put the rule on the highest rung that can hold it, using the
+`correction` playbook:
+
+1. **Unrepresentable:** types, private fields, and crate boundaries (`xtask/layers.toml`).
+2. **Checked:** clippy lints, xtask checks, and CI. Today these include debt markers
+   (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a pending story,
+   feature-map drift, and mutants on the diff of safety-critical crates.
+3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
+4. **Reviewed:** the PR template and the founder's review, which is the last resort, not the plan.
+
+Leave the code in a state you would want the next agent to copy: one paved path per task, no
+workarounds explained in comments, and debt either fixed or recorded in the backlog.
+
 ## Getting it right the first time (specs and safety-critical design)
 
 The mandate spec needed a rewrite after every review round (v0.1 to v0.3). The findings had eight
