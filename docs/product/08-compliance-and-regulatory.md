@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product, with external counsel |
-| **Status** | Draft v0.3 (aligned with trading domain spec v0.3) |
+| **Status** | Draft v0.4 (aligned with trading domain spec v0.5 and mandate spec v0.2) |
 
 > This document records product positions and open questions. It is not legal advice.
 > Every position below must be confirmed by securities and data-protection counsel before
@@ -101,23 +101,40 @@ From the risk and compliance review of the trading domain spec
 ([DEC-33](../project/04-decision-log.md#decisions)):
 
 - **Mandate does not choose instruments, strategy, sizing, or limits**
-  ([DEC-38](../project/04-decision-log.md#decisions)); these come from user-confirmed mandate
-  fields, and advisors are tools the user selects. Every order traces to a user-confirmed mandate
-  version; platform defaults only restrict trading; templates carry no platform-chosen
-  instruments or parameters.
-- Compiler-inferred mandate fields are **inactive until the user confirms them**.
-- Calibration changes autonomy only within user-approved bounds; each change is journaled.
-- Approval requests show the agent's proposal and the mandate rule it follows, **not
-  platform-authored alternatives**.
+  ([DEC-38](../project/04-decision-log.md#decisions)). Every order traces to a user-confirmed
+  mandate version.
+- **The user sets every judgment field** ([DEC-45](../project/04-decision-log.md#decisions)):
+  instruments, goal, allocation, signal models and their parameters and weights, the sizing
+  method, protection, all risk limits, and every `auto`. The compiler only extracts values the
+  user stated, with the quoted text; unstated judgment fields stay blank until the user enters
+  them. Platform defaults exist only for non-judgment fields (for example, `ask` as the autonomy
+  default). Templates set structure, never values.
+- **Sizing is a method the user selects** and confirms in plain language; model weights are fixed
+  by the user; **there is no calibration in v1**
+  ([DEC-47](../project/04-decision-log.md#decisions)). Any future calibration will be a
+  user-selected method whose every change is shown and treated as a risk-increasing mandate change.
+- **Signal models** ([DEC-52](../project/04-decision-log.md#decisions)) have no parameter defaults,
+  document methodology only (no performance claims, rankings, or "recommended" labels), carry an
+  authorship label, and are pinned by content hash. LLM models receive only the user's description,
+  universe, and market inputs.
+- Approval requests show the agent's proposal, the rule that triggered it, and model outputs with
+  authorship; the combined score is labeled "not a probability of profit"; **never
+  platform-authored alternatives, persuasive language, or profit estimates**. Live approvals
+  require step-up; skip is the default.
+- Goal wording avoids expectations: `profit_stop` is a level at which the agent stops, not a
+  target ([DEC-46](../project/04-decision-log.md#decisions)).
 
 ## Market conduct
 
 Autonomous agents can produce wash-trade, layering, or marking-the-close patterns without intent.
 The risk gate enforces conduct controls on **opening and increasing orders** (one side at a time,
 minimum resting time, a price collar on aggressiveness, participation caps, order-to-fill limits,
-close-window restrictions, and self-trade prevention across an owner-declared group of related
-accounts). The controls never block exits, protective orders, or the kill switch
-([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31)). A daily surveillance
+a close window with no market-on-close orders, and self-trade prevention across an owner-declared
+group of related accounts). **Discretionary exits** (signal or goal driven) are paced by the same
+controls and the close window, and equities exit in the regular session only; they are deferred,
+never denied. Risk exits, protective orders, and the kill switch are exempt
+([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31);
+[DEC-48](../project/04-decision-log.md#decisions)). A daily surveillance
 report is generated; threshold breaches are routed to the owner, whose acknowledgment is
 journaled. **The platform does not supervise users' trading.** Instrument eligibility excludes
 OTC, IPO-day, low-priced, and illiquid names; complex, leveraged, inverse, and volatility ETPs and
@@ -140,9 +157,8 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 1. Does an approval request that presents an agent-generated proposed trade, with evidence,
    constitute a recommendation or advice under the Advisers Act or state law, given that a
    user-authored mandate triggered it?
-2. Do the platform-supplied advisor library (momentum, mean reversion, trend), the LLM research
-   advisor, mandate templates, and compiler-inferred mandate fields make Mandate the source of
-   advice? Is the posture statement above accurate, and are the safeguards sufficient?
+2. Do the platform-supplied signal-model library (momentum, mean reversion, trend), the LLM
+   research model, mandate templates, and the compiler make Mandate the source of advice? Is the posture statement above accurate, and are the safeguards sufficient?
 3. Is autonomous (AUTO) execution under a user mandate discretion by Mandate or by the user? Is
    per-field confirmation plus versioned mandates enough?
 4. Should design partners be limited to entities, qualified clients, or accredited investors,
@@ -187,6 +203,31 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     exchange data agreements, and what licensing does Mandate need?
 19. When a customer revokes a bring-your-own key, or runs in hybrid mode, what defense copy of
     records (if any) may the platform retain, and under what contract terms?
+20. Can personalized LLM signal-model output (instrument-specific theses generated in real time for
+    each user's universe) qualify for the publisher exclusion under *Lowe v. SEC*? If not, what
+    changes would make it impersonal?
+21. Is a platform-authored sizing function, applied to user-set caps, the platform determining the
+    "amount" of securities for discretion purposes? Does having the user select and confirm the
+    sizing method cure that?
+22. Would future calibration that changes model weights, or scores that route trades between ASK
+    and AUTO, be platform discretion even within bounds the user approved?
+23. Do required judgment fields left blank for the user (rather than filled with platform values)
+    adequately avoid the platform "choosing limits"? Is quoted-span extraction by the compiler
+    acceptable?
+24. What evidence (rendered text, version, authentication, timestamp) makes mandate confirmations
+    and disclosure acceptances enforceable under E-SIGN and UETA, and adequate in a dispute?
+25. Should leveraged and inverse ETPs be prohibited, or limited by holding period, for retail users
+    rather than only gated by an acknowledgment (FINRA Regulatory Notice 09-31)? What should the
+    retail profile's values be?
+26. Could approval prompts (push timing, scores, theses, short timeouts) be treated as digital
+    engagement practices or behavioral nudges that amount to recommendations? What should approval
+    requests exclude?
+27. If adviser customers rely on Mandate's two-approver and independent-approval controls as part
+    of their Rule 206(4)-7 compliance program, does Mandate take on vendor or oversight obligations?
+28. Do product terms such as "signal model", "combined score", and "profit stop" still create
+    holding-out risk under the Advisers Act or state law?
+29. Is treating goal-driven and signal-driven sales as discretionary exits (AUTO, paced by conduct
+    controls, never denied) defensible under Exchange Act §9(a)(2) and CFTC Rule 180.1?
 
 ## Data protection
 
@@ -206,9 +247,9 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 
 | Risk | Control |
 |---|---|
-| Prompt injection through news or social content causing trades | LLMs produce opinions only; the decider and risk gate are deterministic; mandate limits cap impact; unusual inputs trigger escalation |
+| Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; unusual inputs trigger escalation |
 | Model errors or hallucinated instruments | Typed outputs from decision models; instrument validation against the mandate universe |
-| Overconfident models | Calibration against realized outcomes; confidence thresholds for escalation |
+| Overconfident models | Self-reported confidence is labeled uncalibrated; combined-score thresholds in the user's autonomy rules; missing models count as zero; scorecards for the user's review |
 | Model provider changes | Model versions pinned per mandate version; changes create a new version |
 
 ## Terms and disclosures (to draft with counsel)

@@ -15,11 +15,11 @@ Scales: likelihood and impact are **H**igh, **M**edium, **L**ow.
 | R-02 | An agent causes significant user losses through a bug | M | H | Independent risk gate; drawdown ladder; fault-injection and fuzz testing; paper run required before live; broker-side OCO/bracket protective exits | Founder |
 | R-03 | Duplicate or orphaned orders after crashes | M | H | Write-ahead intents with idempotency keys; reconciliation on restart; fault-injection gate | Founder |
 | R-04 | Credential compromise | L | H | Trading-only OAuth scopes and keys (no fund movement); vault per workspace deployment; per-workspace encryption keys; penetration test | Founder |
-| R-05 | Prompt injection through news or social inputs drives trades | M | H | LLMs produce opinions only; deterministic decider and risk gate; mandate limits; unusual-input escalation | Founder |
+| R-05 | Prompt injection through news or social inputs drives trades | M | H | LLMs produce outputs only; deterministic order builder and risk gate; mandate limits; unusual-input escalation | Founder |
 | R-06 | Broker or exchange API changes, outages, or rate limits | H | M | Connector abstraction; health checks; data-staleness halt; Kraken Derivatives US as second venue in Phase 3 | Founder |
 | R-07 | Jev access or pricing changes (early access, new vendor) | M | M | Model gateway abstraction; Laya self-hosted as fallback; LLM wrapper fallback | Founder |
 | R-08 | Users expect profits and churn when agents lose money | H | M | Clear positioning (control, not returns); baselines in reports; paper first; disclosures | Founder |
-| R-09 | Escalations are too frequent (noise) or too rare (missed risk) | M | M | Calibration; escalation-precision metric; per-workspace thresholds; approver feedback loop | Founder |
+| R-09 | Escalations are too frequent (noise) or too rare (missed risk) | M | M | User-set autonomy rules; escalation-precision metric; per-workspace thresholds; approver feedback loop | Founder |
 | R-10 | Founder review bandwidth: one human reviews all agent output, so review becomes the bottleneck and quality slips under load | H | H | Small, single-story changes; review agents pre-screen every change; CI gates block merges; founder review concentrated on safety-critical paths ([RACI](05-raci.md#human-only-responsibilities)); narrow v1 scope | Founder |
 | R-11 | NautilusTrader LGPL obligations if embedded in on-prem distribution | M | M | Own minimal core for Phase 0–1; legal review before embedding | Founder |
 | R-12 | Market-data redistribution licensing (equities) | M | M | Each user's market data comes through their own Alpaca account and data plan; no redistribution by Mandate; review before any shared data offering | Founder |
@@ -44,7 +44,7 @@ Scales: likelihood and impact are **H**igh, **M**edium, **L**ow.
 | A-02 | Alpaca paper trading (US stocks, ETFs, crypto) is the fastest path to real usage in the US | Paper-to-live conversion versus effort |
 | A-03 | Users can express intent in plain language that compiles reliably into mandates | Mandate compile accuracy metric |
 | A-04 | Hybrid deployment is a buying criterion for funds | Design-partner requests; conversion of hybrid prospects |
-| A-05 | Fast decision models add value over quant-only advisors for event-driven decisions | Advisor scorecards versus quant-only baseline in shadow mode |
+| A-05 | Fast decision models add value over quant-only signal models for event-driven decisions | Signal-model scorecards versus quant-only baseline in shadow mode |
 | A-06 | Web push, email, and chat are sufficient approval channels for v1 | Approval response time; timeout rate |
 
 ## Issues
@@ -60,7 +60,7 @@ Scales: likelihood and impact are **H**igh, **M**edium, **L**ow.
 |---|---|---|---|
 | D-01 | Alpaca paper account for the founder; Alpaca OAuth app registration for the platform | M6 (paper account), M8 (OAuth app) | Blocks Phase 1 / Phase 2 |
 | D-02 | Alpaca historical market data API (free account; stock data on the free feed is limited to IEX, full consolidated data needs a subscription) | M1 | Low; alternative data vendors exist |
-| D-03 | Laya weights (open) and/or Jev early-access key | Phase 3 (P1 in v1) | Fast-model advisor delayed |
+| D-03 | Laya weights (open) and/or Jev early-access key | Phase 3 (P1 in v1) | Fast signal model delayed |
 | D-04 | LLM provider account | Mandate compiler (M8) | Blocks plain-language authoring |
 | D-05 | Notification providers: web push, email, chat, SMS | M10 | Limits channels |
 | D-06 | Billing provider (Stripe Billing, Orb, or Metronome) | M12 | Blocks paid plans |
