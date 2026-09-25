@@ -2,9 +2,10 @@
 
 use std::collections::BTreeMap;
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value, parse, to_canonical};
 
-use crate::{Anchor, StoredEvent, StreamId};
+use crate::schema::parse_digest_ref;
+use crate::{Anchor, StoredEvent, StreamId, merkle_root};
 
 /// Per-event checks in the order they run; the first failure is reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,22 +91,95 @@ impl ArtifactSource for BTreeMap<Digest, Vec<u8>> {
 
 /// Walks `rows` in order from `start`, running the per-event checks of spec §11 in order.
 pub fn verify_events(
-    _rows: &[StoredEvent],
-    _start: TrustedStart,
-    _artifacts: &dyn ArtifactSource,
+    rows: &[StoredEvent],
+    start: TrustedStart,
+    artifacts: &dyn ArtifactSource,
 ) -> Result<Verified, EventFailure> {
-    Err(EventFailure {
-        seq: 0,
-        check: EventCheck::NonCanonical,
+    let mut expected_seq = start.from_seq;
+    let mut prev_hash = start.prev_hash;
+    for row in rows {
+        let fail = |check| EventFailure {
+            seq: row.seq,
+            check,
+        };
+        let body = match parse(&row.body) {
+            Ok(body) if to_canonical(&body) == row.body => body,
+            _ => return Err(fail(EventCheck::NonCanonical)),
+        };
+        if !columns_match(row, &body) {
+            return Err(fail(EventCheck::ColumnMismatch));
+        }
+        if row.seq != expected_seq {
+            return Err(fail(EventCheck::SeqGap));
+        }
+        if Digest::of(&row.body) != row.hash {
+            return Err(fail(EventCheck::RehashMismatch));
+        }
+        if row.prev_hash != prev_hash {
+            return Err(fail(EventCheck::PrevHashMismatch));
+        }
+        for reference in body
+            .get("artifact_refs")
+            .and_then(Value::as_array)
+            .unwrap_or_default()
+        {
+            let digest = reference.as_str().and_then(parse_digest_ref);
+            match digest.and_then(|d| artifacts.artifact(&d).map(|bytes| (d, bytes))) {
+                None => return Err(fail(EventCheck::ArtifactMissing)),
+                Some((d, bytes)) if Digest::of(bytes) != d => {
+                    return Err(fail(EventCheck::ArtifactMismatch));
+                }
+                Some(_) => {}
+            }
+        }
+        prev_hash = row.hash;
+        expected_seq = expected_seq.saturating_add(1);
+    }
+    Ok(Verified {
+        next_seq: expected_seq,
+        last_hash: prev_hash,
     })
+}
+
+/// The stored columns equal the body's fields (spec §11 check 2).
+fn columns_match(row: &StoredEvent, body: &Value) -> bool {
+    let text = |name: &str| body.get(name).and_then(Value::as_str);
+    let int = |name: &str| body.get(name).and_then(Value::as_int);
+    text("stream_id") == Some(row.stream_id.as_str())
+        && int("seq") == Some(row.seq)
+        && text("event_id") == Some(row.event_id.as_str())
+        && text("event_type") == Some(row.event_type.as_str())
+        && int("schema_version") == Some(row.schema_version)
+        && text("environment") == Some(row.environment.as_str())
+        && text("recorded_at") == Some(row.recorded_at.as_str())
+        && text("prev_hash") == Some(row.prev_hash.to_hex().as_str())
 }
 
 /// Checks `rows` of `stream` against `anchor`: the event at the anchored `seq` exists with the
 /// anchored hash, then the anchor's root matches its leaves (sorted by `stream_id`, no repeats).
 pub fn verify_anchor(
-    _anchor: &Anchor,
-    _stream: &StreamId,
-    _rows: &[StoredEvent],
+    anchor: &Anchor,
+    stream: &StreamId,
+    rows: &[StoredEvent],
 ) -> Result<(), RangeCheck> {
-    Err(RangeCheck::AnchorRootMismatch)
+    if let Some(leaf) = anchor
+        .leaves
+        .iter()
+        .find(|l| l.stream_id == stream.as_str())
+    {
+        let present = rows
+            .iter()
+            .any(|r| r.seq == leaf.seq && r.hash == leaf.hash && r.stream_id == leaf.stream_id);
+        if !present {
+            return Err(RangeCheck::AnchorHeadMismatch);
+        }
+    }
+    let sorted = anchor
+        .leaves
+        .windows(2)
+        .all(|w| matches!(w, [a, b] if a.stream_id < b.stream_id));
+    if !sorted || merkle_root(&anchor.leaves) != Some(anchor.root) {
+        return Err(RangeCheck::AnchorRootMismatch);
+    }
+    Ok(())
 }
