@@ -3,7 +3,9 @@
 
 mod common;
 
-use common::{STREAM, T, edit, event_id, journal_with, mark_draft, now, opened_draft, stream};
+use common::{
+    STREAM, T, edit, event_id, journal_with, mark_draft, mark_draft_at, now, opened_draft, stream,
+};
 use mandate_canon::{Digest, parse, to_canonical};
 use mandate_journal::{
     AppendOutcome, Draft, Environment, InvalidReason, MemoryJournal, StreamId, StreamType, seal,
@@ -563,6 +565,7 @@ fn seal_bounds_and_names() {
         EmptyBatch,
         ArtifactRefs,
         PiiRefs,
+        RiskClockRegressed,
     ]
     .iter()
     .map(|r| r.code())
@@ -584,12 +587,133 @@ fn seal_bounds_and_names() {
             "duplicate_event_id",
             "empty_batch",
             "artifact_refs",
-            "pii_refs"
+            "pii_refs",
+            "risk_clock_regressed"
         ]
     );
     let e = Draft::parse(&edit(&mark_draft(1, "1"), "payload.feed", None)).unwrap_err();
     assert_eq!(
         e.to_string(),
         "missing, unknown, or mistyped field at `payload.feed`"
+    );
+}
+
+#[test]
+fn risk_clock_never_decreases_along_a_stream() {
+    let s = stream();
+    let mut j = journal_with(0);
+    let at = |n, clock| mark_draft_at(n, "1", clock);
+    let invalid = |o: AppendOutcome| match o {
+        AppendOutcome::Invalid { draft, error } => (draft, error.reason, error.path),
+        other => panic!("{other:?}"),
+    };
+    assert!(matches!(
+        j.append(&s, 1, 1, now(), &[&at(1, "2026-09-21T14:00:05.000000000Z")]),
+        AppendOutcome::Committed(_)
+    ));
+    assert_eq!(
+        invalid(j.append(&s, 2, 1, now(), &[&at(2, "2026-09-21T14:00:04.000000000Z")])),
+        (
+            0,
+            InvalidReason::RiskClockRegressed,
+            "payload.risk_clock".to_owned()
+        ),
+        "a later append may not undercut the stream's last risk_clock"
+    );
+    assert_eq!(
+        invalid(j.append(
+            &s,
+            2,
+            1,
+            now(),
+            &[
+                &at(2, "2026-09-21T14:00:07.000000000Z"),
+                &at(3, "2026-09-21T14:00:06.000000000Z")
+            ]
+        )),
+        (
+            1,
+            InvalidReason::RiskClockRegressed,
+            "payload.risk_clock".to_owned()
+        ),
+        "a batch may not go backwards either"
+    );
+    assert!(
+        matches!(
+            j.append(
+                &s,
+                2,
+                1,
+                now(),
+                &[
+                    &at(2, "2026-09-21T14:00:05.000000000Z"),
+                    &at(3, "2026-09-21T14:00:06.000000000Z")
+                ]
+            ),
+            AppendOutcome::Committed(_)
+        ),
+        "equal and later clocks are accepted, and the rejected batches changed nothing"
+    );
+    assert_eq!(
+        invalid(j.append(&s, 4, 1, now(), &[&at(4, "2026-09-21T14:00:05.000000000Z")])),
+        (
+            0,
+            InvalidReason::RiskClockRegressed,
+            "payload.risk_clock".to_owned()
+        ),
+        "the committed batch moved the stream's clock to its last draft"
+    );
+    let other = StreamId::parse("acct:ws_1:OTHER").unwrap();
+    let opened = edit(
+        &opened_draft("paper"),
+        "stream_id",
+        Some("\"acct:ws_1:OTHER\""),
+    );
+    let opened = edit(&opened, "payload.account_ref", Some("\"OTHER\""));
+    let opened = edit(&opened, "event_id", Some(&format!("\"{}\"", event_id(100))));
+    let early = edit(
+        &edit(
+            &at(101, "2026-09-21T13:00:00.000000000Z"),
+            "stream_id",
+            Some("\"acct:ws_1:OTHER\""),
+        ),
+        "event_id",
+        Some(&format!("\"{}\"", event_id(101))),
+    );
+    assert!(
+        matches!(
+            j.append(&other, 0, 0, now(), &[&opened, &early]),
+            AppendOutcome::Committed(_)
+        ),
+        "each stream has its own risk clock"
+    );
+}
+
+#[test]
+fn risk_clock_is_a_whole_second_and_marks_require_it() {
+    let reason = |d: &[u8]| {
+        let e = Draft::parse(d).unwrap_err();
+        (e.reason, e.path)
+    };
+    assert_eq!(
+        reason(&mark_draft_at(1, "1", "2026-09-21T14:00:00.500000000Z")),
+        (InvalidReason::NonCanonical, "payload.risk_clock".to_owned())
+    );
+    assert_eq!(
+        reason(&mark_draft_at(1, "1", "14:00")),
+        (InvalidReason::NonCanonical, "payload.risk_clock".to_owned())
+    );
+    assert_eq!(
+        reason(&edit(&mark_draft(1, "1"), "payload.risk_clock", None)),
+        (InvalidReason::Schema, "payload.risk_clock".to_owned())
+    );
+    assert_eq!(
+        reason(&edit(&mark_draft(1, "1"), "payload.risk_clock", Some("7"))),
+        (InvalidReason::Schema, "payload.risk_clock".to_owned())
+    );
+    let d = Draft::parse(&mark_draft_at(1, "1", "2026-09-21T14:00:09.000000000Z")).unwrap();
+    assert_eq!(
+        d.risk_clock().map(|t| t.to_string()).as_deref(),
+        Some("2026-09-21T14:00:09.000000000Z")
     );
 }

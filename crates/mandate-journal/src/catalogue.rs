@@ -32,12 +32,15 @@ const CONTROL: &[StreamType] = &[Control];
 const NONE: &[&str] = &[];
 
 /// The catalogue entry for `event_type`. `TradingDayStarted` and `ClockAdvanced` are owned by the
-/// scheduler and copied into account streams by the executor (spec §2).
+/// scheduler and copied into account streams by the executor (spec §2); `OwnerAcknowledged` is
+/// recorded in the control stream and copied into the account stream, where it is a risk input
+/// (mandate spec §5.2, DEC-81).
 pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
     let e = match event_type {
         "StreamOpened" => entry(&[Account, Agent, Control, Scheduler], NONE),
         "TradingDayStarted" | "ClockAdvanced" => entry(&[Account, Scheduler], NONE),
         "KillSwitchActivated" => entry(&[Account, Agent], NONE),
+        "OwnerAcknowledged" => entry(&[Account, Control], NONE),
 
         "IntentReceived" => entry(ACCOUNT, &[MAN]),
         "GateDecided" => entry(ACCOUNT, &[FEE, CAL, INS, RULE, MAN]),
@@ -93,7 +96,6 @@ pub(crate) fn lookup(event_type: &str) -> Option<Entry> {
         | "ConnectionRevoked"
         | "DisclosureAccepted"
         | "OwnerAlertSent"
-        | "OwnerAcknowledged"
         | "ConfigSnapshotRegistered"
         | "PlatformOperatorAction"
         | "AnchorComputed"

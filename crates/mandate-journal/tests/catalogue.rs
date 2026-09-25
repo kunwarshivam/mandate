@@ -19,7 +19,8 @@ const AGENT: &str = "agent";
 const CTL: &str = "ctl";
 const CLOCK: &str = "clock";
 
-/// Journal spec §9 (and §2 for `ClockAdvanced`, which the executor copies into account streams).
+/// Journal spec §9, with §2's copies into account streams: `ClockAdvanced`, and `OwnerAcknowledged`
+/// as a risk input (mandate spec §5.2, DEC-81).
 const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("StreamOpened", &[ACCT, AGENT, CTL, CLOCK], &[]),
     ("IntentReceived", &[ACCT], &[MAN]),
@@ -83,7 +84,7 @@ const SPEC: &[(&str, &[&str], &[&str])] = &[
     ("ConnectionRevoked", &[CTL], &[]),
     ("DisclosureAccepted", &[CTL], &[]),
     ("OwnerAlertSent", &[CTL], &[]),
-    ("OwnerAcknowledged", &[CTL], &[]),
+    ("OwnerAcknowledged", &[ACCT, CTL], &[]),
     ("ConfigSnapshotRegistered", &[CTL], &[]),
     ("SurveillanceReportGenerated", &[CTL], &[RULE]),
     ("BacktestRunRecorded", &[CTL], &[RULE]),
@@ -239,6 +240,27 @@ fn registered_schemas_accept_their_payloads() {
     assert_eq!(
         (e.reason, e.path.as_str()),
         (InvalidReason::NonCanonical, "payload.trade_date")
+    );
+    let fill = |clock: &str| {
+        with_payload(
+            "FillApplied",
+            &[FEE, CAL, SET, INS],
+            &format!(
+                r#"{{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy",
+                "qty_gross":"10","price":"150","trade_date":"2026-09-21","risk_clock":{clock},"fees":[]}}"#
+            ),
+        )
+    };
+    let timed = Draft::parse(&fill("\"2026-09-21T14:00:01.000000000Z\"")).unwrap();
+    assert_eq!(
+        timed.risk_clock().map(|t| t.secs()),
+        Some(1_789_999_201),
+        "FillApplied carries risk_clock when present"
+    );
+    let e = Draft::parse(&fill("\"2026-09-21T14:00:01.250000000Z\"")).unwrap_err();
+    assert_eq!(
+        (e.reason, e.path.as_str()),
+        (InvalidReason::NonCanonical, "payload.risk_clock")
     );
     let bad_attempt = with_payload(
         "OrderSubmitted",
