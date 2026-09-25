@@ -140,8 +140,8 @@ The risk gate enforces conduct controls on **opening and increasing orders** (on
 minimum resting time, a price collar on aggressiveness, participation caps, order-to-fill limits,
 a close window with no market-on-close orders, and self-trade prevention across an owner-declared
 group of related accounts). **Discretionary exits** (signal or goal driven) are paced by the same
-controls and the close window, and equities exit in the regular session only; they are deferred,
-never denied. Owner exits are paced by participation caps. Risk exits, protective orders, and
+controls, go out in the close window only as marketable limit orders (never MOC/LOC), and for
+equities run in the regular session only; outside it they are deferred, never denied. Owner exits are paced by participation caps. Risk exits, protective orders, and
 automated kill switches are exempt
 ([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31);
 [DEC-48](../project/04-decision-log.md#decisions)). A daily surveillance

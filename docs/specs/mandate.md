@@ -2,11 +2,11 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.4: requires founder approval before implementation (safety-critical) |
+| **Status** | Draft v0.5: requires founder approval before implementation (safety-critical) |
 | **Implements** | PRD 6.3 (FR-3.1 to FR-3.8), 6.5 (FR-5.2 to FR-5.5), 6.6 (FR-6.1 to FR-6.6); backlog E6, E10 |
 | **Schemas** | [mandate.schema.json](../../schemas/mandate.schema.json), [policy.schema.json](../../schemas/policy.schema.json) (structural rules) |
 | **Reference cases** | [reference-cases/mandate.yaml](reference-cases/mandate.yaml) |
-| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-69](../project/04-decision-log.md#decisions) |
+| **Related** | [Trading domain spec](trading-domain.md), [journal spec](journal.md), decisions [DEC-39 to DEC-70](../project/04-decision-log.md#decisions) |
 
 A **mandate** is the binding specification the owner sets for an agent: its goal, instruments,
 capital, signal models, sizing, protection, risk limits, autonomy rules, and notifications. This
@@ -445,7 +445,7 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 | Purpose | Origin | Approval | Market-conduct controls |
 |---|---|---|---|
 | `open`, `increase` | Order builder | Autonomy rules (§6.2) | Apply (trading spec §9.6) |
-| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments | Built-in AUTO; never denied | **Paced, never denied:** price collar, participation caps, the close window; equities in the regular session only (verdict `defer`) |
+| `discretionary_exit` | Order builder (signal exit), goal completion, removed instruments | Built-in AUTO; never denied | **Paced, never denied:** price collar and participation caps; in the close window, marketable limit orders only (DEC-70); equities in the regular session only (verdict `defer` outside it) |
 | `owner_exit` | The owner closes a position or triggers a kill switch | The owner's instruction (step-up); never denied | Participation caps pace it. Outside the regular session, equities sell through the exit price ladder once the owner has confirmed the displayed bid and bid size and a **floor price** (default: the confirmed bid × (1 − the exit ladder's maximum offset)); the ladder never prices below the floor, any remainder rests at the floor and then waits for the session, and the owner is alerted (DEC-66) |
 | `risk_exit` | Risk engine: limits, flatten, `trim_to_target`, stop watchdog (trading spec §5.4) | Built-in AUTO; never denied | Exempt |
 | `protective` | Executor: placing and re-placing protection | Built-in AUTO; never denied | Exempt |
@@ -457,8 +457,8 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
 2. **Gate dry run.** `deny`: the action is skipped and journaled; no approval is ever requested for
    an order the gate would deny. `defer` (discretionary exits only): nothing is submitted and the
    deferral is journaled. **No deferred intent is stored.** The order builder proposes again at
-   each evaluation, and evaluations also run at the regular-session open and when the close window
-   ends, so a deferred exit happens only if the signal still calls for it.
+   each evaluation, and an evaluation also runs at the regular-session open, so a deferred exit
+   happens only if the signal still calls for it.
 3. **Built-in:** purposes other than `open` and `increase` are AUTO.
 4. Otherwise, evaluate `autonomy.rules` **in order**; the first matching rule decides (`auto`,
    `ask`, `deny`). If none matches, `autonomy.default`.
@@ -697,7 +697,6 @@ the fuzz catches seeded bugs.
    risk-increasing (DEC-47).
 5. Additional sizing methods (partial trims, volatility scaling) and rule fields (event windows,
    minutes to close, spread).
-6. **Close-window deferral (OD-10):** a discretionary exit deferred at 15:51 can become an
-   overnight hold, and may not recur at the open if its outputs have expired.
+6. Rule fields for the close window and event windows (for example, minutes to close).
 7. A crypto-spot disclosure, and an acceptable-use rule on material nonpublic information for
    user-supplied data feeds.
