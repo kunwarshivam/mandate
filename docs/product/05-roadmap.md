@@ -14,7 +14,7 @@ flowchart LR
     P1 --> P2["Phase 2<br/>Platform v1<br/>design partners"]
     P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>learning loop"]
     P3 --> P4["Phase 4<br/>Equities, mobile,<br/>enterprise identity, on-prem"]
-    P4 --> P5["Phase 5<br/>Retail, research lab,<br/>shared intelligence"]
+    P4 --> P5["Phase 5<br/>Retail, research lab,<br/>shared data"]
 ```
 
 ## Now
@@ -89,12 +89,12 @@ at least one hybrid customer in production.
 - SAML and SCIM; separation of duties; fully on-prem / air-gapped packaging.
 - SOC 2 readiness.
 
-### Phase 5: Retail, research lab, shared intelligence
+### Phase 5: Retail, research lab, shared data
 
-- Retail managed offering with presets and education (only after legal review).
-- Research lab: agents propose and test new mandate variants; promotion requires approval.
-- Shared intelligence plane: shared market data and public-event judgments for managed
-  workspaces.
+- Retail managed offering under the retail policy profile, with education and disclosures (only after legal review).
+- Research lab: users define and backtest mandate variants; promotion requires approval.
+- Shared data plane: shared market data and factual public-event classifications (no directional
+  views) for managed workspaces.
 - WebAssembly plug-ins for custom logic.
 
 ## Explicitly not planned

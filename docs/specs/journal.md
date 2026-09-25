@@ -49,9 +49,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 - **No global order** across streams. Relationships use `causation_id` and `correlation_id`;
   cross-stream displays sort by `recorded_at` for readability only.
 - **Cross-stream facts are copied by the owner** into the consuming stream with a `causation_id`:
-  the executor writes `AgentModeApplied` (from the agent stream's `AgentModeChanged`) and
-  `TradingDayStarted`, `RiskDayStarted`, and time-driven events (from the scheduler) into the
-  account stream. A mode change that **originates** on the account stream (account restrictions,
+  the executor writes `AgentModeApplied` (from the agent stream's `AgentModeChanged`),
+  `TradingDayStarted`, `ClockAdvanced` (the risk clock, mandate spec §5.2: copied only when a tick
+  emits an event or crosses midnight), and time-driven events
+  (from the scheduler) into the account stream, and derives `RiskDayStarted` there from the copied
+  `ClockAdvanced` crossing midnight America/New_York. A mode change that **originates** on the account stream (account restrictions,
   mandate risk limits) is journaled there first as `AgentModeApplied`, and the agent runtime
   copies it into the agent stream as `AgentModeChanged`; the `causation_id` always points to the
   originating event. A user's kill switch is a **command**
@@ -273,7 +275,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ExternalActivityIngested`, `RelatedAccountsCoordination` | — | unattributed activity; canceled opening orders across the group |
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
-| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, contributed capital; reset evidence; released positions |
+| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, contributed capital; reset evidence; released positions; stale-mark changes; goal completion |
 
 **Agent stream** (owner: agent runtime)
 
@@ -287,13 +289,15 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID) |
 | `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut`, `ApprovalCanceled` | man | content shown (artifact), bound quantity, limit price, and mandate version, cancel reason, channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
+| `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 
 **Workspace control stream** (owner: workspace services)
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
 | `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-45-dec-51): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
-| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason |
+| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), loss carry recorded for the connection |
+| `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method |

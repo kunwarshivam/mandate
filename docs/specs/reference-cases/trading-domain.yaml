@@ -1,4 +1,4 @@
-# Reference cases for docs/specs/trading-domain.md (spec v0.5)
+# Reference cases for docs/specs/trading-domain.md (spec v0.6)
 #
 # SCHEMA v3 - HARNESS RULES
 #
@@ -55,7 +55,8 @@
 # Purposes and verdicts
 # - `purpose` is the originating component's exit type; the gate still checks it against side and
 #   position. `risk_exit` is exempt from every conduct control; `discretionary_exit` is paced and may
-#   receive verdict `defer` (spec 9.6), never `deny`.
+#   receive verdict `defer` (spec 9.6), never `deny`. `owner_exit` outside the regular session needs
+#   `owner_confirmed_bid: true`, otherwise it is deferred (spec 5.5).
 #
 # Other rules
 # - A fill without `client_order_id` is its own order (for per-order fee caps).
@@ -186,6 +187,7 @@ reason_codes:
   - max_orders_per_day      # mandate spec §5.3 (deny; no mode change)
   - close_window            # deny for openings, defer for discretionary exits
   - discretionary_exit_regular_session_only   # defer
+  - owner_confirmation_required               # defer: owner exit outside the session without a confirmed bid
   # exposure and buying power
   - gross_exposure_limit
   - insufficient_buying_power
@@ -1317,4 +1319,6 @@ cases:
       - { at: "2026-09-22T15:52:01-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: risk_exit }, expect: { decision: { verdict: allow } } }
       - { at: "2026-09-22T17:00:00-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: discretionary_exit }, expect: { decision: { verdict: defer, reason_code: discretionary_exit_regular_session_only } } }
       - { at: "2026-09-22T17:00:01-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: risk_exit }, expect: { decision: { verdict: allow } } }
+      - { at: "2026-09-22T17:00:02-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: owner_exit, owner_confirmed_bid: true }, expect: { decision: { verdict: allow } } }
+      - { at: "2026-09-22T17:00:03-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: owner_exit, owner_confirmed_bid: false }, expect: { decision: { verdict: defer, reason_code: owner_confirmation_required } } }
       - { at: "2026-09-23T10:00:00-04:00", event: propose_order, data: { instrument: GOOD, side: sell, type: limit, qty: "10", limit_price: "120.00", purpose: discretionary_exit }, expect: { decision: { verdict: allow } } }

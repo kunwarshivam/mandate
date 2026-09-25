@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product, with external counsel |
-| **Status** | Draft v0.4 (aligned with trading domain spec v0.5 and mandate spec v0.2) |
+| **Status** | Draft v0.5 (aligned with trading domain spec v0.6 and mandate spec v0.3) |
 
 > This document records product positions and open questions. It is not legal advice.
 > Every position below must be confirmed by securities and data-protection counsel before
@@ -35,7 +35,7 @@ for retail users.
 | Requirement | Where enforced |
 |---|---|
 | Users author and approve every mandate; the compiler's output is always shown for confirmation | Mandate authoring (PRD 6.3) |
-| Templates are starting points users must review, not recommendations; they never ship with platform-chosen instruments or parameters ([DEC-38](../project/04-decision-log.md#decisions)) | Mandate authoring |
+| Templates are starting points users must review, not recommendations; they never ship with platform-chosen instruments or values ([DEC-38](../project/04-decision-log.md#decisions)) | Mandate authoring |
 | No platform-generated "you should trade X" suggestions | Product policy |
 | Trading-only OAuth scopes; reject API keys that can withdraw or transfer | Connections (PRD FR-2.2) |
 | Enforce US market rules (day-trading regime, buying power and settlement, sessions, halts; no short sales) | Risk gate (PRD FR-5.10) |
@@ -47,8 +47,10 @@ for retail users.
 ## Retail gating
 
 Retail managed accounts are out of scope until counsel confirms the model. Expected
-additional requirements for retail include suitability-style guardrails (conservative
-presets, leverage caps), clearer disclosures, education, and jurisdiction checks.
+additional requirements for retail include platform policy ceilings (the retail profile:
+`auto_allowed: false`, quant models only, no leveraged ETPs, protection required, a lower lifetime
+loss limit; [DEC-61](../project/04-decision-log.md#decisions), pending counsel), clearer
+disclosures, education, and jurisdiction checks. Ceilings are shown as limits, never pre-filled.
 
 ## United States
 
@@ -123,6 +125,13 @@ From the risk and compliance review of the trading domain spec
   require step-up; skip is the default.
 - Goal wording avoids expectations: `profit_stop` is a level at which the agent stops, not a
   target ([DEC-46](../project/04-decision-log.md#decisions)).
+- LLM model output is limited to observations, evidence, and invalidation conditions (no
+  imperatives, price targets, or profit claims); it is collapsed behind "View model output" on
+  approval screens and never appears in notifications. Agent memory does not feed models in v1, and
+  the shared data plane carries no directional views
+  ([DEC-62](../project/04-decision-log.md#decisions)).
+- Acceptable use (to draft): users may not supply data feeds containing material nonpublic
+  information.
 
 ## Market conduct
 
@@ -132,7 +141,8 @@ minimum resting time, a price collar on aggressiveness, participation caps, orde
 a close window with no market-on-close orders, and self-trade prevention across an owner-declared
 group of related accounts). **Discretionary exits** (signal or goal driven) are paced by the same
 controls and the close window, and equities exit in the regular session only; they are deferred,
-never denied. Risk exits, protective orders, and the kill switch are exempt
+never denied. Owner exits are paced by participation caps. Risk exits, protective orders, and
+automated kill switches are exempt
 ([spec §9.6](../specs/trading-domain.md#96-market-conduct-controls-dec-31);
 [DEC-48](../project/04-decision-log.md#decisions)). A daily surveillance
 report is generated; threshold breaches are routed to the owner, whose acknowledgment is
@@ -209,8 +219,8 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 21. Is a platform-authored sizing function, applied to user-set caps, the platform determining the
     "amount" of securities for discretion purposes? Does having the user select and confirm the
     sizing method cure that?
-22. Would future calibration that changes model weights, or scores that route trades between ASK
-    and AUTO, be platform discretion even within bounds the user approved?
+22. Do platform-model scores used in user-written ASK/AUTO rules, or any future calibration, amount
+    to platform discretion?
 23. Do required judgment fields left blank for the user (rather than filled with platform values)
     adequately avoid the platform "choosing limits"? Is quoted-span extraction by the compiler
     acceptable?
@@ -220,14 +230,18 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     rather than only gated by an acknowledgment (FINRA Regulatory Notice 09-31)? What should the
     retail profile's values be?
 26. Could approval prompts (push timing, scores, theses, short timeouts) be treated as digital
-    engagement practices or behavioral nudges that amount to recommendations? What should approval
-    requests exclude?
+    engagement practices or behavioral nudges that amount to recommendations under existing
+    anti-fraud law, state unfair-practices law, or FTC Act §5? What should approval requests
+    exclude?
 27. If adviser customers rely on Mandate's two-approver and independent-approval controls as part
     of their Rule 206(4)-7 compliance program, does Mandate take on vendor or oversight obligations?
 28. Do product terms such as "signal model", "combined score", and "profit stop" still create
     holding-out risk under the Advisers Act or state law?
 29. Is treating goal-driven and signal-driven sales as discretionary exits (AUTO, paced by conduct
     controls, never denied) defensible under Exchange Act §9(a)(2) and CFTC Rule 180.1?
+30. Would an optional, separately priced shared feed of platform-computed classifications of public
+    events be a signal service, or qualify as impersonal publishing? What must it exclude to stay
+    data?
 
 ## Data protection
 

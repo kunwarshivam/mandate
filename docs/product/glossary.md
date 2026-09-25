@@ -13,7 +13,7 @@
 | **Order builder** | Combines signal-model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score. Formerly "decider" |
 | **Combined score** | The order builder's weighted average of model confidences; an input to autonomy rules, not a probability of profit |
 | **Judgment field** | A mandate field that expresses a trading decision (instruments, goal, allocation, models, sizing, protection, limits, `auto`); only the user sets it |
-| **Risk exit / discretionary exit** | An exit from the risk engine (limits, flatten, kill switch, stop watchdog), exempt from all controls; an exit from the order builder, goal, or owner, paced by conduct controls but never denied |
+| **Risk exit / discretionary exit / owner exit** | An exit from the risk engine (limits, automated flatten, trim, stop watchdog), exempt from all controls; an owner's close or kill switch, paced only by participation caps; an exit from the order builder or goal, paced by conduct controls but never denied |
 | **Lifetime loss floor** | Equity level (contributed capital × (1 − `max_loss_from_allocation`)) at which an agent flattens and pauses permanently unless the owner loosens the mandate |
 | **Autonomy policy** | Rules that classify each proposed action as AUTO, ASK, or DENY |
 | **Risk gate** | Independent code on the order path that enforces limits regardless of agent logic |
@@ -34,7 +34,7 @@
 | **Cell** | A managed hosting unit containing many workspace deployments |
 | **Managed / hybrid / on-prem** | Deployment modes: all ours; thin control plane ours and the rest the customer's; all the customer's |
 | **Notification relay** | Delivers push notifications carrying only an opaque ID and generic text |
-| **Fast decision model** | A model that returns typed answers with probabilities in tens to hundreds of milliseconds (for example, Laya, Jev) |
+| **Fast decision model** | A model that returns typed answers with scores in tens to hundreds of milliseconds (for example, Laya, Jev) |
 | **Calibration** | Adjusting a model's stated confidence so it matches how often it is actually right. Measured for reporting only in v1; never changes behavior ([DEC-47](../project/04-decision-log.md#decisions)) |
 | **Paper trading** | Trading against a live market with simulated funds; for Alpaca, a separate paper environment with the same API as live |
 | **Testnet / demo environment** | A venue's test environment with fake funds (for example, Kraken's derivatives demo) |
