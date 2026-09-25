@@ -15,12 +15,15 @@ usage: cargo xtask <command>
 
 commands:
   check                 run every per-PR job locally
-  ci <job>              run one CI job: lint | test | refcases | reference | supply-chain | spec-guard | nightly
+  ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | spec-guard |
+                        refcases | reference | supply-chain
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   deps                  check every direct dependency against docs/dependencies.md
   refcases [--write]    export reference-case YAML to fixtures/refcases (drift check unless --write)
 ";
 
+const FAST_JOB: [&str; 3] = ["lint", "test", "spec-guard"];
+const FULL_JOB: [&str; 3] = ["refcases", "reference", "supply-chain"];
 const PR_JOBS: [&str; 6] = [
     "lint",
     "test",
@@ -166,7 +169,23 @@ fn ci(job: &str) -> Result<()> {
             }
         }
         "spec-guard" => spec_guard(),
+        // The two required checks (DEC-76): each pays the setup cost once.
+        "fast" => {
+            for part in FAST_JOB {
+                ci(part)?;
+            }
+            Ok(())
+        }
+        "full" => {
+            for part in FULL_JOB {
+                ci(part)?;
+            }
+            Ok(())
+        }
         "nightly" => {
+            for part in PR_JOBS {
+                ci(part)?;
+            }
             for seed in 1..=10 {
                 reference(&["fuzz.py", &seed.to_string()])?;
             }
