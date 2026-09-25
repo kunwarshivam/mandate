@@ -88,6 +88,31 @@ before implementation, and always receive line-by-line founder review:
 6. Emit journal events for every new state change.
 7. Run the full local check before proposing the change (see below).
 
+## Getting it right the first time (specs and safety-critical design)
+
+The mandate spec needed a rewrite after every review round (v0.1 to v0.3). The findings had seven
+causes; each rule below closes one of them. Follow these before sending any spec, schema, or
+safety-critical design for review.
+
+| Cause, with an example from the mandate spec | Rule |
+|---|---|
+| **Local fixes, no global re-check.** v0.2 scaled the high-water mark on allocation changes but left contributed capital additive, so a withdrawal could trip the lifetime floor, contradicting the spec's own sentence two lines earlier | **Invariants first.** Write the properties the design must always hold (for example, "an allocation change never triggers or lifts a limit") before writing rules. After every change, re-check every invariant, not only the finding being fixed |
+| **Claims stated, never tested.** "Can neither lift nor trigger a limit" was asserted, not checked | **Every claim is a test.** Each invariant and each "never" or "always" in the text has a property-based test in the reference implementation. Fuzz random sequences of events (marks, fills, allocation changes, acknowledgments, version changes, clock ticks) and assert the invariants |
+| **Examples that break their own rules.** A base mandate's `target_qty` cost more than its allocation; a case titled "fraction cap binds" did not bind; v0.1's V-021 rejected the spec's own example | **Validate fixtures against the rules.** Every example and base fixture passes every rule it is not meant to fail; every case asserts the condition its title claims, and is recomputed from the rules, not typed |
+| **Cross-spec contracts not traced.** The agent flatten reused the account-wide kill switch (cancel-all, close-position); units differed (basis points vs fraction); two specs gave different outcomes for the same limit | **Trace every reference.** For each rule that relies on another spec, read that section and confirm scope, units, and outcome match; update both sides in the same change |
+| **Lifecycles not finished.** Nothing said what happens after a flatten, after a goal completes, after an acknowledgment, or at a time boundary | **Walk every state to its exit.** For each state and limit: how it is entered, what it blocks, how it ends, who can end it, and what happens at session close, midnight, restart, and version change |
+| **No adversary.** Order splitting, redeploying to reset limits, deposits to lift rungs, one bad tick, and a model outage enlarging orders were all found by reviewers | **Attack it yourself.** Before review, list how a careless user, a bad model, a malicious insider, and a bad market tick could exceed intended risk or imply platform advice; each must be blocked or disclosed |
+| **Decisions hidden inside drafts, and scope creep.** About a third of each round were design choices only the founder can make, and each round added features that became new surface | **Separate decisions from defects.** List open design choices for the founder before drafting. While fixing findings, add no features; propose them separately |
+
+**Before external review:**
+
+1. Run the invariant fuzz, schema and fixture validation, and a link check.
+2. Self-review against the three role checklists: engineer (determinism, ordering, time base,
+   replay, every input listed), risk (loopholes, gap risk, lifecycle), and compliance (who chooses
+   what, records, wording).
+
+**Freeze rule:** after an external review, fix only blockers and majors. Minors go to the backlog.
+
 ## Conventions
 
 These apply once code exists; the first stories (E1) set them up.
