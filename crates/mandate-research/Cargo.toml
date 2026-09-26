@@ -1,0 +1,19 @@
+[package]
+name = "mandate-research"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The research-agent contract of mandate spec §8: the thesis as typed data, the ordered admission checks, revision lineages, thesis expiry, and the deterministic stagger offset"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
