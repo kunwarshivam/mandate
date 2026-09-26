@@ -2,15 +2,21 @@
 # Cloud Agent install step: the toolchain and tools pinned by ADR-0001, then a warm build.
 # Idempotent: each tool is installed only if the pinned version is missing, and every download is
 # checked against a pinned SHA-256. Versions must match .github/workflows/ci.yml.
+# Some cloud sessions allow only the package hosts (github.com, static.rust-lang.org, crates.io,
+# PyPI), so nothing here may be fetched from astral.sh.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
 UV_VERSION="0.12.19"
+UV_SHA256="23bf5552d220e0842b65c862097b2ebaeba0064b74eda5e565e77fd25969d8c8"
 PYTHON_VERSION="3.14"
 BIN="${CARGO_HOME:-$HOME/.cargo}/bin"
 mkdir -p "$BIN" "$HOME/.local/bin"
 export PATH="$BIN:$HOME/.local/bin:$PATH"
+# uv defaults to releases.astral.sh for Python builds. It still checks each build against the
+# SHA-256 compiled into the pinned uv binary.
+export UV_PYTHON_INSTALL_MIRROR="https://github.com/astral-sh/python-build-standalone/releases/download"
 
 # tool version url sha256 member
 TOOLS=(
@@ -55,7 +61,11 @@ done
 
 if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
   echo "installing uv $UV_VERSION"
-  curl -LsSf "https://astral.sh/uv/$UV_VERSION/install.sh" | env UV_NO_MODIFY_PATH=1 sh
+  uv_member="uv-x86_64-unknown-linux-gnu"
+  curl -sSfL -o "$tmp/uv.tgz" "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$uv_member.tar.gz"
+  echo "$UV_SHA256  $tmp/uv.tgz" | sha256sum --check --quiet
+  tar -xzf "$tmp/uv.tgz" -C "$tmp" "$uv_member/uv" "$uv_member/uvx"
+  install -m 0755 "$tmp/$uv_member/uv" "$tmp/$uv_member/uvx" "$HOME/.local/bin/"
 fi
 uv python install "$PYTHON_VERSION"
 
