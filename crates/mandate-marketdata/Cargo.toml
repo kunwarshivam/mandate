@@ -13,6 +13,7 @@ workspace = true
 arrow-array.workspace = true
 arrow-schema.workspace = true
 mandate-canon.workspace = true
+mandate-num.workspace = true
 mandate-time.workspace = true
 parquet.workspace = true
 reqwest.workspace = true

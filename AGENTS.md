@@ -118,7 +118,7 @@ agent needs the same correction twice, put the rule on the highest rung that can
 1. **Unrepresentable:** types, private fields, and crate boundaries (`xtask/layers.toml`).
 2. **Checked:** clippy lints, xtask checks, and CI. Today these include debt markers
    and plain comments (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a
-   pending story,
+   pending story, a pending test that passes on the PR's code (`cargo xtask ci pending`),
    feature-map drift, and mutants on the diff of safety-critical crates.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.
@@ -173,7 +173,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
   registry, gitleaks), and the spec guard. CI runs them as two required checks: `cargo xtask ci fast`
-  (lint, test, spec guard) and `cargo xtask ci full` (fixtures, reference, supply chain).
+  (lint, test, pending tests, spec guard) and `cargo xtask ci full` (fixtures, reference, supply
+  chain).
 - **New crates** get an entry in `xtask/layers.toml` in the same change; safety-critical crates also
   get a CODEOWNERS line and start `src/lib.rs` with the lint header `cargo xtask layers` checks.
 - **New dependencies** need a row in `docs/dependencies.md` in the same change (none by default).

@@ -20,8 +20,7 @@ pub struct ArtifactRef(Digest);
 impl ArtifactRef {
     /// The reference `bytes` are stored under.
     pub fn of(bytes: &[u8]) -> Self {
-        let _ = bytes;
-        Self(Digest::ZERO)
+        Self(Digest::of(bytes))
     }
 
     pub fn from_digest(digest: Digest) -> Self {
@@ -40,7 +39,7 @@ impl ArtifactRef {
 
 impl fmt::Display for ArtifactRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "sha256:")
+        write!(f, "sha256:{}", self.0)
     }
 }
 
@@ -62,7 +61,9 @@ impl ArtifactError {
     /// Stable reason code (ADR-0001 ES-09); the first two are the verification codes of spec §11.
     pub fn code(self) -> &'static str {
         match self {
-            Self::Missing | Self::Corrupt | Self::Unavailable => "",
+            Self::Missing => "artifact_missing",
+            Self::Corrupt => "artifact_mismatch",
+            Self::Unavailable => "artifact_unavailable",
         }
     }
 }
@@ -87,14 +88,18 @@ pub fn get_artifact<S: ArtifactSource + ?Sized>(
     source: &S,
     reference: &ArtifactRef,
 ) -> Result<Vec<u8>, ArtifactError> {
-    let _ = (source, reference);
-    Err(ArtifactError::Unavailable)
+    let bytes = source.read_artifact(reference)?;
+    check_artifact(reference, &bytes)?;
+    Ok(bytes)
 }
 
 /// `Corrupt` unless `bytes` hash to `reference`.
 pub fn check_artifact(reference: &ArtifactRef, bytes: &[u8]) -> Result<(), ArtifactError> {
-    let _ = (reference, bytes);
-    Err(ArtifactError::Unavailable)
+    if ArtifactRef::of(bytes) == *reference {
+        Ok(())
+    } else {
+        Err(ArtifactError::Corrupt)
+    }
 }
 
 /// An in-memory store keyed by digest. Values can be replaced through the map itself, which is how
@@ -109,7 +114,11 @@ impl ArtifactSource for BTreeMap<Digest, Vec<u8>> {
 
 impl ArtifactStore for BTreeMap<Digest, Vec<u8>> {
     fn put_artifact(&mut self, bytes: &[u8]) -> Result<ArtifactRef, ArtifactError> {
-        let _ = bytes;
-        Err(ArtifactError::Unavailable)
+        let reference = ArtifactRef::of(bytes);
+        let stored = self
+            .entry(reference.digest())
+            .or_insert_with(|| bytes.to_vec());
+        check_artifact(&reference, stored)?;
+        Ok(reference)
     }
 }
