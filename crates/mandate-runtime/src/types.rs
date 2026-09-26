@@ -5,7 +5,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Price, Qty};
-use mandate_time::UtcNanos;
 
 /// The scheduler's whole-second risk clock (mandate spec §5.2). The only time the core knows:
 /// `event_time` and `recorded_at` are never read for timing, and nothing reads a wall clock.
@@ -45,6 +44,37 @@ pub struct ConnectionId(pub String);
 /// A workspace's opaque id.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct WorkspaceId(pub String);
+
+/// Which deployment this runtime is. A runtime is for exactly one agent deployment (DEC-08), and it
+/// needs its own ids to tell a kill switch addressed to it from one addressed to a sibling, and its
+/// own streams from another workspace's. Nothing here is secret: all three are opaque ids.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Deployment {
+    pub agent: AgentId,
+    pub connection: ConnectionId,
+    pub workspace: WorkspaceId,
+}
+
+impl Deployment {
+    /// Whether a kill switch of this scope reaches this deployment (trading-domain spec §5.5).
+    pub fn in_scope(&self, scope: &KillScope) -> bool {
+        match scope {
+            KillScope::Agent(agent) => *agent == self.agent,
+            KillScope::Connection(connection) => *connection == self.connection,
+            KillScope::Workspace(workspace) => *workspace == self.workspace,
+        }
+    }
+}
+
+/// What a flatten planner is asked for. The runtime never computes the plan itself
+/// (`AGENTS.md` rule 13, mandate spec `MC-F01` to `MC-F04`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FlattenRequest {
+    pub initiator: Initiator,
+    pub confirmation: Option<OwnerConfirmation>,
+    /// The client order ids of every intent the fold still holds outstanding.
+    pub working_orders: Vec<String>,
+}
 
 /// An agent mode, ordered so that `max` is the strictest (trading-domain spec §7.4, mandate spec
 /// §5.9). The ordering is load-bearing: the effective mode is a maximum over it, so a wrong order
@@ -360,5 +390,4 @@ pub struct SignalInputs {
 pub struct Outstanding {
     pub intent_id: EventId,
     pub purpose: Purpose,
-    pub proposed_at: UtcNanos,
 }

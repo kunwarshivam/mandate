@@ -9,13 +9,15 @@ mod common;
 
 use common::{
     ACCOUNT_STREAM, AGENT_STREAM, AllowGate, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM, DenyGate,
-    FixedPlan, OTHER_AGENT_STREAM, Shell, TestIds, clock, derived_id, event, fresh_output, int,
-    object, ports, price, qty, stale_output, text, universe, view_with_restriction, with_clock,
+    FixedPlan, OTHER_AGENT_STREAM, Shell, TestIds, clock, derived_id, event, fresh_output,
+    instrument, int, object, ports, price, qty, stale_output, text, universe,
+    view_with_restriction, with_clock,
 };
 use mandate_accounting::AssetClass;
 use mandate_runtime::{
     Autonomy, Command, Effect, EventId, FOLD_VERSION, Initiator, Input, IntentBody, KillScope,
-    Mode, OwnerConfirmation, Purpose, RuntimeError, RuntimeState, Seq, WriterEpoch, fold,
+    Mode, OwnerConfirmation, Purpose, RuntimeError, RuntimeState, Seq, TimerId, TimerRequest,
+    WriterEpoch, fold,
 };
 
 /// A clean startup reconciliation on the account stream: what lifts the startup hold.
@@ -54,7 +56,7 @@ fn owner_confirmation() -> OwnerConfirmation {
 #[test]
 #[ignore = "pending E6-1"]
 fn a_gap_in_seq_fails_the_fold() {
-    let mut state = RuntimeState::new();
+    let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
     fold(&mut state, &first).expect("seq 1 folds");
     let gap = reconciliation(3, 10);
@@ -76,7 +78,7 @@ fn a_gap_in_seq_fails_the_fold() {
 #[test]
 #[ignore = "pending E6-1"]
 fn a_repeated_seq_fails_the_fold() {
-    let mut state = RuntimeState::new();
+    let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
     fold(&mut state, &first).expect("seq 1 folds");
     let repeat = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
@@ -87,7 +89,7 @@ fn a_repeated_seq_fails_the_fold() {
 #[test]
 #[ignore = "pending E6-1"]
 fn an_unknown_event_type_fails_the_fold() {
-    let mut state = RuntimeState::new();
+    let mut state = RuntimeState::new(common::deployment());
     let unknown = event(ACCOUNT_STREAM, 1, "SomethingNobodyWrote", object(&[]));
     let error = fold(&mut state, &unknown).expect_err("an uninterpreted event must fail loudly");
     assert_eq!(error.code(), "not_interpreted", "{error}");
@@ -128,31 +130,99 @@ fn a_copied_mode_change_points_at_the_originating_event() {
 #[test]
 #[ignore = "pending E6-1"]
 fn the_golden_journal_folds_to_the_committed_state() {
-    let golden = [
-        event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[])),
-        reconciliation(2, 100),
-        mode_applied(3, "exits_only", 200),
-        event(
-            ACCOUNT_STREAM,
-            4,
-            "MarkUpdated",
-            with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], 300),
-        ),
-    ];
-    let mut state = RuntimeState::new();
-    for e in &golden {
-        fold(&mut state, e).unwrap_or_else(|err| panic!("{} fails: {err}", e.event_type));
+    let committed = include_str!("golden-journal.json");
+    let golden =
+        mandate_canon::parse(committed.as_bytes()).expect("the golden journal is canonical");
+    let object = golden.as_object().expect("an object");
+    let events = object
+        .get("events")
+        .and_then(|v| v.as_array())
+        .expect("an event list");
+    let expected = object
+        .get("expected")
+        .and_then(|v| v.as_object())
+        .expect("the expected fold output");
+
+    let mut state = RuntimeState::new(common::deployment());
+    for value in events {
+        let row = value.as_object().expect("each event is an object");
+        let folded = mandate_runtime::FoldedEvent {
+            stream: row
+                .get("stream")
+                .and_then(|v| v.as_str())
+                .expect("a stream")
+                .to_owned(),
+            seq: Seq(row.get("seq").and_then(|v| v.as_int()).expect("a seq")),
+            event_id: EventId(format!(
+                "{}-{}",
+                row.get("stream")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default(),
+                row.get("seq").and_then(|v| v.as_int()).unwrap_or_default()
+            )),
+            event_type: row
+                .get("event_type")
+                .and_then(|v| v.as_str())
+                .expect("an event type")
+                .to_owned(),
+            causation_id: None,
+            payload: row.get("payload").cloned().expect("a payload"),
+        };
+        fold(&mut state, &folded)
+            .unwrap_or_else(|e| panic!("{} at seq {} fails: {e}", folded.event_type, folded.seq.0));
     }
+
+    let mode = match state.effective_mode() {
+        Mode::Normal => "normal",
+        Mode::ExitsOnly => "exits_only",
+        Mode::Paused => "paused",
+        Mode::Stopped => "stopped",
+    };
     assert_eq!(
-        state.effective_mode(),
-        Mode::ExitsOnly,
-        "the copied mode is the folded mode"
+        Some(mode),
+        expected.get("effective_mode").and_then(|v| v.as_str()),
+        "the committed fold output pins the mode"
     );
-    assert_eq!(state.risk_clock(), Some(clock(300)), "the last tick seen");
     assert_eq!(
-        state.head(ACCOUNT_STREAM),
-        Some(Seq(4)),
-        "the folded position"
+        state.risk_clock().map(|c| c.secs()),
+        expected
+            .get("risk_clock")
+            .and_then(|v| v.as_int())
+            .and_then(|n| i64::try_from(n).ok()),
+        "and the last risk-clock second"
+    );
+    assert_eq!(
+        state.head(ACCOUNT_STREAM).map(|seq| seq.0),
+        expected.get("account_head").and_then(|v| v.as_int()),
+        "and the folded position"
+    );
+    assert_eq!(
+        u64::try_from(state.pending_approvals().len()).unwrap_or(u64::MAX),
+        expected
+            .get("pending_approvals")
+            .and_then(|v| v.as_int())
+            .unwrap_or_default(),
+        "and that nothing is pending"
+    );
+    assert_eq!(
+        u64::try_from(state.outstanding().len()).unwrap_or(u64::MAX),
+        expected
+            .get("outstanding")
+            .and_then(|v| v.as_int())
+            .unwrap_or_default(),
+        "and that nothing is outstanding"
+    );
+    assert_eq!(
+        FOLD_VERSION,
+        u32::try_from(
+            golden
+                .as_object()
+                .and_then(|o| o.get("fold_version"))
+                .and_then(|v| v.as_int())
+                .unwrap_or_default()
+        )
+        .unwrap_or_default(),
+        "a change to fold output bumps FOLD_VERSION and regenerates this file in the same commit"
     );
 }
 
@@ -163,7 +233,7 @@ fn the_fold_version_is_pinned_with_the_golden_journal() {
         FOLD_VERSION, 1,
         "a change to fold output bumps this and regenerates the golden journal (ES-21)"
     );
-    let mut state = RuntimeState::new();
+    let mut state = RuntimeState::new(common::deployment());
     fold(&mut state, &reconciliation(1, 10)).expect("the golden journal's first event folds");
 }
 
@@ -243,7 +313,7 @@ fn every_error_code_is_stable_and_unique() {
         "codes are snake_case and non-empty: {codes:?}"
     );
 
-    let mut state = RuntimeState::new();
+    let mut state = RuntimeState::new(common::deployment());
     fold(
         &mut state,
         &event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[])),
@@ -1638,8 +1708,9 @@ fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
     let ids = TestIds;
     let gate = AllowGate;
     let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
     let view = universe(&["AAPL"]);
-    let ports = ports(&ids, &gate, &plan, &view);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
 
     for initiator in [
         Initiator::Owner,
@@ -1867,4 +1938,156 @@ fn a_notification_carries_only_opaque_ids() {
     }
     let _ = OTHER_AGENT_STREAM;
     let _ = CLOCK_STREAM;
+}
+
+#[test]
+#[ignore = "pending E6-5"]
+fn a_kill_switch_cancels_the_working_order_the_fold_knows() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    let proposed = shell.run(Input::Tick(clock(100)), &ports);
+    let working = proposed
+        .handed
+        .first()
+        .map(|h| h.intent_id.0.clone())
+        .expect("one order is working");
+
+    let ran = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let handed = ran
+        .handed
+        .iter()
+        .find_map(|h| match &h.body {
+            IntentBody::Flatten(plan) => Some(plan.clone()),
+            IntentBody::Order { .. } => None,
+        })
+        .expect("the switch hands a flatten");
+    assert!(
+        handed.cancel_client_order_ids.contains(&working),
+        "a kill switch that left a working order uncancelled would be the worst defect this crate \
+         can have, so the order the fold knows about must appear in the plan's cancel list: \
+         {working} is not in {:?}",
+        handed.cancel_client_order_ids
+    );
+    assert!(
+        !handed.sells.is_empty(),
+        "and the plan sells the agent's sub-ledger, so an empty plan cannot pass this case"
+    );
+}
+
+#[test]
+#[ignore = "pending E6-1"]
+fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::exiting(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    let first = shell.run(Input::Tick(clock(100)), &ports);
+    let intent = first
+        .handed
+        .first()
+        .map(|h| h.intent_id.0.clone())
+        .expect("the exit was handed");
+
+    let taken = event(
+        ACCOUNT_STREAM,
+        2,
+        "IntentReceived",
+        object(&[
+            ("intent_id", text(&intent)),
+            ("instrument", text("AAPL")),
+            ("purpose", text("discretionary_exit")),
+        ]),
+    );
+    shell.fold_one(&taken).expect("folds");
+
+    let (_after, started) = shell.restart(&ports);
+    assert!(
+        started.handed.is_empty(),
+        "an intent the account stream has taken has a terminal outcome, so it is no longer \
+         outstanding and a restart must not hand it again: {:?}",
+        started.handed
+    );
+}
+
+#[test]
+#[ignore = "pending E6-1"]
+fn a_restart_re_arms_the_deadline_the_fold_carries() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Ask);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    let approval = asked(&mut shell, &ports, 100);
+    let armed_before = shell.armed.clone();
+    assert!(
+        armed_before.contains_key(&TimerId::ApprovalDeadline(approval.clone())),
+        "asking arms the deadline"
+    );
+
+    let (after, started) = shell.restart(&ports);
+    assert!(
+        started.timers.iter().any(|request| matches!(
+            request,
+            TimerRequest::Arm { id, .. }
+                if *id == TimerId::ApprovalDeadline(approval.clone())
+        )),
+        "Started re-arms every deadline the fold carries, so a crash costs a wakeup and never a \
+         deadline: {:?}",
+        started.timers
+    );
+    assert_eq!(
+        after
+            .armed
+            .get(&TimerId::ApprovalDeadline(approval.clone())),
+        armed_before.get(&TimerId::ApprovalDeadline(approval)),
+        "and re-arms it at the same second, because the deadline is folded state and not the timer"
+    );
+}
+
+#[test]
+#[ignore = "pending E6-1"]
+fn an_owner_exit_of_one_instrument_names_its_story() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::silent();
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+
+    let error = shell
+        .step(
+            Input::Command(Command::OwnerExit {
+                instrument: instrument("AAPL"),
+                confirmation: Some(owner_confirmation()),
+            }),
+            &ports,
+        )
+        .expect_err("an owner exit of one instrument is not this story's");
+    assert_eq!(
+        error.code(),
+        "not_interpreted",
+        "an uninterpreted command fails loudly and names the story that owns it (DEC-85): {error}"
+    );
+    assert!(
+        format!("{error}").contains("E7-2"),
+        "and the story it names is the executor's: {error}"
+    );
 }

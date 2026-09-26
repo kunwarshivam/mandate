@@ -35,6 +35,7 @@ use proptest::prelude::*;
 struct Shadow {
     mode: String,
     pending_approvals: BTreeSet<String>,
+    deadlines: BTreeMap<String, u64>,
     outstanding: BTreeSet<String>,
     stopped: bool,
 }
@@ -64,10 +65,19 @@ impl Shadow {
                 "KillSwitchActivated" => shadow.stopped = true,
                 "ApprovalRequested" => {
                     shadow.pending_approvals.insert(draft.event_id.0.clone());
+                    if let Some(deadline) = draft
+                        .payload
+                        .as_object()
+                        .and_then(|o| o.get("deadline"))
+                        .and_then(Value::as_int)
+                    {
+                        shadow.deadlines.insert(draft.event_id.0.clone(), deadline);
+                    }
                 }
                 "ApprovalCanceled" | "ApprovalTimedOut" | "ApprovalResponded" => {
                     if let Some(approval) = field("approval") {
                         shadow.pending_approvals.remove(&approval);
+                        shadow.deadlines.remove(&approval);
                     }
                 }
                 "IntentProposed" => {
@@ -92,6 +102,16 @@ impl Shadow {
                 .pending_approvals()
                 .keys()
                 .map(|id| id.0.clone())
+                .collect(),
+            deadlines: state
+                .pending_approvals()
+                .iter()
+                .map(|(id, pending)| {
+                    (
+                        id.0.clone(),
+                        u64::try_from(pending.deadline.secs()).unwrap_or_default(),
+                    )
+                })
                 .collect(),
             outstanding: state.outstanding().keys().map(|id| id.0.clone()).collect(),
             stopped: state.effective_mode() == Mode::Stopped,
@@ -169,14 +189,26 @@ fn scripted() -> impl Strategy<Value = Scripted> {
     ]
 }
 
+/// The same, with a gate that denies every proposal, so a decision always produces an owner alert.
+fn play_denied(script: &[Scripted]) -> (Shell, Vec<Effect>, Vec<EventDraft>) {
+    play_with(script, Autonomy::Auto, &DenyGate("position_cap"))
+}
+
 /// Runs a script, returning what the shell saw. Account-stream `seq` is assigned in order, so the
 /// fold's gapless rule is respected by construction and the script tests behaviour, not sequencing.
 fn play(script: &[Scripted], autonomy: Autonomy) -> (Shell, Vec<Effect>, Vec<EventDraft>) {
+    play_with(script, autonomy, &AllowGate)
+}
+
+fn play_with(
+    script: &[Scripted],
+    autonomy: Autonomy,
+    gate: &dyn mandate_runtime::GateDryRun,
+) -> (Shell, Vec<Effect>, Vec<EventDraft>) {
     let ids = TestIds;
-    let gate = AllowGate;
     let plan = FixedPlan::opening(autonomy);
     let view = universe(&["AAPL"]);
-    let ports = ports(&ids, &gate, &plan, &view);
+    let ports = ports(&ids, gate, &plan, &view);
 
     let mut shell = Shell::new(1);
     let mut seq = 1_u64;
@@ -268,7 +300,7 @@ proptest! {
         script in prop::collection::vec(scripted(), 1..8),
     ) {
         let (shell, _, _) = play(&script, Autonomy::Auto);
-        let mut replayed = RuntimeState::new();
+        let mut replayed = RuntimeState::new(common::deployment());
         for stored in shell.agent_journal.iter().chain(shell.followed.iter()) {
             fold(&mut replayed, stored).map_err(|e| TestCaseError::fail(format!("{e}")))?;
         }
@@ -315,11 +347,14 @@ proptest! {
                 Effect::Journal(draft) if draft.event_type == "IntentProposed" => {
                     recorded.insert(draft.event_id.0.clone());
                 }
+                Effect::Journal(draft) if draft.event_type == "KillSwitchActivated" => {
+                    recorded.insert(draft.event_id.0.clone());
+                }
                 Effect::Intent(handoff) => {
                     prop_assert!(
-                        recorded.contains(&handoff.intent_id.0)
-                            || matches!(handoff.body, IntentBody::Flatten(_)),
-                        "an intent reached the sink before the draft that records it: {:?}",
+                        recorded.contains(&handoff.intent_id.0),
+                        "every handoff follows the draft that records it, a flatten included: a \
+                         flatten's recording draft is its KillSwitchActivated: {:?}",
                         handoff.intent_id
                     );
                 }
@@ -436,8 +471,10 @@ proptest! {
         for handoff in &ran.handed {
             if let IntentBody::Order { purpose, .. } = &handoff.body {
                 prop_assert!(
-                    !purpose.adds_risk(),
-                    "nothing that adds risk is proposed outside normal (AGENTS.md rule 2)"
+                    !matches!(purpose, Purpose::Open | Purpose::Increase),
+                    "nothing that adds risk is proposed outside normal (AGENTS.md rule 2). The \
+                     risk-adding set is listed here rather than read from `Purpose::adds_risk`, so \
+                     a wrong answer there cannot make this property agree with it"
                 );
             }
         }
@@ -450,21 +487,27 @@ proptest! {
         extra in prop::collection::vec(100_i64..400, 1..4),
     ) {
         let (_, _, plain) = play(&script, Autonomy::Auto);
-        let mut padded = script.clone();
-        for at in extra {
-            padded.push(Scripted::Tick(at));
+        let mut padded: Vec<Scripted> = Vec::new();
+        let mut how_many = extra.into_iter();
+        for step in &script {
+            padded.push(step.clone());
+            if let (Scripted::Tick(at), Some(repeats)) = (step, how_many.next()) {
+                for _ in 0..repeats.rem_euclid(3) {
+                    padded.push(Scripted::Tick(*at));
+                }
+            }
         }
         let (_, _, padded_drafts) = play(&padded, Autonomy::Auto);
-        let interesting = |drafts: &[EventDraft]| -> Vec<String> {
+        let types = |drafts: &[EventDraft]| -> Vec<String> {
             drafts.iter().map(|d| d.event_type.clone()).collect()
         };
         prop_assert_eq!(
-            interesting(&plain),
-            interesting(&padded_drafts)
-                .into_iter()
-                .take(plain.len())
-                .collect::<Vec<_>>(),
-            "a tick that crosses no boundary adds no draft (MI-13)"
+            types(&plain),
+            types(&padded_drafts),
+            "a tick that crosses no boundary adds no draft (MI-13). The padding repeats each tick at \
+             its own second rather than inserting new seconds, because a tick that advances the \
+             clock is the evaluation cadence and may legitimately decide something: what MI-13 \
+             claims is that an evaluation which changes no condition journals nothing"
         );
     }
 
@@ -529,20 +572,19 @@ proptest! {
             ))
             .map_err(|e| TestCaseError::fail(format!("{e}")))?;
         let (mut shell, _) = shell.restart(&ports);
-        let head_before = shell.head();
         shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+        let head_before = shell.head();
         let ran = shell.run(Input::Tick(clock(100)), &ports);
 
+        prop_assert!(!ran.drafts.is_empty(), "the step drafted something to check");
         for (index, draft) in ran.drafts.iter().enumerate() {
-            let ordinal_of = u32::try_from(index).unwrap_or(u32::MAX);
-            let expected = derived_id(
-                shell.epoch,
-                Seq(head_before.0.saturating_add(u64::try_from(index).unwrap_or(0))),
-                ordinal_of,
-            );
-            prop_assert!(
-                draft.event_id == expected || !draft.event_id.0.is_empty(),
-                "every id is derived from the epoch, the head, and the ordinal, never generated"
+            let ordinal = u32::try_from(index).unwrap_or(u32::MAX);
+            prop_assert_eq!(
+                draft.event_id.clone(),
+                derived_id(shell.epoch, head_before, ordinal),
+                "every id is the oracle's own derivation from the epoch, the head the batch was \
+                 built against, and the ordinal in that batch: never generated, so a retry \
+                 re-derives it (journal spec §5.1)"
             );
         }
         prop_assert_ne!(
@@ -559,7 +601,7 @@ proptest! {
         second in 1_u64..6,
     ) {
         prop_assume!(second != first.saturating_add(1));
-        let mut state = RuntimeState::new();
+        let mut state = RuntimeState::new(common::deployment());
         let opened = event(ACCOUNT_STREAM, first, "StreamOpened", object(&[]));
         if first == 1 {
             fold(&mut state, &opened).map_err(|e| TestCaseError::fail(format!("{e}")))?;
@@ -586,7 +628,7 @@ proptest! {
             "ReconciliationRun", "RiskDayStarted", "SomethingElseEntirely", "OrderSubmitted",
         ],
     ) {
-        let mut state = RuntimeState::new();
+        let mut state = RuntimeState::new(common::deployment());
         let opened = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
         fold(&mut state, &opened).map_err(|e| TestCaseError::fail(format!("{e}")))?;
         let candidate = event(
@@ -608,10 +650,17 @@ proptest! {
                 name != "SomethingElseEntirely",
                 "an event nobody wrote must not fold silently (DEC-85)"
             ),
-            Err(error) => prop_assert_eq!(
+            Err(error) if name == "SomethingElseEntirely" => prop_assert_eq!(
                 error.code(),
                 "not_interpreted",
                 "an uninterpreted event is named, never mishandled: {}",
+                error
+            ),
+            Err(error) => prop_assert_ne!(
+                error.code(),
+                "not_interpreted",
+                "an event the catalogue names is interpreted: a fold may reject this fixture's \
+                 payload as non-canonical, but never disown the event type: {}",
                 error
             ),
         }
@@ -717,7 +766,19 @@ proptest! {
     fn no_notification_payload_holds_an_instrument_or_a_price(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
-        let (_, effects, _) = play(&script, Autonomy::Auto);
+        let mut script = script;
+        script.insert(0, Scripted::Fresh(100));
+        script.insert(1, Scripted::Tick(100));
+        let (_, effects, _) = play_denied(&script);
+        let notifications = effects
+            .iter()
+            .filter(|e| matches!(e, Effect::Notify(_)))
+            .count();
+        prop_assert!(
+            notifications > 0,
+            "the script is one the gate denies, so an alert is always emitted and this property \
+             can never pass vacuously"
+        );
         for effect in &effects {
             if let Effect::Notify(reference) = effect {
                 let rendered = format!("{} {}", reference.subject_event.0, reference.message_key);
@@ -1062,10 +1123,15 @@ proptest! {
             "and is journaled: {:?}",
             ran.draft_types()
         );
+        let expected = match initiator {
+            Initiator::Owner | Initiator::PlatformOperator => Mode::Stopped,
+            Initiator::RiskLimit => Mode::Paused,
+        };
         prop_assert_eq!(
             shell.state.effective_mode(),
-            initiator.final_mode(),
-            "with the initiator's final mode in force"
+            expected,
+            "with the initiator's final mode in force, mapped here rather than read from the \
+             crate's own `final_mode`, so the two agreeing means something"
         );
     }
 

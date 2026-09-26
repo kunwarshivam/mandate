@@ -2,8 +2,8 @@
 
 use crate::error::RuntimeError;
 use crate::types::{
-    DryRunVerdict, EventId, IntentHandoff, MandateView, Proposal, RiskClock, Seq, SignalInputs,
-    TimerId, WriterEpoch,
+    DryRunVerdict, EventId, FlattenPlan, FlattenRequest, IntentHandoff, MandateView, Proposal,
+    RiskClock, Seq, SignalInputs, TimerId, WriterEpoch,
 };
 
 /// Deterministic event identity (ADR-0001 ES-06, ES-21). The Phase 1 implementation derives the id
@@ -29,12 +29,21 @@ pub trait OrderPlan {
     fn classify(&self, view: &MandateView, proposal: &Proposal) -> crate::types::Autonomy;
 }
 
+/// `mandate-risk`'s agent flatten (family F): the orders to cancel by `client_order_id`, the sells of
+/// exactly this agent's sub-ledger quantity, and which of them a session defers. The runtime carries
+/// the plan without computing it, and [`FlattenPlan`] has no account-wide variant, so no planner can
+/// return `cancel-all` or `close-position` either (`AGENTS.md` rule 13).
+pub trait FlattenPlanner {
+    fn plan(&self, request: &FlattenRequest) -> FlattenPlan;
+}
+
 /// The pure ports a step reads. Each is a function of its arguments, so `handle` stays
 /// deterministic and a test injects fixed implementations.
 pub struct Ports<'a> {
     pub ids: &'a dyn IdGen,
     pub gate: &'a dyn GateDryRun,
     pub plan: &'a dyn OrderPlan,
+    pub flatten: &'a dyn FlattenPlanner,
     pub view: &'a MandateView,
 }
 

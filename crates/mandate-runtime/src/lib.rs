@@ -51,13 +51,15 @@ mod step;
 mod types;
 
 pub use error::{JsonError, RuntimeError};
-pub use ports::{GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource};
-pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, fold};
+pub use ports::{
+    FlattenPlanner, GateDryRun, IdGen, IntentSink, OrderPlan, Ports, SinkError, TimerSource,
+};
+pub use state::{FOLD_VERSION, PendingApproval, RuntimeState, UnresolvedAppend, fold};
 pub use step::handle;
 pub use types::{
-    AgentId, ApprovalOutcome, ApprovalVerdict, Autonomy, Command, ConnectionId, DryRunVerdict,
-    Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FoldedEvent, Initiator, Input,
-    IntentBody, IntentHandoff, KillScope, LocalHold, MandateView, Mode, ModelOutput,
-    NotificationRef, Observation, Outstanding, OwnerConfirmation, Proposal, Purpose, RiskClock,
-    Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
+    AgentId, ApprovalOutcome, ApprovalVerdict, Autonomy, Command, ConnectionId, Deployment,
+    DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenRequest,
+    FoldedEvent, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold, MandateView,
+    Mode, ModelOutput, NotificationRef, Observation, Outstanding, OwnerConfirmation, Proposal,
+    Purpose, RiskClock, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
 };

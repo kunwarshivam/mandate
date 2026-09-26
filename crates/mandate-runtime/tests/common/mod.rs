@@ -8,14 +8,15 @@
 
 use std::collections::BTreeMap;
 
-use mandate_accounting::{InstrumentId, Side};
+use mandate_accounting::{AssetClass, InstrumentId, Side};
 use mandate_canon::{Int, Key, Value};
 use mandate_num::{Price, Qty};
 use mandate_runtime::{
-    Autonomy, DryRunVerdict, Effect, EventDraft, EventId, FoldedEvent, GateDryRun, IdGen,
-    IntentHandoff, MandateView, ModelOutput, OrderPlan, Ports, Proposal, Purpose, RiskClock,
-    RuntimeError, RuntimeState, Seq, SignalInputs, TimerId, TimerRequest, WriterEpoch, fold,
-    handle,
+    AgentId, Autonomy, ConnectionId, Deployment, DryRunVerdict, Effect, EventDraft, EventId,
+    FlattenLeg, FlattenPlan, FlattenPlanner, FlattenRequest, FoldedEvent, GateDryRun, IdGen,
+    Initiator, IntentHandoff, MandateView, ModelOutput, OrderPlan, Ports, Proposal, Purpose,
+    RiskClock, RuntimeError, RuntimeState, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId,
+    WriterEpoch, fold, handle,
 };
 
 pub const AGENT_STREAM: &str = "agent:ws1:agent-a";
@@ -24,6 +25,18 @@ pub const CONTROL_STREAM: &str = "ctl:ws1";
 pub const CLOCK_STREAM: &str = "clock:ws1";
 pub const OTHER_AGENT_STREAM: &str = "agent:ws1:agent-b";
 pub const VERSION: &str = "v1";
+pub const AGENT: &str = "agent-a";
+pub const CONNECTION: &str = "conn-1";
+pub const WORKSPACE: &str = "ws1";
+
+/// The deployment every fixture is for: the ids in `AGENT_STREAM`, `ACCOUNT_STREAM`, and the rest.
+pub fn deployment() -> Deployment {
+    Deployment {
+        agent: AgentId(AGENT.to_owned()),
+        connection: ConnectionId(CONNECTION.to_owned()),
+        workspace: WorkspaceId(WORKSPACE.to_owned()),
+    }
+}
 
 pub fn instrument(name: &str) -> InstrumentId {
     InstrumentId::new(name).unwrap_or_else(|e| panic!("instrument {name}: {e}"))
@@ -201,6 +214,45 @@ impl OrderPlan for FixedPlan {
     }
 }
 
+/// A planner that returns the plan stream G would compute for this fixture: the agent's working
+/// orders by id, one equity leg, and the session deferral the initiator implies.
+pub struct FixedFlatten {
+    pub sells: Vec<(&'static str, AssetClass, &'static str)>,
+}
+
+impl FixedFlatten {
+    pub fn one_equity() -> Self {
+        Self {
+            sells: vec![("AAPL", AssetClass::UsEquity, "10")],
+        }
+    }
+
+    pub fn nothing_held() -> Self {
+        Self { sells: Vec::new() }
+    }
+}
+
+impl FlattenPlanner for FixedFlatten {
+    fn plan(&self, request: &FlattenRequest) -> FlattenPlan {
+        let deferred = request.confirmation.is_none() && request.initiator != Initiator::Owner;
+        FlattenPlan {
+            cancel_client_order_ids: request.working_orders.clone(),
+            sells: self
+                .sells
+                .iter()
+                .map(|(name, asset_class, quantity)| FlattenLeg {
+                    instrument: instrument(name),
+                    asset_class: *asset_class,
+                    qty: qty(quantity),
+                    deferred_to_regular_session: deferred,
+                })
+                .collect(),
+            purpose: request.initiator.sell_purpose(),
+            confirmation: request.confirmation.clone(),
+        }
+    }
+}
+
 pub fn universe(instruments: &[&str]) -> MandateView {
     MandateView {
         version: VERSION.to_owned(),
@@ -277,7 +329,7 @@ pub struct Shell {
 impl Shell {
     pub fn new(epoch: u64) -> Self {
         Self {
-            state: RuntimeState::new(),
+            state: RuntimeState::new(deployment()),
             epoch: WriterEpoch(epoch),
             agent_journal: Vec::new(),
             followed: Vec::new(),
@@ -390,6 +442,26 @@ pub fn ports<'a>(
         ids,
         gate,
         plan,
+        flatten: &DEFAULT_FLATTEN,
+        view,
+    }
+}
+
+static DEFAULT_FLATTEN: FixedFlatten = FixedFlatten { sells: Vec::new() };
+
+/// The same, with a planner a kill-switch case wants to vary.
+pub fn ports_with_flatten<'a>(
+    ids: &'a TestIds,
+    gate: &'a dyn GateDryRun,
+    plan: &'a dyn OrderPlan,
+    flatten: &'a dyn FlattenPlanner,
+    view: &'a MandateView,
+) -> Ports<'a> {
+    Ports {
+        ids,
+        gate,
+        plan,
+        flatten,
         view,
     }
 }

@@ -156,7 +156,7 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131. The crate holds stubs until the implementation PR; the 84 tests below are pending and
+and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
 every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
@@ -176,14 +176,15 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
   `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** `crates/mandate-runtime/tests/hand.rs` (58 hand cases: the fold's sequencing and loud
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
   refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
   approvals, version application, recovery, and the kill switches),
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
   code with the crate: a shadow fold rebuilt from the emitted drafts' payloads, a separately written
   restriction lattice, and an interval accumulator for durations),
   `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
-  fence a writer, and crash and restart). Planted bugs per test: the task brief.
+  fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
+  committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.

@@ -6,7 +6,8 @@ use mandate_accounting::InstrumentId;
 
 use crate::error::RuntimeError;
 use crate::types::{
-    EventId, FoldedEvent, LocalHold, Mode, ModelOutput, Outstanding, RiskClock, Seq, WriterEpoch,
+    Deployment, EventId, FoldedEvent, LocalHold, Mode, ModelOutput, Outstanding, RiskClock, Seq,
+    WriterEpoch,
 };
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
@@ -18,12 +19,13 @@ pub const FOLD_VERSION: u32 = 1;
 /// Every field is private and every collection is ordered (ES-21). The folded position of each
 /// followed stream lives here and is re-derived by replay, so nothing durable exists outside the
 /// journal and a restart cannot mistake an old event for a new one (DEC-131 item 17).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeState {
+    deployment: Deployment,
     heads: BTreeMap<String, Seq>,
     epoch: Option<WriterEpoch>,
     started: bool,
-    unresolved_head: Option<Seq>,
+    unresolved: Option<UnresolvedAppend>,
     risk_clock: Option<RiskClock>,
     copied_mode: Mode,
     local_holds: BTreeSet<LocalHold>,
@@ -32,6 +34,16 @@ pub struct RuntimeState {
     outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
     last_submission: Option<Seq>,
     reconciled_through: Option<Seq>,
+}
+
+/// A batch whose append has not been answered. The input and the drafts are kept so that the only
+/// permitted next step is the same input, which re-emits the same drafts and lets the append answer
+/// `AlreadyCommitted` rather than appending a second event (journal spec §5.1, DEC-131 item 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnresolvedAppend {
+    pub head: Seq,
+    pub input: crate::types::Input,
+    pub drafts: Vec<crate::types::EventDraft>,
 }
 
 /// An approval the runtime is waiting on, with what it binds (mandate spec §6.4).
@@ -44,10 +56,31 @@ pub struct PendingApproval {
 }
 
 impl RuntimeState {
-    /// An empty state, before any event is folded. Reads nothing: there is no constructor that
-    /// touches a clock, a file, or a random number.
-    pub fn new() -> Self {
-        Self::default()
+    /// An empty state for one deployment, before any event is folded. Reads nothing: there is no
+    /// constructor that touches a clock, a file, or a random number. The deployment's ids are what
+    /// let the fold reject another workspace's stream and the kill switch tell its own scope from a
+    /// sibling's, so they are given rather than inferred from the first event folded.
+    pub fn new(deployment: Deployment) -> Self {
+        Self {
+            deployment,
+            heads: BTreeMap::new(),
+            epoch: None,
+            started: false,
+            unresolved: None,
+            risk_clock: None,
+            copied_mode: Mode::Normal,
+            local_holds: BTreeSet::new(),
+            pending_approvals: BTreeMap::new(),
+            outstanding: BTreeMap::new(),
+            outputs: BTreeMap::new(),
+            last_submission: None,
+            reconciled_through: None,
+        }
+    }
+
+    /// Which deployment this runtime is.
+    pub fn deployment(&self) -> &Deployment {
+        &self.deployment
     }
 
     /// The effective mode: the strictest of the copied account-stream mode and every local hold
