@@ -127,6 +127,32 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Run:** `cargo nextest run -p mandate-backtest -p mandate-num`; the pending tests with
   `cargo nextest run -p mandate-backtest --run-ignored all`.
 
+## Autonomy and the order builder (E6-2)
+
+Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
+DEC-130; the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
+  language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
+  output freshness, and `conviction_linear`), §3.1 (`accumulate` and `profit_stop`), §5.2 and §5.3
+  (exact comparisons and the limits the proposal is clipped to); `docs/specs/trading-domain.md` §5.1
+  and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
+  pacing of a discretionary exit).
+- **Code:** `mandate-builder` (new; the §6 classification with its condition language, and the §8.3
+  combine, decide, size, and clip walk), with the exact arithmetic (a unit-interval type, a signed
+  conviction, the weighted 12-place quotients, and the wide sizing intermediates) in `mandate-num`.
+  The gate's dry-run verdict reaches the crate as a value, so `mandate-risk` is not a dependency
+  (DEC-130 item 2).
+- **Tests:** the hand-calculated A and B case recomputations of the brief, the freshness and
+  tie-breaking cases, the four clips and the accumulate clips, and property tests against an
+  independent integer combine oracle, a rational sizing oracle compared by cross-multiplication, and
+  a naive rule walk. Planted bugs per test: the task brief.
+- **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
+  than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
+  harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
+  family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
+- **Run:** `cargo nextest run -p mandate-builder`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the

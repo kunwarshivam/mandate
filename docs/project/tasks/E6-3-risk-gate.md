@@ -828,7 +828,13 @@ each `Proposed (founder)`.
   first, the module is never written.
 - **Stream H (`mandate-builder`)** consumes `size_factor` and proposes the orders MI-9 asserts the
   gate never denies. The dependency runs H → G (layer 5 depends on layer 4), so nothing here waits
-  on H.
+  on H. It also consumes the **gate dry run**: `ref.py`'s `builder` calls `gate` on its own proposal
+  and records the verdict as `gate_dry_run`, skipping the proposal (`autonomy: skipped, by
+  gate_dry_run`) when it denies, which the 20 `MC-B` cases that state a `gate_dry_run` pin. The dry
+  run is **`evaluate` itself** — the gate is pure and has no side effects, so there is no separate
+  entry point and no risk of the dry run and the real call disagreeing. Stream H's DEC-130 item 2
+  passes the verdict in as a value rather than depending on this crate; either way the value must be
+  one `evaluate` produced, and MI-9 is the property that it is never a deny.
 - **Stream I (the runtime)** calls the gate and journals the decision; E6-5's kill switches use
   `agent_flatten`'s plan. Nothing here waits on I.
 - **`mandate-accounting`** supplies the buying-power figure (DEC-104) and the fee rules for check 7.
