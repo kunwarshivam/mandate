@@ -191,6 +191,37 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 - **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
   `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
 
+## Risk gate
+
+Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
+paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
+  §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
+  buying power, §9.6 market-conduct controls), §3.1 to §3.3 (instrument fields, the
+  eligibility floor, concentration), §4.3 and §4.4 (sessions, auction windows, halts),
+  §5.1 to §5.6 (the v1 order policy, the constraints before submission, the kill switch,
+  exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
+  (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
+  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
+- **Code:** `mandate-risk` (new; the pure gate over a mandate, a risk state, an account snapshot, a
+  working universe, a market context and one proposed order, returning allow, deny, defer or hold
+  with the first failing check's stable code and the whole check list for the journal; the
+  §9.2 day-trade ledger; the drawdown ladder's size factor and trim proposals; the
+  agent-scoped flatten plan), with the exact arithmetic added to `mandate-num`. It reads
+  `mandate-accounting`'s account figures and `mandate-time`'s calendar and sessions, and changes
+  neither.
+- **Tests:** the hand-calculated cases of the brief's reference-case table, one property per
+  invariant and per "never" or "always" in trading-domain spec §9 against an independent
+  `i128` oracle, and the E6-3 fuzz over random mandates, market paths and proposal sequences whose
+  shadow ledger is accumulated separately from the gate's own figures. Planted bugs per test: the
+  task brief.
+- **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
+  `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
+  and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
+  in `fixtures/refcases/trading-domain.json`.
+- **Run:** `cargo nextest run -p mandate-risk`.
+
 ## Journal drafts and the event catalogue
 
 - **Spec:** `docs/specs/journal.md` §2, §3, §9.
@@ -273,6 +304,35 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.
 - **Run:** `cargo nextest run -p mandate-cli --test journal_verify --test artifact`.
 
+## Mandate document, validation, risk state, and change classification
+
+Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128;
+the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2 (lifecycle, provenance, the working
+  universe), §3 (structure and goals), §4 (validation, warnings, the policy hierarchy), §5 (the risk
+  state, the risk day, breach confirmation, the lifetime floor, restrictions and the effective mode),
+  §6.3 (the condition language), §7 (platform defaults and proposals), §9 (the version hash and
+  change classification), §11 (the reference cases); `docs/specs/trading-domain.md` §8.1 and §8.2
+  (cost-basis reduction, risk marks); `docs/specs/journal.md` §4 (the canonical form the version
+  hashes) and §9; ADR-0001 ES-02, ES-04, ES-09, ES-21, ES-22.
+- **Code:** `mandate-spec` (new; the mandate document parsed from canonical JSON with its decimals
+  kept as `SchemaDec`, the text checked against the field's whole schema `$def` before it is wrapped,
+  the V-rules and warnings, the policy hierarchy and its runtime
+  overlay, the risk-state fold, risk days, goals, the condition language, and change classification)
+  and `mandate-domain` (new; the vocabulary `mandate-risk`, `mandate-builder`, and the research
+  agent share), with the exact arithmetic in `mandate-num` as ES-04 requires.
+- **Tests:** per the brief: one named test per V-code and per §9.2 classification row, hand-checked
+  fixture figures, and property tests whose oracles rebuild the risk state from the emitted journal
+  events, accumulate breach time from the input list, scan the policy chain in the opposite
+  direction, and prove MI-11 by evaluating generated actions under both rule sets. Planted bugs per
+  test: the task brief.
+- **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
+  through a new `mandate` suite in `mandate-refcases`; families G, A, B, and N stay with streams G,
+  H, and J and fail as "not interpreted until" their owning story.
+- **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
+  `cargo test -p mandate-refcases -- --include-ignored mandate::`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
@@ -285,7 +345,7 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
-  pending their stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).
+  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 

@@ -37,15 +37,15 @@ brief fixes that shape before the gate, the builder, and the research agent are 
   spec](../../specs/trading-domain.md) §5.5 (kill switch), §5.6 (exit pricing), §7.4 (agent modes);
   [glossary](../../product/glossary.md) (deployment, workspace, kill switch, agent modes).
 - **Decisions that apply:** DEC-08 (one process per agent deployment), DEC-05 and DEC-06 (reducing
-  risk needs no approval; ambiguity resolves safe), DEC-16 and DEC-17 through ES-20 (DEC-17's
-  recommendation is the ground this brief stands on and is still `Proposed (founder)`), DEC-72
+  risk needs no approval; ambiguity resolves safe), DEC-16 and DEC-17 through ES-20 (DEC-17 is the
+  ground this brief stands on and the founder accepted it on 2026-09-26, #133), DEC-72
   (ADR-0001), DEC-77 (brief, tests PR, implementation PR), DEC-79 (agents land their own changes;
   the founder's reserved list), DEC-80 (no plain comments), DEC-83 (a tests PR holds stubs only),
   DEC-85 (an uninterpreted input fails loudly), DEC-89 and ES-21 (exact arithmetic, ordered
   containers, no clock, no randomness), DEC-97 (the owner sets the envelope, the platform brings the
   ideas), DEC-103 (the Phase 1 thin slice), DEC-110 (every pending test fails on the stubs),
-  DEC-111, DEC-117 to DEC-126 (the spec v0.6 answers this brief reads; still `Proposed (founder)`,
-  and a veto reopens this brief), DEC-127 (the E4-2 loop this runtime's tick is the live analogue
+  DEC-111, DEC-117 to DEC-126 (the spec v0.6 answers this brief reads, accepted by the founder on
+  2026-09-26 in #133), DEC-127 (the E4-2 loop this runtime's tick is the live analogue
   of), and DEC-131 (this story's interpretations, below).
 
 ## Scope
@@ -730,11 +730,11 @@ caught means the test is wrong, not the bug, and the tests PR says which rows ne
    `mandate-executor` unchanged except the crate name, and the layer question disappears; the
    separation is the recommendation because a single crate would put the broker's client and the
    agent's loop under one lint header and one review surface.
-2. **DEC-17 itself stays `Proposed (founder)`.** This brief is built on the coordinator's
-   recommendation (Postgres `LISTEN`/`NOTIFY` plus journal tailing). Interpretation 5 is what makes the
-   choice cheap: if the founder picks NATS JetStream, the shell crate and one `docs/dependencies.md`
-   row change, and the core, the ports, and every test in this story do not. No veto reopens this
-   brief; it reopens only the shell story in M6.
+2. ~~**DEC-17 itself stays `Proposed (founder)`.**~~ **Settled:** the founder accepted DEC-17 on
+   2026-09-26 (#133) exactly as recommended, Postgres `LISTEN`/`NOTIFY` plus journal tailing for
+   Phase 1, with NATS JetStream reconsidered at M8. Interpretation 5 is what would have made a
+   different answer cheap, and it still earns its keep at M8: the core, the five ports, and every test
+   in this story name no transport, so the M8 reconsideration reaches only the shell crate.
 3. **The shell crate's own entry, later.** The impure shell (tokio, the Postgres client or a NATS
    client) needs its own `xtask/layers.toml` row at layer 7 when M6 wires the executor and the
    connector. This brief does not add it; it is named here so the founder sees it coming rather than
