@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use common::{d, equity, fee_cap, id, no_fees, usd};
 use mandate_accounting::{
     Account, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily,
-    Input, Liquidity, Position, Record, Side, TafCapBasis,
+    FeeKind, Input, Liquidity, Position, Record, Side, TafCapBasis,
 };
 use mandate_num::{Bps, CostBasis, FeePerShare, FeeRate, Price, Qty, SignedQty};
 use mandate_time::{Date, UtcNanos};
@@ -905,5 +905,164 @@ proptest! {
         prop_assert_eq!(after.qty().to_string(), qty(whole - part));
         prop_assert_eq!(atto(after.basis()), expected, "B {} part {} whole {}", basis, part, whole);
         prop_assert_eq!(atto(account.realized_gross()), signed(part * nanos) - (basis - expected));
+    }
+}
+
+/// One input of the fee-configuration property. Each fill carries the fee configuration in force
+/// for it (spec §6.1): a TAF cap in units of 10⁻⁴ USD and the cap mode.
+#[derive(Debug, Clone)]
+enum FeeEvent {
+    Equity {
+        buy: bool,
+        shares: u32,
+        cents: u32,
+        order: u8,
+        day: i64,
+        cap: i128,
+        per_order: bool,
+    },
+    Crypto {
+        buy: bool,
+        micros: u32,
+        cents: u32,
+        maker: bool,
+        day: i64,
+    },
+    Charge {
+        crypto: bool,
+        day: i64,
+    },
+}
+
+fn fee_event() -> impl Strategy<Value = FeeEvent> {
+    let cap = prop_oneof![2 => Just(0i128), 6 => 0i128..=300, 1 => Just(97_900i128)];
+    prop_oneof![
+        6 => (any::<bool>(), 1u32..=300, 1u32..=20_000, 0u8..3, 0i64..2, cap, any::<bool>())
+            .prop_map(|(buy, shares, cents, order, day, cap, per_order)| FeeEvent::Equity { buy, shares, cents, order, day, cap, per_order }),
+        2 => (any::<bool>(), 1u32..=2_000_000, 100u32..=6_000_000, any::<bool>(), 0i64..2)
+            .prop_map(|(buy, micros, cents, maker, day)| FeeEvent::Crypto { buy, micros, cents, maker, day }),
+        2 => (any::<bool>(), 0i64..2).prop_map(|(crypto, day)| FeeEvent::Charge { crypto, day }),
+    ]
+}
+
+/// Canonical text for an amount in units of 10⁻⁴.
+fn ten_thousandths(units: i128) -> String {
+    let text = format!("{}.{:04}", units / 10_000, units % 10_000);
+    text.trim_end_matches('0').trim_end_matches('.').to_owned()
+}
+
+fn fee_config(cap: i128, per_order: bool) -> Config {
+    let mut config = config(1, per_order);
+    config.equities.taf_cap = fee_cap(&ten_thousandths(cap));
+    config
+}
+
+proptest! {
+    /// Fees are never credits, whatever fee configuration each fill carries (DEC-87). Fills and
+    /// charges run with caps that rise, fall, and reach zero within an order, and with the cap mode
+    /// switching between fills. After every input: every fee on a fill is ≥ 0; a fill's TAF matches
+    /// the oracle, min(rate × shares, room) with room = max(0, cap − TAF already charged on the
+    /// order) per order and the cap otherwise; accrued fees never decrease except by a charge, and
+    /// a fill raises them by exactly its USD fees other than the crypto asset fee; a charge is at
+    /// least the accrual it replaces, never negative, and debits settled cash; total fees never
+    /// decrease; and the TAF the fold charged on an order whose sells were all charged per order
+    /// never exceeds the highest cap in force at any of them. The oracle is exact: TAF in units of
+    /// 10⁻¹².
+    #[test]
+    #[ignore = "pending E3-1"]
+    fn fees_are_never_credits_under_per_fill_fee_configurations(events in vec(fee_event(), 1..40)) {
+        let mut account = Account::opening(usd("100000"), []);
+        let mut charged_by_order: BTreeMap<u8, i128> = BTreeMap::new();
+        let mut observed: BTreeMap<u8, (i128, i128, bool)> = BTreeMap::new();
+        for (n, event) in events.iter().enumerate() {
+            let at = |day: i64| format!("2026-09-2{}T11:{:02}:{:02}-04:00", 1 + day, n / 60, n % 60);
+            let (input, config, expected_taf) = match event {
+                FeeEvent::Equity { buy, shares, cents, order, day, cap, per_order } => {
+                    let fill = common::Fill {
+                        fill_id: &format!("f{n}"),
+                        order: (*order > 0).then(|| format!("o{order}")).as_deref(),
+                        instrument: "AAA",
+                        asset_class: AssetClass::UsEquity,
+                        side: if *buy { Side::Buy } else { Side::Sell },
+                        qty: &shares.to_string(),
+                        price: &price(*cents).to_string(),
+                        liquidity: None,
+                        at: &at(*day),
+                    }
+                    .input();
+                    let taf = if *buy {
+                        None
+                    } else {
+                        let uncapped = i128::from(*shares) * TAF_PER_SHARE * 1_000_000;
+                        let cap_units = cap * 100_000_000;
+                        let before = if *order > 0 { charged_by_order.get(order).copied().unwrap_or(0) } else { 0 };
+                        let room = if *per_order && *order > 0 { (cap_units - before).max(0) } else { cap_units };
+                        let taf = uncapped.min(room);
+                        if *order > 0 {
+                            charged_by_order.insert(*order, before + taf);
+                        }
+                        Some(taf)
+                    };
+                    (fill, fee_config(*cap, *per_order), taf)
+                }
+                FeeEvent::Crypto { buy, micros, cents, maker, day } => {
+                    let fill = common::Fill {
+                        fill_id: &format!("f{n}"),
+                        order: None,
+                        instrument: "BTC",
+                        asset_class: AssetClass::Crypto,
+                        side: if *buy { Side::Buy } else { Side::Sell },
+                        qty: &qty_text(i128::from(*micros) * 1_000),
+                        price: &price(*cents).to_string(),
+                        liquidity: Some(if *maker { Liquidity::Maker } else { Liquidity::Taker }),
+                        at: &at(*day),
+                    }
+                    .input();
+                    (fill, fee_config(0, false), None)
+                }
+                FeeEvent::Charge { crypto, day } => (
+                    Input::FeesCharged {
+                        family: if *crypto { FeeFamily::Crypto } else { FeeFamily::Equities },
+                        day: day_date(*day),
+                    },
+                    fee_config(0, false),
+                    None,
+                ),
+            };
+            let applied = account.apply(&input, &config);
+            prop_assert!(applied.is_ok(), "{:?}: {:?}", input, applied);
+            let applied = applied.unwrap();
+            let (before, after) = (&account, &applied.account);
+            let accrued_delta = money(after.fees_accrued().unwrap()) - money(before.fees_accrued().unwrap());
+            match &applied.record {
+                Record::Fill { fees, .. } => {
+                    for fee in fees {
+                        prop_assert!(money(fee.usd) >= 0, "{:?} in {:?}", fee, input);
+                    }
+                    let taf: Vec<i128> = fees.iter().filter(|f| f.kind == FeeKind::Taf).map(|f| money(f.usd)).collect();
+                    if let FeeEvent::Equity { buy: false, order: order @ 1.., cap, per_order, .. } = event {
+                        let seen = observed.entry(*order).or_insert((0, 0, true));
+                        seen.0 += taf.iter().sum::<i128>();
+                        seen.1 = seen.1.max(cap * 100_000_000);
+                        seen.2 &= *per_order;
+                        if seen.2 {
+                            prop_assert!(seen.0 <= seen.1, "order o{} TAF {} above every cap in force {}", order, seen.0, seen.1);
+                        }
+                    }
+                    prop_assert_eq!(taf, expected_taf.into_iter().collect::<Vec<_>>(), "{:?}", input);
+                    let accrued: i128 = fees.iter().filter(|f| f.kind != FeeKind::CryptoAsset).map(|f| money(f.usd)).sum();
+                    prop_assert_eq!(accrued_delta, accrued);
+                    prop_assert!(accrued_delta >= 0);
+                }
+                Record::FeesCharged { accrued, charged } => {
+                    prop_assert!(money(*accrued) >= 0 && money(*charged) >= money(*accrued), "{:?}", applied.record);
+                    prop_assert_eq!(accrued_delta, -money(*accrued));
+                    prop_assert_eq!(money(after.settled()), money(before.settled()) - money(*charged));
+                }
+                other => prop_assert!(false, "{:?}", other),
+            }
+            prop_assert!(money(after.fees_total().unwrap()) >= money(before.fees_total().unwrap()));
+            account = applied.account;
+        }
     }
 }
