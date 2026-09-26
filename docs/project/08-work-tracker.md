@@ -61,7 +61,7 @@ issues are the record; this table is the summary
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
 | E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation, #80 follow-up tests); claim closed | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl`, `agent/e3-3-followup-tests` |
-| E4-1 simulated execution (backtest fill model) | `claude-code` | #58, #105 (implementation) | Tests PR merged (#75) after three review rounds; the task brief and DEC-106 merged in #61; implementation PR open (claim #105), status PR follows (DEC-77) | `agent/e4-1-sim-impl` (implementation); `agent/e4-1-sim-tests-2` (#75); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
+| E4-1 simulated execution (backtest fill model) | `claude-code` | #58, #105 (implementation) | Tests PR merged (#75) after three review rounds; the task brief and DEC-106 merged in #61; implementation PR open (claim #105), status PR follows (DEC-77) | `agent/e4-1-sim-impl-2` (implementation); `agent/e4-1-sim-tests-2` (#75); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | E5-3 Postgres journal | `cursor` | #77 | Merged (#82 tests, #92 implementation); DEC-109 recorded; claims #77 and #78 closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
