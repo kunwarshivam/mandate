@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_time::Date;
 
-use crate::model::{DatasetId, Kind, Records};
+use crate::model::{AssetClass, DatasetId, Feed, Kind, ModelError, Records, Symbol};
 use crate::number::NumberError;
 use crate::timestamp::TimestampError;
 
@@ -207,6 +207,43 @@ pub fn partition_name(day: Date) -> String {
     format!("{day}.parquet")
 }
 
+/// One day as a manifest lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListedDay {
+    pub day: Date,
+    pub rows: u64,
+    /// The partition's size and SHA-256; `None` for a day without records, which has no file.
+    pub file: Option<(u64, Digest)>,
+}
+
+/// Reads the manifest in `dir`: the dataset it records and every day it lists, in date order.
+/// Anything but the canonical manifest this crate writes is refused.
+pub fn read_manifest(dir: &Path) -> Result<(DatasetId, Vec<ListedDay>), DatasetError> {
+    let path = dir.join(MANIFEST);
+    let bytes = fs::read(&path).map_err(io_error(&path))?;
+    let invalid = |reason: String| DatasetError::Manifest {
+        path: path.clone(),
+        reason,
+    };
+    let value = mandate_canon::parse(&bytes).map_err(|e| invalid(e.to_string()))?;
+    let dataset = value
+        .get("dataset")
+        .ok_or_else(|| "there is no `dataset`".to_owned())
+        .and_then(dataset_from_value)
+        .map_err(invalid)?;
+    let manifest = Manifest::parse(&dataset, &bytes).map_err(invalid)?;
+    let days = manifest
+        .days
+        .iter()
+        .map(|(day, entry)| ListedDay {
+            day: *day,
+            rows: entry.rows,
+            file: entry.file,
+        })
+        .collect();
+    Ok((dataset, days))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct DayEntry {
     rows: u64,
@@ -256,6 +293,25 @@ fn dataset_value(dataset: &DatasetId) -> Result<Value, String> {
         members.push(("timeframe", Value::Str(timeframe)));
     }
     object(members)
+}
+
+fn dataset_from_value(value: &Value) -> Result<DatasetId, String> {
+    let field = |name: &str| {
+        value
+            .get(name)
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("the dataset has no `{name}`"))
+    };
+    let model = |e: ModelError| e.to_string();
+    let asset_class: AssetClass = field("asset_class")?.parse().map_err(model)?;
+    let feed: Feed = field("feed")?.parse().map_err(model)?;
+    let kind = match field("kind")? {
+        "bars" => Kind::Bars(field("timeframe")?.parse().map_err(model)?),
+        "trades" => Kind::Trades,
+        other => return Err(format!("unknown kind `{other}`")),
+    };
+    let symbol = Symbol::parse(field("symbol")?).map_err(model)?;
+    DatasetId::new(asset_class, feed, kind, symbol).map_err(model)
 }
 
 fn scales_value(kind: Kind) -> Result<Value, String> {

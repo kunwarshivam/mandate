@@ -85,15 +85,32 @@ story. This story closes milestone M2.
   `the_gated_generator_produces_fee_debits_while_proceeds_are_unsettled` (live) shows the gated
   generator reaches that state, so the bound is exercised.
 
+  **Mutants.** `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants` on the
+  implementation diff: 5 mutants, 0 caught, 5 unviable, 0 missed. Every mutant cargo-mutants
+  generates for this diff replaces a body with `Default::default()`, and neither `Usd`,
+  `AccountType`, nor `Account` implements `Default`, so none of the five compiles; `Reservations::new`
+  is a function named `new`, which cargo-mutants never mutates, and the diff holds no binary
+  operator to flip. The gate reports no survivor but proves little here, so the evidence is the
+  planted bugs above, each re-seeded on its own in this implementation and caught: a cash account
+  counts unsettled proceeds [rc_08, rc_18, fee-debit, and account-type hand tests, oracle,
+  difference, charging, both harness tests]; accrued fees rounded once as a total instead of per
+  bucket [per-bucket hand test, oracle, charging]; accrued fees rounded half-even instead of up
+  [rc_08, per-bucket, debit, and account-type hand tests, oracle, charging, harness rc_08];
+  reservations added instead of subtracted [rc_18 hand test, both reservation tests, oracle]; a
+  negative reservation total accepted [both reservation tests]; the opening type dropped and margin
+  stored [rc_08, rc_18, fee-debit, and account-type hand tests, oracle, difference, charging, both
+  harness tests]; `account_type` always reports margin [rc_08 and account-type hand tests, oracle].
+
 - **Crates in scope:** `mandate-accounting` (`AccountType`, `Reservations`, `Account::opening`
   takes the type, `Account::account_type`, `Account::buying_power`), `mandate-refcases` (the
   `trading_domain` harness and its self-check). Both are safety-critical.
 - **Crates out of scope:** `mandate-num`, `mandate-time` (no change), `mandate-journal` (the
   `AccountStateObserved` payload comes with E6-9), `mandate-domain`.
 - **New dependencies allowed:** none.
-- **Safety-critical:** yes. Delivered per DEC-77: this **tests PR** (API stubs, 15 tests marked
+- **Safety-critical:** yes. Delivered per DEC-77: the **tests PR** (#53: API stubs, 15 tests marked
   `#[ignore = "pending E3-3"]`, the harness, this brief, DEC-104 and DEC-105, the feature map), then
-  the implementation PR, whose test-file changes are only marker deletions. There is no status PR:
+  the **implementation PR**, which replaces every stub and whose test-file changes are the 15 marker
+  deletions and nothing else. There is no status PR:
   no case moves to passing (DEC-105). Spec wording for DEC-104 item 5 goes in a separate spec-only
   change.
 - **Size budget:** 400 non-generated lines per safety-critical PR (ES-13). The tests PR exceeds it
@@ -144,6 +161,20 @@ the executor opens the fold with the observed type. Buying power is a derived va
 Also not here: paper-mode simulated fees in accrued fees (§10, E4-2); uncleared deposits (§7.2:
 funding is no fold input yet); journaling the fold's records (the executor story).
 
+## Follow-ups (review minors from the tests PR, #53)
+
+Minors, so the freeze rule keeps them out of this change (AGENTS.md "Getting it right the first
+time"). The first three touch test files, which a DEC-77 implementation PR may not edit beyond
+deleting its pending markers, so they wait for the next tests PR that changes these files; the
+fourth belongs to the spec-only change DEC-104 already plans.
+
+| Follow-up | Where | Owner |
+|---|---|---|
+| Derive the oracle's holidays from the `us_2026` calendar fixture instead of hardcoding `BANK_HOLIDAY` | `settlement_properties.rs` | the next tests PR touching this file |
+| Give the two differential assertions an oracle value of their own, so they compare against a computed figure rather than the two folds against each other | `settlement_properties::margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds`, `reservations_reduce_buying_power_one_for_one_and_are_never_negative` | the next tests PR touching this file |
+| An unknown broker profile reaches the `unknown account type` arm and so calls a valid `cash` account unknown; the message should name the profile instead | `trading_domain::account_type` | the next tests PR touching the harness |
+| §7.2 writes the accrued-fee term as `round(accrued, 2, ceiling)`, which DEC-104 item 2's per-bucket rounding contradicts | `docs/specs/trading-domain.md` §7.2 | the DEC-104 spec-only change, with the §8.3 and I4 wording |
+
 ## Commands
 
 ```bash
@@ -166,11 +197,12 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 
 ## Definition of done
 
-- [ ] The cited reference cases pass, and none that passed before now fails (none move; the
-      passing cases keep passing on the stubs).
+- [x] The cited reference cases pass, and none that passed before now fails: none move, the ten
+      that passed on the stubs still pass, and RC-08 and RC-18's cash variant now fail only on
+      `propose_order` and `decision`, both E6-3's (DEC-105).
 - [x] Tests came first; each touched invariant has a property test whose oracle is independent and
       was shown to fail on a seeded bug.
-- [ ] New state changes emit journal events (none added; see above).
+- [x] New state changes emit journal events (none added; see above).
 - [x] Docs updated where behavior, interfaces, or decisions changed.
-- [ ] `cargo xtask check` is green (paste the summary in the PR).
-- [ ] The PR description is complete (see the PR template).
+- [x] `cargo xtask check` is green (paste the summary in the PR).
+- [x] The PR description is complete (see the PR template).

@@ -37,7 +37,6 @@ const QQQ_ORDER_REQUIREMENT: &str = "600.01";
 /// buying power 499.98. Settlement at 00:00 ET on 2026-09-22 moves 550: settled 1049.98, buying
 /// power 1049.98.
 #[test]
-#[ignore = "pending E3-3"]
 fn rc_08_cash_account_buying_power_is_settled_cash_less_pending_charges() {
     let config = test_default();
     let a = opening(AccountType::Cash, "1000");
@@ -109,7 +108,6 @@ fn rc_08_cash_account_buying_power_is_settled_cash_less_pending_charges() {
 /// 449.98. Settlement: settled 449.98. In the cash variant, buying power after the sell is 499.98,
 /// so the same order is denied.
 #[test]
-#[ignore = "pending E3-3"]
 fn rc_18_margin_account_reuses_unsettled_proceeds_and_its_cash_variant_does_not() {
     let config = test_default();
     let buy = equity(
@@ -200,7 +198,6 @@ fn rc_18_margin_account_reuses_unsettled_proceeds_and_its_cash_variant_does_not(
 /// not 140 − round(0.13010, 2, ceiling) = 139.86. Charging all three leaves settled 139.85: the
 /// buying power reported before them.
 #[test]
-#[ignore = "pending E3-3"]
 fn pending_charges_are_rounded_up_per_family_and_day() {
     let config = test_default();
     let a = holding_in(AccountType::Cash, "100", "BTC", "0.001", "40");
@@ -264,7 +261,6 @@ fn pending_charges_are_rounded_up_per_family_and_day() {
 /// 60 accrues, so buying power is 39940 immediately. A buy of 0.5 at 40000 (fee in the asset,
 /// nothing accrued) takes 20000: buying power 19940.
 #[test]
-#[ignore = "pending E3-3"]
 fn crypto_proceeds_are_settled_at_fill_in_a_cash_account() {
     let config = test_default();
     let a = holding_in(AccountType::Cash, "0", "BTC", "1", "30000");
@@ -307,7 +303,6 @@ fn crypto_proceeds_are_settled_at_fill_in_a_cash_account() {
 /// CAT 0.00002 rounded up to 0.01, buying power −100.01. The no-debit rule is the gate's promise
 /// (I4), not a rejection in the fold.
 #[test]
-#[ignore = "pending E3-3"]
 fn a_fill_that_creates_a_debit_is_recorded_and_buying_power_reports_the_shortfall() {
     let config = test_default();
     let fill = equity(
@@ -335,7 +330,6 @@ fn a_fill_that_creates_a_debit_is_recorded_and_buying_power_reports_the_shortfal
 /// Reservations come off buying power one for one (spec §7.2, §9.5) and are never negative: a
 /// negative total would add buying power.
 #[test]
-#[ignore = "pending E3-3"]
 fn reservations_reduce_buying_power_and_are_never_negative() {
     let config = test_default();
     let a = step(
@@ -367,7 +361,6 @@ fn reservations_reduce_buying_power_and_are_never_negative() {
 /// 0.01: buying power 1000 − 0.01 = 999.99 in the cash account and 1010 − 0.01 = 1009.99 in the
 /// margin account.
 #[test]
-#[ignore = "pending E3-3"]
 fn the_account_type_is_set_at_opening_and_kept_through_the_fold() {
     let config = test_default();
     let cash = opening(AccountType::Cash, "1000");
@@ -400,7 +393,6 @@ fn the_account_type_is_set_at_opening_and_kept_through_the_fold() {
 /// settled −0.02, a debit bounded by the charge that exists only while a bucket is unsettled
 /// (DEC-104). Settlement leaves 549.98.
 #[test]
-#[ignore = "pending E3-3"]
 fn a_cash_account_sale_can_leave_a_fee_debit_until_its_proceeds_settle() {
     let config = test_default();
     let a = holding_in(AccountType::Cash, "0", "XYZ", "5", "500");
