@@ -163,6 +163,23 @@ impl Exact {
         Ok((numerator, denominator, self.negative != divisor.negative))
     }
 
+    /// `ceil(sqrt(self ÷ divisor), scale)`: the smallest value with `scale` fractional digits
+    /// whose square is at or above the ratio, so an impact built on it is never understated
+    /// ([trading-domain spec §6.4](../../../docs/specs/trading-domain.md#64-backtest-fill-model),
+    /// DEC-106 item 3). The ratio is taken at twice `scale`, rounded up, which an integer root
+    /// then turns into the ceiling of the root itself: for an integer n, n² ≥ ratio × 10^2·scale
+    /// exactly when n² ≥ ceil(ratio × 10^2·scale). `division_by_zero` when `divisor` is zero.
+    pub(crate) fn ceiling_root_of_ratio(self, divisor: Self, scale: u32) -> Result<Self, NumError> {
+        let squared_scale = scale.checked_mul(2).ok_or(NumError::Overflow)?;
+        let (numerator, denominator, _) = self.quotient_terms(divisor, squared_scale)?;
+        let squared = round_quotient(numerator, denominator, false, Rounding::Ceiling)?;
+        Ok(Self {
+            negative: false,
+            magnitude: ceiling_sqrt(squared)?,
+            scale,
+        })
+    }
+
     /// Stores the value, dropping only trailing zeros; anything that would need rounding or more
     /// than 96 significand bits is an error.
     pub(crate) fn to_decimal(self, max_scale: u32) -> Result<Decimal, NumError> {
@@ -222,5 +239,48 @@ fn round_quotient(
             .ok_or(NumError::Overflow)
     } else {
         Ok(quotient)
+    }
+}
+
+/// `ceil(sqrt(value))`, from the floor and one comparison.
+fn ceiling_sqrt(value: U256) -> Result<U256, NumError> {
+    let floor = floor_sqrt(value)?;
+    let squared = floor.checked_mul(floor).ok_or(NumError::Overflow)?;
+    if squared < value {
+        floor.checked_add(U256::from(1u8)).ok_or(NumError::Overflow)
+    } else {
+        Ok(floor)
+    }
+}
+
+/// `floor(sqrt(value))` by Newton's method on integers. The first guess, 2^ceil(bits ÷ 2), is at or
+/// above the root, and each step stays at or above it while falling strictly until it reaches it, so
+/// the loop ends there. Integers throughout: no float reaches a price (ADR-0001 ES-04), and a
+/// backtest that uses the root replays bit for bit (ES-21).
+fn floor_sqrt(value: U256) -> Result<U256, NumError> {
+    let two = U256::from(2u8);
+    if value < two {
+        return Ok(value);
+    }
+    let halved_bits = value
+        .bit_len()
+        .checked_add(1)
+        .and_then(|bits| bits.checked_div(2))
+        .ok_or(NumError::Overflow)?;
+    let mut guess = U256::from(1u8)
+        .checked_shl(halved_bits)
+        .ok_or(NumError::Overflow)?;
+    loop {
+        let next = value
+            .checked_div(guess)
+            .ok_or(NumError::DivisionByZero)?
+            .checked_add(guess)
+            .ok_or(NumError::Overflow)?
+            .checked_div(two)
+            .ok_or(NumError::DivisionByZero)?;
+        if next >= guess {
+            return Ok(guess);
+        }
+        guess = next;
     }
 }
