@@ -95,13 +95,13 @@ Each row gets a named test whose oracle computes the answer its own way.
 | Review finding 5 the startup hold is journaled before anything is re-handed, and lifts only on a reconciliation at or after the last submission | `hand::started_journals_the_startup_hold_before_its_first_handoff`, `hand::an_earlier_reconciliation_does_not_lift_the_startup_hold` |
 | Journal §5.1 idempotency: a retry after `Unavailable` or `Ambiguous` derives the same `event_id` | `hand::a_retried_append_derives_the_same_event_id`, `properties::a_derived_event_id_is_a_function_of_epoch_head_and_ordinal` |
 | Journal §5.1 a batch in doubt is retried with the same drafts, and no input is handled at an unresolved head | `hand::an_unresolved_append_is_retried_before_any_new_input`, `hand::a_tick_during_an_unresolved_append_does_not_change_the_drafts` |
-| E6-5 the plan's cancel list holds the working order the fold knows, so a switch cannot leave one behind | `hand::a_kill_switch_cancels_the_working_order_the_fold_knows` |
-| Journal §5.2 an intent the account stream has taken is no longer outstanding, so a restart does not hand it again | `hand::a_restart_re_hands_nothing_for_an_intent_the_account_already_took` |
+| E6-5 the plan's cancel list holds the working order the fold knows, so a switch cannot leave one behind | `hand::a_kill_switch_cancels_the_working_order_the_fold_knows`, which folds no `IntentReceived`, so it guards the contract only through `outstanding()`; `hand::a_taken_and_working_order_is_in_the_flatten_requests_working_orders` is the implementation PR's one new case and closes the gap by folding `IntentReceived` first |
+| Journal §5.2 an intent the account stream has taken is no longer `Handoff::Pending`, so a restart does not hand it again, and it stays outstanding until a terminal outcome | `hand::a_restart_re_hands_nothing_for_an_intent_the_account_already_took` |
 | ES-20 `Input::Started` re-arms every deadline the fold carries, at the same second | `hand::a_restart_re_arms_the_deadline_the_fold_carries` |
 | DEC-85 a command a later story owns fails loudly and names it: `Command::OwnerExit` answers `NotInterpreted { story: "E7-2" }` | `hand::an_owner_exit_of_one_instrument_names_its_story`, `hand::an_unhandled_command_names_its_story` |
 | E6-5 step 5 the switch disarms the timers of what it cancelled | `hand::a_kill_switch_cancels_every_pending_approval` |
 | Journal §5.1 the writer folds its own committed appends back, which is how it learns its head | `properties::folding_the_journaled_drafts_reproduces_the_live_state`, `hand::a_retried_append_derives_the_same_event_id` |
-| Rule 6 a skipped decision alerts the owner with the decision's id and a message key, and nothing else does | `hand::a_notification_carries_only_opaque_ids`, `properties::no_notification_payload_holds_an_instrument_or_a_price` |
+| Rule 6 a skipped decision alerts the owner with the decision's id and a message key, and nothing else does | `properties::no_notification_payload_holds_an_instrument_or_a_price`, which is the only case that asserts an alert is emitted at all (`hand::a_notification_carries_only_opaque_ids` inspects whatever is emitted and so cannot credit this row) |
 | Journal §9 a flatten handoff is identified by its `KillSwitchActivated` draft, since a flatten is never proposed | `properties::every_intent_effect_follows_the_draft_that_records_it` |
 | Journal §5.1 fencing: a new process increments `writer_epoch`, and a `Fenced` append stops the runtime instead of retrying | `hand::a_fenced_append_stops_the_runtime`, `hand::two_epochs_never_derive_one_event_id` |
 | Journal §2 gapless `seq`: the fold rejects a gap, a repeat, and a stream it does not follow | `hand::a_gap_in_seq_fails_the_fold`, `hand::a_repeated_seq_fails_the_fold`, `properties::the_fold_rejects_every_out_of_order_sequence` |
@@ -575,7 +575,9 @@ shell crate, which is impure, layer 7, and arrives with M6 rather than here.
 ## Interpretations (recorded as DEC-131)
 
 Each item fixes how code realises a rule the spec already states. Item 1 is the only one that needs
-the founder, because it edits founder-owned files.
+the founder, because it edits founder-owned files. The implementation PR added **item 25** to
+DEC-131 and not to this list: it records the readings writing the real logic forced, each the
+conservative one, bounded by the frozen test suite rather than by this brief.
 
 1. **Crate, layer, and criticality.** A new safety-critical `mandate-runtime`, `pure = true`,
    `layer = 6`, `allowed_external = ["thiserror"]`, with a CODEOWNERS line. Layer 6 is the lowest

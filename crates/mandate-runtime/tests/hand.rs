@@ -54,7 +54,6 @@ fn owner_confirmation() -> OwnerConfirmation {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_gap_in_seq_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
@@ -76,7 +75,6 @@ fn a_gap_in_seq_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_repeated_seq_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
@@ -87,7 +85,6 @@ fn a_repeated_seq_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unknown_event_type_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let unknown = event(ACCOUNT_STREAM, 1, "SomethingNobodyWrote", object(&[]));
@@ -100,7 +97,6 @@ fn an_unknown_event_type_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_copied_mode_change_points_at_the_originating_event() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -128,7 +124,6 @@ fn a_copied_mode_change_points_at_the_originating_event() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn the_golden_journal_folds_to_the_committed_state() {
     let committed = include_str!("golden-journal.json");
     let golden =
@@ -227,7 +222,6 @@ fn the_golden_journal_folds_to_the_committed_state() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn the_fold_version_is_pinned_with_the_golden_journal() {
     assert_eq!(
         FOLD_VERSION, 1,
@@ -238,7 +232,6 @@ fn the_fold_version_is_pinned_with_the_golden_journal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unhandled_command_names_its_story() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -257,7 +250,6 @@ fn an_unhandled_command_names_its_story() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn every_error_code_is_stable_and_unique() {
     let codes = [
         RuntimeError::Unimplemented { story: "E6-1" }.code(),
@@ -329,7 +321,6 @@ fn every_error_code_is_stable_and_unique() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_tick_that_changes_nothing_emits_no_effect() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -349,7 +340,6 @@ fn a_tick_that_changes_nothing_emits_no_effect() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_deadline_is_measured_in_whole_seconds_of_risk_clock() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -382,7 +372,6 @@ fn a_deadline_is_measured_in_whole_seconds_of_risk_clock() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn event_time_never_moves_a_deadline() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -423,7 +412,6 @@ fn event_time_never_moves_a_deadline() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_tick_during_an_unresolved_append_does_not_change_the_drafts() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -449,7 +437,6 @@ fn a_tick_during_an_unresolved_append_does_not_change_the_drafts() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_retried_append_derives_the_same_event_id() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -492,7 +479,6 @@ fn a_retried_append_derives_the_same_event_id() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn two_epochs_never_derive_one_event_id() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -526,7 +512,6 @@ fn two_epochs_never_derive_one_event_id() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_fenced_append_stops_the_runtime() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -552,7 +537,6 @@ fn a_fenced_append_stops_the_runtime() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unresolved_append_is_retried_before_any_new_input() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -589,7 +573,6 @@ fn an_unresolved_append_is_retried_before_any_new_input() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unchanged_mode_journals_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -616,7 +599,6 @@ fn an_unchanged_mode_journals_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restriction_that_lifts_while_another_is_active_does_not_restore_normal() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -651,7 +633,6 @@ fn a_restriction_that_lifts_while_another_is_active_does_not_restore_normal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_resume_does_not_lift_the_copied_account_mode() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -674,7 +655,6 @@ fn an_owner_resume_does_not_lift_the_copied_account_mode() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_broker_restriction_arrives_as_a_mode_copy_not_a_flatten() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -712,7 +692,6 @@ fn a_broker_restriction_arrives_as_a_mode_copy_not_a_flatten() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn exits_only_still_proposes_an_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -736,7 +715,6 @@ fn exits_only_still_proposes_an_exit() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_removed_instrument_proposes_no_opening() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -757,7 +735,6 @@ fn a_removed_instrument_proposes_no_opening() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_removed_instrument_still_exits() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -778,7 +755,6 @@ fn a_removed_instrument_still_exits() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_stopped_agent_is_terminal() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -807,7 +783,6 @@ fn a_stopped_agent_is_terminal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_proposal_journals_before_it_reaches_the_sink() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -847,7 +822,6 @@ fn a_proposal_journals_before_it_reaches_the_sink() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_dry_run_deny_skips_the_proposal() {
     let ids = TestIds;
     let gate = DenyGate("position_cap");
@@ -873,7 +847,6 @@ fn a_dry_run_deny_skips_the_proposal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_stale_model_output_proposes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -905,7 +878,6 @@ fn asked(shell: &mut Shell, ports: &mandate_runtime::Ports<'_>, at: i64) -> Even
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_binds_the_quantity_and_the_version() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -942,7 +914,6 @@ fn an_approval_binds_the_quantity_and_the_version() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_under_a_changed_version_is_skipped() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -989,7 +960,6 @@ fn an_approval_under_a_changed_version_is_skipped() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_deadline_skips_the_action() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1015,7 +985,6 @@ fn an_approval_deadline_skips_the_action() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_copied_exits_only_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1042,7 +1011,6 @@ fn a_copied_exits_only_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_pause_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1063,7 +1031,6 @@ fn an_owner_pause_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_reducing_version_applies_at_once_and_cancels_approvals() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1098,7 +1065,6 @@ fn a_reducing_version_applies_at_once_and_cancels_approvals() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_risk_increasing_version_waits_for_a_safe_point() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1138,7 +1104,6 @@ fn a_risk_increasing_version_waits_for_a_safe_point() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn started_journals_the_startup_hold_before_its_first_handoff() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1171,7 +1136,6 @@ fn started_journals_the_startup_hold_before_its_first_handoff() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_stays_paused_until_the_account_reconciles() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1205,7 +1169,6 @@ fn a_restart_stays_paused_until_the_account_reconciles() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_earlier_reconciliation_does_not_lift_the_startup_hold() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1232,7 +1195,6 @@ fn an_earlier_reconciliation_does_not_lift_the_startup_hold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unexplained_position_keeps_the_runtime_paused() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1263,7 +1225,6 @@ fn an_unexplained_position_keeps_the_runtime_paused() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_mid_run_journals_nothing_new() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1295,7 +1256,6 @@ fn a_restart_mid_run_journals_nothing_new() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_after_an_intent_committed_re_hands_it_without_re_journaling() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1331,7 +1291,6 @@ fn a_restart_after_an_intent_committed_re_hands_it_without_re_journaling() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_started_handoff_names_a_draft_the_fold_already_saw() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1358,7 +1317,6 @@ fn a_started_handoff_names_a_draft_the_fold_already_saw() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_under_stopped_re_hands_no_opening_intent() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1381,7 +1339,6 @@ fn a_restart_under_stopped_re_hands_no_opening_intent() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_under_exits_only_still_re_hands_an_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1435,7 +1392,6 @@ fn this_agent() -> KillScope {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_owner_kill_switch_applies_stopped_before_anything_else() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1467,7 +1423,6 @@ fn an_owner_kill_switch_applies_stopped_before_anything_else() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_automated_flatten_applies_paused_first() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1490,7 +1445,6 @@ fn an_automated_flatten_applies_paused_first() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_platform_operator_stop_applies_stopped_as_a_risk_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1534,7 +1488,6 @@ fn a_platform_operator_stop_applies_stopped_as_a_risk_exit() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_owner_kill_switch_journals_the_owner_exit_request_before_the_handoff() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1576,7 +1529,6 @@ fn an_owner_kill_switch_journals_the_owner_exit_request_before_the_handoff() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_unconfirmed_owner_exit_leaves_the_equity_sells_for_the_session() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1615,7 +1567,6 @@ fn an_unconfirmed_owner_exit_leaves_the_equity_sells_for_the_session() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1662,7 +1613,6 @@ fn a_kill_switch_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_approval_that_arrives_after_a_kill_switch_proposes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1695,7 +1645,6 @@ fn an_approval_that_arrives_after_a_kill_switch_proposes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_hands_one_flatten_plan_to_the_sink() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1724,7 +1673,6 @@ fn a_kill_switch_hands_one_flatten_plan_to_the_sink() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1784,7 +1732,6 @@ fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_for_another_agent_changes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1815,7 +1762,6 @@ fn a_kill_switch_for_another_agent_changes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_connection_kill_switch_stops_every_agent_on_that_connection() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1848,7 +1794,6 @@ fn a_connection_kill_switch_stops_every_agent_on_that_connection() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_workspace_kill_switch_stops_every_agent_in_the_workspace() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1873,7 +1818,6 @@ fn a_workspace_kill_switch_stops_every_agent_in_the_workspace() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_with_no_model_output_still_stops_the_agent() {
     let ids = TestIds;
     let gate = DenyGate("everything");
@@ -1897,7 +1841,6 @@ fn a_kill_switch_with_no_model_output_still_stops_the_agent() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn the_runtime_never_lifts_a_risk_limit_restriction_itself() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1933,7 +1876,6 @@ fn the_runtime_never_lifts_a_risk_limit_restriction_itself() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_notification_carries_only_opaque_ids() {
     let ids = TestIds;
     let gate = DenyGate("position_cap");
@@ -1962,7 +1904,6 @@ fn a_notification_carries_only_opaque_ids() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_cancels_the_working_order_the_fold_knows() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2003,8 +1944,69 @@ fn a_kill_switch_cancels_the_working_order_the_fold_knows() {
     );
 }
 
+/// The half of the contract `a_kill_switch_cancels_the_working_order_the_fold_knows` cannot see,
+/// because it folds no `IntentReceived`: an intent the executor has **taken** is no longer
+/// `Handoff::Pending`, and it must still reach the flatten's cancel list, because an order the
+/// executor is working is exactly the one a kill switch exists to cancel (DEC-131 item 22,
+/// trading-domain spec §5.5). The two states are separate for this reason, so the case that pins
+/// one cannot pin the other.
 #[test]
-#[ignore = "pending E6-1"]
+fn a_taken_and_working_order_is_in_the_flatten_requests_working_orders() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    let proposed = shell.run(Input::Tick(clock(100)), &ports);
+    let working = proposed
+        .handed
+        .first()
+        .map(|handoff| handoff.intent_id.0.clone())
+        .expect("one order is working");
+
+    let taken = event(
+        ACCOUNT_STREAM,
+        2,
+        "IntentReceived",
+        object(&[
+            ("intent_id", text(&working)),
+            ("instrument", text("AAPL")),
+            ("purpose", text("open")),
+        ]),
+    );
+    shell.fold_one(&taken).expect("folds");
+    assert!(
+        shell
+            .state
+            .pending_handoffs()
+            .iter()
+            .all(|live| live.intent_id.0 != working),
+        "the executor holds it, so a restart would not hand it again"
+    );
+
+    let ran = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let handed = ran
+        .handed
+        .iter()
+        .find_map(|handoff| match &handoff.body {
+            IntentBody::Flatten(plan) => Some(plan.clone()),
+            IntentBody::Order { .. } => None,
+        })
+        .expect("the switch hands a flatten");
+    assert!(
+        handed.cancel_client_order_ids.contains(&working),
+        "a taken-and-working order stays in the flatten request's working orders: {working} is not \
+         in {:?}",
+        handed.cancel_client_order_ids
+    );
+}
+
+#[test]
 fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2059,7 +2061,6 @@ fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_re_arms_the_deadline_the_fold_carries() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2097,7 +2098,6 @@ fn a_restart_re_arms_the_deadline_the_fold_carries() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_exit_of_one_instrument_names_its_story() {
     let ids = TestIds;
     let gate = AllowGate;
