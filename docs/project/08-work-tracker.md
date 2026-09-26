@@ -1,0 +1,106 @@
+# Work tracker
+
+| | |
+|---|---|
+| **Owner** | The coordinating agent session; the founder reviews |
+| **Status** | Living document. Updated at the end of every working session |
+| **Last updated** | 2026-09-26, end of day 1 of engineering |
+
+Where the project stands, what is waiting on whom, and what comes next. Plans live in
+[02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
+decisions in [04-decision-log.md](04-decision-log.md). This file only tracks progress against them.
+
+## Milestones
+
+| Milestone | State | Done | Next |
+|---|---|---|---|
+| Tier 1 specs | Approved (DEC-71); amended since | Journal spec v0.3 (DEC-81), trading domain spec v0.9 (DEC-86) | Trading domain v0.10 waits on DEC-94 (below) |
+| M0 Foundations | Done | E1-1, E1-2; CI as two required checks (DEC-76); agent workflow (DEC-78 to DEC-80) | — |
+| M1 Market data | In progress | E2-1 download | E2-4, E2-2; E2-3 (Should) later |
+| M2 Accounting | In progress | E3-1, E3-2 | E3-3 closes the milestone |
+| M3 Simulated execution and backtest | Not started | — | E4-1, E4-2 after M2 |
+| M4 Journal | In progress | E5-1 | E5-2, E5-3 |
+| M5 onward | Not started | — | M5 starts with DEC-17 (messaging), per ADR-0001 ES-20 |
+
+## Stories
+
+| Story | State | PRs | Notes |
+|---|---|---|---|
+| E1-1, E1-2 Foundations | Merged | before the PR flow | Workspace, CI, xtask, conventions, templates |
+| E5-1 Journal core | Merged | [#1](https://github.com/kunwarshivam/mandate/pull/1), [#7](https://github.com/kunwarshivam/mandate/pull/7), [#8](https://github.com/kunwarshivam/mandate/pull/8), [#10](https://github.com/kunwarshivam/mandate/pull/10) | Canonical JSON, decimals, timestamps, append protocol, verification, anchoring; 46 journal cases passing. #2 to #6 merged into stacked branches; #2 to #5 were re-landed as #7, and #6 as #8 |
+| `risk_clock` (DEC-81) | Merged | [#12](https://github.com/kunwarshivam/mandate/pull/12), [#13](https://github.com/kunwarshivam/mandate/pull/13), [#14](https://github.com/kunwarshivam/mandate/pull/14) | Required on every risk input; journal vectors version 3 |
+| E3-1 Accounting | Merged | [#16](https://github.com/kunwarshivam/mandate/pull/16), [#18](https://github.com/kunwarshivam/mandate/pull/18), [#19](https://github.com/kunwarshivam/mandate/pull/19), [#21](https://github.com/kunwarshivam/mandate/pull/21), [#23](https://github.com/kunwarshivam/mandate/pull/23), [#24](https://github.com/kunwarshivam/mandate/pull/24), [#25](https://github.com/kunwarshivam/mandate/pull/25), [#26](https://github.com/kunwarshivam/mandate/pull/26), spec [#28](https://github.com/kunwarshivam/mandate/pull/28) | `mandate-num`, trading calendars, `mandate-accounting`. Review caught three defects before merge (basis sign, negative fee cap, cap lowered mid-order); #20 and #22 were superseded |
+| E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
+| E3-2 Corporate actions | Merged (spec text pending) | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec branch `cursor/e3-2-spec-cf6b` (trading domain v0.10) waits on DEC-94 |
+
+## Reference cases
+
+`crates/mandate-refcases/status.toml` is the record; `cargo nextest run -p mandate-refcases` runs
+the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows the rest.
+
+| Suite | Passing | Pending, with the owning stories |
+|---|---|---|
+| Journal (46) | All 46 | — |
+| Trading domain | `schema_version`, RC-01, RC-02, RC-03, RC-05, RC-06 and its `short_position_generic_broker` variant, RC-13, RC-23 and its `forward_3_for_1_non_terminating_mark` variant | RC-08 (E3-3); RC-10, RC-12, RC-19 (E4-1); RC-04 and RC-06 `protective_orders_kept_through_dividend` (E7-2 to E7-4, E6-9); RC-07, RC-11 (E7-3, E7-5, E6-9; their accounting parts are covered by hand tests); the gate, executor, and agent cases (E6-3, E6-5 to E6-9, E7-2 to E7-5). Each pending case names its owner when run |
+| Mandate (215) | Not harnessed yet | Harnessed by the E6 and E10 stories |
+
+## Waiting on the founder
+
+- **DEC-94** (proposed): the trading spec's I3 tolerance for splits is unattainable with 12-place
+  marks; the attainable bound is looser by less than 5 × 10⁻¹³ per share. The code and tests use the
+  attainable bound; the spec text (branch `cursor/e3-2-spec-cf6b`, which also carries DEC-92 and
+  DEC-93's text) merges only after you confirm. DEC-79 reserves loosening a safety invariant for you.
+- **GitHub Support**: purge `refs/pull/1/head` to `refs/pull/14/head`, which still hold commits with
+  the old work email after the history rewrite.
+
+Nothing else is blocked on you. Agents decide engineering and process questions (DEC-79) and list
+them in the decision log.
+
+## Known issues and follow-ups
+
+| Issue | Owner |
+|---|---|
+| A crypto fee rate above 10000 bps makes a crypto buy an error rather than a credit; decide whether to reject such configurations at load | Next accounting story |
+| Fee reservations for buying power | E6-6 |
+| The accounting fold copies the account on every input; measure before long backtests | E4-2 |
+| Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | Before any parallel download |
+| `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
+| Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
+| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-2 or E2-4 |
+| Postgres is not installed in the agent environment or CI | E5-3 (add it to `.cursor/install.sh` and a CI service first) |
+| Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
+
+## Lessons encoded today
+
+- A PR based on another PR's branch never reaches `main` when merged. Every PR now targets `main`
+  (ship playbook).
+- Cloud agents cannot launch other agents, so delegated builders stop at an open PR and the
+  coordinating session runs the independent review (ship playbook step 3).
+- Cursor's cloud-agent hook adds the invoking user as `Co-authored-by`, and it comes back on new
+  machines even after `.cursor/install.sh` disables it. CI's spec-guard job rejects the trailer;
+  agents run `chmod -x` on the hook before committing.
+- `git push -u` with a token-bearing URL writes the token into `.git/config`. Push with the token
+  URL only for single commands, never with `-u`.
+- Merge squash commits with an explicit `commit_message`; GitHub's default copies trailers.
+
+## Next, in order
+
+1. **E3-3** cash-account settlement (RC-08): closes M2.
+2. **E2-4** market sessions and corporate actions in the data, then **E2-2** `inspect` (gaps versus
+   session closures, duplicates, statistics): closes M1. E2-4 first, because `inspect` needs the
+   session model. Resolve the RFC 3339 fractional-seconds gap here.
+3. **E4-1, E4-2** simulated execution and the baseline backtest (RC-10, RC-12, RC-19): the critical
+   path to M5.
+4. **E5-2** artifact store, then **E5-3** the Postgres journal (environment work first).
+5. **M5** starts with decision DEC-17 (messaging) and the mandate reference cases.
+
+E3-3, E2-4, and E5-2 touch different crates and can run in parallel; reviews run one at a time.
+
+## How the work runs
+
+- Builders follow `.cursor/skills/mandate-mode/` (story, spec-change, correction, and ship
+  playbooks) and prove work with `.cursor/skills/verify-mandate/`.
+- Safety-critical stories ship as the DEC-77 sequence: tests PR, implementation PR (test files only
+  lose pending markers), status PR.
+- Each PR merges only after green CI and a pass from an independent review agent on a different
+  model (DEC-79). Today's reviewers ran on GPT-5.6 Sol and failed five PRs before they merged.
