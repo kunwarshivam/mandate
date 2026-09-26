@@ -1,0 +1,428 @@
+//! One property per invariant and per "never" or "always" in trading-domain spec §9.
+//!
+//! Every property computes its expectation its own way — through `common::oracle`, which
+//! accumulates in `i128` at 10^-9 and never calls the crate's arithmetic — so a property cannot
+//! pass because the gate and its oracle share a mistake. The generators are deliberately small and
+//! total: whole-dollar prices, whole-share quantities and a single instrument, because what these
+//! properties check is the decision, not the arithmetic's edge cases, which
+//! `hand::` and `mandate-num`'s own suite pin.
+
+mod common;
+
+use common::oracle::{Breach, ShadowLedger, breached, gross_limit, position_cap, scaled};
+use common::{INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, proposal, qty, usd};
+use mandate_risk::{AgentMode, CheckOutcome, Origin, Purpose, ReasonCode, Side, Verdict, evaluate};
+use proptest::prelude::*;
+
+/// Purposes that reduce risk. MI-1 is about exactly these four.
+const REDUCING: [Origin; 7] = [
+    Origin::OrderBuilder,
+    Origin::GoalCompletion,
+    Origin::RemovedInstrument,
+    Origin::RiskEngine,
+    Origin::TrimToTarget,
+    Origin::StopWatchdog,
+    Origin::OwnerClose,
+];
+
+fn reducing_origin() -> impl Strategy<Value = Origin> {
+    prop::sample::select(REDUCING.to_vec())
+}
+
+fn whole_dollars() -> impl Strategy<Value = u32> {
+    1_u32..3_000
+}
+
+proptest! {
+    /// MI-1, scoped to its own words: risk reduction is never denied by a mandate limit, a conduct
+    /// control, a session rule, an instrument restriction, the eligibility floor, a day-trade
+    /// budget, or buying power. The only denial a reducing purpose may carry is
+    /// `account_trading_blocked`, the broker arm of MI-1's own list.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn mi1_reduction_is_never_denied_by_a_limit(
+        origin in reducing_origin(),
+        position in 1_u32..50,
+        limit in whole_dollars(),
+        orders_today in 0_u32..40,
+    ) {
+        let mut s = Scenario::allowing();
+        s.agent.orders_today = orders_today;
+        s.agent.positions.insert(asset(INSTRUMENT_3), qty(&position.to_string()));
+        s.agent.market_values.insert(asset(INSTRUMENT_3), usd(&(position * limit).to_string()));
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Sell, &position.to_string(), &limit.to_string(), origin,
+        );
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert!(
+            d.verdict != Verdict::Deny || d.reason == Some(ReasonCode::AccountTradingBlocked),
+            "a reducing purpose was denied {:?} by something that is not the broker",
+            d.reason
+        );
+    }
+
+    /// A discretionary exit is never denied at all: §9.6 paces it, and a defer is never converted
+    /// to a deny.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn a_discretionary_exit_is_never_denied(
+        position in 1_u32..50,
+        limit in whole_dollars(),
+        paused in any::<bool>(),
+    ) {
+        let mut s = Scenario::allowing();
+        if paused {
+            s.agent.mode = AgentMode::Paused;
+        }
+        s.agent.positions.insert(asset(INSTRUMENT_3), qty(&position.to_string()));
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Sell, &position.to_string(), &limit.to_string(),
+            Origin::OrderBuilder,
+        );
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert!(
+            matches!(d.verdict, Verdict::Allow | Verdict::Defer | Verdict::Hold),
+            "a discretionary exit was denied: {:?}",
+            d.reason
+        );
+    }
+
+    /// A `Hold` carries only the three codes that can hold an order, and the two `agent_*` ones
+    /// follow the mode rule exactly. The mode rule has no `Unknown`-order arm: that is check 4's.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn a_hold_follows_the_mode_rule_exactly(
+        origin in prop::sample::select(vec![
+            Origin::RiskEngine, Origin::AutomatedKillSwitch, Origin::OwnerClose,
+            Origin::OwnerKillSwitch, Origin::ProtectiveLeg, Origin::OrderBuilder,
+        ]),
+        mode in prop::sample::select(vec![
+            AgentMode::Normal, AgentMode::ExitsOnly, AgentMode::Paused, AgentMode::Stopped,
+        ]),
+    ) {
+        let mut s = Scenario::allowing();
+        s.agent.mode = mode;
+        s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+        s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", origin);
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+
+        let protective = origin == Origin::ProtectiveLeg;
+        let kill_switch = origin.is_kill_switch();
+        let expected_hold = mode == AgentMode::Stopped
+            || (mode == AgentMode::Paused && !(protective || kill_switch));
+
+        if expected_hold {
+            prop_assert_eq!(d.verdict, Verdict::Hold, "the mode rule holds this order");
+            prop_assert!(
+                d.reason == Some(ReasonCode::AgentStopped)
+                    || d.reason == Some(ReasonCode::AgentPaused),
+                "a mode hold carries an agent_* code, not {:?}",
+                d.reason
+            );
+        } else {
+            prop_assert_ne!(
+                d.verdict, Verdict::Hold,
+                "the mode rule does not hold {:?} under {:?}", origin, mode
+            );
+        }
+    }
+
+    /// The per-instrument cap is the lower of the dollar and the fraction bound, and a value
+    /// exactly at it passes. The oracle recomputes both bounds in `i128`.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn position_cap_is_the_lower_of_both_bounds(
+        equity in 1_000_u32..40_000,
+        order in whole_dollars(),
+        held in 0_u32..2_000,
+    ) {
+        let mut s = Scenario::allowing();
+        s.instrument = common::equity_instrument(INSTRUMENT_2);
+        s.risk = common::healthy_risk(&equity.to_string());
+        s.account.equity = usd(&equity.to_string());
+        if held > 0 {
+            s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held.to_string()));
+            s.agent.positions.insert(asset(INSTRUMENT_2), qty("1"));
+        }
+        s.proposed = proposal(INSTRUMENT_2, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder);
+
+        let cap = position_cap(scaled("1500"), scaled("0.2"), scaled(&equity.to_string()));
+        let total = scaled(&held.to_string()) + scaled(&order.to_string());
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        if total > cap {
+            prop_assert_eq!(
+                d.reason, Some(ReasonCode::ConcentrationLimit),
+                "{} is above the cap {}", total, cap
+            );
+        } else {
+            prop_assert_ne!(
+                d.reason, Some(ReasonCode::ConcentrationLimit),
+                "{} is at or below the cap {}", total, cap
+            );
+        }
+    }
+
+    /// Gross exposure is bounded by equity as well as by the configured limit.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn gross_exposure_is_bounded_by_equity(
+        equity in 500_u32..5_000,
+        held in 0_u32..4_000,
+        order in whole_dollars(),
+    ) {
+        let mut s = Scenario::allowing();
+        s.risk = common::healthy_risk(&equity.to_string());
+        s.account.equity = usd(&equity.to_string());
+        if held > 0 {
+            s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held.to_string()));
+            s.agent.positions.insert(asset(INSTRUMENT_2), qty("1"));
+        }
+        s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder);
+
+        let limit = gross_limit(scaled("2000"), scaled(&equity.to_string()));
+        let gross = scaled(&held.to_string()) + scaled(&order.to_string());
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        if gross > limit && d.reason != Some(ReasonCode::ConcentrationLimit)
+            && d.reason != Some(ReasonCode::MaxOrderSize) {
+            prop_assert_eq!(
+                d.reason, Some(ReasonCode::GrossExposureLimit),
+                "{} is above min(2000, equity {})", gross, equity
+            );
+        }
+    }
+
+    /// Every limit comparison is strictly greater, so a value exactly at a limit passes (MC-G02).
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn a_value_exactly_at_a_limit_passes(order in 1_u32..1_000) {
+        let mut s = Scenario::allowing();
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+        );
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert_ne!(
+            d.reason, Some(ReasonCode::MaxOrderSize),
+            "{} is at or below max_order_usd 1000", order
+        );
+    }
+
+    /// A stricter mode is never more permissive: raising the mode never turns a deny into an allow.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn a_stricter_mode_is_never_more_permissive(order in whole_dollars()) {
+        let mut s = Scenario::allowing();
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+        );
+
+        s.agent.mode = AgentMode::Normal;
+        let normal = evaluate(&s.input()).expect("the gate decides");
+        s.agent.mode = AgentMode::ExitsOnly;
+        let stricter = evaluate(&s.input()).expect("the gate decides");
+
+        prop_assert!(
+            normal.verdict == Verdict::Allow || stricter.verdict != Verdict::Allow,
+            "exits_only allowed an opening that normal denied"
+        );
+    }
+
+    /// The re-entry cooldown covers every instrument of the group, not the proposed one alone.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn cooldown_covers_the_whole_group(elapsed_s in 0_i64..7_200) {
+        let mut s = Scenario::allowing();
+        let exit_at = common::at("2026-09-21T14:00:00Z");
+        s.now = mandate_time::UtcNanos::from_parts(exit_at.secs() + elapsed_s, exit_at.nanos())
+            .expect("the test instant is in range");
+        s.agent.last_exit_fill_at.insert(asset(INSTRUMENT_2), exit_at);
+        s.agent.instrument_groups.insert(asset(INSTRUMENT_2), mandate_risk::GroupId(7));
+        s.agent.instrument_groups.insert(asset(INSTRUMENT_3), mandate_risk::GroupId(7));
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        if elapsed_s < 3_600 {
+            prop_assert_eq!(
+                d.reason, Some(ReasonCode::ReentryCooldown),
+                "{} s is inside reentry_cooldown_s 3600", elapsed_s
+            );
+        } else {
+            prop_assert_ne!(
+                d.reason, Some(ReasonCode::ReentryCooldown),
+                "{} s is at or past reentry_cooldown_s 3600", elapsed_s
+            );
+        }
+    }
+
+    /// Every decision lists all eight checks, in §9.1 order, with the ones after a failure marked
+    /// `NotReached`.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn every_decision_lists_the_checks_it_reached(order in whole_dollars()) {
+        let mut s = Scenario::allowing();
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+        );
+        let d = evaluate(&s.input()).expect("the gate decides");
+
+        prop_assert_eq!(d.checks.len(), 8, "every §9.1 check is accounted for");
+        let mut seen_failure = false;
+        for outcome in &d.checks {
+            match outcome {
+                CheckOutcome::Failed(_, _) => {
+                    prop_assert!(!seen_failure, "the gate stops at the first failure");
+                    seen_failure = true;
+                }
+                CheckOutcome::NotReached(_) => prop_assert!(
+                    seen_failure, "a check before the failure is never NotReached"
+                ),
+                CheckOutcome::Passed(_) => prop_assert!(
+                    !seen_failure, "a check after the failure never reads as Passed"
+                ),
+            }
+        }
+    }
+
+    /// The eligibility floor fails closed for anything the ETP source has not classified.
+    #[test]
+    #[ignore = "pending E6-7"]
+    fn etp_fails_closed(unclassified in any::<bool>()) {
+        let mut s = Scenario::allowing();
+        s.instrument.etp = if unclassified {
+            mandate_risk::EtpClass::Unclassified
+        } else {
+            mandate_risk::EtpClass::Complex
+        };
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert_eq!(
+            d.reason, Some(ReasonCode::LeveragedEtpNotEnabled),
+            "an unclassified ETP is treated exactly as a complex one"
+        );
+    }
+
+    /// The order-to-fill ratio is compared without dividing, and only after enough orders.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn the_ratio_is_compared_without_dividing(orders in 0_u32..80, fills in 0_u32..20) {
+        let mut s = Scenario::allowing();
+        s.conduct.orders_today_per_instrument.insert(asset(INSTRUMENT_3), orders);
+        s.conduct.filled_today.insert(asset(INSTRUMENT_3), fills);
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        let breaches = orders >= 20 && orders > 10 * fills.max(1);
+        if breaches {
+            prop_assert_eq!(
+                d.reason, Some(ReasonCode::ConductLimitBreached),
+                "{} orders to {} fills is above 10", orders, fills
+            );
+        } else {
+            prop_assert_ne!(
+                d.reason, Some(ReasonCode::ConductLimitBreached),
+                "{} orders to {} fills is within 10, or below the 20-order floor", orders, fills
+            );
+        }
+    }
+
+    /// The size factor never exceeds one: it is a product of rung factors, each at most one.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn the_size_factor_never_exceeds_one(rungs in prop::collection::vec(0_u8..2, 0..3)) {
+        let mut s = Scenario::allowing();
+        s.risk.active_rungs = rungs.into_iter().collect();
+
+        let factor = mandate_risk::size_factor(&s.mandate, &s.risk).expect("the factor computes");
+        prop_assert!(
+            factor <= mandate_num::Fraction::ONE,
+            "a de-risking factor never enlarges an order"
+        );
+    }
+
+    /// MI-8: identical inputs give identical decisions, check list included.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn mi8_identical_inputs_give_identical_decisions(order in whole_dollars()) {
+        let mut s = Scenario::allowing();
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+        );
+        let a = evaluate(&s.input()).expect("the gate decides");
+        let b = evaluate(&s.input()).expect("the gate decides");
+        prop_assert_eq!(a, b, "the gate is a pure function of its inputs");
+    }
+
+    /// A shadow ledger the property accumulates itself: no sequence of allowed openings walks past
+    /// a limit, however it is split.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn no_allowed_sequence_ever_exceeds_a_limit(
+        orders in prop::collection::vec(1_u32..600, 1..8),
+    ) {
+        let mut s = Scenario::allowing();
+        let mut ledger = ShadowLedger::default();
+        let equity = scaled("10000");
+        let cap = position_cap(scaled("1500"), scaled("0.30"), equity);
+        let gross_cap = gross_limit(scaled("2000"), equity);
+
+        for order in orders {
+            let notional = scaled(&order.to_string());
+            s.agent.market_values.clear();
+            s.agent.positions.clear();
+            for (id, mv) in &ledger.market_value {
+                if *mv > 0 {
+                    s.agent.market_values.insert(
+                        asset(id), usd(&(mv / 1_000_000_000).to_string()),
+                    );
+                    s.agent.positions.insert(asset(id), qty("1"));
+                }
+            }
+            s.agent.orders_today = ledger.opening_orders_today;
+            s.proposed = proposal(
+                INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+            );
+
+            let d = evaluate(&s.input()).expect("the gate decides");
+            if d.verdict == Verdict::Allow {
+                let total = ledger.instrument_total(INSTRUMENT_3, notional);
+                let gross = ledger.gross(notional);
+                prop_assert_eq!(
+                    breached(total, cap, notional, scaled("1000"), gross, gross_cap),
+                    None::<Breach>,
+                    "an allowed order left the ledger past a limit: total {}, cap {}, gross {}, \
+                     gross cap {}",
+                    total, cap, gross, gross_cap
+                );
+                ledger.apply_opening(INSTRUMENT_3, notional);
+            }
+        }
+    }
+}
+
+/// Purpose assignment is total over the origins and sides v1 can produce, and never turns a buy
+/// into an exit.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_buy_is_never_an_exit() {
+    for origin in [
+        Origin::OrderBuilder,
+        Origin::RiskEngine,
+        Origin::OwnerClose,
+        Origin::OwnerKillSwitch,
+        Origin::AutomatedKillSwitch,
+        Origin::TrimToTarget,
+        Origin::StopWatchdog,
+        Origin::GoalCompletion,
+        Origin::RemovedInstrument,
+    ] {
+        let purpose = mandate_risk::assign_purpose(origin, Side::Buy, qty("1"), qty("0"))
+            .expect("a buy with no position is an open");
+        assert_eq!(
+            purpose,
+            Purpose::Open,
+            "a buy is an open or an increase whatever component proposed it: {origin:?}"
+        );
+    }
+}

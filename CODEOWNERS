@@ -29,6 +29,7 @@
 /crates/mandate-artifacts-fs/ @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
+/crates/mandate-risk/       @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-journal-pg/ @kunwarshivam

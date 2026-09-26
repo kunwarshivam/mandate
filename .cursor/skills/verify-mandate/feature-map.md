@@ -182,8 +182,8 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
 - **Run:** `cargo nextest run -p mandate-runtime`.
 ## Risk gate
 
-Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
-paths arrive with the tests PR, which updates this entry.
+Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
+crate exists as stubs and tests; the implementation PRs fill it in story by story.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -193,18 +193,21 @@ paths arrive with the tests PR, which updates this entry.
   exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
   (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
   §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
-- **Code:** `mandate-risk` (new; the pure gate over a mandate, a risk state, an account snapshot, a
-  working universe, a market context and one proposed order, returning allow, deny, defer or hold
-  with the first failing check's stable code and the whole check list for the journal; the
-  §9.2 day-trade ledger; the drawdown ladder's size factor and trim proposals; the
-  agent-scoped flatten plan), with the exact arithmetic added to `mandate-num`. It reads
-  `mandate-accounting`'s account figures and `mandate-time`'s calendar and sessions, and changes
-  neither.
-- **Tests:** the hand-calculated cases of the brief's reference-case table, one property per
-  invariant and per "never" or "always" in trading-domain spec §9 against an independent
-  `i128` oracle, and the E6-3 fuzz over random mandates, market paths and proposal sequences whose
-  shadow ledger is accumulated separately from the gate's own figures. Planted bugs per test: the
-  task brief.
+- **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
+  checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
+  and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
+  `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
+  `surveillance`), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
+  implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
+  `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
+- **Tests:** `crates/mandate-risk/tests/hand.rs` (every MC-G and MC-F figure recomputed from the
+  spec, the mode rule, the `Unknown`-order rule, the account states, the eligibility floor, and a
+  check that every reason code the gate can emit is registered in the founder-owned case file),
+  `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
+  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
+  property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
+  oracle, which never calls the crate's arithmetic). Planted bugs per test: the task brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
