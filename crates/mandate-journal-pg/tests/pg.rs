@@ -219,7 +219,7 @@ fn the_application_role_can_only_insert_and_select_events() {
             "TRUNCATE stream_heads",
             "UPDATE stream_heads SET stream_id = 'acct:ws_1:X'",
             "ALTER TABLE events DISABLE TRIGGER USER",
-            "DROP TRIGGER IF EXISTS x ON events",
+            "DROP TABLE events CASCADE",
             "CREATE TABLE sneaky (x int)",
         ] {
             assert_eq!(
@@ -280,8 +280,9 @@ fn the_database_rejects_bad_rows_forks_gaps_and_head_rollbacks() {
             CHECK_VIOLATION,
             "hash must be sha256(body)"
         );
+        let seq_2 = journal.rows(&s).await.unwrap()[1].hash;
         assert_eq!(
-            sqlstate(insert_row(&db.app, &sealed(&mark(3), 3, head.hash)).await),
+            sqlstate(insert_row(&db.app, &sealed(&mark(3), 3, seq_2)).await),
             UNIQUE_VIOLATION,
             "a second event at a stored seq (a fork)"
         );
