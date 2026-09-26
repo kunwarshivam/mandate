@@ -24,13 +24,15 @@ story. With E2-2 it closes milestone M1.
 
 ## Scope
 
-The story ships in four PRs, each from `main` after the previous one merges (ship playbook):
+The story ships in four PRs, each from `main` and never on another PR's branch (ship playbook).
+PR 2 opens after PR 1 merges; PR 3 depends on neither and opens alongside them; PR 4 opens after
+PRs 1 to 3 and E2-2 (#64) have merged.
 
 | PR | Crates | Safety-critical | Contents |
 |---|---|---|---|
 | 1. Sessions, tests | `mandate-time` | yes (tests PR) | `data/us-equities.calendar`, the `session` API as stubs, the pending tests, this brief |
 | 2. Sessions, implementation | `mandate-time` | yes (implementation PR) | The parser, `sessions`, `session_at`, `new_york_instant`; test files change only by deleting the markers |
-| 3. Corporate actions | `mandate-marketdata` | no | Split and cash-dividend types, the Alpaca `/v1/corporate-actions` wire format and client fetch, split adjustment, a recorded fixture; touches none of the files E2-2 (#64) edits |
+| 3. Corporate actions | `mandate-marketdata` | no | Forward and reverse splits and cash dividends as typed records, every other action type kept by kind, ID, and process date; the Alpaca `/v1/corporate-actions` wire format and paged client fetch; point-in-time split adjustment; recorded fixtures; touches none of the files E2-2 (#64) edits |
 | 4. `inspect` wiring | `mandate-marketdata`, `mandate-cli` | no | Opened after E2-2 (#64) merges: gap classification in `inspect`, `download` records corporate actions, raw and adjusted prices in the report, the feature map and tracker rows |
 
 - **Reference cases that must move from pending to passing:** none. No reference case covers
@@ -113,13 +115,20 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    feed does not cover, as PR 4 records per feed), *no trade* when the venue is open
    and the day's partition was fetched cleanly, and a *true gap* when the venue is open and the day
    was never fetched or its fetch was not clean.
-5. **Split adjustment (PRs 3 and 4).** Point in time (§4.5): a bar is adjusted by every split whose
-   ex-date is after the bar's New York trade date and no later than the as-of date. Prices become
+5. **Split adjustment (PRs 3 and 4).** Point in time (§4.5): as of date D, a bar is adjusted by
+   every split with ex-date ≤ D that took effect after the bar started. A split takes effect at
+   20:00 ET on the calendar day before its ex-date: the overnight session into the ex-date trades
+   post-split (interpretation 2), and §8.5 applies splits at 20:00 ET on the last trading day
+   before the ex-date, which differs only by closed days with no bars. Prices become
    round(p × Π old ÷ Π new, 12, half_even) per §8.5's mark rule; volumes become round(v × Π new ÷
-   Π old, column scale, half_even). Arithmetic is exact `i128` scaled units in `mandate-marketdata`
-   (ES-04 keeps `rust_decimal` in `mandate-num`). Raw prices are what is stored (DEC-89); adjusted
-   prices are derived. Cash dividends are recorded and reported but do not adjust prices (§4.5
-   adjusts for explicit actions; §8.5 treats dividends as cash).
+   Π old, 18, half_even) at the bar column scale (DEC-89); trade counts are unchanged. Arithmetic
+   is exact `i128` scaled units in `mandate-marketdata` (ES-04 keeps `rust_decimal` in
+   `mandate-num`), and an overflow is an error, never a rounding. Raw prices are what is stored
+   (DEC-89); adjusted prices are derived. Cash dividends are recorded and reported but do not
+   adjust prices (the acceptance criterion asks for split-adjusted prices; §8.5 treats dividends
+   as cash). Any other action type Alpaca reports (spin-offs, mergers, stock dividends, name
+   changes, and the rest) is kept by kind, ID, and process date and reported as not adjusted,
+   never silently dropped (§8.5: anything else is out of scope and must be surfaced).
 
 ## Not done here (with the story that owns each)
 
