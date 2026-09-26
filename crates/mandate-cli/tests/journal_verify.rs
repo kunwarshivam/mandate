@@ -15,10 +15,11 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::Digest;
-use mandate_cli::journal::{self, JournalCommand, Outcome, Span, VerifyArgs};
+use mandate_cli::journal::{self, JournalCommand, Outcome, Refusal, Span, VerifyArgs};
 use mandate_cli::{Cli, Command};
 use mandate_journal::{
-    AppendOutcome, ArtifactRef, ArtifactStore, MemoryJournal, RangeCheck, StreamId, export_segment,
+    Anchor, AnchorLeaf, AppendOutcome, ArtifactRef, ArtifactStore, MemoryJournal, RangeCheck,
+    StreamId, export_segment,
 };
 use mandate_time::UtcNanos;
 
@@ -231,6 +232,40 @@ fn anchor_json() -> Vec<u8> {
     format!(
         "{{\"leaves\":[{leaves}],\"root\":\"{}\"}}",
         v["merkle"]["root"].as_str().unwrap()
+    )
+    .into_bytes()
+}
+
+/// An anchor file over `heads`, sorted and rooted the way `AnchorComputed` records it, so a test
+/// can anchor a stream the export does not hold.
+fn anchor_over(heads: Vec<(&str, u64, Digest)>) -> Vec<u8> {
+    let anchor = Anchor::compute(
+        heads
+            .into_iter()
+            .map(|(stream_id, seq, hash)| AnchorLeaf {
+                stream_id: stream_id.to_owned(),
+                seq,
+                hash,
+            })
+            .collect(),
+    )
+    .unwrap();
+    let leaves = anchor
+        .leaves
+        .iter()
+        .map(|leaf| {
+            format!(
+                "{{\"hash\":\"{}\",\"seq\":{},\"stream_id\":\"{}\"}}",
+                leaf.hash.to_hex(),
+                leaf.seq,
+                leaf.stream_id
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    format!(
+        "{{\"leaves\":[{leaves}],\"root\":\"{}\"}}",
+        anchor.root.to_hex()
     )
     .into_bytes()
 }
@@ -964,4 +999,176 @@ fn identical_inputs_give_identical_output() {
         "a failing run repeats its report too"
     );
     assert_eq!(failed.code(), Some("rehash_mismatch"));
+}
+
+#[test]
+fn an_empty_export_with_an_anchor_is_anchor_head_mismatch() {
+    let scratch = Scratch::new("empty-anchored");
+    let anchor = scratch.file("anchor.json", &anchor_json());
+    let (outcome, report) = verify(
+        &scratch,
+        "segment.jsonl",
+        b"",
+        &["--anchor", anchor.as_str()],
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Range(RangeCheck::AnchorHeadMismatch),
+        "an export with no event holds no anchored head, so a wholly truncated segment never \
+         passes the anchor it is covered by"
+    );
+    assert!(outcome.failed());
+    assert!(report.contains("lines: 0"), "{report}");
+    assert!(
+        report.contains("result: failed, anchor_head_mismatch"),
+        "{report}"
+    );
+}
+
+#[test]
+fn an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused() {
+    let scratch = Scratch::new("anchor-elsewhere");
+    let elsewhere = anchor_over(vec![("acct:ws_other:OTHERACCT", 9, Digest::of(b"o"))]);
+    let anchor = scratch.file("anchor.json", &elsewhere);
+    let path = scratch.file("segment.jsonl", &export(&chain()));
+    let args = parse(&[path.as_str(), "--anchor", anchor.as_str()]).unwrap();
+    let mut report = Vec::new();
+    let err = journal::verify(&args, &mut report).unwrap_err();
+    let text = format!("{err:#}");
+    assert!(
+        text.starts_with(Refusal::AnchorStream.code()),
+        "an anchor that says nothing about this stream is never reported as checked: {text}"
+    );
+    assert!(text.contains(VECTOR_STREAM), "{text}");
+    assert!(report.is_empty(), "nothing is reported as verified");
+}
+
+#[test]
+fn an_anchor_covering_more_streams_than_the_export_still_checks_its_own() {
+    let scratch = Scratch::new("anchor-extra");
+    let events = chain();
+    let head = Digest::from_hex(&events[4].hash).unwrap();
+    let wide = anchor_over(vec![
+        (VECTOR_STREAM, 5, head),
+        ("acct:ws_other:OTHERACCT", 9, Digest::of(b"o")),
+        ("ctl:ws_other", 2, Digest::of(b"c")),
+    ]);
+    let anchor = scratch.file("anchor.json", &wide);
+    let (ok, _) = verify(
+        &scratch,
+        "segment.jsonl",
+        &export(&events),
+        &["--anchor", anchor.as_str()],
+    );
+    assert!(!ok.failed(), "{ok}");
+
+    let stale = anchor_over(vec![
+        (VECTOR_STREAM, 5, Digest::of(b"not the head")),
+        ("acct:ws_other:OTHERACCT", 9, Digest::of(b"o")),
+    ]);
+    let anchor = scratch.file("stale.json", &stale);
+    let (bad, _) = verify(
+        &scratch,
+        "stale.jsonl",
+        &export(&events),
+        &["--anchor", anchor.as_str()],
+    );
+    assert_eq!(bad, Outcome::Range(RangeCheck::AnchorHeadMismatch));
+}
+
+#[test]
+fn the_reported_line_count_agrees_with_the_seq_a_failure_names() {
+    let scratch = Scratch::new("line-count");
+    let mut bytes = export(&chain());
+    bytes.push(b'\n');
+    let (outcome, report) = verify(&scratch, "segment.jsonl", &bytes, &[]);
+    assert!(
+        report.contains("lines: 6"),
+        "the blank sixth line is counted, not skipped: {report}"
+    );
+    assert!(
+        report.contains("result: failed, seq 6, non_canonical"),
+        "{report}"
+    );
+    match outcome {
+        Outcome::Event(failure) => assert_eq!(failure.seq, 6),
+        other => panic!("expected a per-event failure, got {other}"),
+    }
+}
+
+#[test]
+fn every_refusal_reports_its_stable_code_first() {
+    let scratch = Scratch::new("codes");
+    let events = chain();
+    let path = scratch.file("segment.jsonl", &export(&events));
+    let store_file = scratch.file("not-a-dir", b"x");
+    let bad_anchor = scratch.file("bad.json", b"{");
+    let elsewhere = scratch.file(
+        "elsewhere.json",
+        &anchor_over(vec![("ctl:ws_other", 2, Digest::of(b"c"))]),
+    );
+    let mut mixed = events_of(&artifact_stream(""));
+    let second = at(&mut mixed, 2);
+    second.body = replace_once(&second.body, ARTIFACT_STREAM, "acct:ws_2:ACCT2");
+    rehash(second);
+    let mixed = scratch.file("mixed.jsonl", &export(&mixed));
+    let cases: Vec<(Refusal, Vec<&str>)> = vec![
+        (
+            Refusal::TrustedStart,
+            vec![
+                path.as_str(),
+                "--from-seq",
+                "0",
+                "--trusted-prev-hash",
+                ZERO_HASH,
+            ],
+        ),
+        (
+            Refusal::ArtifactStore,
+            vec![path.as_str(), "--store", store_file.as_str()],
+        ),
+        (
+            Refusal::Anchor,
+            vec![path.as_str(), "--anchor", bad_anchor.as_str()],
+        ),
+        (
+            Refusal::AnchorStream,
+            vec![path.as_str(), "--anchor", elsewhere.as_str()],
+        ),
+        (Refusal::ExportStreams, vec![mixed.as_str()]),
+    ];
+    for (reason, argv) in cases {
+        let args = parse(&argv).unwrap();
+        let err = journal::verify(&args, &mut Vec::new()).unwrap_err();
+        let text = format!("{err:#}");
+        assert!(
+            text.starts_with(&format!("{}: ", reason.code())),
+            "{:?} must report `{}` first, got {text}",
+            reason,
+            reason.code()
+        );
+    }
+    let codes: Vec<&str> = [
+        Refusal::TrustedStart,
+        Refusal::ArtifactStore,
+        Refusal::Anchor,
+        Refusal::AnchorStream,
+        Refusal::ExportStreams,
+        Refusal::ExportStreamId,
+    ]
+    .iter()
+    .map(|r| r.code())
+    .collect();
+    assert_eq!(
+        codes,
+        [
+            "trusted_start_invalid",
+            "artifact_store_unusable",
+            "anchor_invalid",
+            "anchor_covers_another_stream",
+            "export_mixes_streams",
+            "export_stream_id_invalid"
+        ],
+        "the codes are stable: a change here is a change auditors' scripts see"
+    );
 }

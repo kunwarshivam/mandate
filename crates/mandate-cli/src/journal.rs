@@ -12,7 +12,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, anyhow};
 use clap::{Args, Subcommand};
 use mandate_artifacts_fs::FsArtifactStore;
 use mandate_canon::{Digest, Value, parse};
@@ -105,6 +105,44 @@ impl fmt::Display for Outcome {
     }
 }
 
+/// Why an input was refused before any check of spec §11 could run. `verify` reports these through
+/// `anyhow` with the code first, so an auditor and a script read the same stable word
+/// (ADR-0001 ES-09), as the artifact errors of check 6 already do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Refusal {
+    /// `--from-seq` and `--trusted-prev-hash` are unpaired, out of range, or not 64 lowercase hex.
+    TrustedStart,
+    /// `--store` is not a directory, or could not be opened, so nothing was read from it.
+    ArtifactStore,
+    /// `--anchor` is not an anchor of journal spec §10.
+    Anchor,
+    /// The anchor names no leaf for the stream the export holds, so it vouches for nothing here.
+    AnchorStream,
+    /// The export's lines do not all carry one `stream_id`; a segment is one stream's range (§6.2).
+    ExportStreams,
+    /// The export's `stream_id` is not one of journal spec §2.
+    ExportStreamId,
+}
+
+impl Refusal {
+    /// Stable reason code (ADR-0001 ES-09), the first word of the message.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::TrustedStart => "trusted_start_invalid",
+            Self::ArtifactStore => "artifact_store_unusable",
+            Self::Anchor => "anchor_invalid",
+            Self::AnchorStream => "anchor_covers_another_stream",
+            Self::ExportStreams => "export_mixes_streams",
+            Self::ExportStreamId => "export_stream_id_invalid",
+        }
+    }
+}
+
+/// An input refusal as the command reports it: the stable code, then what was wrong.
+fn refuse(reason: Refusal, detail: impl fmt::Display) -> anyhow::Error {
+    anyhow!("{}: {detail}", reason.code())
+}
+
 /// Verifies the export `args` names, writing the report to `report`. The returned outcome carries
 /// the exit status: [`Outcome::failed`].
 pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outcome> {
@@ -134,13 +172,14 @@ fn shown(path: Option<&Path>) -> String {
     path.map_or_else(|| "none given".to_owned(), |p| p.display().to_string())
 }
 
-/// Non-empty lines the export holds, including a final one without its line feed; [`rows`] rejects
-/// both that and an empty line, so the count says how many lines were read, not how many verified.
+/// Lines the export holds, counted as [`rows`] walks them: every line feed ends one, an empty line
+/// counts, and a final line without its feed counts too, so the count and a failure's `seq` agree.
 fn line_count(export: &[u8]) -> usize {
-    export
-        .split(|b| *b == b'\n')
-        .filter(|line| !line.is_empty())
-        .count()
+    let terminated = export.iter().filter(|b| **b == b'\n').count();
+    match export.last() {
+        None | Some(b'\n') => terminated,
+        Some(_) => terminated.saturating_add(1),
+    }
 }
 
 /// Runs spec §11 in its order: the per-event checks over the whole range first, then the per-range
@@ -159,28 +198,48 @@ fn check(
         return Ok(Outcome::Event(failure));
     }
     let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
-        return Ok(Outcome::Verified(None));
+        return Ok(match anchor {
+            Some(_) => Outcome::Range(RangeCheck::AnchorHeadMismatch),
+            None => Outcome::Verified(None),
+        });
     };
     if let Some(other) = rows.iter().find(|r| r.stream_id != first.stream_id) {
-        bail!(
-            "the export mixes streams (`{}` at seq {}, `{}` at seq {}); a segment is one stream's \
-             contiguous seq range (journal spec §6.2)",
-            first.stream_id,
-            first.seq,
-            other.stream_id,
-            other.seq
-        );
+        return Err(refuse(
+            Refusal::ExportStreams,
+            format_args!(
+                "the export mixes streams (`{}` at seq {}, `{}` at seq {}); a segment is one \
+                 stream's contiguous seq range (journal spec §6.2)",
+                first.stream_id, first.seq, other.stream_id, other.seq
+            ),
+        ));
     }
     let stream = StreamId::parse(&first.stream_id).ok_or_else(|| {
-        anyhow!(
-            "`{}` is not a stream_id of journal spec §2",
-            first.stream_id
+        refuse(
+            Refusal::ExportStreamId,
+            format_args!(
+                "`{}` is not a stream_id of journal spec §2",
+                first.stream_id
+            ),
         )
     })?;
-    if let Some(anchor) = anchor
-        && let Err(check) = verify_anchor(anchor, &stream, &rows)
-    {
-        return Ok(Outcome::Range(check));
+    if let Some(anchor) = anchor {
+        if !anchor
+            .leaves
+            .iter()
+            .any(|leaf| leaf.stream_id == first.stream_id)
+        {
+            return Err(refuse(
+                Refusal::AnchorStream,
+                format_args!(
+                    "the anchor names no leaf for `{}`, the stream this export holds, so it \
+                     vouches for nothing here (journal spec §10)",
+                    first.stream_id
+                ),
+            ));
+        }
+        if let Err(check) = verify_anchor(anchor, &stream, &rows) {
+            return Ok(Outcome::Range(check));
+        }
     }
     Ok(Outcome::Verified(Some(Span {
         stream_id: first.stream_id.clone(),
@@ -269,11 +328,20 @@ fn trusted_start(args: &VerifyArgs) -> anyhow::Result<TrustedStart> {
         (Some(from_seq), Some(hex)) if from_seq >= 1 => Ok(TrustedStart {
             from_seq,
             prev_hash: Digest::from_hex(hex).ok_or_else(|| {
-                anyhow!("--trusted-prev-hash is 64 lowercase hex characters, not `{hex}`")
+                refuse(
+                    Refusal::TrustedStart,
+                    format_args!("--trusted-prev-hash is 64 lowercase hex characters, not `{hex}`"),
+                )
             })?,
         }),
-        (Some(_), Some(_)) => bail!("--from-seq is 1 or more (journal spec §3)"),
-        _ => bail!("--from-seq and --trusted-prev-hash come from one manifest or anchor, together"),
+        (Some(_), Some(_)) => Err(refuse(
+            Refusal::TrustedStart,
+            "--from-seq is 1 or more (journal spec §3)",
+        )),
+        _ => Err(refuse(
+            Refusal::TrustedStart,
+            "--from-seq and --trusted-prev-hash come from one manifest or anchor, together",
+        )),
     }
 }
 
@@ -294,8 +362,16 @@ fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
         None => Ok(Box::new(NoArtifacts)),
         Some(dir) if dir.is_dir() => FsArtifactStore::open(dir)
             .map(|store| Box::new(store) as Box<dyn ArtifactSource>)
-            .map_err(|e| anyhow!("{}: opening the artifact store {}", e.code(), dir.display())),
-        Some(dir) => bail!("the artifact store {} is not a directory", dir.display()),
+            .map_err(|e| {
+                refuse(
+                    Refusal::ArtifactStore,
+                    format_args!("{}, opening the artifact store {}", e.code(), dir.display()),
+                )
+            }),
+        Some(dir) => Err(refuse(
+            Refusal::ArtifactStore,
+            format_args!("the artifact store {} is not a directory", dir.display()),
+        )),
     }
 }
 
@@ -303,16 +379,22 @@ fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
 fn read_anchor(path: &Path) -> anyhow::Result<Anchor> {
     let bytes = fs::read(path).with_context(|| format!("reading the anchor {}", path.display()))?;
     let value = parse(&bytes).map_err(|e| {
-        anyhow!(
-            "{}: the anchor {} is not JSON of journal spec §4",
-            e.kind.code(),
-            path.display()
+        refuse(
+            Refusal::Anchor,
+            format_args!(
+                "the anchor {} is not JSON of journal spec §4 ({})",
+                path.display(),
+                e.kind.code()
+            ),
         )
     })?;
     let missing = |what: &str| {
-        anyhow!(
-            "the anchor {} has no {what} (journal spec §10)",
-            path.display()
+        refuse(
+            Refusal::Anchor,
+            format_args!(
+                "the anchor {} has no {what} (journal spec §10)",
+                path.display()
+            ),
         )
     };
     let digest = |at: Option<&Value>, what: &str| {
