@@ -67,7 +67,7 @@ issues are the record; this table is the summary
 | E5-3 Postgres journal | `cursor` | #77 | Merged (#82 tests, #92 implementation); DEC-109 recorded; claims #77 and #78 closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS and rebased; the founder's confirmation of DEC-99 to DEC-103 pending | `cursor/direction-follow-ups-v2` (#57) |
-| E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Tests (#71), sessions implementation (#85) and corporate actions (#74) merged; PR 4 (#96) in review, and the claim closes when it merges | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
+| E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Merged (#71 tests, #85 sessions implementation, #74 corporate actions, #96 `inspect` wiring); claim closed; the M1 rehearsal's follow-ups are claim #116 | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
 | #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | Merged (#73) | `cursor/install-followup` (#73) |
@@ -82,6 +82,7 @@ issues are the record; this table is the summary
 | Thesis revision loop: DEC-111, E17-9, R-28 | `claude-code` | — | Merged (#99); the story waits on E17-8 | docs only |
 | E5-4 journal verification and artifact commands | `claude-code` | #104 | PR #108 open with green checks, waiting on the merge coordinator's independent review; DEC-115 reserved | `agent/e5-4-verify-cli` (#108) |
 | CI short path for documentation-only changes (DEC-112) | `claude-code` | — | Merged (#100) at the founder's request; a docs PR now costs under two runner minutes | `.github/scripts/` |
+| `inspect` data-quality reporting (M1 rehearsal follow-up to E2-2 and E2-4) | `cursor` | #116 | PR open, waiting on the merge coordinator's review: the IEX early-close evening closed from 17:00, records while the venue is closed, zero-volume and single-trade-spread warnings, inconsistent bars as problems, closed-day counts, the restatement note, and the live test behind `live-alpaca` | `cursor/inspect-quality-39ba` |
 
 ## Waiting on the founder
 
