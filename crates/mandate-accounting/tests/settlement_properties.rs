@@ -507,30 +507,44 @@ proptest! {
         }
     }
 
-    /// I4 and spec §8.3 for the fills of orders the gate approved (DEC-99). After every such buy,
+    /// I4 and spec §8.3 for the fills of orders the gate approved (DEC-99, item 5 proposed to the
+    /// founder; this asserts the strictest reading the fee model allows). After every such buy,
     /// settled cash is ≥ 0 in a cash account and buying power is ≥ 0 in both: a buy never spends
     /// unsettled proceeds or the cash the pending charges need. After every event, settled +
-    /// Σ unsettled − accrued fees ≥ 0 in both account types. A cash account's settled cash is ≥ 0
-    /// whenever no bucket is unsettled: the fee charge on a sale is debited before the proceeds
-    /// settle, so a debit of at most those charges can exist only while proceeds are unsettled.
+    /// Σ unsettled − accrued fees ≥ 0 in both account types. In a cash account, settled cash is
+    /// ≥ 0 whenever no bucket is unsettled, and while one is, settled cash is never below minus the
+    /// charges posted since the last moment nothing was unsettled: the fee charge on a sale is
+    /// debited before the proceeds settle, and nothing else can create the debit. The account type
+    /// is the scenario's, not the fold's report of it.
     #[test]
     #[ignore = "pending E3-3"]
     fn i4_the_no_debit_rule_holds_after_every_gate_approved_fill(s in scenario()) {
         let s = Scenario { gated: true, ..s };
+        let cash = s.cash;
+        let mut previous_settled = i128::from(s.settled_cents) * CENT;
+        let mut charges_while_unsettled = 0;
         for step in run(&s)? {
             let a = &step.after;
             let settled = money(a.settled());
             let total = money(a.cash_total().unwrap());
             let accrued = money(a.fees_accrued().unwrap());
             prop_assert!(total - accrued >= 0, "debit {} after {:?}", total - accrued, step.input);
-            let cash = a.account_type() == AccountType::Cash;
-            if cash && a.unsettled().next().is_none() {
-                prop_assert!(settled >= 0, "settled debit {} with nothing unsettled after {:?}", settled, step.input);
+            if matches!(step.input, Input::FeesCharged { .. }) {
+                charges_while_unsettled += previous_settled - settled;
+            }
+            if cash {
+                if a.unsettled().next().is_none() {
+                    prop_assert!(settled >= 0, "settled debit {} with nothing unsettled after {:?}", settled, step.input);
+                    charges_while_unsettled = 0;
+                } else {
+                    prop_assert!(settled >= -charges_while_unsettled, "settled {} below the charges {} posted while unsettled after {:?}", settled, charges_while_unsettled, step.input);
+                }
             }
             if let Input::Fill(e) = &step.input && e.side == Side::Buy {
                 prop_assert!(!cash || settled >= 0, "a buy spent unsettled proceeds: {} after {:?}", settled, e);
                 prop_assert!(money(a.buying_power(reservations(s.reserved_cents)).unwrap()) >= 0, "{:?}", e);
             }
+            previous_settled = settled;
         }
     }
 
