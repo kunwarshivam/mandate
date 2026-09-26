@@ -10,8 +10,9 @@
 )]
 //! The append-only, hash-chained journal ([journal spec](../../../docs/specs/journal.md), backlog
 //! E5-1): draft validation (§3, §4, §9), the append protocol (§5.1), verification (§11), Merkle
-//! anchoring (§10), and export lines (§6.2). Storage here is in memory; the Postgres store (E5-3)
-//! implements the same protocol over the same `Draft` and `seal`.
+//! anchoring (§10), export lines (§6.2), and content-addressed artifacts (§6.3, E5-2). Storage
+//! here is in memory; the Postgres store (E5-3) implements the same protocol over the same `Draft`
+//! and `seal`, and `mandate-artifacts-fs` stores artifacts on disk.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -19,17 +20,20 @@ use std::fmt;
 use mandate_canon::{Digest, Int, Key, ParseErrorKind, Value, parse, to_canonical};
 use mandate_time::UtcNanos;
 
+mod artifact;
 mod catalogue;
 mod draft;
 mod merkle;
 mod schema;
 mod verify;
 
+pub use artifact::{
+    ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore, check_artifact, get_artifact,
+};
 pub use draft::Draft;
 pub use merkle::{Anchor, AnchorLeaf, merkle_root, tsa_imprint};
 pub use verify::{
-    ArtifactSource, EventCheck, EventFailure, RangeCheck, TrustedStart, Verified, verify_anchor,
-    verify_events,
+    EventCheck, EventFailure, RangeCheck, TrustedStart, Verified, verify_anchor, verify_events,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

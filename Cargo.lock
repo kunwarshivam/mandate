@@ -1007,6 +1007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-artifacts-fs"
+version = "0.0.0"
+dependencies = [
+ "mandate-journal",
+ "mandate-time",
+ "proptest",
+]
+
+[[package]]
 name = "mandate-canon"
 version = "0.0.0"
 dependencies = [

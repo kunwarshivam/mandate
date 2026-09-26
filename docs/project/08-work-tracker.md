@@ -33,6 +33,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
 | E17-0 Research spike | PR open | [#44](https://github.com/kunwarshivam/mandate/pull/44) (code and docs), tests in a second PR | `python/research_spike/`: LLM theses over news and prices, fixed sizing, paper orders, hash-chained JSON Lines journal, score report. Two-to-three-week timebox; exits with a decision-log entry |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
+| E5-2 Artifact store | Tests PR open | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), tests PR | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107); no reference cases |
 
 ## Reference cases
 
@@ -58,6 +59,7 @@ issues are the record; this table is the summary
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
 | E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| E5-2 artifact store | `cursor` | #59 | Tests PR open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be`; implementation `cursor/e5-2-artifact-impl-b0be` after the tests PR merges |
 
 ## Waiting on the founder
 
