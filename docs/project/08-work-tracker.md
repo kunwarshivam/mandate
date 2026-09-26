@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, end of day 1 of engineering (DEC-94 accepted) |
+| **Last updated** | 2026-09-26, direction change: autonomous ideation and retail from the start (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -20,7 +20,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | M2 Accounting | In progress | E3-1, E3-2 | E3-3 closes the milestone |
 | M3 Simulated execution and backtest | Not started | — | E4-1, E4-2 after M2 |
 | M4 Journal | In progress | E5-1 | E5-2, E5-3 |
-| M5 onward | Not started | — | M5 starts with DEC-17 (messaging), per ADR-0001 ES-20 |
+| M5 onward | Not started | — | Before M5: the mandate spec rewrite for DEC-97 and DEC-98 (spec-change PRs). M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
 
 ## Stories
 
@@ -46,6 +46,9 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 
 ## Waiting on the founder
 
+- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
+  before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
+- **Robinhood**: request Agentic Trading beta access and record its terms (OD-12).
 - **GitHub Support**: purge `refs/pull/1/head` to `refs/pull/14/head`, which still hold commits with
   the old work email after the history rewrite.
 
@@ -88,7 +91,13 @@ them in the decision log.
 3. **E4-1, E4-2** simulated execution and the baseline backtest (RC-10, RC-12, RC-19): the critical
    path to M5.
 4. **E5-2** artifact store, then **E5-3** the Postgres journal (environment work first).
-5. **M5** starts with decision DEC-17 (messaging) and the mandate reference cases.
+5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
+   DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
+   the envelope fields and the universe as runtime state, the research agent
+   contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
+   restated for envelope fields.
+6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
+   E17 (research agent and dynamic universe).
 
 E3-3, E2-4, and E5-2 touch different crates and can run in parallel; reviews run one at a time.
 

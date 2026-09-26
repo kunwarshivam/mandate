@@ -27,6 +27,7 @@ stop and ask; do not silently pick one.
 | What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
 | How are events journaled, hashed, stored, and replayed? | [docs/specs/journal.md](docs/specs/journal.md) and its [test vectors](docs/specs/reference-cases/journal.yaml) |
 | How is the code organized, and which tools and versions do we use? | [docs/adr/0001-engineering-setup.md](docs/adr/0001-engineering-setup.md) (ADR-0001) |
+| Why does the platform originate ideas, and what are the retail and connector plans? | [docs/adr/0002-autonomous-ideation-and-retail.md](docs/adr/0002-autonomous-ideation-and-retail.md) (ADR-0002, DEC-97, DEC-98) |
 | What do terms mean? | [docs/product/glossary.md](docs/product/glossary.md) |
 | How is work reviewed and released? | [docs/project/07-quality-and-release.md](docs/project/07-quality-and-release.md) |
 
@@ -52,11 +53,14 @@ stop and ask; do not silently pick one.
 10. **Enforce US account rules.** Day-trading regime, settlement, market-hours, eligibility,
     market-conduct, and account-restriction rules are part of the risk gate, not optional checks
     ([trading domain spec §9](docs/specs/trading-domain.md#9-risk-gate)).
-11. **Mandate does not choose instruments, strategy, sizing, or limits.** The user enters and
-    confirms every judgment field; the compiler only extracts values the user stated and never
-    proposes instruments, signal models, numbers, or `auto`; platform defaults exist only for the
-    non-judgment fields listed in the mandate spec §7; templates set structure, never values; no
-    calibration in v1.
+11. **The owner sets the envelope; the platform brings the ideas** (DEC-97,
+    [ADR-0002](docs/adr/0002-autonomous-ideation-and-retail.md)). Envelope fields (capital, goal, risk
+    limits, autonomy rules, allowed asset classes, `max_instruments`, connection) are entered or
+    proposed and always confirmed by the user, and no code path changes them without a confirmed
+    mandate version. Signal models, their fixed weights, thresholds, protection, and cadence are
+    envelope fields too. Only the working universe and its theses come from the research agent at
+    runtime, within the envelope, journaled, and admitted through the eligibility floor and the
+    autonomy rules. Bring-your-own-strategy pins the universe. No calibration in v1.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
     directly; opening orders are limit orders in the regular session; no short sales in v1.
 13. **Risk reduction is never denied by conduct controls, eligibility, day-trade budgets, buying

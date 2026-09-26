@@ -42,7 +42,7 @@ Autonomous trading is becoming possible, but not trustworthy:
 | Professional individual traders in the US (systematic; stocks and crypto) | v1 design partners | Want agents that trade around the clock with hard limits and a phone ping when it matters |
 | Emerging managers and small funds | v1 design partners | Need autonomy plus approvals, audit, and SSO without building infrastructure |
 | Prop firms, funds, and trading desks | Later | Many agents, strict controls, on-prem deployment, compliance evidence |
-| Retail investors (managed) | Later, after legal review | The retail policy profile (platform ceilings), education, and disclosures |
+| Retail investors (managed; Alpaca and Robinhood Agentic Trading) | v1, from the start ([DEC-98](../project/04-decision-log.md#decisions)); live after counsel signs off | An agent that brings its own ideas, bounded by an envelope they set; the retail profile, disclosures, and education |
 
 See [Personas and journeys](02-personas-and-journeys.md).
 
@@ -57,8 +57,10 @@ See [Personas and journeys](02-personas-and-journeys.md).
 5. **Everything is recorded.** Every observation, analysis, decision, approval, order, and fill.
 6. **Deploy anywhere.** Managed, hybrid, or fully on-prem, from one installer. Strategy and
    credentials stay where the customer wants them.
-7. **Users own the judgment.** Users define mandates. The platform does not recommend trades,
-   hold funds, or charge on trading outcomes.
+7. **Users own the envelope; the agent brings the ideas.** Users set capital, limits, autonomy
+   rules, and allowed asset classes and confirm every one; the platform's research agent originates
+   theses and the agent trades on them within that envelope ([DEC-97](../project/04-decision-log.md#decisions),
+   [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)). The platform does not hold funds or charge on trading outcomes.
 
 ## Positioning
 
@@ -77,10 +79,12 @@ See [Competitive landscape](03-competitive-landscape.md).
 
 - **Geography:** the United States first ([DEC-22](../project/04-decision-log.md#decisions)).
 - **Asset classes and venues:** US stocks, ETFs, and crypto spot through Alpaca first (free
-  paper trading on the same API as live; OAuth connections); CFTC-regulated crypto perpetuals
-  through Kraken Derivatives US next; options, Interactive Brokers, and Coinbase US futures
-  later ([DEC-23](../project/04-decision-log.md#decisions)).
-- **Customers:** professionals and small funds first, larger firms next, retail last.
+  paper trading on the same API as live; OAuth connections); retail equities through Robinhood
+  Agentic Trading second; CFTC-regulated crypto perpetuals through Kraken Derivatives US third;
+  options, Interactive Brokers, and Coinbase US futures later
+  ([DEC-23](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions)).
+- **Customers:** retail and professional individuals from the start ([DEC-98](../project/04-decision-log.md#decisions)), small funds
+  alongside, larger firms next.
 - **Deployment:** managed and hybrid first; fully on-prem / air-gapped after.
 
 ### How we win
@@ -94,7 +98,7 @@ See [Competitive landscape](03-competitive-landscape.md).
 
 ### What we will not do
 
-- Recommend trades, sell signals, or run a marketplace of strategies (at least initially).
+- Sell signals separately from agents, or run a marketplace of strategies (at least initially).
 - Hold customer funds, or hold any permission that can move them (withdrawal or transfer).
 - Charge per trade or as a percentage of assets or profits.
 - Promise returns. The product makes agents safe and accountable; outcomes depend on the

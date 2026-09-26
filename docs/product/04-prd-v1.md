@@ -24,7 +24,8 @@ all-or-nothing, and decisions cannot be explained or audited. See
 
 ## 3. Non-goals (v1)
 
-- Retail launch (pending legal review; see [Compliance](08-compliance-and-regulatory.md)).
+- Live retail trading before counsel signs off; retail on paper is in scope from the start
+  ([DEC-98](../project/04-decision-log.md#decisions); see [Compliance](08-compliance-and-regulatory.md)).
 - Users outside the United States.
 - Options trading (see [DEC-24](../project/04-decision-log.md#decisions)).
 - Short sales, margin borrowing, and the overnight session
@@ -33,7 +34,7 @@ all-or-nothing, and decisions cannot be explained or audited. See
 - Fully on-prem / air-gapped control plane.
 - Native mobile apps (web push, email, SMS, and chat cover approvals in v1).
 - User-supplied code (WebAssembly plug-ins).
-- Strategy marketplace, copy trading, or platform-provided trade recommendations.
+- Strategy marketplace or copy trading.
 - Shared data plane.
 - SAML and SCIM (OIDC SSO only).
 
@@ -96,20 +97,20 @@ instructions for creating a trading-only key; rejections are journaled without s
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting only values the user stated ([mandate spec §7](../specs/mandate.md#7-compiler-dec-45)) | P0 |
+| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting values the user stated and proposing envelope values, each shown as proposed and confirmed by the user; the working universe comes from the research agent at runtime ([DEC-97](../project/04-decision-log.md#decisions); [mandate spec §7](../specs/mandate.md#7-compiler-dec-45), pending its rewrite) | P0 |
 | FR-3.2 | Edit the mandate in a form and as YAML; both stay in sync | P0 |
 | FR-3.3 | Validate against platform, org, and workspace policy before saving | P0 |
 | FR-3.4 | Show a plain-language summary of the compiled mandate for confirmation | P0 |
 | FR-3.5 | Mandates are versioned; deployments pin a version; diffs between versions are viewable | P0 |
 | FR-3.6 | Goal types: continuous, accumulate, profit stop (a stopping level, not a target); maintain exposure later ([DEC-46](../project/04-decision-log.md#decisions)) | P0 (continuous, accumulate, profit stop), P2 (exposure) |
-| FR-3.7 | Signal-model library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision model. Parameters have no defaults; documentation describes methodology only ([DEC-52](../project/04-decision-log.md#decisions)) | P0 quant, P1 LLM and fast model |
-| FR-3.8 | Templates for common mandate structures (which fields and rules are present, never values) | P1 |
+| FR-3.7 | Signal-model library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision model. Parameters have no defaults; documentation describes methodology only ([DEC-52](../project/04-decision-log.md#decisions)) | P0 quant and LLM research (the research agent, DEC-97), P1 fast model |
+| FR-3.8 | Templates for common mandate structures; a template may propose envelope values, shown as proposed | P1 |
+| FR-3.9 | Research agent: originates theses (instrument, direction, horizon, evidence, invalidation) from market data, news, filings, and the agent's memory; admits instruments into the working universe through the eligibility floor, `max_instruments`, and the autonomy rules; every thesis and admission journaled; bring-your-own-strategy mode pins the universe ([DEC-97](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)) | P0 |
 
 **Acceptance criteria (FR-3.1, FR-3.4):** for a set of reference descriptions, the compiled
-mandate contains exactly the values the description states, each with its quoted source; every
-judgment field the description does not state is **left blank for the user to enter**, and no
-field is active until the user confirms it
-([DEC-33](../project/04-decision-log.md#decisions)).
+mandate contains every value the description states, each with its quoted source; proposed envelope
+values are marked as proposed; and no envelope field is active until the user confirms it
+([DEC-97](../project/04-decision-log.md#decisions)).
 
 ### 6.4 Backtest and paper trading
 

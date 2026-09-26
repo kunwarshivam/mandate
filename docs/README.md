@@ -13,6 +13,7 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | Document | Purpose |
 |---|---|
 | [ADR-0001: Engineering setup](adr/0001-engineering-setup.md) | Repository, crates, toolchain, numeric and time types, tests, CI, merge policy, supply chain |
+| [ADR-0002: Autonomous ideation and retail](adr/0002-autonomous-ideation-and-retail.md) | The mandate as a risk envelope, the research agent and dynamic universe, retail from the start, Robinhood Agentic Trading, the compliance working assumption |
 
 ## Specs
 

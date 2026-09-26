@@ -12,9 +12,9 @@ the previous phase's exit criteria are met.
 flowchart LR
     P0["Phase 0<br/>Core engine"] --> P1["Phase 1<br/>One autonomous agent<br/>on Alpaca paper"]
     P1 --> P2["Phase 2<br/>Platform v1<br/>design partners"]
-    P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>learning loop"]
+    P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>scorecards, shadow mode"]
     P3 --> P4["Phase 4<br/>Equities, mobile,<br/>enterprise identity, on-prem"]
-    P4 --> P5["Phase 5<br/>Retail, research lab,<br/>shared data"]
+    P4 --> P5["Phase 5<br/>Research lab,<br/>shared data"]
 ```
 
 ## Now
@@ -39,6 +39,9 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 ### Phase 1: One autonomous agent on Alpaca paper
 
 - Agent runtime: perception, memory, quant signal models, order builder, autonomy policy.
+- Research agent: LLM ideation from market data, news, filings, and memory into theses; universe
+  admission through the eligibility floor and the autonomy rules; bring-your-own-strategy mode
+  ([DEC-97](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)).
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
 - US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
@@ -46,7 +49,8 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 - Escalation v0: email and one chat channel, deadlines, safe defaults.
 - Command-line control.
 
-**Exit criteria:** an agent trades an Alpaca paper account unattended through a continuous soak,
+**Exit criteria:** an agent trades an Alpaca paper account unattended, on theses it generated,
+through a continuous soak,
 survives forced restarts with no duplicate orders, and escalates and applies defaults
 correctly.
 
@@ -63,10 +67,12 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Private approval flow (opaque notifications).
 - Billing and hybrid license keys.
 - Hybrid installer (Helm / Docker Compose).
+- Robinhood Agentic Trading connector (retail equities over MCP into a dedicated account); the
+  retail profile and disclosures; live retail trading once counsel signs off ([DEC-98](../project/04-decision-log.md#decisions)).
 
 **Exit criteria:** PRD release criteria met; 5+ design partners on paper, 3+ live.
 
-### Phase 3: Hybrid at scale, fast models, learning loop
+### Phase 3: Hybrid at scale, fast models, scorecards
 
 - Hybrid deployments hardened (upgrades, health, fallback approval channels).
 - Fast decision models (Laya in-process, Jev optional) with deadlines.
@@ -89,9 +95,9 @@ at least one hybrid customer in production.
 - SAML and SCIM; separation of duties; fully on-prem / air-gapped packaging.
 - SOC 2 readiness.
 
-### Phase 5: Retail, research lab, shared data
+### Phase 5: Research lab and shared data
 
-- Retail managed offering under the retail policy profile, with education and disclosures (only after legal review).
+- Retail education and community features (retail itself starts in v1, [DEC-98](../project/04-decision-log.md#decisions)).
 - Research lab: users define and backtest mandate variants; promotion requires approval.
 - Shared data plane: shared market data and factual public-event classifications (no directional
   views) for managed workspaces.
@@ -99,7 +105,7 @@ at least one hybrid customer in production.
 
 ## Explicitly not planned
 
-- Trade recommendations or signals sold by the platform.
+- Signals sold separately from agents.
 - Strategy marketplace or copy trading.
 - Custody of funds.
 - Pricing tied to trades, assets, or profits.
