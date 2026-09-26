@@ -32,6 +32,8 @@ const TEMP_DIR: &str = "tmp";
 
 /// Distinguishes the temporary files of one process; the process ID distinguishes processes.
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+/// Temporary names tried per put before it is `Unavailable`.
+const TEMP_NAME_ATTEMPTS: u32 = 64;
 
 /// An artifact store rooted at a directory.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,18 +59,25 @@ impl FsArtifactStore {
     }
 
     /// Writes `bytes` to a new temporary file, flushed to disk and read-only, and returns its path.
+    /// A name that is taken, such as one a crashed process with the same ID left behind, is
+    /// skipped for the next one.
     fn write_temp(&self, reference: &ArtifactRef, bytes: &[u8]) -> Result<PathBuf, ArtifactError> {
-        let path = self.root.join(TEMP_DIR).join(format!(
-            "{}.{}.{}",
-            reference.digest().to_hex(),
-            std::process::id(),
-            NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
-        ));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(unavailable)?;
+        let (path, mut file) = (0..TEMP_NAME_ATTEMPTS)
+            .find_map(|_| {
+                let path = self.root.join(TEMP_DIR).join(format!(
+                    "{}.{}.{}",
+                    reference.digest().to_hex(),
+                    std::process::id(),
+                    NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
+                ));
+                let file = OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .ok()?;
+                Some((path, file))
+            })
+            .ok_or(ArtifactError::Unavailable)?;
         file.write_all(bytes).map_err(unavailable)?;
         let mut permissions = file.metadata().map_err(unavailable)?.permissions();
         permissions.set_readonly(true);
