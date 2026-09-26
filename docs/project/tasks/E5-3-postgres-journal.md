@@ -38,6 +38,7 @@ story. Fill every section; write "none" rather than deleting one.
   | Transactional append with the head locked: no fork, no `seq` reuse | `concurrent_appenders_never_fork_or_reuse_a_seq` |
   | A crash between write and commit leaves no partial event | `a_failed_commit_leaves_no_partial_event` (`Unavailable`), `a_connection_lost_during_commit_is_ambiguous_and_atomic` (`Ambiguous`) |
   | Stored bytes are re-verified on read (§11 checks 1 to 5) | `stored_bytes_are_reverified_on_read`, `tamper_vectors_are_caught_when_the_stored_rows_are_read` |
+  | Reads do not need the artifact store (§11 checks 6 and 7) and still check everything else | `C::events_with_artifact_references_are_stored_and_read_back`, `reads_pass_over_artifact_checks_and_verify_every_other_check` |
   | §6.1 append-only in the database: privileges | `the_application_role_can_only_insert_and_select_events` |
   | §6.1 append-only in the database: triggers, including TRUNCATE, binding owner and superuser | `triggers_reject_changes_even_from_the_owner_and_superusers` |
   | §6.1 `CHECK (hash = sha256(body))`, chain links, gapless, heads only advance | `the_database_rejects_bad_rows_forks_gaps_and_head_rollbacks` |
@@ -89,10 +90,11 @@ story. Fill every section; write "none" rather than deleting one.
    `Unavailable`: Postgres rolled the transaction back, so the same drafts can be retried. A
    connection lost or terminated during COMMIT is `Ambiguous`: the writer must re-query before
    acting (§5.3).
-6. **Reads re-verify.** `rows`, `event`, and the events an idempotent retry returns re-run §11
-   checks 1 to 5 over the stream from `seq` 1 through the last row returned; an append also
-   checks that the head row's hash is the stored hash of the head event. A failure is
-   `IntegrityError` naming the check and `seq`, never a result.
+6. **Reads re-verify.** `rows` re-runs §11 checks 1 to 5 over the stream from `seq` 1. `event`,
+   and each event an idempotent retry returns, re-runs checks 1, 2, and 4 on that row. An append
+   runs the same three on the head event and checks that its hash is the head row's. A failure is
+   `IntegrityError` naming the check and `seq`, never a result. Checks 6 and 7 need the artifact
+   store, which is not this crate's, so reads pass over an artifact failure and check the rest.
 7. **Tests.** Each test uses its own schema in the database named by `MANDATE_PG_URL`, migrated
    as the owner role; roles are cluster-wide `NOLOGIN` roles the tests `SET ROLE` to. Without
    `MANDATE_PG_URL` the tests skip, unless `MANDATE_PG_REQUIRED` is set. They run against

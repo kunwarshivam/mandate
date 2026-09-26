@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 use common::{edit, event_id, mark_draft, now, opened_draft, stream};
-use conformance::{append_chain, fixture, get, int, list, text};
+use conformance::{append_chain, artifact_mark_draft, fixture, get, int, list, text};
 use mandate_canon::Digest;
 use mandate_journal::{
     Anchor, AnchorLeaf, AppendOutcome, Draft, EventCheck, EventFailure, Head, StoredEvent,
@@ -838,6 +838,66 @@ fn stored_bytes_are_reverified_on_read() {
             "an append never chains onto a head event whose hash is not the head's"
         );
         assert_eq!(db.block_on(journal.event(&event_id(4))).unwrap(), None);
+    }
+}
+
+/// Opens the suite's stream, then appends artifact-referencing marks 1 and 2 (seq 2 and 3) and plain
+/// marks 3 and 4 (seq 4 and 5).
+async fn opened_with_artifact_marks(journal: &PgJournal) -> StreamId {
+    let (s, epoch) = opened(journal, 0).await;
+    let artifacts = [artifact_mark_draft(1, 'a'), artifact_mark_draft(2, 'b')];
+    let refs: Vec<&[u8]> = artifacts.iter().map(Vec::as_slice).collect();
+    committed(journal.append(&s, 1, epoch, now(), &refs).await);
+    committed(journal.append(&s, 3, epoch, now(), &[&mark(3), &mark(4)]).await);
+    s
+}
+
+#[test]
+#[ignore = "pending E5-3"]
+fn reads_pass_over_artifact_checks_and_verify_every_other_check() {
+    let rewrite = |seq: u64| {
+        format!(
+            "UPDATE events SET body = {b}, hash = sha256({b}) WHERE seq = {seq}",
+            b = replaced(r#""price":"1""#, r#""price":"2""#)
+        )
+    };
+    let cases = [
+        (
+            rewrite(2),
+            3,
+            EventCheck::PrevHashMismatch,
+            "the chain is checked across consecutive artifact events",
+        ),
+        (
+            rewrite(4),
+            5,
+            EventCheck::PrevHashMismatch,
+            "and after them",
+        ),
+        (
+            "UPDATE events SET event_type = 'FillApplied' WHERE seq = 3".to_owned(),
+            3,
+            EventCheck::ColumnMismatch,
+            "and an artifact event's own columns are checked",
+        ),
+    ];
+    for (sql, seq, check, why) in cases {
+        let Some(db) = TestDb::new() else { return };
+        let journal = db.journal();
+        let s = db.block_on(opened_with_artifact_marks(&journal));
+        assert_eq!(db.block_on(journal.rows(&s)).unwrap().len(), 5);
+        db.block_on(tamper(&db, &sql));
+        assert_eq!(
+            read_failure(db.block_on(journal.rows(&s))),
+            integrity(&s, seq, check),
+            "{why}"
+        );
+        if check == EventCheck::ColumnMismatch {
+            assert_eq!(
+                read_failure(db.block_on(journal.event(&event_id(2)))),
+                integrity(&s, seq, check)
+            );
+        }
     }
 }
 
