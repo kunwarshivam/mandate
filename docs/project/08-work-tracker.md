@@ -72,7 +72,7 @@ issues are the record; this table is the summary
 | E5-2 artifact store | `cursor` | #59 | Merged (#66 tests, #84 implementation); DEC-107 recorded; claim closed | `cursor/e5-2-artifact-tests-b0be` (#66), `cursor/e5-2-artifact-impl-b0be` (#84) |
 | `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Merged (#81; DEC-110 reserved in #83); claim closed | `cursor/xtask-pending-fail-7e3b` (#81) |
 | Cursor allocation: next stories | `cursor` | #87 | Merged (#88); E5-4 and the M1 exit run's keys await the founder | `cursor/allocation-next` (#88) |
-| `mandate-marketdata` safe concurrent dataset writes | `cursor` | #86 | Claimed | — |
+| `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` (#90) |
 
 ## Waiting on the founder
 
@@ -106,7 +106,7 @@ them in the decision log.
 | A crypto fee rate above 10000 bps makes a crypto buy an error rather than a credit; decide whether to reject such configurations at load | Next accounting story |
 | Fee reservations for buying power | E6-6 |
 | The accounting fold copies the account on every input; measure before long backtests | E4-2 |
-| Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | #86 (`cursor`), before any parallel download |
+| ~~Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names~~ **Resolved (claim #86, PR #90):** each write holds an advisory lock on the dataset directory, uses a temporary name no other writer uses, and publishes a partition by hard link ([brief](tasks/marketdata-write-safety.md)) | `cursor` |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
 | `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | A `cursor` claim of its own on the shared `mandate-time` crate, after #85 (allocation #88) |
