@@ -28,6 +28,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 |---|---|---|---|
 | E1-1, E1-2 Foundations | Merged | before the PR flow | Workspace, CI, xtask, conventions, templates |
 | E5-1 Journal core | Merged | [#1](https://github.com/kunwarshivam/mandate/pull/1), [#7](https://github.com/kunwarshivam/mandate/pull/7), [#8](https://github.com/kunwarshivam/mandate/pull/8), [#10](https://github.com/kunwarshivam/mandate/pull/10) | Canonical JSON, decimals, timestamps, append protocol, verification, anchoring; 46 journal cases passing. #2 to #6 merged into stacked branches; #2 to #5 were re-landed as #7, and #6 as #8 |
+| E5-3 Postgres journal | Tests PR open | tests: see claim [#77](https://github.com/kunwarshivam/mandate/issues/77); DEC-109 reservation [#79](https://github.com/kunwarshivam/mandate/pull/79) | New `mandate-journal-pg` (sqlx, no query macros; DEC-109); the append suite shared with `MemoryJournal`; Postgres 18 in `full`, 17 nightly; no reference cases move |
 | `risk_clock` (DEC-81) | Merged | [#12](https://github.com/kunwarshivam/mandate/pull/12), [#13](https://github.com/kunwarshivam/mandate/pull/13), [#14](https://github.com/kunwarshivam/mandate/pull/14) | Required on every risk input; journal vectors version 3 |
 | E3-1 Accounting | Merged | [#16](https://github.com/kunwarshivam/mandate/pull/16), [#18](https://github.com/kunwarshivam/mandate/pull/18), [#19](https://github.com/kunwarshivam/mandate/pull/19), [#21](https://github.com/kunwarshivam/mandate/pull/21), [#23](https://github.com/kunwarshivam/mandate/pull/23), [#24](https://github.com/kunwarshivam/mandate/pull/24), [#25](https://github.com/kunwarshivam/mandate/pull/25), [#26](https://github.com/kunwarshivam/mandate/pull/26), spec [#28](https://github.com/kunwarshivam/mandate/pull/28) | `mandate-num`, trading calendars, `mandate-accounting`. Review caught three defects before merge (basis sign, negative fee cap, cap lowered mid-order); #20 and #22 were superseded |
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
@@ -61,6 +62,7 @@ issues are the record; this table is the summary
 | E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation); follow-up tests PR pending | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl` |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Brief PR open (task brief, DEC-106); tests, implementation, and status PRs follow | #61 (brief); built and pushed: `agent/e4-1-sim-tests`, `agent/e4-1-sim-impl`, `agent/e4-1-sim-status` |
+| E5-3 Postgres journal | `cursor` | #77 | Tests PR open; DEC-109 reserved (#79). `xtask` `postgres` part, CI services, and `install.sh` under #78 | `cursor/e5-3-pg-tests-e15e`; implementation `cursor/e5-3-pg-impl-e15e` after the tests PR merges |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS; rebase and the founder's confirmation pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
@@ -93,7 +95,7 @@ them in the decision log.
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
 | `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-4 (a shared `mandate-time` change; E2-2 reads stored nanoseconds and did not need it) |
-| Postgres is not installed in the agent environment or CI | E5-3 (add it to `.cursor/install.sh` and a CI service first) |
+| Postgres in the agent environment: `.cursor/install.sh` installs PostgreSQL 18 only where apt.postgresql.org is reachable, and `MANDATE_PG_URL` must be exported by hand (`environment.json` cannot set it) | E5-3 (CI has it: a service container in `full` and nightly) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
 
 ## Lessons encoded today
