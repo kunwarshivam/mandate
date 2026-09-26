@@ -605,7 +605,7 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
    the 298 committed cases is inside both, so nothing diverges today.
    **Recommendation:** the Rust crate, not ref.py, is the oracle for anything beyond the 298 cases,
    and where the two differ the crate's exact 256-bit result is the correct one. A fuzz is therefore
-   run against this story's independent oracles (below), never differentially against ref.py.
+   run against this story's independent oracles (in Scope, above), never differentially against ref.py.
    Recommendation 1 removes the second divergence; the first is inherent to a 60-digit context and is
    why no differential fuzz is planned.
 3. **`xtask/layers.toml` and CODEOWNERS** gain `mandate-builder` (layer 5, safety-critical, pure,
