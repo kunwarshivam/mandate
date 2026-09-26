@@ -126,10 +126,13 @@ every workspace crate and reference-case suite has an entry and that every path 
   `crates/mandate-marketdata/src/dataset.rs` and
   `crates/mandate-marketdata/src/dataset/partition.rs` (Parquet partitions, manifest,
   compare-before-write), `crates/mandate-marketdata/src/download.rs` (one dataset over a day range).
+  `mandate-cli`: `crates/mandate-cli/src/download.rs` (`mandate download`),
+  `config/research-basket.toml`.
 - **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in
-  `crates/mandate-marketdata/tests/fixtures/alpaca/`.
-- **Run:** `cargo nextest run -p mandate-marketdata`; against the data host with the paper
-  credentials, `MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test live`.
+  `crates/mandate-marketdata/tests/fixtures/alpaca/`; `crates/mandate-cli/tests/download.rs`.
+- **Run:** `cargo nextest run -p mandate-marketdata -p mandate-cli`; against the data host with the
+  paper credentials, `MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test
+  live`.
 
 ## Repository automation
 

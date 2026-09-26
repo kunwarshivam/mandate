@@ -67,3 +67,8 @@ allowed_external = ["libtest-mimic", "serde_json", "toml"]
 layer = 6
 safety_critical = false
 pure = false
+
+[crates.mandate-cli]
+layer = 7
+safety_critical = false
+pure = false

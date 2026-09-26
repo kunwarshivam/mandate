@@ -1,0 +1,8 @@
+# Research basket (DEC-90): the team's internal research data for M1 and backtests. It is not an
+# instrument choice for any user; users choose their own instruments (AGENTS.md rule 11).
+
+[us-equity]
+symbols = ["SPY", "QQQ", "IWM", "TLT", "GLD", "AAPL", "MSFT", "NVDA", "AMZN", "JPM"]
+
+[crypto]
+symbols = ["BTC/USD"]

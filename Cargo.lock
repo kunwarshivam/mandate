@@ -1018,6 +1018,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-cli"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "mandate-marketdata",
+ "mandate-time",
+ "serde",
+ "tokio",
+ "toml",
+]
+
+[[package]]
 name = "mandate-journal"
 version = "0.0.0"
 dependencies = [
