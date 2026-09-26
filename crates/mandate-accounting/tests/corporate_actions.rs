@@ -91,7 +91,6 @@ fn conserves(before: &Account, after: &Account) {
 /// 400 × 1 ÷ 4 = 100; MV 40 × 100 = 4000, equity 4000, realized 0. A later mark of 100 leaves
 /// equity 4000 and unrealized 40 × 100 − 4000 = 0.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_04_forward_split_multiplies_quantity_and_divides_the_mark() {
     let config = no_fees();
     let a = holding("0", "ABC", "10", "4000");
@@ -119,7 +118,6 @@ fn rc_04_forward_split_multiplies_quantity_and_divides_the_mark() {
 /// 2 × 10 ÷ 1 = 20; equity 0 + 9.50 + 2 × 20 = 49.50. The broker's posting of 9.50 settles it:
 /// receivables 0, settled 9.50, equity 49.50.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_05_reverse_split_with_cash_in_lieu_then_the_posting() {
     let config = no_fees();
     let a = holding("0", "LOW", "25", "50");
@@ -159,7 +157,6 @@ fn rc_05_reverse_split_with_cash_in_lieu_then_the_posting() {
 /// total P&L 0 − 25 + 25 = 0. `DividendPaid` is due at 00:00 ET on 2026-10-01 and not a second
 /// before; it moves 25 to settled: 5025, receivables 0, equity 10000.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_06_long_dividend_is_income_on_the_ex_date_and_cash_on_the_pay_date() {
     let config = no_fees();
     let a = holding("5000", "DIV", "100", "5000");
@@ -211,7 +208,6 @@ fn rc_06_long_dividend_is_income_on_the_ex_date_and_cash_on_the_pay_date() {
 /// equity 15000 − 25 − 4975 = 10000, unrealized −4975 + 5000 = 25. On the pay date settled
 /// 15000 − 25 = 14975, equity 10000.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_06_short_dividend_is_a_payable() {
     let config = no_fees();
     let a = holding("15000", "DIV", "-100", "-5000");
@@ -247,7 +243,6 @@ fn rc_06_short_dividend_is_a_payable() {
 /// −0.00000001; mark' = 30 × 3 = 90; MV 3.333333333 × 90 = 299.99999997; unrealized
 /// 299.99999997 − 99.99999999 = 199.99999998; Δequity −0.00000003 = −0.00000001 − 0.00000002.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_23_fractionable_residual_removes_its_basis() {
     let config = no_fees();
     let a = holding("0", "LOWF", "10", "100");
@@ -278,7 +273,6 @@ fn rc_23_fractionable_residual_removes_its_basis() {
 /// 999.99999999999, equity 999.99999999999, realized 0. The 10⁻¹¹ lost to the mark is within
 /// I3's bound |Q_raw| × 5 × 10⁻¹³ = 1.5 × 10⁻¹¹.
 #[test]
-#[ignore = "pending E3-2"]
 fn rc_23_forward_split_with_a_non_terminating_mark() {
     let config = no_fees();
     let a = holding("0", "LOWF", "10", "1000");
@@ -302,7 +296,6 @@ fn rc_23_forward_split_with_a_non_terminating_mark() {
 /// 0.000000000187500000188 = 0.000000000008 = Q·new × 5 × 10⁻¹³, the corrected bound exactly,
 /// above the spec's |Q'| × old × 5 × 10⁻¹³ = 0.0000000000079999999995.
 #[test]
-#[ignore = "pending E3-2"]
 fn i3_is_bounded_by_the_raw_quantity_not_the_split_quantity() {
     let config = no_fees();
     let a = holding("0", "ODD", "1", "1");
@@ -336,7 +329,6 @@ fn i3_is_bounded_by_the_raw_quantity_not_the_split_quantity() {
 /// cash in lieu round(−0.5 × 19, 2) = −9.50, a payable; realized −9.50 − (−10) = 0.50. The broker's
 /// posting of −9.50 settles it: settled 1000 − 9.50 = 990.50.
 #[test]
-#[ignore = "pending E3-2"]
 fn a_short_reverse_split_owes_cash_in_lieu() {
     let config = no_fees();
     let a = holding("1000", "LOW", "-25", "-50");
@@ -366,7 +358,6 @@ fn a_short_reverse_split_owes_cash_in_lieu() {
 /// No share remains, so the whole basis is removed: R = B = 7; cash in lieu round(0.5 × 10, 2) =
 /// 5.00; realized 5 − 7 = −2; the position is flat and gone, and the mark still adjusts: 4 × 2 = 8.
 #[test]
-#[ignore = "pending E3-2"]
 fn a_split_leaving_no_share_removes_the_whole_basis() {
     let config = no_fees();
     let a = holding("0", "ODD", "1", "7");
@@ -387,7 +378,6 @@ fn a_split_leaving_no_share_removes_the_whole_basis() {
 /// holding basis; with B = 5.27 × 10⁻¹³, round(B, 12) = 10⁻¹² > B would leave basis of the wrong
 /// sign. The whole basis is removed instead, and realized is −B (no cash in lieu price).
 #[test]
-#[ignore = "pending E3-2"]
 fn dust_splits_remove_exactly_the_basis_held() {
     let config = no_fees();
     for b in ["0.000000000000000527", "0.000000000000527"] {
@@ -411,7 +401,6 @@ fn dust_splits_remove_exactly_the_basis_held() {
 /// at 0.25 per new share 0.125 → 0.12; at 0.75, 0.375 → 0.38. At a price where f × price rounds to
 /// 0 no receivable is recorded; a split with no residual records none even when a price is given.
 #[test]
-#[ignore = "pending E3-2"]
 fn cash_in_lieu_rounds_half_even_to_cents() {
     let config = no_fees();
     let a = holding("0", "LOW", "15", "30");
@@ -443,7 +432,6 @@ fn cash_in_lieu_rounds_half_even_to_cents() {
 /// 0.625 → 0.62. A flat instrument's dividend is zero, records no receivable, and still counts as
 /// applied, so a second delivery is a duplicate.
 #[test]
-#[ignore = "pending E3-2"]
 fn dividends_round_half_even_to_cents_and_flat_holders_get_none() {
     let config = no_fees();
     for (q, amount) in [("7", "0.88"), ("5", "0.62")] {
@@ -478,7 +466,6 @@ fn dividends_round_half_even_to_cents_and_flat_holders_get_none() {
 /// becomes 30 ÷ 3 = 10 after a 3:1 split; a flat instrument with a mark of 12 has its mark halved
 /// by a 2:1 split and records a split of nothing.
 #[test]
-#[ignore = "pending E3-2"]
 fn splits_adjust_last_fill_prices_and_flat_marks() {
     let config = no_fees();
     let a = Account::opening(usd("1000"), []);
@@ -516,7 +503,6 @@ fn splits_adjust_last_fill_prices_and_flat_marks() {
 /// DEC-95. A split whose adjusted mark rounds to zero at 12 places is rejected: 0.000000001 ÷
 /// 10000 = 10⁻¹³ → 0.
 #[test]
-#[ignore = "pending E3-2"]
 fn a_split_whose_mark_rounds_to_zero_is_rejected() {
     let a = holding("0", "PNY", "1", "1");
     let a = step(&a, &mark("PNY", "0.000000001"), &no_fees());
@@ -534,7 +520,6 @@ fn a_split_whose_mark_rounds_to_zero_is_rejected() {
 /// and a dividend may share an ex-date; a fill traded before an applied action's ex-date is
 /// rejected. Each rejection leaves the account as it was.
 #[test]
-#[ignore = "pending E3-2"]
 fn corporate_actions_and_fills_are_ordered_by_ex_date() {
     let config = no_fees();
     let a = holding("1000", "ABC", "10", "100");
@@ -614,7 +599,6 @@ fn corporate_actions_and_fills_are_ordered_by_ex_date() {
 /// or a second one; a cash in lieu posting of a different amount, for another instrument, or a
 /// second time.
 #[test]
-#[ignore = "pending E3-2"]
 fn postings_settle_only_what_is_outstanding() {
     let config = no_fees();
     let a = holding("0", "LOW", "25", "50");
@@ -657,7 +641,6 @@ fn postings_settle_only_what_is_outstanding() {
 /// equals. 25 → 2 at 1:10 with 19 per new share leaves f 0.5: 9.50. Then 2 → 0 at 1:3 with 30
 /// leaves f 2 ÷ 3: 20.00, or at 1:4 with 19 leaves f 0.5: 9.50 again.
 #[test]
-#[ignore = "pending E3-2"]
 fn a_cash_in_lieu_posting_settles_the_earliest_matching_amount() {
     let config = no_fees();
     let a = holding("0", "LOW", "25", "50");
@@ -698,7 +681,6 @@ fn a_cash_in_lieu_posting_settles_the_earliest_matching_amount() {
 /// `due` orders by date, then the settlement before dividends, then instrument and ex-date. A sell
 /// of AAA traded 2026-09-29 settles 2026-09-30, the pay date of dividends on BBB and AAA.
 #[test]
-#[ignore = "pending E3-2"]
 fn due_orders_settlements_before_dividends_on_one_date() {
     let config = no_fees();
     let a = Account::opening(
@@ -750,7 +732,6 @@ fn due_orders_settlements_before_dividends_on_one_date() {
 
 /// A dividend whose pay date is before its ex-date cannot be built; the pay date may equal it.
 #[test]
-#[ignore = "pending E3-2"]
 fn a_dividend_is_never_paid_before_its_ex_date() {
     let price = Price::parse("1").unwrap();
     let error = CashDividend::new(id("DIV"), d("2026-09-22"), d("2026-09-21"), price).unwrap_err();

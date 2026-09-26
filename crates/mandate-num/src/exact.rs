@@ -126,6 +126,28 @@ impl Exact {
 
     /// `self ÷ divisor`, rounded once to `scale` fractional digits.
     pub(crate) fn div(self, divisor: Self, scale: u32, mode: Rounding) -> Result<Self, NumError> {
+        let (numerator, denominator, negative) = self.quotient_terms(divisor, scale)?;
+        Ok(Self {
+            negative,
+            magnitude: round_quotient(numerator, denominator, negative, mode)?,
+            scale,
+        })
+    }
+
+    /// `self ÷ divisor`, truncated toward zero to `scale` fractional digits.
+    pub(crate) fn div_toward_zero(self, divisor: Self, scale: u32) -> Result<Self, NumError> {
+        let (numerator, denominator, negative) = self.quotient_terms(divisor, scale)?;
+        Ok(Self {
+            negative,
+            magnitude: numerator
+                .checked_div(denominator)
+                .ok_or(NumError::DivisionByZero)?,
+            scale,
+        })
+    }
+
+    /// Integer magnitudes whose quotient is |self ÷ divisor| × 10^`scale`, and the quotient's sign.
+    fn quotient_terms(self, divisor: Self, scale: u32) -> Result<(U256, U256, bool), NumError> {
         if divisor.magnitude.is_zero() {
             return Err(NumError::DivisionByZero);
         }
@@ -138,12 +160,7 @@ impl Exact {
             .magnitude
             .checked_mul(pow10(self.scale.saturating_sub(up))?)
             .ok_or(NumError::Overflow)?;
-        let negative = self.negative != divisor.negative;
-        Ok(Self {
-            negative,
-            magnitude: round_quotient(numerator, denominator, negative, mode)?,
-            scale,
-        })
+        Ok((numerator, denominator, self.negative != divisor.negative))
     }
 
     /// Stores the value, dropping only trailing zeros; anything that would need rounding or more
