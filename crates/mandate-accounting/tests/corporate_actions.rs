@@ -295,6 +295,42 @@ fn rc_23_forward_split_with_a_non_terminating_mark() {
     conserves(&a, &b);
 }
 
+/// DEC-94. Q 1 on fractionable ODD marked 1.000000001, 16:3: Q_raw = 16 ÷ 3, Q' = 5.333333333,
+/// r = Q·new − Q'·old = 16 − 15.999999999 = 0.000000001; mark × 3 ÷ 16 = 0.1875000001875, a tie,
+/// so mark' = 0.187500000188; MV' = 5.333333333 × 0.187500000188 = 1.000000000940166666604, ΔMV =
+/// −0.000000000059833333396. Times old: 3 × ΔMV + r × mark' = −0.000000000179500000188 +
+/// 0.000000000187500000188 = 0.000000000008 = Q·new × 5 × 10⁻¹³, the corrected bound exactly,
+/// above the spec's |Q'| × old × 5 × 10⁻¹³ = 0.0000000000079999999995.
+#[test]
+#[ignore = "pending E3-2"]
+fn i3_is_bounded_by_the_raw_quantity_not_the_split_quantity() {
+    let config = no_fees();
+    let a = holding("0", "ODD", "1", "1");
+    let a = step(&a, &mark("ODD", "1.000000001"), &config);
+    let b = step(
+        &a,
+        &split("ODD", "2026-09-22", (16, 3), FRACTIONAL, None),
+        &config,
+    );
+    assert_eq!(position(&b, "ODD").0, "5.333333333");
+    let adjusted = b.mark(&id("ODD")).unwrap();
+    assert_eq!(text(adjusted), "0.187500000188");
+    assert_eq!(text(b.market_value().unwrap()), "1.000000000940166666604");
+    let delta = b
+        .market_value()
+        .unwrap()
+        .checked_sub(a.market_value().unwrap())
+        .unwrap();
+    assert_eq!(text(delta), "-0.000000000059833333396");
+    let residual_value = qty("0.000000001").value_at_mark(adjusted).unwrap();
+    let lhs = [delta, delta, delta, residual_value]
+        .into_iter()
+        .try_fold(Usd::ZERO, Usd::checked_add)
+        .unwrap();
+    assert_eq!(text(lhs), "0.000000000008");
+    assert!(lhs > usd("0.0000000000079999999995"));
+}
+
 /// A short reverse split. Q −25, B −50, 1:10 on non-fractionable LOW with 19 per new share:
 /// Q_raw −2.5, Q' −2 (toward zero), f −0.5; R = round(−50 × −0.5 ÷ −2.5, 12) = −10, B' = −40;
 /// cash in lieu round(−0.5 × 19, 2) = −9.50, a payable; realized −9.50 − (−10) = 0.50. The broker's

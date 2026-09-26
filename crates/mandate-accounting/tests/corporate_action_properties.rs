@@ -43,7 +43,9 @@ const INSTRUMENTS: [&str; 2] = ["AAA", "BBB"];
 const MAX_SPLITS: usize = 3;
 const SETTLED: i128 = 1_000_000 * 100 * CENT;
 
+/// `n ÷ d` rounded half-even to an integer, for a divisor of either sign.
 fn floor_round(n: i128, d: i128) -> i128 {
+    let (n, d) = if d < 0 { (-n, -d) } else { (n, d) };
     assert!(d > 0);
     let q = n.div_euclid(d);
     let r = n.rem_euclid(d);
@@ -185,6 +187,8 @@ enum Event {
         instrument: usize,
         cents: i128,
     },
+    /// Cash in lieu prices are often a few odd cents, and 1:2 whole-share splits common, so that
+    /// half a share lands on a half-cent tie.
     Split {
         instrument: usize,
         new: u64,
@@ -192,7 +196,8 @@ enum Event {
         whole: bool,
         cil_cents: Option<i128>,
     },
-    /// `per_share` in 10⁻⁴ USD; the pay date is `pay_offset` weekdays after the ex-date.
+    /// `per_share` in 10⁻⁴ USD, often a multiple of 0.005 so that amounts land on half-cent ties;
+    /// the pay date is `pay_offset` weekdays after the ex-date.
     Dividend {
         instrument: usize,
         per_share: i128,
@@ -224,14 +229,16 @@ fn event() -> impl Strategy<Value = Event> {
         6 => (
             0usize..2,
             any::<bool>(),
-            prop_oneof![(1i128..=50).prop_map(|s| s * QTY), 1i128..=50 * QTY, 1i128..=10],
+            prop_oneof![3 => (1i128..=50).prop_map(|s| s * QTY), 1 => 1i128..=50 * QTY, 1 => 1i128..=10],
             1i128..=10_000,
         )
             .prop_map(|(instrument, buy, qty, cents)| Event::Fill { instrument, buy, qty, cents }),
         2 => (0usize..2, 1i128..=10_000).prop_map(|(instrument, cents)| Event::Mark { instrument, cents }),
-        4 => (0usize..2, 1u64..=4, 1u64..=4, any::<bool>(), proptest::option::of(1i128..=10_000))
+        4 => (0usize..2, 1u64..=4, 1u64..=4, any::<bool>(), proptest::option::of(prop_oneof![1i128..=10_000, (0i128..50).prop_map(|k| 2 * k + 1)]))
             .prop_map(|(instrument, new, old, whole, cil_cents)| Event::Split { instrument, new, old, whole, cil_cents }),
-        3 => (0usize..2, 1i128..=10_000, 0u8..=5)
+        2 => (0usize..2, (0i128..50).prop_map(|k| 2 * k + 1))
+            .prop_map(|(instrument, cents)| Event::Split { instrument, new: 1, old: 2, whole: true, cil_cents: Some(cents) }),
+        3 => (0usize..2, prop_oneof![1i128..=10_000, (1i128..=200).prop_map(|k| 50 * k)], 0u8..=5)
             .prop_map(|(instrument, per_share, pay_offset)| Event::Dividend { instrument, per_share, pay_offset }),
         3 => Just(Event::Advance),
         2 => (any::<usize>(), any::<bool>()).prop_map(|(pick, exact)| Event::PostCashInLieu { pick, exact }),
@@ -253,9 +260,9 @@ fn opening() -> impl Strategy<Value = Option<Opening>> {
     proptest::option::of(
         (
             prop_oneof![
-                1i128..=10,
-                (1i128..=100).prop_map(|s| s * QTY),
-                1i128..=100 * QTY
+                1 => 1i128..=10,
+                3 => (1i128..=100).prop_map(|s| s * QTY),
+                1 => 1i128..=100 * QTY
             ],
             prop_oneof![0i128..=10_000_000, 0i128..=10_000_000_000_000_000_000_000],
             any::<bool>(),
@@ -651,7 +658,7 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Run, TestCaseError> {
         ..Oracle::default()
     };
     let mut positions = Vec::new();
-    let mut work: Vec<(Input, Result<Option<Record>, AccountingError>)> = Vec::new();
+    let mut marks = Vec::new();
     for (i, opening) in scenario.openings.iter().enumerate() {
         if let Some(o) = opening {
             positions.push((
@@ -664,17 +671,18 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Run, TestCaseError> {
             ));
             oracle.positions.insert(i, (o.qty, o.basis));
             oracle.marks.insert(i, o.cents * MARK_CENT);
-            work.push((
-                Input::Mark {
-                    instrument: id(INSTRUMENTS[i]),
-                    price: price(o.cents),
-                },
-                Ok(None),
-            ));
+            marks.push(Input::Mark {
+                instrument: id(INSTRUMENTS[i]),
+                price: price(o.cents),
+            });
         }
     }
-    let opening = Account::opening(usd(&decimal(SETTLED, 21)), positions);
+    let opening = marks.iter().fold(
+        Account::opening(usd(&decimal(SETTLED, 21)), positions),
+        |account, mark| account.apply(mark, &config).unwrap().account,
+    );
     let mut account = opening.clone();
+    let mut work: Vec<(Input, Result<Option<Record>, AccountingError>)> = Vec::new();
     let mut steps = Vec::new();
     let mut applied_actions: Vec<Input> = Vec::new();
     let mut today = 0i64;
@@ -720,12 +728,9 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Run, TestCaseError> {
         Ok(())
     };
 
-    fold(
-        &mut account,
-        &oracle,
-        core::mem::take(&mut work),
-        &mut steps,
-    )?;
+    if check_oracle {
+        compare(&account, &oracle)?;
+    }
 
     for (n, event) in scenario.events.iter().enumerate() {
         match *event {
