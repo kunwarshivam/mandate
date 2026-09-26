@@ -1,22 +1,38 @@
-//! Fetching one UTC day of one dataset, or a symbol's corporate actions: pagination, retries with
-//! exponential backoff for rate limits and server errors, and ordering checks. The transport and
-//! the pause are injected so tests replay recorded responses without a network or a clock
-//! (ADR-0001 ES-19).
+//! Fetching one UTC day of one dataset, or a symbol's corporate actions: pagination, pacing to the
+//! host's rate limit, retries (a 429 waits for the next rate window, server errors back off
+//! exponentially), and ordering checks. The transport and the clock are injected so tests replay
+//! recorded responses without a network or real waiting (ADR-0001 ES-19).
 
 use std::collections::BTreeSet;
 use std::future::Future;
-use std::time::Duration;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, SystemTime};
 
 use mandate_time::{Date, UtcNanos};
 
 use crate::alpaca::{self, WireError};
 use crate::model::{CorporateActions, DatasetId, DayRange, Records, Symbol};
+use crate::rate::Pacer;
+pub use crate::rate::RatePolicy;
 use crate::timestamp::TimestampError;
 
-/// An HTTP response: the status code and the body bytes.
+/// A response's rate-limit headers as the host sent them; the client parses them and ignores any
+/// that do not parse.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RateHeaders {
+    /// `X-Ratelimit-Limit`: requests allowed per window.
+    pub limit: Option<String>,
+    /// `X-Ratelimit-Remaining`: requests left.
+    pub remaining: Option<String>,
+    /// `X-Ratelimit-Reset`: when the allowance is whole again, in seconds since the Unix epoch.
+    pub reset: Option<String>,
+}
+
+/// An HTTP response: the status code, the rate-limit headers, and the body bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Response {
     pub status: u16,
+    pub rate: RateHeaders,
     pub body: Vec<u8>,
 }
 
@@ -55,37 +71,58 @@ pub trait Transport {
     fn get(&self, path_and_query: &str) -> impl Future<Output = Result<Response, TransportError>>;
 }
 
-/// Waits between attempts.
+/// Tells the time and waits between requests. The client paces against `now`, so a `pause` must
+/// move `now` forward by at least its duration.
 pub trait Pause {
+    fn now(&self) -> UtcNanos;
     fn pause(&self, duration: Duration) -> impl Future<Output = ()>;
 }
 
-/// Pauses on the tokio timer.
+/// The system clock and the tokio timer.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TokioPause;
 
 impl Pause for TokioPause {
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the adapter's edge reads the wall clock to compare with the host's rate-limit reset (ES-05)"
+    )]
+    fn now(&self) -> UtcNanos {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .ok()
+            .and_then(|since| {
+                let secs = i64::try_from(since.as_secs()).ok()?;
+                UtcNanos::from_parts(secs, since.subsec_nanos()).ok()
+            })
+            .unwrap_or(UtcNanos::EPOCH)
+    }
+
     async fn pause(&self, duration: Duration) {
         tokio::time::sleep(duration).await;
     }
 }
 
-/// Attempt `n` (from 1) that fails with a retryable cause waits
-/// `min(first_delay × 2^(n-1), max_delay)`, up to `max_attempts` attempts in all.
+/// A server error or transport failure `n` (from 1) waits `min(first_delay × 2^(n-1), max_delay)`,
+/// up to `max_attempts` such failures. A 429 instead waits for the next rate window
+/// ([`RatePolicy`]), up to `rate_limit_windows` times.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
     pub first_delay: Duration,
     pub max_delay: Duration,
+    pub rate_limit_windows: u32,
 }
 
 impl Default for RetryPolicy {
-    /// Six attempts over about a minute, enough to outlast Alpaca's per-minute rate window.
+    /// Six attempts over about half a minute for server errors, and three windows of waiting for
+    /// rate limits, so a window that slips past its reset does not fail a download.
     fn default() -> Self {
         Self {
             max_attempts: 6,
             first_delay: Duration::from_secs(1),
             max_delay: Duration::from_secs(32),
+            rate_limit_windows: 3,
         }
     }
 }
@@ -130,28 +167,38 @@ impl FetchError {
     }
 }
 
-/// The market-data client over an injected transport and pause.
+/// The market-data client over an injected transport and clock. Requests made through one client,
+/// concurrently or not, share its rate-limit pacing.
 #[derive(Debug)]
 pub struct Client<T, P> {
     transport: T,
     pause: P,
     retry: RetryPolicy,
+    pacer: Mutex<Pacer>,
     page_limit: u32,
 }
 
 impl<T: Transport, P: Pause> Client<T, P> {
-    /// A client with the default retry policy and Alpaca's largest page.
+    /// A client with the default retry and rate policies and Alpaca's largest page.
     pub fn new(transport: T, pause: P) -> Self {
         Self {
             transport,
             pause,
             retry: RetryPolicy::default(),
+            pacer: Mutex::new(Pacer::new(RatePolicy::default())),
             page_limit: alpaca::MAX_PAGE_LIMIT,
         }
     }
 
     pub fn with_retry(self, retry: RetryPolicy) -> Self {
         Self { retry, ..self }
+    }
+
+    pub fn with_rate(self, rate: RatePolicy) -> Self {
+        Self {
+            pacer: Mutex::new(Pacer::new(rate)),
+            ..self
+        }
     }
 
     /// Records per page, clamped to 1..=10,000.
@@ -231,26 +278,54 @@ impl<T: Transport, P: Pause> Client<T, P> {
 
     async fn get_with_retry(&self, path: &str) -> Result<Vec<u8>, FetchError> {
         let attempts = self.retry.max_attempts.max(1);
-        let mut attempt = 1_u32;
+        let mut failures = 0_u32;
+        let mut rate_limited = 0_u32;
         loop {
-            let cause = match self.transport.get(path).await {
-                Ok(Response { status: 200, body }) => return Ok(body),
-                Ok(Response { status, .. }) if status == 429 || (500..600).contains(&status) => {
+            while let Some(wait) = self.admit() {
+                self.pause.pause(wait).await;
+            }
+            let reply = self.transport.get(path).await;
+            let headers = reply.as_ref().ok().map(|response| &response.rate);
+            self.pacer().complete(headers, self.pause.now());
+            let cause = match reply {
+                Ok(Response {
+                    status: 200, body, ..
+                }) => return Ok(body),
+                Ok(Response { status: 429, .. }) => {
+                    self.pacer().rate_limited(self.pause.now());
+                    rate_limited = rate_limited.saturating_add(1);
+                    if rate_limited <= self.retry.rate_limit_windows {
+                        continue;
+                    }
+                    return Err(FetchError::Exhausted {
+                        attempts: failures.saturating_add(rate_limited),
+                        last: RetryCause::Status(429),
+                    });
+                }
+                Ok(Response { status, .. }) if (500..600).contains(&status) => {
                     RetryCause::Status(status)
                 }
                 Ok(Response { status, .. }) => return Err(FetchError::Status { status }),
                 Err(e) if e.is_retryable() => RetryCause::Transport(e),
                 Err(e) => return Err(FetchError::Transport(e)),
             };
-            if attempt >= attempts {
+            failures = failures.saturating_add(1);
+            if failures >= attempts {
                 return Err(FetchError::Exhausted {
-                    attempts: attempt,
+                    attempts: failures.saturating_add(rate_limited),
                     last: cause,
                 });
             }
-            self.pause.pause(self.retry.delay(attempt)).await;
-            attempt = attempt.saturating_add(1);
+            self.pause.pause(self.retry.delay(failures)).await;
         }
+    }
+
+    fn admit(&self) -> Option<Duration> {
+        self.pacer().admit(self.pause.now())
+    }
+
+    fn pacer(&self) -> MutexGuard<'_, Pacer> {
+        self.pacer.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 

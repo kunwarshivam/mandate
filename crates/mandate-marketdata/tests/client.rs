@@ -91,7 +91,7 @@ async fn records_out_of_time_order_across_pages_are_an_error() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn rate_limits_and_server_errors_retry_with_exponential_backoff() {
+async fn server_errors_back_off_exponentially_and_a_rate_limit_waits_a_window() {
     let body = page(&["2026-09-24T08:00:00Z"], None);
     let transport = FakeTransport::serving([
         status(429),
@@ -107,7 +107,7 @@ async fn rate_limits_and_server_errors_retry_with_exponential_backoff() {
         .await
         .unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(pause.pauses(), secs(&[1, 2, 4, 8]));
+    assert_eq!(pause.pauses(), secs(&[60, 1, 2, 4]));
     let requested = transport.requested();
     assert_eq!(requested.len(), 5);
     assert!(
@@ -136,6 +136,7 @@ async fn retries_stop_after_the_attempt_budget() {
         max_attempts: 5,
         first_delay: Duration::from_secs(1),
         max_delay: Duration::from_secs(4),
+        ..RetryPolicy::default()
     };
     let transport = FakeTransport::serving((0..5).map(|_| Err(TransportError::Connect)));
     let pause = RecordingPause::default();

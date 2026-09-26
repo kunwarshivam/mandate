@@ -198,13 +198,15 @@ founder-owned, so the four entries the tests PR adds are the items this brief ca
 ### Shared crates the tests PR touches
 
 - **`mandate-num`** (shared-crate additions only; ES-04 keeps exact arithmetic there, so
-  `mandate-spec` divides nothing itself). The operations §4.2 and §5 need, on top of DEC-127 item
-  14's `Ratio`: `Usd::at_least_ratio_of(ratio, of)` and the three other exact comparison predicates
-  §5.2 asks for ("comparisons are exact"), which cross-multiply on 256-bit intermediates and never
+  `mandate-spec` divides nothing itself). `Ratio` (signed, 24 places) and
+  `Usd::ratio_to(other, scale, mode)` — which is what DD, the daily P&L fraction, and
+  `position_pnl_fraction` need — arrived on `main` with E4-2's tests PR (#118, DEC-127 item 14), and
+  `CostBasis::portion` already carries §8.1's reduction. This stream adds only what §4.2 and §5 need
+  on top: `Usd::at_least_ratio_of(ratio, of)` and the three other exact comparison predicates §5.2
+  asks for ("comparisons are exact"), which cross-multiply on 256-bit intermediates and never
   materialise a rounded product; `Usd::times_ratio(ratio, scale, mode)` for the reported figures;
   `Usd::scaled_by(numerator, denominator, scale, mode)`, one rounding, for §5.1's
-  ceil(X × (E + Δ) ÷ E, 12); `Usd::ratio_to(other, scale, mode)` for DD and the daily fraction;
-  `Ratio::{times, complement}`; and `CostBasis::portion`, which already exists, for §8.1's reduction.
+  ceil(X × (E + Δ) ÷ E, 12); and `Ratio::{times, complement}`.
   Each gets an integer oracle in `crates/mandate-num/tests/num.rs`.
 - **`mandate-canon`**: a decimal ordering on `DecStr` (`Ord`, defined on the normalised text, so it
   is total and exact), which is what V-012, V-013, and V-014 need and what keeps the document's
@@ -749,11 +751,11 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     dispatches `agent_flatten` to `not interpreted until E6-3`, and the coordinator can move it back
     with one comment.
 20. **`mandate-num` gets one set of exact operations.** ES-04 keeps exact arithmetic in that crate.
-    This stream builds on DEC-127 item 14's `Ratio` rather than adding a second ratio type, and adds
-    the comparison predicates and the one-rounding scaling above. Stream G's claim also names
-    `Usd × Fraction`; the coordinator sequences so that one stream lands each operation and the
-    other consumes it. If `Ratio` has not merged when tests PR 1 opens, that PR adds it in the shape
-    DEC-127 item 14 fixes, and stream E's PR then carries no duplicate.
+    E4-2's tests PR (#118) landed `Ratio` (signed, 24 places) and `Usd::ratio_to` on `main`, so this
+    stream reuses both rather than adding a second ratio type, and adds only the exact comparison
+    predicates, `Usd::times_ratio`, `Usd::scaled_by` (one rounding), and `Ratio::{times, complement}`.
+    Stream G's claim also names `Usd × Fraction`; the coordinator sequences so that one stream lands
+    each operation and the other consumes it.
 
 ## Not done
 

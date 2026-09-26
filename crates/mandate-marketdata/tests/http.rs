@@ -4,11 +4,12 @@
 use std::fs;
 use std::path::Path;
 
-use mandate_marketdata::client::{Transport, TransportError};
+use mandate_marketdata::client::{RateHeaders, Transport, TransportError};
 use mandate_marketdata::http::{
     AlpacaDataHttp, Credentials, CredentialsError, DATA_HOST, KEY_ID_VAR, SECRET_VAR,
-    is_market_data_path,
+    is_market_data_path, rate_headers,
 };
+use reqwest::header::{HeaderMap, HeaderValue};
 
 const KEY: &str = "PKSENTINELKEYID00000";
 const SECRET: &str = "sentinel-secret-value-never-printed";
@@ -127,4 +128,28 @@ async fn a_refused_path_sends_nothing() {
         http.get("/v2/orders?status=all").await,
         Err(TransportError::RefusedPath)
     );
+}
+
+#[test]
+fn rate_limit_headers_are_read_whatever_their_case() {
+    let mut headers = HeaderMap::new();
+    headers.insert("X-Ratelimit-Limit", HeaderValue::from_static("200"));
+    headers.insert("x-ratelimit-remaining", HeaderValue::from_static("199"));
+    headers.insert("X-RATELIMIT-RESET", HeaderValue::from_static("1790450694"));
+    headers.insert("x-ratelimit-other", HeaderValue::from_static("1"));
+    assert_eq!(
+        rate_headers(&headers),
+        RateHeaders {
+            limit: Some("200".to_owned()),
+            remaining: Some("199".to_owned()),
+            reset: Some("1790450694".to_owned()),
+        }
+    );
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-ratelimit-remaining",
+        HeaderValue::from_bytes(b"19\xff").unwrap(),
+    );
+    assert_eq!(rate_headers(&headers), RateHeaders::default());
 }

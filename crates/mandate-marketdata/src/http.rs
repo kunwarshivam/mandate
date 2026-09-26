@@ -5,11 +5,11 @@
 
 use std::time::Duration;
 
-use reqwest::header::HeaderValue;
+use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::{Url, redirect};
 use secrecy::{ExposeSecret, SecretString};
 
-use crate::client::{Response, Transport, TransportError};
+use crate::client::{RateHeaders, Response, Transport, TransportError};
 
 /// The market-data host.
 pub const DATA_HOST: &str = "https://data.alpaca.markets";
@@ -180,11 +180,27 @@ impl Transport for AlpacaDataHttp {
             .await
             .map_err(|e| transport_error(&e))?;
         let status = response.status().as_u16();
+        let rate = rate_headers(response.headers());
         let body = response
             .bytes()
             .await
             .map_err(|e| transport_error(&e))?
             .to_vec();
-        Ok(Response { status, body })
+        Ok(Response { status, rate, body })
+    }
+}
+
+/// The `X-Ratelimit-*` headers of a response; one that is absent or not visible ASCII is `None`.
+pub fn rate_headers(headers: &HeaderMap) -> RateHeaders {
+    let read = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    RateHeaders {
+        limit: read("x-ratelimit-limit"),
+        remaining: read("x-ratelimit-remaining"),
+        reset: read("x-ratelimit-reset"),
     }
 }
