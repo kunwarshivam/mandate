@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://mandate.dev/schemas/mandate/1",
   "title": "Mandate",
-  "description": "Binding agent specification, schema version 1 (spec v0.5, approved). See docs/specs/mandate.md. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
+  "description": "Binding agent specification, schema version 1 (spec v0.6, envelope fields only; DEC-97). See docs/specs/mandate.md. The working universe and its theses are runtime state outside this document. Structural rules only; semantic validation rules (V-codes) and warnings (W-codes) are in the spec.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -70,18 +70,45 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "instruments",
+        "pinned",
+        "pinned_instruments",
+        "max_instruments",
+        "asset_classes",
         "leveraged_etps_enabled",
         "leveraged_etp_disclosure_version"
       ],
       "properties": {
-        "instruments": {
+        "pinned": {
+          "type": "boolean",
+          "description": "Bring-your-own-strategy: the owner pins the universe and the research agent admits nothing."
+        },
+        "pinned_instruments": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 50,
+          "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/instrument_ref"
-          }
+          },
+          "description": "The pinned universe; empty unless `pinned` is true (V-034)."
+        },
+        "max_instruments": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Ceiling on the working universe (DEC-117: default 5, platform ceiling 20)."
+        },
+        "asset_classes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "crypto",
+              "us_equity"
+            ]
+          },
+          "description": "Asset classes an admission may use (DEC-97: an envelope field)."
         },
         "leveraged_etps_enabled": {
           "type": "boolean"
@@ -104,6 +131,7 @@
       "required": [
         "description",
         "signal_models",
+        "research",
         "cadence",
         "sizing"
       ],
@@ -119,6 +147,41 @@
           "items": {
             "$ref": "#/$defs/signal_model"
           }
+        },
+        "research": {
+          "description": "Research-agent envelope fields; null when no signal model admits instruments (V-036).",
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "interval_s",
+                "cost_cap_usd_per_day",
+                "max_revisions_per_lineage"
+              ],
+              "properties": {
+                "interval_s": {
+                  "type": "integer",
+                  "minimum": 300,
+                  "maximum": 604800,
+                  "description": "How often the research agent may propose (DEC-97: cadence is an envelope field)."
+                },
+                "cost_cap_usd_per_day": {
+                  "$ref": "#/$defs/positive_decimal",
+                  "description": "Model spend per agent per risk day (DEC-120)."
+                },
+                "max_revisions_per_lineage": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 10,
+                  "description": "Revisions allowed in one thesis lineage (DEC-111)."
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "cadence": {
           "type": "object",
@@ -328,6 +391,7 @@
       "required": [
         "rules",
         "default",
+        "admission",
         "approval"
       ],
       "properties": {
@@ -344,6 +408,14 @@
             "deny",
             "auto"
           ]
+        },
+        "admission": {
+          "enum": [
+            "ask",
+            "deny",
+            "auto"
+          ],
+          "description": "Ceiling on the autonomy decision for the first order in a newly admitted instrument; platform default ask (DEC-97)."
         },
         "approval": {
           "type": "object",
@@ -517,7 +589,8 @@
         "content_hash",
         "params",
         "weight",
-        "max_output_age_s"
+        "max_output_age_s",
+        "admits_instruments"
       ],
       "properties": {
         "id": {
@@ -570,6 +643,10 @@
           "type": "integer",
           "minimum": 60,
           "maximum": 86400
+        },
+        "admits_instruments": {
+          "type": "boolean",
+          "description": "True for the research agent: its outputs may name instruments outside the working universe (DEC-97)."
         }
       }
     },
@@ -812,11 +889,13 @@
                 "first_trade_in_instrument",
                 "gross_usd_after",
                 "instrument",
+                "new_instrument",
                 "order_usd",
                 "position_pnl_fraction",
                 "position_usd_after",
                 "purpose",
                 "session",
+                "thesis_confidence",
                 "unusual_input"
               ]
             },

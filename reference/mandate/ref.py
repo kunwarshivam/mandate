@@ -1,4 +1,4 @@
-"""Reference implementation of docs/specs/mandate.md (v0.5, approved). Not production code."""
+"""Reference implementation of docs/specs/mandate.md (v0.6). Not production code."""
 import copy, hashlib, json, pathlib
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -112,8 +112,8 @@ FIELD_TYPES = {
     "purpose": "enum", "session": "enum", "asset_class": "enum", "instrument": "string",
     "order_usd": "decimal", "position_usd_after": "decimal", "gross_usd_after": "decimal",
     "bought_today_usd": "decimal", "daily_pnl_fraction": "decimal", "position_pnl_fraction": "decimal",
-    "combined_score": "unit", "drawdown": "unit",
-    "unusual_input": "bool", "first_trade_in_instrument": "bool",
+    "combined_score": "unit", "drawdown": "unit", "thesis_confidence": "unit",
+    "unusual_input": "bool", "first_trade_in_instrument": "bool", "new_instrument": "bool",
 }
 ENUMS = {"purpose": {"open", "increase"}, "session": {"pre_market", "regular", "after_hours", "crypto"},
          "asset_class": {"us_equity", "crypto"}}
@@ -172,10 +172,12 @@ def is_catch_all(c):
 SYSTEM_FIELDS = ["/mandate_schema_version", "/source_text_ref"]
 PLATFORM_DEFAULTABLE = {   # path -> required value (None = any value)
     "/name": None, "/notifications": None, "/autonomy/approval/on_timeout": "skip",
-    "/autonomy/approval/approvers": None, "/autonomy/default": "ask",
+    "/autonomy/approval/approvers": None, "/autonomy/default": "ask", "/autonomy/admission": "ask",
     "/universe/leveraged_etps_enabled": False, "/universe/leveraged_etp_disclosure_version": None,
     "/environment": "paper",
 }
+OWNER_SOURCES = ("user_stated", "user_entered", "platform_proposed")
+NEVER_PROPOSED = ["/universe/pinned_instruments", "/environment", "/connection_id"]
 
 def covered(path, prefixes):
     return any(path == p or path.startswith(p + "/") for p in prefixes)
@@ -194,7 +196,7 @@ def worst_case(m):
     r, p = m["risk"], m["protection"]
     A = D(m["capital"]["allocation_usd"])
     pos = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * A)
-    crypto = any(i["asset_class"] == "crypto" for i in m["universe"]["instruments"])
+    crypto = "crypto" in m["universe"]["asset_classes"]
     stop = (D(p["stop_distance"]) + (D(p["crypto_stop_limit_offset"] or 0) if crypto else 0)) if p["enabled"] else None
     return {"one_position_at_stop_usd": norm(pos * stop) if stop is not None else None,
             "daily_loss_budget_usd": norm(D(r["max_daily_loss"]) * A),
@@ -203,14 +205,15 @@ def worst_case(m):
 
 def semantic(m, ctx):
     errs, warns = set(), set()
-    inst = m["universe"]["instruments"]
+    u = m["universe"]
+    inst = u["pinned_instruments"]
     ids = [i["asset_id"] for i in inst]
     if ctx.get("connection_environment", m["environment"]) != m["environment"]:
         errs.add("V-001")
     if D(ctx["other_allocations_usd"]) + D(m["capital"]["allocation_usd"]) > D(ctx["account_equity_usd"]):
         errs.add("V-002")
     g = m["goal"]
-    if g["type"] == "accumulate" and ids != [g["instrument"]]:
+    if g["type"] == "accumulate" and not (u["pinned"] and ids == [g["instrument"]] and m["behavior"]["research"] is None):
         errs.add("V-003")
     if m["universe"]["leveraged_etps_enabled"]:
         dv = m["universe"]["leveraged_etp_disclosure_version"]
@@ -228,7 +231,7 @@ def semantic(m, ctx):
             errs.add("V-007")
     p = m["protection"]
     if p["enabled"]:
-        if any(i["asset_class"] == "crypto" for i in inst) and p["crypto_stop_limit_offset"] is None:
+        if "crypto" in u["asset_classes"] and p["crypto_stop_limit_offset"] is None:
             errs.add("V-008")
     elif p["stop_distance"] is not None or p["take_profit_distance"] is not None or p["crypto_stop_limit_offset"] is not None:
         errs.add("V-008")
@@ -237,7 +240,7 @@ def semantic(m, ctx):
     if not (sorted_unique(ids) and sorted_unique([s["id"] for s in sms]) and len(set(rule_ids)) == len(rule_ids)
             and all(sorted_unique([q["key"] for q in s["params"]]) for s in sms)
             and sorted_unique(m["behavior"]["cadence"]["event_sources"])
-            and sorted_unique(m["notifications"]["channels"])
+            and sorted_unique(m["notifications"]["channels"]) and sorted_unique(u["asset_classes"])
             and sorted_unique(m["autonomy"]["approval"]["approvers"])):
         errs.add("V-009")
     r = m["risk"]
@@ -281,9 +284,12 @@ def semantic(m, ctx):
             if allowed is None or (PLATFORM_DEFAULTABLE[allowed] is not None and get(m, allowed) != PLATFORM_DEFAULTABLE[allowed]) \
                     or (allowed == "/autonomy/approval/approvers" and multi):
                 errs.add("V-020")
-        elif pv["source"] not in ("user_stated", "user_entered") or not pv["confirmed"]:
+        elif pv["source"] not in OWNER_SOURCES or not pv["confirmed"]:
             errs.add("V-020")
+        if pv["source"] == "platform_proposed" and covered(path, NEVER_PROPOSED):
+            errs.add("V-040")
     autos = ["/autonomy/default"] if m["autonomy"]["default"] == "auto" else []
+    autos += ["/autonomy/admission"] if m["autonomy"]["admission"] == "auto" else []
     autos += [f"/autonomy/rules/{i}" for i, x in enumerate(m["autonomy"]["rules"]) if x["then"] == "auto"]
     for a in autos:
         pv = prov.get(a, {"source": "user_entered", "confirmed": True})
@@ -300,6 +306,18 @@ def semantic(m, ctx):
         errs.add("V-031")
     if r["scale_action"] == "trim_to_target" and g["type"] == "accumulate":
         errs.add("V-033")
+    admitting = [s for s in sms if s["admits_instruments"]]
+    if len(admitting) > 1 or (admitting and not admitting[0]["id"].startswith("llm.")) \
+            or (len(admitting) == 1) != (m["behavior"]["research"] is not None):
+        errs.add("V-036")
+    if u["pinned"] and admitting:
+        errs.add("V-037")
+    if u["pinned"] != (len(inst) > 0):
+        errs.add("V-034")
+    if u["max_instruments"] < len(inst):
+        errs.add("V-035")
+    if any(i["asset_class"] not in u["asset_classes"] for i in inst):
+        errs.add("V-041")
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
         errs.add("V-032")
@@ -310,6 +328,8 @@ def semantic(m, ctx):
         warns.add("W-002")
     if not p["enabled"]:
         warns.add("W-003")
+    if m["autonomy"]["admission"] == "auto" and admitting:
+        warns.add("W-006")
     rules = m["autonomy"]["rules"]
     for i, rule in enumerate(rules):
         if is_catch_all(rule["when"]) and i < len(rules) - 1:
@@ -327,20 +347,26 @@ MAND_PATH = {
     "rebalance_band": "/behavior/sizing/rebalance_band", "hysteresis": "/risk/hysteresis",
     "cadence_interval_s": "/behavior/cadence/interval_s", "approval_timeout_s": "/autonomy/approval/timeout_s",
     "reentry_cooldown_s": "/risk/reentry_cooldown_s", "daily_breach_min_s": "/risk/daily_breach_min_s",
-    "scale_lift_after_s": "/risk/scale_lift_after_s",
+    "scale_lift_after_s": "/risk/scale_lift_after_s", "max_instruments": "/universe/max_instruments",
 }
 P_MAX = ["allocation_usd", "max_loss_from_allocation", "max_position_usd", "max_position_fraction",
          "max_gross_exposure_usd", "max_order_usd", "max_orders_per_day", "max_daily_loss", "max_drawdown",
          "breach_confirm_s", "max_output_age_s", "exit_threshold", "stop_distance_max", "exits_only_at_max",
-         "two_approver_above_usd"]
+         "two_approver_above_usd", "max_instruments", "research_weight", "research_cost_cap_usd_per_day",
+         "max_revisions_per_lineage"]
 P_MIN = ["entry_threshold", "rebalance_band", "hysteresis", "cadence_interval_s", "approval_timeout_s",
-         "reentry_cooldown_s", "daily_breach_min_s", "scale_lift_after_s"]
-P_ENABLE = ["leveraged_etps_allowed", "auto_allowed"]
+         "reentry_cooldown_s", "daily_breach_min_s", "scale_lift_after_s", "research_interval_s",
+         "stagger_window_s"]
+P_ENABLE = ["leveraged_etps_allowed", "auto_allowed", "research_agent_allowed", "admission_auto_allowed"]
 P_REQUIRE = ["protection_required", "independent_approval_required"]
-P_SET = ["asset_classes", "signal_model_types", "goal_types", "channels"]
-RETAIL_PROFILE = {"auto_allowed": False, "signal_model_types": ["quant"], "leveraged_etps_allowed": False,
-                  "protection_required": True, "approval_timeout_s": 120, "max_loss_from_allocation": "0.2"}
-PLATFORM_BASE = {"max_loss_from_allocation": "0.5", "breach_confirm_s": 300}
+P_SET = ["asset_classes", "signal_model_types", "goal_types", "channels", "environments"]
+RETAIL_PROFILE = {"auto_allowed": True, "signal_model_types": ["llm", "quant"], "leveraged_etps_allowed": False,
+                  "protection_required": True, "approval_timeout_s": 120, "max_loss_from_allocation": "0.2",
+                  "research_agent_allowed": False, "environments": ["paper"]}
+INTERNAL_RESEARCH_PROFILE = {"research_agent_allowed": True, "admission_auto_allowed": False,
+                             "max_revisions_per_lineage": 3, "environments": ["paper"]}
+PLATFORM_BASE = {"max_loss_from_allocation": "0.5", "breach_confirm_s": 300, "max_instruments": 20,
+                 "stagger_window_s": 900}
 
 def mandate_policy_values(m):
     v = {k: get(m, p) for k, p in MAND_PATH.items()}
@@ -351,8 +377,19 @@ def mandate_policy_values(m):
     v["leveraged_etps_allowed"] = m["universe"]["leveraged_etps_enabled"]
     v["auto_allowed"] = m["autonomy"]["default"] == "auto" or any(r["then"] == "auto" for r in m["autonomy"]["rules"])
     v["protection_required"] = m["protection"]["enabled"]
-    v["asset_classes"] = sorted({i["asset_class"] for i in m["universe"]["instruments"]})
+    v["asset_classes"] = m["universe"]["asset_classes"]
     v["signal_model_types"] = sorted({s["id"].split(".")[0] for s in m["behavior"]["signal_models"]})
+    res = m["behavior"]["research"]
+    admitting = [s for s in m["behavior"]["signal_models"] if s["admits_instruments"]]
+    v["research_agent_allowed"] = bool(admitting)
+    v["admission_auto_allowed"] = m["autonomy"]["admission"] == "auto"
+    v["environments"] = [m["environment"]]
+    if admitting:
+        v["research_weight"] = admitting[0]["weight"]
+    if res is not None:
+        v["research_interval_s"] = res["interval_s"]
+        v["research_cost_cap_usd_per_day"] = res["cost_cap_usd_per_day"]
+        v["max_revisions_per_lineage"] = res["max_revisions_per_lineage"]
     v["goal_types"] = [m["goal"]["type"]]
     v["channels"] = m["notifications"]["channels"]
     return v
@@ -580,6 +617,13 @@ class RiskState:
             err = self._allocation(D(s["delta_usd"]), ev)
         elif kind == "clock":
             pass
+        elif kind == "universe_changed":
+            if s["change"] == "removed":
+                self.inst_restrictions.add("removed_instrument")
+            else:
+                self.inst_restrictions.discard("removed_instrument")
+            ev.append({"type": "UniverseChanged", "instrument": s["instrument"], "change": s["change"],
+                       "reason": s["reason"]})
         elif kind == "floor_loosened":
             err = self._loosen_floor(s, ev, t)
         elif kind == "agent_stopped":
@@ -835,6 +879,9 @@ def gate(m, st, prop):
     working = st.get("working_opening_orders", [])
     order = D(prop["qty"]) * D(prop["limit_price"])
     inst = prop["instrument"]
+    universe = st.get("working_universe")
+    if universe is not None and inst not in universe:
+        return {"verdict": "deny", "reason": "not_in_working_universe", "computed": {"instrument": inst}}
     cap = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)
     inst_total = mv.get(inst, D(0)) + sum(D(w["max_cost"]) for w in working if w["instrument"] == inst) + order
     comp = {"instrument_total": norm(inst_total), "cap": norm(cap)}
@@ -890,6 +937,8 @@ def autonomy(m, a):
             break
     if res is None:
         res = {"decision": au["default"], "by": "default"}
+    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:
+        res = {"decision": au["admission"], "by": "admission_ceiling"}
     if res["decision"] == "ask":
         t = au["approval"]["two_approver_above_usd"]
         res["approvers_required"] = 2 if t is not None and D(a["order_usd"]) > D(t) else 1
@@ -1052,6 +1101,125 @@ def builder(m, inp):
     out["autonomy"] = autonomy(m, a)
     return out
 
+# ------------------------------------------------------------------ research agent: admission (§8.5)
+ADMISSION_IGNORED = ("direction_not_allowed", "horizon_mismatch", "revision_without_predecessor")
+
+def stagger_offset(workspace_id, thesis_id, window_s):
+    """§8.4 (DEC-100): a deterministic per-workspace delay on the first opening order of a thesis."""
+    if window_s <= 0:
+        return 0
+    digest = hashlib.sha256(f"{workspace_id}\x00{thesis_id}".encode()).digest()
+    return int.from_bytes(digest, "big") % window_s
+
+def thesis_expires_at(th):
+    return T(th["as_of"]) + timedelta(seconds=th["horizon_s"])
+
+def admission_checks(m, inp):
+    """The ordered §8.5 checks as (reason, failed) pairs; the first failure decides."""
+    u, beh = m["universe"], m["behavior"]
+    th, res = inp["thesis"], beh["research"]
+    active = list(inp.get("working_universe", []))
+    inst = th["instrument_id"]
+    renewal = inst in active
+    admitting = [s for s in beh["signal_models"] if s["admits_instruments"]]
+    lineage = inp.get("lineages", {}).get(th["lineage_id"], {})
+    cap = res["max_revisions_per_lineage"] if res is not None else 0
+    spend = D(inp.get("research_spend_usd_today", "0"))
+    yield "direction_not_allowed", th["direction"] != "long"
+    yield "horizon_mismatch", T(th["expires_at"]) != thesis_expires_at(th)
+    yield "revision_without_predecessor", (th["revision"] > 0) != (th.get("predecessor_thesis_id") is not None)
+    yield "research_disabled", not admitting or res is None
+    yield "universe_pinned", u["pinned"]
+    yield "admission_denied", m["autonomy"]["admission"] == "deny"
+    yield "cost_cap_reached", res is not None and spend >= D(res["cost_cap_usd_per_day"])
+    yield "not_in_data_universe", inp.get("data_universe") is not None and inst not in inp["data_universe"]
+    yield "operator_halt", inst in inp.get("halted_instruments", [])
+    yield "not_allowed_asset_class", th["asset_class"] not in u["asset_classes"]
+    yield "leveraged_etp_not_enabled", bool(th.get("leveraged_etp")) and not u["leveraged_etps_enabled"]
+    yield "eligibility_floor", inst in inp.get("eligibility_failures", [])
+    yield "instrument_group_claimed", _group_claimed(inst, inp) and not renewal
+    yield "source_not_allowlisted", any(s not in inp.get("allowlisted_sources", []) for s in th["evidence_sources"])
+    yield "no_corroboration", not (th["corroboration"] or {}).get("kind")
+    yield "lineage_retired", lineage.get("retired", False) or th["revision"] > cap
+    yield "universe_full", not renewal and len(active) >= u["max_instruments"]
+
+def _group_claimed(inst, inp):
+    groups = inp.get("instrument_groups", {})
+    claimed = {groups.get(a, a) for a in inp.get("claimed_by_other_agents", [])}
+    return groups.get(inst, inst) in claimed
+
+def admit(m, inp):
+    """§8.5: decides one thesis against the envelope. Admission never loosens an envelope field (MI-16)."""
+    th = inp["thesis"]
+    inst = th["instrument_id"]
+    active = list(inp.get("working_universe", []))
+    renewal = inst in active
+    reason = next((name for name, failed in admission_checks(m, inp) if failed), None)
+    kind = "ThesisRevised" if th["revision"] > 0 else "ThesisProposed"
+    entry = {"type": kind, "thesis_id": th["thesis_id"], "lineage_id": th["lineage_id"], "revision": th["revision"],
+             "instrument": inst, "direction": th["direction"], "horizon_s": th["horizon_s"],
+             "conviction": th["conviction"], "confidence": th["confidence"],
+             "corroboration": (th["corroboration"] or {}).get("kind"), "admitted": reason is None,
+             "reason": reason}
+    if th["revision"] > 0:
+        entry["predecessor_thesis_id"] = th.get("predecessor_thesis_id")
+    out = {"admitted": reason is None, "reason": reason, "ignored": reason in ADMISSION_IGNORED,
+           "change": None, "working_universe": active, "journal": [entry]}
+    if reason is None:
+        out["change"] = "renewed" if renewal else "admitted"
+        if not renewal:
+            out["working_universe"] = sorted(active + [inst])
+            out["journal"].append({"type": "UniverseChanged", "instrument": inst, "change": "admitted",
+                                   "reason": "thesis_admitted", "thesis_id": th["thesis_id"],
+                                   "universe_size_after": len(out["working_universe"])})
+    out["universe_size_after"] = len(out["working_universe"])
+    out["first_order_autonomy"] = autonomy(m, dict(inp.get("admission_action", {}),
+                                                   purpose="open", new_instrument=True,
+                                                   thesis_confidence=th["confidence"])) if reason is None else None
+    return out
+
+def lineage_fold(m, inp):
+    """§8.6 (DEC-111): folds a sequence of proposals, capping revisions per lineage."""
+    res = m["behavior"]["research"]
+    cap = res["max_revisions_per_lineage"] if res is not None else 0
+    lineages, universe, steps = {}, list(inp.get("working_universe", [])), []
+    for th in inp["theses"]:
+        one = dict(inp, thesis=th, working_universe=universe, lineages=lineages)
+        r = admit(m, one)
+        universe = r["working_universe"]
+        st = lineages.setdefault(th["lineage_id"], {"revisions": 0, "admitted": 0, "retired": False})
+        if th["revision"] > cap:
+            st["retired"] = True
+        elif r["admitted"]:
+            st["revisions"] = max(st["revisions"], th["revision"])
+            st["admitted"] += 1
+        steps.append({"thesis_id": th["thesis_id"], "admitted": r["admitted"], "reason": r["reason"],
+                      "score_carried_forward": False, "lineage_revisions": st["revisions"],
+                      "universe_size_after": r["universe_size_after"]})
+    return {"steps": steps, "lineages": lineages, "working_universe": universe}
+
+def thesis_expiry(m, inp):
+    """§8.6, DEC-118: at its horizon a thesis is not renewed; its instrument becomes removed."""
+    now = T(inp["now"])
+    removals, keep = [], []
+    for e in sorted(inp["entries"], key=lambda x: x["instrument"]):
+        if e.get("invalidated"):
+            why = "thesis_invalidated"
+        elif e.get("lineage_retired"):
+            why = "lineage_retired"
+        elif now >= T(e["expires_at"]):
+            why = "thesis_expired"
+        else:
+            keep.append(e["instrument"])
+            continue
+        removals.append({"type": "UniverseChanged", "instrument": e["instrument"], "change": "removed",
+                         "reason": why, "thesis_id": e["thesis_id"], "universe_size_after": None})
+    for i, r in enumerate(removals):
+        r["universe_size_after"] = len(keep) + len(removals) - i - 1
+    return {"working_universe": keep, "removed": [r["instrument"] for r in removals],
+            "instrument_restrictions": {r["instrument"]: "removed_instrument" for r in removals},
+            "journal": removals}
+
 # ------------------------------------------------------------------ agent-scoped kill switch (trading §5.5)
 def agent_flatten(inp):
     agent = inp["agent"]
@@ -1103,9 +1271,11 @@ NUM_MAX = ["/capital/allocation_usd", "/capital/max_loss_from_allocation", "/ris
            "/risk/max_position_fraction", "/risk/max_gross_exposure_usd", "/risk/max_order_usd",
            "/risk/max_orders_per_day", "/risk/max_daily_loss", "/risk/max_drawdown", "/risk/breach_confirm_s",
            "/goal/target_qty", "/goal/max_spend_usd", "/goal/max_avg_price", "/goal/profit_level",
-           "/protection/stop_distance", "/behavior/sizing/exit_threshold"]
+           "/protection/stop_distance", "/behavior/sizing/exit_threshold", "/universe/max_instruments",
+           "/behavior/research/cost_cap_usd_per_day", "/behavior/research/max_revisions_per_lineage"]
 NUM_MIN = ["/behavior/sizing/entry_threshold", "/behavior/sizing/rebalance_band", "/risk/hysteresis",
-           "/risk/reentry_cooldown_s", "/risk/daily_breach_min_s", "/risk/scale_lift_after_s"]
+           "/risk/reentry_cooldown_s", "/risk/daily_breach_min_s", "/risk/scale_lift_after_s",
+           "/behavior/research/interval_s"]
 NEUTRAL = ["/name", "/notifications/quiet_hours"]
 
 def rule_widen(a, b):
@@ -1131,7 +1301,7 @@ def classify_autonomy(o, n):
     ot, nt = oa["two_approver_above_usd"], na["two_approver_above_usd"]
     if ot != nt and (nt is None or (ot is not None and D(nt) > D(ot))):
         return "increasing"
-    if STRICT[n["default"]] < STRICT[o["default"]]:
+    if STRICT[n["default"]] < STRICT[o["default"]] or STRICT[n["admission"]] < STRICT[o["admission"]]:
         return "increasing"
     oids, nids = [r["id"] for r in o["rules"]], [r["id"] for r in n["rules"]]
     common_o = [x for x in oids if x in nids]
@@ -1176,9 +1346,25 @@ def diff_paths(a, b, base=""):
     elif a != b:
         yield base
 
+PIN_SWITCH_PATHS = ["/universe/pinned", "/universe/pinned_instruments", "/universe/max_instruments",
+                    "/behavior/research", "/behavior/signal_models"]
+
+def pinning_switch(old, new, paths):
+    """§9.2, DEC-121: turning bring-your-own-strategy on is one risk-reducing change, not a field-by-field one."""
+    ou, nu, ob, nb = old["universe"], new["universe"], old["behavior"], new["behavior"]
+    if ou["pinned"] or not nu["pinned"] or nb["research"] is not None:
+        return False
+    if nu["max_instruments"] > ou["max_instruments"]:
+        return False
+    if nb["signal_models"] != [dict(s, admits_instruments=False) for s in ob["signal_models"]]:
+        return False
+    return all(covered(p, PIN_SWITCH_PATHS) for p in paths)
+
 def classify(old, new):
     res = set()
     paths = list(diff_paths(old, new))
+    if "/environment" not in paths and "/connection_id" not in paths and pinning_switch(old, new, paths):
+        return "risk_reducing", paths
     for p in paths:
         a, b = get(old, p), get(new, p)
         if p in ("/environment", "/connection_id"):
@@ -1202,13 +1388,23 @@ def classify(old, new):
                         res.add("increasing")
                     elif x != y:
                         res.add("reducing")
-        elif p == "/universe/instruments":
+        elif p == "/universe/pinned_instruments":
+            if old["universe"]["pinned"] != new["universe"]["pinned"]:
+                continue
             oi, ni = {i["asset_id"] for i in a}, {i["asset_id"] for i in b}
             res.add("increasing" if ni - oi else ("reducing" if oi - ni else "neutral"))
+        elif p == "/universe/pinned":
+            res.add("increasing" if not b else "reducing")
+        elif p == "/universe/asset_classes":
+            res.add("increasing" if set(b) - set(a) else "reducing")
+        elif p == "/behavior/research":
+            res.add("increasing" if b is not None else "reducing")
         elif p.startswith("/autonomy"):
             res.add(classify_autonomy(old["autonomy"], new["autonomy"]))
         elif p == "/goal/end_date":
             res.add("increasing" if b is None or (a is not None and b > a) else "reducing")
+        elif p == "/protection/crypto_stop_limit_offset":
+            res.add("increasing" if b is not None and (a is None or D(b) > D(a)) else "reducing")
         elif p == "/protection/enabled":
             res.add("increasing" if not b else "reducing")
         elif p == "/universe/leveraged_etps_enabled":

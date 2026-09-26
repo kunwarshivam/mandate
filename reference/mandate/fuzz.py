@@ -1,4 +1,4 @@
-"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-14)."""
+"""Property-based fuzz of the reference implementation against the invariants of mandate spec §1.1 (MI-1 to MI-20)."""
 import copy, json, random, sys
 from ref import *  # noqa: F401,F403
 from ref import D
@@ -303,6 +303,7 @@ def fuzz_autonomy(n):
     for _ in range(n):
         m["autonomy"]["rules"] = [rand_rule(i) for i in range(rng.randint(0, 4))]
         m["autonomy"]["default"] = rng.choice(["ask", "deny", "auto"])
+        m["autonomy"]["admission"] = rng.choice(["ask", "deny", "auto"])
         new = copy.deepcopy(m)
         new["autonomy"] = mutate(m["autonomy"])
         if rng.random() < 0.3:
@@ -313,17 +314,150 @@ def fuzz_autonomy(n):
                 a = {"purpose": rng.choice(["open", "increase"]), "session": rng.choice(["regular", "crypto"]),
                      "instrument": base.BTC, "asset_class": "crypto", "unusual_input": False,
                      "first_trade_in_instrument": False, "drawdown": "0", "daily_pnl_fraction": "0",
-                     "position_usd_after": "0", "gross_usd_after": "0"}
+                     "position_usd_after": "0", "gross_usd_after": "0",
+                     "new_instrument": rng.random() < 0.5, "thesis_confidence": rng.choice(["0", "0.5", "0.9"])}
                 for f, vals in FIELDS_NUM.items():
                     a[f] = rng.choice(vals + [norm(D(v) + D("0.01")) for v in vals])
                 d0, d1 = autonomy(m, a)["decision"], autonomy(new, a)["decision"]
                 check(STRICT[d1] >= STRICT[d0], "MI-11 reducing change never loosens autonomy",
                       (m["autonomy"], new["autonomy"], a, d0, d1))
+                if a["new_instrument"]:
+                    check(STRICT[d0] >= STRICT[m["autonomy"]["admission"]],
+                          "MI-17 an admission is never looser than the owner's admission ceiling", (m["autonomy"], a, d0))
+
+INSTRUMENTS = [base.ABC, base.XYZ, base.QRS, base.LMN, base.BTC]
+SRC_OK = ["src.filings", "src.newswire"]
+TH_NOW = "2026-09-22T14:00:00.000000000Z"
+
+def rand_research_mandate():
+    m = copy.deepcopy(base.research)
+    u = m["universe"]
+    u["max_instruments"] = rng.randint(1, 4)
+    u["asset_classes"] = rng.choice([["us_equity"], ["crypto", "us_equity"]])
+    u["leveraged_etps_enabled"] = rng.random() < 0.3
+    if u["leveraged_etps_enabled"]:
+        u["leveraged_etp_disclosure_version"] = "sha256:" + "b" * 64
+    m["protection"]["crypto_stop_limit_offset"] = "0.005" if "crypto" in u["asset_classes"] else None
+    m["autonomy"]["admission"] = rng.choice(["ask", "deny", "auto"])
+    m["behavior"]["research"]["max_revisions_per_lineage"] = rng.randint(0, 3)
+    if rng.random() < 0.25:
+        u.update({"pinned": True, "max_instruments": 1,
+                  "pinned_instruments": [{"asset_id": base.XYZ, "symbol": "XYZ", "asset_class": "us_equity"}],
+                  "asset_classes": ["us_equity"]})
+        m["protection"]["crypto_stop_limit_offset"] = None
+        m["behavior"]["research"] = None
+        for sm in m["behavior"]["signal_models"]:
+            sm["admits_instruments"] = False
+    V.validate(m)
+    assert semantic(m, dict(base.CTX, disclosures_accepted=["sha256:" + "b" * 64]))[0] == [], m["universe"]
+    return m
+
+def rand_thesis(i, lineage, revision):
+    inst = rng.choice(INSTRUMENTS)
+    horizon = rng.choice([3600, 86400, 604800])
+    as_of = TH_NOW
+    bad_expiry = rng.random() < 0.1
+    return {"thesis_id": f"th-{i}", "lineage_id": lineage, "revision": revision,
+            "predecessor_thesis_id": (f"th-{i - 1}" if revision > 0 else None) if rng.random() > 0.1 else None,
+            "instrument_id": inst, "asset_class": "crypto" if inst == base.BTC else "us_equity",
+            "direction": rng.choice(["long", "long", "long", "short"]), "horizon_s": horizon,
+            "conviction": norm(D(rng.randint(0, 100)) / 100), "confidence": norm(D(rng.randint(0, 100)) / 100),
+            "as_of": as_of,
+            "expires_at": fmt(T(as_of) + timedelta(seconds=horizon + (60 if bad_expiry else 0))),
+            "evidence_sources": rng.choice([SRC_OK, ["src.filings"], ["src.anonymous_blog"], []]),
+            "corroboration": rng.choice([{"kind": "independent_source"}, {"kind": "market_data"}, {}]),
+            "leveraged_etp": rng.random() < 0.2, "invalidation": "The trend breaks."}
+
+def fuzz_admission(n):
+    """MI-15, MI-16, MI-17, MI-18, MI-20: the working universe stays inside the envelope, whatever a thesis says."""
+    for _ in range(n):
+        m = rand_research_mandate()
+        frozen = copy.deepcopy(m)
+        u = m["universe"]
+        allowed, cap = u["asset_classes"], u["max_instruments"]
+        rev_cap = m["behavior"]["research"]["max_revisions_per_lineage"] if m["behavior"]["research"] else 0
+        elig = rng.sample(INSTRUMENTS, rng.randint(0, 2))
+        halted = rng.sample(INSTRUMENTS, rng.randint(0, 1))
+        groups = {base.QRS: "grp_q", base.LMN: "grp_q"}
+        claimed = [base.LMN] if rng.random() < 0.3 else []
+        universe, lineages = [], {}
+        admitted_revisions = {}           # independent per-lineage counter (MI-18)
+        lineage = "lin-0"
+        for i in range(rng.randint(4, 14)):
+            if rng.random() < 0.3:
+                lineage = f"lin-{i}"
+                revision = 0
+            else:
+                revision = admitted_revisions.get(lineage, 0) + (1 if rng.random() < 0.7 else 0)
+            th = rand_thesis(i, lineage, revision)
+            inp = {"thesis": th, "working_universe": universe, "eligibility_failures": elig,
+                   "allowlisted_sources": SRC_OK, "instrument_groups": groups, "claimed_by_other_agents": claimed,
+                   "halted_instruments": halted, "data_universe": None,
+                   "research_spend_usd_today": rng.choice(["0", "0", "5"]), "lineages": lineages,
+                   "admission_action": {"order_usd": "300", "combined_score": "0.8", "instrument": th["instrument_id"],
+                                        "asset_class": th["asset_class"], "session": "regular",
+                                        "first_trade_in_instrument": True, "drawdown": "0", "daily_pnl_fraction": "0",
+                                        "position_usd_after": "300", "gross_usd_after": "300",
+                                        "bought_today_usd": "300", "position_pnl_fraction": "0",
+                                        "unusual_input": False}}
+            r = admit(m, inp)
+            check(m == frozen, "MI-16 admitting a thesis never changes an envelope field", (th, m))
+            check(len(r["working_universe"]) <= cap, "MI-15 the working universe never exceeds max_instruments",
+                  (cap, r["working_universe"]))
+            if u["pinned"]:
+                check(not r["admitted"], "MI-20 a pinned universe admits nothing", (th, r))
+            if r["admitted"] and r["change"] == "admitted":
+                check(th["instrument_id"] not in universe, "MI-15 an admission never duplicates an entry", (th, r))
+                check(th["asset_class"] in allowed, "MI-15 an admitted instrument is in an allowed asset class", (th, allowed))
+                check(th["instrument_id"] not in elig, "MI-15 an admitted instrument passed the eligibility floor", (th, elig))
+                check(th["instrument_id"] not in halted, "MI-15 an admitted instrument is not halted", (th, halted))
+                check(bool(th["corroboration"].get("kind")), "MI-15 an admitted thesis is corroborated", th)
+                check(all(s in SRC_OK for s in th["evidence_sources"]),
+                      "MI-15 an admitted thesis cites only allowlisted sources", th)
+                check(not (th["leveraged_etp"] and not u["leveraged_etps_enabled"]),
+                      "MI-15 a leveraged ETP needs the owner opt-in", th)
+                check(th["direction"] == "long", "MI-15 v1 admits long theses only", th)
+                check(T(th["expires_at"]) == T(th["as_of"]) + timedelta(seconds=th["horizon_s"]),
+                      "MI-15 an admitted thesis expires at its horizon", th)
+            if r["admitted"]:
+                check(STRICT[r["first_order_autonomy"]["decision"]] >= STRICT[m["autonomy"]["admission"]],
+                      "MI-17 the first order in an admitted instrument respects the admission ceiling", (th, r))
+                check(th["revision"] <= rev_cap, "MI-18 no revision past the lineage cap is admitted", (th, rev_cap))
+                admitted_revisions[th["lineage_id"]] = max(admitted_revisions.get(th["lineage_id"], 0), th["revision"])
+                lineages.setdefault(th["lineage_id"], {"revisions": 0, "admitted": 0, "retired": False})
+                lineages[th["lineage_id"]]["revisions"] = admitted_revisions[th["lineage_id"]]
+            elif r["reason"] == "lineage_retired":
+                lineages.setdefault(th["lineage_id"], {"revisions": 0, "admitted": 0, "retired": False})["retired"] = True
+            universe = r["working_universe"]
+        check(all(v <= rev_cap for v in admitted_revisions.values()),
+              "MI-18 a lineage never exceeds max_revisions_per_lineage", (admitted_revisions, rev_cap))
+
+def fuzz_expiry(n):
+    """MI-19 and DEC-118: exactly the invalidated, retired, and expired entries are removed."""
+    for _ in range(n):
+        now = T(TH_NOW) + timedelta(seconds=rng.choice([0, 3600, 86400, 604800]))
+        entries = []
+        for i, inst in enumerate(rng.sample(INSTRUMENTS, rng.randint(1, 5))):
+            entries.append({"instrument": inst, "thesis_id": f"th-{i}", "lineage_id": f"lin-{i}", "revision": 0,
+                            "expires_at": fmt(T(TH_NOW) + timedelta(seconds=rng.choice([3600, 86400, 604800]))),
+                            "invalidated": rng.random() < 0.3, "lineage_retired": rng.random() < 0.2})
+        inp = {"now": fmt(now), "entries": entries}
+        r = thesis_expiry(base.research, inp)
+        expected = sorted(e["instrument"] for e in entries
+                          if e["invalidated"] or e["lineage_retired"] or now >= T(e["expires_at"]))
+        check(sorted(r["removed"]) == expected, "MI-19 exactly the ended theses are removed", (inp, r))
+        check(sorted(r["working_universe"]) == sorted(e["instrument"] for e in entries
+                                                     if e["instrument"] not in expected),
+              "MI-19 every other entry stays", (inp, r))
+        check(all(v == "removed_instrument" for v in r["instrument_restrictions"].values()),
+              "MI-19 removal restricts only the instrument, never the agent", (inp, r))
 
 if __name__ == "__main__":
     fuzz_risk(400)
     fuzz_gate(300)
     fuzz_builder(400)
+    fuzz_admission(300)
+    fuzz_expiry(400)
     fuzz_autonomy(3000)
     from collections import Counter
     print("failures:", len(FAIL), Counter(f[0] for f in FAIL))

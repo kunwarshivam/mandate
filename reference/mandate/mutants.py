@@ -13,9 +13,29 @@ MUTANTS = {
     "daily lift ignores the minimum delay": ('(t - self.daily["at"]).total_seconds() >= self.daily_min', "True"),
     "flatten acknowledged while not flat": ('            if "drawdown_flatten" in self.restrictions and self.qty > 0:\n'
                                             '                return "flatten_in_progress"\n', ""),
+    "admission ignores max_instruments": ('yield "universe_full", not renewal and len(active) >= u["max_instruments"]',
+                                          'yield "universe_full", False'),
+    "the pinned mode admits": ('    yield "research_disabled", not admitting or res is None\n'
+                               '    yield "universe_pinned", u["pinned"]\n',
+                               '    yield "research_disabled", False\n    yield "universe_pinned", False\n'),
+    "admission ignores the eligibility floor": ('yield "eligibility_floor", inst in inp.get("eligibility_failures", [])',
+                                                'yield "eligibility_floor", False'),
+    "admission ignores corroboration": ('yield "no_corroboration", not (th["corroboration"] or {}).get("kind")',
+                                        'yield "no_corroboration", False'),
+    "admission ignores the source allowlist": ('yield "source_not_allowlisted", any(s not in inp.get("allowlisted_sources", []) for s in th["evidence_sources"])',
+                                               'yield "source_not_allowlisted", False'),
+    "admission ignores the owner's admission ceiling": (
+        '    if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:',
+        '    if False:'),
+    "lineage cap is off by one": ('yield "lineage_retired", lineage.get("retired", False) or th["revision"] > cap',
+                                  'yield "lineage_retired", lineage.get("retired", False) or th["revision"] > cap + 1'),
+    "expiry keeps an invalidated thesis": ('        if e.get("invalidated"):\n            why = "thesis_invalidated"\n',
+                                           '        if False:\n            why = "thesis_invalidated"\n'),
+    "expiry ignores the horizon": ('        elif now >= T(e["expires_at"]):', '        elif False:'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_risk(400); fuzz_gate(200); print(len(FAIL))")
+         "fuzz_risk(400); fuzz_gate(200); fuzz_admission(300); fuzz_expiry(400); fuzz_autonomy(1500); "
+         "print(len(FAIL))")
 
 def main():
     survivors = []

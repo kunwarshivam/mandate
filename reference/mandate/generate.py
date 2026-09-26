@@ -1,4 +1,4 @@
-"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.5."""
+"""Generates docs/specs/reference-cases/mandate.yaml for mandate spec v0.6."""
 import copy, json
 from collections import Counter
 import yaml
@@ -6,9 +6,9 @@ from ref import *  # noqa: F401,F403
 from ref import D, ROOT
 from bases import *  # noqa: F401,F403
 
-doc = {"version": 3, "spec": "docs/specs/mandate.md (v0.5, approved)",
+doc = {"version": 4, "spec": "docs/specs/mandate.md (v0.6)",
        "schemas": ["schemas/mandate.schema.json", "schemas/policy.schema.json"],
-       "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25"},
+       "harness_defaults": {"mark_max_age_s": 120, "hard_trigger_multiple": "1.25", "stagger_window_s": 900},
        "bases": {n: {"mandate": m, "canonical_sha256": version(m)} for n, m in BASES.items()},
        "version_vector": {"base": "btc_accumulator", "canonical": canon(btc), "mandate_version": version(btc)},
        "signal_model_registry": REGISTRY, "validation_context_defaults": CTX, "cases": []}
@@ -25,6 +25,7 @@ def derived(name, base, patch, note):
     doc["bases"][name] = {"mandate": m, "canonical_sha256": version(m), "derived_from": base, "note": note}
 
 NO_PROT = {"enabled": False, "stop_distance": None, "take_profit_distance": None, "crypto_stop_limit_offset": None}
+RESEARCH = {"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}
 
 # =========================================================== A. schema
 S = [
@@ -54,6 +55,16 @@ S = [
     ("MC-S22", "Signal model without max_output_age_s", "btc_accumulator",
      [{"op": "remove", "path": "/behavior/signal_models/0/max_output_age_s"}], False),
     ("MC-S23", "Unknown scale_action", "btc_accumulator", [rep("/risk/scale_action", "sell_everything")], False),
+    ("MC-S24", "max_instruments above the platform ceiling of 20", "research_equity", [rep("/universe/max_instruments", 21)], False),
+    ("MC-S25", "max_instruments of 0", "research_equity", [rep("/universe/max_instruments", 0)], False),
+    ("MC-S26", "Empty asset_classes", "research_equity", [rep("/universe/asset_classes", [])], False),
+    ("MC-S27", "Research object missing the cost cap", "research_equity",
+     [{"op": "remove", "path": "/behavior/research/cost_cap_usd_per_day"}], False),
+    ("MC-S28", "Unknown autonomy.admission value", "research_equity", [rep("/autonomy/admission", "sometimes")], False),
+    ("MC-S29", "Signal model without admits_instruments", "btc_accumulator",
+     [{"op": "remove", "path": "/behavior/signal_models/0/admits_instruments"}], False),
+    ("MC-S30", "max_revisions_per_lineage above 10", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 11)], False),
+    ("MC-S31", "Research interval below 300 s", "research_equity", [rep("/behavior/research/interval_s", 60)], False),
 ]
 for cid, title, base, patch, ok in S:
     m = apply_patch(MB[base], patch)
@@ -67,8 +78,8 @@ SEM = [
     ("MC-V02", "Base swing mandate passes every V-rule", "two_stock_swing", [], {}),
     ("MC-V03", "Allocations exceed account equity", "btc_accumulator", [], {"other_allocations_usd": "16000"}),
     ("MC-V04", "Allocations exactly equal account equity", "btc_accumulator", [], {"other_allocations_usd": "15000"}),
-    ("MC-V05", "Accumulate universe must be exactly the goal instrument", "btc_accumulator",
-     [{"op": "add", "path": "/universe/instruments/-", "value": {"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}}], {}),
+    ("MC-V05", "Accumulate universe must be pinned to exactly the goal instrument", "btc_accumulator",
+     [rep("/universe/pinned", False), rep("/universe/pinned_instruments", [])], {}),
     ("MC-V06", "Leveraged ETPs without an accepted disclosure", "two_stock_swing",
      [rep("/universe/leveraged_etps_enabled", True), rep("/universe/leveraged_etp_disclosure_version", "sha256:" + "b" * 64)],
      {"disclosures_accepted": ["sha256:" + "c" * 64]}),
@@ -84,8 +95,8 @@ SEM = [
     ("MC-V12", "Protection disabled but distances set", "btc_accumulator", [rep("/protection/enabled", False)], {}),
     ("MC-V13", "Protection disabled with distances null (warning W-003)", "btc_accumulator", [rep("/protection", NO_PROT)], {}),
     ("MC-V14", "Instruments not sorted by asset_id", "two_stock_swing",
-     [rep("/universe/instruments", [{"asset_id": QRS, "symbol": "QRS", "asset_class": "us_equity"},
-                                    {"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}])], {}),
+     [rep("/universe/pinned_instruments", [{"asset_id": QRS, "symbol": "QRS", "asset_class": "us_equity"},
+                                          {"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}])], {}),
     ("MC-V15", "Duplicate rule id", "btc_accumulator", [rep("/autonomy/rules/1/id", "large_orders")], {}),
     ("MC-V16", "Ladder rungs not strictly increasing", "btc_accumulator", [rep("/risk/drawdown_ladder/1/at", "0.03")], {}),
     ("MC-V17", "Ladder actions out of severity order", "btc_accumulator",
@@ -143,6 +154,34 @@ SEM = [
      [{"op": "add", "path": "/autonomy/rules/-", "value": {"id": "never_reached", "when": {"field": "order_usd", "op": "gt", "value": "5000"}, "then": "deny"}}], {}),
     ("MC-V48", "Multiple violations are all reported", "two_stock_swing",
      [rep("/risk/max_order_usd", "2000"), rep("/risk/hysteresis", "0.05")], {"other_allocations_usd": "20000"}),
+    ("MC-V52", "Base research mandate passes every V-rule", "research_equity", [], {}),
+    ("MC-V53", "Not pinned but pinned instruments are set", "research_equity",
+     [rep("/universe/pinned_instruments", [{"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}])], {}),
+    ("MC-V54", "Pinned with an empty pinned universe", "two_stock_swing", [rep("/universe/pinned_instruments", [])], {}),
+    ("MC-V55", "max_instruments below the pinned count", "two_stock_swing", [rep("/universe/max_instruments", 1)], {}),
+    ("MC-V56", "Two signal models admitting instruments", "research_equity",
+     [rep("/behavior/signal_models/1/admits_instruments", True)], {}),
+    ("MC-V57", "A quant model may not admit instruments", "research_equity",
+     [rep("/behavior/signal_models/0/admits_instruments", False), rep("/behavior/signal_models/1/admits_instruments", True)], {}),
+    ("MC-V58", "Research fields set with no admitting model", "two_stock_swing", [rep("/behavior/research", RESEARCH)], {}),
+    ("MC-V59", "Pinning the universe disables the research agent", "research_equity",
+     [rep("/universe/pinned", True),
+      rep("/universe/pinned_instruments", [{"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}])], {}),
+    ("MC-V60", "Accumulate with research fields set", "btc_accumulator", [rep("/behavior/research", RESEARCH)], {}),
+    ("MC-V61", "Pinned instrument outside the envelope asset classes", "two_stock_swing",
+     [rep("/universe/asset_classes", ["crypto"]), rep("/protection/crypto_stop_limit_offset", "0.005")], {}),
+    ("MC-V62", "Pinned instruments proposed by the platform", "two_stock_swing", [],
+     {"provenance": {"/universe/pinned_instruments": PU("platform_proposed")}}),
+    ("MC-V63", "Platform default for autonomy.admission must be ask", "research_equity", [rep("/autonomy/admission", "deny")],
+     {"provenance": {"/autonomy/admission": PU("platform_default")}}),
+    ("MC-V64", "Admission auto extracted by the compiler, not entered", "research_equity", [rep("/autonomy/admission", "auto")],
+     {"provenance": {"/autonomy/admission": PU("user_stated")}}),
+    ("MC-V65", "Admission auto that is user-entered and confirmed is a warning", "research_equity",
+     [rep("/autonomy/admission", "auto")], {"provenance": {"/autonomy/admission": PU("user_entered")}}),
+    ("MC-V66", "Envelope field proposed by the platform and confirmed is fine", "research_equity", [],
+     {"provenance": {"/universe/max_instruments": PU("platform_proposed"), "/risk/max_daily_loss": PU("platform_proposed")}}),
+    ("MC-V67", "Platform-proposed envelope field left unconfirmed", "research_equity", [],
+     {"provenance": {"/universe/max_instruments": PU("platform_proposed", False)}}),
 ]
 for cid, title, base, patch, ctx in SEM:
     m = apply_patch(MB[base], patch)
@@ -163,7 +202,7 @@ POL = [
      [("platform", PLATFORM_BASE), ("organization", {"max_drawdown": "0.09"}), ("workspace", {"max_drawdown": "0.08"})]),
     ("MC-P04", "Workspace looser than its org is itself invalid", "btc_accumulator", [],
      [("platform", PLATFORM_BASE), ("organization", {"max_drawdown": "0.1"}), ("workspace", {"max_drawdown": "0.12"})]),
-    ("MC-P05", "Retail profile: swing mandate uses auto and an LLM model", "two_stock_swing", [],
+    ("MC-P05", "Retail profile: the research agent is not yet allowed to retail", "research_equity", [],
      [("platform", dict(PLATFORM_BASE, **RETAIL_PROFILE)), ("organization", {}), ("workspace", {})]),
     ("MC-P06", "Retail profile: quant-only, ask-only mandate conforms", "btc_accumulator",
      [rep("/autonomy/rules/2/then", "ask")],
@@ -182,6 +221,25 @@ POL = [
      [("platform", PLATFORM_BASE), ("organization", {"max_output_age_s": 1800}), ("workspace", {})]),
     ("MC-P13", "Rebalance band below the workspace minimum", "btc_accumulator", [],
      [("platform", PLATFORM_BASE), ("organization", {}), ("workspace", {"rebalance_band": "0.1"})]),
+    ("MC-P14", "Retail profile: the swing mandate conforms now that auto and llm are allowed", "two_stock_swing", [],
+     [("platform", dict(PLATFORM_BASE, **RETAIL_PROFILE)), ("organization", {}), ("workspace", {})]),
+    ("MC-P15", "Internal research profile: the thin slice conforms", "research_equity", [],
+     [("platform", dict(PLATFORM_BASE, **INTERNAL_RESEARCH_PROFILE)), ("organization", {}), ("workspace", {})]),
+    ("MC-P16", "Internal research profile refuses admission auto", "research_equity", [rep("/autonomy/admission", "auto")],
+     [("platform", dict(PLATFORM_BASE, **INTERNAL_RESEARCH_PROFILE)), ("organization", {}), ("workspace", {})]),
+    ("MC-P17", "No live trading until counsel signs off", "research_equity",
+     [rep("/environment", "live"), rep("/connection_id", "conn_alpaca_live_01")],
+     [("platform", dict(PLATFORM_BASE, environments=["paper"])), ("organization", {}), ("workspace", {})]),
+    ("MC-P18", "Working universe above the org ceiling", "research_equity", [],
+     [("platform", PLATFORM_BASE), ("organization", {"max_instruments": 3}), ("workspace", {})]),
+    ("MC-P19", "Org caps the research agent weight", "research_equity", [],
+     [("platform", PLATFORM_BASE), ("organization", {"research_weight": "0.3"}), ("workspace", {})]),
+    ("MC-P20", "Research interval below the org minimum", "research_equity", [],
+     [("platform", PLATFORM_BASE), ("organization", {"research_interval_s": 7200}), ("workspace", {})]),
+    ("MC-P21", "Revisions per lineage above the workspace maximum", "research_equity", [],
+     [("platform", PLATFORM_BASE), ("organization", {}), ("workspace", {"max_revisions_per_lineage": 1})]),
+    ("MC-P22", "Research cost cap above the org maximum", "research_equity", [],
+     [("platform", PLATFORM_BASE), ("organization", {"research_cost_cap_usd_per_day": "2"}), ("workspace", {})]),
 ]
 for cid, title, base, patch, levels in POL:
     m = apply_patch(MB[base], patch)
@@ -354,6 +412,17 @@ risk_case("MC-R23", "Withdrawals cannot shrink the loss carried to the connectio
            {"event": "agent_stopped", "at": at(14, 4), "session": "crypto"}],
           note="Reviewer probe: the agent loses about 850, is flat, withdraws 9000, and retires. The carry is the net dollar loss.")
 
+risk_case("MC-R24", "A removed instrument is exits-only in that instrument; re-admission clears it", "research_equity",
+          [], "10", "100", "us_equity", at(14, 0),
+          [mk(at(14, 1), "100"),
+           {"event": "universe_changed", "at": at(14, 2), "instrument": XYZ, "change": "removed",
+            "reason": "thesis_expired", "session": "regular"},
+           mk(at(14, 3), "100"),
+           {"event": "universe_changed", "at": at(14, 4), "instrument": XYZ, "change": "admitted",
+            "reason": "thesis_admitted", "session": "regular"}],
+          note="A universe change is an account-stream risk input (DEC-97). Removal restricts only that instrument: "
+               "protection stays and exits are never denied (MI-1, MI-19).")
+
 # =========================================================== E. risk day boundaries
 for cid, title, instant in [
     ("MC-T01", "Last second of 2026-03-07 (EST)", "2026-03-08T04:59:59.000000000Z"),
@@ -387,6 +456,9 @@ G = [
      dict(GS, last_exit_fill_at={LMN: at(14, 30)}, instrument_groups={QRS: "grp_q", LMN: "grp_q"}), (QRS, "open", "1")),
     ("MC-G13", "Re-entry allowed once the cooldown has passed", {}, dict(GS, now=at(15, 30), last_exit_fill_at={QRS: at(14, 30)}),
      (QRS, "open", "1")),
+    ("MC-G14", "Opening an instrument outside the working universe", {}, dict(GS, working_universe=[XYZ]), (QRS, "open", "1")),
+    ("MC-G15", "Exiting an instrument outside the working universe is allowed", {}, dict(GS, working_universe=[XYZ]),
+     (QRS, "discretionary_exit", "1")),
 ]
 for cid, title, over, st, (inst, purpose, qty) in G:
     patch = [rep(p, v) for p, v in over.items()]
@@ -502,6 +574,18 @@ A = [
     ("MC-A11", "Bought-today rule catches order splitting",
      {"/autonomy/rules": [{"id": "daily_buys", "when": {"field": "bought_today_usd", "op": "gt", "value": "2000"}, "then": "ask"}] + RULES},
      {"order_usd": "500", "combined_score": "0.9", "bought_today_usd": "2300"}),
+    ("MC-A12", "The admission ceiling turns an auto rule into ask for a new instrument", {},
+     {"order_usd": "300", "combined_score": "0.8", "new_instrument": True, "thesis_confidence": "0.9"}),
+    ("MC-A13", "Admission auto confirmed by the owner is AUTO", {"/autonomy/admission": "auto"},
+     {"order_usd": "300", "combined_score": "0.8", "new_instrument": True, "thesis_confidence": "0.9"}),
+    ("MC-A14", "Admission deny overrides an auto rule", {"/autonomy/admission": "deny"},
+     {"order_usd": "300", "combined_score": "0.8", "new_instrument": True, "thesis_confidence": "0.9"}),
+    ("MC-A15", "The admission ceiling never loosens a deny rule", {"/autonomy/admission": "auto",
+      "/autonomy/rules": [{"id": "no_new", "when": {"field": "new_instrument", "op": "eq", "value": True}, "then": "deny"}] + RULES},
+     {"order_usd": "300", "combined_score": "0.8", "new_instrument": True, "thesis_confidence": "0.9"}),
+    ("MC-A16", "A thesis-confidence rule asks below the owner threshold", {"/autonomy/admission": "auto",
+      "/autonomy/rules": [{"id": "thin_thesis", "when": {"field": "thesis_confidence", "op": "lt", "value": "0.6"}, "then": "ask"}] + RULES},
+     {"order_usd": "300", "combined_score": "0.8", "new_instrument": True, "thesis_confidence": "0.5"}),
 ]
 for cid, title, over, a in A:
     patch = [rep(p, v) for p, v in over.items()]
@@ -509,7 +593,8 @@ for cid, title, over, a in A:
     assert V.is_valid(m), cid
     full = {"purpose": "open", "order_usd": "0", "combined_score": "0", "instrument": BTC, "asset_class": "crypto",
             "session": "crypto", "first_trade_in_instrument": False, "drawdown": "0", "daily_pnl_fraction": "0",
-            "position_usd_after": "0", "gross_usd_after": "0", "bought_today_usd": "0", "position_pnl_fraction": "0"}
+            "position_usd_after": "0", "gross_usd_after": "0", "bought_today_usd": "0", "position_pnl_fraction": "0",
+            "new_instrument": False, "thesis_confidence": "0"}
     full.update(a)
     if full["purpose"] in REDUCING:
         full = {"purpose": full["purpose"]}
@@ -553,6 +638,17 @@ for cid, title, base, st in GL:
     cases.append({"id": cid, "kind": "goal", "title": title, "base": base, "state": st, "expect": goal_status(MB[base], st)})
 
 # =========================================================== K. change classification
+PIN = [rep("/universe/pinned", True),
+       rep("/universe/pinned_instruments", [{"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}]),
+       rep("/universe/max_instruments", 1), rep("/behavior/research", None),
+       rep("/behavior/signal_models/0/admits_instruments", False)]
+UNPIN = [rep("/universe/pinned", False), rep("/universe/pinned_instruments", []),
+         rep("/universe/max_instruments", 5), rep("/behavior/research", RESEARCH),
+         rep("/behavior/signal_models/0/admits_instruments", True)]
+derived("research_equity_pinned", "research_equity", PIN, "bring-your-own-strategy: the universe is pinned to XYZ")
+derived("research_equity_two_classes", "research_equity",
+        [rep("/universe/asset_classes", ["crypto", "us_equity"]), rep("/protection/crypto_stop_limit_offset", "0.005")],
+        "adds crypto to the allowed asset classes")
 derived("btc_accumulator_with_deny", "btc_accumulator",
         [{"op": "add", "path": "/autonomy/rules/2", "value": {"id": "deny_big_low", "when": {"field": "order_usd", "op": "gt", "value": "800"}, "then": "deny"}}],
         "adds rule deny_big_low at index 2")
@@ -560,8 +656,9 @@ CH = [
     ("MC-C01", "Raise max_drawdown (and the last rung)", "btc_accumulator",
      [rep("/risk/max_drawdown", "0.09"), rep("/risk/drawdown_ladder/2/at", "0.09")]),
     ("MC-C02", "Add an instrument", "two_stock_swing",
-     [{"op": "add", "path": "/universe/instruments/-", "value": {"asset_id": LMN, "symbol": "LMN", "asset_class": "us_equity"}}]),
-    ("MC-C03", "Remove an instrument", "two_stock_swing", [{"op": "remove", "path": "/universe/instruments/1"}]),
+     [{"op": "add", "path": "/universe/pinned_instruments/-", "value": {"asset_id": LMN, "symbol": "LMN", "asset_class": "us_equity"}},
+      rep("/universe/max_instruments", 3)]),
+    ("MC-C03", "Remove an instrument", "two_stock_swing", [{"op": "remove", "path": "/universe/pinned_instruments/1"}]),
     ("MC-C04", "Raise the large-order ask threshold", "btc_accumulator", [rep("/autonomy/rules/0/when/value", "950")]),
     ("MC-C05", "Raise the low-score ask threshold", "btc_accumulator", [rep("/autonomy/rules/1/when/value", "0.7")]),
     ("MC-C06", "Lower max_daily_loss", "btc_accumulator", [rep("/risk/max_daily_loss", "0.01")]),
@@ -599,6 +696,21 @@ CH = [
     ("MC-C33", "Change on_complete", "btc_accumulator", [rep("/goal/on_complete", "release")]),
     ("MC-C34", "Change the environment", "btc_accumulator", [rep("/environment", "live")]),
     ("MC-C35", "Remove the end date (null means no end)", "btc_accumulator", [rep("/goal/end_date", None)]),
+    ("MC-C36", "Pin the universe (bring-your-own-strategy on)", "research_equity", PIN),
+    ("MC-C37", "Unpin the universe (the platform may admit again)", "research_equity_pinned", UNPIN),
+    ("MC-C38", "Raise max_instruments", "research_equity", [rep("/universe/max_instruments", 8)]),
+    ("MC-C39", "Lower max_instruments", "research_equity", [rep("/universe/max_instruments", 3)]),
+    ("MC-C40", "Add an allowed asset class", "research_equity",
+     [rep("/universe/asset_classes", ["crypto", "us_equity"]), rep("/protection/crypto_stop_limit_offset", "0.005")]),
+    ("MC-C41", "Remove an allowed asset class", "research_equity_two_classes", [rep("/universe/asset_classes", ["us_equity"]),
+                                                                               rep("/protection/crypto_stop_limit_offset", None)]),
+    ("MC-C42", "Turn the research agent off (the signal-model row stays fail-safe)", "research_equity",
+     [rep("/behavior/research", None), rep("/behavior/signal_models/0/admits_instruments", False)]),
+    ("MC-C43", "Raise the revisions allowed per lineage", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 5)]),
+    ("MC-C44", "Lower the research cost cap", "research_equity", [rep("/behavior/research/cost_cap_usd_per_day", "2")]),
+    ("MC-C45", "Lengthen the research interval", "research_equity", [rep("/behavior/research/interval_s", 7200)]),
+    ("MC-C46", "Make the admission ceiling stricter (ask to deny)", "research_equity", [rep("/autonomy/admission", "deny")]),
+    ("MC-C47", "Loosen the admission ceiling (ask to auto)", "research_equity", [rep("/autonomy/admission", "auto")]),
 ]
 for cid, title, base, patch in CH:
     old = MB[base]
@@ -609,6 +721,98 @@ for cid, title, base, patch in CH:
     if got != "invalid":
         e["step_up_required"] = got == "risk_increasing"
     cases.append({"id": cid, "kind": "change", "title": title, "base": base, "patch": patch, "expect": e})
+
+# =========================================================== L. research agent: admission, lineage, expiry
+TH_NOW = "2026-09-22T14:00:00.000000000Z"
+SOURCES = ["src.filings", "src.newswire"]
+ADM_ACTION = {"order_usd": "300", "combined_score": "0.8", "instrument": XYZ, "asset_class": "us_equity",
+              "session": "regular", "first_trade_in_instrument": True, "drawdown": "0", "daily_pnl_fraction": "0",
+              "position_usd_after": "300", "gross_usd_after": "300", "bought_today_usd": "300",
+              "position_pnl_fraction": "0", "unusual_input": False}
+
+def thesis(tid, inst=ABC, cls="us_equity", conv="0.7", conf="0.8", horizon=86400, rev=0, lineage=None, pred=None,
+           direction="long", sources=None, corroboration="independent_source", as_of=TH_NOW, expires=None, etp=False):
+    return {"thesis_id": tid, "lineage_id": lineage or tid, "revision": rev, "predecessor_thesis_id": pred,
+            "instrument_id": inst, "asset_class": cls, "direction": direction, "horizon_s": horizon,
+            "conviction": conv, "confidence": conf, "as_of": as_of,
+            "expires_at": expires or fmt(T(as_of) + timedelta(seconds=horizon)),
+            "evidence_sources": SOURCES if sources is None else sources,
+            "corroboration": {"kind": corroboration} if corroboration else {},
+            "leveraged_etp": etp, "invalidation": "Guidance is cut, or the 50-day trend breaks."}
+
+ADM_BASE = {"working_universe": [], "eligibility_failures": [], "allowlisted_sources": SOURCES,
+            "instrument_groups": {}, "claimed_by_other_agents": [], "halted_instruments": [],
+            "data_universe": None, "research_spend_usd_today": "0", "lineages": {},
+            "admission_action": ADM_ACTION}
+N = [
+    ("MC-N01", "A corroborated thesis in an allowed asset class is admitted", "research_equity", {"thesis": thesis("th-1")}),
+    ("MC-N02", "max_instruments is full", "research_equity",
+     {"thesis": thesis("th-2"), "working_universe": [XYZ, QRS, LMN, BTC, "7b4a1c2e-9999-4a2b-9c3d-000000000009"]}),
+    ("MC-N03", "An asset class outside the envelope is refused", "research_equity", {"thesis": thesis("th-3", inst=BTC, cls="crypto")}),
+    ("MC-N04", "A thesis failing the eligibility floor is refused", "research_equity",
+     {"thesis": thesis("th-4"), "eligibility_failures": [ABC]}),
+    ("MC-N05", "An instrument group claimed by another agent is refused", "research_equity",
+     {"thesis": thesis("th-5"), "instrument_groups": {ABC: "grp_a", LMN: "grp_a"}, "claimed_by_other_agents": [LMN]}),
+    ("MC-N06", "A thesis with no corroboration is refused (DEC-101)", "research_equity",
+     {"thesis": thesis("th-6", corroboration=None)}),
+    ("MC-N07", "Evidence from a source off the allowlist is refused (DEC-101)", "research_equity",
+     {"thesis": thesis("th-7", sources=["src.filings", "src.anonymous_blog"])}),
+    ("MC-N08", "A pinned universe admits nothing", "research_equity_pinned", {"thesis": thesis("th-8", inst=XYZ)}),
+    ("MC-N09", "The research cost cap refuses new theses for the day (DEC-120)", "research_equity",
+     {"thesis": thesis("th-9"), "research_spend_usd_today": "5"}),
+    ("MC-N10", "An operator per-thesis halt refuses the admission (DEC-100)", "research_equity",
+     {"thesis": thesis("th-10"), "halted_instruments": [ABC]}),
+    ("MC-N11", "The thin slice admits only research-basket instruments (DEC-103)", "research_equity",
+     {"thesis": thesis("th-11"), "data_universe": [XYZ, QRS]}),
+    ("MC-N12", "A short thesis is ignored (long only in v1)", "research_equity", {"thesis": thesis("th-12", direction="short")}),
+    ("MC-N13", "An expiry that disagrees with the horizon is ignored", "research_equity",
+     {"thesis": thesis("th-13", expires="2026-09-30T14:00:00.000000000Z")}),
+    ("MC-N14", "Renewing an active instrument adds no second entry", "research_equity",
+     {"thesis": thesis("th-14", inst=XYZ), "working_universe": [XYZ]}),
+    ("MC-N15", "Admission deny refuses the admission outright", "research_equity_admission_deny", {"thesis": thesis("th-15")}),
+    ("MC-N16", "A leveraged ETP without the owner opt-in is refused", "research_equity", {"thesis": thesis("th-16", etp=True)}),
+]
+derived("research_equity_admission_deny", "research_equity", [rep("/autonomy/admission", "deny")], "autonomy.admission deny")
+for cid, title, base, over in N:
+    inp = dict(ADM_BASE, **over)
+    cases.append({"id": cid, "kind": "admission", "title": title, "base": base, "patch": [], "input": inp,
+                  "expect": admit(MB[base], inp)})
+
+LIN = [
+    ("MC-N17", "Revisions 1 to 3 are admitted; revision 4 retires the lineage (DEC-111)", "research_equity",
+     [thesis("th-20"), thesis("th-21", rev=1, lineage="th-20", pred="th-20"),
+      thesis("th-22", rev=2, lineage="th-20", pred="th-21"), thesis("th-23", rev=3, lineage="th-20", pred="th-22"),
+      thesis("th-24", rev=4, lineage="th-20", pred="th-23")]),
+    ("MC-N18", "A revision never carries its predecessor score forward (DEC-111)", "research_equity",
+     [thesis("th-30"), thesis("th-31", rev=1, lineage="th-30", pred="th-30")]),
+    ("MC-N19", "A revision without a predecessor id is ignored", "research_equity",
+     [thesis("th-40", rev=1, lineage="th-40", pred=None)]),
+]
+for cid, title, base, theses in LIN:
+    inp = dict(ADM_BASE, theses=theses)
+    cases.append({"id": cid, "kind": "lineage", "title": title, "base": base, "patch": [], "input": inp,
+                  "expect": lineage_fold(MB[base], inp)})
+
+EX_ENTRY = {"instrument": ABC, "thesis_id": "th-1", "lineage_id": "th-1", "revision": 0,
+            "expires_at": "2026-09-23T14:00:00.000000000Z"}
+EXP = [
+    ("MC-N20", "A thesis at its horizon removes its instrument (DEC-118)", "2026-09-23T14:00:00.000000000Z", [dict(EX_ENTRY)]),
+    ("MC-N21", "An invalidated thesis removes at once, before its horizon", "2026-09-22T18:00:00.000000000Z",
+     [dict(EX_ENTRY, invalidated=True)]),
+    ("MC-N22", "A retired lineage removes its instrument, an unexpired thesis stays", "2026-09-22T18:00:00.000000000Z",
+     [dict(EX_ENTRY, lineage_retired=True), dict(EX_ENTRY, instrument=XYZ, thesis_id="th-2", lineage_id="th-2")]),
+]
+for cid, title, now, entries in EXP:
+    inp = {"now": now, "entries": entries}
+    cases.append({"id": cid, "kind": "thesis_expiry", "title": title, "base": "research_equity", "input": inp,
+                  "expect": thesis_expiry(research, inp)})
+
+cases.append({"id": "MC-N23", "kind": "stagger",
+              "title": "The stagger offset is deterministic per workspace and thesis, inside the window (DEC-100)",
+              "input": {"window_s": 900, "pairs": [["ws_a", "th-1"], ["ws_b", "th-1"], ["ws_a", "th-2"]]},
+              "expect": {"offsets": [stagger_offset("ws_a", "th-1", 900), stagger_offset("ws_b", "th-1", 900),
+                                     stagger_offset("ws_a", "th-2", 900)],
+                         "window_s": 900}})
 
 # =========================================================== output
 HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.5, approved)
