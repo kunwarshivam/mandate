@@ -2,6 +2,13 @@
 
 [graph]
 all-features = true
+# The platforms we build (ES-17) and develop on; wasm32-only crates are out of scope (DEC-88).
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+]
 
 [advisories]
 version = 2
