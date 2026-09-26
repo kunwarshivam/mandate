@@ -31,6 +31,8 @@ pub enum InspectError {
     Time(#[from] TimeError),
     #[error("day range: {0}")]
     Range(#[from] ModelError),
+    #[error("inspect does not summarize stored {} yet", .0.dir_name())]
+    Unsupported(Kind),
 }
 
 impl InspectError {
@@ -42,6 +44,7 @@ impl InspectError {
             Self::Overflow { .. } => "overflow",
             Self::Time(_) => "time",
             Self::Range(_) => "range",
+            Self::Unsupported(_) => "unsupported",
         }
     }
 }
@@ -404,6 +407,7 @@ impl Totals {
             gaps: match kind {
                 Kind::Bars(timeframe) => Some(GapFinder::new(timeframe)),
                 Kind::Trades => None,
+                Kind::Quotes => None,
             },
             duplicates: Vec::new(),
         }
@@ -456,6 +460,7 @@ impl Totals {
                     )
                 }));
             }
+            Records::Quotes(_) => return Err(InspectError::Unsupported(Kind::Quotes)),
         }
         Ok(())
     }
@@ -478,6 +483,7 @@ impl Totals {
                 high: decimal("price", high, PRICE_SCALE)?,
                 size: decimal("size", self.quantity, SIZE_SCALE)?,
             },
+            Kind::Quotes => return Err(InspectError::Unsupported(Kind::Quotes)),
         };
         Ok(Some(Stats {
             rows: self.rows,

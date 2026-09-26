@@ -83,6 +83,7 @@ pub fn decimal_scales(kind: Kind) -> &'static [(&'static str, u8)] {
             ("vwap", BAR_SCALE),
         ],
         Kind::Trades => &[("price", PRICE_SCALE), ("size", SIZE_SCALE)],
+        Kind::Quotes => &[],
     }
 }
 
@@ -281,6 +282,7 @@ fn dataset_value(dataset: &DatasetId) -> Result<Value, String> {
     let (kind, timeframe) = match dataset.kind() {
         Kind::Bars(timeframe) => ("bars", Some(timeframe.to_string())),
         Kind::Trades => ("trades", None),
+        Kind::Quotes => ("trades", None),
     };
     let mut members = vec![
         ("asset_class", text(dataset.asset_class().as_str())),

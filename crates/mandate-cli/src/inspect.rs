@@ -100,6 +100,7 @@ pub fn render(inspection: &Inspection) -> String {
     }
     match inspection.dataset.kind() {
         Kind::Trades => lines.push("gaps: not applicable to trades".to_owned()),
+        Kind::Quotes => lines.push("gaps: not applicable to quotes".to_owned()),
         Kind::Bars(_) if inspection.gaps.is_empty() => lines.push("gaps: 0".to_owned()),
         Kind::Bars(_) => {
             lines.push(format!(

@@ -62,6 +62,7 @@ pub fn schema(kind: Kind) -> SchemaRef {
             Field::new("tape", DataType::Utf8, true),
             Field::new("taker_side", DataType::Utf8, true),
         ],
+        Kind::Quotes => vec![],
     };
     Arc::new(Schema::new(fields))
 }
@@ -159,6 +160,7 @@ pub fn encode(dataset: &DatasetId, records: &Records) -> Result<Vec<u8>, Dataset
     let columns = match records {
         Records::Bars(bars) => bar_columns(symbol, bars)?,
         Records::Trades(trades) => trade_columns(symbol, trades)?,
+        Records::Quotes(_) => vec![],
     };
     let schema = schema(dataset.kind());
     let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(parquet_error)?;
@@ -368,6 +370,7 @@ pub fn read(path: &Path, kind: Kind) -> Result<Records, DatasetError> {
         match &mut records {
             Records::Bars(bars) => read_bars(&columns, bars)?,
             Records::Trades(trades) => read_trades(&columns, trades)?,
+            Records::Quotes(_) => {}
         }
         offset = offset.saturating_add(batch.num_rows());
     }

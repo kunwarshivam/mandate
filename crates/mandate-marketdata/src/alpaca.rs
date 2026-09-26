@@ -106,6 +106,7 @@ pub fn page_path(
         (AssetClass::UsEquity, Kind::Trades) => "/v2/stocks/trades",
         (AssetClass::Crypto, Kind::Bars(_)) => "/v1beta3/crypto/us/bars",
         (AssetClass::Crypto, Kind::Trades) => "/v1beta3/crypto/us/trades",
+        (_, Kind::Quotes) => "/stub/quotes",
     };
     let mut path = format!(
         "{endpoint}?symbols={}",
@@ -124,7 +125,7 @@ pub fn page_path(
         (AssetClass::UsEquity, Kind::Trades) => {
             path.push_str(&format!("&feed={}", dataset.feed()));
         }
-        (AssetClass::Crypto, _) => {}
+        (AssetClass::UsEquity, Kind::Quotes) | (AssetClass::Crypto, _) => {}
     }
     path.push_str("&sort=asc");
     if let Some(token) = page_token {
@@ -140,6 +141,7 @@ pub fn parse_page(dataset: &DatasetId, day: Date, body: &[u8]) -> Result<Page, W
     let (member, raw_map) = match dataset.kind() {
         Kind::Bars(_) => ("bars", envelope.bars),
         Kind::Trades => ("trades", envelope.trades),
+        Kind::Quotes => ("quotes", None),
     };
     let raw_map = raw_map.ok_or(WireError::MissingMember(member))?;
     let raw_token = envelope
@@ -170,6 +172,7 @@ pub fn parse_page(dataset: &DatasetId, day: Date, body: &[u8]) -> Result<Page, W
         Some(raw) => match dataset.kind() {
             Kind::Bars(_) => Records::Bars(bars(raw, &window)?),
             Kind::Trades => Records::Trades(trades(raw, &window)?),
+            Kind::Quotes => Records::empty(Kind::Quotes),
         },
     };
     Ok(Page {
