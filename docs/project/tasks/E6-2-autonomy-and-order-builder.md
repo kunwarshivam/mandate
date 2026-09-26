@@ -101,7 +101,7 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | §6.3 `in` and `not_in` on enum and string fields; V-023's type rules reject anything else at load | `hand::a_condition_whose_value_does_not_match_its_field_type_is_refused`, `properties::every_loaded_rule_is_type_correct` |
   | §6.3, V-018 `unusual_input` is refused at load until the drift detector ships | `hand::a_rule_using_unusual_input_is_refused` |
   | §6.3 the exposure fields are the order's **after** values, so order splitting cannot evade a bound | `hand::bought_today_catches_order_splitting`, `properties::position_and_gross_after_include_this_order` |
-  | §8.2 fresh means `as_of ≤ now < expires_at` **and** `now − as_of ≤ max_output_age_s`; each bound is exclusive or inclusive exactly as written | `hand::a_future_as_of_is_not_fresh`, `hand::an_output_at_exactly_max_output_age_is_fresh_and_one_second_later_is_not`, `hand::an_output_expiring_exactly_now_is_not_fresh`, `properties::freshness_matches_the_interval_oracle` |
+  | §8.2 fresh means `as_of ≤ now < expires_at` **and** `now − as_of ≤ max_output_age_s`; each bound is exclusive or inclusive exactly as written | `hand::a_future_as_of_is_not_fresh`, `hand::an_output_whose_as_of_is_exactly_now_is_fresh`, `hand::an_output_at_exactly_max_output_age_is_fresh_and_one_second_later_is_not`, `hand::an_output_expiring_exactly_now_is_not_fresh`, `properties::freshness_matches_the_interval_oracle` |
   | §8.1, §8.2 an output whose id, version, or content hash is not the pinned triple is ignored and counts as missing (DEC-67) | `hand::a_wrong_model_version_counts_as_missing`, `hand::an_unpinned_model_id_is_ignored` |
   | §8.2 only the latest fresh output per model counts: latest `as_of`, ties by journal order | `hand::duplicate_outputs_take_the_latest_as_of`, `hand::two_outputs_with_one_as_of_take_the_later_journal_position`, `properties::one_output_per_model_is_used_and_it_is_the_latest` |
   | §8.3 step 1 c = round₁₂(F ÷ W) with a missing model at 0, so an outage never forces a sell | `hand::a_missing_model_counts_as_zero_for_the_exit_conviction`, `properties::removing_a_fresh_output_never_lowers_the_exit_conviction_below_the_rest` |
@@ -116,7 +116,8 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | §8.3 step 2 cap = min(`max_position_usd`, `max_position_fraction` × E), and T = b × cap × size factor | `hand::the_cap_is_the_lesser_of_the_dollar_and_fraction_limits`, `hand::the_ladder_size_factor_scales_the_target` |
   | §8.3 step 3 Delta = T − MV at the **risk mark** − max cost of working opening orders; a working order counts toward the target | `hand::a_working_opening_order_counts_toward_the_target`, `properties::delta_matches_the_independent_target_oracle` |
   | §8.3 step 3 hold when Delta ≤ 0 (no signal trims in v1) and when Delta < `rebalance_band` × cap | `hand::at_or_above_target_holds_and_never_sells`, `hand::a_delta_inside_the_band_holds`, `properties::a_positive_conviction_never_produces_a_sell` |
-  | §8.3 step 3 the buy value is the least of Delta, `max_order_usd`, the cap headroom, and the gross headroom, at the ask, truncated to the increment | `hand::each_of_the_four_clips_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
+  | §8.3 step 3 the buy value is the least of Delta, `max_order_usd`, the cap headroom, and the gross headroom, at the ask, truncated to the increment | `hand::each_bound_that_can_bind_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
+  | The cap headroom is **never** the binding bound, because `T ≤ cap` makes `delta ≤ cap − MV − working` always (a finding of the tests PR, below) | `hand::the_cap_headroom_is_never_the_binding_bound` |
   | §8.3 step 3 hold when the clipped value is below `rebalance_band` × cap (no tiny top-ups) | `hand::a_value_below_the_band_after_clipping_holds` |
   | §8.3 step 4 the three accumulate clips, each truncated to the increment, and the projected-average guard | `hand::accumulate_clipped_to_the_remaining_target_quantity`, `hand::accumulate_clipped_by_max_spend`, `hand::accumulate_clipped_by_max_avg_price`, `hand::a_projected_average_above_max_avg_price_holds`, `properties::an_accumulate_buy_never_breaks_a_goal_bound` |
   | §8.3 step 4 fees are in the clips: per-unit cost a = ask × (1 + cash fee rate) and quantity received β = 1 − asset fee rate | `hand::accumulate_with_fees_counts_the_spend_and_the_quantity_received`, `hand::a_max_avg_price_denominator_that_is_not_positive_leaves_the_clip_off` |
@@ -131,20 +132,29 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | DEC-130 item 8 an input too wide for an exact chain refuses the proposal instead of approximating | `hand::a_weight_beyond_twelve_places_is_refused`, `hand::a_confidence_beyond_eighteen_places_is_refused`, `properties::no_input_within_the_stated_bounds_overflows` |
   | DEC-85 every input is stated: nothing defaults silently | `hand::an_absent_prior_fill_flag_is_not_inferred_from_the_position` |
 
-  **Oracles.** `crates/mandate-builder/tests/properties.rs` holds a second implementation that shares
-  no code with the crate: the combine step as `i128`/`I256` integer arithmetic at a fixed scale with
-  its own half-even rounding (the weights, convictions, and confidences scaled to integers and one
-  division at the end), the sizing chain as a rational (numerator and denominator as big integers,
-  compared by cross-multiplication so no quotient is ever taken), and the autonomy classification as
-  a naive recursive walk that re-reads the rule list from the start for every action. The three
-  bands of step 2 are checked by a generator that sweeps the conviction line rather than by asking
-  the crate which band it chose. Every property runs through one helper that first asserts the
-  oracle and the crate agree on the **action kind**, so no property can pass on a hold the crate
-  returned for the wrong reason.
+  **Oracles.** `crates/mandate-builder/tests/properties.rs` holds three implementations that share no
+  code with the crate: a sign-and-magnitude decimal on `i128` with its own alignment, multiplication,
+  comparison, half-even rounding, and truncation, which recomputes every combined and every sizing
+  figure; a naive autonomy walk that re-reads the rule list from the start for every action and
+  compares condition values by parsing their canonical text; and the §8.3 chain as a straight line of
+  those operations, with the four bounds compared rather than minimised through the crate's own type.
+  Every sizing property runs through one helper that first asserts the oracle and the crate agree on
+  the **action kind**, so no property can pass on a hold the crate returned for the wrong reason.
 
-  **Planted bugs.** Each is broken alone in a throwaway implementation of the stubs (kept out of the
-  PR, DEC-83), run, and reverted; the tests PR's body reports the result and the module doc of
-  `tests/properties.rs` carries the full list.
+  **Generated scales are coarse on purpose:** weights, convictions, and confidences at up to 6
+  fractional places, equities and prices at up to 2. An `i128` oracle cannot carry the 48-place
+  products an 18-place confidence would make, and an arbitrary-precision oracle would end up reusing
+  `mandate-num`'s own 256-bit arithmetic and prove nothing. The fine-scale edges are pinned by hand
+  instead: `MC-B13`'s 13-place confidence, the 12-place and 18-place refusals, and the `mandate-num`
+  digit tests. E4-1 made the same trade for its 18-place root.
+
+  **Planted bugs.** Thirty-two, each broken alone in a throwaway implementation of the stubs (kept
+  out of the PR, DEC-83), run, and reverted. Every one is caught. Writing that implementation is also
+  what found the two defects the tests PR records below, and the pass itself found a third: no test
+  covered §8.2's **inclusive** lower bound, so an implementation reading `as_of ≤ now` as strict
+  passed every other freshness case. `hand::an_output_whose_as_of_is_exactly_now_is_fresh` closes it,
+  and the freshness generator now draws the boundary offsets explicitly rather than hoping a uniform
+  range lands on zero.
 
   | Planted bug | Caught by |
   |---|---|
@@ -165,8 +175,8 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | MV uses the ask rather than the risk mark, so the position looks larger and a buy is smaller — or the reverse | `hand::a_working_opening_order_counts_toward_the_target`, `properties::delta_matches_the_independent_target_oracle` (MC-B18's 8.7 delta) |
   | The working opening orders' cost is left out of Delta | `hand::a_working_opening_order_counts_toward_the_target`, MC-B15 |
   | The rebalance band is compared against Delta only, not against the value after clipping | `hand::a_value_below_the_band_after_clipping_holds` (MC-B19) |
-  | One of the four clips is dropped from the minimum | `hand::each_of_the_four_clips_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
-  | The share count rounds instead of truncating to the increment | `hand::each_of_the_four_clips_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
+  | One of the four bounds is dropped from the minimum | `hand::each_bound_that_can_bind_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
+  | The share count rounds instead of truncating to the increment | `num::shares_are_truncated_toward_zero_at_the_increment`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
   | The step-5 guard drops `n ≤ 0` and keeps only the minimum-order comparison | `hand::a_zero_quantity_never_becomes_a_buy_at_a_zero_minimum_and_zero_band`, `properties::every_proposed_quantity_is_strictly_positive` |
   | The flat-position check is tried before the `accumulate` check in step 2 | `hand::a_flat_accumulate_agent_below_the_exit_threshold_holds_exits_disabled` |
   | The accumulate remaining-quantity clip divides by 1 instead of β, so the asset fee is ignored | `hand::accumulate_with_fees_counts_the_spend_and_the_quantity_received`, `properties::an_accumulate_buy_never_breaks_a_goal_bound` |
@@ -405,18 +415,19 @@ pub fn decide(
 ```
 
 `BuilderError` names one cause each, with a stable `code()` (ES-09): `Unimplemented` (the tests PR's
-stubs only), `UnsupportedSizingMethod`, `ConditionTooDeep`, `ConditionTypeMismatch`,
-`ReservedField` (`unusual_input`, V-018), `DuplicateRuleId`, `NoSignalModels`, `WeightSumZero`,
-`CrossedQuote` (item 17), `AccumulateInstrumentMismatch`, and the numeric and time errors it wraps,
-whose codes (`too_precise`, `overflow`, `not_canonical`) are how an input too wide to size exactly
-refuses the proposal (item 8).
+stubs only), `ConditionTooDeep`, `ConditionTypeMismatch`, `ReservedField` (`unusual_input`, V-018),
+`DuplicateRuleId`, `NoSignalModels`, `WeightSumZero`, `CrossedQuote` (item 17),
+`AccumulateInstrumentMismatch`, and the numeric and time errors it wraps, whose codes
+(`too_precise`, `overflow`, `not_canonical`) are how an input too wide to size exactly refuses the
+proposal (item 8).
 
-Two refusals an earlier draft of this brief carried are **not** in that list, because
-`reference/mandate/ref.py` does not raise them and neither needs an error at all. An output whose
+Three refusals an earlier draft of this brief carried are **not** in that list, because
+`reference/mandate/ref.py` does not raise them and none needs an error at all. An output whose
 `expires_at` is at or before its `as_of` is simply never fresh, which is the freshness test's own
-answer; and `Direction` has one variant, `Long`, so a direction v1 does not support is
-unrepresentable rather than rejected (the trust ladder's first rung). `CrossedQuote` stays, and item
-17 records it as a refusal ref.py does not raise.
+answer; `Direction` has one variant, `Long`, and `SizingMethod` one, `ConvictionLinear`, so a
+direction or a method v1 does not support is unrepresentable rather than rejected — the trust
+ladder's first rung. `CrossedQuote` stays, and item 17 records it as the one refusal ref.py would not
+produce.
 
 ## Exact arithmetic (DEC-89, ES-04, ES-21)
 
@@ -553,6 +564,37 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
     sold. And the step-5 guard is `n ≤ 0` **or** the value below the minimum order, not the minimum
     alone, so a zero-quantity buy is impossible even where `min_order_usd` and `rebalance_band` are
     both zero — the one thing standing between a fully clipped budget and an order for nothing.
+
+## What the tests PR settled, and what it found
+
+Shapes the brief left open, fixed by the tests PR and reported in its body. None changes a rule; each
+is a Rust detail or a finding about the spec's own arithmetic.
+
+| Settled | Why |
+|---|---|
+| `AutonomyPolicy::new` is **implemented**, not stubbed: V-017's depth, V-018's reserved field, V-023's types, and unique rule ids are load-time checks | The `mandate-num` precedent (`Ratio::parse` real, the formulas stubbed): a constructor that validates is not logic under test, and implementing it makes the pending tests fail at their own assertion rather than at fixture construction. Its five tests therefore pass in the tests PR |
+| `Field::kind()` and a public `Kind` | V-023's table has to live somewhere, and naming it lets the property test check the invariant "every rule that loads is type-correct" without re-deriving the table |
+| `Outcome::NotProposed` | A hold has no order to gate, and `decide` is total rather than returning an `Option`, so no caller can forget the case |
+| `Action::Buy` boxes its `ActionContext` | The variant is otherwise 200 bytes larger than `Hold`, which `clippy::large_enum_variant` rejects. No semantic change |
+| `Conviction::of_fraction` | §8.3 step 2 compares a combined conviction against `entry_threshold` and `exit_threshold`, which are `SizeFraction`s; the conversion is what makes that comparison typed |
+| `UsdExact::round` refuses a `scale` beyond the 28 places `Usd` stores | Clamping it silently would hand a caller fewer places than it asked for, in the one path that reports a figure to an owner |
+| `UsdExact::truncated_quotient` returns a **signed** quantity | A bound already exceeded leaves a negative budget, which §8.3 step 5 holds on; a non-negative type would have to error or clamp, and both hide the case |
+| `UnsupportedSizingMethod` dropped from `BuilderError` | The same rung-1 argument as `Direction`: `SizingMethod` has one variant, so there is nothing to reject, and `ref.py` does not check the method either. Round 1's item 4 asked for exactly this consistency |
+
+**Two findings about §8.3 itself**, from writing the throwaway implementation:
+
+1. **The cap headroom can never be the binding bound.** Step 3's third bound is
+   `cap − MV − working`, and the target is `buy_conviction × cap × size factor` with both factors at
+   most one, so `T ≤ cap` and therefore `delta ≤ cap − MV − working` always, with equality only at
+   full conviction and no active rung. The bound is belt and braces rather than a clip, and a proposal
+   cut to exactly the cap headroom is cut by the delta and reports no clip at all
+   (`hand::the_cap_headroom_is_never_the_binding_bound`). Nothing in the spec is wrong; the brief's
+   first reading that all four bounds bind was.
+2. **The rebalance band is checked before the goal clips, the minimum order after.** A value above the
+   band can therefore be clipped by an `accumulate` bound to well below the band and still be
+   proposed, as long as it clears the minimum order — which is what `MC-B26` and the spend-clip case
+   do. That asymmetry is the spec's own order of operations and is now pinned by tests rather than
+   inferred.
 
 ## Dependencies
 

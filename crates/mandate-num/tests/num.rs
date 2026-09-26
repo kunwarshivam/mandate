@@ -3,8 +3,9 @@
 //! independent of the library's 256-bit sign-and-magnitude arithmetic.
 
 use mandate_num::{
-    Adverse, Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice, NumError, Price,
-    Qty, Ratio, Rounding, ShareIncrement, SignedQty, SplitRatio, TickRule, Usd,
+    Adverse, Bps, Conviction, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice,
+    NumError, Price, Qty, Ratio, Rounding, ShareIncrement, Signed, SignedQty, SizeFraction,
+    SplitRatio, TickRule, Unit, Usd, UsdExact,
 };
 use proptest::prelude::*;
 
@@ -1421,5 +1422,282 @@ fn hand_calculated_roots_at_their_edges() {
     assert_eq!(
         annualized.root_floor().unwrap().to_string(),
         "2233.664435359109"
+    );
+}
+
+/// DEC-130 item 7: each of the builder's types holds exactly the places its fields need and refuses
+/// more, so a mandate the schema accepts with a wider value is `too_precise` rather than approximated.
+/// `SizeFraction` stops at 12 because that bound is what keeps the sizing chain inside 256 bits;
+/// `Unit` and `Conviction` reach 18 because `MC-B13` already carries a 13-place confidence.
+#[test]
+fn the_builder_types_hold_the_places_their_fields_need() {
+    assert!(SizeFraction::parse("0.000000000001").is_ok());
+    assert_eq!(
+        SizeFraction::parse("0.0000000000001").err(),
+        Some(NumError::TooPrecise)
+    );
+    assert_eq!(SizeFraction::parse("1").unwrap().to_string(), "1");
+    assert_eq!(
+        SizeFraction::parse("1.000000000001").err(),
+        Some(NumError::AboveOne)
+    );
+    assert_eq!(SizeFraction::parse("-0.1").err(), Some(NumError::Negative));
+    assert!(SizeFraction::ZERO.is_zero());
+
+    assert!(Unit::parse("0.6499999999999").is_ok());
+    assert!(Unit::parse("0.000000000000000001").is_ok());
+    assert_eq!(
+        Unit::parse("0.0000000000000000001").err(),
+        Some(NumError::TooPrecise)
+    );
+    assert_eq!(Unit::parse("1.1").err(), Some(NumError::AboveOne));
+
+    assert!(Conviction::parse("-1").is_ok());
+    assert!(Conviction::parse("1").is_ok());
+    assert_eq!(
+        Conviction::parse("-1.000000000000000001").err(),
+        Some(NumError::Negative)
+    );
+    assert_eq!(
+        Conviction::parse("1.000000000000000001").err(),
+        Some(NumError::AboveOne)
+    );
+    assert!(Conviction::parse("-0.5").unwrap().is_negative());
+    assert_eq!(
+        Conviction::parse("0.25").unwrap().negated().to_string(),
+        "-0.25"
+    );
+    assert_eq!(Conviction::NEGATIVE_ONE.to_string(), "-1");
+
+    assert!(Signed::parse("-12.5").unwrap().is_negative());
+    assert_eq!(
+        Signed::parse("-0.0000000000000000001").err(),
+        Some(NumError::TooPrecise)
+    );
+
+    assert_eq!(
+        SizeFraction::parse("0.10").err(),
+        Some(NumError::NotCanonical)
+    );
+    assert_eq!(Unit::parse("0.50").err(), Some(NumError::NotCanonical));
+}
+
+/// Mandate spec §8.3 step 1: each combined figure is **one** rounding of one exact quotient, taken at
+/// 12 places, half-even. The `two_stock_swing` weights are 0.6 and 0.4, so `MC-B01`'s outputs give
+/// 0.472 and 0.74, and `MC-B13`'s 13-place confidence makes the quotient 0.64999999999996, which
+/// rounds to 0.65 — the one digit that turns an ASK into an AUTO.
+#[test]
+#[ignore = "pending E6-2"]
+fn a_weighted_ratio_is_one_rounding_of_the_exact_quotient() {
+    let momentum = SizeFraction::parse("0.6").unwrap();
+    let news = SizeFraction::parse("0.4").unwrap();
+    let weights = [momentum, news];
+
+    let b01 = [
+        (
+            momentum,
+            Conviction::parse("0.8").unwrap(),
+            Unit::parse("0.9").unwrap(),
+        ),
+        (
+            news,
+            Conviction::parse("0.2").unwrap(),
+            Unit::parse("0.5").unwrap(),
+        ),
+    ];
+    assert_eq!(
+        Conviction::weighted_ratio(&b01, &[], &weights)
+            .unwrap()
+            .to_string(),
+        "0.472"
+    );
+    let scores = [
+        (momentum, Unit::parse("0.9").unwrap()),
+        (news, Unit::parse("0.5").unwrap()),
+    ];
+    assert_eq!(
+        Unit::weighted_ratio(&scores, &weights).unwrap().to_string(),
+        "0.74"
+    );
+
+    let b13 = [
+        (
+            momentum,
+            Conviction::parse("1").unwrap(),
+            Unit::parse("0.65").unwrap(),
+        ),
+        (
+            news,
+            Conviction::parse("1").unwrap(),
+            Unit::parse("0.6499999999999").unwrap(),
+        ),
+    ];
+    assert_eq!(
+        Conviction::weighted_ratio(&b13, &[], &weights)
+            .unwrap()
+            .to_string(),
+        "0.65"
+    );
+
+    let only_momentum = [(
+        momentum,
+        Conviction::parse("0.8").unwrap(),
+        Unit::parse("0.9").unwrap(),
+    )];
+    assert_eq!(
+        Conviction::weighted_ratio(&only_momentum, &[], &weights)
+            .unwrap()
+            .to_string(),
+        "0.432"
+    );
+    assert_eq!(
+        Conviction::weighted_ratio(&only_momentum, &[news], &weights)
+            .unwrap()
+            .to_string(),
+        "0.032",
+        "a missing model counts as fully bearish for a buy, so an outage never enlarges one (MI-10)"
+    );
+    assert_eq!(
+        Conviction::weighted_ratio(&[], &[], &weights)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(
+        Conviction::weighted_ratio(&[], &weights, &weights)
+            .unwrap()
+            .to_string(),
+        "-1"
+    );
+    let half = [(
+        SizeFraction::parse("1").unwrap(),
+        Conviction::parse("0.0000000000005").unwrap(),
+        Unit::ONE,
+    )];
+    let one = [SizeFraction::parse("1").unwrap()];
+    assert_eq!(
+        Conviction::weighted_ratio(&half, &[], &one)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(
+        Conviction::weighted_ratio(&[], &[], &[SizeFraction::ZERO]).err(),
+        Some(NumError::DivisionByZero),
+        "no weight at all is an error, never a zero that would read as bearish"
+    );
+}
+
+/// DEC-130 item 7: the sizing chain is exact or an error. A cap of `max_position_fraction × E` reaches
+/// 33 fractional places — a 12-place fraction times an equity a 9-place quantity at a 12-place mark
+/// gives 21 of — which `Usd` cannot hold at all, so it lives in [`UsdExact`] and narrows only through
+/// an explicit rounding.
+#[test]
+fn the_builder_arithmetic_is_exact_or_an_error() {
+    let equity = UsdExact::of_usd(Usd::parse("0.000000000000000000001").unwrap());
+    let cap = equity
+        .times_size_fraction(SizeFraction::parse("0.000000000001").unwrap())
+        .unwrap();
+    assert_eq!(cap.to_string(), "0.000000000000000000000000000000001");
+    assert_eq!(cap.round(28, Rounding::HalfEven).unwrap().to_string(), "0");
+    assert_eq!(cap.round(12, Rounding::HalfEven).unwrap().to_string(), "0");
+    assert_eq!(
+        cap.round(12, Rounding::Ceiling).unwrap().to_string(),
+        "0.000000000001"
+    );
+    assert_eq!(
+        cap.round(33, Rounding::HalfEven).err(),
+        Some(NumError::TooPrecise)
+    );
+
+    let delta = UsdExact::of_usd(Usd::parse("708").unwrap());
+    let order_limit = UsdExact::of_usd(Usd::parse("1000").unwrap());
+    assert_eq!(delta.min(order_limit).unwrap().to_string(), "708");
+    assert_eq!(order_limit.min(delta).unwrap().to_string(), "708");
+    assert!(delta.is_positive());
+    assert!(!UsdExact::ZERO.is_positive());
+    assert!(!delta.checked_sub(order_limit).unwrap().is_positive());
+    assert_eq!(delta.checked_sub(order_limit).unwrap().to_string(), "-292");
+    assert_eq!(delta.checked_add(order_limit).unwrap().to_string(), "1708");
+    assert_eq!(
+        UsdExact::of_price(Price::parse("100").unwrap())
+            .times(UsdExact::of_qty(Qty::parse("7").unwrap()))
+            .unwrap()
+            .to_string(),
+        "700"
+    );
+    assert_eq!(
+        UsdExact::of_usd(Usd::parse("1500").unwrap())
+            .times_conviction(Conviction::parse("0.472").unwrap())
+            .unwrap()
+            .times_size_fraction(SizeFraction::parse("0.5").unwrap())
+            .unwrap()
+            .to_string(),
+        "354"
+    );
+    let negative = UsdExact::of_basis(CostBasis::parse("-0.005").unwrap());
+    assert_eq!(negative.to_string(), "-0.005");
+    assert_eq!(
+        negative.round(2, Rounding::HalfEven).unwrap().to_string(),
+        "0"
+    );
+    assert_eq!(
+        negative.round(2, Rounding::Ceiling).unwrap().to_string(),
+        "0"
+    );
+}
+
+/// Mandate spec §8.3 steps 3 and 4: money becomes shares by **truncation** toward zero at the
+/// instrument's increment, so a buy never pays for more than its budget, and a budget already spent
+/// gives a signed quantity that step 5's `n ≤ 0` guard holds on rather than a sell.
+#[test]
+#[ignore = "pending E6-2"]
+fn shares_are_truncated_toward_zero_at_the_increment() {
+    let budget = UsdExact::of_usd(Usd::parse("708").unwrap());
+    let ask = UsdExact::of_price(Price::parse("100").unwrap());
+    assert_eq!(
+        budget
+            .truncated_quotient(ask, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "7"
+    );
+    assert_eq!(
+        budget
+            .truncated_quotient(ask, ShareIncrement::Fractional)
+            .unwrap()
+            .to_string(),
+        "7.08"
+    );
+    let crypto = UsdExact::of_usd(Usd::parse("1000").unwrap())
+        .truncated_quotient(
+            UsdExact::of_price(Price::parse("55100").unwrap()),
+            ShareIncrement::Fractional,
+        )
+        .unwrap();
+    assert_eq!(crypto.to_string(), "0.01814882");
+    let spent = UsdExact::ZERO
+        .checked_sub(UsdExact::of_usd(Usd::parse("150").unwrap()))
+        .unwrap();
+    assert_eq!(
+        spent
+            .truncated_quotient(ask, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "-1",
+        "a bound already exceeded leaves a negative budget, which step 5 holds on rather than selling"
+    );
+    assert_eq!(
+        UsdExact::of_usd(Usd::parse("50").unwrap())
+            .truncated_quotient(ask, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(
+        budget
+            .truncated_quotient(UsdExact::ZERO, ShareIncrement::Whole)
+            .err(),
+        Some(NumError::DivisionByZero)
     );
 }

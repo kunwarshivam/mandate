@@ -1315,6 +1315,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-builder"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-canon"
 version = "0.0.0"
 dependencies = [

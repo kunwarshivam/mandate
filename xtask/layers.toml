@@ -87,6 +87,12 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+[crates.mandate-builder]
+layer = 5
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-cli]
 layer = 7
 safety_critical = false

@@ -19,6 +19,9 @@
 //! [trading-domain spec §2.1]: ../../../docs/specs/trading-domain.md#21-numbers
 
 mod exact;
+mod sizing;
+
+pub use sizing::{COMBINED_SCALE, Conviction, Signed, SizeFraction, Unit, UsdExact};
 
 use core::fmt;
 
@@ -784,7 +787,7 @@ impl FeeCap {
     }
 }
 
-trait NegExact {
+pub(crate) trait NegExact {
     fn neg_exact(self) -> Self;
 }
 

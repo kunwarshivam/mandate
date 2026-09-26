@@ -1,0 +1,19 @@
+[package]
+name = "mandate-builder"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Autonomy classification and the order builder: model outputs and the owner's fixed weights in, a clipped proposal and an AUTO / ASK / DENY decision out (mandate spec §6, §8.3)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

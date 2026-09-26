@@ -2,6 +2,7 @@
 //! rounding is the one a caller asks for in [`Exact::div`].
 
 use core::cmp::Ordering;
+use core::fmt;
 
 use ruint::aliases::U256;
 use rust_decimal::Decimal;
@@ -28,12 +29,42 @@ fn pow10(exp: u32) -> Result<U256, NumError> {
 }
 
 impl Exact {
+    pub(crate) const ZERO: Self = Self {
+        negative: false,
+        magnitude: U256::ZERO,
+        scale: 0,
+    };
+    pub(crate) const ONE: Self = Self {
+        negative: false,
+        magnitude: U256::from_limbs([1, 0, 0, 0]),
+        scale: 0,
+    };
+
     pub(crate) fn integer(n: u64) -> Self {
         Self {
             negative: false,
             magnitude: U256::from(n),
             scale: 0,
         }
+    }
+
+    /// Whether the value is strictly above zero. Sign and magnitude decide it, so no scale is
+    /// aligned and nothing can overflow.
+    pub(crate) fn is_positive(self) -> bool {
+        !self.negative && !self.magnitude.is_zero()
+    }
+
+    /// Orders two values exactly, by the sign of their difference, so the scales are aligned once
+    /// and only in the place that already reports an overflow.
+    pub(crate) fn compare(self, other: Self) -> Result<Ordering, NumError> {
+        let difference = self.sub(other)?;
+        Ok(if difference.magnitude.is_zero() {
+            Ordering::Equal
+        } else if difference.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        })
     }
 
     pub(crate) fn of(value: Decimal) -> Self {
@@ -284,5 +315,33 @@ fn floor_sqrt(value: U256) -> Result<U256, NumError> {
             return Ok(guess);
         }
         guess = next;
+    }
+}
+
+/// Writes the value exactly, with trailing fractional zeros dropped and no exponent, which is the
+/// canonical decimal text of [the journal grammar](../../../docs/specs/journal.md#4-canonical-json)
+/// and how the mandate reference cases report a figure wider than [`Decimal`] holds.
+impl fmt::Display for Exact {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let digits = self.magnitude.to_string();
+        let scale = usize::try_from(self.scale).map_err(|_| fmt::Error)?;
+        let padding = scale
+            .checked_add(1)
+            .and_then(|least| least.checked_sub(digits.len()))
+            .unwrap_or(0);
+        let padded = format!("{}{digits}", "0".repeat(padding));
+        let point = padded.len().checked_sub(scale).ok_or(fmt::Error)?;
+        let (integer, fraction) = padded.split_at_checked(point).ok_or(fmt::Error)?;
+        let fraction = fraction.trim_end_matches('0');
+        let sign = if self.negative && !self.magnitude.is_zero() {
+            "-"
+        } else {
+            ""
+        };
+        if fraction.is_empty() {
+            write!(f, "{sign}{integer}")
+        } else {
+            write!(f, "{sign}{integer}.{fraction}")
+        }
     }
 }
