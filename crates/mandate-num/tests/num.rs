@@ -1382,3 +1382,44 @@ proptest! {
         )?;
     }
 }
+
+/// The roots at their edges: zero, a perfect square at 12 places, the value one unit above it, the
+/// value one unit below, and a squared Sharpe large enough to need the whole integer part. A ceiling
+/// root and a floor root agree exactly on a perfect square and straddle every value between two.
+#[test]
+#[ignore = "pending E4-2"]
+fn hand_calculated_roots_at_their_edges() {
+    let zero = Ratio::ZERO;
+    assert_eq!(zero.root_ceiling().unwrap(), Ratio::ZERO);
+    assert_eq!(zero.root_floor().unwrap(), Ratio::ZERO);
+
+    let square = Ratio::parse("0.0625").unwrap();
+    assert_eq!(square.root_ceiling().unwrap().to_string(), "0.25");
+    assert_eq!(square.root_floor().unwrap().to_string(), "0.25");
+
+    let above = Ratio::parse("0.062500000001").unwrap();
+    assert_eq!(
+        above.root_floor().unwrap().to_string(),
+        "0.250000000001",
+        "its square, 0.062500000000500000000001, is still at or below the value"
+    );
+    assert_eq!(above.root_ceiling().unwrap().to_string(), "0.250000000002");
+
+    let below = Ratio::parse("0.062499999999").unwrap();
+    assert_eq!(below.root_ceiling().unwrap().to_string(), "0.249999999998");
+    assert_eq!(below.root_floor().unwrap().to_string(), "0.249999999997");
+
+    let four = Ratio::parse("4").unwrap();
+    assert_eq!(four.root_ceiling().unwrap().to_string(), "2");
+    assert_eq!(four.root_floor().unwrap().to_string(), "2");
+
+    let annualized = Ratio::parse("4989256.809788127492").unwrap();
+    assert_eq!(
+        annualized.root_ceiling().unwrap().to_string(),
+        "2233.66443535911"
+    );
+    assert_eq!(
+        annualized.root_floor().unwrap().to_string(),
+        "2233.664435359109"
+    );
+}

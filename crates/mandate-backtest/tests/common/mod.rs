@@ -108,6 +108,16 @@ pub fn pre_market(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
     }
 }
 
+/// An overnight bar of `day` (20:00 to 04:00 ET, spec §4.3): nothing fills there (DEC-30), but its
+/// mark and any fee charge its instant reaches still land.
+pub fn overnight(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    SimBar {
+        session: Session::Overnight,
+        session_start: at(&et(day, "20:00")),
+        ..bar(day, clock, ohlcv)
+    }
+}
+
 /// A crypto bar, in UTC: crypto trades continuously and its day ends at 00:00 UTC (spec §2.2, §4.3).
 pub fn continuous(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
     let [open, high, low, close, volume] = ohlcv;
@@ -198,6 +208,17 @@ pub fn no_equity_fees() -> Config {
     fees
 }
 
+/// FINRA TAF alone, capped at `cap` under `basis`, with no SEC and no CAT: a configuration where the
+/// reported fee total *is* the TAF, so a case can tell a cap counted per order from one counted per
+/// execution (spec §6.2, DEC-87).
+pub fn taf_only_fees(cap: &str, basis: TafCapBasis) -> Config {
+    let mut fees = no_equity_fees();
+    fees.equities.taf_per_share = FeePerShare::parse("0.0002").unwrap();
+    fees.equities.taf_cap = FeeCap::parse(cap).unwrap();
+    fees.equities.taf_cap_basis = basis;
+    fees
+}
+
 /// A crossover with windows of two and three periods, a 25 bps collar, and a target notional of
 /// 50,000 USD.
 pub fn crossover() -> Strategy {
@@ -283,6 +304,25 @@ pub fn run(
     bars: &[SimBar],
 ) -> Result<BacktestRun, mandate_backtest::BacktestError> {
     let medians = Median(qty("10000"));
+    let coverage_start = bars
+        .first()
+        .map(|b| b.start)
+        .unwrap_or(at("2026-09-21T00:00:00Z"));
+    mandate_backtest::run(&BacktestInput {
+        config,
+        bars,
+        coverage_start,
+        first_bar_volumes: &medians,
+    })
+}
+
+/// The same with a stated median, which decides the cap of every bar that opens a session.
+pub fn run_with_median(
+    config: &RunConfig,
+    bars: &[SimBar],
+    median: &str,
+) -> Result<BacktestRun, mandate_backtest::BacktestError> {
+    let medians = Median(qty(median));
     let coverage_start = bars
         .first()
         .map(|b| b.start)

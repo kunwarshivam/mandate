@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use mandate_accounting::Side;
+use mandate_accounting::{Side, TafCapBasis};
 use mandate_backtest::{
     AbsentStatistics, BacktestError, Metrics, MetricsConfig, Observation, Sign, Strategy,
     StrategyConfig, Totals,
@@ -164,9 +164,10 @@ fn a_flat_run_leaves_the_sharpe_absent_with_zero_variance() {
     assert_eq!(metrics.absent, Some(AbsentStatistics::ZeroVariance));
 }
 
-/// A variance whose exact value is positive but rounds to zero at 12 places leaves the Sharpe absent
-/// for the same reason: 100000 → 100000.000000001 → 100000.000000002 has period returns 1e-14 and
-/// 1e-14 rounded to 12 places, so both are 0 and the variance is 0.
+/// A run whose equity rises by less than a picopoint a period: 100000 → 100000.000000001 →
+/// 100000.000000002 has exact period returns of 1 ÷ 10¹⁴, which round to zero at 12 places, so the
+/// variance is zero and the Sharpe is absent as `zero_variance`. The **exact** net P&L is still
+/// positive while the total return is zero: a figure below the report's last place is not a figure.
 #[test]
 #[ignore = "pending E4-2"]
 fn a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance() {
@@ -181,10 +182,17 @@ fn a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance() {
     assert_eq!(metrics.variance, Some(Ratio::ZERO));
     assert_eq!(metrics.absent, Some(AbsentStatistics::ZeroVariance));
     assert_eq!(metrics.sharpe_squared, None);
-    assert!(
-        metrics.total_return > Ratio::ZERO,
-        "the run did make money, even if no period return survives 12 places"
+    assert_eq!(
+        metrics.net_pnl,
+        usd("0.000000002"),
+        "the run did make money"
     );
+    assert_eq!(
+        metrics.total_return,
+        Ratio::ZERO,
+        "2 ÷ 10¹⁴ rounds to zero at the twelfth place"
+    );
+    assert_eq!(metrics.return_sum, Ratio::ZERO);
 }
 
 /// A constant rise never drops below its peak, so the drawdown is zero and both periods it reports
@@ -295,24 +303,19 @@ fn annualizing_scales_the_squares_not_the_roots() {
     )
     .unwrap();
 
-    let variance = metrics.variance.unwrap();
-    assert_eq!(
-        metrics.variance_annualized,
-        Some(variance.times_int(252).unwrap())
-    );
-    let squared = metrics.sharpe_squared.unwrap();
+    assert_eq!(metrics.variance, Some(ratio("0.000906221436")));
+    assert_eq!(metrics.variance_annualized, Some(ratio("0.228367801872")));
+    assert_eq!(metrics.volatility_annualized, Some(ratio("0.477878438384")));
+    assert_eq!(metrics.sharpe_squared, Some(ratio("0.11482183684")));
     assert_eq!(
         metrics.sharpe_squared_annualized,
-        Some(squared.times_int(252).unwrap())
+        Some(ratio("28.93510288368"))
     );
-    assert_eq!(
-        metrics.volatility_annualized,
-        Some(variance.times_int(252).unwrap().root_ceiling().unwrap())
-    );
+    assert_eq!(metrics.sharpe_annualized, Some(ratio("5.379135886337")));
 }
 
 /// The variance divides by n − 1, not n: on the main series the sample variance is 0.000906221436,
-/// where the population variance would be two thirds of it.
+/// where a population divisor of 3 rather than 2 would give two thirds of it, 0.000604147624.
 #[test]
 #[ignore = "pending E4-2"]
 fn variance_uses_the_sample_divisor() {
@@ -324,18 +327,12 @@ fn variance_uses_the_sample_divisor() {
     )
     .unwrap();
 
-    let sample = metrics.variance.unwrap();
-    assert_eq!(sample, ratio("0.000906221436"));
-    let population = Ratio::sample_variance(
-        metrics.return_sum,
-        metrics.return_sum_of_squares,
-        metrics.period_count,
-    )
-    .unwrap();
-    assert_eq!(sample, population, "the figure is the crate's own formula");
-    assert!(
-        sample > ratio("0.000604147624"),
-        "a population divisor would give two thirds of the sample variance"
+    assert_eq!(metrics.period_count, 3, "so the divisor is 2");
+    assert_eq!(metrics.variance, Some(ratio("0.000906221436")));
+    assert_ne!(
+        metrics.variance,
+        Some(ratio("0.000604147624")),
+        "that is the population variance, with n rather than n − 1"
     );
 }
 
@@ -359,30 +356,34 @@ fn a_single_round_trip_turns_over_its_notional_once() {
     assert_eq!(metrics.fill_count, 2);
 }
 
-/// The report's fee fields come from the fold, and the return is net of them because equity
-/// subtracts accrued fees (spec §8.2): a run whose only event is a fee accrual of 10 USD on 100,000
-/// closes at 99,990 and reports −0.0001.
+/// The total return is net of fees, because equity subtracts accrued fees (spec §8.2): the same run
+/// with the fees switched off ends strictly higher, by exactly the fee total.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_total_return_is_net_of_accrued_and_charged_fees() {
-    let totals = Totals {
-        fees_total: usd("10"),
-        fees_accrued: usd("4"),
-        fees_charged: usd("6"),
-        ..one_round_trip()
-    };
-    let metrics = Metrics::of(
-        usd("100000"),
-        &observations(&["99990"]),
-        &totals,
-        &daily_equity_metrics(),
-    )
-    .unwrap();
+    let mut free = run_config(equity(), crossover(), "100000");
+    free.fees = no_equity_fees();
+    let charged = run_config(equity(), crossover(), "100000");
 
-    assert_eq!(metrics.fees_total, usd("10"));
-    assert_eq!(metrics.fees_accrued, usd("4"));
-    assert_eq!(metrics.fees_charged, usd("6"));
-    assert_eq!(metrics.total_return, ratio("-0.0001"));
+    let free_run = run(&free, &seven_days()).unwrap();
+    let charged_run = run(&charged, &seven_days()).unwrap();
+
+    assert_eq!(free_run.report.strategy.fees_total, Usd::ZERO);
+    assert_eq!(charged_run.report.strategy.fees_total, usd("1.585055967"));
+    assert!(
+        charged_run.report.strategy.total_return < free_run.report.strategy.total_return,
+        "fees are inside the return"
+    );
+    assert_eq!(
+        charged_run.report.strategy.ending_equity,
+        free_run
+            .report
+            .strategy
+            .ending_equity
+            .checked_sub(usd("1.585055967"))
+            .unwrap(),
+        "the whole difference is the fees"
+    );
 }
 
 /// A year must hold at least one period.
@@ -428,12 +429,12 @@ fn a_period_opening_at_zero_equity_has_no_return() {
 }
 
 /// The excess return is the exact difference of the two reported total returns, with no rounding of
-/// its own: 0.03 − 0.0201 = 0.0099.
+/// its own, and the benchmark it is measured against actually traded.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_excess_return_is_the_difference_of_the_two_reported_returns() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
     let expected = run
         .report
@@ -442,12 +443,18 @@ fn the_excess_return_is_the_difference_of_the_two_reported_returns() {
         .checked_sub(run.report.benchmark.total_return)
         .unwrap();
     assert_eq!(run.report.excess_total_return, expected);
+    assert!(
+        run.report.benchmark.filled_qty > Qty::ZERO,
+        "the benchmark is a tradable comparison, not an index line"
+    );
 }
 
-/// Two regular bars a day for the trading week of 2026-09-21, closing at 100.00, 101.00, 104.00,
-/// 104.50, and 103.00: at day 3's close the fast window (101 + 104) beats the slow one
-/// (100 + 101 + 104) by cross-multiplication, 615 > 610, so the strategy goes long from day 4.
-fn five_days() -> Vec<mandate_sim::SimBar> {
+/// Seven trading days of two regular bars each, from 2026-09-21, closing at 100.00, 101.00, 104.00,
+/// 104.50, 103.00, 102.00, 102.00. The crossover goes long at period 3 (205 × 3 = 615 above
+/// 305 × 2 = 610) and flat at period 5 (207.50 × 3 = 622.50 at or below 311.50 × 2 = 623), so the
+/// entry is decided at bar 5 and fills on bar 6 and the exit is decided at bar 9 and fills on bar 10.
+/// Period 7's decision falls on the last bar, which the loop never acts on.
+fn seven_days() -> Vec<mandate_sim::SimBar> {
     vec![
         auction(
             "2026-09-21",
@@ -499,7 +506,35 @@ fn five_days() -> Vec<mandate_sim::SimBar> {
             "15:59",
             ["103.10", "103.20", "102.90", "103.00", "9000"],
         ),
+        auction(
+            "2026-09-28",
+            "09:30",
+            ["103.00", "103.10", "101.90", "102.00", "8000"],
+        ),
+        bar(
+            "2026-09-28",
+            "15:59",
+            ["101.90", "102.10", "101.80", "102.00", "9000"],
+        ),
+        auction(
+            "2026-09-29",
+            "09:30",
+            ["102.00", "102.10", "101.90", "102.00", "8000"],
+        ),
+        bar(
+            "2026-09-29",
+            "15:59",
+            ["102.00", "102.10", "101.90", "102.00", "9000"],
+        ),
     ]
+}
+
+/// The first `days` trading days of [`seven_days`], then `extra`: the fee cases end a run just before
+/// or just after the instant spec §6.2 charges at.
+fn days_then(days: usize, extra: Vec<mandate_sim::SimBar>) -> Vec<mandate_sim::SimBar> {
+    let mut bars: Vec<_> = seven_days().into_iter().take(days * 2).collect();
+    bars.extend(extra);
+    bars
 }
 
 /// The entry is a day limit buy in the regular session, priced a collar above the signal period's
@@ -509,7 +544,7 @@ fn five_days() -> Vec<mandate_sim::SimBar> {
 #[ignore = "pending E4-2"]
 fn an_entry_is_a_day_limit_buy_at_the_collar_above_the_close() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
     let entry = run
         .orders
@@ -597,7 +632,8 @@ fn penny_stock_week() -> Vec<mandate_sim::SimBar> {
 }
 
 /// The crossover compares window sums by cross-multiplication, so no division and no rounding enter
-/// the signal: with closes 100, 101, 104 the fast sum 205 times 3 beats the slow sum 305 times 2.
+/// the signal: with closes 100, 101, 104 the fast sum 205 times 3 beats the slow sum 305 times 2, and
+/// with 104.50 and 103.00 added the fast sum 207.50 times 3 falls at or below 311.50 times 2.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_crossover_compares_sums_by_cross_multiplication() {
@@ -620,6 +656,19 @@ fn the_crossover_compares_sums_by_cross_multiplication() {
             .unwrap(),
         mandate_backtest::Signal::Flat,
         "a falling series keeps the fast average below the slow one"
+    );
+    assert_eq!(
+        strategy
+            .signal(&[
+                price("100"),
+                price("101"),
+                price("104"),
+                price("104.50"),
+                price("103")
+            ])
+            .unwrap(),
+        mandate_backtest::Signal::Flat,
+        "622.50 is below 623, so the fifth period of the fixture is flat"
     );
 }
 
@@ -662,20 +711,25 @@ fn crossed_windows_are_an_error() {
     );
 }
 
-/// An exit sells the whole position, not a quantity truncated to the increment (§5.3 rule 2).
+/// An exit sells the whole position, not a quantity truncated to the increment (§5.3 rule 2): the
+/// entry filled 479 shares on bar 6, so the exit decided at bar 9 submits 479, priced
+/// `on_tick(103.00 × (1 − 25 bps), up)` = `on_tick(102.7425, up)` = 102.75.
 #[test]
 #[ignore = "pending E4-2"]
 fn an_exit_sells_the_whole_position() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
-    let entry = run.orders.first().unwrap();
     let exit = run
         .orders
         .iter()
         .find(|o| o.order.side == Side::Sell)
-        .expect("day 5's fall takes the signal flat");
-    let bought: Qty = run
+        .expect("period 5 is flat, and it is not the last period");
+    assert_eq!(exit.index, 1);
+    assert_eq!(exit.decided_at_bar, 9, "day 5's last regular bar");
+    assert_eq!(exit.limit, price("102.75"));
+    assert_eq!(exit.order.qty, qty("479"));
+    let bought = run
         .fills
         .iter()
         .filter(|f| f.execution.side == Side::Buy)
@@ -684,8 +738,6 @@ fn an_exit_sells_the_whole_position() {
         exit.order.qty, bought,
         "the exit sells what the entry filled"
     );
-    assert!(exit.order.qty <= entry.order.qty);
-    assert_eq!(exit.order.side, Side::Sell);
 }
 
 /// A crypto buy pays its fee in the asset, so the position sits off the increment; the exit still
@@ -700,7 +752,7 @@ fn a_crypto_exit_sells_the_part_the_asset_fee_left_off_the_increment() {
         .orders
         .iter()
         .find(|o| o.order.side == Side::Sell)
-        .expect("the crypto run exits too");
+        .expect("the crypto run exits on its sixth UTC day");
     let filled = run
         .fills
         .iter()
@@ -713,91 +765,80 @@ fn a_crypto_exit_sells_the_part_the_asset_fee_left_off_the_increment() {
     assert_eq!(
         exit.order.tif,
         mandate_sim::TimeInForce::Gtc,
-        "crypto takes GTC"
+        "a continuous instrument has no session to cancel a day order at"
     );
     assert!(run.report.strategy.fees_asset > Usd::ZERO);
 }
 
-/// Five UTC days of continuous bars, two a day, closing at 100, 101, 104, 104.5, 103.
+/// Seven UTC days of continuous bars, two a day, with the closes of [`seven_days`], so the entry
+/// fills on the fourth day and the exit on the sixth; the seventh day's first bar is past 00:00 UTC
+/// of the sixth, which is when spec §6.3 charges the sale's fee.
 fn crypto_days() -> Vec<mandate_sim::SimBar> {
-    vec![
-        continuous(
-            "2026-09-21",
+    let days = [
+        ("2026-09-21", "100.00", "100.10"),
+        ("2026-09-22", "100.10", "101.00"),
+        ("2026-09-23", "101.00", "104.00"),
+        ("2026-09-24", "104.00", "104.50"),
+        ("2026-09-25", "104.50", "103.00"),
+        ("2026-09-26", "103.00", "102.00"),
+        ("2026-09-27", "102.00", "102.00"),
+    ];
+    let mut bars = Vec::new();
+    for (day, open, close) in days {
+        bars.push(continuous(
+            day,
             "00:01",
-            ["100.00", "100.20", "99.80", "100.10", "8000"],
-        ),
-        continuous(
-            "2026-09-21",
+            [open, "107.30", "99.50", close, "8000"],
+        ));
+        bars.push(continuous(
+            day,
             "23:59",
-            ["100.10", "100.20", "99.90", "100.00", "9000"],
-        ),
-        continuous(
-            "2026-09-22",
-            "00:01",
-            ["100.10", "101.20", "100.00", "101.10", "8000"],
-        ),
-        continuous(
-            "2026-09-22",
-            "23:59",
-            ["101.10", "101.20", "100.90", "101.00", "9000"],
-        ),
-        continuous(
-            "2026-09-23",
-            "00:01",
-            ["101.10", "104.20", "101.00", "104.10", "8000"],
-        ),
-        continuous(
-            "2026-09-23",
-            "23:59",
-            ["104.10", "104.20", "103.90", "104.00", "9000"],
-        ),
-        continuous(
-            "2026-09-24",
-            "00:01",
-            ["104.10", "104.60", "104.00", "104.50", "8000"],
-        ),
-        continuous(
-            "2026-09-24",
-            "23:59",
-            ["104.50", "104.60", "104.30", "104.50", "9000"],
-        ),
-        continuous(
-            "2026-09-25",
-            "00:01",
-            ["104.50", "104.60", "102.90", "103.10", "8000"],
-        ),
-        continuous(
-            "2026-09-25",
-            "23:59",
-            ["103.10", "103.20", "102.90", "103.00", "9000"],
-        ),
-    ]
+            [close, "107.30", "99.50", close, "9000"],
+        ));
+    }
+    bars
 }
 
-/// A period's mark is its closing bar's close (spec §8.2), so the last observation of the week is
-/// 103.00 times the position plus cash, never the day's open or high.
+/// A period's mark is its closing bar's close (spec §8.2). The benchmark buys 996 shares — 800 on
+/// bar 1, where the cap is 10% of bar 0's 8,000, and 196 on bar 2 — both at
+/// `min(100.35, 100.10 × 1.0003)` = 100.13003, so the last observation is
+/// `100000 − buy notional + 996 × 102.00 − fees`; the same figure marked at that bar's open, 102.00
+/// against a close of 102.00, is why the fixture's last bar opens at 102.00 and the case compares the
+/// two explicitly.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_period_mark_is_the_last_bars_close() {
     let config = run_config(equity(), buy_and_hold(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let mut bars = seven_days();
+    bars[13] = bar(
+        "2026-09-29",
+        "15:59",
+        ["101.50", "102.10", "101.40", "102.00", "9000"],
+    );
+    let run = run(&config, &bars).unwrap();
 
-    let held = run
-        .fills
-        .iter()
-        .fold(Qty::ZERO, |sum, f| sum.checked_add(f.fill.qty).unwrap());
+    let metrics = &run.report.strategy;
+    let cash = usd("100000").checked_sub(metrics.buy_notional).unwrap();
+    let closing = bars.len() - 1;
+    let at_close = cash
+        .checked_add(metrics.filled_qty.notional(bars[closing].close).unwrap())
+        .unwrap()
+        .checked_sub(metrics.fees_total)
+        .unwrap();
+    let at_open = cash
+        .checked_add(metrics.filled_qty.notional(bars[closing].open).unwrap())
+        .unwrap()
+        .checked_sub(metrics.fees_total)
+        .unwrap();
+
     let last = run.equity.last().unwrap();
-    let marked_at_close = held.notional(price("103.00")).unwrap();
-    let marked_at_open = held.notional(price("103.10")).unwrap();
-    assert!(
-        last.equity < marked_at_open,
-        "the day's open would have flattered the last observation"
+    assert_eq!(last.bar, closing, "the week's last regular bar");
+    assert_eq!(metrics.filled_qty, qty("996"));
+    assert_eq!(last.equity, at_close);
+    assert_ne!(
+        last.equity, at_open,
+        "the bar's open would have given a different equity"
     );
-    assert!(
-        last.equity <= marked_at_close.checked_add(usd("100000")).unwrap(),
-        "equity is cash plus the position at the closing bar's close"
-    );
-    assert_eq!(last.bar, 9, "the week's last regular bar closed the period");
 }
 
 /// An after-hours bar never closes an equity period: §8.2's end of day is the official close, so the
@@ -805,7 +846,7 @@ fn the_period_mark_is_the_last_bars_close() {
 #[test]
 #[ignore = "pending E4-2"]
 fn an_after_hours_bar_does_not_close_an_equity_period() {
-    let mut bars = five_days();
+    let mut bars = seven_days();
     bars.insert(
         2,
         after_hours(
@@ -820,7 +861,7 @@ fn an_after_hours_bar_does_not_close_an_equity_period() {
     let first = run.equity.first().unwrap();
     assert_eq!(first.date, d("2026-09-21"));
     assert_eq!(first.bar, 1, "the 15:59 regular bar, not the 16:30 one");
-    assert_eq!(run.equity.len(), 5, "still five periods");
+    assert_eq!(run.equity.len(), 7, "still seven periods");
 }
 
 /// A trade date the input covers only outside the regular session is no period at all; its bars are
@@ -828,7 +869,10 @@ fn an_after_hours_bar_does_not_close_an_equity_period() {
 #[test]
 #[ignore = "pending E4-2"]
 fn a_date_covered_only_outside_the_regular_session_is_no_period() {
-    let mut bars = five_days();
+    let mut bars: Vec<_> = seven_days()
+        .into_iter()
+        .filter(|b| b.trade_date != d("2026-09-22"))
+        .collect();
     bars.insert(
         2,
         pre_market(
@@ -837,9 +881,6 @@ fn a_date_covered_only_outside_the_regular_session_is_no_period() {
             ["100.00", "100.10", "99.90", "100.00", "500"],
         ),
     );
-    bars.retain(|b| {
-        !(b.trade_date == d("2026-09-22") && b.session == mandate_sim::Session::Regular)
-    });
     let config = run_config(equity(), buy_and_hold(), "100000");
     let run = run(&config, &bars).unwrap();
 
@@ -847,105 +888,117 @@ fn a_date_covered_only_outside_the_regular_session_is_no_period() {
         run.equity.iter().all(|o| o.date != d("2026-09-22")),
         "no regular bar on the 22nd, so no period for it"
     );
-    assert_eq!(run.equity.len(), 4);
+    assert_eq!(run.equity.len(), 6);
 }
 
 /// A fill in the period's closing bar is inside that period's equity: the observation is taken after
-/// the bar's fills, its mark, and its charges, never before.
+/// the bar's fills, its mark, and its charges, never before. The benchmark's first fill is 800 shares
+/// on bar 1, which is also the bar that closes period 1, so the first observation already holds them.
 #[test]
 #[ignore = "pending E4-2"]
 fn a_fill_in_the_last_bar_of_a_day_is_inside_that_days_equity() {
     let config = run_config(equity(), buy_and_hold(), "100000");
-    let bars = closing_bar_fill();
+    let bars = seven_days();
     let run = run(&config, &bars).unwrap();
 
-    let fill = run
-        .fills
-        .first()
-        .expect("the benchmark fills on the second bar");
-    assert_eq!(fill.fill.bar, 1, "the day's closing bar");
+    let first_fill = run.fills.first().expect("the benchmark fills on bar 1");
+    assert_eq!(first_fill.fill.bar, 1, "the bar that closes period 1");
+    assert_eq!(first_fill.fill.qty, qty("800"), "10% of bar 0's 8,000");
+
     let first = run.equity.first().unwrap();
     assert_eq!(first.bar, 1);
-    assert!(
-        first.equity != usd("100000"),
-        "the fill and its fees are inside the first observation"
+    let held = first_fill.fill.qty;
+    let cash = usd("100000")
+        .checked_sub(held.notional(first_fill.fill.price).unwrap())
+        .unwrap();
+    let expected = cash
+        .checked_add(held.notional(bars[1].close).unwrap())
+        .unwrap()
+        .checked_sub(usd("0.008"))
+        .unwrap();
+    assert_eq!(
+        first.equity, expected,
+        "cash after the fill, the position at bar 1's close, less CAT 0.00001 x 800"
     );
 }
 
-/// One trading day of two bars where the benchmark's order can only fill in the second, which is also
-/// the bar that closes the period.
-fn closing_bar_fill() -> Vec<mandate_sim::SimBar> {
-    vec![
-        auction(
-            "2026-09-21",
-            "09:30",
-            ["100.00", "100.20", "99.80", "100.00", "8000"],
-        ),
-        bar(
-            "2026-09-21",
-            "15:59",
-            ["100.05", "100.20", "99.90", "100.00", "9000"],
-        ),
-        auction(
-            "2026-09-22",
-            "09:30",
-            ["100.10", "101.20", "100.00", "101.10", "8000"],
-        ),
-        bar(
-            "2026-09-22",
-            "15:59",
-            ["101.10", "101.20", "100.90", "101.00", "9000"],
-        ),
-    ]
-}
-
-/// A settlement dated before a bar posts before that bar's fills: the sale of day 1 settles on day 2
-/// (T+1 on the settlement calendar), and the entry of day 2 sizes from cash that already includes it.
+/// A settlement moves money between buckets without changing equity (spec §8.3, invariant I4), and it
+/// posts at the start of the bar whose instant it falls before. The exit fills on 2026-09-28, so its
+/// proceeds settle at 00:00 ET on 2026-09-29; with no fill and no charge left on that day, period 7's
+/// equity equals period 6's exactly.
 #[test]
 #[ignore = "pending E4-2"]
 fn a_settlement_posts_before_the_bars_fills() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
-    let settled_on = run
+    let sixth = run
         .equity
         .iter()
-        .find(|o| o.date == d("2026-09-25"))
-        .expect("the week's last period");
-    assert!(settled_on.equity > Usd::ZERO);
+        .find(|o| o.date == d("2026-09-28"))
+        .expect("period 6");
+    let seventh = run
+        .equity
+        .iter()
+        .find(|o| o.date == d("2026-09-29"))
+        .expect("period 7");
+    assert_eq!(
+        seventh.equity, sixth.equity,
+        "a settlement is a bucket transfer, not a gain"
+    );
     assert!(
         run.fills
             .iter()
-            .all(|f| f.execution.executed_at.date() <= d("2026-09-25")),
-        "no fill is dated after the run"
+            .all(|f| f.execution.executed_at.date() < d("2026-09-29")),
+        "nothing trades on the last day, so only the settlement moved"
     );
 }
 
-/// Equity fees are charged at 20:00 ET on their trade date (spec §6.2): with a bar after that
-/// instant, day 4's accrual is charged and no longer accrued.
+/// Equity fees are charged at 20:00 ET on their trade date (spec §6.2), not at a midnight of the
+/// loop's own. The entry fills 479 shares on 2026-09-24, accruing CAT 0.00001 × 479 = 0.00479; a run
+/// that ends at that day's 20:30 bar charges `round(0.00479, 2, ceiling)` = 0.01 and accrues nothing,
+/// while the same run ending at 19:30 has charged nothing and still accrues 0.00479. A rule that
+/// charged at New York midnight instead would charge neither.
 #[test]
 #[ignore = "pending E4-2"]
 fn equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date() {
-    let mut bars = five_days();
-    bars.insert(
-        8,
-        after_hours(
-            "2026-09-24",
-            "20:30",
-            ["104.50", "104.60", "104.40", "104.50", "500"],
-        ),
-    );
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &bars).unwrap();
 
-    assert!(
-        run.report.strategy.fees_charged > Usd::ZERO,
-        "the 20:30 bar is past 20:00 ET, so day 4's accrual is charged"
-    );
+    let after = run(
+        &config,
+        &days_then(
+            4,
+            vec![overnight(
+                "2026-09-24",
+                "20:30",
+                ["104.50", "104.60", "104.40", "104.50", "500"],
+            )],
+        ),
+    )
+    .unwrap();
+    assert_eq!(after.report.strategy.fees_charged, usd("0.01"));
+    assert_eq!(after.report.strategy.fees_accrued, Usd::ZERO);
+
+    let before = run(
+        &config,
+        &days_then(
+            4,
+            vec![after_hours(
+                "2026-09-24",
+                "19:30",
+                ["104.50", "104.60", "104.40", "104.50", "500"],
+            )],
+        ),
+    )
+    .unwrap();
+    assert_eq!(before.report.strategy.fees_charged, Usd::ZERO);
+    assert_eq!(before.report.strategy.fees_accrued, usd("0.00479"));
 }
 
-/// Crypto fees are charged at 00:00 UTC (spec §6.3), so the first bar of the next UTC day charges the
-/// day before it.
+/// Crypto fees are charged at 00:00 UTC (spec §6.3): the exit of the sixth UTC day accrues a USD fee
+/// on that date, and the seventh day's first bar is past its midnight, so the fee is charged. A
+/// crypto **buy** pays in the asset instead, which is never accrued, so a run that only bought would
+/// have nothing to charge.
 #[test]
 #[ignore = "pending E4-2"]
 fn crypto_fees_are_charged_at_midnight_utc() {
@@ -954,22 +1007,31 @@ fn crypto_fees_are_charged_at_midnight_utc() {
 
     assert!(
         run.report.strategy.fees_charged > Usd::ZERO,
-        "a later UTC day's bar charges the accrual of the day before"
+        "the sale's USD fee is charged at the next 00:00 UTC"
+    );
+    assert!(
+        run.report.strategy.fees_asset > Usd::ZERO,
+        "the buy's fee was taken in the asset"
+    );
+    assert_eq!(
+        run.report.strategy.fees_accrued,
+        Usd::ZERO,
+        "nothing accrued is left once the charge lands"
     );
 }
 
-/// Nothing is swept at the end of a run: an accrual whose charging instant the bars never reach stays
-/// accrued, which is exactly what the fold would hold at that instant, and the report shows it.
+/// Nothing is swept at the end of a run: [`seven_days`] has no bar past 20:00 ET on any trade date,
+/// so every accrual stays accrued, exactly as the fold would hold it. The entry accrues CAT
+/// 0.00001 × 479 = 0.00479, and the exit of 479 shares at 102.9691, which is 49,322.1989, accrues SEC
+/// 0.00003 × 49322.1989 = 1.479665967, TAF 0.0002 × 479 = 0.0958, and CAT 0.00479: 1.585055967 in all.
 #[test]
 #[ignore = "pending E4-2"]
 fn an_accrual_the_bars_never_reach_stays_accrued() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
-    assert!(
-        run.report.strategy.fees_accrued > Usd::ZERO,
-        "the last day's fees accrue but 20:00 ET is past the last bar"
-    );
+    assert_eq!(run.report.strategy.fees_charged, Usd::ZERO);
+    assert_eq!(run.report.strategy.fees_accrued, usd("1.585055967"));
     assert_eq!(
         run.report.strategy.fees_total,
         run.report
@@ -982,46 +1044,34 @@ fn an_accrual_the_bars_never_reach_stays_accrued() {
     );
 }
 
-/// A day's fees are charged once, not twice: two bars past 20:00 ET on the same trade date leave one
-/// charge.
+/// A day's fees are charged once: two bars past 20:00 ET on the same trade date leave one charge of
+/// 0.01, not two.
 #[test]
 #[ignore = "pending E4-2"]
 fn a_days_fees_are_charged_once_after_the_day_ends() {
-    let mut bars = five_days();
-    bars.insert(
-        8,
-        after_hours(
-            "2026-09-24",
-            "21:30",
-            ["104.50", "104.60", "104.40", "104.50", "500"],
-        ),
-    );
-    bars.insert(
-        8,
-        after_hours(
-            "2026-09-24",
-            "20:30",
-            ["104.50", "104.60", "104.40", "104.50", "500"],
-        ),
-    );
     let config = run_config(equity(), crossover(), "100000");
-    let twice = run(&config, &bars).unwrap();
-
-    let mut once_bars = five_days();
-    once_bars.insert(
-        8,
-        after_hours(
-            "2026-09-24",
-            "20:30",
-            ["104.50", "104.60", "104.40", "104.50", "500"],
+    let twice = run(
+        &config,
+        &days_then(
+            4,
+            vec![
+                overnight(
+                    "2026-09-24",
+                    "20:30",
+                    ["104.50", "104.60", "104.40", "104.50", "500"],
+                ),
+                overnight(
+                    "2026-09-24",
+                    "21:30",
+                    ["104.50", "104.60", "104.40", "104.50", "500"],
+                ),
+            ],
         ),
-    );
-    let once = run(&config, &once_bars).unwrap();
+    )
+    .unwrap();
 
-    assert_eq!(
-        twice.report.strategy.fees_charged, once.report.strategy.fees_charged,
-        "a second bar past the instant charges nothing more"
-    );
+    assert_eq!(twice.report.strategy.fees_charged, usd("0.01"));
+    assert_eq!(twice.report.strategy.fees_accrued, Usd::ZERO);
 }
 
 /// A signal at a period's close fills no earlier than the next bar: the decision is timed at that
@@ -1030,8 +1080,9 @@ fn a_days_fees_are_charged_once_after_the_day_ends() {
 #[ignore = "pending E4-2"]
 fn a_signal_at_a_days_close_fills_no_earlier_than_the_next_bar() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
 
+    assert!(!run.fills.is_empty(), "the run does trade");
     for order in &run.orders {
         let index = usize::try_from(order.index).unwrap();
         for fill in run.fills.iter().filter(|f| f.fill.order.index() == index) {
@@ -1044,98 +1095,14 @@ fn a_signal_at_a_days_close_fills_no_earlier_than_the_next_bar() {
     }
 }
 
-/// The decision instant is the next bar's start, so a gap in the data delays a fill rather than
-/// letting it happen at an instant the input does not cover: with the whole of day 4 missing, the
-/// entry decided at day 3's close first becomes eligible on day 5.
+/// Every fill carries its order's client order ID, a distinct fill ID built from the order's index and
+/// the fill's ordinal within it, and the start of the bar it happened in (DEC-127 item 21).
 #[test]
 #[ignore = "pending E4-2"]
-fn a_decision_is_timed_at_the_next_bars_start_so_a_gap_delays_it() {
-    let bars: Vec<_> = five_days()
-        .into_iter()
-        .filter(|b| b.trade_date != d("2026-09-24"))
-        .collect();
+fn every_fill_carries_its_orders_identifiers() {
     let config = run_config(equity(), crossover(), "100000");
+    let bars = seven_days();
     let run = run(&config, &bars).unwrap();
-
-    let entry = run.orders.first().expect("day 3's close still goes long");
-    assert_eq!(entry.decided_at_bar, 5);
-    for fill in &run.fills {
-        assert!(fill.execution.executed_at.date() >= d("2026-09-25"));
-    }
-}
-
-/// An order eligible in the middle of a session caps on the previous bar's volume, not on the
-/// 20-session median: the loop passes the whole bar slice, so the model sees the earlier bars
-/// (DEC-127 item 18). With no median at all, a mid-session order still fills.
-#[test]
-#[ignore = "pending E4-2"]
-fn an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median() {
-    let config = run_config(equity(), crossover(), "100000");
-    let with_median = run(&config, &five_days()).unwrap();
-    let without_median = run_without_median(&config, &five_days()).unwrap();
-
-    assert!(
-        !without_median.fills.is_empty(),
-        "a mid-session bar has a previous bar of its session, so its cap is not the median's"
-    );
-    assert_eq!(
-        with_median.fills.first().map(|f| f.fill.qty),
-        without_median.fills.first().map(|f| f.fill.qty),
-        "the median never decides a mid-session cap"
-    );
-}
-
-/// A day order's remainder ends where the fill model says it does: the loop reads `OrderEnd` back
-/// rather than recomputing rule 2's last eligible session.
-#[test]
-#[ignore = "pending E4-2"]
-fn a_day_orders_remainder_ends_where_simulate_says_it_does() {
-    let config = run_config(equity(), crossover(), "100000");
-    let bars = five_days();
-    let run = run(&config, &bars).unwrap();
-
-    let entry = run.orders.first().unwrap();
-    let outcome = simulate_directly(&config, &bars, &[entry.order]).unwrap();
-    assert_eq!(
-        Some(entry.end),
-        outcome.end_of(mandate_sim::OrderRef::new(0)),
-        "the loop's end state is the model's"
-    );
-}
-
-/// The bar in which an order stops working submits no replacement: the order works through the end of
-/// that bar (§5.3 rule 6), so the next submission comes from a later period close.
-#[test]
-#[ignore = "pending E4-2"]
-fn the_bar_that_ends_an_order_submits_no_replacement() {
-    let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
-
-    for pair in run.orders.windows(2) {
-        let (first, second) = (pair[0], pair[1]);
-        let last_fill = run
-            .fills
-            .iter()
-            .filter(|f| f.fill.order.index() == usize::try_from(first.index).unwrap())
-            .map(|f| f.fill.bar)
-            .max();
-        if let Some(bar) = last_fill {
-            assert!(
-                second.decided_at_bar > bar,
-                "the bar that ended order {} decided no replacement",
-                first.index
-            );
-        }
-    }
-}
-
-/// Two executions of one order share its client order ID, so the per-order TAF cap binds across them
-/// (spec §6.2, DEC-87), and every fill ID is distinct.
-#[test]
-#[ignore = "pending E4-2"]
-fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
-    let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &five_days()).unwrap();
 
     let first = run.fills.first().expect("at least one fill");
     assert_eq!(first.execution.client_order_id.as_deref(), Some("o0"));
@@ -1155,7 +1122,167 @@ fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
             fill.execution.client_order_id.as_deref(),
             Some(format!("o{order}").as_str())
         );
+        assert_eq!(
+            fill.execution.executed_at, bars[fill.fill.bar].start,
+            "a fill is timed at its bar's start"
+        );
     }
+}
+
+/// The decision instant is the next bar's start, so a gap in the data delays a fill rather than
+/// letting it happen at an instant the input does not cover: with the whole of day 4 missing, the
+/// entry decided at day 3's close first becomes eligible on day 5.
+#[test]
+#[ignore = "pending E4-2"]
+fn a_decision_is_timed_at_the_next_bars_start_so_a_gap_delays_it() {
+    let bars: Vec<_> = seven_days()
+        .into_iter()
+        .filter(|b| b.trade_date != d("2026-09-24"))
+        .collect();
+    let config = run_config(equity(), crossover(), "100000");
+    let run = run(&config, &bars).unwrap();
+
+    let entry = run.orders.first().expect("day 3's close still goes long");
+    assert_eq!(entry.decided_at_bar, 5);
+    for fill in run.fills.iter().filter(|f| f.fill.order.index() == 0) {
+        assert!(
+            fill.execution.executed_at.date() >= d("2026-09-25"),
+            "day 4 is not in the data, so nothing fills there"
+        );
+    }
+}
+
+/// An order eligible in the middle of a session caps on the previous bar's volume, not on the
+/// 20-session median: the loop passes the whole bar slice, so the model still sees the earlier bars
+/// (DEC-127 item 18). The benchmark is decided at bar 0's close and is eligible from bar 1, which has
+/// bar 0 before it in the same session, so its cap is 10% of 8,000 = 800 even when no median exists at
+/// all; a slice trimmed to start at bar 1 would make that bar its session's first covered bar and cap
+/// it at 0, filling nothing.
+#[test]
+#[ignore = "pending E4-2"]
+fn an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median() {
+    let config = run_config(equity(), buy_and_hold(), "100000");
+    let bars = seven_days();
+    let without_median = run_without_median(&config, &bars).unwrap();
+
+    let first = without_median
+        .fills
+        .first()
+        .expect("bar 1 is mid-session, so it caps on bar 0's volume");
+    assert_eq!(first.fill.bar, 1);
+    assert_eq!(first.fill.qty, qty("800"));
+
+    let with_median = run(&config, &bars).unwrap();
+    assert_eq!(
+        with_median.fills.first().map(|f| f.fill.qty),
+        Some(qty("800")),
+        "a median never decides a mid-session cap"
+    );
+}
+
+/// A day order's remainder ends where the fill model says it does: the loop reads `OrderEnd` back
+/// rather than recomputing rule 2's last eligible session.
+#[test]
+#[ignore = "pending E4-2"]
+fn a_day_orders_remainder_ends_where_simulate_says_it_does() {
+    let config = run_config(equity(), crossover(), "100000");
+    let bars = seven_days();
+    let run = run(&config, &bars).unwrap();
+
+    let entry = run.orders.first().unwrap();
+    let outcome = simulate_directly(&config, &bars, &[entry.order]).unwrap();
+    assert_eq!(
+        Some(entry.end),
+        outcome.end_of(mandate_sim::OrderRef::new(0)),
+        "the loop's end state is the model's"
+    );
+}
+
+/// The bar in which an order stops working submits no replacement: the order works through the end of
+/// that bar (§5.3 rule 6), so the next submission comes from a later period close. The entry fills in
+/// full on bar 6 and the exit is decided at bar 9.
+#[test]
+#[ignore = "pending E4-2"]
+fn the_bar_that_ends_an_order_submits_no_replacement() {
+    let config = run_config(equity(), crossover(), "100000");
+    let run = run(&config, &seven_days()).unwrap();
+
+    assert_eq!(run.orders.len(), 2, "one entry and one exit");
+    assert_eq!(run.orders[0].end, mandate_sim::OrderEnd::Filled);
+    let last_fill = run
+        .fills
+        .iter()
+        .filter(|f| f.fill.order.index() == 0)
+        .map(|f| f.fill.bar)
+        .max()
+        .expect("the entry fills");
+    assert_eq!(last_fill, 6);
+    assert!(
+        run.orders[1].decided_at_bar > last_fill,
+        "the bar that ended the entry decided nothing"
+    );
+}
+
+/// Two executions of one order share its client order ID, so a per-order TAF cap binds across them
+/// (spec §6.2, DEC-87). With TAF alone at 0.0002 a share and a cap of 0.05, an exit of 479 shares that
+/// fills 200 then 279 is charged 0.04 and then `max(0, 0.05 − 0.04)` = 0.01, that is 0.05 in all; the
+/// same fills under a per-execution cap are charged 0.04 and `min(0.0558, 0.05)` = 0.05, that is 0.09,
+/// which is also what a `client_order_id` of `None` would give, because the fold then treats every
+/// execution as its own order.
+#[test]
+#[ignore = "pending E4-2"]
+fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
+    let bars = thin_exit_week();
+    let mut per_order = run_config(equity(), crossover(), "100000");
+    per_order.fees = taf_only_fees("0.05", TafCapBasis::PerOrder);
+    let run = run_with_median(&per_order, &bars, "2000").unwrap();
+
+    let exit_fills: Vec<_> = run
+        .fills
+        .iter()
+        .filter(|f| f.execution.side == Side::Sell)
+        .collect();
+    assert_eq!(
+        exit_fills.len(),
+        2,
+        "the cap splits the exit across two bars"
+    );
+    assert_eq!(exit_fills[0].fill.qty, qty("200"));
+    assert_eq!(exit_fills[1].fill.qty, qty("279"));
+    assert_eq!(exit_fills[0].execution.fill_id, "o1-f0");
+    assert_eq!(exit_fills[1].execution.fill_id, "o1-f1");
+    for fill in &exit_fills {
+        assert_eq!(fill.execution.client_order_id.as_deref(), Some("o1"));
+    }
+    assert_eq!(
+        run.report.strategy.fees_total,
+        usd("0.05"),
+        "one cap for the order, not one for each execution"
+    );
+
+    let mut per_execution = run_config(equity(), crossover(), "100000");
+    per_execution.fees = taf_only_fees("0.05", TafCapBasis::PerExecution);
+    let other = run_with_median(&per_execution, &bars, "2000").unwrap();
+    assert_eq!(other.report.strategy.fees_total, usd("0.09"));
+}
+
+/// [`seven_days`] with thin volume on the exit day, so a cap of 10% of the 2,000-share median fills
+/// 200 of the 479 on that day's first bar and the remaining 279 on the second, whose reference is the
+/// first bar's 3,000.
+fn thin_exit_week() -> Vec<mandate_sim::SimBar> {
+    seven_days()
+        .into_iter()
+        .map(|b| {
+            if b.trade_date == d("2026-09-28") {
+                mandate_sim::SimBar {
+                    volume: qty("3000"),
+                    ..b
+                }
+            } else {
+                b
+            }
+        })
+        .collect()
 }
 
 /// A bar whose `trade_date` is not the one the calendar gives its start fails the run, so a
@@ -1163,7 +1290,7 @@ fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
 #[test]
 #[ignore = "pending E4-2"]
 fn a_bar_whose_trade_date_disagrees_with_the_calendar_fails_the_run() {
-    let mut bars = five_days();
+    let mut bars = seven_days();
     bars[2].trade_date = d("2026-09-23");
     let config = run_config(equity(), crossover(), "100000");
 
@@ -1174,7 +1301,11 @@ fn a_bar_whose_trade_date_disagrees_with_the_calendar_fails_the_run() {
 }
 
 /// An entry the day after an exit sizes from `cash_total`, so the unsettled proceeds of the sale are
-/// available in a margin account (§7.2) and the period is not silently sat out.
+/// available in a margin account (§7.2). Starting from 60,000, the entry of 479 shares at 104.13123
+/// leaves 10,121.14083 settled; the exit at 102.9691 adds 49,322.1989 **unsettled** until the next
+/// day, so at the sixth period's close `cash_total` is 59,443.33973 and the second entry is
+/// `truncate(min(50000, 59443.33973) ÷ 107.26)` = 466 shares, where settled cash alone would have
+/// bought `truncate(10121.14083 ÷ 107.26)` = 94.
 #[test]
 #[ignore = "pending E4-2"]
 fn an_entry_the_day_after_an_exit_sizes_from_unsettled_proceeds() {
@@ -1186,71 +1317,69 @@ fn an_entry_the_day_after_an_exit_sizes_from_unsettled_proceeds() {
         .iter()
         .filter(|o| o.order.side == Side::Buy)
         .collect();
-    assert!(
-        entries.len() >= 2,
-        "the second signal still submits, although the first sale has not settled"
-    );
-    let second = entries[1];
-    assert!(
-        second.order.qty > Qty::ZERO,
-        "sizing from settled cash alone would have made this order zero"
-    );
+    assert_eq!(entries.len(), 2, "the sixth period goes long again");
+    assert_eq!(entries[1].limit, price("107.26"));
+    assert_eq!(entries[1].order.qty, qty("466"));
 }
 
-/// A week that goes long, flat, then long again, with a starting cash small enough that a settled-cash
-/// denominator would leave nothing to buy with on the re-entry day.
+/// [`seven_days`] with the sixth day rising to 107.00 instead of falling, so the fifth period is flat,
+/// which exits, and the sixth is long again (210 × 3 = 630 above 314.50 × 2 = 629) while the sale is
+/// still unsettled.
 fn round_trip_and_re_entry() -> Vec<mandate_sim::SimBar> {
-    let mut bars = five_days();
-    bars.extend(vec![
-        auction(
-            "2026-09-28",
-            "09:30",
-            ["103.00", "106.00", "103.00", "105.90", "8000"],
-        ),
-        bar(
-            "2026-09-28",
-            "15:59",
-            ["105.90", "106.00", "105.50", "106.00", "9000"],
-        ),
-        auction(
-            "2026-09-29",
-            "09:30",
-            ["106.00", "108.00", "106.00", "107.90", "8000"],
-        ),
-        bar(
-            "2026-09-29",
-            "15:59",
-            ["107.90", "108.00", "107.50", "108.00", "9000"],
-        ),
-    ]);
+    let mut bars = seven_days();
+    bars[10] = auction(
+        "2026-09-28",
+        "09:30",
+        ["103.00", "107.20", "102.90", "107.10", "8000"],
+    );
+    bars[11] = bar(
+        "2026-09-28",
+        "15:59",
+        ["107.10", "107.20", "106.90", "107.00", "9000"],
+    );
+    bars[12] = auction(
+        "2026-09-29",
+        "09:30",
+        ["107.00", "107.20", "106.90", "107.00", "8000"],
+    );
+    bars[13] = bar(
+        "2026-09-29",
+        "15:59",
+        ["107.00", "107.20", "106.90", "107.00", "9000"],
+    );
     bars
 }
 
-/// The benchmark buys at its first eligible bar, not at the run's last price: its fill is on bar 1
-/// and its price is inside that bar's range, never the final close.
+/// The benchmark buys at its first eligible bar, not at the run's last price. It is decided at the
+/// close of **bar 0** rather than at a period close, the one exception loop step 6 makes (DEC-127 item
+/// 13), so with the collar its limit is `on_tick(100.10 × 1.0025, down)` = `on_tick(100.35025, down)`
+/// = 100.35, its quantity `truncate(100000 ÷ 100.35)` = 996, and its first fill is 800 shares at
+/// `min(100.35, 100.10 × 1.0003)` = 100.13003 on bar 1.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_benchmark_buys_at_its_first_eligible_bar_not_the_last() {
     let config = run_config(equity(), buy_and_hold(), "100000");
-    let bars = five_days();
+    let bars = seven_days();
     let run = run(&config, &bars).unwrap();
 
-    let fill = run.fills.first().expect("the benchmark buys");
-    assert_eq!(fill.fill.bar, 1, "the bar after the one that decided it");
-    assert!(
-        fill.fill.price <= price("100.20"),
-        "bar 1's high bounds the price"
-    );
-    assert!(fill.fill.price >= price("99.90"), "bar 1's low bounds it");
     assert_eq!(
         run.orders.len(),
         1,
         "the benchmark submits exactly one order"
     );
+    assert_eq!(run.orders[0].decided_at_bar, 0, "decided at bar 0's close");
+    assert_eq!(run.orders[0].limit, price("100.35"));
+    assert_eq!(run.orders[0].order.qty, qty("996"));
+    assert_eq!(run.orders[0].order.tif, mandate_sim::TimeInForce::Gtc);
+
+    let fill = run.fills.first().expect("the benchmark buys");
+    assert_eq!(fill.fill.bar, 1, "the bar after the one that decided it");
+    assert_eq!(fill.fill.price, price("100.13003"));
+    assert_eq!(fill.fill.qty, qty("800"));
 }
 
-/// A benchmark the market never lets fill in full reports its unfilled quantity rather than
-/// pretending to hold shares.
+/// A benchmark the volume cap never lets fill in full reports its unfilled quantity rather than
+/// pretending to hold shares, and its GTC order is still working when the bars run out.
 #[test]
 #[ignore = "pending E4-2"]
 fn the_benchmark_that_cannot_fill_reports_its_unfilled_quantity() {
@@ -1264,11 +1393,12 @@ fn the_benchmark_that_cannot_fill_reports_its_unfilled_quantity() {
         "the volume cap left part of the order working"
     );
     assert!(metrics.submitted_qty > Qty::ZERO);
+    assert_eq!(run.orders[0].end, mandate_sim::OrderEnd::Open);
 }
 
 /// The same week with tiny volumes, so a 10% cap fills only a fraction of the benchmark's order.
 fn thin_week() -> Vec<mandate_sim::SimBar> {
-    five_days()
+    seven_days()
         .into_iter()
         .map(|b| mandate_sim::SimBar {
             volume: qty("10"),
@@ -1283,7 +1413,7 @@ fn thin_week() -> Vec<mandate_sim::SimBar> {
 #[ignore = "pending E4-2"]
 fn a_changed_bar_changes_the_bars_digest() {
     let config = run_config(equity(), buy_and_hold(), "100000");
-    let bars = five_days();
+    let bars = seven_days();
     let first = run(&config, &bars).unwrap();
     let again = run(&config, &bars).unwrap();
     assert_eq!(
@@ -1296,7 +1426,7 @@ fn a_changed_bar_changes_the_bars_digest() {
     );
 
     let mut changed = bars.clone();
-    changed[9].close = price("103.01");
+    changed[13].close = price("102.01");
     let other = run(&config, &changed).unwrap();
     assert_ne!(first.report.inputs.bars, other.report.inputs.bars);
     assert_eq!(
@@ -1311,7 +1441,7 @@ fn a_changed_bar_changes_the_bars_digest() {
 #[ignore = "pending E4-2"]
 fn the_report_serializes_to_the_committed_canonical_bytes() {
     let config = run_config(equity(), buy_and_hold(), "100000");
-    let run = run(&config, &five_days()).unwrap();
+    let run = run(&config, &seven_days()).unwrap();
     let bytes = run.report.canonical_bytes().unwrap();
     let text = String::from_utf8(bytes.clone()).unwrap();
 

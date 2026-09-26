@@ -179,6 +179,11 @@ impl BacktestRun {
 /// and 00:00 UTC, the period observation when this bar closes a period, and last the strategy's
 /// decision, timed at the next bar's start so nothing fills in the bar that decided it (§6.4 rule 1).
 ///
+/// The buy-and-hold benchmark is the one exception to that last step: its single order is decided at
+/// **bar 0's** close rather than at the first period close, because a benchmark that sat out its first
+/// period would not be the comparison FR-4.2 asks for (DEC-127 item 13). Its decision is timed at bar
+/// 1's start like any other, so it still cannot fill in the bar that decided it.
+///
 /// Errors: no bars; a bar whose `trade_date` is not the one the calendar gives its start; a period
 /// whose opening equity is not positive; a crossover whose windows are crossed or zero; a year with
 /// no periods; and the arithmetic, fill-model, accounting, and time errors it wraps.

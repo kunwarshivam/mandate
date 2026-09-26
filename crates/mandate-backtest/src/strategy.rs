@@ -23,9 +23,12 @@ pub struct StrategyConfig {
 /// (AGENTS.md rule 3). It compares the two averages **without dividing**, by cross-multiplying the
 /// window sums, so the signal introduces no rounding of its own.
 ///
-/// [`Strategy::BuyAndHold`] submits one GTC limit buy at the first bar's close plus the collar and
+/// [`Strategy::BuyAndHold`] submits one GTC limit buy at the **first bar's** close plus the collar and
 /// nothing afterwards: the benchmark FR-4.2 asks for, paying the same slippage and the same fees as
-/// the strategy it is compared with.
+/// the strategy it is compared with. It is the one exception to the loop's rule that decisions are
+/// taken at period closes (DEC-127 items 2 and 13): a benchmark decided at the first *period* close
+/// would sit out that whole period, so its order is decided at bar 0's close, timed at bar 1's start,
+/// and eligible from bar 1.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Strategy {
     MovingAverageCrossover(StrategyConfig),
@@ -50,8 +53,9 @@ impl Strategy {
     /// For a crossover: `Undecided` until `slow_periods` periods have closed, then `Long` when
     /// `fast_sum × slow_periods > slow_sum × fast_periods` — the division-free form of
     /// `fast_sum ÷ fast_periods > slow_sum ÷ slow_periods` — and `Flat` on equality or below. For
-    /// buy-and-hold: `Long` at the first period and `Undecided` afterwards, since the benchmark
-    /// submits exactly one order.
+    /// buy-and-hold: `Long` when `closes` holds exactly one price, the close of bar 0, and `Undecided`
+    /// afterwards, since the benchmark submits exactly one order. The loop passes it the first bar's
+    /// close at bar 0, rather than waiting for a period to close.
     ///
     /// Errors: `strategy_windows_crossed` for a fast window at or above the slow one, or either
     /// zero; and the arithmetic errors of the sums.

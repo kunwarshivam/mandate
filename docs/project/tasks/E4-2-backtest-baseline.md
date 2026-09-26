@@ -98,7 +98,7 @@ story. This story closes the M3 loop that E4-1 opened: bars in, a signal, an ord
   | Annualization is an exact integer multiplication of the squared figures | `num::an_annualized_variance_is_the_period_value_times_the_period_count`, `hand::annualizing_scales_the_squares_not_the_roots` |
   | Sharpe never reads better than the truth: the reported `sharpe` squared never exceeds `sharpe_squared`, and the root is rounded towards −∞ | `num::a_sharpe_root_never_exceeds_the_squared_value`, `hand::a_negative_sharpe_rounds_away_from_zero`, `properties::the_sharpe_sign_matches_the_excess_mean` |
   | Maximum drawdown is peak-to-trough on the period closes, from the running peak including E₀, and never negative | `hand::a_drawdown_after_a_new_peak_is_measured_from_that_peak`, `hand::a_run_that_only_falls_measures_from_the_starting_equity`, `properties::max_drawdown_matches_the_running_peak_oracle` |
-  | Turnover counts one side, not both | `hand::a_single_round_trip_turns_over_its_notional_once`, `properties::turnover_matches_the_min_of_the_two_sides` |
+  | Turnover counts one side, not both | `hand::a_single_round_trip_turns_over_its_notional_once`, `properties::turnover_matches_the_min_of_the_two_sides`, `properties::the_totals_recompute_from_the_runs_fills_and_orders` |
   | The buy-and-hold benchmark buys at its first eligible bar, through the same fill model and fees | `hand::the_benchmark_buys_at_its_first_eligible_bar_not_the_last`, `hand::the_benchmark_that_cannot_fill_reports_its_unfilled_quantity`, `properties::the_benchmark_never_trades_after_its_first_order` |
   | The excess total return is the exact difference of the two reported returns | `hand::the_excess_return_is_the_difference_of_the_two_reported_returns` |
   | Every derived figure recomputes from the figures the report shows (DEC-127 item 15) | `properties::every_reported_statistic_recomputes_from_the_reported_inputs` |
@@ -106,12 +106,12 @@ story. This story closes the M3 loop that E4-1 opened: bars in, a signal, an ord
   | ES-21 no clock, no randomness, no floats, ordered containers only | `properties::a_run_repeated_in_the_same_process_is_equal`, and the crate's lint header |
   | §6.4 the loop drives the fill model without re-deriving it: the run's fills equal `simulate`'s over the whole bar slice, and a day order's cancellation is read from the `OrderEnd` that `SimOutcome::end_of` returns, never recomputed | `properties::the_runs_fills_are_exactly_what_simulate_returned`, `hand::an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median`, `hand::a_day_orders_remainder_ends_where_simulate_says_it_does` |
   | §5.3 rule 6 an order works through the end of the bar that ends it, so that bar submits nothing | `hand::the_bar_that_ends_an_order_submits_no_replacement` |
-  | §6.1, §6.2, DEC-87 each fill carries a unique `fill_id` and its order's `client_order_id`, so the per-order TAF cap binds across the order's executions | `hand::two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap`, `properties::no_fill_id_is_ever_reused` |
-  | §6.2, §6.3 fees are charged at 20:00 ET for an equity trade date and at 00:00 UTC for a crypto date, and an accrual whose instant the bars never reach stays accrued | `hand::equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`, `hand::crypto_fees_are_charged_at_midnight_utc`, `hand::an_accrual_the_bars_never_reach_stays_accrued` |
+  | §6.1, §6.2, DEC-87 each fill carries a unique `fill_id`, its order's `client_order_id`, and its bar's start, so the per-order TAF cap binds across the order's executions | `hand::two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap`, `hand::every_fill_carries_its_orders_identifiers`, `properties::no_fill_id_is_ever_reused` |
+  | §6.2, §6.3 fees are charged at 20:00 ET for an equity trade date and at 00:00 UTC for a crypto date, once, and an accrual whose instant the bars never reach stays accrued | `hand::equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`, `hand::a_days_fees_are_charged_once_after_the_day_ends`, `hand::crypto_fees_are_charged_at_midnight_utc`, `hand::an_accrual_the_bars_never_reach_stays_accrued` |
   | §8.2 a period closes at its last regular-session bar (an equity) or its last bar of the UTC date (crypto), and a date with no closing bar is no period | `hand::an_after_hours_bar_does_not_close_an_equity_period`, `hand::a_date_covered_only_outside_the_regular_session_is_no_period` |
   | §7.2 an entry sizes from `cash_total`, so unsettled sale proceeds are available in a margin account | `hand::an_entry_the_day_after_an_exit_sizes_from_unsettled_proceeds` |
   | An absent figure is `Null` with `absent` saying why | `hand::one_period_leaves_the_dispersion_fields_absent`, `hand::a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance` |
-  | A run that only rises has no drawdown, reported at peak and trough period 0 | `hand::a_run_that_only_rises_has_no_drawdown` |
+  | A run that only rises has no drawdown, reported at peak and trough period 0, and a figure below the twelfth place is not a figure | `hand::a_run_that_only_rises_has_no_drawdown`, `hand::a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance` |
   | ES-04 the new arithmetic is exact or an error, one rounding per formula | `num::ratios_round_once_and_reject_twenty_five_places`, `num::shares_at_a_price_truncate_to_the_increment` |
 
   **Oracles.** `crates/mandate-backtest/tests/properties.rs` holds a second ledger and a second
@@ -130,7 +130,7 @@ story. This story closes the M3 loop that E4-1 opened: bars in, a signal, an ord
   |---|---|
   | Fees dropped from the return (equity as settled + market value) | `properties::a_higher_fee_never_raises_the_return`, `hand::the_total_return_is_net_of_accrued_and_charged_fees` |
   | Drawdown measured from E₀ instead of the running peak | `hand::a_drawdown_after_a_new_peak_is_measured_from_that_peak`, `properties::max_drawdown_matches_the_running_peak_oracle` |
-  | Turnover counting both sides | `hand::a_single_round_trip_turns_over_its_notional_once`, `properties::turnover_matches_the_min_of_the_two_sides` |
+  | Turnover counting both sides | `hand::a_single_round_trip_turns_over_its_notional_once`, `properties::turnover_matches_the_min_of_the_two_sides`, `properties::the_totals_recompute_from_the_runs_fills_and_orders` |
   | Buy-and-hold buying at the last bar's price | `hand::the_benchmark_buys_at_its_first_eligible_bar_not_the_last` |
   | A figure summed from an unordered map, so the bytes depend on iteration order | `properties::identical_inputs_give_byte_identical_reports`, `hand::the_report_serializes_to_the_committed_canonical_bytes` |
   | Variance with divisor n instead of n − 1 | `hand::variance_uses_the_sample_divisor`, `num::a_sample_variance_matches_the_integer_oracle_and_is_never_negative` |
@@ -297,8 +297,9 @@ pub struct Report {
 }
 
 impl Report {
-    pub fn canonical(&self) -> Value;
-    pub fn digest(&self) -> Digest;
+    pub fn canonical(&self) -> Result<Value, BacktestError>;
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, BacktestError>;
+    pub fn digest(&self) -> Result<Digest, BacktestError>;
 }
 
 pub struct BacktestRun {
@@ -429,8 +430,10 @@ With period closes c₁ … c_d and windows `fast_periods` = f < `slow_periods` 
   §5.2, which `simulate` re-checks and rejects otherwise.
 
 The **buy-and-hold benchmark** is the same loop, bars, fill model, fee configuration, and starting
-cash, with a strategy that submits exactly one order: at the close of the first bar, a **GTC** limit
-buy at `on_tick(close.slipped(collar, up), tick, down)` for
+cash, with a strategy that submits exactly one order: at the close of the **first bar** — the one
+exception to step 6's rule that decisions are taken at period closes, because a benchmark that sat out
+its first period would not be the comparison FR-4.2 asks for — a **GTC** limit buy at
+`on_tick(close.slipped(collar, up), tick, down)` for
 `truncate(starting cash ÷ limit, increment)` shares, and nothing afterwards. Its remainder keeps
 working, so a benchmark the volume cap or a rising market cannot fill reports its `submitted_qty`
 above its `filled_qty` instead of pretending to hold shares. Both runs pay the same slippage and the
@@ -573,7 +576,11 @@ Three rules hold across the table:
     and exits as tick-rounded limit sells of the whole position (which the crypto asset fee leaves off
     the increment, §5.3 rule 2), no adds and no protective legs; the time in force is `Day` on an
     equity and `Gtc` on a continuous instrument (§5.2), and a GTC order is never re-submitted.
-13. **The benchmark** is the same loop with a one-order GTC buy-and-hold strategy, sized
+13. **The benchmark** is the same loop with a one-order GTC buy-and-hold strategy, decided at the
+    close of **bar 0** rather than at a period close — the single exception to item 2's decision rule,
+    since a benchmark that sat out its first period would not be the comparison FR-4.2 asks for, and
+    its decision is still timed at the next bar's start, so it cannot fill in the bar that decided it —
+    sized
     `truncate(starting cash ÷ limit, increment)`, reporting `submitted_qty` and `filled_qty`, and the
     comparison is a full metric block plus the exact difference of the two total returns. The
     benchmark pays the same slippage and fees as the strategy; it is a tradable benchmark, not an

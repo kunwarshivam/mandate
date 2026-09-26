@@ -20,10 +20,11 @@
 mod common;
 
 use common::*;
-use mandate_accounting::{Account, AccountType, Input, Side};
+use mandate_accounting::{Account, AccountType, FeeFamily, Input, Side};
 use mandate_backtest::{BacktestRun, Metrics, Observation, Sign};
 use mandate_num::{Price, Qty, Ratio, Usd};
 use mandate_sim::SimBar;
+use mandate_time::{Date, new_york_date_and_hour};
 use proptest::prelude::*;
 
 /// Fixed-point helpers and the statistics, in `i128` units.
@@ -243,6 +244,7 @@ mod sequencer {
     ) -> Vec<Usd> {
         let mut account = Account::opening(AccountType::Margin, config.starting_cash, []);
         let closings = closing_bars(bars);
+        let mut charged: Vec<Date> = Vec::new();
         let mut out = Vec::new();
         for (index, bar) in bars.iter().enumerate() {
             for input in account.due(bar.start).expect("due movements") {
@@ -267,11 +269,44 @@ mod sequencer {
                 )
                 .expect("a mark folds")
                 .account;
+            for day in charges_due(bars, index, &mut charged) {
+                account = account
+                    .apply(
+                        &Input::FeesCharged {
+                            family: FeeFamily::Equities,
+                            day,
+                        },
+                        &config.fees,
+                    )
+                    .expect("a charge folds")
+                    .account;
+            }
             if closings.contains(&index) {
                 out.push(account.equity().expect("equity after a closing bar"));
             }
         }
         out
+    }
+
+    /// The equity trade dates whose 20:00 ET instant this bar is the first to reach (spec §6.2), which
+    /// is the rule the loop must follow: a date is charged once, at the first bar whose New York date
+    /// and hour are at or past (date, 20).
+    pub fn charges_due(bars: &[SimBar], index: usize, charged: &mut Vec<Date>) -> Vec<Date> {
+        let (today, hour) = new_york_date_and_hour(bars[index].start).expect("a New York instant");
+        let mut due = Vec::new();
+        for bar in bars.iter().take(index + 1) {
+            let date = bar.trade_date;
+            if charged.contains(&date) || due.contains(&date) {
+                continue;
+            }
+            let reached = date < today || (date == today && hour >= 20);
+            if reached {
+                due.push(date);
+            }
+        }
+        due.sort_unstable();
+        charged.extend(due.iter().copied());
+        due
     }
 
     /// The signal the crossover must give at each period close, by cross-multiplying the window sums
@@ -570,14 +605,27 @@ proptest! {
         for pair in run.orders.windows(2) {
             let (first, second) = (pair[0], pair[1]);
             prop_assert!(second.decided_at_bar > first.decided_at_bar);
+            let index = usize::try_from(first.index).unwrap();
             let last_fill = run
                 .fills
                 .iter()
-                .filter(|f| f.fill.order.index() == usize::try_from(first.index).unwrap())
+                .filter(|f| f.fill.order.index() == index)
                 .map(|f| f.fill.bar)
                 .max();
-            if let Some(bar) = last_fill {
-                prop_assert!(second.decided_at_bar >= bar);
+            let stopped = match first.end {
+                mandate_sim::OrderEnd::Filled => last_fill,
+                mandate_sim::OrderEnd::Expired { at_bar } => Some(at_bar.max(last_fill.unwrap_or(at_bar))),
+                mandate_sim::OrderEnd::Open => None,
+            };
+            prop_assert!(
+                first.end != mandate_sim::OrderEnd::Open,
+                "an order still working leaves no room for a later one"
+            );
+            if let Some(bar) = stopped {
+                prop_assert!(
+                    second.decided_at_bar > bar,
+                    "the bar that ended an order decides no replacement"
+                );
             }
         }
     }
@@ -638,23 +686,33 @@ proptest! {
         }
     }
 
-    /// A signal computed on a prefix is the same whatever comes after it: the strategy never reads a
-    /// later close.
+    /// The strategy never reads a later close: changing the last trade date's bars leaves every order
+    /// decided before it, and every fill before it, exactly as they were.
     #[test]
     #[ignore = "pending E4-2"]
     fn the_signal_never_reads_a_later_close(bars in generated_bars()) {
-        let closes: Vec<Price> = sequencer::closing_bars(&bars)
-            .into_iter()
-            .map(|index| bars[index].close)
-            .collect();
-        let strategy = crossover();
-        for end in 1..=closes.len() {
-            let prefix = strategy.signal(&closes[..end]).expect("a signal");
-            let mut extended = closes[..end].to_vec();
-            extended.push(closes[0]);
-            let with_more = strategy.signal(&extended[..end]).expect("a signal");
-            prop_assert_eq!(prefix, with_more);
+        let config = run_config(equity(), crossover(), "100000");
+        let first = run(&config, &bars).expect("a generated run folds");
+        checked(&first, &bars);
+
+        let last_date = bars.last().expect("bars").trade_date;
+        let cut = bars.iter().position(|b| b.trade_date == last_date).expect("its first bar");
+        let mut changed = bars.clone();
+        for bar in changed.iter_mut().skip(cut) {
+            bar.high = bar.high.slipped(mandate_num::Bps::parse("500").unwrap(), mandate_num::Adverse::Up).unwrap();
         }
+        let other = run(&config, &changed).expect("a generated run folds");
+
+        let before: Vec<_> = first.orders.iter().filter(|o| o.decided_at_bar < cut).collect();
+        let after: Vec<_> = other.orders.iter().filter(|o| o.decided_at_bar < cut).collect();
+        prop_assert_eq!(
+            before.iter().map(|o| (o.index, o.decided_at_bar, o.limit, o.order.qty)).collect::<Vec<_>>(),
+            after.iter().map(|o| (o.index, o.decided_at_bar, o.limit, o.order.qty)).collect::<Vec<_>>()
+        );
+        prop_assert_eq!(
+            first.fills.iter().filter(|f| f.fill.bar < cut).map(|f| f.fill.clone()).collect::<Vec<_>>(),
+            other.fills.iter().filter(|f| f.fill.bar < cut).map(|f| f.fill.clone()).collect::<Vec<_>>()
+        );
     }
 
     /// The strategy is long only and never crosses zero: no sell exceeds what is held, and no
@@ -700,9 +758,61 @@ proptest! {
         let dear_run = run(&dear, &bars).expect("a generated run folds");
         checked(&cheap_run, &bars);
         checked(&dear_run, &bars);
-        prop_assert!(dear_run.report.strategy.total_return <= cheap_run.report.strategy.total_return);
-        prop_assert!(dear_run.report.strategy.fees_total >= cheap_run.report.strategy.fees_total);
         prop_assert_eq!(cheap_run.report.strategy.fees_total, Usd::ZERO);
+        prop_assert!(dear_run.report.strategy.fees_total >= cheap_run.report.strategy.fees_total);
+        if dear_run.report.strategy.fees_total > Usd::ZERO {
+            prop_assert!(
+                dear_run.report.strategy.total_return < cheap_run.report.strategy.total_return,
+                "a fee that exists must lower the return, not leave it equal"
+            );
+            prop_assert!(
+                dear_run.report.strategy.ending_equity < cheap_run.report.strategy.ending_equity
+            );
+        } else {
+            prop_assert_eq!(
+                dear_run.report.strategy.total_return,
+                cheap_run.report.strategy.total_return
+            );
+        }
+    }
+
+    /// Every total recomputes from the run's own fills and orders: the notionals are the gross
+    /// quantity times the price by side, the counts are the lengths, and the quantities are the sums of
+    /// what was submitted and what filled (DEC-127 items 10 and 22). A loop that summed net quantities,
+    /// limit prices, or one side twice would disagree here.
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn the_totals_recompute_from_the_runs_fills_and_orders(bars in generated_bars()) {
+        let run = generated_run(&bars);
+        checked(&run, &bars);
+        let metrics = &run.report.strategy;
+
+        let mut buys = 0i128;
+        let mut sells = 0i128;
+        let mut filled = 0i128;
+        for fill in &run.fills {
+            let qty = oracle::units(&fill.fill.qty.to_string(), 9);
+            let price = oracle::units(&fill.fill.price.to_string(), 9);
+            let notional = qty * price;
+            match fill.execution.side {
+                Side::Buy => buys += notional,
+                Side::Sell => sells += notional,
+            }
+            filled += qty;
+        }
+        let submitted: i128 = run
+            .orders
+            .iter()
+            .map(|o| oracle::units(&o.order.qty.to_string(), 9))
+            .sum();
+
+        prop_assert_eq!(oracle::units(&metrics.buy_notional.to_string(), 18), buys);
+        prop_assert_eq!(oracle::units(&metrics.sell_notional.to_string(), 18), sells);
+        prop_assert_eq!(oracle::units(&metrics.traded_notional.to_string(), 18), buys + sells);
+        prop_assert_eq!(usize::try_from(metrics.fill_count).unwrap(), run.fills.len());
+        prop_assert_eq!(oracle::units(&metrics.filled_qty.to_string(), 9), filled);
+        prop_assert_eq!(oracle::units(&metrics.submitted_qty.to_string(), 9), submitted);
+        prop_assert!(metrics.filled_qty <= metrics.submitted_qty);
     }
 
     /// Identical inputs give byte-identical reports and the same digest, which is the story's
