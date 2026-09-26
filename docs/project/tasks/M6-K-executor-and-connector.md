@@ -70,7 +70,8 @@ finishing first.
   stream is what makes reservations real), DEC-107 (the artifact store the raw broker exchanges are
   written to), DEC-110 (every pending test fails on the stubs), DEC-117 to DEC-126 (the mandate spec
   v0.6 answers, still `Proposed (founder)`), DEC-129 (stream G's gate, which this executor calls as the
-  binding gate), DEC-131 (stream I's runtime: the `IntentSink` this executor implements, the effect
+  binding gate), DEC-131 (stream I's runtime: the `IntentSink` the shell's adapter implements on this
+  executor's behalf, the effect
   shapes, outstanding intents, `Input::Started` recovery, and the executor as the binder for
   cancel-all), and **DEC-133** (this stream's interpretations, below).
 - **Risks this stream is the mitigation for:** [R-03](../03-raid-log.md) (duplicate or orphaned orders
@@ -857,14 +858,16 @@ founder-owned files; the items under "Decisions needed" that would add a number 
 10. **A timeout is never a rejection.** An unknown outcome is `Unknown`, with its reservation held, its
     quantity counted as filled for exposure and concentration, and no new order in that instrument
     (§5.3 rule 9) until it resolves. Treating silence as a rejection is how a duplicate is born.
-11. **`Abandoned` is exactly the spec's two cases, and the age check guards every submission.** An
-    intent is abandoned when the gate denies it, or when it is older than `max_intent_age` — checked at
-    **every** `Intent → Submitting` transition, not only at a resubmission. §5.7's diagram states
-    `Intent --> Abandoned: intent too old` unqualified, and an intent re-handed after a long outage
-    would otherwise be gated and sent at its *first* submission however stale, since crash points 1 and
-    2 leave it with no submission behind it (review round 1, finding 2). Nothing else abandons an
-    intent, and an abandoned intent is never re-sent: `OrderAbandoned` is terminal, and a later handoff
-    of the same intent id hits item 8's lookup and produces nothing.
+11. **`Abandoned` is exactly the spec's two cases, and the age check guards every submission.** §5.7
+    abandons on a **gate re-check** denial or an intent that is too old. The re-check wording matters:
+    a *first-pass* deny never produces an order in the `Intent` state at all, it is a journaled
+    `GateDecided(deny)` with nothing sent and nothing to abandon (review round 2, nit 4). The age half
+    is checked at **every** `Intent → Submitting` transition, not only at a resubmission: §5.7's
+    diagram states `Intent --> Abandoned: intent too old` unqualified, and an intent re-handed after a
+    long outage would otherwise be gated and sent at its *first* submission however stale, since crash
+    points 1 and 2 leave it with no submission behind it (review round 1, finding 2). Nothing else
+    abandons an intent, and an abandoned intent is never re-sent: `OrderAbandoned` is terminal, and a
+    later handoff of the same intent id hits item 8's lookup and produces nothing.
 12. **Reconciliation's step order is part of the algorithm:** orders, then fills, then positions, then
     cash, then fees, then `ReconciliationRun`. Positions are compared only after the missing fills are
     ingested, because a position difference that a missing fill explains is not a mismatch, and pausing
@@ -975,7 +978,7 @@ means the test is wrong, not the bug.
 |---|---|
 | A restart resubmits an order whose `OrderSubmitted` committed, without querying the broker first, so a crash in the submission window doubles the order | `fault::crash_at_journal_before_request`, `hand::an_unacknowledged_submission_queries_before_it_resubmits`, `properties::no_crash_point_makes_the_broker_see_two_orders_for_one_intent` |
 | The intent is journaled after the connector call rather than before, so a crash between them sends an order the journal never recorded | `properties::every_submit_effect_follows_the_order_submitted_draft_that_names_it`, `hand::a_submission_journals_before_the_request_leaves`, `fault::crash_at_request_no_response` |
-| Reconciliation keeps our own order state when it differs from the broker's, journaling nothing, so the journal and reality diverge silently | `properties::reconciliation_always_adopts_the_broker_side`, `hand::a_journal_only_order_is_reconciled_away_not_kept`, `hand::every_adoption_journals_a_compensating_event_with_the_difference` |
+| Reconciliation keeps our own order state when it differs from the broker's, journaling nothing, so the journal and reality diverge silently | `properties::every_order_difference_adopts_the_broker_with_a_compensating_event`, `hand::a_journal_only_order_is_reconciled_away_not_kept`, `hand::every_adoption_journals_a_compensating_event_with_the_difference` |
 | A bracket entry that fills partly keeps waiting for the rest, so the filled quantity is left with no OCO and no journaled interval | `hand::a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity`, `fault::crash_between_entry_fill_and_oco`, `properties::every_unprotected_interval_has_a_journaled_start_and_end` |
 | A cancel is treated as done when the request is accepted rather than when the broker confirms, so the exit is submitted into a still-resting OCO | `hand::an_exit_never_submits_before_the_cancel_is_confirmed`, `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding`, `fault::crash_at_cancel_before_confirmation` |
 | An abandoned intent is re-sent when the runtime re-hands it after a restart, so an order the gate refused reaches the broker | `hand::an_abandoned_intent_is_never_re_sent`, `hand::a_gate_denial_on_re_check_abandons_the_intent`, `properties::distinct_intents_never_share_a_client_order_id` |
