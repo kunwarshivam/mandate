@@ -295,7 +295,6 @@ fn results_that_do_not_fit_are_errors() {
 /// A fee cap is a non-negative amount of money: a negative cap would turn a capped fee into a
 /// credit (DEC-87).
 #[test]
-#[ignore = "pending E3-1"]
 fn fee_caps_are_non_negative_amounts_of_money() {
     assert_eq!(FeeCap::parse("-0.01"), Err(NumError::Negative));
     assert_eq!(FeeCap::parse("9.790"), Err(NumError::NotCanonical));
