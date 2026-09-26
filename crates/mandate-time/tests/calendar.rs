@@ -145,7 +145,6 @@ fn fixture() -> impl Strategy<Value = Fixture> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E3-1"]
     fn new_york_date_and_hour_follow_the_daylight_saving_rule(secs in modern_secs()) {
         let local = secs + oracle_offset(secs);
         let (date, hour) = new_york_date_and_hour(instant(secs)).unwrap();
@@ -154,7 +153,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn new_york_midnight_is_the_first_instant_of_the_local_day(day in naive_days(2007, 1, 1)..naive_days(2099, 12, 31)) {
         let midnight = new_york_midnight(date_of(day)).unwrap();
         let standard = day * 86_400 + 5 * 3_600;
@@ -164,7 +162,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn trading_and_settlement_days_follow_the_rule(f in fixture(), offset in 0i64..=120) {
         let calendar = f.calendar();
         let day = f.from + offset;
@@ -173,7 +170,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn equity_trade_date_is_the_trading_day_of_execution_with_the_evening_cutoff(f in fixture(), offset in 0i64..=100 * 86_400) {
         let calendar = f.calendar();
         let secs = f.from * 86_400 + offset;
@@ -191,7 +187,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn settlement_is_the_next_settlement_day_after_the_trade_date(f in fixture(), offset in 0i64..=120) {
         let calendar = f.calendar();
         let trade = f.from + offset;
@@ -207,7 +202,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn rfc3339_offsets_are_subtracted(
         secs in modern_secs(),
         sign in prop_oneof![Just(1i64), Just(-1i64)],
@@ -231,7 +225,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn next_and_weekend_agree_with_naive_counting(day in 0i64..naive_days(9999, 12, 31)) {
         prop_assert_eq!(date_of(day).next(), Ok(date_of(day + 1)));
         prop_assert_eq!(date_of(day).is_weekend(), weekday(day) >= 5);
@@ -257,7 +250,6 @@ fn us_2026() -> TradingCalendar {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn reference_case_trade_and_settlement_dates() {
     let calendar = us_2026();
     let cases = [
@@ -284,7 +276,6 @@ fn reference_case_trade_and_settlement_dates() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn midnights_and_offsets_around_the_2026_transitions() {
     assert_eq!(
         new_york_midnight(d("2026-09-22")).unwrap(),
@@ -315,7 +306,6 @@ fn midnights_and_offsets_around_the_2026_transitions() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn calendar_errors() {
     let calendar = us_2026();
     assert_eq!(
@@ -361,7 +351,6 @@ fn calendar_errors() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn rfc3339_rejects_other_forms() {
     for text in [
         "2026-09-21T10:00:00",
