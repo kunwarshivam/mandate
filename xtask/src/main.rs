@@ -1043,8 +1043,8 @@ fn has_pending_tests(dir: &str) -> Result<bool> {
 }
 
 /// A DEC-77 tests PR marks a test `#[ignore = "pending <story>"]` because it cannot pass on the
-/// PR's stubs. One that passes anyway pins nothing (the E5-2 tests PR had one), so every test the
-/// change newly marks pending is run and must fail; a failure by panic, `todo!()` included, counts.
+/// PR's stubs. One that passes anyway pins nothing, so every test the change newly marks pending
+/// is run and must fail; a failure by panic, `todo!()` included, counts.
 /// Outside a PR, or with no new pending test, there is nothing to run.
 fn pending() -> Result<()> {
     let Some(base) = base_ref() else {
@@ -1141,7 +1141,6 @@ fn pending_problems(root: &Path, base: &str) -> Result<Vec<String>> {
 
 /// A test marked `#[ignore = "pending <story>"]`: its path within its file (enclosing inline `mod`
 /// blocks, then the function name), its story, and the line of its name.
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct PendingTest {
     path: String,
     story: String,
