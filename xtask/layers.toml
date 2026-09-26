@@ -17,7 +17,7 @@
 #   4  mandate-risk
 #   5  mandate-builder
 #   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
-#      mandate-alpaca
+#      mandate-alpaca, mandate-runtime
 #   7  mandate-backtest, mandate-cli (the CLI moves up when a command needs mandate-backtest)
 #   tool  mandate-refcases, xtask
 
@@ -109,3 +109,9 @@ layer = 6
 safety_critical = true
 pure = false
 allowed_external = []
+
+[crates.mandate-runtime]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]

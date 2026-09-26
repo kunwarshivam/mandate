@@ -156,7 +156,8 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131; the paths arrive with the tests PR, which updates this entry.
+and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
+every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -166,20 +167,75 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
   command), 5.1 (append and fencing), 5.2 (write before acting, crash recovery), 8 (replay and
   `fold_version`), 9 (the agent-stream catalogue); `docs/HLD.md` section 5; ADR-0001 ES-06, ES-20,
   ES-21, ES-24.
-- **Code:** `mandate-runtime` (new; `fold` and `handle`, with recovery as `Input::Started`, the mode
-  lattice, the kill-switch routing, approvals, the pure `IdGen`, `GateDryRun`, and `OrderPlan` ports,
-  and the shell-driven `IntentSink` and `TimerSource`), over `mandate-journal`'s drafts and append
-  protocol unchanged. The shell (tokio, the
+- **Code:** `mandate-runtime` (new): `crates/mandate-runtime/src/state.rs` (`RuntimeState`, `fold`,
+  `FOLD_VERSION`), `crates/mandate-runtime/src/step.rs` (`handle`, the only producer of effects),
+  `crates/mandate-runtime/src/types.rs` (`Input`, `Effect`, `Mode`, `Initiator`, `KillScope`,
+  `FlattenPlan` — which has no account-wide variant, so `cancel-all` and `close-position` are
+  unrepresentable), `crates/mandate-runtime/src/ports.rs` (the pure `IdGen`, `GateDryRun`, and
+  `OrderPlan` in `Ports`, and the shell-driven `IntentSink` and `TimerSource`),
+  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
+  `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** the hand cases of the brief (the kill-switch order and scope, recovery, approvals,
-  version application, error codes) and property tests against three independent oracles: a shadow
-  fold over the emitted drafts' canonical bytes, a separately written restriction lattice, and an
-  interval accumulator for durations. A committed golden journal pins `fold_version` 1. Planted bugs
-  per test: the task brief.
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
+  refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
+  approvals, version application, recovery, and the kill switches),
+  `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
+  code with the crate: a shadow fold rebuilt from the emitted drafts' payloads, a separately written
+  restriction lattice, and an interval accumulator for durations),
+  `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
+  fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
+  committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
-- **Run:** `cargo nextest run -p mandate-runtime`.
+- **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
+  `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
+
+## Idempotent executor and broker connector
+
+Planned by [the E7-2, E7-3 and E7-4 task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)
+and DEC-133; the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/trading-domain.md` section 5.1 to 5.7 (the v1 order policy, the Alpaca
+  capability matrix, the constraints before submission, protective exits and the tranche model, the
+  kill switch, exit pricing, and the order lifecycle with the broker status mapping), 6.1 (the fill
+  record), 7.1 to 7.4 (the account ledger, buying power, account restrictions, agent modes), 9.1 (the
+  binding gate the executor runs), 9.6 and 9.7 (conduct controls and rate limits), 10 (paper mode and
+  the shadow ledger), 11 (reconciliation), 12 (the account-stream events);
+  `docs/specs/journal.md` section 2 (the account stream's single writer, copied facts, `intent_id`),
+  5.1 (append, idempotency, fencing), 5.2 (write before acting, recovery by `client_order_id`), 8
+  (replay and `fold_version`), 9 (the account-stream catalogue); `docs/HLD.md` section 5 ("Durability")
+  and 6.D (crash recovery); ADR-0001 ES-02, ES-06, ES-09, ES-19, ES-20, ES-21, ES-23, ES-24; backlog
+  E7-2, E7-3, E7-4.
+- **Code:** `mandate-executor` (new; `fold` and `handle` over the account stream, the intent protocol,
+  `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
+  reservations released by the whole terminal set, the protective sequences and the exit ladder,
+  reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
+  account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
+  the two crates share a layer) and `mandate-alpaca` (new; the paper
+  trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
+  credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
+  reject mappings). It calls `mandate-risk` directly as the binding gate and reads
+  `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
+  connector is not here.
+- **Tests:** the hand cases of the brief (the submission chain, the `Unknown` lookup discipline, the
+  status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
+  codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
+  against four independent oracles: a broker-side submission counter inside the fake connector, a
+  shadow order book rebuilt from the drafts' canonical bytes, an `i128` shadow position ledger, and a
+  protection accountant that finds every unprotected interval. Alpaca fixtures follow
+  `mandate-marketdata`'s recorded-scenario shape adapted for a write API (method and body in
+  `requests.txt`, `response-N.json`, its own `record.sh`) and are hand-built; a recording pass against
+  the paper host is an addition on top. Planted bugs per test (21): the task brief.
+- **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
+  `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
+  `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
+  move in a status PR after the implementation, turning `trading_domain::RC-14` and its four variants,
+  `RC-04`, `RC-06`'s `protective_orders_kept_through_dividend`, `RC-07`, `RC-11`, `RC-20`, `RC-21` and
+  `RC-24` green.
+- **Run:** `cargo nextest run -p mandate-executor -p mandate-alpaca`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
