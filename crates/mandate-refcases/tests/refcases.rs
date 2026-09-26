@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use libtest_mimic::{Arguments, Failed, Trial};
-use mandate_refcases::{Case, CaseStatus, journal, parse_status, read_fixture, trading_domain};
+use mandate_refcases::{
+    Case, CaseStatus, journal, mandate, parse_status, read_fixture, trading_domain,
+};
 
 fn main() -> ExitCode {
     let args = Arguments::from_args();
@@ -32,6 +34,10 @@ fn main() -> ExitCode {
     }
     match read_fixture(&fixtures, "trading-domain.json") {
         Ok(fixture) => cases.extend(trading_domain::cases(&fixture)),
+        Err(e) => setup_errors.push(e),
+    }
+    match read_fixture(&fixtures, "mandate.json") {
+        Ok(fixture) => cases.extend(mandate::cases(&fixture)),
         Err(e) => setup_errors.push(e),
     }
 
