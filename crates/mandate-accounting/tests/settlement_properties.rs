@@ -530,7 +530,6 @@ proptest! {
     /// reservations match the oracle after every event, in the account and in its twin of the
     /// other type.
     #[test]
-    #[ignore = "pending E3-3"]
     fn buying_power_matches_the_oracle_after_every_event(s in scenario()) {
         for step in run(&s)?.steps {
             compare(&step.after, &step.oracle, s.cash, s.reserved_cents)?;
@@ -549,7 +548,6 @@ proptest! {
     /// debit. The account type, the charges, and whether anything is unsettled are the scenario's
     /// and the oracle's, never the fold's report of them.
     #[test]
-    #[ignore = "pending E3-3"]
     fn i4_the_no_debit_rule_holds_after_every_gate_approved_fill(s in scenario()) {
         let s = Scenario { gated: true, ..s };
         let cash = s.cash;
@@ -583,7 +581,6 @@ proptest! {
     /// Folding the same inputs, a margin account's buying power exceeds a cash account's by exactly
     /// the unsettled proceeds (spec §7.2, DEC-34): nothing else differs between the types.
     #[test]
-    #[ignore = "pending E3-3"]
     fn margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds(s in scenario()) {
         for step in run(&s)?.steps {
             let (cash, margin) = if s.cash { (&step.after, &step.twin) } else { (&step.twin, &step.after) };
@@ -597,7 +594,6 @@ proptest! {
     /// Reservations come off buying power one for one, whatever the state, and a negative total is
     /// rejected (spec §7.2, §9.5).
     #[test]
-    #[ignore = "pending E3-3"]
     fn reservations_reduce_buying_power_one_for_one_and_are_never_negative(
         s in scenario(),
         other in 0u32..=100_000,
@@ -616,7 +612,6 @@ proptest! {
     /// the sum of the per-bucket ceilings, which is what the charges debit, not the ceiling of the
     /// sum.
     #[test]
-    #[ignore = "pending E3-3"]
     fn charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash(s in scenario()) {
         let last = run(&s)?;
         let config = test_default();
