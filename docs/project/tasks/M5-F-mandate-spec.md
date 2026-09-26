@@ -147,7 +147,7 @@ MI-12 is asserted by the semantic cases rather than fuzzed, as §1.1 says.
 | §9.2 every classification row, and the pinning switch in both directions | `change::one_test_per_row` (about 30 named cases), `change::pinning_from_a_version_with_an_admitting_model_is_reducing`, `change::pinning_from_a_version_without_one_is_increasing`, `change::unpinning_is_increasing` |
 | MI-11 a version classified reducing or neutral never makes any autonomy decision less strict | `properties::a_reducing_or_neutral_version_never_loosens_an_autonomy_decision` (the oracle evaluates every generated action under both rule sets) |
 | §9.2 the version is increasing if any path is, otherwise reducing if any path is, otherwise neutral; an unlisted path is increasing | `change::an_unknown_path_is_increasing`, `properties::classification_is_the_join_over_changed_paths` |
-| ES-22 the Rust parse accepts exactly what the JSON Schema accepts | `schema::one_test_per_s_case`, `properties::the_parse_agrees_with_the_schemas_pattern_grammar` |
+| ES-22 the Rust parse accepts exactly what the JSON Schema accepts, each decimal against its own `$def` grammar | `schema::one_test_per_s_case`, `properties::the_parse_agrees_with_the_schemas_pattern_grammar`, `properties::a_schema_dec_is_its_own_dec_str_normal_form` |
 | ES-21 no clock, no randomness, `BTreeMap`, exact arithmetic or a typed error | `properties::no_output_depends_on_iteration_order`, `num::every_new_operation_matches_its_integer_oracle` |
 | The harness reads every key every owned case states (DEC-85) | `harness::every_owned_case_key_is_read`, `harness::a_family_another_stream_owns_fails_with_its_story`, `harness::a_wrong_expected_value_fails_the_case` |
 
@@ -182,7 +182,7 @@ Two new crates, both `pure = true` and `safety_critical = true` (ES-02 already p
 
 | Crate | Layer | Holds | Why not elsewhere |
 |---|---|---|---|
-| `mandate-domain` | 1 | The vocabulary three M5 streams share: `AssetClass`, `AssetId`, `Environment`, `Side`, `Purpose`, `AutonomyDecision`, `AgentMode`, `Session`, `DomainError` | Putting them in `mandate-spec` would make `mandate-risk` (4), `mandate-builder` (5), and any later connector depend on the mandate rules to name an asset class. ES-02's chain is `num, time, canon -> domain -> journal, accounting -> spec`, and the known-issues row ("`AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain`") names the story that creates the crate as its owner |
+| `mandate-domain` | 1 | The vocabulary three M5 streams share: `AssetClass`, `AssetId`, `WorkingUniverse`, `Environment`, `Side`, `Purpose`, `AutonomyDecision`, `AgentMode`, `Session`, `DomainError` | Putting them in `mandate-spec` would make `mandate-risk` (4), `mandate-builder` (5), and any later connector depend on the mandate rules to name an asset class. ES-02's chain is `num, time, canon -> domain -> journal, accounting -> spec`, and the known-issues row ("`AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain`") names the story that creates the crate as its owner |
 | `mandate-spec` | 3 | The mandate document, validation, the policy hierarchy, the risk state, risk days, goals, the condition language, and change classification | These are the rules the gate enforces, so they must sit **below** the gate: `mandate-risk` at layer 4 reads them and cannot be where they are defined (AGENTS.md rule 1, "limits are enforced by the risk gate, independent of agent logic") |
 
 `mandate-spec` depends on `mandate-num`, `mandate-time`, `mandate-canon`, and `mandate-domain`, and
@@ -208,9 +208,6 @@ founder-owned, so the four entries the tests PR adds are the items this brief ca
   `Usd::scaled_by(numerator, denominator, scale, mode)`, one rounding, for §5.1's
   ceil(X × (E + Δ) ÷ E, 12); and `Ratio::{times, complement}`.
   Each gets an integer oracle in `crates/mandate-num/tests/num.rs`.
-- **`mandate-canon`**: a decimal ordering on `DecStr` (`Ord`, defined on the normalised text, so it
-  is total and exact), which is what V-012, V-013, and V-014 need and what keeps the document's
-  28-place decimals out of any fixed-scale type until a rule actually computes with them.
 - **`mandate-accounting`**: one line, `pub use mandate_domain::AssetClass;`, replacing the local
   enum. Its variants are identical and it carries no methods, so no call site changes.
 - **`mandate-refcases`**: the new `mandate` suite (below).
@@ -223,6 +220,17 @@ The caller's view, written before any logic; these are the tests PR's stubs.
 
 ```rust
 pub struct Mandate { /* private fields; every accessor below */ }
+
+pub enum DecGrammar { Decimal, PositiveDecimal, Fraction, OpenFraction, UnitPositive }
+pub struct SchemaDec { /* the field's text and the grammar it satisfied */ }
+
+impl SchemaDec {
+    pub fn parse(text: &str, grammar: DecGrammar) -> Result<Self, ParseError>;
+    pub fn as_str(&self) -> &str;
+    pub fn to_dec_str(&self) -> DecStr;      // the identity on a SchemaDec, by construction
+    pub fn to_usd(&self) -> Result<Usd, SpecError>;
+    pub fn to_ratio(&self) -> Result<Ratio, SpecError>;
+}
 
 impl Mandate {
     pub fn parse(value: &Value) -> Result<Self, ParseError>;
@@ -256,12 +264,22 @@ pub struct Pointer(String);
   its pattern is a `ParseError` naming the JSON Pointer and the reason. That is what makes the 31
   MC-S cases a test of the Rust parse and satisfies ES-22 ("the Rust mandate parser must agree with
   `jsonschema` validation on every MC-S case").
-- **Every decimal field is a `mandate_canon::DecStr`,** not a `mandate-num` type. The schema's
-  `decimal`, `fraction`, `unit_positive`, `open_fraction`, and `positive_decimal` all allow up to 28
-  integer digits and up to 28 fractional digits; `DecStr` accepts exactly that set and rejects
-  exactly what the schema rejects (MC-S04's `0.020`, MC-S17's 29 places), while `Price`, `Usd`, and
-  `Ratio` have narrower scales. Each rule converts the fields it computes with, and a value outside
-  the target type is a typed error naming the path, never a rounded number (interpretation 4).
+- **Every decimal field is a `SchemaDec`,** a `mandate-spec` newtype holding the field's text
+  together with the `$def` grammar it satisfied — not a `mandate-num` type, whose scales are
+  narrower, and **not a bare `mandate_canon::DecStr`**, which is a *normalising* wrapper over the
+  wider journal grammar (§4.6): `DecStr::parse` returns `Ok("0.02")` for MC-S04's `0.020`, also
+  accepts `007.50`, `1e3`, and `.5`, allows 29 integer digits where the schema allows 28, and knows
+  nothing of the narrower `fraction`, `open_fraction`, `unit_positive`, and `positive_decimal`
+  grammars. So `SchemaDec::parse` checks the raw text against the field's own `$def` pattern
+  **first** and only then wraps it. Every schema grammar is canonical by construction — no leading
+  zeros beyond a bare `0`, a fractional part ending in a non-zero digit, no exponent, `-0` excluded
+  — so text that passes it is already `DecStr`'s normal form, `DecStr::parse` on it is the identity,
+  and `canonical_bytes` round-trips. A property test asserts that identity over generated values
+  rather than assuming it. Each rule converts the fields it computes with, and a value outside the
+  target type is a typed error naming the path, never a rounded number (interpretation 4).
+- **`SchemaDec` orders by decimal value** (`Ord`, total and exact: sign, then integer-part length,
+  then the text, which the canonical grammar makes sufficient). That is all V-012, V-013, and V-014
+  need, so no arithmetic type and no change to `mandate-canon` is involved.
 - **`canonical_bytes` round-trips.** `Mandate::parse(v)` then `canonical_bytes` reproduces the bytes
   `mandate-canon`'s writer produces for `v`, so the version hash cannot drift from the document the
   owner confirmed. `mandate::version_vector` checks the bytes and the digest against the fixture.
@@ -279,14 +297,30 @@ rules state.
 
 ### Strategy fields: what the document does not hold
 
-§3.2's runtime state is **not** in `Mandate` and not in this stream's crates. The working universe,
-the current thesis per instrument, the lineage state, and the day's research spend are folds of
-`UniverseChanged`, `ThesisProposed`, `ThesisRevised`, and `ModelInvocationRecorded`, owned by
-streams G and J. `mandate-spec` names only the shape the risk state needs of them:
+§3.2's runtime state is **not** in `Mandate`. The working universe, the current thesis per
+instrument, the lineage state, and the day's research spend are folds of `UniverseChanged`,
+`ThesisProposed`, `ThesisRevised`, and `ModelInvocationRecorded`, produced by streams G and J.
+Only the universe's **type** is shared, so it lives in `mandate-domain` — one type, not one per
+stream — in the shape stream G's gate actually needs:
 
 ```rust
-pub struct WorkingUniverse(BTreeSet<AssetId>);
+pub enum WorkingUniverse {
+    Known { instruments: BTreeSet<AssetId>, pinned: bool },
+    Unavailable,
+}
 ```
+
+`Unavailable` is a real state and not an empty set: §5.3 check 2 must deny every opening while the
+fold has not been read, which an empty `Known` would also do but would report as "universe empty"
+rather than "universe unknown". Stream G's brief defines its own `WorkingUniverse` over
+`InstrumentId`; that copy goes and G consumes this one (DEC-128 item 21).
+
+**One id type.** `mandate_domain::AssetId` is the schema's `$defs/uuid` form (`asset_id` in
+`instrument_ref`, and the `instrument_id` of a model output), which is what every mandate rule and
+every reference case names. `mandate_accounting::InstrumentId` stays the broker-facing id, "any
+non-empty string", and is the wider type: `AssetId -> InstrumentId` is total and infallible,
+`InstrumentId -> AssetId` is fallible and is only ever needed at a connector boundary. Streams G and
+H use `AssetId` for anything that comes from a mandate, a thesis, or a reference case.
 
 The risk state takes `UniverseChanged` as one of its inputs (§2.3: "a risk input carrying
 `risk_clock`") and turns it into an instrument restriction; it never decides admission.
@@ -295,8 +329,8 @@ The risk state takes `UniverseChanged` as one of its inputs (§2.3: "a risk inpu
 
 ```rust
 pub struct ValidationContext {
-    pub account_equity_usd: DecStr,
-    pub other_allocations_usd: DecStr,
+    pub account_equity_usd: Usd,
+    pub other_allocations_usd: Usd,
     pub validation_date: Date,
     pub registry: Option<BTreeMap<ModelId, RegisteredModel>>,
     pub provenance: ProvenanceMap,
@@ -306,13 +340,13 @@ pub struct ValidationContext {
     pub instrument_groups: BTreeMap<AssetId, GroupId>,
     pub claimed_by_other_agents: BTreeSet<AssetId>,
     pub connection_environment: Option<Environment>,
-    pub connection_loss_carry_usd: DecStr,
+    pub connection_loss_carry_usd: Usd,
     pub eligibility_failures: BTreeSet<AssetId>,
     pub previous_version: Option<PreviousVersion>,
 }
 
 pub struct ValidationReport {
-    pub violations: BTreeSet<Rule>,
+    pub violations: BTreeSet<Violation>,
     pub warnings: BTreeSet<Warning>,
     pub worst_case: WorstCase,
 }
@@ -347,11 +381,11 @@ outside the arithmetic range, interpretation 4).
 The V- and W-codes are the spec's own stable identifiers, so they are the code (ES-09):
 
 ```rust
-pub enum Rule { V001, V002, V003, V005, V006, V007, V008, V009, V010, V011, V012, V013, V014,
-                V015, V016, V017, V018, V020, V022, V023, V024, V030, V031, V032, V033, V034,
-                V035, V036, V037, V038, V039 }
+pub enum Violation { V001, V002, V003, V005, V006, V007, V008, V009, V010, V011, V012, V013, V014,
+                     V015, V016, V017, V018, V020, V022, V023, V024, V030, V031, V032, V033, V034,
+                     V035, V036, V037, V038, V039 }
 
-impl Rule {
+impl Violation {
     pub fn code(self) -> &'static str;   // "V-001" .. "V-039"
     pub fn spec_section(self) -> &'static str;
 }
@@ -361,8 +395,9 @@ pub enum Warning { W001, W002, W003, W005, W006 }
 
 There is no V-004, V-019, V-021, V-025 to V-029, or W-004: §4.1 and §4.2 do not define them (v0.1's
 V-021 was withdrawn in the rewrite), and the enum has no variant for a code the spec does not state,
-so a reader cannot mistake a gap for an unimplemented rule. `BTreeSet<Rule>` gives the sorted order
-the cases expect, ordered by code.
+so a reader cannot mistake a gap for an unimplemented rule. `BTreeSet<Violation>` gives the sorted
+order the cases expect, ordered by code. The type is `Violation`, not `Rule`, because
+`autonomy.rules[]` is the crate's `Rule` (§6.3) and stream H reads it by that name.
 
 `ParseError`, `SpecError`, `PolicyError`, and `DomainError` are `thiserror` enums, each variant with
 a stable `code()` (ES-09): `unknown_member`, `missing_member`, `not_a_decimal`,
@@ -380,7 +415,7 @@ pub struct PolicyLevel { pub name: LevelName, pub values: PolicyValues }
 pub enum LevelName { Platform, Organization, Workspace, Mandate }
 pub struct PolicyValues(BTreeMap<PolicyKey, PolicyValue>);
 pub enum PolicyKey { /* the §4.3 keys, one variant each */ }
-pub enum PolicyValue { Decimal(DecStr), Integer(u64), Flag(bool), Set(BTreeSet<String>), Absent }
+pub enum PolicyValue { Decimal(SchemaDec), Integer(u64), Flag(bool), Set(BTreeSet<String>), Absent }
 
 pub struct PolicyViolation {
     pub key: PolicyKey,
@@ -409,10 +444,16 @@ impl PolicyOverlay {
 `check` takes the levels outermost first and nothing else: no registry lookup, no I/O, no clock. It
 does two things — report violations, and fold the chain into the **overlay** §4.3 describes ("they
 apply to running agents at the next evaluation as an overlay: the stricter value governs, and `auto`
-evaluates as `ask` when `auto_allowed` becomes false"). `PolicyOverlay` is the second type streams G
-and H consume; H asks it whether `auto` is still allowed before returning `auto`, and G asks it for
-the effective ceiling of each limit it enforces. Keeping the overlay next to the check means one
-definition of "stricter", tested once.
+evaluates as `ask` when `auto_allowed` becomes false"). `PolicyOverlay` is the second type streams G,
+H, and J consume: H asks `auto_allowed` before returning `auto`, G asks `effective` for the ceiling
+of each limit it enforces, and J asks `effective` for `max_instruments`,
+`research_cost_cap_usd_per_day`, `research_interval_s`, `max_revisions_per_lineage`,
+`research_agent_allowed`, `admission_auto_allowed`, and `stagger_window_s`, which are §8.5's checks
+4 to 7 and 16 to 17. A lowered `max_instruments` therefore **refuses further admissions and removes
+nothing**: §8.5 check 17 refuses a thesis when the universe is already at the ceiling, and a refusal
+admits nothing and changes the universe only in the one `lineage_retired` case (§8.6 item 4), so
+MI-19 still holds and an over-ceiling universe drains by expiry, never by a forced removal. Keeping
+the overlay next to the check means one definition of "stricter", tested once.
 
 ### Change classification as a pure function
 
@@ -464,7 +505,7 @@ pub enum Input {
     AllocationChange { delta_usd: Usd },
     Clock,
     UniverseChanged { instrument: AssetId, change: UniverseChange, reason: RemovalReason },
-    FloorLoosened { new_max_loss_from_allocation: DecStr, confirmed_at: UtcNanos,
+    FloorLoosened { new_max_loss_from_allocation: SchemaDec, confirmed_at: UtcNanos,
                     independent_approval: bool },
     AgentStopped { reason: StopReason },
     GoalComplete,
@@ -487,7 +528,10 @@ pub struct Snapshot {
     pub daily_pnl: Usd,
     pub daily_pnl_fraction: Ratio,
     pub capital_base: Usd,
+    pub inherited_loss: Usd,
     pub size_factor: Ratio,
+    pub latched: BTreeSet<LimitKey>,
+    pub active_rungs: BTreeSet<u8>,
     pub restrictions: BTreeSet<Restriction>,
     pub agent_mode: AgentMode,
     pub instrument_restrictions: BTreeSet<InstrumentRestriction>,
@@ -511,7 +555,8 @@ pub enum RiskEvent {
     UniverseChanged { instrument: AssetId, change: UniverseChange, reason: RemovalReason },
     InstrumentRestrictionChanged { restriction: InstrumentRestriction,
                                    reason: RestrictionReason, active: bool },
-    GoalCompleted { reason: GoalReason, then: OnCompleteApplied },
+    GoalCompleted { reason: Option<GoalReason>, then: Option<ThenAction>,
+                    on_complete: Option<OnComplete> },
     PositionReleased { qty: Qty },
     AgentStopped { reason: StopReason, loss_carry_usd: Usd },
 }
@@ -528,9 +573,16 @@ pub struct RiskDay { pub day: Date, pub starts_at: UtcNanos, pub ends_at: UtcNan
 ```
 
 `Snapshot` is the third type the other streams consume: G reads `size_factor`, `restrictions`,
-`agent_mode`, `instrument_restrictions`, and `agent_equity` for the §5.3 limits; H reads
-`size_factor` and `drawdown` for the order builder's targets and its condition fields. Reading a
-snapshot rather than the state itself means no other crate can advance the risk clock.
+`agent_mode`, `instrument_restrictions`, and `agent_equity` for the §5.3 limits, `active_rungs` for
+the §5.5 `trim_to_target` guard (a rung must have been active for `breach_confirm_s`), and `latched`
+and `inherited_loss` for the floor and the acknowledgment paths; H reads `size_factor` and
+`drawdown` for the order builder's targets and its condition fields. `latched`, `active_rungs`, and
+`inherited_loss` are in the snapshot rather than derived by each caller because oracle 1 rebuilds
+exactly those three from the journal and compares them, so a limit that latches without journaling
+is caught once instead of per consumer. The field is `day_start_equity`, the name every
+`risk_state` case uses in its `expect` block; stream G's brief calls it `day_open_equity` and takes
+this name (DEC-128 item 21). Reading a snapshot rather than the state itself means no other crate
+can advance the risk clock.
 
 `step` takes the clock with the input, never from a clock read (ES-21), and rejects a time before
 the last step (`clock_went_backwards`). An `AllocationChange` whose `at` is later than the last step
@@ -580,15 +632,25 @@ impl Condition {
 
 pub trait Facts {
     fn enum_field(&self, field: ConditionField) -> Option<&str>;
-    fn decimal_field(&self, field: ConditionField) -> Option<&DecStr>;
+    fn decimal_field(&self, field: ConditionField) -> Option<Ratio>;
     fn bool_field(&self, field: ConditionField) -> Option<bool>;
 }
 ```
 
-§6.3 is the document's own language, so the tree, its type rules, and `matches` live here.
-§6.2's evaluation order — the gate dry run, the built-in AUTO purposes, first match wins, the
-default, and the `autonomy.admission` ceiling — is stream H's, and so are the facts it supplies.
-This split is why the A-family cases are H's while V-017, V-018, and V-023 are this stream's.
+§6.3 is the document's own language, so the tree, its type rules, and `matches` live here, in
+`mandate-spec`, and **nowhere else**. §6.2's evaluation order — the gate dry run, the built-in AUTO
+purposes, first match wins, the default, and the `autonomy.admission` ceiling — is stream H's, and so
+is every implementation of `Facts`. This split is why the A-family cases are H's while V-017, V-018,
+and V-023 are this stream's.
+
+Stream H's brief (#128) currently defines its own `Condition`, `Field`, `Op`, and `Value`, its own
+`matches` oracle, and the `ConditionTooDeep`, `ConditionTypeMismatch`, and `ReservedField` errors.
+Those are the same §6.3 rule in a second safety-critical crate, which is the very argument this brief
+uses to leave family F with stream G, so they go: `mandate-spec` owns the tree, `Condition::matches`,
+and those three error variants (they are V-017, V-023, and V-018, which only `validate` can report),
+and H's tests PR deletes its copy and imports them. H keeps its own `Facts` implementation and its own
+oracle *for §6.2*, which is a different rule. F's tests PR lands the types first, so H has something
+to import (DEC-128 item 21).
 
 ## The case-loading design
 
@@ -655,13 +717,21 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
    clause covers its family: E10-1 (S, V, P), E10-3 (the version vector and C), E6-4 (R, T, L),
    E17-1 (the field split). Reference cases need no marker: a case absent from `status.toml` is
    pending by construction.
-3. **The document keeps its decimals as text.** Every decimal field is a `mandate_canon::DecStr`.
-   The schema's decimal grammars allow up to 28 integer and up to 28 fractional digits, which is
-   exactly what `DecStr` accepts and what `Price` (9 places), `Usd` (28 places of scale but a
-   96-bit significand), and `Ratio` (24 places) do not. Storing the text keeps the Rust parse in
-   agreement with `jsonschema` on every MC-S case and on fuzzed mandates (ES-22) and keeps the
-   canonical bytes, and therefore the version hash, byte-identical to what the owner confirmed.
-   Comparisons that need no arithmetic (V-012, V-013, V-014) use a decimal ordering on `DecStr`.
+3. **The document keeps its decimals as text, checked against the field's own grammar.** Every
+   decimal field is a `SchemaDec`: the raw text plus the `$def` grammar it satisfied, checked as
+   text before anything wraps it. It is **not** a bare `mandate_canon::DecStr`, which normalises
+   rather than rejects and implements the wider journal grammar of §4.6: `DecStr::parse("0.020")`
+   returns `Ok("0.02")`, so MC-S04 would be accepted; it also takes `007.50`, `1e3`, and `.5`,
+   allows 29 integer digits where the schema allows 28, and does not know the narrower `fraction`,
+   `open_fraction`, `unit_positive`, and `positive_decimal` grammars at all. Text is still the
+   storage, because the schema's grammars allow up to 28 integer and 28 fractional digits, which
+   `Price` (9 places), `Usd` (28 places of scale but a 96-bit significand), and `Ratio` (24 places)
+   cannot hold; keeping it as text is what puts the Rust parse in agreement with `jsonschema` on
+   every MC-S case and on fuzzed mandates (ES-22) and keeps the canonical bytes, and therefore the
+   version hash, byte-identical to what the owner confirmed. Because every schema grammar is
+   canonical by construction, `DecStr::parse` on a `SchemaDec` is the identity, which a property
+   test asserts. V-012, V-013, and V-014 need only ordering, so `SchemaDec` implements `Ord` by
+   decimal value and `mandate-canon` is not touched at all.
 4. **Out of arithmetic range is a typed error, never a rounded number.** A rule that must compute
    with a field converts it, and a value the target type cannot hold exactly returns
    `SpecError::OutOfRange { path }` with code `out_of_range`. It is not a V-code: the mandate is
@@ -720,12 +790,19 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     seconds; equity staleness and the `scale_lift_after_s` timer count regular-session seconds for
     equities (from `mandate-time`'s NYSE calendar) and all seconds for crypto (§5.2, §5.5). Nothing
     reads a clock (ES-21).
-15. **One journal event per thing that changed.** `AgentModeApplied` only on a change (MI-6);
-    `InstrumentRestrictionChanged` once per restriction that changed, never one standing for another
-    (§5.10); a `scale_sizes` rung's trigger and lift carry no reason, while a latch carries one only
-    when it is not plain confirmation (`hard_trigger`, `resolved_at_rollover`, `new_day_breach`,
-    `after_reset`, `owner_acknowledged`, `version_loosened`). Two rungs can both journal
-    `hard_breach_pending` while a single `hard_breach` restriction is set (MC-R19).
+15. **One journal event per thing that changed, in the fixture's exact shape.** `AgentModeApplied`
+    only on a change (MI-6); `InstrumentRestrictionChanged` once per restriction that changed, never
+    one standing for another (§5.10). A `scale_sizes` rung's trigger and lift carry an `action` and
+    no reason; a latch carries a reason only when it is not plain confirmation
+    (`hard_trigger`, `resolved_at_rollover`, `new_day_breach`, `after_reset`, `owner_acknowledged`,
+    `version_loosened`), and the hard-breach pair adds `hard_breach_pending` to the trigger reasons
+    and `hard_breach_cleared` to the lift reasons, which a lift carries *instead of* an `action`
+    (MC-R19 step 3 expects `RiskLimitLifted{limit, reason: hard_breach_cleared}` beside
+    `RiskLimitLifted{limit, action: scale_sizes}`). Two rungs can both journal `hard_breach_pending`
+    while a single `hard_breach` restriction is set (MC-R19 step 2). `GoalCompleted` has two shapes
+    in the fixture and the type carries both: `{on_complete}` for the `goal_complete` input
+    (MC-R16, MC-R17) and `{reason, then}` for a confirmed `profit_stop` (MC-R22), so every member is
+    optional and the harness compares only the members the case states.
 16. **A rejected input still produces an outcome.** An allocation change or floor loosening that is
     refused returns `Outcome` with `rejection: Some(..)` and a journaled
     `MandateVersionApplied { result: rejected }`, and the state is unchanged apart from the time that
@@ -756,6 +833,21 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     predicates, `Usd::times_ratio`, `Usd::scaled_by` (one rounding), and `Ratio::{times, complement}`.
     Stream G's claim also names `Usd × Fraction`; the coordinator sequences so that one stream lands
     each operation and the other consumes it.
+
+21. **Shared types have one home, named here, because three streams read them.** The review of this
+    brief found the same type in two briefs three times, so each is settled: (a)
+    `WorkingUniverse` lives in `mandate-domain` in stream G's richer shape
+    (`Known { instruments, pinned } | Unavailable`) over `AssetId`, and G's own copy goes; (b) the
+    id type is `mandate_domain::AssetId`, the schema's UUID form, for everything that comes from a
+    mandate, a thesis, or a reference case, while `mandate_accounting::InstrumentId` stays the wider
+    broker-facing id (`AssetId -> InstrumentId` total, the reverse fallible and needed only at a
+    connector); (c) the §6.3 condition tree, `Condition::matches`, and the `ConditionTooDeep`,
+    `ConditionTypeMismatch`, and `ReservedField` errors are `mandate-spec`'s alone, and stream H's
+    tests PR deletes its copy and imports them, keeping only its own `Facts` and its §6.2 oracle;
+    (d) the risk snapshot's field is `day_start_equity`, the name every `risk_state` case uses, not
+    `day_open_equity`; (e) the V-code enum is `Violation`, leaving `Rule` for `autonomy.rules[]`,
+    which H reads by that name. F's tests PR lands all of these first so the other streams have
+    something to import.
 
 ## Not done
 
@@ -811,6 +903,17 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
    row's parenthetical swaps the L and F family names against spec §11. Interpretation 19 gives the
    family to stream G. **Recommendation:** the coordinator corrects the two rows when it merges this
    brief; one comment reassigning family F is enough to change the tests PR.
+5. **Four founder-owned entries** the tests PR adds and cannot take itself: `xtask/layers.toml` gains
+   `[crates.mandate-spec]` (layer 3, `safety_critical = true`, `pure = true`,
+   `allowed_external = ["thiserror"]`) and `[crates.mandate-domain]` (the same at layer 1), and
+   CODEOWNERS gains a line for each crate directory. `cargo xtask layers` fails without them, so the
+   tests PR cannot be green until they are in; the founder may veto either crate's placement, which
+   reopens interpretation 1. `Proposed (founder)`.
+6. **Shared-crate sequencing across three claims.** `mandate-num` is touched by this claim (the exact
+   comparison predicates, `Usd::times_ratio`, `Usd::scaled_by`, `Ratio::{times, complement}`), by
+   E4-2's #114, and by stream G's #123 (`Usd × Fraction`, which `Usd::times_ratio` subsumes). The
+   coordinator decides which stream lands each operation; this brief's default is that F lands the
+   set above and G consumes it.
 
 ## Commands
 
@@ -880,8 +983,13 @@ nothing catches means the test set is incomplete, not that the bug is harmless.
 | 17 | An unlisted changed path is treated as neutral instead of increasing | `change::an_unknown_path_is_increasing`, `properties::classification_is_the_join_over_changed_paths` |
 | 18 | Changed paths are computed element by element inside an array, so a ladder change reports `/risk/drawdown_ladder/2/at` | `change::one_test_per_row`, MC-C01 |
 | 19 | The parse accepts a decimal sent as a JSON number | `schema::one_test_per_s_case`, MC-S06, MC-S16 |
-| 20 | The parse accepts a non-canonical decimal (`0.020`) or 29 fractional digits | `schema::one_test_per_s_case`, MC-S04, MC-S17 |
-| 21 | The parse ignores unknown members instead of rejecting them | `schema::one_test_per_s_case`, MC-S05 |
-| 22 | `canonical_bytes` re-serialises from the typed fields rather than reproducing the canonical form, so a 28-place decimal loses a digit and the version hash moves | `change::the_version_vector`, `properties::equal_documents_hash_equally_and_a_one_bit_change_does_not` |
-| 23 | The harness treats an unknown `expect` member as satisfied | `harness::every_owned_case_key_is_read`, `harness::a_wrong_expected_value_fails_the_case` |
-| 24 | The harness dispatches a `gate` case to the risk state instead of failing with its owning story | `harness::a_family_another_stream_owns_fails_with_its_story` |
+| 20 | The parse wraps a decimal in `DecStr` **without** first checking the field's `$def` pattern, so `DecStr`'s normalisation silently accepts `0.020` (as `0.02`), `007.50`, `1e3`, and `.5` | `schema::one_test_per_s_case`, `properties::a_schema_dec_is_its_own_dec_str_normal_form`, MC-S04 |
+| 21 | The parse uses the `decimal` grammar for every field instead of the narrower one the schema declares, so `max_drawdown` of `8` or a negative fraction passes | `schema::one_test_per_s_case`, MC-S03, MC-S13, MC-S14 |
+| 22 | The parse bounds the integer part at `DecStr`'s 29 digits rather than the schema's 28 | `properties::the_parse_agrees_with_the_schemas_pattern_grammar` |
+| 23 | 29 fractional digits are accepted | `schema::one_test_per_s_case`, MC-S17 |
+| 24 | The parse ignores unknown members instead of rejecting them | `schema::one_test_per_s_case`, MC-S05 |
+| 25 | `canonical_bytes` re-serialises from the typed fields rather than reproducing the canonical form, so a 28-place decimal loses a digit and the version hash moves | `change::the_version_vector`, `properties::equal_documents_hash_equally_and_a_one_bit_change_does_not` |
+| 26 | The harness treats an unknown `expect` member as satisfied | `harness::every_owned_case_key_is_read`, `harness::a_wrong_expected_value_fails_the_case` |
+| 27 | The harness dispatches a `gate` case to the risk state instead of failing with its owning story | `harness::a_family_another_stream_owns_fails_with_its_story` |
+| 28 | A hard-breach lift journals an `action` instead of `reason: hard_breach_cleared`, or the two rungs share one event | `risk::a_single_flash_print_latches_nothing`, MC-R19 step 3 |
+| 29 | `GoalCompleted` always carries `reason` and `then`, so the `goal_complete` input's `on_complete`-only entry does not match | `goal::one_test_per_row_of_the_goal_table`, MC-R16, MC-R17 |
