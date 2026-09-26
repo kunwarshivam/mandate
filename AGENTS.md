@@ -21,6 +21,7 @@ stop and ask; do not silently pick one.
 | How is the system structured? | [docs/HLD.md](docs/HLD.md) |
 | What must v1 do? | [docs/product/04-prd-v1.md](docs/product/04-prd-v1.md) |
 | What should I work on? | [docs/project/06-backlog-v1.md](docs/project/06-backlog-v1.md), in milestone order from [docs/project/02-milestones-and-wbs.md](docs/project/02-milestones-and-wbs.md) |
+| Where does the work stand, and what is next? | [docs/project/08-work-tracker.md](docs/project/08-work-tracker.md), updated at the end of every session |
 | What has already been decided? | [docs/project/04-decision-log.md](docs/project/04-decision-log.md) |
 | What are the exact trading rules (accounting, orders, fees, settlement, account rules)? | [docs/specs/trading-domain.md](docs/specs/trading-domain.md) and its [reference cases](docs/specs/reference-cases/trading-domain.yaml), which tests must reproduce exactly |
 | What is a mandate, which invariants must hold, and how are limits, autonomy, and the order builder defined? | [docs/specs/mandate.md](docs/specs/mandate.md), the [mandate](schemas/mandate.schema.json) and [policy](schemas/policy.schema.json) schemas, and its [reference cases](docs/specs/reference-cases/mandate.yaml) |
