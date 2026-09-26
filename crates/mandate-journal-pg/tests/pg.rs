@@ -182,6 +182,7 @@ fn applied_migrations_are_checked_and_never_rerun() {
             "an applied migration that changed is refused"
         );
     });
+    drop(db);
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
         run(
