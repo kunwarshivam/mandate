@@ -48,7 +48,10 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 
 - **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
   before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
-- **Robinhood**: request Agentic Trading beta access and record its terms (OD-12).
+- **Robinhood**: open an agentic account yourself, on a desktop, from your own Robinhood login
+  (OD-12: self-serve, no beta request). Agents never connect to it (rule 8); the connector story
+  will use a paper or test path Robinhood has not yet published, so ask Robinhood support whether one
+  exists.
 - **GitHub Support**: purge `refs/pull/1/head` to `refs/pull/14/head`, which still hold commits with
   the old work email after the history rewrite.
 
