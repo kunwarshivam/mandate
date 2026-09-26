@@ -19,6 +19,7 @@ use std::sync::Arc;
 use mandate_canon::{Int, Key, Value};
 
 pub mod journal;
+pub mod trading_domain;
 
 pub type Json = serde_json::Value;
 
