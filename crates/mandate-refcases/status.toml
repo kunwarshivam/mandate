@@ -48,3 +48,10 @@
 'append::committed' = { status = "passing", story = "E5-1" }
 'append::float_rejected' = { status = "passing", story = "E5-1" }
 'append::missing_required_config_ref' = { status = "passing", story = "E5-1" }
+
+[trading_domain]
+'schema_version' = { status = "passing", story = "E3-1" }
+'RC-01' = { status = "passing", story = "E3-1" }
+'RC-02' = { status = "passing", story = "E3-1" }
+'RC-03' = { status = "passing", story = "E3-1" }
+'RC-13' = { status = "passing", story = "E3-1" }
