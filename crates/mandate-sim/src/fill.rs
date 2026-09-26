@@ -237,8 +237,7 @@ impl Seen<'_> {
         }
     }
 
-    /// The bar's extreme against this side: its high for a buy, its low for a sell, which is how far
-    /// the market moved towards a stop (rule 6).
+    /// [`favours`] for this bar's side, which every rule below reads the bar through.
     fn favours(&self, subject: Price, level: Price) -> bool {
         favours(self.side, subject, level)
     }
