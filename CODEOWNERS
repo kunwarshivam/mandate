@@ -26,5 +26,7 @@
 /crates/mandate-canon/      @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-journal/    @kunwarshivam
+/crates/mandate-artifacts-fs/ @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
+/crates/mandate-sim/        @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam

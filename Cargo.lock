@@ -1007,6 +1007,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-artifacts-fs"
+version = "0.0.0"
+dependencies = [
+ "mandate-journal",
+ "mandate-time",
+ "proptest",
+]
+
+[[package]]
 name = "mandate-canon"
 version = "0.0.0"
 dependencies = [
@@ -1080,9 +1089,21 @@ dependencies = [
  "mandate-canon",
  "mandate-journal",
  "mandate-num",
+ "mandate-sim",
  "mandate-time",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "mandate-sim"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
 ]
 
 [[package]]

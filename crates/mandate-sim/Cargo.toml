@@ -1,0 +1,19 @@
+[package]
+name = "mandate-sim"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The backtest fill model: bars and orders in, fills out, as a pure function (trading-domain spec §6.4)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
