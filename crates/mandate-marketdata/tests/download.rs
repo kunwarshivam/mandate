@@ -274,8 +274,12 @@ async fn each_stock_download_records_the_actions_of_every_day_stored_so_far() {
     let one_day = |d: &str| DayRange::new(day(d), day(d)).unwrap();
     let bars = |d: &str| scenario(&format!("stock-bars-sip-spy-1hour-{d}")).bodies;
 
-    let transport =
-        FakeTransport::serving(bars("2026-09-23").iter().map(|b| ok(b)).chain([ok(SPY_DIVIDEND)]));
+    let transport = FakeTransport::serving(
+        bars("2026-09-23")
+            .iter()
+            .map(|b| ok(b))
+            .chain([ok(SPY_DIVIDEND)]),
+    );
     let client = Client::new(transport.clone(), RecordingPause::default());
     download(&client, &store, &id, one_day("2026-09-23"), |_| {})
         .await
@@ -290,8 +294,12 @@ async fn each_stock_download_records_the_actions_of_every_day_stored_so_far() {
         "the dividend's ex-date is after the stored day"
     );
 
-    let transport =
-        FakeTransport::serving(bars("2026-09-24").iter().map(|b| ok(b)).chain([ok(SPY_DIVIDEND)]));
+    let transport = FakeTransport::serving(
+        bars("2026-09-24")
+            .iter()
+            .map(|b| ok(b))
+            .chain([ok(SPY_DIVIDEND)]),
+    );
     let client = Client::new(transport.clone(), RecordingPause::default());
     let second = download(&client, &store, &id, one_day("2026-09-24"), |_| {})
         .await
@@ -405,7 +413,8 @@ async fn actions_that_cannot_be_stored_are_an_error_naming_the_dataset() {
     assert!(matches!(err, DownloadError::StoreActions { .. }), "{err}");
     assert_eq!(err.code(), "store_actions");
     assert!(
-        err.to_string().starts_with("SPY bars-1Hour (sip) corporate actions: "),
+        err.to_string()
+            .starts_with("SPY bars-1Hour (sip) corporate actions: "),
         "{err}"
     );
 }

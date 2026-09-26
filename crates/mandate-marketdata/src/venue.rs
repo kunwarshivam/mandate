@@ -3,7 +3,10 @@
 //! own hours, checked in as `data/<feed>.venue` with their sources (trading domain spec §1
 //! principle 2); crypto trades continuously.
 
-use mandate_time::{CalendarDataError, Date, ExchangeCalendar, NewYorkTime, TimeError, UtcNanos};
+use mandate_time::{
+    CalendarDataError, Date, ExchangeCalendar, NewYorkTime, TimeError, UtcNanos,
+    new_york_date_and_hour, new_york_instant, new_york_midnight,
+};
 
 use crate::model::Feed;
 
@@ -12,7 +15,9 @@ const IEX: &str = include_str!("../data/iex.venue");
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum VenueError {
-    #[error("line {line}: expected `valid`, then `hours`, then at most one `unpublished_after_early_close`, each with its fields")]
+    #[error(
+        "line {line}: expected `valid`, then `hours`, then at most one `unpublished_after_early_close`, each with its fields"
+    )]
     Syntax { line: usize },
     #[error("line {line}: {source}")]
     Value { line: usize, source: TimeError },
@@ -27,7 +32,13 @@ pub enum VenueError {
 impl VenueError {
     /// Stable reason code (ADR-0001 ES-09).
     pub fn code(&self) -> &'static str {
-        ""
+        match self {
+            Self::Syntax { .. } => "syntax",
+            Self::Value { .. } => "value",
+            Self::Order { .. } => "order",
+            Self::Incomplete => "incomplete",
+            Self::Calendar(_) => "calendar",
+        }
     }
 }
 
@@ -56,8 +67,54 @@ pub struct VenueHours {
 
 impl VenueHours {
     /// Parses the format described in the header of `data/sip.venue`.
-    pub fn parse(_text: &str) -> Result<Self, VenueError> {
-        Err(VenueError::Incomplete)
+    pub fn parse(text: &str) -> Result<Self, VenueError> {
+        let mut range = None;
+        let mut hours = None;
+        let mut until = None;
+        let records = text
+            .split('\n')
+            .zip(1..)
+            .filter(|(line, _)| !line.is_empty() && !line.starts_with('#'));
+        for (record, line) in records {
+            let fields: Vec<&str> = record.split(' ').collect();
+            match (fields.as_slice(), range, hours, until) {
+                (["valid", from, to], None, None, None) => {
+                    let (from, to) = (date(line, from)?, date(line, to)?);
+                    increasing(line, &[from, to], |a, b| a <= b)?;
+                    range = Some((from, to));
+                }
+                (["hours", open, regular_open, regular_close, close], Some(_), None, None) => {
+                    let times = [
+                        time(line, open)?,
+                        time(line, regular_open)?,
+                        time(line, regular_close)?,
+                        time(line, close)?,
+                    ];
+                    increasing(line, &times, |a, b| a < b)?;
+                    hours = Some(times);
+                }
+                (["unpublished_after_early_close", at], Some(_), Some(times), None) => {
+                    let at = time(line, at)?;
+                    increasing(line, &[times[2], at], |a, b| a < b)?;
+                    until = Some(at);
+                }
+                _ => return Err(VenueError::Syntax { line }),
+            }
+        }
+        let (Some((valid_from, valid_to)), Some([open, regular_open, regular_close, close])) =
+            (range, hours)
+        else {
+            return Err(VenueError::Incomplete);
+        };
+        Ok(Self {
+            valid_from,
+            valid_to,
+            open,
+            regular_open,
+            regular_close,
+            close,
+            unpublished_after_early_close: until,
+        })
     }
 
     /// The consolidated tape's hours, checked in as `data/sip.venue`.
@@ -119,8 +176,14 @@ pub struct Venue {
 impl Venue {
     /// The venue of `feed`: SIP and IEX by the US-equities calendar and their checked-in hours,
     /// crypto continuous.
-    pub fn of(_feed: Feed) -> Result<Self, VenueError> {
-        Ok(Self::continuous())
+    pub fn of(feed: Feed) -> Result<Self, VenueError> {
+        let hours = match feed {
+            Feed::Sip => VenueHours::sip()?,
+            Feed::Iex => VenueHours::iex()?,
+            Feed::CryptoUs => return Ok(Self::continuous()),
+        };
+        let calendar = ExchangeCalendar::us_equities().map_err(VenueError::Calendar)?;
+        Ok(Self::exchange(calendar, hours))
     }
 
     /// A venue that never closes.
@@ -143,13 +206,105 @@ impl Venue {
     }
 
     /// Whether the venue trades at all on `date`, as daily bars need.
-    pub fn day_state(&self, _date: Date) -> Result<VenueState, TimeError> {
-        Ok(VenueState::Closed)
+    pub fn day_state(&self, date: Date) -> Result<VenueState, TimeError> {
+        let Schedule::Exchange { calendar, hours } = &self.schedule else {
+            return Ok(VenueState::Open);
+        };
+        if !hours.holds_on(date) {
+            return Ok(VenueState::Unclassified);
+        }
+        match calendar.is_trading_day(date) {
+            Ok(true) => Ok(VenueState::Open),
+            Ok(false) => Ok(VenueState::Closed),
+            Err(TimeError::OutsideCalendar) => Ok(VenueState::Unclassified),
+            Err(e) => Err(e),
+        }
     }
 
     /// A reader of states that reuses each New York day's hours across instants.
     pub fn states(&self) -> States<'_> {
-        States { venue: self }
+        States {
+            venue: self,
+            day: None,
+        }
+    }
+
+    /// The venue's state through the New York day `date`: `base`, except over `periods`.
+    fn day(&self, date: Date) -> Result<Day, TimeError> {
+        let from = new_york_midnight(date)?;
+        let to = new_york_midnight(date.next()?)?;
+        let (base, periods) = match &self.schedule {
+            Schedule::Continuous => (VenueState::Open, Vec::new()),
+            Schedule::Exchange { calendar, hours } => hours.periods(calendar, date)?,
+        };
+        Ok(Day {
+            from,
+            to,
+            base,
+            periods,
+        })
+    }
+}
+
+impl VenueHours {
+    fn holds_on(&self, date: Date) -> bool {
+        (self.valid_from..=self.valid_to).contains(&date)
+    }
+
+    /// The periods of `date` during which the venue is not closed, with the state of each.
+    fn periods(
+        &self,
+        calendar: &ExchangeCalendar,
+        date: Date,
+    ) -> Result<(VenueState, Vec<Period>), TimeError> {
+        if !self.holds_on(date) {
+            return Ok((VenueState::Unclassified, Vec::new()));
+        }
+        let spans = match calendar.sessions(date) {
+            Err(TimeError::OutsideCalendar) => return Ok((VenueState::Unclassified, Vec::new())),
+            spans => spans?,
+        };
+        let [_overnight, pre_market, regular, after_hours] = spans.as_slice() else {
+            return Ok((VenueState::Closed, Vec::new()));
+        };
+        let open = pre_market.start().max(new_york_instant(date, self.open)?);
+        let close = after_hours.end().min(new_york_instant(date, self.close)?);
+        let early = regular.end() < new_york_instant(date, self.regular_close)?;
+        let periods = match self.unpublished_after_early_close {
+            Some(until) if early => vec![
+                (open, regular.end(), VenueState::Open),
+                (
+                    regular.end(),
+                    new_york_instant(date, until)?,
+                    VenueState::Unclassified,
+                ),
+            ],
+            _ => vec![(open, close, VenueState::Open)],
+        };
+        Ok((VenueState::Closed, periods))
+    }
+}
+
+type Period = (UtcNanos, UtcNanos, VenueState);
+
+#[derive(Debug)]
+struct Day {
+    from: UtcNanos,
+    to: UtcNanos,
+    base: VenueState,
+    periods: Vec<Period>,
+}
+
+impl Day {
+    fn contains(&self, at: UtcNanos) -> bool {
+        self.from <= at && at < self.to
+    }
+
+    fn state_at(&self, at: UtcNanos) -> VenueState {
+        self.periods
+            .iter()
+            .find(|(start, end, _)| *start <= at && at < *end)
+            .map_or(self.base, |(_, _, state)| *state)
     }
 }
 
@@ -157,11 +312,40 @@ impl Venue {
 #[derive(Debug)]
 pub struct States<'a> {
     venue: &'a Venue,
+    day: Option<Day>,
 }
 
 impl States<'_> {
-    pub fn at(&mut self, _at: UtcNanos) -> Result<VenueState, TimeError> {
-        let _ = self.venue;
-        Ok(VenueState::Closed)
+    pub fn at(&mut self, at: UtcNanos) -> Result<VenueState, TimeError> {
+        let day = match self.day.take() {
+            Some(day) if day.contains(at) => day,
+            _ => {
+                let (date, _) = new_york_date_and_hour(at)?;
+                self.venue.day(date)?
+            }
+        };
+        let state = day.state_at(at);
+        self.day = Some(day);
+        Ok(state)
+    }
+}
+
+fn date(line: usize, field: &str) -> Result<Date, VenueError> {
+    Date::parse(field).map_err(|source| VenueError::Value { line, source })
+}
+
+fn time(line: usize, field: &str) -> Result<NewYorkTime, VenueError> {
+    NewYorkTime::parse(field).map_err(|source| VenueError::Value { line, source })
+}
+
+fn increasing<T: Copy>(
+    line: usize,
+    values: &[T],
+    ordered: impl Fn(T, T) -> bool,
+) -> Result<(), VenueError> {
+    if values.windows(2).all(|pair| ordered(pair[0], pair[1])) {
+        Ok(())
+    } else {
+        Err(VenueError::Order { line })
     }
 }

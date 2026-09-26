@@ -245,7 +245,12 @@ fn the_checked_in_hours_are_the_published_ones() {
         (day("2018-01-01"), day("2026-12-05"))
     );
     assert_eq!(
-        [sip.open(), sip.regular_open(), sip.regular_close(), sip.close()],
+        [
+            sip.open(),
+            sip.regular_open(),
+            sip.regular_close(),
+            sip.close()
+        ],
         [ny("04:00"), ny("09:30"), ny("16:00"), ny("20:00")]
     );
     assert_eq!(sip.unpublished_after_early_close(), None);
@@ -255,7 +260,12 @@ fn the_checked_in_hours_are_the_published_ones() {
         (day("2018-01-01"), day("2028-12-31"))
     );
     assert_eq!(
-        [iex.open(), iex.regular_open(), iex.regular_close(), iex.close()],
+        [
+            iex.open(),
+            iex.regular_open(),
+            iex.regular_close(),
+            iex.close()
+        ],
         [ny("08:00"), ny("09:30"), ny("16:00"), ny("17:00")]
     );
     assert_eq!(iex.unpublished_after_early_close(), Some(ny("20:00")));
@@ -309,10 +319,26 @@ fn malformed_venue_hours_are_errors_on_their_line() {
 #[test]
 fn bad_dates_and_times_are_value_errors_with_their_cause() {
     for (text, line, source) in [
-        ("valid 2026-02-30 2026-12-31\n".to_owned(), 1, TimeError::InvalidDate),
-        ("valid 2026-01-01 26-12-31\n".to_owned(), 1, TimeError::Syntax),
-        (format!("{VALID}hours 08:00 09:30 16:00 24:00\n"), 2, TimeError::InvalidDate),
-        (format!("{VALID}hours 8:00 09:30 16:00 17:00\n"), 2, TimeError::Syntax),
+        (
+            "valid 2026-02-30 2026-12-31\n".to_owned(),
+            1,
+            TimeError::InvalidDate,
+        ),
+        (
+            "valid 2026-01-01 26-12-31\n".to_owned(),
+            1,
+            TimeError::Syntax,
+        ),
+        (
+            format!("{VALID}hours 08:00 09:30 16:00 24:00\n"),
+            2,
+            TimeError::InvalidDate,
+        ),
+        (
+            format!("{VALID}hours 8:00 09:30 16:00 17:00\n"),
+            2,
+            TimeError::Syntax,
+        ),
         (
             format!("{VALID}{HOURS}unpublished_after_early_close 20:60\n"),
             3,
@@ -335,8 +361,14 @@ fn ranges_and_hours_must_increase() {
         (format!("{VALID}hours 08:00 16:00 09:30 17:00\n"), 2),
         (format!("{VALID}hours 08:00 09:30 17:00 17:00\n"), 2),
         (format!("{VALID}hours 08:00 09:30 16:00 15:00\n"), 2),
-        (format!("{VALID}{HOURS}unpublished_after_early_close 16:00\n"), 3),
-        (format!("{VALID}{HOURS}unpublished_after_early_close 12:00\n"), 3),
+        (
+            format!("{VALID}{HOURS}unpublished_after_early_close 16:00\n"),
+            3,
+        ),
+        (
+            format!("{VALID}{HOURS}unpublished_after_early_close 12:00\n"),
+            3,
+        ),
     ] {
         let err = parse_err(&text);
         assert!(
@@ -351,7 +383,10 @@ fn ranges_and_hours_must_increase() {
 #[test]
 fn venue_hours_need_both_the_range_and_the_hours() {
     for text in ["", "# only a comment\n", VALID] {
-        assert!(matches!(parse_err(text), VenueError::Incomplete), "{text:?}");
+        assert!(
+            matches!(parse_err(text), VenueError::Incomplete),
+            "{text:?}"
+        );
     }
 }
 

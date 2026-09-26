@@ -13,8 +13,8 @@ use mandate_canon::{DecStr, Digest};
 use mandate_marketdata::actions::{CORPORATE_ACTIONS, RecordedActions, write_actions};
 use mandate_marketdata::dataset::{DatasetError, MANIFEST, Store};
 use mandate_marketdata::inspect::{
-    ActionsReport, AdjustedPrices, ClassifiedGap, Coverage, Duplicate, Gap, GapClass,
-    InspectError, Problem, Stretch, Values, classify, gaps, inspect,
+    ActionsReport, AdjustedPrices, ClassifiedGap, Coverage, Duplicate, Gap, GapClass, InspectError,
+    Problem, Stretch, Values, classify, gaps, inspect,
 };
 use mandate_marketdata::model::{
     AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Feed, Kind, OtherAction,
@@ -278,12 +278,7 @@ fn iex_gaps_split_into_no_trade_closures_true_gaps_and_the_unclassified_early_cl
                 at("2026-11-27", 17),
                 at("2026-11-30", 13),
                 vec![
-                    stretch(
-                        Unclassified,
-                        at("2026-11-27", 18),
-                        at("2026-11-28", 0),
-                        7
-                    ),
+                    stretch(Unclassified, at("2026-11-27", 18), at("2026-11-28", 0), 7),
                     stretch(
                         SessionClosure,
                         at("2026-11-28", 1),
@@ -323,19 +318,9 @@ fn the_open_hours_of_a_day_whose_partition_cannot_be_trusted_are_true_gaps() {
             at("2026-09-21", 23),
             at("2026-09-23", 8),
             vec![
-                stretch(
-                    SessionClosure,
-                    at("2026-09-22", 0),
-                    at("2026-09-22", 7),
-                    8
-                ),
+                stretch(SessionClosure, at("2026-09-22", 0), at("2026-09-22", 7), 8),
                 stretch(TrueGap, at("2026-09-22", 8), at("2026-09-22", 23), 16),
-                stretch(
-                    SessionClosure,
-                    at("2026-09-23", 0),
-                    at("2026-09-23", 7),
-                    8
-                ),
+                stretch(SessionClosure, at("2026-09-23", 0), at("2026-09-23", 7), 8),
             ],
         )]
     );
@@ -1063,7 +1048,13 @@ fn nvda_split_actions(range: DayRange, split_ex_date: &str) -> RecordedActions {
 
 fn nvda_around_the_split(scratch: &Scratch) -> PathBuf {
     let daily = |date: &str, low: &str, high: &str| {
-        Records::Bars(vec![bar(time(&format!("{date}T04:00:00.000000000Z")), low, high, "1000", 10)])
+        Records::Bars(vec![bar(
+            time(&format!("{date}T04:00:00.000000000Z")),
+            low,
+            high,
+            "1000",
+            10,
+        )])
     };
     let none = || Records::empty(Kind::Bars("1Day".parse().unwrap()));
     stored(

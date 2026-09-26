@@ -156,7 +156,8 @@ fn refused(bytes: &str, reading: &str) -> ActionsError {
 #[test]
 fn a_hand_edited_foreign_or_malformed_file_is_refused() {
     let spaced = NVDA_JSON.replacen(",", ", ", 1);
-    let other_format = NVDA_JSON.replace("mandate-corporate-actions/1", "mandate-corporate-actions/2");
+    let other_format =
+        NVDA_JSON.replace("mandate-corporate-actions/1", "mandate-corporate-actions/2");
     let reordered = NVDA_JSON.replace(
         r#""first":"2024-06-07","format":"mandate-corporate-actions/1","last":"2024-06-10""#,
         r#""first":"2024-06-10","format":"mandate-corporate-actions/1","last":"2024-06-07""#,
@@ -164,7 +165,10 @@ fn a_hand_edited_foreign_or_malformed_file_is_refused() {
     let bad_ratio = NVDA_JSON.replace(r#""new_shares":10"#, r#""new_shares":0"#);
     let bad_rate = NVDA_JSON.replace(r#""rate":"0.01""#, r#""rate":"1e-2""#);
     let numeric_rate = NVDA_JSON.replace(r#""rate":"0.01""#, r#""rate":1"#);
-    let bad_date = NVDA_JSON.replace(r#""process_date":"2024-06-08""#, r#""process_date":"2024-6-8""#);
+    let bad_date = NVDA_JSON.replace(
+        r#""process_date":"2024-06-08""#,
+        r#""process_date":"2024-6-8""#,
+    );
     let missing = NVDA_JSON.replace(r#","symbol":"NVDA""#, "");
     let extra = NVDA_JSON.replace(r#""symbol":"NVDA""#, r#""symbol":"NVDA","zz":1"#);
     let bad_flag = NVDA_JSON.replace(r#""special":false"#, r#""special":"no""#);
