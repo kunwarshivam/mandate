@@ -1,7 +1,14 @@
-//! Vendor timestamps parse exactly; Parquet's `i64` nanoseconds are range-checked (DEC-89).
+//! Vendor timestamps parse exactly, through `UtcNanos::parse_rfc3339` and nothing of this crate's
+//! own (#98); Parquet's `i64` nanoseconds are range-checked (DEC-89).
 
-use mandate_marketdata::timestamp::{day_start, from_unix_nanos, parse_rfc3339_utc, to_unix_nanos};
-use mandate_time::Date;
+mod common;
+
+use std::fs;
+
+use mandate_marketdata::timestamp::{
+    TimestampError, day_start, from_unix_nanos, parse_rfc3339_utc, to_unix_nanos,
+};
+use mandate_time::{Date, UtcNanos};
 
 #[test]
 fn vendor_timestamps_with_zero_to_nine_fraction_digits_parse_exactly() {
@@ -64,5 +71,71 @@ fn days_start_at_midnight_utc() {
             day_start(Date::parse(day).unwrap()).map(|t| t.to_string()),
             Ok(format!("{day}T00:00:00.000000000Z"))
         );
+    }
+}
+
+#[test]
+fn the_vendor_parser_agrees_with_utc_nanos_parse_rfc3339_on_every_recorded_timestamp() {
+    let mut seen = 0_u64;
+    for scenario in fs::read_dir(common::fixtures_dir()).unwrap() {
+        let dir = scenario.unwrap().path();
+        if !dir.is_dir() {
+            continue;
+        }
+        for page in fs::read_dir(&dir).unwrap() {
+            let path = page.unwrap().path();
+            if path.extension().is_none_or(|e| e != "json") {
+                continue;
+            }
+            let body = fs::read_to_string(&path).unwrap();
+            for raw in rfc3339_strings(&body) {
+                assert_eq!(
+                    parse_rfc3339_utc(&raw).map_err(|_| ()),
+                    UtcNanos::parse_rfc3339(&raw).map_err(|_| ()),
+                    "{}: {raw}",
+                    path.display()
+                );
+                seen = seen.saturating_add(1);
+            }
+        }
+    }
+    assert!(seen > 500, "the recorded pages hold {seen} timestamps");
+}
+
+/// Every JSON string of the recorded bodies that ends in `Z`, which is how Alpaca writes an
+/// instant; dates (`YYYY-MM-DD`) and tokens do not.
+fn rfc3339_strings(body: &str) -> Vec<String> {
+    body.split('"')
+        .skip(1)
+        .step_by(2)
+        .filter(|s| s.ends_with('Z') && s.contains('T'))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_vendor_parser_delegates_to_mandate_time_and_keeps_no_parser_of_its_own() {
+    let source = include_str!("../src/timestamp.rs");
+    assert!(
+        source.contains("UtcNanos::parse_rfc3339"),
+        "the vendor parse must go through mandate-time (#98)"
+    );
+    for retired in ["fraction_ok", "NANO_DIGITS", "split_once('.')", "canonical"] {
+        assert!(
+            !source.contains(retired),
+            "`{retired}` is part of the retired RFC 3339 workaround"
+        );
+    }
+}
+
+#[test]
+fn an_offset_is_refused_here_although_mandate_time_accepts_it() {
+    for raw in [
+        "2026-09-24T13:30:00+00:00",
+        "2026-09-24T13:30:00.5-04:00",
+        "2026-09-24T13:30:00+05:30",
+    ] {
+        assert!(UtcNanos::parse_rfc3339(raw).is_ok(), "{raw}");
+        assert_eq!(parse_rfc3339_utc(raw), Err(TimestampError::Syntax), "{raw}");
     }
 }
