@@ -12,3 +12,6 @@ __pycache__/
 
 # Downloaded market data is research data, never committed (E2-1, DEC-89).
 /data/
+
+# Claude Code local state (subagent worktrees); never part of the repository
+.claude/

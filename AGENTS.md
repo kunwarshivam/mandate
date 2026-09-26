@@ -92,7 +92,8 @@ missed mutants, and green CI (DEC-79):
 
 ## How to work
 
-1. Pick one story from the backlog. One change implements one story.
+1. Pick one story from the backlog that no open claim issue holds, and claim it
+   (`.cursor/skills/mandate-mode/playbooks/coordination.md`). One change implements one story.
 2. In the change description, cite the story ID, the PRD requirement, and the HLD section.
 3. Write tests first for safety-critical paths; include property-based tests for invariants.
 4. Keep changes small enough to review in one sitting.

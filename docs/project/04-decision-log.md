@@ -127,3 +127,15 @@ Status values: **Accepted**, **Proposed** (recommended, awaiting confirmation), 
 | ~~OD-10~~ | ~~Close-window deferral~~ | — | **Resolved by DEC-70** |
 | ~~OD-11~~ | ~~Ban code comments~~ | — | **Resolved by DEC-80** |
 | OD-12 | Robinhood Agentic Trading: whether one platform may act for many customers, rate limits, and the MCP tool contract. **Resolved in part (2026-09-26, from Robinhood's support article):** access is self-serve, with no waitlist or developer registration; a customer with a primary individual investing account in good standing connects any MCP client to `https://agent.robinhood.com/mcp/trading` on a desktop, authenticates with their Robinhood login, and is prompted to open the agentic account (one of at most 10 individual accounts). The agent then reads **every** Robinhood account of the customer, including account numbers, positions, balances, transactions, and watchlists, and trades stocks in the agentic account and crypto through a matching Robinhood Crypto account (not in New York; no transfer, staking, or lending). Robinhood states the customer is responsible for the agent's trades. Open: rate limits, the tool contract, and platform-scale terms | Before the Robinhood connector story (M8) | Robinhood support article "Agentic Trading overview"; compliance question 32 |
+
+## Reserved identifiers
+
+The single registry for identifiers minted in unmerged work
+([coordination playbook](../../.cursor/skills/mandate-mode/playbooks/coordination.md) §3). Take the
+next integer after the highest here or in the rows above, whichever is larger; a released
+reservation keeps its row and its number is never reused.
+
+| Identifier | Coordinator | Claim | Purpose | State |
+|---|---|---|---|---|
+| DEC-99 to DEC-103 | `cursor` | — | Direction follow-ups (#52) | Reserved |
+| DEC-104, DEC-105 | `claude-code` | #48 | E3-3 fold and harness decisions (#46; renumbered from DEC-99 and DEC-100) | Reserved |
