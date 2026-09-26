@@ -87,6 +87,13 @@ s = steps("MC-R11")
 req("MC-R11", s[1]["restrictions"] == [] and s[1]["drawdown"] == s[0]["drawdown"] and s[2]["drawdown"] == s[0]["drawdown"], "no trip, DD preserved")
 s = steps("MC-R12")
 req("MC-R12", s[2].get("error") == "increase_blocked_while_latched" and s[3].get("error") == "equity_below_exposure", "rejections")
+s = steps("MC-R24")
+req("MC-R24", s[1]["instrument_restrictions"] == ["removed_instrument"] and s[3]["instrument_restrictions"] == [],
+    "removal restricts the instrument, re-admission clears it")
+req("MC-R24", all(any(j["type"] == "InstrumentRestrictionChanged" and j["restriction"] == "removed_instrument"
+                      and j["reason"] == x["reason"] for j in x["expect"]["journal"])
+                  for x in C["MC-R24"]["steps"] if x["event"] == "universe_changed"),
+    "the restriction event names removed_instrument with the universe reason, not stale_mark")
 s = steps("MC-R13")
 req("MC-R13", s[2]["agent_equity"] == s[1]["agent_equity"] and s[2]["instrument_restrictions"] == [] and
     s[3]["instrument_restrictions"] == ["stale_mark"] and s[4]["instrument_restrictions"] == [] and s[5]["instrument_restrictions"] == ["stale_mark"],
@@ -121,6 +128,7 @@ for cid, reason in {"MC-G01": "concentration_limit", "MC-G03": "max_order_size",
     req(cid, C[cid]["expect"]["reason"] == reason, reason)
 req("MC-G05", C["MC-G05"]["expect"]["computed"]["cap"] == "1425", "fraction cap binds")
 req("MC-G06", C["MC-G06"]["expect"]["computed"]["gross_limit"] == "9500", "E caps gross")
+req("MC-G16", C["MC-G16"]["expect"]["reason"] == "not_in_working_universe", "an empty universe denies")
 for cid in ("MC-G02", "MC-G08", "MC-G09", "MC-G10", "MC-G13", "MC-G15"):
     req(cid, C[cid]["expect"]["verdict"] == "allow", "allow")
 
@@ -181,7 +189,8 @@ for cid in ("MC-L01", "MC-L02", "MC-L03", "MC-L04"):
     req(cid, C[cid]["expect"]["done"] and C[cid]["expect"]["then"] == "hold_protected", "done, on_complete")
 # research agent: admission (§8.5), lineage (§8.6), expiry (DEC-118), stagger (DEC-100)
 ADM = {cid: C[cid]["expect"] for cid in C if C[cid]["kind"] == "admission"}
-adm_reason = {"MC-N02": "universe_full", "MC-N03": "not_allowed_asset_class", "MC-N04": "eligibility_floor",
+adm_reason = {"MC-N25": "leveraged_etp_not_enabled",
+              "MC-N02": "universe_full", "MC-N03": "not_allowed_asset_class", "MC-N04": "eligibility_floor",
               "MC-N05": "instrument_group_claimed", "MC-N06": "no_corroboration", "MC-N07": "source_not_allowlisted",
               "MC-N08": "research_disabled", "MC-N09": "cost_cap_reached", "MC-N10": "operator_halt",
               "MC-N11": "not_in_data_universe", "MC-N12": "direction_not_allowed", "MC-N13": "horizon_mismatch",
@@ -193,6 +202,8 @@ for cid, reason in adm_reason.items():
 for cid in ("MC-N12", "MC-N13", "MC-N19"):
     e = ADM.get(cid) or C[cid]["expect"]["steps"][0]
     req(cid, e.get("ignored", e.get("reason") == "revision_without_predecessor"), "a malformed thesis is ignored")
+req("MC-N26", ADM["MC-N26"]["admitted"] and ADM["MC-N26"]["reason"] is None,
+    "a leveraged ETP with the opt-in and the accepted disclosure is admitted")
 req("MC-N01", ADM["MC-N01"]["admitted"] and ADM["MC-N01"]["change"] == "admitted"
     and ADM["MC-N01"]["universe_size_after"] == 1
     and any(j["type"] == "UniverseChanged" and j["change"] == "admitted" for j in ADM["MC-N01"]["journal"]), "admitted")
@@ -210,12 +221,20 @@ req("MC-N17", L17[-1]["reason"] == "lineage_retired" and C["MC-N17"]["expect"]["
     "the fourth revision retires the lineage")
 req("MC-N18", all(not s["score_carried_forward"] for s in C["MC-N18"]["expect"]["steps"]), "no score carried forward")
 req("MC-N19", C["MC-N19"]["expect"]["steps"][0]["reason"] == "revision_without_predecessor", "lineage needs a predecessor")
+L24 = C["MC-N24"]["expect"]
+req("MC-N24", L24["steps"][-1]["reason"] == "lineage_retired" and L24["steps"][-1]["lineage_retired"],
+    "the over-cap revision retires the lineage")
+req("MC-N24", L24["working_universe"] == [] and L24["steps"][-1]["universe_size_after"] == 0
+    and any(j["type"] == "UniverseChanged" and j["reason"] == "lineage_retired" for j in L24["steps"][-1]["journal"]),
+    "retirement removes the instrument the lineage held, journalled from the fold")
 
 req("MC-N20", C["MC-N20"]["expect"]["journal"][0]["reason"] == "thesis_expired"
     and C["MC-N20"]["expect"]["working_universe"] == [], "the horizon removes the instrument")
 req("MC-N21", C["MC-N21"]["expect"]["journal"][0]["reason"] == "thesis_invalidated", "invalidation removes at once")
 req("MC-N22", len(C["MC-N22"]["expect"]["removed"]) == 1 and len(C["MC-N22"]["expect"]["working_universe"]) == 1,
     "only the retired lineage is removed")
+req("MC-N22", "lineages" in C["MC-N22"]["input"] and not any("lineage_retired" in e for e in C["MC-N22"]["input"]["entries"]),
+    "retirement is read from the lineage state, never a per-entry flag")
 for cid in ("MC-N20", "MC-N21", "MC-N22"):
     e = C[cid]["expect"]
     req(cid, all(v == "removed_instrument" for v in e["instrument_restrictions"].values()),

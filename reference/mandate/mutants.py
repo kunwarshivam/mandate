@@ -32,9 +32,25 @@ MUTANTS = {
     "expiry keeps an invalidated thesis": ('        if e.get("invalidated"):\n            why = "thesis_invalidated"\n',
                                            '        if False:\n            why = "thesis_invalidated"\n'),
     "expiry ignores the horizon": ('        elif now >= T(e["expires_at"]):', '        elif False:'),
+    "expiry ignores a retired lineage": ('        elif lineages.get(e["lineage_id"], {}).get("retired", False):',
+                                         '        elif False:'),
+    "the gate fails open without a working universe": ('    if inst not in st["working_universe"]:',
+                                                       '    if inst not in st.get("working_universe", [inst]):'),
+    "pinning is reducing without a research agent": (
+        '            had_agent = any(s["admits_instruments"] for s in old["behavior"]["signal_models"])\n'
+        '            res.add("reducing" if b and had_agent else "increasing")',
+        '            res.add("reducing" if b else "increasing")'),
+    "a retired lineage keeps its instrument": ('            if held in universe:\n'
+                                              '                universe = [i for i in universe if i != held]\n',
+                                              '            if False:\n'
+                                              '                universe = [i for i in universe if i != held]\n'),
+    "admission ignores the leveraged-ETP disclosure": (
+        '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
+        '        u["leveraged_etps_enabled"])'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_risk(400); fuzz_gate(200); fuzz_admission(300); fuzz_expiry(400); fuzz_autonomy(1500); "
+         "fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
+         "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "print(len(FAIL))")
 
 def main():

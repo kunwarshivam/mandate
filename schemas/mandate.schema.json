@@ -85,12 +85,12 @@
         "pinned_instruments": {
           "type": "array",
           "minItems": 0,
-          "maxItems": 50,
+          "maxItems": 20,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/instrument_ref"
           },
-          "description": "The pinned universe; empty unless `pinned` is true (V-034)."
+          "description": "The pinned universe; empty unless `pinned` is true (V-034), and never more than `max_instruments`, whose own ceiling is 20 (V-035)."
         },
         "max_instruments": {
           "type": "integer",

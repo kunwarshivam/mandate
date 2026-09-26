@@ -185,7 +185,7 @@ decimal strings; the schema gives each field's bounds.
 | `capital.max_loss_from_allocation` | Lifetime loss floor as a fraction of the capital base (§5.7) |
 | `goal` | `continuous`, `accumulate`, or `profit_stop` (§3.1) |
 | `universe.pinned` | Bring-your-own-strategy: the owner pins the universe and the research agent admits nothing (§2.3) |
-| `universe.pinned_instruments[]` | The pinned universe (1–50 when pinned, empty otherwise), sorted by `asset_id` (V-034) |
+| `universe.pinned_instruments[]` | The pinned universe (1–20 when pinned, empty otherwise), sorted by `asset_id` (V-034). The schema's ceiling matches `max_instruments`, which V-035 keeps at or above the count |
 | `universe.max_instruments` | Ceiling on the working universe, 1 to 20 (DEC-117: the platform proposes 5). Never below the pinned count (V-035) |
 | `universe.asset_classes[]` | Asset classes an admission may use, sorted and non-empty. Every pinned instrument is in one of them (V-039) |
 | `universe.leveraged_etps_enabled`, `leveraged_etp_disclosure_version` | Opt-in for complex ETPs (trading spec §3.2) and the accepted disclosure version |
@@ -347,7 +347,8 @@ limits, never pre-filled as values.
   true`, `environments: [paper]`, `admission_auto_allowed: false` (every admission is `ask`), and
   `max_revisions_per_lineage ≤ 3`. It is assigned only to the team's own workspaces, and the
   research agent's data universe is fixed there to the research basket (DEC-90), enforced at
-  admission (§8.5, check 5). The basket is never offered to a user as an instrument choice; users'
+  admission (§8.5, check 8, `not_in_data_universe`). The basket is never offered to a user as an
+  instrument choice; users'
   agents get `research_agent_allowed: true` only after the DEC-99 evaluation passes, and then each
   owner's envelope alone decides what may be admitted.
 - `independent_approval_required` (maker-checker): deployment, risk-increasing changes,
@@ -549,7 +550,7 @@ is admitted again.
 | `AgentModeApplied` | account | The effective mode changes | agent, from, to, restrictions; copied by the agent runtime into the agent stream as `AgentModeChanged` |
 | `KillSwitchActivated` | account | A flatten | scope, initiator, orders canceled, sells submitted or deferred |
 | `UniverseChanged` | account | An instrument is admitted to or removed from the working universe (§2.3); a risk input with `risk_clock` | agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
-| `InstrumentRestrictionChanged` | account | `stale_mark` or `removed_instrument` set or cleared | agent, instrument, restriction, reason, active |
+| `InstrumentRestrictionChanged` | account | `stale_mark` or `removed_instrument` is set or cleared. **One event per restriction that changed**, never one event standing for another | agent, instrument, restriction, reason (`no_sane_mark`, `sane_mark`, or the `UniverseChanged` reason that removed or re-admitted the instrument), active |
 | `GoalCompleted` | account | A goal completes (§3.1) | agent, reason (`profit_stop_reached`, `target_qty`, `max_spend`, `end_date`), `on_complete` applied |
 | `AgentStopped` | workspace control | The agent retires | agent, reason, net dollar loss added to the connection's loss carry |
 | `OwnerExitRequested` | agent | The owner closes a position or triggers a kill switch | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
@@ -816,7 +817,7 @@ also records its predecessor (journal spec §9).
 
 **Cost cap** (DEC-120). `behavior.research.cost_cap_usd_per_day` bounds the agent's model spend per
 risk day. The cap is enforced by deterministic code, not by the model: a thesis proposed once the
-day's spend has reached the cap is journaled and refused (§8.5, check 4). Existing positions are
+day's spend has reached the cap is journaled and refused (§8.5, check 7). Existing positions are
 managed normally — their theses stay valid until they expire or are invalidated — and exits,
 protection, and kill switches are unaffected. The cap resets with the risk day (§5.4).
 
@@ -832,14 +833,15 @@ protection, and kill switches are unaffected. The cap resets with the risk day (
   global control plane.
 - An **operator per-thesis halt** names an instrument and optionally the research agent's pinned
   content hash. Every workspace that operator's deployment hosts then refuses matching admissions
-  (§8.5, check 6) and matching openings, while exits and protection continue (DEC-05). It is
+  (§8.5, check 9) and matching openings, while exits and protection continue (DEC-05). It is
   journaled in each workspace as a `PlatformOperatorAction` and is the only way one workspace's
   situation changes another's decisions.
 - **Staggered execution.** The first opening order on a newly admitted thesis waits a deterministic
   offset of `SHA-256(workspace_id ‖ 0x00 ‖ thesis_id)`, read as a big-endian integer, modulo
-  `stagger_window_s` (policy, minimum 900 s; DEC-123), in whole seconds, counted from the later of
-  the admission and the regular-session open. Accounts therefore do not act at once without sharing
-  any state, and the wait is inside the conduct controls. A window of 0 means no wait.
+  `stagger_window_s` (policy, minimum 900 s; DEC-123), in whole seconds. For equities it is counted
+  from the later of the admission and the next regular-session open; crypto trades continuously, so
+  it is counted from the admission. Accounts therefore do not act at once without sharing any state,
+  and the wait is inside the conduct controls. A window of 0 means no wait.
   Bring-your-own-strategy agents keep per-account controls only.
 
 **Evidence** (DEC-99). Historical backtests of LLM-originated theses are not evidence of thesis
@@ -877,16 +879,18 @@ success it replaces that instrument's current thesis without a second entry.
 | 8 | `not_in_data_universe` | Where a profile pins a data universe, the instrument is in it (DEC-103) |
 | 9 | `operator_halt` | The instrument is not under an operator per-thesis halt (DEC-100) |
 | 10 | `not_allowed_asset_class` | The instrument's asset class is in `universe.asset_classes` |
-| 11 | `leveraged_etp_not_enabled` | A leveraged or inverse ETP requires `universe.leveraged_etps_enabled` and its accepted disclosure (V-005, trading spec §3.2) |
+| 11 | `leveraged_etp_not_enabled` | A leveraged or inverse ETP requires `universe.leveraged_etps_enabled` **and** a `DisclosureAccepted` for exactly `leveraged_etp_disclosure_version`, the same condition V-005 applies at validation (trading spec §3.2) |
 | 12 | `eligibility_floor` | The instrument passes the eligibility floor (trading spec §3.2) |
 | 13 | `instrument_group_claimed` | Its instrument group is unclaimed by another agent on the account (trading spec §7.1) |
 | 14 | `source_not_allowlisted` | Every cited evidence source is on the allowlist (DEC-101) |
 | 15 | `no_corroboration` | The thesis is corroborated by an independent source or by market data (DEC-101) |
 | 16 | `lineage_retired` | The lineage is not retired and `revision ≤ max_revisions_per_lineage` (DEC-111) |
-| 17 | `universe_full` | The working universe holds fewer than `universe.max_instruments` instruments (MI-15). Skipped on a renewal |
+| 17 | `universe_full` | The working universe holds fewer than `universe.max_instruments` instruments (MI-15). **The only check a renewal skips** |
 
-- **A refusal changes nothing.** It is journaled (`ThesisProposed` or `ThesisRevised` with
-  `admitted: false` and the reason) and no order is proposed. A **full universe never displaces an
+- **A refusal admits nothing.** It is journaled (`ThesisProposed` or `ThesisRevised` with
+  `admitted: false` and the reason) and no order is proposed. It leaves the working universe as it
+  was, with one exception: a refusal that retires a lineage removes the instrument that lineage held
+  (§8.6 item 4), which is a removal, never an admission. A **full universe never displaces an
   active instrument**: the thesis is refused, so an agent cannot churn its book by admitting and
   removing to reset the re-entry cooldown (§5.3).
 - **On success** the executor writes `UniverseChanged` (admitted) into the account stream, with a
@@ -928,8 +932,15 @@ predecessor.
 3. A revision is a proposal like any other: the eligibility floor, corroboration, and the autonomy
    rules all apply, and it can never loosen an envelope field (MI-16).
 4. A lineage is capped by `behavior.research.max_revisions_per_lineage` (the platform proposes 3). A
-   proposal with `revision >` the cap is refused (`lineage_retired`), the lineage is retired, no
-   further revision in it is admitted, and the owner is told (`OwnerAlertSent`).
+   proposal with `revision >` the cap is refused (`lineage_retired`) and **retires the lineage**: no
+   further thesis in it is ever admitted, and the owner is told (`OwnerAlertSent`).
+   **Retirement removes the instrument the lineage holds**, at once and in the same fold step, as
+   `UniverseChanged` (removed, reason `lineage_retired`). The platform has failed on the idea
+   `max_revisions_per_lineage` times and no renewal can be admitted, so leaving the position in the
+   working universe would leave it with no path back; removal is exits-only, so it adds no risk
+   (MI-19, and the safe-default rule of `AGENTS.md` rule 3). This is the one case where a refusal
+   changes the working universe: the refusal admits nothing, and the retirement it triggers removes.
+   Retirement is read from the lineage state the events fold to, never asserted per instrument.
 5. **Not before the evaluator.** No revision loop ships before the forward-paper evaluator exists
    (E17-8) and the DEC-99 evaluation has run once on the DEC-103 thin slice.
 
@@ -954,7 +965,8 @@ invalid (V-031).
 | Ladder | Increasing if the actions change, or any `at` or `factor` is larger; otherwise reducing |
 | `scale_action` | `limit_buys` → `trim_to_target` reducing; the reverse increasing |
 | `universe.pinned_instruments` | Increasing if any instrument is added; reducing if only removed. Skipped when `universe.pinned` itself changed (the next two rows decide) |
-| **Pinning** (`universe.pinned` false → true) together with clearing `behavior.research` and every `admits_instruments`, and not raising `max_instruments`, and changing nothing else | **Reducing as one change** (DEC-121): bring-your-own-strategy turns the research agent off. Instruments the agent had admitted and that are not in the pinned list become removed instruments (§2.2) |
+| **Pinning** (`universe.pinned` false → true) **from a version that had an admitting model**, together with clearing `behavior.research` and every `admits_instruments`, and not raising `max_instruments`, and changing nothing else | **Reducing as one change** (DEC-121): bring-your-own-strategy turns the research agent off. Instruments the agent had admitted and that are not in the pinned list become removed instruments (§2.2) |
+| **Pinning from a version that had no admitting model** | Increasing. Such a version has an empty working universe and can open nothing (§5.3), so pinning hands the agent instruments it could not trade before. DEC-121's reason for calling pinning reducing — that it removes the platform's discretion — does not apply when there was no discretion to remove |
 | **Unpinning** (`universe.pinned` true → false) | Increasing: it lets the platform admit instruments the owner did not choose. Needs step-up (DEC-121) |
 | `universe.asset_classes` | Increasing if any class is added; otherwise reducing |
 | `behavior.research` set from null | Increasing (the research agent may now admit); cleared to null is reducing |
@@ -990,7 +1002,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 291 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 295 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1004,13 +1016,13 @@ the fuzz catches seeded bugs.
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R24 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |
-| Gate | MC-G01 to MC-G15 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe |
+| Gate | MC-G01 to MC-G16 | Position cap, order size, group cooldown, orders per day, gross exposure, exits exempt, the working universe (including an empty one, which denies every opening) |
 | Order builder | MC-B01 to MC-B32 | Exit and buy conviction, freshness, clipping, band, trim and its guards, deferral, averaging down, accumulate clips with fees |
 | Autonomy | MC-A01 to MC-A16 | Built-in AUTO including `owner_exit`, rule order, thresholds, default, two approvers, the admission ceiling, `new_instrument`, `thesis_confidence` |
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |
-| Admission | MC-N01 to MC-N16 | Every §8.5 check in order: asset class, eligibility, group claim, corroboration, the allowlist, `max_instruments`, the pinned mode, the cost cap, the operator halt, the thin slice, ignored outputs, renewal, the admission ceiling, leveraged ETPs |
-| Lineage | MC-N17 to MC-N19 | The revision cap and retirement, no score carried forward, a revision without a predecessor |
+| Admission | MC-N01 to MC-N16, MC-N25, MC-N26 | Every §8.5 check in order: asset class, eligibility, group claim, corroboration, the allowlist, `max_instruments`, the pinned mode, the cost cap, the operator halt, the thin slice, ignored outputs, renewal, the admission ceiling, and leveraged ETPs with and without the accepted disclosure |
+| Lineage | MC-N17 to MC-N19, MC-N24 | The revision cap and retirement, the instrument retirement removes, no score carried forward, a revision without a predecessor |
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
 | Change | MC-C01 to MC-C47 | Every classification row, including rule addition, removal, and reordering, the pinning switch, the research fields, and the admission ceiling |

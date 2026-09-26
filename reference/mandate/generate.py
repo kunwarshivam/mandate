@@ -435,7 +435,8 @@ for cid, title, instant in [
 
 # =========================================================== F. gate
 GS = {"now": at(15, 0), "agent_equity": "10000", "positions_mv": {XYZ: "1000"},
-      "working_opening_orders": [{"instrument": XYZ, "max_cost": "300"}], "orders_today": 3, "last_exit_fill_at": {}}
+      "working_opening_orders": [{"instrument": XYZ, "max_cost": "300"}], "orders_today": 3,
+      "last_exit_fill_at": {}, "working_universe": [QRS, XYZ]}
 G = [
     ("MC-G01", "Per-instrument cap exceeded (current + working + proposed)", {}, GS, (XYZ, "increase", "3")),
     ("MC-G02", "Per-instrument cap met exactly", {}, GS, (XYZ, "increase", "2")),
@@ -459,6 +460,7 @@ G = [
     ("MC-G14", "Opening an instrument outside the working universe", {}, dict(GS, working_universe=[XYZ]), (QRS, "open", "1")),
     ("MC-G15", "Exiting an instrument outside the working universe is allowed", {}, dict(GS, working_universe=[XYZ]),
      (QRS, "discretionary_exit", "1")),
+    ("MC-G16", "An empty working universe denies every opening", {}, dict(GS, working_universe=[]), (XYZ, "increase", "1")),
 ]
 for cid, title, over, st, (inst, purpose, qty) in G:
     patch = [rep(p, v) for p, v in over.items()]
@@ -475,7 +477,8 @@ def out(model, conv, conf, as_of="2026-09-22T13:59:00.000000000Z", exp="2026-09-
     return {"model_id": model, "model_version": reg["version"], "content_hash": reg["content_hash"], "instrument_id": inst,
             "as_of": as_of, "expires_at": exp, "conviction": conv, "confidence": conf}
 MOM, NEWS, MR = "quant.momentum", "llm.news_research", "quant.mean_reversion"
-GST = {"agent_equity": "10000", "positions_mv": {}, "working_opening_orders": [], "orders_today": 0, "last_exit_fill_at": {}}
+GST = {"agent_equity": "10000", "positions_mv": {}, "working_opening_orders": [], "orders_today": 0,
+       "last_exit_fill_at": {}, "working_universe": [BTC, QRS, XYZ]}
 def gst(**kw):
     return dict(GST, **kw)
 BI = {"now": NOW, "instrument": XYZ, "asset_class": "us_equity", "agent_equity": "10000", "position_qty": "0",
@@ -743,7 +746,7 @@ def thesis(tid, inst=ABC, cls="us_equity", conv="0.7", conf="0.8", horizon=86400
 ADM_BASE = {"working_universe": [], "eligibility_failures": [], "allowlisted_sources": SOURCES,
             "instrument_groups": {}, "claimed_by_other_agents": [], "halted_instruments": [],
             "data_universe": None, "research_spend_usd_today": "0", "lineages": {},
-            "admission_action": ADM_ACTION}
+            "disclosures_accepted": [], "admission_action": ADM_ACTION}
 N = [
     ("MC-N01", "A corroborated thesis in an allowed asset class is admitted", "research_equity", {"thesis": thesis("th-1")}),
     ("MC-N02", "max_instruments is full", "research_equity",
@@ -771,7 +774,14 @@ N = [
      {"thesis": thesis("th-14", inst=XYZ), "working_universe": [XYZ]}),
     ("MC-N15", "Admission deny refuses the admission outright", "research_equity_admission_deny", {"thesis": thesis("th-15")}),
     ("MC-N16", "A leveraged ETP without the owner opt-in is refused", "research_equity", {"thesis": thesis("th-16", etp=True)}),
+    ("MC-N25", "A leveraged ETP is refused while the accepted disclosure is a different version (V-005)",
+     "research_equity_etp", {"thesis": thesis("th-17", etp=True), "disclosures_accepted": ["sha256:" + "c" * 64]}),
+    ("MC-N26", "A leveraged ETP with the opt-in and the accepted disclosure is admitted", "research_equity_etp",
+     {"thesis": thesis("th-18", etp=True), "disclosures_accepted": ["sha256:" + "b" * 64]}),
 ]
+derived("research_equity_etp", "research_equity",
+        [rep("/universe/leveraged_etps_enabled", True), rep("/universe/leveraged_etp_disclosure_version", "sha256:" + "b" * 64)],
+        "leveraged ETPs enabled with an accepted disclosure version")
 derived("research_equity_admission_deny", "research_equity", [rep("/autonomy/admission", "deny")], "autonomy.admission deny")
 for cid, title, base, over in N:
     inp = dict(ADM_BASE, **over)
@@ -787,7 +797,12 @@ LIN = [
      [thesis("th-30"), thesis("th-31", rev=1, lineage="th-30", pred="th-30")]),
     ("MC-N19", "A revision without a predecessor id is ignored", "research_equity",
      [thesis("th-40", rev=1, lineage="th-40", pred=None)]),
+    ("MC-N24", "Retiring a lineage removes the instrument it holds (DEC-111)", "research_equity_cap_one",
+     [thesis("th-50"), thesis("th-51", rev=1, lineage="th-50", pred="th-50"),
+      thesis("th-52", rev=2, lineage="th-50", pred="th-51")]),
 ]
+derived("research_equity_cap_one", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 1)],
+        "max_revisions_per_lineage 1")
 for cid, title, base, theses in LIN:
     inp = dict(ADM_BASE, theses=theses)
     cases.append({"id": cid, "kind": "lineage", "title": title, "base": base, "patch": [], "input": inp,
@@ -795,15 +810,17 @@ for cid, title, base, theses in LIN:
 
 EX_ENTRY = {"instrument": ABC, "thesis_id": "th-1", "lineage_id": "th-1", "revision": 0,
             "expires_at": "2026-09-23T14:00:00.000000000Z"}
+RETIRED = {"th-1": {"revisions": 3, "admitted": 4, "retired": True}}
 EXP = [
-    ("MC-N20", "A thesis at its horizon removes its instrument (DEC-118)", "2026-09-23T14:00:00.000000000Z", [dict(EX_ENTRY)]),
+    ("MC-N20", "A thesis at its horizon removes its instrument (DEC-118)", "2026-09-23T14:00:00.000000000Z",
+     [dict(EX_ENTRY)], {}),
     ("MC-N21", "An invalidated thesis removes at once, before its horizon", "2026-09-22T18:00:00.000000000Z",
-     [dict(EX_ENTRY, invalidated=True)]),
+     [dict(EX_ENTRY, invalidated=True)], {}),
     ("MC-N22", "A retired lineage removes its instrument, an unexpired thesis stays", "2026-09-22T18:00:00.000000000Z",
-     [dict(EX_ENTRY, lineage_retired=True), dict(EX_ENTRY, instrument=XYZ, thesis_id="th-2", lineage_id="th-2")]),
+     [dict(EX_ENTRY), dict(EX_ENTRY, instrument=XYZ, thesis_id="th-2", lineage_id="th-2")], RETIRED),
 ]
-for cid, title, now, entries in EXP:
-    inp = {"now": now, "entries": entries}
+for cid, title, now, entries, lineages in EXP:
+    inp = {"now": now, "entries": entries, "lineages": lineages}
     cases.append({"id": cid, "kind": "thesis_expiry", "title": title, "base": "research_equity", "input": inp,
                   "expect": thesis_expiry(research, inp)})
 
@@ -815,9 +832,9 @@ cases.append({"id": "MC-N23", "kind": "stagger",
                          "window_s": 900}})
 
 # =========================================================== output
-HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.5, approved)
+HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.6)
 #
-# Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-11
+# Generated by a reference implementation that is fuzzed against invariants MI-1 to MI-20
 # (spec 1.1); every expected value is computed, not typed.
 #
 # HARNESS RULES
@@ -843,10 +860,18 @@ HEADER = """# Reference cases for docs/specs/mandate.md (spec v0.5, approved)
 #   breach time accumulating; `harness_defaults.mark_max_age_s` is the staleness limit.
 # - risk_day: the risk day containing `at` and its bounds (spec 5.4).
 # - gate: only the mandate limits of spec 5.3, in trading spec 9.1 order; every other check passes.
+#   `state.working_universe` is required: an instrument outside it is denied `not_in_working_universe`.
 # - builder: the risk engine's trim (spec 5.5), the order builder (spec 8.3), the gate dry run, and
 #   autonomy. `session` defaults to regular; `in_close_window` to false; fee rates to 0;
 #   `has_prior_fill` to (position_qty > 0).
-# - autonomy: evaluate spec 6.2 for the given action.
+# - autonomy: evaluate spec 6.2 for the given action, including the admission ceiling of 6.2 step 5.
+# - admission: the ordered spec 8.5 checks for one thesis; the first failure is the reason, and the
+#   three shape reasons also set `ignored` (spec 8.2). `first_order_autonomy` is the decision for the
+#   first order in an admitted instrument, null when the thesis is refused.
+# - lineage: fold spec 8.6 over `input.theses` in order, carrying the working universe and the
+#   lineage state; retiring a lineage removes its instrument (reason `lineage_retired`).
+# - thesis_expiry: spec 8.6 at `input.now`; retirement is read from `input.lineages`, never per entry.
+# - stagger: the deterministic offset of spec 8.4 for each [workspace_id, thesis_id] pair.
 # - agent_flatten: the agent-scoped kill-switch plan (trading spec 5.5).
 # - goal: goal completion (spec 3.1) for the given state.
 # - change: classify `base` against the patched mandate (spec 9.2).

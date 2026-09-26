@@ -574,6 +574,7 @@ class RiskState:
         self.session = s.get("session", self.session)
         kind = s["event"]
         self._reset_now = False
+        self._inst_reason = {}
         inst_before = set(self.inst_restrictions)
         # ---- stale-mark timer (advances before this input is applied)
         if self.qty > 0:
@@ -622,6 +623,7 @@ class RiskState:
                 self.inst_restrictions.add("removed_instrument")
             else:
                 self.inst_restrictions.discard("removed_instrument")
+            self._inst_reason["removed_instrument"] = s["reason"]
             ev.append({"type": "UniverseChanged", "instrument": s["instrument"], "change": s["change"],
                        "reason": s["reason"]})
         elif kind == "floor_loosened":
@@ -745,9 +747,11 @@ class RiskState:
                 ev.append({"type": "GoalCompleted", "reason": "profit_stop_reached", "then": "discretionary_exit_all_then_retire"})
         if self.qty == 0:
             self.inst_restrictions.discard("stale_mark")
-        if inst_before != self.inst_restrictions:
-            ev.append({"type": "InstrumentRestrictionChanged", "restriction": "stale_mark",
-                       "active": "stale_mark" in self.inst_restrictions})
+        for r in sorted(inst_before ^ self.inst_restrictions):
+            active = r in self.inst_restrictions
+            ev.append({"type": "InstrumentRestrictionChanged", "restriction": r,
+                       "reason": self._inst_reason.get(r, "no_sane_mark" if active else "sane_mark"),
+                       "active": active})
         new = self.eff_mode()
         if new != self.mode:
             ev.append({"type": "AgentModeApplied", "from": self.mode, "to": new})
@@ -879,8 +883,7 @@ def gate(m, st, prop):
     working = st.get("working_opening_orders", [])
     order = D(prop["qty"]) * D(prop["limit_price"])
     inst = prop["instrument"]
-    universe = st.get("working_universe")
-    if universe is not None and inst not in universe:
+    if inst not in st["working_universe"]:
         return {"verdict": "deny", "reason": "not_in_working_universe", "computed": {"instrument": inst}}
     cap = min(D(r["max_position_usd"]), D(r["max_position_fraction"]) * E)
     inst_total = mv.get(inst, D(0)) + sum(D(w["max_cost"]) for w in working if w["instrument"] == inst) + order
@@ -1135,9 +1138,10 @@ def admission_checks(m, inp):
     yield "not_in_data_universe", inp.get("data_universe") is not None and inst not in inp["data_universe"]
     yield "operator_halt", inst in inp.get("halted_instruments", [])
     yield "not_allowed_asset_class", th["asset_class"] not in u["asset_classes"]
-    yield "leveraged_etp_not_enabled", bool(th.get("leveraged_etp")) and not u["leveraged_etps_enabled"]
+    yield "leveraged_etp_not_enabled", bool(th.get("leveraged_etp")) and not (
+        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))
     yield "eligibility_floor", inst in inp.get("eligibility_failures", [])
-    yield "instrument_group_claimed", _group_claimed(inst, inp) and not renewal
+    yield "instrument_group_claimed", _group_claimed(inst, inp)
     yield "source_not_allowlisted", any(s not in inp.get("allowlisted_sources", []) for s in th["evidence_sources"])
     yield "no_corroboration", not (th["corroboration"] or {}).get("kind")
     yield "lineage_retired", lineage.get("retired", False) or th["revision"] > cap
@@ -1179,33 +1183,54 @@ def admit(m, inp):
     return out
 
 def lineage_fold(m, inp):
-    """§8.6 (DEC-111): folds a sequence of proposals, capping revisions per lineage."""
+    """§8.6 (DEC-111): folds a sequence of proposals, capping revisions per lineage.
+
+    Retiring a lineage removes its instrument at once (reason `lineage_retired`): the platform has
+    failed on the idea `max_revisions_per_lineage` times and no renewal can be admitted, so leaving
+    the position open would leave it with no path back. Removal is exits-only, so it adds no risk.
+    """
     res = m["behavior"]["research"]
     cap = res["max_revisions_per_lineage"] if res is not None else 0
     lineages, universe, steps = {}, list(inp.get("working_universe", [])), []
+    holders = dict(inp.get("lineage_instruments", {}))
     for th in inp["theses"]:
         one = dict(inp, thesis=th, working_universe=universe, lineages=lineages)
         r = admit(m, one)
         universe = r["working_universe"]
+        journal = list(r["journal"])
         st = lineages.setdefault(th["lineage_id"], {"revisions": 0, "admitted": 0, "retired": False})
-        if th["revision"] > cap:
+        if th["revision"] > cap and not st["retired"]:
             st["retired"] = True
+            held = holders.get(th["lineage_id"])
+            if held in universe:
+                universe = [i for i in universe if i != held]
+                journal.append({"type": "UniverseChanged", "instrument": held, "change": "removed",
+                                "reason": "lineage_retired", "thesis_id": th["thesis_id"],
+                                "universe_size_after": len(universe)})
         elif r["admitted"]:
             st["revisions"] = max(st["revisions"], th["revision"])
             st["admitted"] += 1
+            holders[th["lineage_id"]] = th["instrument_id"]
         steps.append({"thesis_id": th["thesis_id"], "admitted": r["admitted"], "reason": r["reason"],
                       "score_carried_forward": False, "lineage_revisions": st["revisions"],
-                      "universe_size_after": r["universe_size_after"]})
-    return {"steps": steps, "lineages": lineages, "working_universe": universe}
+                      "lineage_retired": st["retired"], "universe_size_after": len(universe),
+                      "journal": journal})
+    return {"steps": steps, "lineages": lineages, "lineage_instruments": holders,
+            "working_universe": universe}
 
 def thesis_expiry(m, inp):
-    """§8.6, DEC-118: at its horizon a thesis is not renewed; its instrument becomes removed."""
+    """§8.6, DEC-118: at its horizon a thesis is not renewed; its instrument becomes removed.
+
+    Retirement is read from the lineage state the fold produced (`lineages`), never taken as a
+    per-entry flag, so nothing can be removed for a reason the journal does not carry.
+    """
     now = T(inp["now"])
+    lineages = inp.get("lineages", {})
     removals, keep = [], []
     for e in sorted(inp["entries"], key=lambda x: x["instrument"]):
         if e.get("invalidated"):
             why = "thesis_invalidated"
-        elif e.get("lineage_retired"):
+        elif lineages.get(e["lineage_id"], {}).get("retired", False):
             why = "lineage_retired"
         elif now >= T(e["expires_at"]):
             why = "thesis_expired"
@@ -1354,6 +1379,8 @@ def pinning_switch(old, new, paths):
     ou, nu, ob, nb = old["universe"], new["universe"], old["behavior"], new["behavior"]
     if ou["pinned"] or not nu["pinned"] or nb["research"] is not None:
         return False
+    if not any(s["admits_instruments"] for s in ob["signal_models"]):
+        return False
     if nu["max_instruments"] > ou["max_instruments"]:
         return False
     if nb["signal_models"] != [dict(s, admits_instruments=False) for s in ob["signal_models"]]:
@@ -1394,7 +1421,8 @@ def classify(old, new):
             oi, ni = {i["asset_id"] for i in a}, {i["asset_id"] for i in b}
             res.add("increasing" if ni - oi else ("reducing" if oi - ni else "neutral"))
         elif p == "/universe/pinned":
-            res.add("increasing" if not b else "reducing")
+            had_agent = any(s["admits_instruments"] for s in old["behavior"]["signal_models"])
+            res.add("reducing" if b and had_agent else "increasing")
         elif p == "/universe/asset_classes":
             res.add("increasing" if set(b) - set(a) else "reducing")
         elif p == "/behavior/research":
