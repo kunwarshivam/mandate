@@ -50,6 +50,8 @@ pub enum NumError {
     NotPositive,
     #[error("division by zero")]
     DivisionByZero,
+    #[error("the value must not exceed one")]
+    AboveOne,
 }
 
 impl NumError {
@@ -62,6 +64,7 @@ impl NumError {
             Self::Negative => "negative",
             Self::NotPositive => "not_positive",
             Self::DivisionByZero => "division_by_zero",
+            Self::AboveOne => "above_one",
         }
     }
 }
@@ -162,6 +165,19 @@ decimal_type!(
     /// A non-negative number of basis points.
     Bps
 );
+/// A non-negative fraction of one, at most one, with at most 9 fractional digits: the backtest
+/// volume-cap fraction ([trading-domain spec §6.4] rule 3). The upper bound is part of the type
+/// because a fraction above one would let a bar fill more than it traded.
+///
+/// [trading-domain spec §6.4]: ../../../docs/specs/trading-domain.md#64-backtest-fill-model
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Fraction(Decimal);
+
+impl fmt::Display for Fraction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0.normalize(), f)
+    }
+}
 
 impl Qty {
     pub const ZERO: Self = Self(Decimal::ZERO);
@@ -199,6 +215,20 @@ impl Qty {
             .div(Exact::integer(BPS_PER_UNIT), QTY_SCALE, mode)?
             .to_decimal(QTY_SCALE)
             .map(Self)
+    }
+
+    /// `self + other`, exact.
+    pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
+        let _ = other;
+        Err(NumError::Overflow)
+    }
+
+    /// `truncate(fraction × self, increment)`: a bar's volume cap (spec §6.4 rule 3), truncated
+    /// toward zero to the instrument's quantity increment, so a cap never reaches past the volume
+    /// its reference bar traded. Truncation, not rounding: the cap is an upper bound.
+    pub fn portion(self, fraction: Fraction, increment: ShareIncrement) -> Result<Self, NumError> {
+        let _ = (fraction, increment);
+        Err(NumError::Overflow)
     }
 }
 
@@ -255,6 +285,25 @@ impl Price {
     pub fn parse(text: &str) -> Result<Self, NumError> {
         parse(text, QTY_SCALE).and_then(positive).map(Self)
     }
+
+    /// A backtest fill price after slippage (spec §6.4 rules 4 to 7): `self + ceil(self × bps ÷
+    /// 10000, 9)` for [`Adverse::Up`], a buy, and `self − ceil(self × bps ÷ 10000, 9)` for
+    /// [`Adverse::Down`], a sell. Rounding the slippage amount up, once, at the 9 places a price
+    /// holds (spec §2.1) moves the price against the order whichever way it goes, so a fill price
+    /// never flatters a backtest (DEC-106 item 2). The result is not tick-rounded (spec §6.4 rule
+    /// 9). `not_positive` when the slippage takes a sell price to zero or below.
+    pub fn slipped(self, slippage: Bps, adverse: Adverse) -> Result<Self, NumError> {
+        let _ = (slippage, adverse);
+        Err(NumError::Overflow)
+    }
+}
+
+/// Which way slippage moves a price: against the order, so a buy pays more and a sell receives
+/// less (spec §6.4 rules 4 to 7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Adverse {
+    Up,
+    Down,
 }
 
 impl MarkPrice {
@@ -506,8 +555,43 @@ impl FeePerShare {
 }
 
 impl Bps {
+    pub const ZERO: Self = Self(Decimal::ZERO);
+
     pub fn parse(text: &str) -> Result<Self, NumError> {
         parse(text, FULL_SCALE).and_then(non_negative).map(Self)
+    }
+
+    /// `self + other`, exact: the half-spread plus the impact of spec §6.4's slippage.
+    pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
+        let _ = other;
+        Err(NumError::Overflow)
+    }
+
+    /// `coefficient × sqrt(fill ÷ reference)` in basis points: the `sqrt` impact model of spec
+    /// §6.4. The root is `ceil(sqrt(fill ÷ reference), 18)`, the smallest value with 18 fractional
+    /// digits whose square is at or above the ratio, so the impact is never understated
+    /// (DEC-106 item 3); the product is then exact. `division_by_zero` when `reference` is zero,
+    /// which the caller avoids by capping the bar at zero instead (spec §6.4 rule 3).
+    pub fn sqrt_impact(coefficient: Bps, fill: Qty, reference: Qty) -> Result<Self, NumError> {
+        let _ = (coefficient, fill, reference);
+        Err(NumError::Overflow)
+    }
+}
+
+impl Fraction {
+    pub const ZERO: Self = Self(Decimal::ZERO);
+    /// The whole of a quantity: `Qty::portion(Fraction::ONE, increment)` truncates to the increment.
+    pub const ONE: Self = Self(Decimal::ONE);
+
+    /// Canonical text of a value from zero to one inclusive: `negative` below zero, `above_one`
+    /// above one, `too_precise` beyond 9 places.
+    pub fn parse(text: &str) -> Result<Self, NumError> {
+        let _ = text;
+        Err(NumError::Overflow)
+    }
+
+    pub fn is_zero(self) -> bool {
+        self.0.is_zero()
     }
 }
 
