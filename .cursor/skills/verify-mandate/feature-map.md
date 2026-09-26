@@ -119,7 +119,8 @@ every workspace crate and reference-case suite has an entry and that every path 
   `docs/project/tasks/E2-1-download.md`.
 - **Code:** `mandate-marketdata`: `crates/mandate-marketdata/src/number.rs` (raw JSON number text to
   `DecStr` and `Decimal128` units, exact or rejected), `crates/mandate-marketdata/src/timestamp.rs`
-  (vendor timestamps, UTC days).
+  (vendor timestamps, UTC days), `crates/mandate-marketdata/src/model.rs` (datasets, symbols, feeds,
+  timeframes, day ranges, bars and trades).
 - **Tests:** `crates/mandate-marketdata/tests/`.
 - **Run:** `cargo nextest run -p mandate-marketdata`.
 

@@ -5,5 +5,6 @@
 //!
 //! The adapter layer (ES-02, layer 6): it does I/O and depends on the pure core, never the reverse.
 
+pub mod model;
 pub mod number;
 pub mod timestamp;
