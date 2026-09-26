@@ -228,7 +228,7 @@ clock, does no I/O, and keeps no state between calls.
 ```bash
 cargo xtask check
 cargo nextest run -p mandate-sim
-cargo nextest run -p mandate-refcases --run-ignored all -E 'test(=trading_domain::RC-10) | test(=trading_domain::RC-12) | test(=trading_domain::RC-19)'
+cargo nextest run -p mandate-refcases --run-ignored all -E 'test(/trading_domain::RC-1[029]$/)'
 cargo mutants -p mandate-sim
 ```
 
