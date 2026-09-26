@@ -10,8 +10,10 @@ mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
+anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }
 arrow-schema = { version = "60.0.0", default-features = false }
+clap = { version = "4.6.7", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
 jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
 libtest-mimic = "0.8.2"
 parquet = { version = "60.0.0", default-features = false, features = ["arrow", "snap"] }

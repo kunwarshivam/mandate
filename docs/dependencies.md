@@ -10,16 +10,17 @@ entry in `xtask/layers.toml`.
 
 | Name | Ecosystem | Used by | Purpose | Alternatives considered | License | Approved |
 |---|---|---|---|---|---|---|
-| `anyhow` | cargo | xtask | Error context in tooling (binaries only, ES-09) | Plain `Box<dyn Error>` | MIT OR Apache-2.0 | DEC-72 |
-| `serde` | cargo | xtask; mandate-marketdata | Deserializing `cargo metadata`, TOML policy files, and Alpaca response envelopes | Hand parsing | MIT OR Apache-2.0 | DEC-72 |
+| `anyhow` | cargo | xtask; mandate-cli | Error context in tooling and binaries only (ES-09) | Plain `Box<dyn Error>` | MIT OR Apache-2.0 | DEC-72 |
+| `serde` | cargo | xtask; mandate-marketdata; mandate-cli | Deserializing `cargo metadata`, TOML policy and basket files, and Alpaca response envelopes | Hand parsing | MIT OR Apache-2.0 | DEC-72 |
 | `serde_json` | cargo | xtask; mandate-refcases; mandate-marketdata; mandate-canon (dev) | Reading `cargo metadata` output and the reference-case fixtures, and feeding the differential canonicalizer test; in `mandate-marketdata`, Alpaca responses with every number read as raw text through the `raw_value` feature (ES-23). Never on the hashing path (ES-07); `arbitrary_precision` stays banned | `json` crate | MIT OR Apache-2.0 | DEC-72 |
-| `toml` | cargo | xtask; mandate-refcases | Reading `xtask/layers.toml`, `pyproject.toml`, and `crates/mandate-refcases/status.toml` | `toml_edit` | MIT OR Apache-2.0 | DEC-72 |
+| `toml` | cargo | xtask; mandate-refcases; mandate-cli | Reading `xtask/layers.toml`, `pyproject.toml`, `crates/mandate-refcases/status.toml`, and `config/research-basket.toml` | `toml_edit` | MIT OR Apache-2.0 | DEC-72 |
 | `reqwest` | cargo | mandate-marketdata | HTTPS client for the Alpaca market-data host; `default-features = false`, `rustls-no-provider`, no redirects, HTTPS only. About 109 crates with its TLS stack | `ureq` (blocking), `hyper` directly (more code to own) | MIT OR Apache-2.0 | DEC-88 |
 | `rustls` | cargo | mandate-marketdata | TLS with the `ring` provider, installed before the client is built (reqwest's own rustls feature needs aws-lc, whose license set includes OpenSSL); 13 crates | aws-lc-rs (C, OpenSSL license) | Apache-2.0 OR ISC OR MIT | DEC-88 |
 | `parquet` | cargo | mandate-marketdata | Writing and reading market-data Parquet with `Decimal128(38, s)` columns (ES-23); only the `arrow` and `snap` features, so no C compression libraries; 48 crates | Arrow IPC (not what research tools read); `polars` (much larger) | Apache-2.0 | DEC-88 |
 | `arrow-array` | cargo | mandate-marketdata | Building the typed columns (`Decimal128`, `Timestamp(ns, UTC)`, lists) that `parquet` writes; 32 crates, all shared with `parquet` | The `arrow` umbrella crate (pulls compute kernels) | Apache-2.0 | DEC-88 |
 | `arrow-schema` | cargo | mandate-marketdata | Column types and fields for those schemas; 1 crate | The `arrow` umbrella crate | Apache-2.0 | DEC-88 |
-| `tokio` | cargo | mandate-marketdata | Async runtime in shell crates only, `~1.53` LTS (ES-06): timers for retry backoff; 13 crates | `async-std` (discontinued); blocking HTTP | MIT | DEC-72 |
+| `clap` | cargo | mandate-cli | Argument parsing, validation, and help for the `mandate` binary; derive, without color or suggestions; 19 crates | `lexopt` (no help or validation), `pico-args` | MIT OR Apache-2.0 | DEC-88 |
+| `tokio` | cargo | mandate-marketdata; mandate-cli | Async runtime in shell crates only, `~1.53` LTS (ES-06): timers for retry backoff and the CLI's current-thread runtime; 13 crates | `async-std` (discontinued); blocking HTTP | MIT | DEC-72 |
 | `secrecy` | cargo | mandate-marketdata | Holding the paper API key ID and secret so `Debug` never prints them (ES-09, AGENTS.md rule 7); 2 crates | A hand-written redacting wrapper | MIT OR Apache-2.0 | DEC-72 |
 | `sha2` | cargo | mandate-canon | SHA-256 for event hashes, anchors, and artifact references (ES-07); `default-features = false` | `ring`, `aws-lc-rs` (C and assembly, larger surface) | MIT OR Apache-2.0 | DEC-72 |
 | `rust_decimal` | cargo | mandate-num | Storage of typed decimal values behind private-field newtypes (ES-04); `default-features = false`; its arithmetic and `FromStr` are never used for results | `bigdecimal` (heap-allocated, unbounded), `fixed` (binary fractions) | MIT | DEC-72 |

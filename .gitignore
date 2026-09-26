@@ -9,3 +9,6 @@ __pycache__/
 .env
 .env.*
 /mutants.out*/
+
+# Downloaded market data is research data, never committed (E2-1, DEC-89).
+/data/
