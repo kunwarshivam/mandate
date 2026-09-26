@@ -3,8 +3,9 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use mandate_accounting::{
-    Account, AssetClass, CashDividend, Config, CorporateAction, CryptoFees, EquityFees, Execution,
-    FeeFamily, Input, InstrumentId, Liquidity, Position, Side, Split, TafCapBasis,
+    Account, AccountType, AssetClass, CashDividend, Config, CorporateAction, CryptoFees,
+    EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Reservations, Side,
+    Split, TafCapBasis,
 };
 use mandate_num::{
     Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, ShareIncrement, SignedQty,
@@ -195,9 +196,21 @@ pub fn cash_in_lieu_posted(instrument: &str, amount: &str) -> Input {
     }
 }
 
-/// An account with `settled` cash and one position.
+/// A margin account with `settled` cash and one position.
 pub fn holding(settled: &str, instrument: &str, qty: &str, basis: &str) -> Account {
+    holding_in(AccountType::Margin, settled, instrument, qty, basis)
+}
+
+/// An account of `account_type` with `settled` cash and one position.
+pub fn holding_in(
+    account_type: AccountType,
+    settled: &str,
+    instrument: &str,
+    qty: &str,
+    basis: &str,
+) -> Account {
     Account::opening(
+        account_type,
         usd(settled),
         [(
             id(instrument),
@@ -208,6 +221,15 @@ pub fn holding(settled: &str, instrument: &str, qty: &str, basis: &str) -> Accou
             .unwrap(),
         )],
     )
+}
+
+/// An account of `account_type` with `settled` cash and no position.
+pub fn opening(account_type: AccountType, settled: &str) -> Account {
+    Account::opening(account_type, usd(settled), [])
+}
+
+pub fn reserved(total: &str) -> Reservations {
+    Reservations::new(usd(total)).unwrap()
 }
 
 /// Rebuilds an input from the text of every field, as a journal round trip would.
