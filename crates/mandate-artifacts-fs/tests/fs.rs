@@ -67,7 +67,6 @@ fn tamper(store: &FsArtifactStore, reference: &ArtifactRef, bytes: &[u8]) {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn objects_live_at_sha256_shard_hex_and_are_read_only() {
     let (dir, mut store) = open("layout");
     let reference = store.put_artifact(b"abc").unwrap();
@@ -84,7 +83,6 @@ fn objects_live_at_sha256_shard_hex_and_are_read_only() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn an_absent_reference_is_missing() {
     let (_, store) = open("absent");
     let reference = ArtifactRef::of(b"never stored");
@@ -96,7 +94,6 @@ fn an_absent_reference_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn an_unreadable_object_is_unavailable_not_missing() {
     let (_, mut store) = open("unreadable");
     let readable = store.put_artifact(b"readable").unwrap();
@@ -123,7 +120,6 @@ fn an_unreadable_object_is_unavailable_not_missing() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn a_name_in_place_without_an_object_is_unavailable() {
     let (_, mut store) = open("dangling");
     let reference = ArtifactRef::of(b"shadowed");
@@ -139,7 +135,6 @@ fn a_name_in_place_without_an_object_is_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn a_root_that_cannot_be_created_is_unavailable() {
     let dir = fresh_dir("root-is-a-file");
     fs::create_dir_all(dir.parent().unwrap()).unwrap();
@@ -148,7 +143,6 @@ fn a_root_that_cannot_be_created_is_unavailable() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn objects_survive_reopening_the_store() {
     let (dir, mut store) = open("reopen");
     let reference = store.put_artifact(b"data snapshot").unwrap();
@@ -161,7 +155,6 @@ fn objects_survive_reopening_the_store() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn put_never_overwrites_a_corrupt_object() {
     let (_, mut store) = open("no-overwrite");
     let reference = store.put_artifact(b"thesis").unwrap();
@@ -175,7 +168,6 @@ fn put_never_overwrites_a_corrupt_object() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn concurrent_puts_of_the_same_bytes_all_succeed_with_one_object() {
     let dir = fresh_dir("concurrent");
     let bytes = vec![7u8; 64 * 1024];
@@ -197,7 +189,6 @@ fn concurrent_puts_of_the_same_bytes_all_succeed_with_one_object() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn readers_see_a_whole_object_or_none_while_it_is_written() {
     let dir = fresh_dir("atomic");
     let reader = FsArtifactStore::open(&dir).unwrap();
@@ -244,7 +235,6 @@ fn readers_see_a_whole_object_or_none_while_it_is_written() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn a_crashed_write_leaves_no_object() {
     let (dir, mut store) = open("crash");
     let content = b"prompt and retrieved context".to_vec();
@@ -285,7 +275,6 @@ fn a_crashed_write_leaves_no_object() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn verification_reads_artifacts_from_disk() {
     let (_, mut store) = open("verify");
     let content = b"model response".to_vec();
@@ -347,7 +336,6 @@ fn journal_citing(stream: &StreamId, reference: &ArtifactRef) -> MemoryJournal {
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-2"]
     fn put_then_get_returns_the_bytes(bytes in vec(any::<u8>(), 0..2048)) {
         let (dir, mut store) = open("round-trip");
         let reference = store.put_artifact(&bytes).unwrap();
@@ -358,7 +346,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-2"]
     fn the_same_bytes_get_the_same_address_once(
         a in vec(any::<u8>(), 0..64),
         b in vec(any::<u8>(), 0..64),
@@ -372,7 +359,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-2"]
     fn one_flipped_bit_on_disk_is_detected_on_read(
         bytes in vec(any::<u8>(), 1..256),
         index in any::<prop::sample::Index>(),
