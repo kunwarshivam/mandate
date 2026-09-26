@@ -7,6 +7,7 @@ members = ["xtask", "crates/*"]
 mandate-accounting = { path = "crates/mandate-accounting", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
+mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 jiff = { version = "0.2.37", default-features = false, features = ["std", "tzdb-bundle-always"] }
