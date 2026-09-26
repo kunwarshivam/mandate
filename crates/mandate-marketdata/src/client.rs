@@ -297,20 +297,20 @@ impl<T: Transport, P: Pause> Client<T, P> {
                     if rate_limited <= self.retry.rate_limit_windows {
                         continue;
                     }
-                    RetryCause::Status(429)
+                    return Err(FetchError::Exhausted {
+                        attempts: failures.saturating_add(rate_limited),
+                        last: RetryCause::Status(429),
+                    });
                 }
                 Ok(Response { status, .. }) if (500..600).contains(&status) => {
-                    failures = failures.saturating_add(1);
                     RetryCause::Status(status)
                 }
                 Ok(Response { status, .. }) => return Err(FetchError::Status { status }),
-                Err(e) if e.is_retryable() => {
-                    failures = failures.saturating_add(1);
-                    RetryCause::Transport(e)
-                }
+                Err(e) if e.is_retryable() => RetryCause::Transport(e),
                 Err(e) => return Err(FetchError::Transport(e)),
             };
-            if failures >= attempts || rate_limited > self.retry.rate_limit_windows {
+            failures = failures.saturating_add(1);
+            if failures >= attempts {
                 return Err(FetchError::Exhausted {
                     attempts: failures.saturating_add(rate_limited),
                     last: cause,

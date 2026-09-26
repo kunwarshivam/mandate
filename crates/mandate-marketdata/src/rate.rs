@@ -5,6 +5,7 @@
 //! reset, or for a full window when none is known. Times are integer nanoseconds since the Unix
 //! epoch; there is no floating point.
 
+use std::cmp::Ordering;
 use std::time::Duration;
 
 use mandate_time::UtcNanos;
@@ -157,12 +158,15 @@ impl Pacer {
         seen.remaining = seen.remaining.saturating_sub(self.in_flight);
         seen.reset = seen.reset.min(now.saturating_add(self.window()));
         self.budget = Some(match self.budget {
-            Some(known) if known.reset == seen.reset => Budget {
-                remaining: known.remaining.min(seen.remaining),
-                ..known
+            None => seen,
+            Some(known) => match known.reset.cmp(&seen.reset) {
+                Ordering::Less => seen,
+                Ordering::Equal => Budget {
+                    remaining: known.remaining.min(seen.remaining),
+                    ..known
+                },
+                Ordering::Greater => known,
             },
-            Some(known) if known.reset > seen.reset => known,
-            Some(_) | None => seen,
         });
     }
 

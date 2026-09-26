@@ -463,6 +463,22 @@ async fn a_429_and_server_errors_count_against_separate_budgets() {
         .unwrap();
     assert_eq!(clock.pauses(), secs(&[1, 60, 2, 60]));
 
+    let transport = FakeTransport::serving([status(429), status(503), ok(&bars_page(0, 1))]);
+    let clock = RecordingPause::default();
+    let client = Client::new(transport, clock.clone()).with_retry(RetryPolicy {
+        rate_limit_windows: 1,
+        ..RetryPolicy::default()
+    });
+    client
+        .fetch_day(&spy_sip_1hour(), day("2026-09-24"))
+        .await
+        .unwrap();
+    assert_eq!(
+        clock.pauses(),
+        secs(&[60, 1]),
+        "a server error after the last allowed 429 still retries"
+    );
+
     let transport = FakeTransport::serving([status(429), status(503), status(503)]);
     let client = Client::new(transport, RecordingPause::default()).with_retry(RetryPolicy {
         max_attempts: 2,
@@ -549,6 +565,23 @@ async fn a_stale_response_never_raises_the_remaining_count() {
     );
 
     let transport = FakeTransport::serving([
+        ok_rated(&bars_page(0, 3), 200, 100, START_SECS + 50),
+        ok_rated(&bars_page(1, 3), 200, 3, START_SECS + 50),
+        ok(&bars_page(2, 3)),
+    ]);
+    let clock = RecordingPause::default();
+    let client = Client::new(transport, clock.clone());
+    client
+        .fetch_day(&spy_sip_1hour(), day("2026-09-24"))
+        .await
+        .unwrap();
+    assert_eq!(
+        clock.pauses(),
+        secs(&[50]),
+        "a lower count for the same reset is another client's spending"
+    );
+
+    let transport = FakeTransport::serving([
         ok_rated(&bars_page(0, 3), 200, 6, START_SECS + 50),
         ok_rated(&bars_page(1, 3), 200, 100, START_SECS + 20),
         ok(&bars_page(2, 3)),
@@ -622,6 +655,23 @@ async fn a_limit_below_two_paces_as_two() {
         clock.pauses(),
         secs(&[60, 60]),
         "a burst of one, refilled at one a minute"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_partly_refilled_bucket_waits_only_for_the_rest_of_a_request() {
+    let transport =
+        FakeTransport::serving([ok(&bars_page(0, 2)), status(503), ok(&bars_page(1, 2))]);
+    let clock = RecordingPause::default();
+    let client = Client::new(transport, clock.clone()).with_rate(policy(2, 5));
+    client
+        .fetch_day(&spy_sip_1hour(), day("2026-09-24"))
+        .await
+        .unwrap();
+    assert_eq!(
+        clock.pauses(),
+        secs(&[60, 1, 59]),
+        "the second of backoff refilled a sixtieth of a request"
     );
 }
 
