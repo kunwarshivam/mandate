@@ -94,6 +94,7 @@ fn only_market_data_paths_are_requested() {
         "/v2/stocks/trades?symbols=SPY",
         "/v1beta3/crypto/us/bars?symbols=BTC%2FUSD",
         "/v1beta3/crypto/us/trades?symbols=BTC%2FUSD",
+        "/v1/corporate-actions?symbols=AAPL&start=2020-01-01&end=2021-12-31&limit=5&sort=asc",
     ] {
         assert!(is_market_data_path(path), "{path}");
     }
@@ -107,6 +108,8 @@ fn only_market_data_paths_are_requested() {
         "/v2/stocks/bars?symbols=SPY#@example.com",
         "/v2/stocks/bars?symbols=SPY\r\nHost: example.com",
         "/v2/stocks/bars/../../orders?x=1",
+        "/v1/corporate-actions",
+        "/v2/corporate_actions/announcements?ca_types=Split",
         "",
     ] {
         assert!(!is_market_data_path(path), "{path:?}");

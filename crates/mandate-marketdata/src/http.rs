@@ -81,18 +81,20 @@ impl HttpSetupError {
     }
 }
 
-const ENDPOINTS: [&str; 4] = [
+const ENDPOINTS: [&str; 5] = [
     "/v2/stocks/bars?",
     "/v2/stocks/trades?",
     "/v1beta3/crypto/us/bars?",
     "/v1beta3/crypto/us/trades?",
+    "/v1/corporate-actions?",
 ];
 const USER_AGENT: &str = concat!("mandate-marketdata/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// Whether `path_and_query` names one of the four historical bars and trades endpoints, with a
-/// query of percent-encoded parameters and nothing that could change the host or the request.
+/// Whether `path_and_query` names one of the four historical bars and trades endpoints or the
+/// corporate-actions endpoint, with a query of percent-encoded parameters and nothing that could
+/// change the host or the request.
 pub fn is_market_data_path(path_and_query: &str) -> bool {
     let Some(query) = ENDPOINTS
         .iter()
