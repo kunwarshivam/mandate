@@ -58,7 +58,6 @@ fn without_gate_steps(steps: &mut Json) {
 }
 
 #[test]
-#[ignore = "pending E3-3"]
 fn rc_08_accounting_steps_pass_and_a_wrong_account_type_or_buying_power_fails() {
     assert_eq!(run(accounting_steps_of("RC-08", |_| {}), "RC-08"), Ok(()));
 
@@ -109,7 +108,6 @@ fn rc_08_accounting_steps_pass_and_a_wrong_account_type_or_buying_power_fails() 
 }
 
 #[test]
-#[ignore = "pending E3-3"]
 fn rc_18_cash_variant_accounting_steps_pass_and_the_margin_case_reads_the_default_type() {
     let variant = "RC-18::generic_cash_account";
     assert_eq!(run(accounting_steps_of("RC-18", |_| {}), variant), Ok(()));

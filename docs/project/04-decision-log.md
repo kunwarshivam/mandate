@@ -141,5 +141,6 @@ reservation keeps its row and its number is never reused.
 | Identifier | Coordinator | Claim | Purpose | State |
 |---|---|---|---|---|
 | DEC-99 to DEC-103 | `cursor` | — | Direction follow-ups (#52) | Reserved |
-| DEC-104, DEC-105 | `claude-code` | #48 | E3-3 fold and harness decisions (#46; renumbered from DEC-99 and DEC-100) | In #46 |
+| DEC-104, DEC-105 | `claude-code` | #48 | E3-3 fold and harness decisions (#46; renumbered from DEC-99 and DEC-100) | Merged (#53, #67) |
+| DEC-107 | `cursor` | #59 | E5-2: the filesystem artifact backend's own crate (ES-02 crate list) | Reserved |
 | DEC-108 | `claude-code` | #58 | E4-1 tests-PR crate, arithmetic, and harness shapes (DEC-106 is reserved for the story's interpretations; DEC-107 is `cursor`'s) | In this PR |

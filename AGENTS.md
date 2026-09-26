@@ -163,7 +163,12 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
 - **Setup:** `bash .cursor/install.sh` installs everything at the pinned versions and is idempotent;
   Cloud Agents run it automatically through `.cursor/environment.json`. Rust comes from
   `rust-toolchain.toml` (1.98.1) via rustup; Python 3.14 and uv 0.12; cargo-deny, cargo-nextest,
-  typos, and gitleaks at the versions in `.github/workflows/ci.yml` (keep the two in sync).
+  typos, and gitleaks at the versions in `.github/workflows/ci.yml` (keep the two in sync). It
+  downloads only from `github.com` (release assets redirect to
+  `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
+  `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
+  behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
+  (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
