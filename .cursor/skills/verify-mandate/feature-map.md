@@ -296,6 +296,35 @@ crate exists as stubs and tests; the implementation PRs fill it in story by stor
   `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.
 - **Run:** `cargo nextest run -p mandate-cli --test journal_verify --test artifact`.
 
+## Mandate document, validation, risk state, and change classification
+
+Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128;
+the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2 (lifecycle, provenance, the working
+  universe), §3 (structure and goals), §4 (validation, warnings, the policy hierarchy), §5 (the risk
+  state, the risk day, breach confirmation, the lifetime floor, restrictions and the effective mode),
+  §6.3 (the condition language), §7 (platform defaults and proposals), §9 (the version hash and
+  change classification), §11 (the reference cases); `docs/specs/trading-domain.md` §8.1 and §8.2
+  (cost-basis reduction, risk marks); `docs/specs/journal.md` §4 (the canonical form the version
+  hashes) and §9; ADR-0001 ES-02, ES-04, ES-09, ES-21, ES-22.
+- **Code:** `mandate-spec` (new; the mandate document parsed from canonical JSON with its decimals
+  kept as `SchemaDec`, the text checked against the field's whole schema `$def` before it is wrapped,
+  the V-rules and warnings, the policy hierarchy and its runtime
+  overlay, the risk-state fold, risk days, goals, the condition language, and change classification)
+  and `mandate-domain` (new; the vocabulary `mandate-risk`, `mandate-builder`, and the research
+  agent share), with the exact arithmetic in `mandate-num` as ES-04 requires.
+- **Tests:** per the brief: one named test per V-code and per §9.2 classification row, hand-checked
+  fixture figures, and property tests whose oracles rebuild the risk state from the emitted journal
+  events, accumulate breach time from the input list, scan the policy chain in the opposite
+  direction, and prove MI-11 by evaluating generated actions under both rule sets. Planted bugs per
+  test: the task brief.
+- **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
+  through a new `mandate` suite in `mandate-refcases`; families G, A, B, and N stay with streams G,
+  H, and J and fail as "not interpreted until" their owning story.
+- **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
+  `cargo test -p mandate-refcases -- --include-ignored mandate::`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
@@ -308,7 +337,7 @@ crate exists as stubs and tests; the implementation PRs fill it in story by stor
   without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
-  pending their stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).
+  pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 
