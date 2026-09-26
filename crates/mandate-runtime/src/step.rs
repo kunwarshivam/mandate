@@ -8,9 +8,9 @@ use crate::ports::{IdGen, Ports};
 use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
     ApprovalOutcome, ApprovalVerdict, Autonomy, Command, DryRunVerdict, Effect, EventDraft,
-    EventId, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold,
-    MandateView, Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal,
-    RiskClock, Seq, TimerId, TimerRequest, WriterEpoch,
+    EventId, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateView,
+    Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, RiskClock, Seq,
+    TimerId, TimerRequest, WriterEpoch,
 };
 
 /// How long an ASKed action waits before the `skip` timeout fires (mandate spec §6.4).
@@ -81,7 +81,14 @@ fn applied(
         Input::Journal(event) => Some(&event.event_id),
         _ => None,
     };
-    mode_change(state, origin, payload::REASON_RESTRICTION, effective, batch)?;
+    mode_change(
+        state,
+        origin,
+        payload::REASON_RESTRICTION,
+        effective,
+        state.lifecycle(),
+        batch,
+    )?;
     let version_applied = match input {
         Input::Journal(event) => matches!(event.event_type.as_str(), "MandateVersionApplied"),
         _ => false,
@@ -126,6 +133,7 @@ fn started(
         None,
         payload::REASON_STARTUP_HOLD,
         state.effective_mode(),
+        state.lifecycle(),
         &mut batch,
     )?;
     for live in state.pending_handoffs() {
@@ -150,42 +158,26 @@ fn started(
 /// A command addressed to this deployment. A kill switch is honoured from folded state alone, in
 /// every mode, with no model output, no gate call, and no approval (`AGENTS.md` rule 13).
 fn commanded(
-    state: &mut RuntimeState,
+    state: &RuntimeState,
     command: &Command,
     ports: &Ports<'_>,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
     match command {
         Command::Pause => {
-            state.hold(LocalHold::OwnerPaused);
-            mode_change(
-                state,
-                None,
-                payload::REASON_OWNER_PAUSE,
-                state.effective_mode(),
-                batch,
-            )?;
+            let lifecycle = state.lifecycle().max(Mode::Paused);
+            lifecycle_change(state, payload::REASON_OWNER_PAUSE, lifecycle, batch)?;
             cancel_approvals(state, batch, payload::REASON_OWNER_PAUSE)
         }
         Command::Resume => {
-            state.release(LocalHold::OwnerPaused);
-            mode_change(
-                state,
-                None,
-                payload::REASON_OWNER_RESUME,
-                state.effective_mode(),
-                batch,
-            )
+            let lifecycle = match state.lifecycle() {
+                Mode::Stopped => Mode::Stopped,
+                _ => Mode::Normal,
+            };
+            lifecycle_change(state, payload::REASON_OWNER_RESUME, lifecycle, batch)
         }
         Command::Stop => {
-            state.hold(LocalHold::Stopped);
-            mode_change(
-                state,
-                None,
-                payload::REASON_OWNER_STOP,
-                state.effective_mode(),
-                batch,
-            )?;
+            lifecycle_change(state, payload::REASON_OWNER_STOP, Mode::Stopped, batch)?;
             cancel_approvals(state, batch, payload::REASON_OWNER_STOP)
         }
         Command::KillSwitch {
@@ -212,7 +204,7 @@ fn commanded(
 /// cancelled with its timer disarmed, then exactly one agent-scoped flatten handed to the sink. The
 /// runtime computes no plan, cancels nothing, and sells nothing (`AGENTS.md` rule 13).
 fn switched(
-    state: &mut RuntimeState,
+    state: &RuntimeState,
     scope: &KillScope,
     initiator: Initiator,
     confirmation: Option<&OwnerConfirmation>,
@@ -222,12 +214,12 @@ fn switched(
     if !state.deployment().in_scope(scope) {
         return Ok(());
     }
-    state.switched(initiator);
     mode_change(
         state,
         None,
         payload::REASON_KILL_SWITCH,
-        state.effective_mode(),
+        state.effective_mode().max(initiator.final_mode()),
+        state.lifecycle(),
         batch,
     )?;
     if matches!(initiator, Initiator::Owner) {
@@ -247,6 +239,35 @@ fn switched(
     Ok(())
 }
 
+/// An owner `Pause`, `Resume`, or `Stop` changes the **deployment lifecycle**, which the agent-stream
+/// catalogue records nowhere but on an `AgentModeChanged`, so this one is journaled even when the
+/// effective mode is unchanged because a stricter restriction is already in force. Without the draft
+/// the lifecycle would live only in memory, and a pause taken while the account stream or the startup
+/// hold already paused the agent would be lost the moment that other restriction lifted — less strict
+/// than the owner asked for. MI-6's "only when it changes" governs the mode *copies*, which are
+/// journaled through [`mode_change`] (DEC-131 item 25).
+fn lifecycle_change(
+    state: &RuntimeState,
+    reason: &'static str,
+    lifecycle: Mode,
+    batch: &mut Batch<'_>,
+) -> Result<(), RuntimeError> {
+    let body = payload::object(vec![
+        (
+            "from",
+            payload::text(payload::mode_name(state.journaled_mode())),
+        ),
+        (
+            "to",
+            payload::text(payload::mode_name(state.mode_with(lifecycle))),
+        ),
+        ("reason", payload::text(reason)),
+        ("lifecycle", payload::text(payload::mode_name(lifecycle))),
+    ])?;
+    batch.journal("AgentModeChanged", None, body)?;
+    Ok(())
+}
+
 /// `AgentModeChanged` is journaled only when the effective mode changed (mandate spec §5.9, MI-6),
 /// and a copy of an account-stream fact cites the event it came from (journal spec §2).
 fn mode_change(
@@ -254,6 +275,7 @@ fn mode_change(
     origin: Option<&EventId>,
     reason: &'static str,
     effective: Mode,
+    lifecycle: Mode,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
     if effective != state.journaled_mode() {
@@ -264,6 +286,7 @@ fn mode_change(
             ),
             ("to", payload::text(payload::mode_name(effective))),
             ("reason", payload::text(reason)),
+            ("lifecycle", payload::text(payload::mode_name(lifecycle))),
         ])?;
         batch.journal("AgentModeChanged", origin.cloned(), body)?;
     }

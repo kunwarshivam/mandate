@@ -98,17 +98,22 @@ pub(crate) fn purpose_name(purpose: Purpose) -> &'static str {
     }
 }
 
+/// Every purpose, so that [`purpose_from`] is the inverse of [`purpose_name`] by construction rather
+/// than by a second list that could disagree with the first.
+const PURPOSES: [Purpose; 7] = [
+    Purpose::Open,
+    Purpose::Increase,
+    Purpose::RiskExit,
+    Purpose::OwnerExit,
+    Purpose::DiscretionaryExit,
+    Purpose::Protective,
+    Purpose::Flatten,
+];
+
 pub(crate) fn purpose_from(name: &str) -> Option<Purpose> {
-    match name {
-        "open" => Some(Purpose::Open),
-        "increase" => Some(Purpose::Increase),
-        "risk_exit" => Some(Purpose::RiskExit),
-        "owner_exit" => Some(Purpose::OwnerExit),
-        "discretionary_exit" => Some(Purpose::DiscretionaryExit),
-        "protective" => Some(Purpose::Protective),
-        "flatten" => Some(Purpose::Flatten),
-        _ => None,
-    }
+    PURPOSES
+        .into_iter()
+        .find(|purpose| purpose_name(*purpose) == name)
 }
 
 pub(crate) fn side_name(side: Side) -> &'static str {

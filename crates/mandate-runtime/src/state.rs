@@ -1,6 +1,6 @@
 //! The folded state and the replay that builds it.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mandate_accounting::InstrumentId;
 
@@ -31,7 +31,7 @@ pub struct RuntimeState {
     last_evaluated: Option<RiskClock>,
     copied_mode: Mode,
     journaled_mode: Mode,
-    local_holds: BTreeSet<LocalHold>,
+    lifecycle: Mode,
     switch: Option<crate::types::Initiator>,
     awaiting_reconciliation: bool,
     reconciled: bool,
@@ -77,7 +77,7 @@ impl RuntimeState {
             last_evaluated: None,
             copied_mode: Mode::Normal,
             journaled_mode: Mode::Normal,
-            local_holds: BTreeSet::new(),
+            lifecycle: Mode::Normal,
             switch: None,
             awaiting_reconciliation: false,
             reconciled: false,
@@ -98,17 +98,7 @@ impl RuntimeState {
     /// (mandate spec §5.9, MI-6). A maximum over [`Mode`]'s ordering, so the runtime is never less
     /// strict than the account stream and never lifts what the account stream set.
     pub fn effective_mode(&self) -> Mode {
-        let mut mode = self.copied_mode;
-        if self.awaiting_reconciliation {
-            mode = mode.max(LocalHold::AwaitingReconciliation.mode());
-        }
-        for hold in &self.local_holds {
-            mode = mode.max(hold.mode());
-        }
-        if let Some(initiator) = self.switch {
-            mode = mode.max(initiator.final_mode());
-        }
-        mode
+        self.mode_with(self.lifecycle)
     }
 
     /// Whether an intent of this purpose may be **proposed** in the effective mode.
@@ -165,15 +155,33 @@ impl RuntimeState {
         &self.pending_approvals
     }
 
+    /// The effective mode a given deployment lifecycle would produce: the strictest of the copied
+    /// account-stream mode, that lifecycle, the startup hold, and the kill switch's final mode. A
+    /// maximum over [`Mode`]'s ordering, so the runtime is never less strict than the account stream
+    /// and never lifts what the account stream set.
+    pub(crate) fn mode_with(&self, lifecycle: Mode) -> Mode {
+        let mut mode = self.copied_mode.max(lifecycle);
+        if self.awaiting_reconciliation {
+            mode = mode.max(LocalHold::AwaitingReconciliation.mode());
+        }
+        if let Some(initiator) = self.switch {
+            mode = mode.max(initiator.final_mode());
+        }
+        mode
+    }
+
+    /// The deployment's own lifecycle state, as a mode rather than as a set of
+    /// [`LocalHold`]s. It is a mode because `AgentModeChanged` is the only agent-stream event that
+    /// can carry it and MI-6 writes that event only when the effective mode changed, so a mode is the
+    /// one form of this state a replay can restore (DEC-131 item 25).
+    pub(crate) fn lifecycle(&self) -> Mode {
+        self.lifecycle
+    }
+
     /// The same maximum as [`Self::effective_mode`] without the startup hold, which governs new
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
-        let mut mode = self.copied_mode;
-        for hold in &self.local_holds {
-            if !matches!(hold, LocalHold::AwaitingReconciliation) {
-                mode = mode.max(hold.mode());
-            }
-        }
+        let mut mode = self.copied_mode.max(self.lifecycle);
         if let Some(initiator) = self.switch {
             mode = mode.max(initiator.final_mode());
         }
@@ -243,18 +251,6 @@ impl RuntimeState {
         if self.awaiting_reconciliation && self.reconciliation_known() {
             self.awaiting_reconciliation = false;
         }
-    }
-
-    pub(crate) fn hold(&mut self, hold: LocalHold) {
-        self.local_holds.insert(hold);
-    }
-
-    pub(crate) fn release(&mut self, hold: LocalHold) {
-        self.local_holds.remove(&hold);
-    }
-
-    pub(crate) fn switched(&mut self, initiator: crate::types::Initiator) {
-        self.switch = Some(initiator);
     }
 
     /// The risk-clock second a tick is handled at. Monotone by construction: a tick that arrives
@@ -357,24 +353,15 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
     match event.event_type.as_str() {
         "AgentModeChanged" => {
             state.journaled_mode = mode_field(event)?;
-            match payload::str_of(&event.payload, "reason") {
-                Some(payload::REASON_OWNER_PAUSE) => {
-                    state.local_holds.insert(LocalHold::OwnerPaused);
-                }
-                Some(payload::REASON_OWNER_RESUME) => {
-                    state.local_holds.remove(&LocalHold::OwnerPaused);
-                }
-                Some(payload::REASON_OWNER_STOP) => {
-                    state.local_holds.insert(LocalHold::Stopped);
-                }
-                _ => {}
-            }
+            state.lifecycle = payload::str_of(&event.payload, "lifecycle")
+                .and_then(payload::mode_from)
+                .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
         "KillSwitchActivated" => {
-            let initiator = payload::str_of(&event.payload, "initiator")
+            state.switch = payload::str_of(&event.payload, "initiator")
                 .and_then(payload::initiator_from)
+                .map(Some)
                 .ok_or_else(|| payload::non_canonical("initiator"))?;
-            state.switched(initiator);
         }
         "IntentProposed" => {
             let purpose = payload::str_of(&event.payload, "purpose")
