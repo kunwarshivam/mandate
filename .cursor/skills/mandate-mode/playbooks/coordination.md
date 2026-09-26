@@ -20,21 +20,29 @@ The current allocation. Change it by editing this table in a PR, never by starti
 
 | Coordinator | Stories | Crates and paths |
 |---|---|---|
-| `claude-code` | E3-3, E4-1, E4-2, E17-0 (spike), the DEC-97 and DEC-98 spec rewrite (Track C) | `mandate-accounting`, `mandate-refcases`, `mandate-sim`, `python/research_spike/`, `docs/specs/mandate.md`, `schemas/`, `reference/` |
+| `claude-code` | E3-3, E4-1, E4-2, E17-0 (spike), the DEC-97 and DEC-98 spec rewrite (Track C) | `mandate-accounting`, `mandate-sim`, `python/research_spike/`, `docs/specs/mandate.md`, `schemas/mandate.schema.json`, `schemas/policy.schema.json`, `reference/mandate/` |
 | `cursor` | E2-4, E2-2, E5-2, E5-3 | `mandate-marketdata`, `mandate-cli`, `mandate-journal`, `mandate-journal-pg`, `.cursor/install.sh` and CI environment work |
 
-Shared, owned by no one: `mandate-num`, `mandate-time`, `mandate-canon`, `xtask`. A change there
-needs its own claim issue, stays minimal, and says which story needs it.
+Shared, owned by no one: `mandate-num`, `mandate-time`, `mandate-canon`, `xtask`, and
+`mandate-refcases` with `status.toml` and `docs/specs/reference-cases/`. In the harness and the
+case files, ownership is per case: each story edits only the interpretations, cases, and status
+rows it names in its claim. A change to a shared crate needs its own claim issue, stays minimal,
+and says which story needs it.
 
 ## 3. Reserve identifiers before you use them
 
-Decision IDs (`DEC-`), open decisions (`OD-`), ADR numbers, epic and story IDs, and PR sequence
-names collide silently between sessions. Before using one:
+Decision IDs (`DEC-`), open decisions (`OD-`), ADR numbers, and epic and story IDs collide
+silently between sessions: two open PRs have already minted the same DEC numbers. The single
+registry is the **Reserved identifiers** table at the end of
+`docs/project/04-decision-log.md`. Before the first commit that uses a new identifier:
 
-1. Find the highest number across `main`, every open PR, and every open claim issue
-   (`gh pr list --search DEC-`, `gh issue list --label claim`).
-2. Take the next one and comment `DEC-<n> reserved` (or `OD-<n>`, `ADR-<n>`) on your claim
-   issue before the first commit that uses it.
+1. Take the next integer for that prefix after the highest one in the table or in the log's
+   rows on `main`, whichever is larger. The table is on `main`, so fetch first.
+2. Add a row (identifier, coordinator, claim issue, purpose) in a one-line docs PR, or in your
+   claim's first PR if it is docs-only and can merge within the hour. Until that row is on
+   `main`, also comment `DEC-<n> reserved` on your claim issue so the other side sees it.
+3. When the decision merges, the row stays as the record; a reservation that is abandoned is
+   marked "released" rather than deleted, and its number is never reused.
 
 ## 4. Shared files
 
@@ -43,11 +51,15 @@ everyone. In each: add or change only the rows for your own stories; never rewri
 coordinator's rows; append rather than reorder. Rebase onto `main` immediately before merging
 and resolve conflicts by keeping both sides.
 
-## 5. Merge only your own
+## 5. One merge queue
 
-The owning coordinator merges its PRs after green CI and its independent review (the ship
-playbook). Never merge, rebase, force-push, or close another coordinator's PR or branch. To ask
-the other side for a review or a decision, comment on its claim issue.
+Cursor cloud agents cannot launch other agents (ship playbook step 3), so they stop at an open PR
+with green CI and say so in its body. The Claude Code coordinating session is the merge
+coordinator for both sides: it launches the independent review on a different model, relays
+findings back to the author through the PR, and on PASS squash-merges (the reviewer may merge on
+its behalf, as ship.md step 5 allows). Merges go in claim order, one at a time, so shared files
+never race. Nobody rebases, force-pushes, or closes a branch they did not create; to ask for a
+review, a decision, or a rebase, comment on the PR or the claim issue.
 
 ## 6. Secrets and environments
 
