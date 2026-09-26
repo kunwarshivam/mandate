@@ -4,8 +4,10 @@
 //! with a stock dataset, and for a quotes dataset each quoted side's extremes, the signed spread,
 //! and the locked, crossed, one-sided, and unquoted counts (DEC-116); gaps between consecutive
 //! bars, each missing bar slot classified as a session closure, no trade, a true gap, or
-//! unclassified (trading domain spec §4.2); records that share a key; and every partition that is
-//! missing, altered, unreadable, or not listed.
+//! unclassified (trading domain spec §4.2); records that share a key; records stamped while the
+//! venue is closed, zero-volume bars, and single-trade bars whose prices differ, as warnings; and
+//! every partition that is missing, altered, unreadable, not listed, or holds a bar whose open or
+//! close lies outside its range.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -18,11 +20,11 @@ use mandate_time::{Date, TimeError, UtcNanos};
 use crate::actions::{ActionsError, RecordedActions, read_actions};
 use crate::dataset::{self, BAR_SCALE, DatasetError, ListedDay, PRICE_SCALE, SIZE_SCALE};
 use crate::model::{
-    AdjustmentError, AssetClass, DatasetId, DayRange, Kind, ModelError, PriceAdjuster, Records,
-    TimeUnit, Timeframe,
+    AdjustmentError, AssetClass, Bar, DatasetId, DayRange, Kind, ModelError, PriceAdjuster,
+    Records, TimeUnit, Timeframe,
 };
 use crate::number::{self, NumberError};
-use crate::venue::{Venue, VenueError, VenueState};
+use crate::venue::{States, Venue, VenueError, VenueState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InspectError {
@@ -75,6 +77,8 @@ pub struct Inspection {
     pub gaps: Vec<ClassifiedGap>,
     /// In key order.
     pub duplicates: Vec<Duplicate>,
+    /// Over the records of the partitions without problems.
+    pub quality: Quality,
     /// Listed days first, in date order, then unlisted files by name.
     pub problems: Vec<Problem>,
 }
@@ -85,10 +89,53 @@ pub struct Coverage {
     /// `None` when the manifest lists no day.
     pub span: Option<DayRange>,
     pub listed: u64,
-    /// Runs of listed days without records.
+    /// Runs of listed days without records on which the venue trades or may trade.
     pub empty: Vec<DayRange>,
+    /// Listed days without records on which the venue is closed all day: weekends and holidays,
+    /// counted rather than listed.
+    pub closed: u64,
     /// Runs of days inside the span that the manifest does not list: never fetched.
     pub missing: Vec<DayRange>,
+}
+
+/// How many first examples an [`Occurrences`] keeps.
+pub const EXAMPLES: usize = 5;
+
+/// How many records show one finding, and the earliest [`EXAMPLES`] distinct times among them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Occurrences {
+    pub count: u64,
+    /// Ascending.
+    pub first: Vec<UtcNanos>,
+}
+
+impl Occurrences {
+    fn add(&mut self, at: UtcNanos) {
+        self.count = self.count.saturating_add(1);
+        if let Err(index) = self.first.binary_search(&at)
+            && index < EXAMPLES
+        {
+            self.first.insert(index, at);
+            self.first.truncate(EXAMPLES);
+        }
+    }
+}
+
+/// What the vendor sent that a reader should weigh before using it, without making a partition
+/// untrusted: storage keeps the vendor's records (DEC-89), and each of these still has the fields
+/// and the price order of trading domain spec §4.1, so they are warnings rather than
+/// [`Problem`]s and leave `inspect`'s exit status alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Quality {
+    /// Records stamped while the feed's venue is closed: a bar by its start, a daily bar by its
+    /// day, a trade or quote by its time. A bar starting at the venue's close is one of them.
+    pub closed_period: Occurrences,
+    /// Bars with zero volume, which §4.2 says do not exist ("a bar exists only when trades
+    /// occur"); always empty for trades and quotes.
+    pub zero_volume: Occurrences,
+    /// Bars with a trade count of one whose prices are not all equal; always empty for trades
+    /// and quotes.
+    pub single_trade_spread: Occurrences,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -160,6 +207,9 @@ pub enum Values {
     Trades {
         low: DecStr,
         high: DecStr,
+        /// Over every stored trade. A venue's official open or close that the tape reports again
+        /// under another condition counts each time, so a stock's total can exceed its bars'
+        /// volume; the trading domain spec defines no trade conditions to exclude.
         size: DecStr,
     },
     /// A side whose price is zero holds no order, so it is left out of `bid`, `ask`, and `spread`,
@@ -269,13 +319,20 @@ pub enum Problem {
     Unlisted {
         file: String,
     },
+    /// Bars whose open or close lies outside their low-to-high range, which no bar of trades can
+    /// have (trading domain spec §4.1).
+    InconsistentBars {
+        day: Date,
+        bars: u64,
+    },
 }
 
 /// Inspects the dataset stored in `dir`. A missing or invalid manifest is an error; a bad
 /// partition is a [`Problem`] in the result.
 pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
     let (dataset, days) = dataset::read_manifest(dir)?;
-    let coverage = coverage(&days)?;
+    let venue = Venue::of(dataset.feed())?;
+    let coverage = coverage(&days, &venue)?;
     let corporate_actions = actions_report(dir, &dataset, coverage.span)?;
     let adjuster = match &corporate_actions {
         ActionsReport::Applied { recorded, as_of } => {
@@ -287,11 +344,32 @@ pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
     };
     let mut totals = Totals::new(dataset.kind(), adjuster);
     let mut problems = Vec::new();
+    let mut states = venue.states();
+    let daily = matches!(dataset.kind(), Kind::Bars(t) if t.unit() == TimeUnit::Day);
     for listed in days.iter().filter(|d| d.file.is_some()) {
-        match load(dir, listed, dataset.kind()) {
-            Ok(records) => totals.add(&records)?,
-            Err(problem) => problems.push(problem),
+        let records = match load(dir, listed, dataset.kind()) {
+            Ok(records) => records,
+            Err(problem) => {
+                problems.push(problem);
+                continue;
+            }
+        };
+        match inconsistent_bars(&records)? {
+            0 => {}
+            bars => {
+                problems.push(Problem::InconsistentBars {
+                    day: listed.day,
+                    bars,
+                });
+                continue;
+            }
         }
+        for at in records.times() {
+            if closed_at(&venue, &mut states, daily, at)? {
+                totals.quality.closed_period.add(at);
+            }
+        }
+        totals.add(&records)?;
     }
     problems.extend(unlisted(dir, &days)?);
     let untrusted: BTreeSet<Date> = problems.iter().filter_map(Problem::day).collect();
@@ -300,7 +378,6 @@ pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
         .map(|d| d.day)
         .filter(|day| !untrusted.contains(day))
         .collect();
-    let venue = Venue::of(dataset.feed())?;
     let mut gaps = Vec::new();
     if let (Kind::Bars(timeframe), Some(finder)) = (dataset.kind(), totals.gaps.take()) {
         for gap in finder.gaps {
@@ -316,9 +393,47 @@ pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
         corporate_actions,
         gaps,
         duplicates: totals.duplicates,
+        quality: totals.quality,
         problems,
         dataset,
     })
+}
+
+/// Whether the venue is closed at a record's time; a daily bar is closed when its whole day is.
+fn closed_at(
+    venue: &Venue,
+    states: &mut States<'_>,
+    daily: bool,
+    at: UtcNanos,
+) -> Result<bool, InspectError> {
+    let state = if daily {
+        venue.day_state(at.date())?
+    } else {
+        states.at(at)?
+    };
+    Ok(state == VenueState::Closed)
+}
+
+/// The number of bars whose open or close lies outside their low-to-high range; zero for trades
+/// and quotes.
+fn inconsistent_bars(records: &Records) -> Result<u64, InspectError> {
+    let bars = match records {
+        Records::Bars(bars) => bars,
+        Records::Trades(_) | Records::Quotes(_) => return Ok(0),
+    };
+    let mut count = 0_u64;
+    for bar in bars {
+        let low = units("low", &bar.low, BAR_SCALE)?;
+        let high = units("high", &bar.high, BAR_SCALE)?;
+        let within = |column, value| -> Result<bool, InspectError> {
+            let value = units(column, value, BAR_SCALE)?;
+            Ok(low <= value && value <= high)
+        };
+        if !(within("open", &bar.open)? && within("close", &bar.close)?) {
+            count = count.saturating_add(1);
+        }
+    }
+    Ok(count)
 }
 
 /// The missing slots of `gap` between bars of `timeframe`, in runs of one class: a slot is a
@@ -414,7 +529,8 @@ impl Problem {
             | Self::Altered { day }
             | Self::Unreadable { day, .. }
             | Self::RowCount { day, .. }
-            | Self::OutsideDay { day, .. } => Some(*day),
+            | Self::OutsideDay { day, .. }
+            | Self::InconsistentBars { day, .. } => Some(*day),
             Self::Unlisted { .. } => None,
         }
     }
@@ -488,21 +604,26 @@ fn unlisted(dir: &Path, days: &[ListedDay]) -> Result<Vec<Problem>, InspectError
         .collect())
 }
 
-fn coverage(days: &[ListedDay]) -> Result<Coverage, InspectError> {
+fn coverage(days: &[ListedDay], venue: &Venue) -> Result<Coverage, InspectError> {
     let (Some(first), Some(last)) = (days.first(), days.last()) else {
         return Ok(Coverage {
             span: None,
             listed: 0,
             empty: Vec::new(),
+            closed: 0,
             missing: Vec::new(),
         });
     };
     let span = DayRange::new(first.day, last.day)?;
     let rows: BTreeMap<Date, u64> = days.iter().map(|d| (d.day, d.rows)).collect();
     let (mut empty, mut missing) = (Vec::new(), Vec::new());
+    let mut closed = 0_u64;
     for date in span.days()? {
         match rows.get(&date) {
             None => missing.push(date),
+            Some(0) if venue.day_state(date)? == VenueState::Closed => {
+                closed = closed.saturating_add(1);
+            }
             Some(0) => empty.push(date),
             Some(_) => {}
         }
@@ -511,6 +632,7 @@ fn coverage(days: &[ListedDay]) -> Result<Coverage, InspectError> {
         span: Some(span),
         listed: u64::try_from(days.len()).unwrap_or(u64::MAX),
         empty: runs(empty)?,
+        closed,
         missing: runs(missing)?,
     })
 }
@@ -609,6 +731,12 @@ fn duplicates<'a, T: PartialEq>(
             _ => None,
         })
         .collect()
+}
+
+/// Whether a bar's prices are not all equal. Only bars inside their own range are summarized, and
+/// such a bar's prices are all equal exactly when its low equals its high.
+fn prices_differ(bar: &Bar) -> Result<bool, InspectError> {
+    Ok(units("low", &bar.low, BAR_SCALE)? != units("high", &bar.high, BAR_SCALE)?)
 }
 
 fn units(column: &'static str, value: &DecStr, scale: u8) -> Result<i128, InspectError> {
@@ -754,6 +882,7 @@ struct Totals {
     quotes: QuoteTotals,
     gaps: Option<GapFinder>,
     duplicates: Vec<Duplicate>,
+    quality: Quality,
 }
 
 impl Totals {
@@ -775,6 +904,7 @@ impl Totals {
                 Kind::Quotes => None,
             },
             duplicates: Vec::new(),
+            quality: Quality::default(),
         }
     }
 
@@ -827,6 +957,12 @@ impl Totals {
                     self.record(bar.start, ("low", &bar.low), ("high", &bar.high), BAR_SCALE)?;
                     let volume = units("volume", &bar.volume, BAR_SCALE)?;
                     self.quantity = sum("volume", self.quantity, volume)?;
+                    if volume == 0 {
+                        self.quality.zero_volume.add(bar.start);
+                    }
+                    if bar.trade_count == 1 && prices_differ(bar)? {
+                        self.quality.single_trade_spread.add(bar.start);
+                    }
                     self.trade_count = self.trade_count.checked_add(bar.trade_count).ok_or(
                         InspectError::Overflow {
                             column: "trade_count",
