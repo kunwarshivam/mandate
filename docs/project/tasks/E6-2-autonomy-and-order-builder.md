@@ -43,21 +43,27 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
 
 - **Reference cases that must move from pending to passing:** `mandate::MC-A01` to `MC-A16`
   (autonomy, 16 cases) and the 28 `mandate::MC-B*` builder cases other than `MC-B17`, `MC-B30`,
-  `MC-B31`, and `MC-B32`. They move in a **harness-and-status PR after stream F's tests PR**, not in
-  this story's tests PR: `fixtures/refcases/mandate.json` exists but `crates/mandate-refcases` has
-  no `mandate` module, and building one needs stream F's mandate document type. Nothing in
-  `crates/mandate-refcases/status.toml` changes before that PR.
+  `MC-B31`, and `MC-B32`. They move in a **harness-and-status PR after stream F's and stream G's
+  tests PRs**, not in this story's tests PR. Three things are missing today:
+  `crates/mandate-refcases` has no `mandate` module (stream F builds it); building one needs stream
+  F's mandate document type; and every `B` case states a `gate_state` and expects a `gate_dry_run`
+  verdict, so the harness composes propose → **gate** → `decide` and needs stream G's gate, which
+  `MC-B21`'s deny and `MC-B22`'s defer make unavoidable (item 15). The `A` family needs neither the
+  gate nor a quote, so if the coordinator wants the 16 autonomy cases earlier they can move on F's
+  harness alone. Nothing in `crates/mandate-refcases/status.toml` changes before that PR.
 - **Cases this story does not own.** `MC-B17`, `MC-B30`, `MC-B31`, and `MC-B32` assert the §5.5
   `trim_to_target` risk exit and its four guards (`rung_not_confirmed`, `holding`,
   `regular_session_only`, `below_minimum_order`). Every one of them turns on ladder state the
   builder does not hold, so they are **stream G's** (`mandate-risk`, DEC-129); see Dependencies.
 - **`RC-08` and `RC-18` are not this story's either.** The tracker's M2 row reads that they wait for
   an interpretation of `propose_order`. Their `propose_order` steps supply an explicit instrument,
-  side, quantity, limit price, and purpose and expect a **gate** verdict with reason code
-  `insufficient_settled_buying_power`, which is trading spec §9.5 buying power reached through
-  §9.1's ordered checks; trading spec §12 maps `propose_order` to `IntentProposed` and `GateDecided`.
-  Nothing in either case combines model outputs or sizes a position. Both are **stream G's**
-  (E6-3 and E6-6); this brief records the correction so no stream waits on the other.
+  side, quantity, limit price, and purpose and expect a **gate** verdict: `RC-08` and `RC-18`'s
+  `generic_cash_account` variant a deny with reason code `insufficient_settled_buying_power`, and
+  `RC-18`'s main path an `allow` with the reservation's effect on buying power (`449.97`). Either way
+  the verdict is trading spec §9.5 buying power reached through §9.1's ordered checks, and §12 maps
+  `propose_order` to `IntentProposed` and `GateDecided`. Nothing in either case combines model
+  outputs or sizes a position. Both are **stream G's** (E6-3 and E6-6); this brief records the
+  correction so no stream waits on the other.
 - **Fixture check before any code.** Every number below is recomputed from §8.3 against the
   `two_stock_swing` base (weights `llm.news_research` 0.4 and `quant.momentum` 0.6, so W = 1;
   `entry_threshold` and `exit_threshold` 0.3; `rebalance_band` 0.05; `max_position_usd` 1500,
@@ -104,6 +110,8 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | §8.3 step 1 s = round₁₂(Σ fresh wᵢ · confidenceᵢ ÷ W), and all three round once, before any comparison | `hand::the_score_rounds_to_twelve_places_before_the_rule_compares_it`, `num::a_weighted_ratio_is_one_rounding_of_the_exact_quotient`, `properties::the_three_combined_figures_match_the_integer_oracle` |
   | §8.3 step 1 no fresh output holds, and still reports c, b, and s | `hand::no_fresh_output_holds_and_reports_zero_minus_one_and_zero` |
   | §8.3 step 2 an exit fires at c ≤ −`exit_threshold`, sells the whole position at the bid, and is disabled for `accumulate` (§3.1) | `hand::an_exit_at_the_threshold_sells_the_whole_position`, `hand::accumulate_never_sells_on_negative_conviction`, `hand::a_flat_position_below_the_exit_threshold_holds` |
+  | §8.3 step 2, item 21 the `accumulate` check precedes the flat-position check, so a flat `accumulate` agent holds `discretionary_exits_disabled` and never `no_position` | `hand::a_flat_accumulate_agent_below_the_exit_threshold_holds_exits_disabled` |
+  | Item 21 the step-5 guard is `n ≤ 0` **or** below the minimum order, so a zero-quantity buy is impossible even with a zero minimum and a zero band | `hand::a_zero_quantity_never_becomes_a_buy_at_a_zero_minimum_and_zero_band`, `properties::every_proposed_quantity_is_strictly_positive` |
   | §8.3 step 2 a buy fires at b ≥ `entry_threshold`, and between the thresholds nothing is proposed | `hand::between_the_thresholds_nothing_is_proposed`, `properties::the_three_bands_partition_the_conviction_line` |
   | §8.3 step 2 cap = min(`max_position_usd`, `max_position_fraction` × E), and T = b × cap × size factor | `hand::the_cap_is_the_lesser_of_the_dollar_and_fraction_limits`, `hand::the_ladder_size_factor_scales_the_target` |
   | §8.3 step 3 Delta = T − MV at the **risk mark** − max cost of working opening orders; a working order counts toward the target | `hand::a_working_opening_order_counts_toward_the_target`, `properties::delta_matches_the_independent_target_oracle` |
@@ -115,8 +123,8 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | §8.3 step 5 hold below the minimum order | `hand::a_value_below_the_minimum_order_holds` |
   | §8.3, §5.3 the proposal is already clipped to the limits, so the gate's §5.3 checks cannot deny an allowed proposal for a limit the builder owns | `properties::a_proposal_never_fails_the_position_order_or_gross_limit` |
   | §6.2 step 2 a `deny` dry run skips the action and **no approval is requested** (DEC-05) | `hand::a_gate_deny_skips_and_asks_nobody`, `properties::no_denied_proposal_ever_reaches_an_approval` |
-  | §6.2 step 2, §9.6 an equity discretionary exit outside the regular session is deferred, never denied, and nothing is stored (DEC-48, DEC-70) | `hand::an_equity_discretionary_exit_outside_the_regular_session_defers`, `hand::a_crypto_discretionary_exit_at_any_time_is_allowed` |
-  | §9.6, DEC-70 a discretionary exit inside the close window goes out as a marketable limit order | `hand::a_discretionary_exit_in_the_close_window_is_a_marketable_limit` |
+  | §6.2 step 2, §9.6 a `defer` verdict leaves nothing stored and never becomes a deny (DEC-48), and the builder never derives one: `decide` sees no session (item 15) | `hand::a_defer_verdict_stores_nothing_and_never_becomes_a_deny`, `properties::decide_returns_deferred_exactly_when_the_verdict_defers` |
+  | §9.6, DEC-70 an equity discretionary exit inside the close window is proposed as a marketable limit order, and a crypto exit never is | `hand::a_discretionary_exit_in_the_close_window_is_a_marketable_limit`, `hand::a_crypto_discretionary_exit_is_a_plain_limit_in_any_session` |
   | §6.1 the builder labels a purpose from side and position but never binds it: the gate assigns it | `hand::a_buy_with_no_position_is_open_and_with_one_is_increase`, `properties::the_builder_never_proposes_a_sell_above_the_position` |
   | DEC-32 long only: no proposal is ever a short sale or crosses zero | `properties::no_proposal_crosses_zero` |
   | ES-21, DEC-89 exact arithmetic: no float, no clock, no randomness, ordered containers, identical inputs give identical proposals | `properties::identical_inputs_give_identical_proposals`, `num::the_builder_arithmetic_is_exact_or_an_error`, and the crate's lint header |
@@ -159,11 +167,14 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   | The rebalance band is compared against Delta only, not against the value after clipping | `hand::a_value_below_the_band_after_clipping_holds` (MC-B19) |
   | One of the four clips is dropped from the minimum | `hand::each_of_the_four_clips_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
   | The share count rounds instead of truncating to the increment | `hand::each_of_the_four_clips_binds_in_turn`, `properties::a_proposal_never_exceeds_any_of_the_four_bounds` |
+  | The step-5 guard drops `n ≤ 0` and keeps only the minimum-order comparison | `hand::a_zero_quantity_never_becomes_a_buy_at_a_zero_minimum_and_zero_band`, `properties::every_proposed_quantity_is_strictly_positive` |
+  | The flat-position check is tried before the `accumulate` check in step 2 | `hand::a_flat_accumulate_agent_below_the_exit_threshold_holds_exits_disabled` |
   | The accumulate remaining-quantity clip divides by 1 instead of β, so the asset fee is ignored | `hand::accumulate_with_fees_counts_the_spend_and_the_quantity_received`, `properties::an_accumulate_buy_never_breaks_a_goal_bound` |
   | The projected-average guard is skipped when the clip did not bind | `hand::a_projected_average_above_max_avg_price_holds` |
   | An `accumulate` goal still takes the exit branch | `hand::accumulate_never_sells_on_negative_conviction` (MC-B29) |
   | A `deny` dry run still requests an approval | `hand::a_gate_deny_skips_and_asks_nobody`, `properties::no_denied_proposal_ever_reaches_an_approval` (MC-B21) |
-  | An equity discretionary exit outside the regular session is denied rather than deferred | `hand::an_equity_discretionary_exit_outside_the_regular_session_defers` (MC-B22) |
+  | A `defer` verdict is turned into a deny or a skip | `hand::a_defer_verdict_stores_nothing_and_never_becomes_a_deny`, `properties::decide_returns_deferred_exactly_when_the_verdict_defers` (MC-B22) |
+  | An equity exit in the close window is proposed as a plain limit, or a crypto exit as a marketable one | `hand::a_discretionary_exit_in_the_close_window_is_a_marketable_limit`, `hand::a_crypto_discretionary_exit_is_a_plain_limit_in_any_session` |
 
 - **Crates in scope.** New `mandate-builder` (layer 5 per ADR-0001 ES-02 and `xtask/layers.toml`'s
   plan; `pure = true`; `safety_critical = true`, DEC-130 item 1; `allowed_external = ["thiserror"]`;
@@ -181,7 +192,8 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
 - **Safety-critical:** yes (DEC-130 item 1). Autonomy is the boundary between what an agent may do
   alone and what the owner must approve, and the builder is what sizes a position. DEC-77 sequence:
   tests PR (crate, stubs, pending tests), implementation PR (test files change only by deleting
-  `#[ignore = "pending E6-2"]` lines), then the harness-and-status PR once stream F's harness exists.
+  `#[ignore = "pending E6-2"]` lines), then the harness-and-status PR once stream F's harness and
+  stream G's gate exist.
 - **Size budget:** 400 non-generated lines per PR (ES-13). The tests PR will exceed it for test
   code; it states its split, and the autonomy tests and the builder tests are separable if the
   coordinator wants two.
@@ -341,6 +353,7 @@ pub struct RiskContext {
     pub thesis_confidence: Unit,
 }
 
+/// Declaration order is not evaluation order; item 21 fixes the order the reasons are reached in.
 pub enum HoldReason {
     NoFreshOutputs, NoPosition, DiscretionaryExitsDisabled, BetweenThresholds,
     AtOrAboveTarget, WithinRebalanceBand, BelowBandAfterClipping,
@@ -380,7 +393,9 @@ pub fn propose(
 
 pub enum GateVerdict { Allow, Deny, Defer }
 /// §6.2 step 2 then steps 3 to 6: the gate's verdict arrives as a **value**, so the builder never
-/// calls the gate. A `Deny` is skipped and journaled and no approval is requested (DEC-05).
+/// calls the gate. A `Deny` is skipped and journaled and no approval is requested (DEC-05); a
+/// `Defer` is the gate's, never derived here — `decide` takes no `Market` and so cannot see the
+/// session (item 15).
 pub enum Outcome { Skipped, Deferred, Classified(Autonomy) }
 pub fn decide(
     policy: &AutonomyPolicy,
@@ -392,9 +407,16 @@ pub fn decide(
 `BuilderError` names one cause each, with a stable `code()` (ES-09): `Unimplemented` (the tests PR's
 stubs only), `UnsupportedSizingMethod`, `ConditionTooDeep`, `ConditionTypeMismatch`,
 `ReservedField` (`unusual_input`, V-018), `DuplicateRuleId`, `NoSignalModels`, `WeightSumZero`,
-`ExpiryBeforeAsOf`, `CrossedQuote`, `AccumulateInstrumentMismatch`, `DirectionNotSupported`, and the
-numeric and time errors it wraps, whose codes (`too_precise`, `overflow`, `not_canonical`) are how an
-input too wide to size exactly refuses the proposal (item 8).
+`CrossedQuote` (item 17), `AccumulateInstrumentMismatch`, and the numeric and time errors it wraps,
+whose codes (`too_precise`, `overflow`, `not_canonical`) are how an input too wide to size exactly
+refuses the proposal (item 8).
+
+Two refusals an earlier draft of this brief carried are **not** in that list, because
+`reference/mandate/ref.py` does not raise them and neither needs an error at all. An output whose
+`expires_at` is at or before its `as_of` is simply never fresh, which is the freshness test's own
+answer; and `Direction` has one variant, `Long`, so a direction v1 does not support is
+unrepresentable rather than rejected (the trust ladder's first rung). `CrossedQuote` stays, and item
+17 records it as a refusal ref.py does not raise.
 
 ## Exact arithmetic (DEC-89, ES-04, ES-21)
 
@@ -495,16 +517,25 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
 14. **`skipped` and `deferred` are outcomes, not decisions.** The reference cases carry them in the
     `autonomy` field; in Rust they are `Outcome::Skipped` and `Outcome::Deferred`, so a gate verdict
     cannot be mistaken for an autonomy decision in a `match`, and the harness maps the two shapes.
-15. **The discretionary-exit session and close-window rules are read from the market input, and the
-    exit is never denied.** An equity exit outside the regular session is `Outcome::Deferred` with
-    nothing stored (§6.2 step 2, DEC-48), and inside the close window the proposal's shape is
-    `MarketableLimit` (DEC-70). Crypto has no regular session, so `Session::Crypto` never defers.
+15. **A discretionary exit is paced, never denied, and the two pacing rules have different owners.**
+    The **session** rule is the gate's: an equity exit outside the regular session is verdict
+    `defer` (trading spec §9.6, §9.1, DEC-48), and `decide` maps `GateVerdict::Defer` to
+    `Outcome::Deferred` with nothing stored (§6.2 step 2). The builder does not derive it — `decide`
+    takes no `Market`, so it cannot see the session, which is item 2 holding rather than an omission.
+    `reference/mandate/ref.py` composes the two inside its `builder`, which is why MC-B22 reads as a
+    builder case; in Rust the harness composes propose → gate → `decide`, and the gate is stream G's.
+    The **close-window** rule is the builder's, because it changes the order it proposes rather than
+    the verdict: `propose` has `Market`, and an equity discretionary exit with `in_close_window` set
+    carries `OrderShape::MarketableLimit` (DEC-70). Crypto has no regular session, so
+    `Session::Crypto` is never deferred.
 16. **No approval is requested for an action the gate would deny**, and `decide` is the only path to
     an `Autonomy`, so that rule holds by construction rather than by discipline (§6.2 step 2).
 17. **Limit prices are the quote, not a collared or tick-rounded price.** §8.3 prices a buy at the
     ask and an exit at the bid; the collar (trading §9.6) and the tick (§2.1) are the gate's and the
     executor's, and applying them here would price an order twice. A crossed quote (bid > ask) is
-    `CrossedQuote` rather than a negative spread quietly sized.
+    `CrossedQuote`, a refusal `reference/mandate/ref.py` does not raise and no committed case
+    reaches, taken because sizing off a crossed quote prices an order against a market that does not
+    exist; it is the one refusal in `BuilderError` that ref.py would not produce.
 18. **Protection is not the builder's.** `protection` is an envelope field the executor uses to place
     the bracket or crypto stop-limit (trading §5.4); the builder proposes the entry only.
 19. **No defaults.** Every field the reference cases treat as optional (`size_factor`, `gross_usd`,
@@ -515,6 +546,13 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
     `ModelOutputRecorded` (with the `ignored` reason for an output this crate rejected),
     `IntentProposed`, `GateDecided`, and the approval events; the skipped and deferred journaling of
     §6.2 step 2 is the runtime's (stream I).
+21. **Two orderings the spec leaves implicit, fixed here.** In step 2 the `accumulate` check comes
+    **before** the flat-position check, as `ref.py` has it, so a flat `accumulate` agent under
+    c ≤ −`exit_threshold` holds `discretionary_exits_disabled`, not `no_position`: the goal disabled
+    the exit, and reporting the position instead would read as though a position would have been
+    sold. And the step-5 guard is `n ≤ 0` **or** the value below the minimum order, not the minimum
+    alone, so a zero-quantity buy is impossible even where `min_order_usd` and `rebalance_band` are
+    both zero — the one thing standing between a fully clipped budget and an order for nothing.
 
 ## Dependencies
 
@@ -522,14 +560,14 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
   `crates/mandate-refcases`'s `mandate` module. Not needed for this story's tests PR: item 5's narrow
   views are defined here, and the tests are hand-built inputs plus generated ones. What waits for F
   is the **harness-and-status PR** that wires the `A` and `B` families and moves them in
-  `status.toml`. If F's brief places `Session`, `Purpose`, `AssetClass`, or `InstrumentId` in
+  `status.toml`, and the `B` family also waits on stream G's gate (Scope). If F's brief places `Session`, `Purpose`, `AssetClass`, or `InstrumentId` in
   `mandate-domain`, this crate takes them from there in the implementation PR instead of defining
   them, which changes no signature in this brief.
-- **Stream G (`mandate-risk`, DEC-129).** Owns the gate whose verdict `decide` consumes, the
-  `trim_to_target` proposal and its guards (items 3), and `RC-08` and `RC-18` (item 4). No code
-  dependency in either direction: the verdict is a value. `GateVerdict` is defined here so the tests
-  PR does not wait for G; if G defines the same enum, the implementation PR takes G's and deletes
-  this one.
+- **Stream G (`mandate-risk`, DEC-129).** Owns the gate whose verdict `decide` consumes — including
+  the `defer` of item 15 — the `trim_to_target` proposal and its guards (item 3), and `RC-08` and
+  `RC-18` (item 4). No code dependency in either direction: the verdict is a value. `GateVerdict` is
+  defined here so the tests PR does not wait for G; if G defines the same enum, the implementation PR
+  takes G's and deletes this one. The `B` family's harness does need G's gate, as Scope says.
 - **Stream J (E17, DEC-132).** Supplies `new_instrument` and `thesis_confidence` (§8.4, §8.5) as
   inputs. §8.5 admission is J's, not this story's; this crate only reads the two flags.
 - **Stream I (E6-1, DEC-131).** The runtime that sequences risk engine → builder → gate → autonomy
@@ -558,15 +596,34 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
    invalidate a committed case), and bound a condition value to the places its field's type holds. Until then item 8's typed refusal
    stands, which is the conservative reading. `schemas/` and `docs/specs/` are protected paths
    (ES-22), so this brief cannot make the change; it is a spec-change PR of its own.
-2. **`reference/mandate/ref.py` computes in unbounded precision**, so for an input beyond the bounds
-   of recommendation 1 the Python reference returns a number and the Rust returns `overflow`. Every
-   one of the 298 committed cases is inside the bounds, so no case diverges; the recommendation
-   removes the possibility rather than documenting it. Confirming it also confirms that the Rust
-   crate, not ref.py, is what a fuzz may be run against.
+2. **`reference/mandate/ref.py` is not an exact oracle beyond the committed cases.** It sets
+   `getcontext().prec = 60` (ref.py:8), so it is 60 significant digits, not unbounded: `budget ÷ ask`
+   and the three accumulate quotients round to 60 digits *before* `trunc` truncates them to the
+   increment, and a quotient that sits within 10⁻⁶⁰ of a multiple of the increment can therefore
+   truncate one increment higher there than exact arithmetic gives. In the other direction, an input
+   beyond recommendation 1's bounds gets a number from Python and `overflow` from Rust. Every one of
+   the 298 committed cases is inside both, so nothing diverges today.
+   **Recommendation:** the Rust crate, not ref.py, is the oracle for anything beyond the 298 cases,
+   and where the two differ the crate's exact 256-bit result is the correct one. A fuzz is therefore
+   run against this story's independent oracles (below), never differentially against ref.py.
+   Recommendation 1 removes the second divergence; the first is inherent to a 60-digit context and is
+   why no differential fuzz is planned.
 3. **`xtask/layers.toml` and CODEOWNERS** gain `mandate-builder` (layer 5, safety-critical, pure,
    `allowed_external = ["thiserror"]`). Both are founder-owned; the tests PR adds the two lines for
    the founder to confirm or veto, as DEC-127 item 1 did for `mandate-backtest`.
-4. **E6-2's acceptance criteria name `MC-A01` to `MC-A11` and `MC-B01` to `MC-B29`**, but spec v0.6
+4. **`UsdExact` puts a 256-bit value in a public API, which ES-04's engineering note does not
+   foresee.** That note says "typed domain values stay within a 96-bit significand and scale ≤ 28",
+   and `Sizes` reports `cap`, `target_value`, and `delta` as `UsdExact` because cap reaches 33 places
+   and the target 57 (the arithmetic section), while §5.2 forbids rounding a value a comparison uses.
+   **Recommendation:** amend the ES-04 note at the next ADR touch to name one wide reported type in
+   `mandate-num` alongside the storage newtypes, bounded to the 256-bit intermediates ES-04 already
+   requires and convertible to `Usd` only by an explicit rounding. The alternative the independent
+   review raised — keep the wide value crate-private and have `propose` return the three figures as
+   rationals compared by cross-multiplication — keeps the note intact but leaves the journal and the
+   approval screen with a numerator and a denominator where the reference cases show `1500`, so it
+   trades a documented type for an undocumented presentation. `docs/adr/` is not a protected path, but
+   amending an accepted ADR is the founder's call either way.
+5. **E6-2's acceptance criteria name `MC-A01` to `MC-A11` and `MC-B01` to `MC-B29`**, but spec v0.6
    added `MC-A12` to `MC-A16` (the admission ceiling and thesis confidence) and `MC-B30` to `MC-B32`
    (the trim guards). This story takes all 16 `A` cases; the three new `B` cases go to stream G with
    `MC-B17` (item 3). Recommendation: the backlog line is updated to "`MC-A01` to `MC-A16` and the
@@ -585,7 +642,7 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
 - Protective order prices and the tranche model (trading §5.4), exit pricing ladders (§5.6), and the
   collar and tick rounding of a submitted price (item 17).
 - The mandate reference-case harness and the `status.toml` move: the harness-and-status PR after
-  stream F's tests PR.
+  stream F's harness and, for the `B` family, stream G's gate.
 - Sizing methods other than `conviction_linear`, and any calibration (DEC-47: there is none in v1).
 
 ## Commands

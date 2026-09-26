@@ -149,7 +149,8 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
   a naive rule walk. Planted bugs per test: the task brief.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
-  harness-and-status PR after stream F's tests PR adds the `mandate` harness module.
+  harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
+  family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
 - **Run:** `cargo nextest run -p mandate-builder`.
 
 ## Journal drafts and the event catalogue
