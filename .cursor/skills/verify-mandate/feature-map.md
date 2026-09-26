@@ -50,18 +50,23 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 ## Accounting
 
-- **Spec:** `docs/specs/trading-domain.md` §6, §8 (invariants I1 to I7 in §8.6), §12 (the journal
-  events that feed the fold); task briefs `docs/project/tasks/E3-1-accounting.md` and
-  `docs/project/tasks/E3-2-corporate-actions.md`.
+- **Spec:** `docs/specs/trading-domain.md` §6, §7.2 (account type and buying power), §8
+  (invariants I1 to I7 in §8.6), §12 (the journal events that feed the fold); task briefs
+  `docs/project/tasks/E3-1-accounting.md`, `docs/project/tasks/E3-2-corporate-actions.md`, and
+  `docs/project/tasks/E3-3-settlement.md`.
 - **Code:** `mandate-accounting`: `crates/mandate-accounting/src/lib.rs` (inputs, corporate
-  actions, fee configuration, errors), `crates/mandate-accounting/src/account.rs` (the pure fold:
-  positions, cash buckets, fee accrual and charges, splits, dividends, cash in lieu, receivables,
-  income, realized and unrealized P&L, equity).
+  actions, fee configuration, account type, reservations, errors),
+  `crates/mandate-accounting/src/account.rs` (the pure fold: positions, cash buckets, fee accrual
+  and charges, splits, dividends, cash in lieu, receivables, income, realized and unrealized P&L,
+  equity, buying power).
 - **Tests:** `crates/mandate-accounting/tests/hand.rs` (hand-calculated cases, partial fills, flips),
   `crates/mandate-accounting/tests/properties.rs` (one property per invariant against an i128
   ledger oracle), `crates/mandate-accounting/tests/corporate_actions.rs` (hand-calculated splits,
   dividends, and cash in lieu), `crates/mandate-accounting/tests/corporate_action_properties.rs`
-  (I1, I3, I5, I6 and the split, mark, dividend, and receivable rules against an i128 oracle).
+  (I1, I3, I5, I6 and the split, mark, dividend, and receivable rules against an i128 oracle),
+  `crates/mandate-accounting/tests/settlement.rs` (hand-calculated buying power in cash and margin
+  accounts, pending charges, reservations), `crates/mandate-accounting/tests/settlement_properties.rs`
+  (buying power and the no-debit rule I4 against an i128 oracle, with a gated generator).
 - **Reference cases:** `trading_domain::*` in `fixtures/refcases/trading-domain.json`.
 - **Run:** `cargo nextest run -p mandate-accounting`.
 
@@ -100,10 +105,11 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
 - **Code:** `mandate-refcases`: `crates/mandate-refcases/src/journal.rs` (one interpretation per
   prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges,
-  settlement, corporate actions, dividends, and cash-in-lieu postings; every other step type and
-  expectation key fails as "not interpreted until" its
-  owning story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/status.toml`
-  (founder-owned).
+  settlement, corporate actions, dividends, cash-in-lieu postings, the account type, and buying
+  power; every other step type and expectation key fails as "not interpreted until" its owning
+  story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
+  (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
+  without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).

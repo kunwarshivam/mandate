@@ -9,8 +9,8 @@ use common::{
     step, text, usd,
 };
 use mandate_accounting::{
-    Account, AccountingError, CashDividend, Input, Position, Receivable, ReceivableKind, Record,
-    Side,
+    Account, AccountType, AccountingError, CashDividend, Input, Position, Receivable,
+    ReceivableKind, Record, Side,
 };
 use mandate_num::{CostBasis, NumError, Price, ShareIncrement, SignedQty, Usd};
 
@@ -447,7 +447,7 @@ fn dividends_round_half_even_to_cents_and_flat_holders_get_none() {
             [dividend_due("DIV", "2026-09-22", "2026-10-01", amount)]
         );
     }
-    let flat = Account::opening(usd("100"), []);
+    let flat = Account::opening(AccountType::Margin, usd("100"), []);
     let action = dividend("DIV", "2026-09-22", "2026-10-01", "0.125");
     assert_eq!(
         record(&flat, &action),
@@ -468,7 +468,7 @@ fn dividends_round_half_even_to_cents_and_flat_holders_get_none() {
 #[test]
 fn splits_adjust_last_fill_prices_and_flat_marks() {
     let config = no_fees();
-    let a = Account::opening(usd("1000"), []);
+    let a = Account::opening(AccountType::Margin, usd("1000"), []);
     let a = step(
         &a,
         &equity(
@@ -490,7 +490,11 @@ fn splits_adjust_last_fill_prices_and_flat_marks() {
     assert_eq!(mark_text(&b, "XYZ"), Some("10".into()));
     assert_eq!(text(b.market_value().unwrap()), "90");
 
-    let flat = step(&Account::opening(usd("0"), []), &mark("FLT", "12"), &config);
+    let flat = step(
+        &Account::opening(AccountType::Margin, usd("0"), []),
+        &mark("FLT", "12"),
+        &config,
+    );
     let action = split("FLT", "2026-09-22", (2, 1), FRACTIONAL, None);
     assert_eq!(
         record(&flat, &action),
@@ -684,6 +688,7 @@ fn a_cash_in_lieu_posting_settles_the_earliest_matching_amount() {
 fn due_orders_settlements_before_dividends_on_one_date() {
     let config = no_fees();
     let a = Account::opening(
+        AccountType::Margin,
         usd("0"),
         [
             (id("AAA"), Position::new(qty("10"), basis("10")).unwrap()),
