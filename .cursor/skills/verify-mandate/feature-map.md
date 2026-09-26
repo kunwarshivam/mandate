@@ -177,12 +177,12 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 ## Pending tests fail on the stubs
 
-- **Spec:** DEC-77 (tests PR, implementation PR, status PR); the story playbook step 8.
-- **Code:** `pending_problems` and `pending_tests` in `xtask/src/main.rs` (markers found on tokens,
-  compared with the merge base, run with nextest `--run-ignored ignored-only`).
+- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110; the story playbook step 8.
+- **Code:** `pending_problems` and `pending_tests` in `xtask/src/main.rs` (markers found on tokens
+  in every tracked or untracked `.rs` file, run in one nextest `--run-ignored ignored-only`).
 - **Tests:** the `xtask` unit tests (markers in comments, doc comments, strings, raw strings, split
-  across lines; base comparison; result matching) and a fixture workspace in a temporary git
-  repository in which a new pending test passes on the stubs.
+  across lines; result matching) and a fixture workspace in a temporary git repository in which
+  committed, uncommitted, and untracked pending tests pass on the stubs.
 - **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
 
 ## Repository automation

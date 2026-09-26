@@ -118,7 +118,7 @@ agent needs the same correction twice, put the rule on the highest rung that can
 1. **Unrepresentable:** types, private fields, and crate boundaries (`xtask/layers.toml`).
 2. **Checked:** clippy lints, xtask checks, and CI. Today these include debt markers
    and plain comments (`cargo xtask markers`), `#[allow]` without a reason, `#[ignore]` without a
-   pending story, a newly pending test that passes on the PR's code (`cargo xtask ci pending`),
+   pending story, a pending test that passes on the PR's code (`cargo xtask ci pending`),
    feature-map drift, and mutants on the diff of safety-critical crates.
 3. **Guided:** this file, skills under `.cursor/skills/`, and `.cursor/BUGBOT.md`.
 4. **Reviewed:** the PR template and the independent review agent, the last resort, not the plan.

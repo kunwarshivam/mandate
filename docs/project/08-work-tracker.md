@@ -67,7 +67,7 @@ issues are the record; this table is the summary
 | E2-2 dataset inspect | `cursor` | #56 | One PR (not safety-critical), open with CI green, awaiting review | `cursor/e2-2-inspect-2749` |
 | #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
-| `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | PR open, CI green, ready for review | `cursor/xtask-pending-fail-7e3b` (#81) |
+| `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Review passed; gate runs every pending test (DEC-110, reserved in #83) | `cursor/xtask-pending-fail-7e3b` (#81) |
 
 ## Waiting on the founder
 
@@ -123,7 +123,7 @@ them in the decision log.
   clear them before the first run.
 - Running pending property tests writes `*.proptest-regressions`; ignored from now on.
 - A tests PR (#66) carried a pending test that already passed on its stubs. The `fast` check now
-  runs every newly pending test and fails if one passes (`cargo xtask ci pending`).
+  runs every pending test and fails if one passes (`cargo xtask ci pending`, DEC-110).
 
 ## Next, in order
 
