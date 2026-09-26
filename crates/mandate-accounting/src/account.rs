@@ -195,6 +195,7 @@ pub struct Applied {
 /// inputs compare equal exactly when every stored value matches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
+    account_type: AccountType,
     positions: BTreeMap<InstrumentId, Position>,
     marks: BTreeMap<InstrumentId, MarkPrice>,
     last_fill_prices: BTreeMap<InstrumentId, MarkPrice>,
@@ -221,8 +222,8 @@ impl Account {
         settled: Usd,
         positions: impl IntoIterator<Item = (InstrumentId, Position)>,
     ) -> Self {
-        let _ = account_type;
         Self {
+            account_type,
             positions: positions
                 .into_iter()
                 .filter(|(_, p)| !p.qty.is_zero())
@@ -684,7 +685,7 @@ impl Account {
     }
 
     pub fn account_type(&self) -> AccountType {
-        AccountType::Margin
+        self.account_type
     }
 
     pub fn settled(&self) -> Usd {
@@ -695,8 +696,26 @@ impl Account {
     /// less `reservations`, less the charges the accrued fees will post. The gate takes the lower of
     /// this and the broker's figure (E6-6). Negative when a debit exists.
     pub fn buying_power(&self, reservations: Reservations) -> Result<Usd, AccountingError> {
-        let _ = reservations;
-        Err(AccountingError::InvalidPosition)
+        let available = match self.account_type {
+            AccountType::Cash => self.settled,
+            AccountType::Margin => self.cash_total()?,
+        };
+        Ok(available
+            .checked_sub(reservations.total())?
+            .checked_sub(self.charges_due()?)?)
+    }
+
+    /// Σ over the open (family, day) buckets of `round(bucket, 2, ceiling)`: the cash the pending
+    /// `FeesCharged` inputs will debit (spec §6.2, DEC-104), not `round(Σ accrued, 2, ceiling)`.
+    /// The two agree while one bucket is open; otherwise this is the more conservative figure, and
+    /// it leaves settled cash after every charge exactly at the buying power reported before them.
+    fn charges_due(&self) -> Result<Usd, AccountingError> {
+        let charges = self
+            .accrued
+            .values()
+            .map(|bucket| bucket.round(CHARGE_SCALE, Rounding::Ceiling))
+            .collect::<Result<Vec<Usd>, NumError>>()?;
+        Ok(sum(charges)?)
     }
 
     pub fn unsettled(&self) -> impl Iterator<Item = (Date, Usd)> {
