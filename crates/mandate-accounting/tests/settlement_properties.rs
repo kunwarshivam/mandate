@@ -16,12 +16,14 @@ use std::collections::BTreeMap;
 use common::{d, id, test_default, usd};
 use mandate_accounting::{
     Account, AccountType, AccountingError, AssetClass, Config, Execution, FeeFamily, Input,
-    Liquidity, Reservations, Side,
+    Liquidity, Position, Reservations, Side,
 };
-use mandate_num::{NumError, Price, Qty, Usd};
+use mandate_num::{CostBasis, NumError, Price, Qty, SignedQty, Usd};
 use mandate_time::{Date, UtcNanos};
 use proptest::collection::vec;
 use proptest::prelude::*;
+use proptest::strategy::ValueTree;
+use proptest::test_runner::TestRunner;
 
 const MONEY: i128 = 1_000_000_000_000;
 const CENT: i128 = MONEY / 100;
@@ -175,7 +177,7 @@ enum Event {
 
 fn event() -> impl Strategy<Value = Event> {
     prop_oneof![
-        6 => (0usize..2, any::<bool>(), 1u32..=500, 100u32..=50_000)
+        6 => (0usize..2, any::<bool>(), prop_oneof![9 => 1u32..=500, 1 => 1u32..=100_000], 100u32..=50_000)
             .prop_map(|(instrument, buy, shares, cents)| Event::Equity { instrument, buy, shares, cents }),
         3 => (any::<bool>(), 1u32..=2_000_000, 100_000u32..=9_000_000, any::<bool>())
             .prop_map(|(buy, micros, cents, maker)| Event::Crypto { buy, micros, cents, maker }),
@@ -188,8 +190,11 @@ fn event() -> impl Strategy<Value = Event> {
 struct Scenario {
     cash: bool,
     /// Buys go through the oracle's buying-power check first, and sells never exceed the position:
-    /// the fills of orders the gate approved (I4).
+    /// the fills of orders the gate approved (I4). Sells are never held back by buying power
+    /// (AGENTS.md rule 13).
     gated: bool,
+    /// Whole shares of AAA held at the opening, so that a gated scenario can sell with no cash.
+    opening_shares: u32,
     settled_cents: u32,
     reserved_cents: u32,
     events: Vec<(Event, u32)>,
@@ -199,14 +204,16 @@ fn scenario() -> impl Strategy<Value = Scenario> {
     (
         any::<bool>(),
         any::<bool>(),
-        0u32..=20_000_000,
+        prop_oneof![9 => 0u32..=500, 1 => 0u32..=100_000],
+        prop_oneof![1 => Just(0u32), 1 => 0u32..=10_000, 2 => 0u32..=20_000_000],
         0u32..=100_000,
         vec((event(), 0u32..=72_000), 1..40),
     )
         .prop_map(
-            |(cash, gated, settled_cents, reserved_cents, events)| Scenario {
+            |(cash, gated, opening_shares, settled_cents, reserved_cents, events)| Scenario {
                 cash,
                 gated,
+                opening_shares,
                 settled_cents,
                 reserved_cents,
                 events,
@@ -267,6 +274,13 @@ struct Step {
     oracle: Oracle,
 }
 
+/// A scenario's steps and its final state, which is the opening state when no input was applied.
+struct Run {
+    steps: Vec<Step>,
+    account: Account,
+    oracle: Oracle,
+}
+
 fn account_type(cash: bool) -> AccountType {
     if cash {
         AccountType::Cash
@@ -297,16 +311,28 @@ fn fold(
 /// Drives the library and the oracle through a scenario. Every fill's cash effect, fee accrual,
 /// trade day, and settlement day are computed by the oracle; the generator asks the oracle, never
 /// the library, whether a gated buy fits.
-fn run(s: &Scenario) -> Result<Vec<Step>, TestCaseError> {
+fn run(s: &Scenario) -> Result<Run, TestCaseError> {
     let config = test_default();
     let reserved = i128::from(s.reserved_cents) * CENT;
     let opening = i128::from(s.settled_cents) * CENT;
-    let mut account = Account::opening(account_type(s.cash), usd(&money_text(opening)), []);
-    let mut twin = Account::opening(account_type(!s.cash), usd(&money_text(opening)), []);
+    let held = i128::from(s.opening_shares) * NANO;
+    let position = Position::new(
+        SignedQty::parse(&qty_text(held)).unwrap(),
+        CostBasis::parse("0").unwrap(),
+    )
+    .unwrap();
+    let positions = [(id(INSTRUMENTS[0]), position)];
+    let mut account = Account::opening(
+        account_type(s.cash),
+        usd(&money_text(opening)),
+        positions.clone(),
+    );
+    let mut twin = Account::opening(account_type(!s.cash), usd(&money_text(opening)), positions);
     let mut oracle = Oracle {
         settled: opening,
         ..Oracle::default()
     };
+    oracle.held.insert(0, held);
     let mut steps = Vec::new();
     let mut secs = LOCAL_BASE + 10 * 3_600;
     for (n, (event, gap)) in s.events.iter().enumerate() {
@@ -330,8 +356,9 @@ fn run(s: &Scenario) -> Result<Vec<Step>, TestCaseError> {
                 let p = i128::from(*cents);
                 let notional = traded * p * 10;
                 let cat = exact_div(traded * CAT_PER_SHARE, NANO);
-                let fits =
-                    !s.gated || oracle.buying_power(s.cash, reserved) >= notional + ceil_cents(cat);
+                let fits = !s.gated
+                    || !*buy
+                    || oracle.buying_power(s.cash, reserved) >= notional + ceil_cents(cat);
                 if traded <= 0 || !fits {
                     continue;
                 }
@@ -375,7 +402,7 @@ fn run(s: &Scenario) -> Result<Vec<Step>, TestCaseError> {
                 };
                 let p = i128::from(*cents);
                 let notional = traded * p * 10;
-                let fits = !s.gated || oracle.buying_power(s.cash, reserved) >= notional;
+                let fits = !s.gated || !*buy || oracle.buying_power(s.cash, reserved) >= notional;
                 if traded <= 0 || !fits {
                     continue;
                 }
@@ -463,7 +490,11 @@ fn run(s: &Scenario) -> Result<Vec<Step>, TestCaseError> {
             });
         }
     }
-    Ok(steps)
+    Ok(Run {
+        steps,
+        account,
+        oracle,
+    })
 }
 
 fn compare(
@@ -501,39 +532,40 @@ proptest! {
     #[test]
     #[ignore = "pending E3-3"]
     fn buying_power_matches_the_oracle_after_every_event(s in scenario()) {
-        for step in run(&s)? {
+        for step in run(&s)?.steps {
             compare(&step.after, &step.oracle, s.cash, s.reserved_cents)?;
             compare(&step.twin, &step.oracle, !s.cash, s.reserved_cents)?;
         }
     }
 
     /// I4 and spec §8.3 for the fills of orders the gate approved (DEC-99, item 5 proposed to the
-    /// founder; this asserts the strictest reading the fee model allows). After every such buy,
-    /// settled cash is ≥ 0 in a cash account and buying power is ≥ 0 in both: a buy never spends
-    /// unsettled proceeds or the cash the pending charges need. After every event, settled +
-    /// Σ unsettled − accrued fees ≥ 0 in both account types. In a cash account, settled cash is
-    /// ≥ 0 whenever no bucket is unsettled, and while one is, settled cash is never below minus the
-    /// charges posted since the last moment nothing was unsettled: the fee charge on a sale is
-    /// debited before the proceeds settle, and nothing else can create the debit. The account type
-    /// is the scenario's, not the fold's report of it.
+    /// founder; this asserts the strictest reading the fee model's rounded charges allow). After
+    /// every such buy, settled cash is ≥ 0 in a cash account and buying power is ≥ 0 in both: a
+    /// buy never spends unsettled proceeds or the cash the pending charges need. After every
+    /// event, settled + Σ unsettled − accrued fees ≥ 0 in both account types. In a cash account,
+    /// settled cash is ≥ 0 whenever no bucket is unsettled, and while one is, settled cash is
+    /// never below minus the charges posted since the last moment nothing was unsettled: the fee
+    /// charge on a sale is debited before the proceeds settle, and nothing else can create the
+    /// debit. The account type, the charges, and whether anything is unsettled are the scenario's
+    /// and the oracle's, never the fold's report of them.
     #[test]
     #[ignore = "pending E3-3"]
     fn i4_the_no_debit_rule_holds_after_every_gate_approved_fill(s in scenario()) {
         let s = Scenario { gated: true, ..s };
         let cash = s.cash;
-        let mut previous_settled = i128::from(s.settled_cents) * CENT;
+        let mut previous_oracle_settled = i128::from(s.settled_cents) * CENT;
         let mut charges_while_unsettled = 0;
-        for step in run(&s)? {
+        for step in run(&s)?.steps {
             let a = &step.after;
             let settled = money(a.settled());
             let total = money(a.cash_total().unwrap());
             let accrued = money(a.fees_accrued().unwrap());
             prop_assert!(total - accrued >= 0, "debit {} after {:?}", total - accrued, step.input);
             if matches!(step.input, Input::FeesCharged { .. }) {
-                charges_while_unsettled += previous_settled - settled;
+                charges_while_unsettled += previous_oracle_settled - step.oracle.settled;
             }
             if cash {
-                if a.unsettled().next().is_none() {
+                if step.oracle.unsettled.is_empty() {
                     prop_assert!(settled >= 0, "settled debit {} with nothing unsettled after {:?}", settled, step.input);
                     charges_while_unsettled = 0;
                 } else {
@@ -544,7 +576,7 @@ proptest! {
                 prop_assert!(!cash || settled >= 0, "a buy spent unsettled proceeds: {} after {:?}", settled, e);
                 prop_assert!(money(a.buying_power(reservations(s.reserved_cents)).unwrap()) >= 0, "{:?}", e);
             }
-            previous_settled = settled;
+            previous_oracle_settled = step.oracle.settled;
         }
     }
 
@@ -553,7 +585,7 @@ proptest! {
     #[test]
     #[ignore = "pending E3-3"]
     fn margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds(s in scenario()) {
-        for step in run(&s)? {
+        for step in run(&s)?.steps {
             let (cash, margin) = if s.cash { (&step.after, &step.twin) } else { (&step.twin, &step.after) };
             let difference = money(margin.buying_power(Reservations::NONE).unwrap()) - money(cash.buying_power(Reservations::NONE).unwrap());
             prop_assert_eq!(difference, step.oracle.unsettled_total(), "{:?}", step.input);
@@ -571,9 +603,9 @@ proptest! {
         other in 0u32..=100_000,
         negative in 1u32..=100_000,
     ) {
-        let Some(last) = run(&s)?.pop() else { return Ok(()) };
-        let with_scenario = money(last.after.buying_power(reservations(s.reserved_cents)).unwrap());
-        let with_other = money(last.after.buying_power(reservations(other)).unwrap());
+        let last = run(&s)?.account;
+        let with_scenario = money(last.buying_power(reservations(s.reserved_cents)).unwrap());
+        let with_other = money(last.buying_power(reservations(other)).unwrap());
         prop_assert_eq!(with_scenario - with_other, (i128::from(other) - i128::from(s.reserved_cents)) * CENT);
         let rejected = Reservations::new(usd(&format!("-{}", cents_text(i128::from(negative)))));
         prop_assert_eq!(rejected, Err(AccountingError::Num(NumError::Negative)));
@@ -586,10 +618,10 @@ proptest! {
     #[test]
     #[ignore = "pending E3-3"]
     fn charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash(s in scenario()) {
-        let Some(last) = run(&s)?.pop() else { return Ok(()) };
+        let last = run(&s)?;
         let config = test_default();
-        let before = money(last.after.buying_power(Reservations::NONE).unwrap());
-        let mut account = last.after;
+        let before = money(last.account.buying_power(Reservations::NONE).unwrap());
+        let mut account = last.account;
         for (crypto, day) in last.oracle.accrued.keys() {
             let charge = Input::FeesCharged {
                 family: if *crypto { FeeFamily::Crypto } else { FeeFamily::Equities },
@@ -600,10 +632,40 @@ proptest! {
             account = applied.unwrap().account;
         }
         prop_assert_eq!(money(account.fees_accrued().unwrap()), 0);
-        let remaining = match account.account_type() {
-            AccountType::Cash => money(account.settled()),
-            AccountType::Margin => money(account.cash_total().unwrap()),
+        let remaining = if s.cash {
+            money(account.settled())
+        } else {
+            money(account.cash_total().unwrap())
         };
         prop_assert_eq!(remaining, before);
     }
+}
+
+/// The gated generator reaches the state DEC-99 item 5 describes: a cash account whose settled
+/// cash a fee charge took below zero while sale proceeds were unsettled, counted with the oracle
+/// over a deterministic run of 4000 scenarios, so the bound in `i4_…` is exercised.
+#[test]
+fn the_gated_generator_produces_fee_debits_while_proceeds_are_unsettled() {
+    let mut runner = TestRunner::deterministic();
+    let mut debits = 0;
+    for _ in 0..4_000 {
+        let s = scenario().new_tree(&mut runner).unwrap().current();
+        let s = Scenario {
+            gated: true,
+            cash: true,
+            ..s
+        };
+        let debit = run(&s).unwrap().steps.iter().any(|step| {
+            matches!(step.input, Input::FeesCharged { .. })
+                && step.oracle.settled < 0
+                && !step.oracle.unsettled.is_empty()
+        });
+        if debit {
+            debits += 1;
+        }
+    }
+    assert!(
+        debits >= 40,
+        "only {debits} of 4000 gated cash scenarios charged a fee into a debit while proceeds were unsettled"
+    );
 }

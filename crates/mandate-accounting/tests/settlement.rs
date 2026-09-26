@@ -363,6 +363,9 @@ fn reservations_reduce_buying_power_and_are_never_negative() {
 
 /// The account type is set at opening, reported, kept through the fold, and part of equality: two
 /// otherwise identical accounts of different types are different states (I6 compares accounts).
+/// Selling 1 XYZ at 10 accrues SEC 0.0003 + TAF 0.0002 + CAT 0.00001 = 0.00051, rounded up to
+/// 0.01: buying power 1000 − 0.01 = 999.99 in the cash account and 1010 − 0.01 = 1009.99 in the
+/// margin account.
 #[test]
 #[ignore = "pending E3-3"]
 fn the_account_type_is_set_at_opening_and_kept_through_the_fold() {
@@ -386,12 +389,14 @@ fn the_account_type_is_set_at_opening_and_kept_through_the_fold() {
     assert_eq!(margin.account_type(), AccountType::Margin);
     assert_eq!(text(cash.settled()), text(margin.settled()));
     assert_eq!(unsettled(&cash), unsettled(&margin));
-    assert_ne!(buying_power(&cash), buying_power(&margin));
+    assert_eq!(buying_power(&cash), "999.99");
+    assert_eq!(buying_power(&margin), "1009.99");
 }
 
 /// In a cash account holding 5 XYZ with no settled cash, selling 5 at 110 puts 550 in the
-/// 2026-09-22 bucket and accrues 0.0176, so buying power is −0.02 and every buy is denied. The
-/// charge at 20:00 debits ceil(0.0176, 2) = 0.02 from settled cash before the proceeds settle:
+/// 2026-09-22 bucket and accrues SEC 0.0165 + TAF 0.001 + CAT 0.00005 = 0.01755, so buying power
+/// is 0 − round(0.01755, 2, ceiling) = −0.02 and every buy is denied. The charge at 20:00 debits
+/// ceil(0.01755, 2) = 0.02 from settled cash before the proceeds settle:
 /// settled −0.02, a debit bounded by the charge that exists only while a bucket is unsettled
 /// (DEC-99). Settlement leaves 549.98.
 #[test]
@@ -413,6 +418,7 @@ fn a_cash_account_sale_can_leave_a_fee_debit_until_its_proceeds_settle() {
     );
     assert_eq!(text(a.settled()), "0");
     assert_eq!(unsettled(&a), [("2026-09-22".into(), "550".into())]);
+    assert_eq!(text(a.fees_accrued().unwrap()), "0.01755");
     assert_eq!(buying_power(&a), "-0.02");
 
     let a = step(&a, &charge(FeeFamily::Equities, "2026-09-21"), &config);
