@@ -60,3 +60,6 @@
 'RC-06::short_position_generic_broker' = { status = "passing", story = "E3-2" }
 'RC-23' = { status = "passing", story = "E3-2" }
 'RC-23::forward_3_for_1_non_terminating_mark' = { status = "passing", story = "E3-2" }
+'RC-10' = { status = "passing", story = "E4-1" }
+'RC-12' = { status = "passing", story = "E4-1" }
+'RC-19' = { status = "passing", story = "E4-1" }
