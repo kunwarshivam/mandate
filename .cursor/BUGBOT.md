@@ -20,6 +20,9 @@ them yet.
   `crates/mandate-refcases/status.toml`) changed in the same PR as code.
 - An implementation PR that edits test files beyond deleting `#[ignore = "pending <story>"]` lines
   (DEC-77).
+- A pending test that `cargo xtask ci pending` does not run, so nothing shows that it fails on the
+  stubs: one a macro generates, or one already pending on `main` whose body the PR changes. The
+  check runs only tests newly marked pending, found by name.
 - A new direct dependency without a row in `docs/dependencies.md`, or a live-trading host,
   credential, or `live` feature.
 
