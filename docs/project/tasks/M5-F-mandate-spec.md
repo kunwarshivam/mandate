@@ -324,8 +324,12 @@ pub enum WorkingUniverse {
 
 `Unavailable` is a real state and not an empty set: §5.3 check 2 must deny every opening while the
 fold has not been read, which an empty `Known` would also do but would report as "universe empty"
-rather than "universe unknown". Stream G's brief defines its own `WorkingUniverse` over
-`InstrumentId`; that copy goes and G consumes this one (DEC-128 item 21).
+rather than "universe unknown". Stream G's merged brief
+([#127](https://github.com/kunwarshivam/mandate/pull/127)) defines this enum over `InstrumentId`
+inside a `#[doc(hidden)]` `crates/mandate-risk/src/spec_types.rs`, together with a placeholder
+`RiskState` whose field is `day_open_equity`; its own Dependencies section has the first
+implementation PR after F's tests PR merges delete that module and take F's types, so no second
+design survives and the two name differences resolve there (DEC-128 item 21).
 
 **One id type.** `mandate_domain::AssetId` is the schema's `$defs/uuid` form (`asset_id` in
 `instrument_ref`, and the `instrument_id` of a model output), which is what every mandate rule and
@@ -882,8 +886,10 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     trait are `mandate-spec`'s. §6.2's order, the built-in AUTO purposes, the admission ceiling, and
     the facts themselves are stream H's, which is why the A-family cases are H's.
 19. **Family F (agent flatten) is stream G's.** The work-graph row for stream F lists it, but spec
-    §11 assigns MC-F01 to MC-F04 to *agent flatten*, stream G's claim
-    [#123](https://github.com/kunwarshivam/mandate/issues/123) holds those four cases under E6-3
+    §11 assigns MC-F01 to MC-F04 to *agent flatten*, and stream G's **merged** brief
+    ([#127](https://github.com/kunwarshivam/mandate/pull/127), claim
+    [#123](https://github.com/kunwarshivam/mandate/issues/123)) owns those four cases under E6-3,
+    with `agent_flatten` in its public API and its own hand and property tests for them;
     together with the `agent_flatten` harness interpretation, and the plan reads no mandate field at
     all (it takes open orders, sub-ledger positions, the session, and the initiator). Implementing it
     in both crates would put one safety-critical rule in two places. The harness this stream writes
@@ -897,9 +903,13 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     each operation and the other consumes it.
 
 21. **Shared types have one home, named here, because three streams read them.** The review of this
-    brief found the same type in two briefs three times, so each is settled: (a)
+    brief found the same type in two briefs three times, so each is settled, and each of the two
+    merged sibling briefs already carries the mechanism that adopts it: (a)
     `WorkingUniverse` lives in `mandate-domain` in stream G's richer shape
-    (`Known { instruments, pinned } | Unavailable`) over `AssetId`, and G's own copy goes; (b) the
+    (`Known { instruments, pinned } | Unavailable`) over `AssetId`, and G's copy — in its
+    `#[doc(hidden)]` `spec_types.rs`, over `InstrumentId` and beside a `RiskState` whose field is
+    `day_open_equity` — is deleted by G's first implementation PR after F's tests PR merges, which is
+    G's own stated plan; (b) the
     id type is `mandate_domain::AssetId`, the schema's UUID form, for everything that comes from a
     mandate, a thesis, or a reference case, while `mandate_accounting::InstrumentId` stays the wider
     broker-facing id (`AssetId -> InstrumentId` total, the reverse fallible and needed only at a
