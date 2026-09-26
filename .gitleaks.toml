@@ -16,9 +16,13 @@ regex = '''(?i)alpaca[a-z_]*secret[a-z_]*\s*[:=]\s*['"]?[A-Za-z0-9/+]{30,}'''
 keywords = ["alpaca"]
 
 # Alpaca pagination tokens in recorded fixtures are base64 of `SYMBOL|...|timestamp`, not
-# credentials; the tests replay them to check pagination (E2-1, DEC-89).
+# credentials; the tests replay them to check pagination (E2-1, DEC-89). `condition = "AND"`
+# allows a match only when both the path and the text match, so the same text in any other file
+# is still reported.
 [[allowlists]]
-description = "Alpaca page tokens"
+description = "Alpaca page tokens in the recorded fixture pages"
 targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^crates/mandate-marketdata/tests/fixtures/alpaca/[a-z0-9-]+/(?:page-[0-9]+\.json|requests\.txt)$''']
 regexTarget = "match"
 regexes = ['''^(?:next_page_token":"[A-Za-z0-9+/=]+"|page_token=[A-Za-z0-9+/%=]+)$''']

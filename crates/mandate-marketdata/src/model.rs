@@ -1,6 +1,6 @@
 //! What a download names and returns: the dataset identity (asset class, feed, kind, symbol), the
-//! day range, and the vendor's bar and trade records (trading domain spec §4.1). Numbers are
-//! [`DecStr`] until `mandate-num` exists (DEC-89).
+//! day range, and the vendor's bar and trade records (trading domain spec §4.1). The records live
+//! here with [`DecStr`] numbers until `mandate-domain` exists (DEC-89).
 
 use std::fmt;
 use std::path::PathBuf;
