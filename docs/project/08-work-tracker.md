@@ -73,6 +73,7 @@ issues are the record; this table is the summary
 | `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Merged (#81; DEC-110 reserved in #83); claim closed | `cursor/xtask-pending-fail-7e3b` (#81) |
 | Cursor allocation: next stories | `cursor` | #87 | Merged (#88); E5-4 and the M1 exit run's keys await the founder | `cursor/allocation-next` (#88) |
 | `mandate-marketdata` safe concurrent dataset writes | `cursor` | #86 | Claimed | — |
+| `mandate-time`: `UtcNanos` fractional seconds (shared crate, for E2-1) | `cursor` | #91 | Tests PR open; the implementation branch is pushed and waits for it to merge (DEC-77) | `cursor/utcnanos-fraction-tests-2652` (tests), `cursor/utcnanos-fraction-impl-2652` (implementation) |
 
 ## Waiting on the founder
 
@@ -106,7 +107,8 @@ them in the decision log.
 | Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | #86 (`cursor`), before any parallel download |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
-| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | A `cursor` claim of its own on the shared `mandate-time` crate, after #85 (allocation #88) |
+| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | #91 (`cursor`): `parse_rfc3339` takes one to nine digits; the canonical `parse` and the journal's `risk_clock` whole-second check stay as strict ([brief](tasks/utcnanos-fractional-seconds.md)) |
+| `mandate-marketdata` keeps its own RFC 3339 parser (`timestamp::parse_rfc3339_utc`), the workaround for the row above | `cursor`, after #91 merges and #86 releases the crate: switch the Alpaca parser to `UtcNanos::parse_rfc3339` |
 | Postgres in the agent environment: `.cursor/install.sh` installs PostgreSQL 18 only where apt.postgresql.org is reachable, and `MANDATE_PG_URL` must be exported by hand (`environment.json` cannot set it) | E5-3 (CI has it: a service container in `full` and nightly) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
 
