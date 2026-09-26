@@ -395,7 +395,10 @@ fn read_quotes(c: &Columns<'_>, out: &mut Vec<Quote>) -> Result<(), DatasetError
         .zip(conditions)
         .zip(tape);
     for (
-        (((((((time, bid_price), bid_size), ask_price), ask_size), bid_exchange), ask_exchange), conditions),
+        (
+            ((((((time, bid_price), bid_size), ask_price), ask_size), bid_exchange), ask_exchange),
+            conditions,
+        ),
         tape,
     ) in rows
     {
