@@ -156,7 +156,8 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131; the paths arrive with the tests PR, which updates this entry.
+and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
+every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -166,20 +167,30 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
   command), 5.1 (append and fencing), 5.2 (write before acting, crash recovery), 8 (replay and
   `fold_version`), 9 (the agent-stream catalogue); `docs/HLD.md` section 5; ADR-0001 ES-06, ES-20,
   ES-21, ES-24.
-- **Code:** `mandate-runtime` (new; `fold` and `handle`, with recovery as `Input::Started`, the mode
-  lattice, the kill-switch routing, approvals, the pure `IdGen`, `GateDryRun`, and `OrderPlan` ports,
-  and the shell-driven `IntentSink` and `TimerSource`), over `mandate-journal`'s drafts and append
-  protocol unchanged. The shell (tokio, the
+- **Code:** `mandate-runtime` (new): `crates/mandate-runtime/src/state.rs` (`RuntimeState`, `fold`,
+  `FOLD_VERSION`), `crates/mandate-runtime/src/step.rs` (`handle`, the only producer of effects),
+  `crates/mandate-runtime/src/types.rs` (`Input`, `Effect`, `Mode`, `Initiator`, `KillScope`,
+  `FlattenPlan` — which has no account-wide variant, so `cancel-all` and `close-position` are
+  unrepresentable), `crates/mandate-runtime/src/ports.rs` (the pure `IdGen`, `GateDryRun`, and
+  `OrderPlan` in `Ports`, and the shell-driven `IntentSink` and `TimerSource`),
+  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
+  `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** the hand cases of the brief (the kill-switch order and scope, recovery, approvals,
-  version application, error codes) and property tests against three independent oracles: a shadow
-  fold over the emitted drafts' canonical bytes, a separately written restriction lattice, and an
-  interval accumulator for durations. A committed golden journal pins `fold_version` 1. Planted bugs
-  per test: the task brief.
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
+  refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
+  approvals, version application, recovery, and the kill switches),
+  `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
+  code with the crate: a shadow fold rebuilt from the emitted drafts' payloads, a separately written
+  restriction lattice, and an interval accumulator for durations),
+  `crates/mandate-runtime/tests/common/mod.rs` (the in-memory shell, which can put an append in doubt,
+  fence a writer, and crash and restart), and `crates/mandate-runtime/tests/golden-journal.json` (the
+  committed fold output that pins `FOLD_VERSION`). Planted bugs per test: the task brief.
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
-- **Run:** `cargo nextest run -p mandate-runtime`.
+- **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
+  `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the

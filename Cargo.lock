@@ -1422,6 +1422,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-runtime"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-sim"
 version = "0.0.0"
 dependencies = [
