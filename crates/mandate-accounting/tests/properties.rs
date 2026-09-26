@@ -842,3 +842,68 @@ proptest! {
         prop_assert_eq!(atto(account.realized_gross()), cash);
     }
 }
+
+/// Canonical decimal text for a signed amount in units of 10⁻¹⁸.
+fn atto_text(value: i128) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let magnitude = value.abs();
+    let int = magnitude / 1_000_000_000_000_000_000;
+    let frac = format!("{:018}", magnitude % 1_000_000_000_000_000_000);
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2048))]
+
+    /// DEC-86 stated exactly. Let U = B − round(B × part ÷ whole, 12, half_even), the reduced basis
+    /// without the limit. The reduced basis is U whenever U is on the position's side of zero or
+    /// zero. Otherwise the rounded removal exceeds the basis held, which needs B to have digits
+    /// below the 12th place, and the reduced basis is 0. Realized P&L is the proceeds less the
+    /// basis actually removed. The oracle is exact: basis in 10⁻¹⁸ (so removals are multiples of
+    /// 10⁶), quantities and prices in 10⁻⁹. Half the bases are below 2 × 10⁻¹², where the limit
+    /// can bind, and a sixth are on the 12-place grid, where it never does.
+    #[test]
+    #[ignore = "pending E3-1"]
+    fn a_reduction_matches_the_rounded_formula_unless_the_removal_exceeds_the_basis_held(
+        short in any::<bool>(),
+        whole in 2i128..=1_000,
+        part_pick in any::<u32>(),
+        basis_atto in prop_oneof![
+            3 => 0i128..=2_000_000,
+            1 => 0i128..=100_000_000,
+            1 => 0i128..=10_000_000_000_000_000_000_000,
+            1 => (0i128..=10_000_000_000).prop_map(|grid| grid * 1_000_000),
+        ],
+        nanos in 1i128..=1_000_000,
+    ) {
+        let part = 1 + i128::from(part_pick) % (whole - 1);
+        let signed = |magnitude: i128| if short { -magnitude } else { magnitude };
+        let basis = signed(basis_atto);
+        let removal = floor_round(basis * part, whole * 1_000_000, true) * 1_000_000;
+        let uncapped = basis - removal;
+        let expected = if signed(uncapped) >= 0 { uncapped } else { 0 };
+        if expected != uncapped {
+            prop_assert_ne!(basis_atto % 1_000_000, 0, "the limit bound on a basis on the 12-place grid");
+        }
+        let qty = |magnitude: i128| if short { format!("-{}", qty_text(magnitude)) } else { qty_text(magnitude) };
+        let held = Position::new(
+            SignedQty::parse(&qty(whole)).unwrap(),
+            CostBasis::parse(&atto_text(basis)).unwrap(),
+        )
+        .unwrap();
+        let side = if short { Side::Buy } else { Side::Sell };
+        let fill = equity("f1", "AAA", side, &qty_text(part), &qty_text(nanos), "2026-09-21T10:00:00-04:00");
+        let applied = Account::opening(usd("0"), [(id("AAA"), held)]).apply(&fill, &no_fees());
+        prop_assert!(applied.is_ok(), "{:?}", applied);
+        let account = applied.unwrap().account;
+        let after = account.position(&id("AAA"));
+        prop_assert_eq!(after.qty().to_string(), qty(whole - part));
+        prop_assert_eq!(atto(after.basis()), expected, "B {} part {} whole {}", basis, part, whole);
+        prop_assert_eq!(atto(account.realized_gross()), signed(part * nanos) - (basis - expected));
+    }
+}

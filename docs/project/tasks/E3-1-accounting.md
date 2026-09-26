@@ -91,8 +91,8 @@ failed the accounting implementation. What changed, and why:
    with a basis, so a long with a negative basis could be built and closing it at 100 reported 200
    realized. The constructor now rejects a basis whose sign opposes the quantity; initial positions
    and the harness's fixture loading go through it, and each fold transition builds its result
-   through it. A reduction's removed basis is limited to the basis held, which matters only when the
-   basis has digits below the 12th place.
+   through it. A reduction's removed basis is limited to the basis held; see round 2 for the exact
+   condition under which the limit changes the result.
 2. **Fee configuration is non-negative by type (DEC-87).** `EquityFees::taf_cap` was a signed
    `Usd`: a negative cap made per-execution TAF negative while per-order mode clamped it to 0. It is
    now `FeeCap` (parsed at the boundary; negative text is rejected), and both modes use
@@ -100,14 +100,41 @@ failed the accounting implementation. What changed, and why:
 3. **`Halve` in the property generator** is resolved from the oracle's position at that point in
    the run, not from the opening state, so it halves what is held after earlier events.
 
-New tests (pending in the tests PR, live in the implementation PR):
+## Review round 2
+
+The second review failed the round-1 tests PR on two points.
+
+1. **Regression guards are not pending tests.** `closing_at_the_average_cost_realizes_nothing` and
+   `both_taf_cap_modes_charge_one_execution_orders_alike` pass on the round-0 implementation (the
+   failed PR #20). The defects they relate to (a basis on the wrong side, a negative cap) can no
+   longer be constructed, so these tests guard against regressions rather than show a fix. A
+   pending marker means "fails until the implementation lands", so they no longer carry one. They
+   cannot run live in the tests PR either: `main` still has the stubbed fold, where they fail at
+   `InstrumentId::new`. They move out of the tests PR and land as live tests in a tests-only change
+   after the implementation.
+2. **DEC-86 now states the limit exactly.** With U = B − round(B × part ÷ whole, 12, half_even),
+   the reduced basis is U whenever U is on the position's side of zero or zero. Otherwise the
+   rounded removal exceeds the basis held, and the position ends with zero basis. That requires B
+   to have digits below the 12th decimal place. The limit depends on the rounded removal, not the
+   exact formula: B 0.000000000000527 reduced by 19 of 20 has exact remaining basis
+   0.00000000000002635, yet the result is 0.
+
+Tests for the review findings. Each is pending in the tests PR and fails on the round-0 code:
 
 | Finding | Test |
 |---|---|
 | Basis sign follows quantity | `hand::positions_whose_basis_opposes_the_quantity_are_rejected` |
-| Closing P&L stays correct | `hand::closing_at_the_average_cost_realizes_nothing`, `hand::a_reduction_never_removes_more_basis_than_the_position_holds`, `properties::reductions_keep_the_basis_on_the_position_side_and_a_close_realizes_cash_flow` |
+| A reduction removes at most the basis held | `hand::a_reduction_never_removes_more_basis_than_the_position_holds`, `properties::reductions_keep_the_basis_on_the_position_side_and_a_close_realizes_cash_flow` |
+| DEC-86's exact condition | `hand::the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held`, `properties::a_reduction_matches_the_rounded_formula_unless_the_removal_exceeds_the_basis_held` |
 | Negative cap rejected | `num::fee_caps_are_non_negative_amounts_of_money` |
-| Cap modes agree | `hand::both_taf_cap_modes_charge_one_execution_orders_alike` |
+
+The property `a_reduction_matches_the_rounded_formula_unless_the_removal_exceeds_the_basis_held`
+uses an exact integer oracle. It fails when the limit is removed, when the limit is applied
+unconditionally (the whole basis removed on every reduction), and when it ignores the position's
+side.
+
+The other `pending E3-1` tests in `hand.rs` and `properties.rs` came with the first tests PR. They
+are pending because the fold on `main` is stubbed, and they pass on the round-0 code.
 
 `crates/mandate-refcases/status.toml` is unchanged: the status PR still marks the same cases as
 passing.

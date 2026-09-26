@@ -968,3 +968,69 @@ fn a_reduction_never_removes_more_basis_than_the_position_holds() {
         assert_eq!(text(a.realized_gross()), "0");
     }
 }
+
+/// The limit on the removed basis binds only when the rounded removal exceeds the basis held, and
+/// then the position ends with zero basis (DEC-86). Each case reduces by selling (or, for the
+/// short, buying back) at 1 with no fees; realized = proceeds − removed.
+///
+/// - Q 20, B 0.000000000000527, sell 19: the exact remaining basis is 0.00000000000002635 (on the
+///   long side), but round(0.00000000000050065, 12, half_even) = 0.000000000001 exceeds B, so the
+///   removal is B: Q 1, B 0, realized 19 − 0.000000000000527 = 18.999999999999473. The short
+///   mirror (Q −20, B −0.000000000000527, buy 19) ends at B 0 with realized −18.999999999999473.
+/// - Q 20, B 0.000000000527 (on the 12-place grid), sell 19: removal round(0.00000000050065, 12)
+///   = 0.000000000501, B 0.000000000026, realized 19 − 0.000000000501 = 18.999999999499.
+/// - Q 2, B 1.0000000000005 (digits below the 12th place), sell 1: removal
+///   round(0.50000000000025, 12) = 0.5 does not exceed B, so the rounded formula stands:
+///   B 0.5000000000005, realized 0.5.
+#[test]
+#[ignore = "pending E3-1"]
+fn the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held() {
+    let config = no_fees();
+    for (qty, basis, side, traded, left, realized) in [
+        (
+            "20",
+            "0.000000000000527",
+            Side::Sell,
+            "19",
+            ("1", "0"),
+            "18.999999999999473",
+        ),
+        (
+            "-20",
+            "-0.000000000000527",
+            Side::Buy,
+            "19",
+            ("-1", "0"),
+            "-18.999999999999473",
+        ),
+        (
+            "20",
+            "0.000000000527",
+            Side::Sell,
+            "19",
+            ("1", "0.000000000026"),
+            "18.999999999499",
+        ),
+        (
+            "2",
+            "1.0000000000005",
+            Side::Sell,
+            "1",
+            ("1", "0.5000000000005"),
+            "0.5",
+        ),
+    ] {
+        let a = Account::opening(usd("0"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = step(
+            &a,
+            &equity("f1", "XYZ", side, traded, "1", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(
+            position(&a, "XYZ"),
+            (left.0.into(), left.1.into()),
+            "{qty} {basis}"
+        );
+        assert_eq!(text(a.realized_gross()), realized, "{qty} {basis}");
+    }
+}
