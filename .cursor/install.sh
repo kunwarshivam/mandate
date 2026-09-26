@@ -91,7 +91,8 @@ as_postgres() {
   if [ -z "$SUDO" ]; then runuser -u postgres -- "$@"; else $SUDO -u postgres "$@"; fi
 }
 install_postgres() {
-  $SUDO apt-get install -y -qq postgresql-common &&
+  $SUDO apt-get update -qq &&
+    $SUDO apt-get install -y -qq postgresql-common &&
     $SUDO /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y &&
     $SUDO apt-get install -y -qq "postgresql-$PG_MAJOR"
 }
