@@ -18,7 +18,7 @@ keywords = ["alpaca"]
 # Alpaca pagination tokens in recorded fixtures are base64 of `SYMBOL|...|timestamp`, not
 # credentials; the tests replay them to check pagination (E2-1, DEC-89). `condition = "AND"`
 # allows a match only when both the path and the text match, so the same text in any other file
-# is still reported.
+# is still reported; `cargo xtask ci supply-chain` plants cases that check this.
 [[allowlists]]
 description = "Alpaca page tokens in the recorded fixture pages"
 targetRules = ["generic-api-key"]

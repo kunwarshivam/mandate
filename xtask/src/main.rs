@@ -191,7 +191,8 @@ fn ci(job: &str) -> Result<()> {
                     ],
                 ),
                 None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
-            }
+            }?;
+            gitleaks_exceptions()
         }
         "spec-guard" => {
             commit_trailers()?;
@@ -249,6 +250,92 @@ fn output(program: &str, args: &[&str]) -> Result<String> {
         );
     }
     String::from_utf8(out.stdout).context("non-UTF-8 output")
+}
+
+#[derive(Deserialize)]
+struct Finding {
+    #[serde(rename = "File")]
+    file: String,
+    #[serde(rename = "RuleID")]
+    rule_id: String,
+}
+
+/// Cases for the `.gitleaks.toml` exceptions (DEC-89): a one-line file, and the rule that must
+/// report it, or `None` where an exception must allow it. An exception allows its text only in the
+/// files it names, and every other rule still applies there. The values are assembled at run time
+/// so that this source matches no rule.
+fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
+    let page = concat!(
+        "U1BZfDIwMjYtMDktMjRUMTQ6MDA6MDBa",
+        "fFBMQU5URUR8MTIzNDU2Nzg5MA=="
+    );
+    let json = format!("{{\"bars\":[],\"next_page_token\":\"{page}\"}}");
+    let query = format!("/v2/stocks/bars?symbols=SPY&page_token={page}");
+    let fixture = |name| format!("crates/mandate-marketdata/tests/fixtures/alpaca/planted/{name}");
+    let key_id = format!("PK{}", "PLANTEDKEYID000000");
+    let generic = Some("generic-api-key");
+    vec![
+        (fixture("page-1.json"), json.clone(), None),
+        (fixture("requests.txt"), query.clone(), None),
+        (fixture("page-2.json"), key_id, Some("alpaca-key-id")),
+        (fixture("notes.json"), json.clone(), generic),
+        ("stray.json".to_owned(), json, generic),
+        ("stray.txt".to_owned(), query, generic),
+    ]
+}
+
+/// Scans [`gitleaks_plants`], written to a temporary directory, with the repository's
+/// `.gitleaks.toml`: exactly the expected findings must be reported.
+fn gitleaks_exceptions() -> Result<()> {
+    let dir = env::temp_dir().join(format!("mandate-gitleaks-{}", std::process::id()));
+    let report_path = dir.with_extension("json");
+    let mut expected = BTreeSet::new();
+    for (path, line, rule) in gitleaks_plants() {
+        let file = dir.join(&path);
+        fs::create_dir_all(file.parent().context("planted file has no parent")?)?;
+        fs::write(&file, format!("{line}\n"))?;
+        expected.extend(rule.map(|rule| (path, rule.to_owned())));
+    }
+    let config = repo_root()?.join(".gitleaks.toml");
+    eprintln!("    $ (in a temporary directory) gitleaks dir --config .gitleaks.toml .");
+    let status = Command::new("gitleaks")
+        .current_dir(&dir)
+        .args([
+            "dir",
+            "--no-banner",
+            "--exit-code",
+            "0",
+            "--report-format",
+            "json",
+        ])
+        .arg("--config")
+        .arg(&config)
+        .arg("--report-path")
+        .arg(&report_path)
+        .arg(".")
+        .status()
+        .context("starting `gitleaks` (is it installed? see AGENTS.md)")?;
+    let report_text = fs::read_to_string(&report_path);
+    fs::remove_dir_all(&dir)?;
+    if !status.success() {
+        bail!("gitleaks failed on the planted cases with {status}");
+    }
+    fs::remove_file(&report_path)?;
+    let findings: Vec<Finding> = serde_json::from_str(&report_text?)?;
+    let found: BTreeSet<(String, String)> =
+        findings.into_iter().map(|f| (f.file, f.rule_id)).collect();
+    let mut problems: Vec<String> = (expected.difference(&found))
+        .map(|(file, rule)| format!("{file}: not reported by {rule}"))
+        .collect();
+    problems.extend(
+        (found.difference(&expected)).map(|(file, rule)| format!("{file}: reported by {rule}")),
+    );
+    report(problems, "gitleaks-exceptions")?;
+    eprintln!(
+        "    gitleaks-exceptions: {} planted findings reported",
+        expected.len()
+    );
+    Ok(())
 }
 
 /// Runs a tool from the `python/` uv workspace (ruff, pytest, the exporter).
