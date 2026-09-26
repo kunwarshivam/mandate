@@ -123,6 +123,15 @@ macro_rules! conformance_tests {
 
         $(#[$attr])*
         #[test]
+        fn events_with_artifact_references_are_stored_and_read_back() {
+            $crate::conformance::run(
+                $fresh,
+                $crate::conformance::events_with_artifact_references_are_stored_and_read_back,
+            );
+        }
+
+        $(#[$attr])*
+        #[test]
         fn rejected_batches_write_nothing_and_use_no_seq() {
             $crate::conformance::run(
                 $fresh,
@@ -491,6 +500,37 @@ pub fn identical_retries_return_the_stored_events<B: Backend>(b: &mut B) {
     all.extend(rows);
     all.extend(next);
     assert_eq!(b.rows(&s), all, "retries stored nothing");
+}
+
+/// A `MarkUpdated` draft whose `payload.source` is the artifact reference `sha256:<fill>…`.
+pub fn artifact_mark_draft(n: u64, fill: char) -> Vec<u8> {
+    let reference = format!("\"sha256:{}\"", fill.to_string().repeat(64));
+    let draft = edit(&mark_draft(n, "1"), "payload.source", Some(&reference));
+    edit(&draft, "artifact_refs", Some(&format!("[{reference}]")))
+}
+
+pub fn events_with_artifact_references_are_stored_and_read_back<B: Backend>(b: &mut B) {
+    let s = stream();
+    let epoch = opened_with_marks(b, 0);
+    let batch = [artifact_mark_draft(1, 'a'), artifact_mark_draft(2, 'b')];
+    let refs: Vec<&[u8]> = batch.iter().map(Vec::as_slice).collect();
+    let rows = committed(b.append(&s, 1, epoch, now(), &refs));
+    let next = committed(b.append(&s, 3, epoch, now(), &[&mark_draft(3, "1")]));
+    assert_eq!(next[0].prev_hash, rows[1].hash);
+    assert_eq!(
+        b.append(&s, 0, epoch, now(), &refs),
+        AppendOutcome::AlreadyCommitted(rows.clone()),
+        "artifact bytes are not needed to recognise a retry"
+    );
+    assert_eq!(b.event(&event_id(1)).as_ref(), Some(&rows[0]));
+    let mut all = vec![b.rows(&s)[0].clone()];
+    all.extend(rows);
+    all.extend(next);
+    assert_eq!(
+        b.rows(&s),
+        all,
+        "reads do not need the artifact store (§11 checks 6 and 7)"
+    );
 }
 
 pub fn rejected_batches_write_nothing_and_use_no_seq<B: Backend>(b: &mut B) {
