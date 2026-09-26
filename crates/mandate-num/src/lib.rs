@@ -76,6 +76,8 @@ const MARK_SCALE: u32 = 12;
 /// Money and rates keep full precision up to the stored maximum.
 const FULL_SCALE: u32 = 28;
 const BPS_PER_UNIT: u64 = 10_000;
+/// The `sqrt` impact model takes its root at 18 fractional digits (spec §6.4, DEC-106 item 3).
+const ROOT_SCALE: u32 = 18;
 
 fn parse(text: &str, max_scale: u32) -> Result<Decimal, NumError> {
     let value = Exact::parse(text)?.to_decimal(max_scale)?;
@@ -219,16 +221,21 @@ impl Qty {
 
     /// `self + other`, exact.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Overflow)
+        self.exact()
+            .add(other.exact())?
+            .to_decimal(QTY_SCALE)
+            .map(Self)
     }
 
     /// `truncate(fraction × self, increment)`: a bar's volume cap (spec §6.4 rule 3), truncated
     /// toward zero to the instrument's quantity increment, so a cap never reaches past the volume
     /// its reference bar traded. Truncation, not rounding: the cap is an upper bound.
     pub fn portion(self, fraction: Fraction, increment: ShareIncrement) -> Result<Self, NumError> {
-        let _ = (fraction, increment);
-        Err(NumError::Overflow)
+        self.exact()
+            .mul(fraction.exact())?
+            .div_toward_zero(Exact::integer(1), increment.places())?
+            .to_decimal(QTY_SCALE)
+            .map(Self)
     }
 }
 
@@ -293,8 +300,16 @@ impl Price {
     /// never flatters a backtest (DEC-106 item 2). The result is not tick-rounded (spec §6.4 rule
     /// 9). `not_positive` when the slippage takes a sell price to zero or below.
     pub fn slipped(self, slippage: Bps, adverse: Adverse) -> Result<Self, NumError> {
-        let _ = (slippage, adverse);
-        Err(NumError::Overflow)
+        let amount = self.exact().mul(slippage.exact())?.div(
+            Exact::integer(BPS_PER_UNIT),
+            QTY_SCALE,
+            Rounding::Ceiling,
+        )?;
+        let moved = match adverse {
+            Adverse::Up => self.exact().add(amount)?,
+            Adverse::Down => self.exact().sub(amount)?,
+        };
+        moved.to_decimal(QTY_SCALE).and_then(positive).map(Self)
     }
 }
 
@@ -327,6 +342,17 @@ pub enum ShareIncrement {
     Whole,
 }
 
+impl ShareIncrement {
+    /// How many fractional digits a quantity on this grid may have: a quantity is truncated to it
+    /// by a split (spec §8.5) and a backtest volume cap (spec §6.4 rule 3).
+    fn places(self) -> u32 {
+        match self {
+            Self::Fractional => QTY_SCALE,
+            Self::Whole => 0,
+        }
+    }
+}
+
 /// A split ratio `new:old` of positive integers: `new` shares for every `old` (spec §8.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SplitRatio {
@@ -355,14 +381,10 @@ impl SplitRatio {
     /// Q' = Q × new ÷ old truncated toward zero to `increment`, with Q kept for the residual
     /// formulas.
     pub fn split(self, qty: SignedQty, increment: ShareIncrement) -> Result<SplitQty, NumError> {
-        let grid = match increment {
-            ShareIncrement::Fractional => QTY_SCALE,
-            ShareIncrement::Whole => 0,
-        };
         let after = qty
             .exact()
             .mul(Exact::integer(self.new))?
-            .div_toward_zero(Exact::integer(self.old), grid)?
+            .div_toward_zero(Exact::integer(self.old), increment.places())?
             .to_decimal(QTY_SCALE)?;
         Ok(SplitQty {
             ratio: self,
@@ -563,8 +585,10 @@ impl Bps {
 
     /// `self + other`, exact: the half-spread plus the impact of spec §6.4's slippage.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Overflow)
+        self.exact()
+            .add(other.exact())?
+            .to_decimal(FULL_SCALE)
+            .map(Self)
     }
 
     /// `coefficient × sqrt(fill ÷ reference)` in basis points: the `sqrt` impact model of spec
@@ -573,8 +597,14 @@ impl Bps {
     /// (DEC-106 item 3); the product is then exact. `division_by_zero` when `reference` is zero,
     /// which the caller avoids by capping the bar at zero instead (spec §6.4 rule 3).
     pub fn sqrt_impact(coefficient: Bps, fill: Qty, reference: Qty) -> Result<Self, NumError> {
-        let _ = (coefficient, fill, reference);
-        Err(NumError::Overflow)
+        let root = fill
+            .exact()
+            .ceiling_root_of_ratio(reference.exact(), ROOT_SCALE)?;
+        coefficient
+            .exact()
+            .mul(root)?
+            .to_decimal(FULL_SCALE)
+            .map(Self)
     }
 }
 
@@ -586,12 +616,20 @@ impl Fraction {
     /// Canonical text of a value from zero to one inclusive: `negative` below zero, `above_one`
     /// above one, `too_precise` beyond 9 places.
     pub fn parse(text: &str) -> Result<Self, NumError> {
-        let _ = text;
-        Err(NumError::Overflow)
+        let value = parse(text, QTY_SCALE).and_then(non_negative)?;
+        if value > Decimal::ONE {
+            Err(NumError::AboveOne)
+        } else {
+            Ok(Self(value))
+        }
     }
 
     pub fn is_zero(self) -> bool {
         self.0.is_zero()
+    }
+
+    fn exact(self) -> Exact {
+        Exact::of(self.0)
     }
 }
 

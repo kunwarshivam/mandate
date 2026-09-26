@@ -732,7 +732,6 @@ fn hand_calculated_split_values_from_the_reference_cases() {
 /// The backtest fill model's arithmetic (trading-domain spec §6.4, DEC-106; claim #62). A
 /// `Fraction` is the volume-cap fraction: non-negative, at most one, at most 9 places.
 #[test]
-#[ignore = "pending E4-1"]
 fn fractions_run_from_zero_to_one_inclusive() {
     for accepted in ["0", "0.1", "0.000000001", "0.5", "1"] {
         assert_eq!(
@@ -767,7 +766,6 @@ fn fractions_run_from_zero_to_one_inclusive() {
 /// 10% of 5000 shares is 500 either way, while 10% of 5005 is 500.5, which whole shares truncate to
 /// 500 and a fractionable instrument keeps.
 #[test]
-#[ignore = "pending E4-1"]
 fn hand_calculated_slippage_and_volume_caps() {
     let three_bps = Bps::parse("3").unwrap();
     let hundred = Price::parse("100").unwrap();
@@ -845,7 +843,6 @@ fn hand_calculated_slippage_and_volume_caps() {
 /// 0.707106781186547525, giving 7.07106781186547525 bps; and √2 = 1.41421356237309504880… rounds up
 /// to 1.414213562373095049, giving 14.14213562373095049 bps.
 #[test]
-#[ignore = "pending E4-1"]
 fn hand_calculated_sqrt_impacts() {
     let ten = Bps::parse("10").unwrap();
     let cases = [
@@ -892,7 +889,6 @@ fn fractions() -> impl Strategy<Value = i128> {
 proptest! {
     /// Adding quantities and basis points is exact or an error (ES-04).
     #[test]
-    #[ignore = "pending E4-1"]
     fn adding_quantities_and_basis_points_is_exact(
         a in unsigned(i64::MAX, 9),
         b in unsigned(i64::MAX, 9),
@@ -915,7 +911,6 @@ proptest! {
     /// Spec §6.4 rule 3: a volume cap is the product truncated to the increment, never above the
     /// exact product, and never above the quantity it comes from when the fraction is at most one.
     #[test]
-    #[ignore = "pending E4-1"]
     fn a_volume_cap_is_the_truncated_product_and_never_above_it(
         volume in unsigned(1_000_000_000, 9),
         mantissa in fractions(),
@@ -938,7 +933,6 @@ proptest! {
     /// is `not_positive` rather than a price. Prices stay below 10⁹ and basis points below 10⁶ so
     /// that the `i128` oracle's own product is exact.
     #[test]
-    #[ignore = "pending E4-1"]
     fn slippage_moves_a_price_against_the_order_by_a_rounded_up_amount(
         p in positive(1_000_000_000, 9),
         b in unsigned(1_000_000, 8),
@@ -966,7 +960,6 @@ proptest! {
     /// reference volume, never above it below that, never below it above that, and never falls as
     /// the fill grows.
     #[test]
-    #[ignore = "pending E4-1"]
     fn sqrt_impact_is_monotone_and_bounded_by_its_coefficient(
         reference in positive(100_000, 9),
         smaller in positive(100_000, 9),
