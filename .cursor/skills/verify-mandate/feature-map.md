@@ -180,6 +180,36 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
 - **Run:** `cargo nextest run -p mandate-runtime`.
+## Risk gate
+
+Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
+paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
+  §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
+  buying power, §9.6 market-conduct controls), §3.1 to §3.3 (instrument fields, the
+  eligibility floor, concentration), §4.3 and §4.4 (sessions, auction windows, halts),
+  §5.1 to §5.6 (the v1 order policy, the constraints before submission, the kill switch,
+  exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
+  (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
+  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
+- **Code:** `mandate-risk` (new; the pure gate over a mandate, a risk state, an account snapshot, a
+  working universe, a market context and one proposed order, returning allow, deny, defer or hold
+  with the first failing check's stable code and the whole check list for the journal; the
+  §9.2 day-trade ledger; the drawdown ladder's size factor and trim proposals; the
+  agent-scoped flatten plan), with the exact arithmetic added to `mandate-num`. It reads
+  `mandate-accounting`'s account figures and `mandate-time`'s calendar and sessions, and changes
+  neither.
+- **Tests:** the hand-calculated cases of the brief's reference-case table, one property per
+  invariant and per "never" or "always" in trading-domain spec §9 against an independent
+  `i128` oracle, and the E6-3 fuzz over random mandates, market paths and proposal sequences whose
+  shadow ledger is accumulated separately from the gate's own figures. Planted bugs per test: the
+  task brief.
+- **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
+  `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
+  and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
+  in `fixtures/refcases/trading-domain.json`.
+- **Run:** `cargo nextest run -p mandate-risk`.
 
 ## Journal drafts and the event catalogue
 
