@@ -78,6 +78,7 @@ issues are the record; this table is the summary
 | `mandate-time`: `UtcNanos` fractional seconds (shared crate, for E2-1) | `cursor` | #91 | Tests PR open; the implementation branch is pushed and waits for it to merge (DEC-77) | `cursor/utcnanos-fraction-tests-2652` (tests), `cursor/utcnanos-fraction-impl-2652` (implementation) |
 | E2-3 top-of-book quotes | `cursor` | #94 | Slice 1 (model, client, storage) open for review (#95); the CLI integration PR follows | `cursor/e2-3-quotes-v2-a075` (#95); `cursor/e2-3-quotes-a075` superseded |
 | `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` (#90) |
+| Thesis revision loop: DEC-111, E17-9, R-28 | `claude-code` | — | Docs PR at the founder's request; the story waits on E17-8 | docs only |
 
 ## Waiting on the founder
 
@@ -173,7 +174,8 @@ them in the decision log.
    internal paper workspaces with the research basket as the fixed test data universe, every
    admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation (E17-8). The
    full E17-3, for users' agents under their own envelopes, follows only after that evaluation
-   passes.
+   passes. **E17-9**, the thesis revision loop, follows E17-8 and one completed evaluation
+   ([DEC-111](04-decision-log.md#decisions)); it is never built against backtests.
 
 E4-1, E2-4, and E5-3 touch different crates and can run in parallel; reviews and merges run one at a
 time.

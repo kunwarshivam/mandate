@@ -49,6 +49,9 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 - Signal-model scorecards: every thesis scored after its horizon against pre-registered baselines on
   forward paper trading, net of modeled costs ([DEC-99](../project/04-decision-log.md#decisions),
   E15-3).
+- Thesis revision loop (Should): a thesis that failed on forward paper may be revised, with its
+  autopsy journaled, scored from zero on forward paper only, and capped per lineage; only after the
+  forward-paper evaluation has run once ([DEC-111](../project/04-decision-log.md#decisions), E17-9).
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
 - US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
