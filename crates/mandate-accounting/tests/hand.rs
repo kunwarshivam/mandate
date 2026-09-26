@@ -1034,3 +1034,143 @@ fn the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held() 
         assert_eq!(text(a.realized_gross()), realized, "{qty} {basis}");
     }
 }
+
+fn fee_of(record: &Record, kind: FeeKind) -> String {
+    match record {
+        Record::Fill { fees, .. } => {
+            let matching: Vec<String> = fees
+                .iter()
+                .filter(|f| f.kind == kind)
+                .map(|f| text(f.usd))
+                .collect();
+            assert_eq!(matching.len(), 1, "{fees:?}");
+            matching.concat()
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+fn sell_on_order(fill_id: &str, order: &str, price: &str, at: &str) -> Input {
+    Fill {
+        fill_id,
+        order: Some(order),
+        instrument: "XYZ",
+        asset_class: AssetClass::UsEquity,
+        side: Side::Sell,
+        qty: "100",
+        price,
+        liquidity: None,
+        at,
+    }
+    .input()
+}
+
+fn capped(cap: &str, basis: TafCapBasis) -> mandate_accounting::Config {
+    let mut config = test_default();
+    config.equities.taf_cap = fee_cap(cap);
+    config.equities.taf_cap_basis = basis;
+    config
+}
+
+/// Each execution is charged under the fee configuration in force for it (spec §6.1), and per
+/// order the TAF room is max(0, cap − TAF already charged on the order) (DEC-87). Four sells of 100
+/// at 50 on order `o1`, each with SEC 5000 × 0.00003 = 0.15, CAT 0.001, and uncapped TAF 0.02:
+/// cap 0.015 charges 0.015 (accrued 0.166); the cap falls to 0, so the room is max(0, −0.015) = 0
+/// and TAF is 0, not −0.015 (accrued 0.317); a cap of 0.01, below the 0.015 already charged, also
+/// charges 0 (0.468); the cap rises to 0.025, leaving room 0.01 (0.629). The order's TAF totals
+/// 0.025, the highest cap in force.
+#[test]
+#[ignore = "pending E3-1"]
+fn per_order_taf_is_never_negative_when_the_cap_falls_within_an_order() {
+    let held = build("400", "19600").unwrap();
+    let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+    for (n, (cap, taf, accrued)) in [
+        ("0.015", "0.015", "0.166"),
+        ("0", "0", "0.317"),
+        ("0.01", "0", "0.468"),
+        ("0.025", "0.01", "0.629"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let sell = sell_on_order(
+            &format!("f{n}"),
+            "o1",
+            "50",
+            &format!("2026-09-21T11:00:0{n}-04:00"),
+        );
+        let applied = a.apply(&sell, &capped(cap, TafCapBasis::PerOrder)).unwrap();
+        assert_eq!(fee_of(&applied.record, FeeKind::Taf), taf, "cap {cap}");
+        a = applied.account;
+        assert_eq!(text(a.fees_accrued().unwrap()), accrued, "cap {cap}");
+    }
+}
+
+/// A day's charge is never a cash credit. Sell 100 at 0.01 on order `o1` with a per-order cap of
+/// 0.015: SEC 1 × 0.00003 = 0.00003, TAF 0.015, CAT 0.001, accrued 0.01603 for 2026-09-21. The next
+/// trading day the cap is 0 and a second sell on `o1` has TAF max(0, 0 − 0.015) = 0, so 2026-09-22
+/// accrues 0.00103 and its charge is ceil(0.00103, 2) = 0.01, a debit. (With a negative TAF of
+/// −0.015 the day would accrue −0.01397 and the charge would credit 0.01.)
+#[test]
+#[ignore = "pending E3-1"]
+fn a_daily_charge_is_never_a_credit_when_the_cap_falls() {
+    let held = build("200", "100").unwrap();
+    let a = Account::opening(usd("100"), [(id("XYZ"), held)]);
+    let a = step(
+        &a,
+        &sell_on_order("f1", "o1", "0.01", "2026-09-21T11:00:00-04:00"),
+        &capped("0.015", TafCapBasis::PerOrder),
+    );
+    assert_eq!(text(a.fees_accrued().unwrap()), "0.01603");
+    let config = capped("0", TafCapBasis::PerOrder);
+    let a = step(
+        &a,
+        &sell_on_order("f2", "o1", "0.01", "2026-09-22T11:00:00-04:00"),
+        &config,
+    );
+    assert_eq!(text(a.fees_accrued().unwrap()), "0.01706");
+    let applied = a
+        .apply(&charge(FeeFamily::Equities, "2026-09-22"), &config)
+        .unwrap();
+    assert_eq!(
+        applied.record,
+        Record::FeesCharged {
+            accrued: usd("0.00103"),
+            charged: usd("0.01"),
+        }
+    );
+    assert_eq!(text(applied.account.settled()), "99.99");
+}
+
+/// The per-order room counts all TAF already charged on the order, whichever mode charged it
+/// (DEC-87). Sell 100 at 50 on `o1` per execution with cap 0.015: TAF 0.015. The configuration
+/// switches to per order with cap 0.015: room max(0, 0.015 − 0.015) = 0, TAF 0. Cap 0.02 per
+/// order: room 0.005, TAF 0.005. The order's TAF totals 0.02, the highest cap in force.
+#[test]
+#[ignore = "pending E3-1"]
+fn per_order_taf_room_counts_executions_charged_per_execution() {
+    let held = build("300", "14700").unwrap();
+    let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+    for (n, (cap, basis, taf)) in [
+        ("0.015", TafCapBasis::PerExecution, "0.015"),
+        ("0.015", TafCapBasis::PerOrder, "0"),
+        ("0.02", TafCapBasis::PerOrder, "0.005"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let sell = sell_on_order(
+            &format!("f{n}"),
+            "o1",
+            "50",
+            &format!("2026-09-21T11:00:0{n}-04:00"),
+        );
+        let applied = a.apply(&sell, &capped(cap, basis)).unwrap();
+        assert_eq!(
+            fee_of(&applied.record, FeeKind::Taf),
+            taf,
+            "{cap} {basis:?}"
+        );
+        a = applied.account;
+    }
+}

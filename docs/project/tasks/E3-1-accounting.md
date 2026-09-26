@@ -139,6 +139,44 @@ are pending because the fold on `main` is stubbed, and they pass on the round-0 
 `crates/mandate-refcases/status.toml` is unchanged: the status PR still marks the same cases as
 passing.
 
+## Review round 3
+
+The review passed the round-2 tests PR and failed the implementation. The per-order TAF room was
+cap − TAF already charged, with no floor. Each fill is charged under the fee configuration in
+force for it (spec §6.1, §6.2), so a cap lowered from 0.015 to 0 between two executions of one
+order charged TAF −0.015: a fee credit.
+
+DEC-87 now states the rule for changing configurations. Per order, room = max(0, cap − TAF
+already charged on the order), counting every earlier execution of the order in either mode. The
+cap otherwise. Charged TAF is never refunded.
+
+Every difference of configured or accumulated amounts in the fold that feeds a fee or cash:
+
+| Place | Can it become a credit? | Covered by |
+|---|---|---|
+| Per-order TAF room, cap − charged | Yes, when the cap falls below the TAF already charged; now floored at 0 | `hand::per_order_taf_is_never_negative_when_the_cap_falls_within_an_order`, property below |
+| Per-order TAF room after a switch from `per_execution` | No credit, but the order's TAF exceeded the cap: TAF charged per execution was not counted; now it is | `hand::per_order_taf_room_counts_executions_charged_per_execution`, property below |
+| Equities daily charge, `round(total, 2, ceiling)` | Only if the day's total is negative (it was, with a negative TAF): the ceiling of a negative total is a credit | `hand::a_daily_charge_is_never_a_credit_when_the_cap_falls`, property below |
+| Crypto buy, received = gross − fee quantity | No: a fee above 100% makes the subtraction an error, not a credit | not changed (see below) |
+| SEC, CAT, crypto fees; settlement amounts | No: products and sums of non-negative amounts | property below |
+
+The property `properties::fees_are_never_credits_under_per_fill_fee_configurations` gives each
+fill its own configuration: caps rise, fall and reach zero within an order, and the cap mode
+switches between fills. Its oracle computes TAF exactly in integers. After every input it checks:
+
+- every fee is ≥ 0;
+- accrued fees never decrease except by a charge;
+- a charge is never negative and debits settled cash;
+- total fees never decrease;
+- on an order whose sells were all charged per order, the TAF charged never exceeds the highest
+  cap in force at any of them.
+
+All four new tests are pending and fail on the round-2 implementation (PR #22).
+
+Not changed, for a later decision: a crypto fee rate above 10000 bps would make a crypto buy fail
+(`negative`) instead of applying the fill. Fee reservations (spec §9.5) belong to E6-6 and have
+no code yet.
+
 ## Journal events that feed the fold (spec §12)
 
 | Journal event | `mandate_accounting::Input` |
