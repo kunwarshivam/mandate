@@ -27,11 +27,17 @@ layer = "tool"
 safety_critical = false
 pure = false
 
+[crates.mandate-num]
+layer = 0
+safety_critical = true
+pure = true
+allowed_external = ["ruint", "rust_decimal", "thiserror"]
+
 [crates.mandate-time]
 layer = 0
 safety_critical = true
 pure = true
-allowed_external = ["thiserror"]
+allowed_external = ["jiff", "thiserror"]
 
 [crates.mandate-canon]
 layer = 0
