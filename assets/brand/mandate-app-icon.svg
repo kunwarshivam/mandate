@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Mandate app icon</title>
+  <desc id="desc">Mandate mark reversed on a dark rounded square.</desc>
+  <rect width="512" height="512" rx="112" fill="#171717"/>
+  <g transform="translate(96 96) scale(1.25)">
+    <path fill="#F7F4ED" d="M24 28 112 80v34L86 98v98l-62 32V28Z"/>
+    <path fill="#F7F4ED" d="m232 28-88 52v34l26-16v98l62 32V28Z"/>
+  </g>
+</svg>
