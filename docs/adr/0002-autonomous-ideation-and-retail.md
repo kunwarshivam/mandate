@@ -116,8 +116,9 @@ Findings that shape the decision:
 9. **Sequencing.** Phase 0 (market data, accounting, backtest, journal) is unchanged: E3-3 stays
    next. The mandate spec, its schemas, the reference implementation, and the 215 reference cases
    are rewritten in spec-change PRs before M5 (the field split, universe as runtime state, the
-   research agent contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and
-   V-020, V-022, and MI-12 restated for envelope fields). The mandate spec's current text at §1.2,
+   research agent contract, `ThesisProposed` and `UniverseChanged`, the retail profile, V-020,
+   V-022, and MI-12 restated for envelope fields, and V-003 restated so that an `accumulate` goal
+   pins its single instrument and admits nothing). The mandate spec's current text at §1.2,
    §4.3, §7, §8.1, and §10 and the trading domain spec's principle 5 carry the superseded posture
    until then. Backlog: E15 (LLM signal models) becomes
    Must in Phase 1; a new epic E17 (research agent and dynamic universe) is Must in Phase 1; a
