@@ -29,7 +29,10 @@ const ROLE_LOCK: i64 = 0x4535_3350_4752;
 
 static SCHEMAS: AtomicU64 = AtomicU64::new(0);
 
-/// A migrated schema of its own, with pools for each role, dropped when the value is.
+/// A migrated schema of its own, with pools for each role, dropped when the value is. The schema is
+/// migrated without sqlx's migration lock, which is one advisory lock per database: no one else
+/// migrates this schema, and a failed run leaves that lock held on its connection until the pool
+/// closes, which would stall every other test's setup.
 pub struct TestDb {
     pub rt: Runtime,
     pub schema: String,
@@ -111,7 +114,9 @@ impl TestDb {
             let owner = pool(&base, &schema, Some(OWNER_ROLE), 2);
             let app = pool(&base, &schema, Some(APP_ROLE), 8);
             let admin = pool(&base, &schema, None, 2);
-            migrator().run(&owner).await.unwrap();
+            let mut migrator = migrator();
+            migrator.set_locking(false);
+            migrator.run(&owner).await.unwrap();
             (owner, app, admin)
         });
         Some(TestDb {
