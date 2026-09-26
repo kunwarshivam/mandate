@@ -340,6 +340,22 @@ impl Action {
             liquidity: Some(Liquidity::Taker),
         }
     }
+
+    /// A resting limit filling at its own price, which made liquidity (DEC-106 item 6).
+    fn maker(level: Price) -> Self {
+        Self {
+            basis: Basis::Exact(level),
+            liquidity: Some(Liquidity::Maker),
+        }
+    }
+
+    /// An auction fill, at the open and neither maker nor taker (DEC-106 item 5).
+    fn at_auction(open: Price) -> Self {
+        Self {
+            basis: Basis::Exact(open),
+            liquidity: None,
+        }
+    }
 }
 
 /// A leg's state between bars (spec §6.4 rules 5 to 7, DEC-106 items 7 and 10).
@@ -371,6 +387,26 @@ struct Leg {
     reports_as: Option<OcoLeg>,
     kind: LegKind,
     phase: Phase,
+}
+
+impl Leg {
+    /// The only leg of an order, which reports no OCO leg.
+    fn only(kind: LegKind, phase: Phase) -> Self {
+        Self {
+            reports_as: None,
+            kind,
+            phase,
+        }
+    }
+
+    /// One leg of a protective pair, which reports which leg it is (spec §6.4 rule 8).
+    fn of_pair(reports_as: OcoLeg, kind: LegKind, phase: Phase) -> Self {
+        Self {
+            reports_as: Some(reports_as),
+            kind,
+            phase,
+        }
+    }
 }
 
 /// What `leg` does on this bar, and the phase it leaves behind: a trigger or a change of phase
@@ -450,15 +486,9 @@ fn arriving_action(leg: &mut Leg, seen: &Seen<'_>) -> Option<Action> {
 /// otherwise a strict pass of the level fills at it as maker, and a touch is not a fill.
 fn resting_action(seen: &Seen<'_>, level: Price) -> Option<Action> {
     if seen.bar.auction && seen.gapped(level) {
-        Some(Action {
-            basis: Basis::Exact(seen.bar.open),
-            liquidity: None,
-        })
+        Some(Action::at_auction(seen.bar.open))
     } else if seen.through(level) {
-        Some(Action {
-            basis: Basis::Exact(level),
-            liquidity: Some(Liquidity::Maker),
-        })
+        Some(Action::maker(level))
     } else {
         None
     }
@@ -561,49 +591,25 @@ impl<'o> Working<'o> {
         let (legs, protective) = match order.kind {
             OrderKind::Oco { limit, stop } => (
                 vec![
-                    Leg {
-                        reports_as: Some(OcoLeg::Limit),
-                        kind: LegKind::Limit { limit },
-                        phase: Phase::Resting(limit),
-                    },
-                    Leg {
-                        reports_as: Some(OcoLeg::Stop),
-                        kind: LegKind::Stop { stop },
-                        phase: Phase::Fresh,
-                    },
+                    Leg::of_pair(
+                        OcoLeg::Limit,
+                        LegKind::Limit { limit },
+                        Phase::Resting(limit),
+                    ),
+                    Leg::of_pair(OcoLeg::Stop, LegKind::Stop { stop }, Phase::Fresh),
                 ],
                 Some((limit, stop)),
             ),
             OrderKind::Limit { limit } => (
-                vec![Leg {
-                    reports_as: None,
-                    kind: LegKind::Limit { limit },
-                    phase: on_arrival(limit),
-                }],
+                vec![Leg::only(LegKind::Limit { limit }, on_arrival(limit))],
                 None,
             ),
-            OrderKind::Market => (
-                vec![Leg {
-                    reports_as: None,
-                    kind: LegKind::Market,
-                    phase: Phase::Fresh,
-                }],
-                None,
-            ),
-            OrderKind::Stop { stop } => (
-                vec![Leg {
-                    reports_as: None,
-                    kind: LegKind::Stop { stop },
-                    phase: Phase::Fresh,
-                }],
-                None,
-            ),
+            OrderKind::Market => (vec![Leg::only(LegKind::Market, Phase::Fresh)], None),
+            OrderKind::Stop { stop } => {
+                (vec![Leg::only(LegKind::Stop { stop }, Phase::Fresh)], None)
+            }
             OrderKind::StopLimit { stop, limit } => (
-                vec![Leg {
-                    reports_as: None,
-                    kind: LegKind::StopLimit { stop, limit },
-                    phase: Phase::Fresh,
-                }],
+                vec![Leg::only(LegKind::StopLimit { stop, limit }, Phase::Fresh)],
                 None,
             ),
         };
