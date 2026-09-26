@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Founder (decides); agents (options and recommendations) |
-| **Status** | Open. Each answer becomes a decision-log entry before the spec-change PRs start |
+| **Status** | Answered as proposals. Every question below is answered by taking its recommendation, recorded as [DEC-117 to DEC-126](04-decision-log.md#decisions) (question 1 to question 10, in order) with status `Proposed (founder)`. The mandate spec rewrite (Track C) is built on those answers; the founder can veto any of them before that PR merges, and this document stays as the reasoning behind each row |
 
 The mandate spec rewrite for [DEC-97](04-decision-log.md#decisions) to
 [DEC-103](04-decision-log.md#decisions) ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md))
@@ -14,7 +14,7 @@ recommendation here departs from one; a departure needs its own decision-log ent
 (`AGENTS.md` rule 9). Until a question is answered, agents continue with its most conservative
 option consistent with those decisions.
 
-## 1. `universe.max_instruments` default and platform ceiling
+## 1. `universe.max_instruments` default and platform ceiling ([DEC-117](04-decision-log.md#decisions))
 
 `universe.max_instruments` bounds the working universe the research agent may build. Today
 `universe.instruments` holds 1 to 50 instruments (mandate spec §3). More instruments mean more
@@ -26,7 +26,7 @@ admissions to approve, smaller positions at a given allocation, and more researc
 **Recommendation.** Default 5 and platform ceiling 20, the same for retail. At a 1,000 USD
 allocation, five positions are 200 USD each, and five admissions to approve stay reviewable. Organizations may set a lower maximum through the policy hierarchy (DEC-51).
 
-## 2. Thesis lifetime
+## 2. Thesis lifetime ([DEC-118](04-decision-log.md#decisions))
 
 A thesis has a horizon (`horizon_s`, mandate spec §8.2). When the research agent's output for an
 instrument expires, it counts as zero for exits and as fully bearish for buys (§8.3). A position
@@ -44,7 +44,7 @@ the autonomy rules again. A thesis that expires without renewal makes the instru
 exits-only, protection stays, and the discretionary exit follows §2.2. The horizon is also when
 DEC-99 scores the thesis, so the position and its score end together.
 
-## 3. Bounds on the research agent's weight
+## 3. Bounds on the research agent's weight ([DEC-119](04-decision-log.md#decisions))
 
 DEC-97 and ADR-0002 part 1 settle how the weight is set: the research agent is one signal model with
 a user-confirmed weight, an envelope field the compiler may propose and the user confirms (DEC-47
@@ -59,7 +59,7 @@ only whether anything bounds the user's value.
 **Recommendation.** Organizations may cap it through the policy hierarchy. No platform bound until
 the DEC-99 evaluation gives evidence for one.
 
-## 4. Research-agent cost cap
+## 4. Research-agent cost cap ([DEC-120](04-decision-log.md#decisions))
 
 Model cost grows with the number of agents, instruments, and sources (ADR-0002, "Consequences").
 
@@ -72,7 +72,7 @@ the cap is reached, the research agent proposes no new theses until the next day
 are managed normally: their theses stay valid until they expire or are invalidated, and exits,
 protection, and kill switches are unaffected.
 
-## 5. Switching into and out of bring-your-own-strategy mode
+## 5. Switching into and out of bring-your-own-strategy mode ([DEC-121](04-decision-log.md#decisions))
 
 ADR-0002 part 1 settles the mode itself: pinning the universe disables the research agent and gives
 today's behavior, so the pinned universe stays in the hashed, confirmed mandate version under the
@@ -88,7 +88,7 @@ once; the research agent's instruments not in the pinned list become removed ins
 protection stays, discretionary exit under §2.2). Unpinning is risk-increasing and needs step-up,
 because it lets the platform admit instruments the owner did not choose.
 
-## 6. The DEC-99 evaluation window, metric, and pass threshold
+## 6. The DEC-99 evaluation window, metric, and pass threshold ([DEC-122](04-decision-log.md#decisions))
 
 The Phase 1 exit requires research-agent theses to beat the baselines (buy-and-hold of the eligible
 basket, and a broad index ETF) on forward paper trading, net of modeled costs. The window, the
@@ -105,7 +105,7 @@ baseline over the same holding window. The pass threshold is a one-sided 95% low
 above zero against both baselines. The E17-0 spike report gives the spread of outcomes needed to
 check that 100 theses can show a difference.
 
-## 7. The DEC-100 monitoring thresholds and stagger window
+## 7. The DEC-100 monitoring thresholds and stagger window ([DEC-123](04-decision-log.md#decisions))
 
 Each workspace's gate stays the only binding control, with its own participation cap (trading domain
 spec §9.6). The aggregate-flow monitor sums research-agent exposure per instrument over the
@@ -125,7 +125,7 @@ instrument per deployment, whichever is lower. Stagger over 15 minutes, within t
 The operator issues the halt; the monitor never halts by itself, so no workspace's state changes
 another's decisions without an operator's action. Revisit the values before live trading.
 
-## 8. The Robinhood paper stage
+## 8. The Robinhood paper stage ([DEC-124](04-decision-log.md#decisions))
 
 Robinhood has no paper environment, and E10-4 requires a paper run before going live
 ([OD-12](04-decision-log.md#open-decisions)).
@@ -140,7 +140,7 @@ Robinhood users; Alpaca paper is optional for users who also have an Alpaca acco
 would make Robinhood users open a second brokerage account. Whether any live Robinhood path is
 possible still depends on the OD-12 answers on client order IDs.
 
-## 9. `auto` for retail on paper before counsel answers question 33
+## 9. `auto` for retail on paper before counsel answers question 33 ([DEC-125](04-decision-log.md#decisions))
 
 DEC-98 stands: the retail profile has `auto_allowed: true`, and every retail user trades paper until
 counsel signs off. Counsel question 33 asks what ceilings, disclosures, and checks `auto` needs for
@@ -156,7 +156,7 @@ wording on the retail profile and go-live screens. The wording is compliance tex
 accepts it (DEC-79). Restricting retail to `ask` would need a decision-log entry superseding that
 part of DEC-98.
 
-## 10. How theses are shown to the user
+## 10. How theses are shown to the user ([DEC-126](04-decision-log.md#decisions))
 
 Approval screens show the agent's proposal, the rule that triggered it, and model outputs with
 authorship ([compliance](../product/08-compliance-and-regulatory.md), "Posture safeguards").

@@ -97,7 +97,7 @@ instructions for creating a trading-only key; rejections are journaled without s
 
 | ID | Requirement | Priority |
 |---|---|---|
-| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting values the user stated and proposing envelope values, each shown as proposed and confirmed by the user; the working universe comes from the research agent at runtime ([DEC-97](../project/04-decision-log.md#decisions); [mandate spec §7](../specs/mandate.md#7-compiler-dec-45), pending its rewrite) | P0 |
+| FR-3.1 | Describe an agent in plain language; the system compiles a structured mandate (goal, instruments, capital, connection, behavior, signal models, sizing, cadence, protection, risk, autonomy, notifications), extracting values the user stated and proposing envelope values, each shown as proposed and confirmed by the user; the working universe comes from the research agent at runtime ([DEC-97](../project/04-decision-log.md#decisions); [mandate spec §7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97), pending its rewrite) | P0 |
 | FR-3.2 | Edit the mandate in a form and as YAML; both stay in sync | P0 |
 | FR-3.3 | Validate against platform, org, and workspace policy before saving | P0 |
 | FR-3.4 | Show a plain-language summary of the compiled mandate for confirmation | P0 |
