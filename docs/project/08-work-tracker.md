@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, direction change: autonomous ideation and retail from the start (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-26, direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -20,7 +20,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | M2 Accounting | In progress | E3-1, E3-2 | E3-3 closes the milestone |
 | M3 Simulated execution and backtest | Not started | — | E4-1, E4-2 after M2 |
 | M4 Journal | In progress | E5-1 | E5-2, E5-3 |
-| M5 onward | Not started | — | Before M5: the mandate spec rewrite for DEC-97 and DEC-98 (spec-change PRs). M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
+| M5 onward | Not started | — | Before M5: the founder's design questions, then the mandate spec rewrite for DEC-97 to DEC-103 (spec-change PRs). M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
 
 ## Stories
 
@@ -47,8 +47,11 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 
 ## Waiting on the founder
 
-- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
-  before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
+- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 35)
+  now, during Phase 0 (DEC-102). Nothing trades live until this is answered.
+- **Design questions**: answer the [design questions](09-mandate-rewrite-questions.md) (universe
+  size, thesis lifetime, research weight and cost cap, the DEC-99 evaluation, the DEC-100 values, the
+  Robinhood paper stage, retail `auto`, how theses are shown) before the mandate spec rewrite starts.
 - **Robinhood**: open an agentic account yourself, on a desktop, from your own Robinhood login
   (OD-12: self-serve, no beta request). Agents never connect to it (rule 8); the connector story
   will use a paper or test path Robinhood has not yet published, so ask Robinhood support whether one
@@ -95,13 +98,17 @@ them in the decision log.
 3. **E4-1, E4-2** simulated execution and the baseline backtest (RC-10, RC-12, RC-19): the critical
    path to M5.
 4. **E5-2** artifact store, then **E5-3** the Postgres journal (environment work first).
-5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
-   DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
+5. **Before M5:** the founder's answers to the [design questions](09-mandate-rewrite-questions.md)
+   come first. Then the mandate spec, schemas, reference implementation, and the 215 cases are
+   rewritten for DEC-97 to DEC-103 as spec-change PRs
+   ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
    the envelope fields and the universe as runtime state, the research agent
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe).
+   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the research
+   basket, every admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation
+   (E17-8). The full E17-3 follows only after that evaluation passes.
 
 E3-3, E2-4, and E5-2 touch different crates and can run in parallel; reviews run one at a time.
 

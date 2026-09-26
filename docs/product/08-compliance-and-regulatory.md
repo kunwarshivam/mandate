@@ -29,7 +29,8 @@ originates ideas and the agent trades on them within that envelope
 The last point is the shape of investment advice and discretion under the Advisers Act and state
 law. The software-only position of drafts v0.1 to v0.5 is withdrawn. **Working assumption:** Mandate
 may need to register as an investment adviser, or adopt a structure counsel approves, before any
-live trading; counsel engagement moves from M13 to before the Phase 1 exit. The broker-dealer,
+live trading; counsel is engaged during Phase 0, in parallel with engineering
+([DEC-102](../project/04-decision-log.md#decisions)). The broker-dealer,
 money-transmission, and BitLicense positions below are unchanged. Until counsel signs off, every
 user trades paper only.
 
@@ -53,7 +54,7 @@ Retail is in scope from the start ([DEC-98](../project/04-decision-log.md#decisi
 workspaces are the default, through Alpaca and Robinhood Agentic Trading. The retail profile
 (`auto_allowed: true`, LLM models allowed, protection required, no leveraged ETPs, a lifetime-loss
 ceiling and an approval-timeout minimum set with counsel) applies as platform policy. **Live retail
-trading waits for counsel** (questions 31 to 34), disclosures, education, and jurisdiction checks;
+trading waits for counsel** (questions 31 to 35), disclosures, education, and jurisdiction checks;
 until then retail users trade paper. Ceilings are shown as limits; proposed values are marked as
 proposed.
 
@@ -170,6 +171,10 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 
 ## Questions for counsel
 
+Counsel is engaged during Phase 0 ([DEC-102](../project/04-decision-log.md#decisions)), because the
+answers to questions 31 to 35 shape the research agent, the retail profile, onboarding, and the
+go-live screen.
+
 1. Does an approval request that presents an agent-generated proposed trade, with evidence,
    constitute a recommendation or advice under the Advisers Act or state law, given that a
    user-authored mandate triggered it?
@@ -263,6 +268,9 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     values be?
 34. Does the bring-your-own-strategy mode (the research agent disabled) carry a different posture
     from the ideation mode, and should the terms distinguish them?
+35. How may the product describe an agent that "brings its own ideas" without implying expected
+    performance, given the Marketing Rule's limits on testimonials and hypothetical performance?
+    What must the onboarding and go-live screens say?
 
 ## Data protection
 
@@ -282,7 +290,7 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 
 | Risk | Control |
 |---|---|
-| Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; the research agent admits instruments only through the eligibility floor, `max_instruments`, and the autonomy rules (ADR-0002); the input-drift detector is required in Phase 1 |
+| Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; the research agent admits instruments only through the eligibility floor, `max_instruments`, and the autonomy rules (ADR-0002); it reads only vetted sources and admits only on corroborated evidence, and the input-drift detector is required in Phase 1 ([DEC-101](../project/04-decision-log.md#decisions)) |
 | Model errors or hallucinated instruments | Typed outputs from decision models; instrument validation against the mandate universe |
 | Overconfident models | Self-reported confidence is labeled uncalibrated; combined-score thresholds in the user's autonomy rules; a missing model counts as fully bearish for buys and as zero for exits; scorecards for the user's review |
 | Model provider changes | The content hash pins the underlying model identity; the gateway never substitutes a model; withdrawals are journaled `PlatformOperatorAction` events and outputs then count as missing ([DEC-67](../project/04-decision-log.md#decisions)) |
