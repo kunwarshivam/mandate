@@ -145,37 +145,51 @@ Every figure below was recomputed from the spec text, by hand, before any type w
 ### Invariants touched
 
 Each gets a named test whose oracle computes the answer its own way (AGENTS.md, "Independent
-oracles"; ES-11). Test paths are `crates/mandate-research/tests/`.
+oracles"; ES-11). Test paths are `crates/mandate-research/tests/`, and **every name below is a test
+that exists**: `refcases::MC_N*` are the 25 family-N cases loaded from
+`fixtures/refcases/mandate.json`, `rules::*` run unignored because they pin rule logic this PR carries
+live (interpretation 23), and everything else is pending until its story lands.
 
 | Clause or invariant | Test |
 |---|---|
-| §8.5 the checks are evaluated **in order** and the first failure is the journaled reason | `admission::one_test_per_check` (17 named cases, each failing exactly one check with every later check also failing where the spec allows it), `properties::the_reason_is_the_lowest_numbered_failing_check` |
-| §8.2, §8.5 checks 1 to 3 are **ignored outputs** as well as refusals | `admission::the_three_ignored_outputs_report_ignored`, `properties::ignored_is_exactly_the_first_three_checks`, MC-N12, MC-N13, MC-N19 |
-| §8.5 a refusal admits nothing and leaves the universe as it was, with the one `lineage_retired` exception | `properties::a_refusal_never_grows_the_universe`, `properties::only_a_retirement_lets_a_refusal_change_the_universe`, MC-N02 to MC-N13, MC-N15, MC-N16, MC-N25 |
-| MI-15 the universe never exceeds the effective `max_instruments`, holds no duplicate, and every member passed every check when admitted | `properties::the_universe_never_exceeds_its_ceiling_or_repeats`, `properties::every_member_was_admitted_by_a_passing_check_set`, MC-N02 |
-| MI-15, §8.5 a **full universe never displaces** an active instrument; `universe_full` is the only check a renewal skips | `admission::a_full_universe_refuses_rather_than_displacing`, `admission::a_renewal_skips_only_the_full_check`, `properties::a_renewal_and_a_first_admission_differ_only_in_check_17`, MC-N02, MC-N14 |
-| MI-16 admission never changes an envelope field | `properties::admission_changes_no_envelope_field` (the mandate's canonical bytes, its version, and every effective overlay value are identical before and after every admission and every fold) |
-| MI-17 the first order in a newly admitted instrument is at least as strict as `autonomy.admission` | `admission::an_admitted_thesis_reports_the_effective_admission_ceiling`, `properties::first_order_facts_always_carry_new_instrument_and_the_ceiling` (the strictness comparison itself is stream H's, interpretation 3) |
-| MI-18 a lineage never admits a revision past `max_revisions_per_lineage`, and no revision carries a predecessor's score | `lineage::revisions_up_to_the_cap_are_admitted_and_the_next_retires`, `properties::a_lineage_never_admits_past_its_cap`, `properties::no_fold_step_ever_carries_a_score_forward`, MC-N17, MC-N18, MC-N24 |
-| §8.6 item 4 retirement follows the **journaled refusal reason**, not the revision number | `lineage::an_earlier_check_refusing_an_over_cap_revision_retires_nothing`, `properties::retirement_happens_exactly_on_a_lineage_retired_refusal`, MC-N27 |
-| §8.6 item 4 retirement removes the instrument the lineage holds, in the same fold step, and never one another lineage now holds | `lineage::retirement_removes_the_instrument_it_holds`, `lineage::retirement_leaves_what_another_lineage_took_over`, `properties::retirement_removes_at_most_its_own_holder`, MC-N24, MC-N28 |
-| MI-19 exactly the theses that expired, were invalidated, or whose lineage retired remove their instrument | `expiry::one_test_per_removal_reason`, `properties::exactly_the_ended_theses_remove_their_instrument`, MC-N20, MC-N21, MC-N22 |
-| §8.6 expiry is inclusive at the horizon, and the reason order is invalidated, retired, expired | `expiry::the_horizon_removes_at_exactly_the_horizon`, `expiry::invalidation_outranks_an_unreached_horizon`, `properties::the_removal_reason_is_the_first_that_holds`, MC-N20, MC-N22 |
-| MI-19 removal restricts that instrument only | `expiry::a_removal_restricts_only_its_own_instrument`, `properties::a_removal_touches_no_other_instruments_restriction` |
-| MI-20 a pinned universe admits nothing | `admission::a_pinned_universe_admits_nothing`, `properties::no_pinned_mandate_ever_admits` (whichever of checks 4 and 5 fires), MC-N08 |
-| §8.4, DEC-100, DEC-123 the stagger offset is deterministic, depends on both ids, and is inside the window | `stagger::the_three_fixture_offsets`, `properties::an_offset_is_below_its_window`, `properties::both_ids_change_the_offset`, `num::the_reduction_matches_a_least_significant_first_oracle`, MC-N23 |
-| §8.4 the offset is counted from the admission for crypto and from the **later** of the admission and the next regular open for equities; a window of 0 means no wait | `stagger::an_equity_release_waits_for_the_later_of_the_two_instants`, `stagger::a_crypto_release_is_counted_from_the_admission`, `stagger::a_zero_window_releases_at_once`, `properties::a_release_is_never_before_its_anchor` |
-| §8.4, DEC-120 the cost cap binds at equality and refuses new theses only | `admission::the_cost_cap_binds_at_equality`, `properties::the_cost_cap_never_touches_an_existing_entry`, MC-N09 |
-| DEC-101 every cited source must be on the allowlist, and corroboration is required | `admission::one_source_off_the_allowlist_refuses_the_whole_thesis`, `admission::a_thesis_without_corroboration_is_refused`, `properties::a_source_off_the_allowlist_never_admits` (stated over theses citing at least one source, because an empty list passes check 14 vacuously; "Decisions needed" item 7), `properties::an_uncorroborated_thesis_never_admits`, `admission::check_15_market_data_corroboration_admits_a_thesis_citing_no_sources`, MC-N06, MC-N07 |
-| DEC-101, R-05 no string in a thesis can change a verdict (the prompt-injection property) | `properties::text_never_changes_a_verdict` (every string field replaced by adversarial text, including text naming other checks, over generated inputs) |
-| DEC-103 the thin slice admits only instruments in the pinned data universe | `admission::the_data_universe_refuses_anything_outside_it`, `properties::a_pinned_data_universe_is_a_superset_of_every_admission`, MC-N11 |
-| §8.5 checks 10 and 11 read instrument reference data, never the thesis's own claim | `admission::check_10_reads_reference_data_and_a_thesis_has_no_asset_class_to_claim`, `admission::check_11_the_opt_in_alone_does_not_admit_a_leveraged_etp`, `properties::text_never_changes_a_verdict` (interpretation 6) |
-| trading spec §7.1 the group claim covers an ungrouped instrument as its own group | `admission::an_ungrouped_instrument_is_its_own_group`, `admission::a_group_claimed_through_a_sibling_refuses`, MC-N05 |
+| §8.5 the checks are evaluated **in order** and the first failure is the journaled reason | `admission::check_1_*` to `admission::check_16_*` (one named case per check, seventeen in all with the renewal case), `admission::checks_reports_all_seventeen_in_the_spec_order`, `admission::the_lower_numbered_check_decides_when_several_fail`, `properties::the_reason_is_the_lowest_numbered_failing_check` |
+| §8.5 the ordinals and journaled codes themselves | `rules::every_refusal_reason_carries_its_own_ordinal_once`, `rules::every_refusal_reason_has_the_codes_the_spec_table_states` |
+| §8.2, §8.5 checks 1 to 3 are **ignored outputs** as well as refusals | `rules::ignored_outputs_are_exactly_the_first_three_checks`, `admission::check_1_a_short_thesis_is_ignored`, `admission::check_2_an_expiry_that_disagrees_with_the_horizon_is_ignored`, `admission::check_3_a_revision_without_a_predecessor_is_ignored`, `admission::check_3_a_revision_zero_carrying_a_predecessor_is_ignored`, `properties::ignored_is_exactly_the_first_three_checks`, `refcases::MC_N12`, `refcases::MC_N13`, `refcases::MC_N19` |
+| §8.5 a refusal admits nothing and leaves the universe as it was, with the one `lineage_retired` exception | `properties::a_refusal_never_grows_the_universe`, `properties::only_a_retirement_lets_a_refusal_change_the_universe`, `refcases::MC_N03` to `refcases::MC_N13`, `refcases::MC_N15`, `refcases::MC_N16`, `refcases::MC_N25` |
+| MI-15 the universe never exceeds the effective `max_instruments`, holds no duplicate, and every member passed every check when admitted | `properties::the_universe_never_exceeds_its_ceiling_or_repeats`, `properties::every_member_was_admitted_by_a_passing_check_set`, `refcases::MC_N02` |
+| MI-15, §8.5 a **full universe never displaces** an active instrument; `universe_full` is the only check a renewal skips | `admission::mc_n02_a_full_universe_refuses_rather_than_displacing`, `admission::a_renewal_skips_only_the_full_check`, `admission::a_lowered_ceiling_refuses_and_never_removes`, `properties::a_renewal_and_a_first_admission_differ_only_in_check_17`, `refcases::MC_N02` |
+| MI-16 admission never changes an envelope field | `properties::admission_changes_no_envelope_field` |
+| MI-17 the first order in a newly admitted instrument is at least as strict as `autonomy.admission` | `admission::mc_n01_a_corroborated_thesis_in_an_allowed_asset_class_is_admitted`, `admission::the_internal_research_profile_makes_every_admission_ask_without_refusing_any`, `rules::the_admission_ceiling_only_ever_tightens`, `properties::first_order_facts_always_carry_new_instrument_and_the_ceiling` (the strictness comparison itself is stream H's, interpretation 3) |
+| MI-18 a lineage never admits a revision past `max_revisions_per_lineage`, and no revision carries a predecessor's score | `lineage::mc_n17_revisions_one_to_three_are_admitted_and_the_fourth_retires_the_lineage`, `lineage::mc_n18_a_revision_never_carries_its_predecessor_score_forward`, `admission::check_16_a_revision_at_the_cap_is_admitted`, `admission::check_16_a_revision_past_the_cap_is_refused`, `admission::check_16_a_policy_ceiling_lowers_the_revision_cap`, `properties::a_lineage_never_admits_past_its_cap`, `refcases::MC_N17`, `refcases::MC_N18`, `refcases::MC_N24` |
+| §8.6 item 4 retirement follows the **journaled refusal reason**, not the revision number | `lineage::mc_n27_an_over_cap_revision_an_earlier_check_refuses_retires_nothing`, `properties::retirement_happens_exactly_on_a_lineage_retired_refusal`, `refcases::MC_N27` |
+| §8.6 item 4 retirement removes the instrument the lineage holds, in the same fold step, and never one another lineage now holds | `lineage::mc_n24_retirement_removes_the_instrument_it_holds`, `lineage::mc_n17_the_retiring_step_journals_the_removal_with_the_size_after`, `lineage::mc_n28_retirement_never_removes_an_instrument_another_lineage_now_holds`, `lineage::a_lineage_retires_and_removes_only_once`, `properties::retirement_removes_at_most_its_own_holder`, `refcases::MC_N24`, `refcases::MC_N28` |
+| MI-19 exactly the theses that expired, were invalidated, or whose lineage retired remove their instrument | `expiry::mc_n20_a_thesis_at_its_horizon_removes_its_instrument`, `expiry::mc_n21_an_invalidated_thesis_removes_at_once_before_its_horizon`, `expiry::mc_n22_a_retired_lineage_removes_its_instrument_and_an_unexpired_thesis_stays`, `properties::exactly_the_ended_theses_remove_their_instrument`, `refcases::MC_N20` to `refcases::MC_N22` |
+| §8.6 expiry is inclusive at the horizon, and the reason order is invalidated, retired, expired | `expiry::the_horizon_removes_at_exactly_the_horizon_and_not_before`, `expiry::the_removal_reason_is_the_first_that_holds`, `expiry::a_retired_lineage_outranks_an_expired_horizon`, `properties::the_removal_reason_is_the_first_that_holds` |
+| MI-19 removal restricts that instrument only | `properties::a_removal_touches_no_other_instruments_restriction`, `expiry::several_removals_count_the_universe_down` |
+| MI-20 a pinned universe admits nothing | `admission::check_5_a_pinned_universe_admits_nothing_even_with_an_admitting_model`, `admission::mc_n08_a_pinned_validated_mandate_refuses_at_check_four`, `properties::no_pinned_mandate_ever_admits`, `refcases::MC_N08` |
+| §8.4, DEC-100, DEC-123 the stagger offset is deterministic, depends on both ids, and is inside the window | `stagger::mc_n23_the_three_fixture_offsets`, `stagger::both_ids_change_the_offset`, `stagger::the_digest_is_the_workspace_a_zero_byte_and_the_thesis`, `stagger::a_zero_window_gives_a_zero_offset`, `stagger::a_one_second_window_gives_a_zero_offset`, `properties::an_offset_is_below_its_window`, `refcases::MC_N23` |
+| §8.4 the offset is counted from the admission for crypto and from the **later** of the admission and the next regular open for equities | `stagger::an_equity_release_waits_for_the_later_of_the_two_instants`, `stagger::an_equity_admitted_inside_the_session_counts_from_the_admission`, `stagger::a_crypto_release_is_counted_from_the_admission`, `stagger::a_zero_offset_releases_at_the_anchor`, `stagger::an_equity_without_a_next_regular_open_is_an_error`, `properties::a_release_is_never_before_its_anchor` |
+| §8.4 the proposal cadence is a policy minimum, and the crate reads no clock | `stagger::the_next_proposal_is_one_interval_after_the_last`, `stagger::an_agent_that_has_never_proposed_may_propose_now`, `rules::the_proposal_interval_takes_the_higher_of_the_two_bounds` |
+| §8.4, DEC-120 the cost cap binds at equality and refuses new theses only | `admission::check_7_the_cost_cap_binds_at_equality`, `admission::check_7_a_cent_below_the_cap_still_admits`, `rules::the_cost_cap_takes_the_lower_of_the_two_amounts`, `properties::the_cost_cap_never_touches_an_existing_entry`, `refcases::MC_N09` |
+| DEC-101 every cited source must be on the allowlist, and corroboration is required | `admission::check_14_one_source_off_the_allowlist_refuses_the_whole_thesis`, `admission::check_15_a_thesis_without_corroboration_is_refused`, `admission::check_15_market_data_corroboration_admits_a_thesis_citing_no_sources`, `properties::a_source_off_the_allowlist_never_admits` (stated over theses citing at least one source, because an empty list passes check 14 vacuously; "Decisions needed" item 7), `properties::an_uncorroborated_thesis_never_admits`, `refcases::MC_N06`, `refcases::MC_N07` |
+| DEC-101, R-05 no string in a thesis can change a verdict (the prompt-injection property) | `properties::text_never_changes_a_verdict` (the invalidation prose, an allowlisted source's name, and the thesis's own ids), `properties::text_never_changes_a_fold` |
+| DEC-103 the thin slice admits only instruments in the pinned data universe, with every admission `ask` | `admission::check_8_the_thin_slices_data_universe_refuses_anything_outside_it`, `properties::a_pinned_data_universe_is_a_superset_of_every_admission`, `rules::the_internal_research_profile_carries_the_thin_slices_own_values`, `refcases::MC_N11` |
+| §8.5 checks 10 and 11 read instrument reference data, never the thesis's own claim | `admission::check_10_reads_reference_data_and_a_thesis_has_no_asset_class_to_claim`, `admission::check_11_the_opt_in_alone_does_not_admit_a_leveraged_etp`, `admission::mc_n25_a_leveraged_etp_with_a_different_accepted_disclosure_version_is_refused`, `admission::mc_n26_a_leveraged_etp_with_the_opt_in_and_the_exact_disclosure_is_admitted`, `refcases::MC_N16`, `refcases::MC_N25` |
+| trading spec §7.1 the group claim covers an ungrouped instrument as its own group | `admission::check_13_an_instrument_group_claimed_by_another_agent_is_refused`, `admission::check_13_a_group_claimed_through_a_sibling_refuses`, `admission::check_13_an_ungrouped_instrument_is_its_own_group_and_a_group_id_spelling_an_asset_id_claims_nothing`, `rules::a_named_group_wins_and_an_unnamed_instrument_is_its_own_group`, `rules::a_group_id_spelling_an_asset_id_is_not_that_instruments_group`, `rules::an_empty_group_map_leaves_every_instrument_ungrouped`, `refcases::MC_N05` |
+| §4.3 each key the overlay resolves tightens in its own direction (interpretation 22) | `rules::a_maximum_takes_the_lower_of_the_two_bounds`, `rules::the_revision_cap_takes_the_lower_of_the_two_bounds`, `rules::a_minimum_takes_the_higher_of_the_two_bounds`, `rules::the_admission_ceiling_only_ever_tightens`, `rules::the_permissive_overlay_constrains_nothing_and_permits_both`, `admission::check_4_a_policy_that_forbids_the_research_agent_refuses`, `admission::check_16_a_policy_ceiling_lowers_the_revision_cap` |
 | §2.3, §5.3 an unavailable working universe is an error, never an empty set | `admission::an_unavailable_universe_is_an_error` |
-| MI-8, ES-21 the same inputs give identical outputs; no clock, no randomness, `BTreeMap` order only | `properties::identical_inputs_give_identical_admissions_and_events`, `properties::no_output_depends_on_iteration_order` |
-| §8.5, §8.6 every state change emits its journal entry, and nothing changes without one | `properties::the_universe_equals_the_fold_of_the_emitted_events` (oracle 1), `properties::every_step_emits_exactly_one_thesis_entry` |
-| journal spec §9 the entry type follows the revision number, and `predecessor_thesis_id` is present exactly when `revision > 0` | `admission::the_entry_type_follows_the_revision_number`, `properties::a_predecessor_appears_exactly_on_a_revision`, MC-N19 |
-| The harness reads every key every family-N case states (DEC-85) | `harness::every_family_n_case_key_is_read`, `harness::a_wrong_expected_value_fails_the_case` (in the later harness PR) |
+| MI-8, ES-21 the same inputs give identical outputs; no clock, no randomness, order-independent | `properties::identical_inputs_give_identical_admissions_and_events`, `properties::no_output_depends_on_iteration_order`, `expiry::the_removal_order_does_not_depend_on_the_input_order` |
+| §8.5, §8.6 every state change emits its journal entry, and nothing changes without one | `properties::the_universe_equals_the_fold_of_the_emitted_events` (oracle 1), `properties::every_step_emits_exactly_one_thesis_entry`, `admission::mc_n01_admission_journals_the_thesis_entry_and_the_universe_change` |
+| journal spec §9 the entry type follows the revision number, and `predecessor_thesis_id` is present exactly when `revision > 0` | `admission::the_entry_type_follows_the_revision_number`, `lineage::mc_n19_a_revision_without_a_predecessor_id_is_ignored_and_admits_nothing`, `properties::every_step_emits_exactly_one_thesis_entry`, `refcases::MC_N19` |
+| §8.2, DEC-118 `expires_at` equals `as_of + horizon_s` | `admission::the_horizon_pairs_as_of_with_expires_at_exactly`, `admission::check_2_an_expiry_that_disagrees_with_the_horizon_is_ignored`, `refcases::MC_N13` |
+| An input that makes a decision impossible is a typed error, never a verdict | `admission::an_unavailable_universe_is_an_error`, `lineage::a_fold_that_names_one_thesis_twice_is_an_error`, `expiry::an_entry_list_holding_one_instrument_twice_is_an_error`, `stagger::an_equity_without_a_next_regular_open_is_an_error` |
+| Every family-N case is read from the fixture, and every `expect` key it states is compared (DEC-85) | `refcases::assert_every_key_known` (called by each case), `refcases::every_family_n_case_is_covered`, `refcases::the_three_cases_this_file_defers_are_named` |
+
+**Hand-tested only**, with no property: the three cases that state `first_order_autonomy` (MC-N01,
+MC-N14, MC-N26), because the ceiling's *effect* is stream H's `classify`; the digest's byte layout
+(`stagger::the_digest_is_the_workspace_a_zero_byte_and_the_thesis`), which is one hash and has nothing
+to generalise over; and the four `properties::*_oracle_*` self-checks, which exist to fail on a seeded
+bug rather than to hold over generated input.
 
 ### Oracles
 
@@ -193,11 +207,14 @@ Four independent oracles, each shown to fail on a seeded bug before it is truste
    order and stops at the first failure. Both must name the same reason, so a check evaluated out of
    order is caught even when the result happens to agree. Every property first asserts that at least
    one check failed in the cases that expect a refusal, so no property can pass on an empty verdict.
-3. **The lineage counter.** A separate accumulator walks the thesis sequence and tracks, per
-   lineage, the highest admitted revision, the number of admissions, and whether an otherwise-passing
-   thesis exceeded the cap; from those it derives retirement and the removal set without reading the
-   fold's own state. A test seeds "retire on any refusal of an over-cap revision" and watches the
-   oracle catch it on MC-N27's shape.
+3. **The lineage counter.** A separate accumulator walks the thesis sequence and tracks, per lineage
+   — keyed by the lineage id the thesis carries, so a sequence of first theses is not collapsed into
+   one — the highest admitted revision, the number of admissions, retirement, which instrument each
+   lineage holds, and therefore the removal set. `properties::a_lineage_never_admits_past_its_cap`
+   compares **all of them** against the fold: every step's `lineage_revisions` and `lineage_retired`,
+   then each `Lineage`'s `revisions`, `admitted` and `retired`, then the journaled removals against
+   the ones the counter derived. `properties::the_lineage_oracle_catches_an_admission_after_retirement`
+   seeds the "retire on any refusal" bug and watches the counter catch it.
 4. **The modular reduction, least-significant-first.** The implementation folds the 32 digest bytes
    most-significant-first, accumulating `acc = (acc × 256 + byte) mod window`. The oracle walks the
    bytes from the least significant end with its own table of `256^k mod window`, so the two share no
@@ -270,7 +287,8 @@ pub struct OutputEnvelope {
 }
 
 /// §8.4's thesis. It carries what the agent said; every fact about the *instrument* is in
-/// `InstrumentFacts` and every fact about the evidence is in `CorroborationFacts`.
+/// `InstrumentFacts` and every fact about the evidence is in `ProposedThesis::corroboration` and
+/// `AdmissionFacts::allowlist`.
 pub struct Thesis {
     pub thesis_id: ThesisId,
     pub lineage_id: LineageId,
@@ -547,9 +565,13 @@ pub struct UniverseChangedEntry {
 ```
 
 `UniverseChange`, `UniverseChangeReason`, `InstrumentRestriction`, `AutonomyDecision`, `AssetId`,
-`AssetClass`, and `WorkingUniverse` come from `mandate-domain` or `mandate-spec` (interpretation 15);
-`ModelId`, `ModelVersion`, `ContentHash`, `GroupId`, `SchemaDec`, and `Digest` come from
-`mandate-spec` and `mandate-canon`. This crate defines no second copy.
+`AssetClass`, `GroupId`, `SchemaDec`, `ValidatedMandate`, `PolicyOverlay`, and `WorkingUniverse` belong
+to `mandate-domain` or `mandate-spec`, and `ModelId` is stream F's too (its `ValidationContext` names
+it); `Digest` is `mandate-canon`'s. **`ModelVersion` and `ContentHash` are the exception:** stream H's
+brief names both, and stream H is a sibling at layer 5 this crate may not depend on, so they are
+declared in `spec_types.rs` and the coordinator settles where they live when F's crate lands
+(interpretation 15). Until `mandate-spec` and `mandate-domain` exist, all of these are narrow views in
+that temporary module, which the first implementation PR after F's tests PR deletes.
 
 ### Errors
 
@@ -557,7 +579,6 @@ pub struct UniverseChangedEntry {
 `universe_unavailable` (the `UniverseChanged` fold has not been read, so nothing may be admitted —
 never treated as an empty universe, interpretation 18), `duplicate_instrument` (an input universe
 holding a repeat, which MI-15 forbids), `duplicate_thesis_id` (a fold input naming one thesis twice),
-`instrument_facts_missing` (a fold step whose instrument has no reference data),
 `session_calendar_missing` (an equity stagger anchor with no next regular open),
 `window_too_large`, `interval_too_large`, `time_out_of_range` (a horizon or an offset that leaves
 `UtcNanos`'s range), `out_of_range` (a decimal outside the arithmetic range, as DEC-128 item 4
@@ -728,6 +749,31 @@ requiring every pending test to fail on the stubs).
     reads the envelope field **`universe.pinned`**, not `WorkingUniverse::Known { pinned }`, and it is
     MI-20 rather than a policy key. The two are kept in step by validation, and the crate reads the
     envelope, because a runtime flag is not what the owner confirmed.
+
+23. **Three rules stay live, and are mutation-tested by hand.** `RefusalReason`'s ordinals, codes and
+    `is_ignored_output`; `PolicyOverlay`'s six stricter-of rules and its two profile constructors; and
+    `group_of` are real code in this tests PR, not stubs, because each states a rule exactly once
+    (interpretations 4, 12 and 22) and a stub cannot hold a rule. DEC-83 asks in exchange that nothing
+    live goes unverified, so `crates/mandate-research/tests/rules.rs` pins every branch of all three
+    **unignored**, and `cargo mutants -p mandate-research` was run by hand: **0 missed across every
+    live rule and both constructors.** Two shapes changed to get there, and both are improvements:
+    `effective_cost_cap` uses `min` like the other maximums rather than a comparison whose `<` and
+    `<=` are equivalent at equality, and neither profile constructor uses `..Self::default()`, because a
+    field whose explicit value equals the default can be deleted with no visible effect. The 44 mutants
+    that remain missed are all on stub bodies, on `as_str` and `code` accessors, and on narrow-view
+    constructors — everything only a pending test reaches, and a pending test does not run under
+    mutants. The implementation PR's `--in-diff` gate covers them when the stubs become logic.
+24. **The swap PR asks for one DEC-77 exception, scoped to constructor and builder lines.** Stream F's
+    real types differ from the narrow views in ways no signature in this brief captures: `AssetId::parse`
+    against `AssetId::new`, `GroupId::new -> Self` against `-> Result`, `SchemaDec::parse(text, grammar)`
+    against `from_checked_text`, `cost_cap_usd_per_day` as a `SchemaDec` rather than a `Usd`,
+    `ValidatedMandate::new(Mandate, &ValidationContext, &[PolicyLevel])` against
+    `from_validated_envelope`, and a `PolicyOverlay` whose fields F keeps private where the tests build
+    one with a struct literal. So the PR that deletes `spec_types.rs` must also edit
+    `tests/common/mod.rs` and the construction lines of `admission.rs`, `properties.rs` and
+    `refcases.rs`. DEC-77 otherwise lets an implementation PR change test files only by deleting pending
+    markers, so that PR states the exception, keeps it to those lines, and changes no assertion — which
+    a reviewer can check, because every assertion is a separate line from the builder that feeds it.
 
 ## The case-loading design
 

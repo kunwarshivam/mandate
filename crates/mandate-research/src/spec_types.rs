@@ -275,25 +275,36 @@ pub struct PolicyOverlay {
 
 impl PolicyOverlay {
     /// An overlay that constrains nothing beyond the mandate, with both permissions granted.
+    ///
+    /// Every field is spelled out rather than taken from `..Self::default()`: a field whose explicit
+    /// value happens to equal the default can be deleted without changing behaviour, which no test
+    /// can distinguish, and a complete struct expression makes that unrepresentable instead.
     #[must_use]
     pub fn permissive() -> Self {
         Self {
+            max_instruments: None,
+            max_revisions_per_lineage: None,
+            research_cost_cap_usd_per_day: None,
+            stagger_window_s: None,
+            research_interval_s: None,
             research_agent_allowed: true,
             admission_auto_allowed: true,
-            ..Self::default()
         }
     }
 
-    /// DEC-103's internal research profile: the research agent on, every admission `ask`, and at
-    /// most three revisions per lineage.
+    /// DEC-103's internal research profile: the research agent on, every admission `ask`, at most
+    /// three revisions per lineage, and DEC-123's 900 s stagger floor. Spelled out for the reason
+    /// [`Self::permissive`] gives.
     #[must_use]
     pub fn internal_research_profile() -> Self {
         Self {
+            max_instruments: None,
             max_revisions_per_lineage: Some(3),
+            research_cost_cap_usd_per_day: None,
             stagger_window_s: Some(900),
+            research_interval_s: None,
             research_agent_allowed: true,
             admission_auto_allowed: false,
-            ..Self::default()
         }
     }
 
@@ -316,11 +327,15 @@ impl PolicyOverlay {
     }
 
     /// `research_cost_cap_usd_per_day`, a maximum: the lower of the two (check 7, DEC-120).
+    ///
+    /// Written with `min`, like the other two maximums, rather than a comparison and two branches:
+    /// at equality both branches return the same amount, so `<` and `<=` would be equivalent there
+    /// and no test could tell them apart. `Usd`'s `Ord` is exact (ES-04).
     #[must_use]
     pub fn effective_cost_cap(&self, mandate_value: Usd) -> Usd {
         match self.research_cost_cap_usd_per_day {
-            Some(ceiling) if ceiling < mandate_value => ceiling,
-            _ => mandate_value,
+            Some(ceiling) => ceiling.min(mandate_value),
+            None => mandate_value,
         }
     }
 

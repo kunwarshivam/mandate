@@ -407,10 +407,15 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-research/tests/lineage.rs` (MC-N17 to MC-N19, MC-N24, MC-N27, MC-N28),
   `crates/mandate-research/tests/expiry.rs` (MC-N20 to MC-N22 and the horizon boundary),
   `crates/mandate-research/tests/stagger.rs` (MC-N23's three offsets and the anchor rules, with the
-  least-significant-first reduction oracle), and
+  least-significant-first reduction oracle),
   `crates/mandate-research/tests/properties.rs` (the four oracles: the universe replayed from the
   emitted events, the failing-check set computed unordered, an independent lineage counter, and the
-  oracle self-checks that fail on a seeded bug). Planted bugs per test: the task brief.
+  oracle self-checks that fail on a seeded bug),
+  `crates/mandate-research/tests/refcases.rs` (25 of the 28 family-N cases loaded from
+  `fixtures/refcases/mandate.json` rather than typed out; the three that state `first_order_autonomy`
+  wait for stream H's `classify`), and `crates/mandate-research/tests/rules.rs` (the rule logic this
+  crate carries live, pinned unignored so `cargo mutants` reaches it). Planted bugs per test: the task
+  brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
   with streams F, G, and H.
