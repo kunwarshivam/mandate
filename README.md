@@ -56,7 +56,7 @@ flowchart BT
 
 | Layer | Crate | Responsibility | Safety-critical | Pure |
 |---|---|---|---|---|
-| 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction` with exact-or-error arithmetic, square-root impact and integer roots; `Ratio`, tick rounding, and the metric arithmetic are stubs with their tests merged, pending E4-2 | yes | yes |
+| 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction` with exact-or-error arithmetic, square-root impact and integer roots; `Ratio`, tick rounding, money-to-shares sizing, and the metric arithmetic are stubs with their tests merged, pending E4-2 | yes | yes |
 | 0 | `mandate-time` | `UtcNanos` (RFC 3339 with fractional seconds), dates, the NYSE calendar, trading sessions, trade-date rules | yes | yes |
 | 0 | `mandate-canon` | Canonical JSON, the decimal grammar, SHA-256 digests | yes | yes |
 | 2 | `mandate-accounting` | The account fold: positions, cost basis, cash and settlement, fees with per-order caps, marks, realized and unrealized P&L, corporate actions, buying power | yes | yes |
@@ -84,7 +84,7 @@ sized under caps, paper orders, a hash-chained journal, a scorecard against SPY)
 | Spec | Version | Reference cases | How the code is held to it |
 |---|---|---|---|
 | [Trading domain](docs/specs/trading-domain.md) | v0.10, approved | 26 worked cases (RC-01 onward) and 40 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
-| [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 10 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
+| [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
 | [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness for these cases is Phase 1 work |
 
 ## Verification pipeline
