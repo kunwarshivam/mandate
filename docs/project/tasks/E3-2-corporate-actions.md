@@ -82,7 +82,8 @@ story.
   places [mark parse property]; value at a mark rounded to 12 places [value property]; split
   rounding instead of truncating [split property].
 
-  **Mutants.** Recorded with the implementation.
+  **Mutants.** `MANDATE_BASE_REF=<tests PR head> cargo xtask ci mutants` on the implementation
+  diff: 67 mutants, 37 caught, 30 unviable, 0 missed.
 
 - **Crates in scope:** `mandate-num` (`MarkPrice`, `SplitRatio`, `ShareIncrement`, `SplitQty`),
   `mandate-accounting` (corporate actions, receivables, income), `mandate-refcases` (the

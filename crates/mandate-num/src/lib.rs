@@ -68,6 +68,8 @@ impl NumError {
 
 /// Prices and quantities have at most 9 fractional digits (spec §2.1).
 const QTY_SCALE: u32 = 9;
+/// Reporting marks have at most 12 fractional digits (spec §2.1).
+const MARK_SCALE: u32 = 12;
 /// Money and rates keep full precision up to the stored maximum.
 const FULL_SCALE: u32 = 28;
 const BPS_PER_UNIT: u64 = 10_000;
@@ -78,6 +80,14 @@ fn parse(text: &str, max_scale: u32) -> Result<Decimal, NumError> {
         Ok(value)
     } else {
         Err(NumError::NotCanonical)
+    }
+}
+
+fn positive(value: Decimal) -> Result<Decimal, NumError> {
+    if value > Decimal::ZERO {
+        Ok(value)
+    } else {
+        Err(NumError::NotPositive)
     }
 }
 
@@ -228,8 +238,10 @@ impl SignedQty {
 
     /// `self × mark`, exact and signed.
     pub fn value_at_mark(self, mark: MarkPrice) -> Result<Usd, NumError> {
-        let _ = mark.exact();
-        Err(NumError::Overflow)
+        self.exact()
+            .mul(mark.exact())?
+            .to_decimal(FULL_SCALE)
+            .map(Usd)
     }
 }
 
@@ -241,19 +253,14 @@ impl From<Qty> for SignedQty {
 
 impl Price {
     pub fn parse(text: &str) -> Result<Self, NumError> {
-        let value = parse(text, QTY_SCALE)?;
-        if value > Decimal::ZERO {
-            Ok(Self(value))
-        } else {
-            Err(NumError::NotPositive)
-        }
+        parse(text, QTY_SCALE).and_then(positive).map(Self)
     }
 }
 
 impl MarkPrice {
     /// Canonical text of a positive value with at most 12 fractional digits.
-    pub fn parse(_text: &str) -> Result<Self, NumError> {
-        Err(NumError::NotCanonical)
+    pub fn parse(text: &str) -> Result<Self, NumError> {
+        parse(text, MARK_SCALE).and_then(positive).map(Self)
     }
 }
 
@@ -281,8 +288,11 @@ pub struct SplitRatio {
 impl SplitRatio {
     /// Both terms must be positive (`not_positive`).
     pub fn new(new: u64, old: u64) -> Result<Self, NumError> {
-        let _ = (new, old);
-        Err(NumError::NotPositive)
+        if new == 0 || old == 0 {
+            Err(NumError::NotPositive)
+        } else {
+            Ok(Self { new, old })
+        }
     }
 
     pub fn new_shares(self) -> u64 {
@@ -295,18 +305,35 @@ impl SplitRatio {
 
     /// Q' = Q × new ÷ old truncated toward zero to `increment`, with Q kept for the residual
     /// formulas.
-    pub fn split(self, _qty: SignedQty, _increment: ShareIncrement) -> Result<SplitQty, NumError> {
-        Err(NumError::Overflow)
+    pub fn split(self, qty: SignedQty, increment: ShareIncrement) -> Result<SplitQty, NumError> {
+        let grid = match increment {
+            ShareIncrement::Fractional => QTY_SCALE,
+            ShareIncrement::Whole => 0,
+        };
+        let after = qty
+            .exact()
+            .mul(Exact::integer(self.new))?
+            .div_toward_zero(Exact::integer(self.old), grid)?
+            .to_decimal(QTY_SCALE)?;
+        Ok(SplitQty {
+            ratio: self,
+            before: qty,
+            after: SignedQty(after),
+        })
     }
 
-    /// `round(mark × old ÷ new, scale, mode)`: one rounding; `not_positive` if it rounds to zero.
-    pub fn mark(
-        self,
-        _mark: MarkPrice,
-        _scale: u32,
-        _mode: Rounding,
-    ) -> Result<MarkPrice, NumError> {
-        Err(NumError::Overflow)
+    /// `round(mark × old ÷ new, scale, mode)`: one rounding; `not_positive` if it rounds to zero,
+    /// `too_precise` if `scale` exceeds a mark's 12 places.
+    pub fn mark(self, mark: MarkPrice, scale: u32, mode: Rounding) -> Result<MarkPrice, NumError> {
+        if scale > MARK_SCALE {
+            return Err(NumError::TooPrecise);
+        }
+        mark.exact()
+            .mul(Exact::integer(self.old))?
+            .div(Exact::integer(self.new), scale, mode)?
+            .to_decimal(MARK_SCALE)
+            .and_then(positive)
+            .map(MarkPrice)
     }
 }
 
@@ -333,23 +360,37 @@ impl SplitQty {
     /// division of terminating inputs (spec §8.5).
     pub fn residual_basis(
         self,
-        _basis: CostBasis,
-        _scale: u32,
-        _mode: Rounding,
+        basis: CostBasis,
+        scale: u32,
+        mode: Rounding,
     ) -> Result<CostBasis, NumError> {
-        let _ = self.ratio;
-        Err(NumError::Overflow)
+        basis
+            .exact()
+            .mul(self.residual_times_old()?)?
+            .div(self.scaled_before()?, scale, mode)?
+            .to_decimal(FULL_SCALE)
+            .map(CostBasis)
     }
 
     /// `round(f × price, scale, mode)` with f = (Q·new − Q'·old) ÷ old: cash in lieu of the
     /// residual, signed like Q.
-    pub fn cash_in_lieu(
-        self,
-        _price: Price,
-        _scale: u32,
-        _mode: Rounding,
-    ) -> Result<Usd, NumError> {
-        Err(NumError::Overflow)
+    pub fn cash_in_lieu(self, price: Price, scale: u32, mode: Rounding) -> Result<Usd, NumError> {
+        self.residual_times_old()?
+            .mul(price.exact())?
+            .div(Exact::integer(self.ratio.old), scale, mode)?
+            .to_decimal(FULL_SCALE)
+            .map(Usd)
+    }
+
+    /// Q·new.
+    fn scaled_before(self) -> Result<Exact, NumError> {
+        self.before.exact().mul(Exact::integer(self.ratio.new))
+    }
+
+    /// Q·new − Q'·old = f × old.
+    fn residual_times_old(self) -> Result<Exact, NumError> {
+        self.scaled_before()?
+            .sub(self.after.exact().mul(Exact::integer(self.ratio.old))?)
     }
 }
 
