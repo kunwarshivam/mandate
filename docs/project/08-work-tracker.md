@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, day 2 close (work graph added; Cursor paused, everything on `claude-code`): E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-26, day 2 evening: the five parallel streams merged in one queue (E2-3 slice 2 #107, E5-4 #108, E4-1 implementation #111 and status #113, the E4-2 brief #112 with DEC-127, the mandate spec v0.6 #109 with DEC-117 to DEC-126 proposed to the founder), so E4-1, E5-4, and E2-3 are complete and Track C's spec rewrite is in; DEC-113 (up-to-date rule off) and DEC-114 to DEC-116 recorded; earlier that day (work graph added; Cursor paused, everything on `claude-code`): E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -16,11 +16,11 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 |---|---|---|---|
 | Tier 1 specs | Approved (DEC-71); amended since | Journal spec v0.3 (DEC-81), trading domain spec v0.10 (DEC-86, DEC-92 to DEC-94) | — |
 | M0 Foundations | Done | E1-1, E1-2; CI as two required checks (DEC-76); agent workflow (DEC-78 to DEC-80) | — |
-| M1 Market data | In progress | E2-1 download, E2-2 inspect (#64), E2-4 sessions and corporate actions (#71, #85, #74, #96), safe concurrent writes (#90), fractional seconds (#93, #98), E2-3 slice 1 (#95) | The M1 exit run (`cursor`, once the founder adds market-data keys to the Cursor environment); E2-3 CLI slice; retire the marketdata RFC 3339 workaround |
+| M1 Market data | In progress | E2-1 download, E2-2 inspect (#64), E2-4 sessions and corporate actions (#71, #85, #74, #96), safe concurrent writes (#90), fractional seconds (#93, #98), E2-3 (#95, #107), the marketdata RFC 3339 parser retired (#107) | The M1 exit run (once the founder adds market-data keys to an agent environment); proactive rate limiting in the Alpaca client (claim #115, opened by a `cursor` session) |
 | M2 Accounting | Done | E3-1, E3-2, E3-3 (#53, #67) | RC-08 and RC-18 pass when E6-3 interprets `propose_order`; a follow-up tests PR carries the #53 review minors |
-| M3 Simulated execution and backtest | In progress | E4-1 brief (#61), E4-1 tests (#75), E4-1 implementation (open) | E4-1 status PR (RC-10, RC-12, RC-19), then E4-2 |
-| M4 Journal | In progress | E5-1, E5-2 (#66, #84), E5-3 (#82, #92) | E5-4 verification CLI in review (#108); then the cold store, segment manifests, and the `segment_*` and `tsa_token_invalid` checks |
-| M5 onward | Not started | — | Before M5: the mandate spec rewrite for DEC-97 and DEC-98 (spec-change PRs). M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
+| M3 Simulated execution and backtest | In progress | E4-1 complete: brief (#61), tests (#75), implementation (#111), status (#113); RC-10, RC-12, RC-19 passing; the E4-2 brief and DEC-127 (#112) | E4-2 tests PR (stream E, `agent/e4-2-tests`, new `mandate-backtest` crate at layer 7 with the `mandate-num` metric arithmetic under claim #114), then its implementation PR |
+| M4 Journal | In progress | E5-1, E5-2 (#66, #84), E5-3 (#82, #92), E5-4 verification CLI (#108) | The cold store, segment manifests, and the `segment_*` and `tsa_token_invalid` checks |
+| M5 onward | Not started | Before M5: the mandate spec v0.6 rewrite for DEC-97 to DEC-103 and DEC-111 (#109), with DEC-117 to DEC-126 proposed to the founder | The founder's confirmation of DEC-117 to DEC-126; the Rust harness for the 298 mandate reference cases. M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
 
 ## Stories
 
@@ -36,10 +36,11 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E17-0 Research spike | Merged | [#44](https://github.com/kunwarshivam/mandate/pull/44), [#47](https://github.com/kunwarshivam/mandate/pull/47) | `python/research_spike`: Alpaca news and bars, Claude Sonnet 5 via OpenRouter, fixed sizing under caps, hash-chained JSONL journal, scorer versus SPY. Dry runs only; live paper runs await the founder's go |
 | E2-2 Inspect | Merged | [#64](https://github.com/kunwarshivam/mandate/pull/64) | `cursor`: coverage, exact statistics, gaps, duplicates, untrusted partitions |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
-| E4-1 Simulated execution | Tests PR merged | [#61](https://github.com/kunwarshivam/mandate/pull/61), [#75](https://github.com/kunwarshivam/mandate/pull/75) | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19), 51 pending tests with an independent oracle, 30 planted bugs caught. [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106, tests-PR shapes in DEC-108. Three review rounds on Claude Fable 5.1; implementation PR open: the fill model and `mandate-num`'s arithmetic fill in every stub, so all 53 pending tests pass and RC-10, RC-12, and RC-19 pass on the code; DEC-114 records two readings neither DEC-106 nor DEC-108 covers. Status PR next |
+| E4-1 Simulated execution | Merged (all four PRs) | [#61](https://github.com/kunwarshivam/mandate/pull/61), [#75](https://github.com/kunwarshivam/mandate/pull/75), [#111](https://github.com/kunwarshivam/mandate/pull/111), [#113](https://github.com/kunwarshivam/mandate/pull/113) | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19 passing), 53 tests with an independent oracle, 30 planted bugs caught; `mandate-num` gained the fill arithmetic (`Fraction::parse`, `Qty::portion`, `Bps::sqrt_impact`, `Price::slipped`). [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106, tests-PR shapes in DEC-108, two further readings in DEC-114. Reviews on Claude Fable 5.1: three rounds on the tests, one on the implementation (148 mutants, 0 missed). Follow-up: a `SessionOffAssetClass` validation (Continuous only for crypto), see Known issues |
+| E4-2 Baseline backtest and metrics | Brief merged; tests PR next | [#112](https://github.com/kunwarshivam/mandate/pull/112) | The loop end to end: bars, a division-free moving-average crossover, orders through the §6.4 fill model over the whole bar slice, fills through the accounting fold, marks at each bar's close, and one exact-decimal report (return, variance and a ceiling-rooted volatility, a squared Sharpe, maximum drawdown from the running peak, one-sided turnover, fees, and a tradable buy-and-hold comparison). [Task brief](tasks/E4-2-backtest-baseline.md); 22 interpretations in DEC-127. Crate placement confirmed by the coordinator: a new layer-7 `mandate-backtest` (safety-critical), founder veto on the tests PR. Claim [#110](https://github.com/kunwarshivam/mandate/issues/110), shared-crate claim [#114](https://github.com/kunwarshivam/mandate/issues/114); no reference case moves, so no status PR |
 | E5-2 Artifact store | Merged | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), [#66](https://github.com/kunwarshivam/mandate/pull/66) (tests), [#84](https://github.com/kunwarshivam/mandate/pull/84) (implementation) | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107): write-once, hard-linked into place, re-hashed on every read; zero missed mutants; no reference cases, so no status PR |
-| E5-4 Journal verification CLI | PR open | [#108](https://github.com/kunwarshivam/mandate/pull/108) | `claude-code`: `mandate journal verify <export> [--store] [--anchor] [--from-seq --trusted-prev-hash]` runs journal spec §11 in order over a §6.2 segment and reports the first failure with the spec's code and a non-zero exit; `mandate artifact put`/`get` over the filesystem store, the get re-hashed. Every tamper vector an export can express is replayed through the command; `column_altered` and `seq_values_swapped` are asserted inexpressible, because an export stores no columns apart from the body. `mandate-journal` and `mandate-artifacts-fs` unchanged. Interpretations in DEC-115; [task brief](tasks/E5-4-verification-cli.md) |
-| E2-3 Top-of-book quotes (Should) | Slice 2 open | [#95](https://github.com/kunwarshivam/mandate/pull/95), [#107](https://github.com/kunwarshivam/mandate/pull/107) | Slice 1 (`cursor`, #95): `Quote`, `Kind::Quotes`, the Alpaca stock (`sip`, `iex`) and crypto quotes client, `Decimal128(38, 9)` partitions; locked, crossed, and one-sided quotes kept as sent. Slice 2 (`claude-code`, #107): `download --kind quotes`, and `inspect` statistics for a quotes dataset (each quoted side, the signed spread, and the locked, crossed, one-sided, and unquoted counts, DEC-116), so `InspectError::Unsupported` is gone. Still open: a live quotes check in `tests/live.rs` and a quotes download in the M1 exit run, both needing market-data keys |
+| E5-4 Journal verification CLI | Merged | [#108](https://github.com/kunwarshivam/mandate/pull/108) | `claude-code`: `mandate journal verify <export> [--store] [--anchor] [--from-seq --trusted-prev-hash]` runs journal spec §11 in order over a §6.2 segment and reports the first failure with the spec's code and a non-zero exit; `mandate artifact put`/`get` over the filesystem store, the get re-hashed. Every tamper vector an export can express is replayed through the command; `column_altered` and `seq_values_swapped` are asserted inexpressible. Input refusals carry stable codes; an anchor never vouches for an export it cannot cover (two review findings). `mandate-journal` and `mandate-artifacts-fs` unchanged. Interpretations in DEC-115; [task brief](tasks/E5-4-verification-cli.md) |
+| E2-3 Top-of-book quotes (Should) | Merged (both slices) | [#95](https://github.com/kunwarshivam/mandate/pull/95), [#107](https://github.com/kunwarshivam/mandate/pull/107) | Slice 1 (`cursor`, #95): `Quote`, `Kind::Quotes`, the Alpaca stock (`sip`, `iex`) and crypto quotes client, `Decimal128(38, 9)` partitions; locked, crossed, and one-sided quotes kept as sent. Slice 2 (`claude-code`, #107): `download --kind quotes`, and `inspect` statistics for a quotes dataset (each quoted side, the signed spread, and the locked, crossed, one-sided, and unquoted counts, DEC-116), so `InspectError::Unsupported` is gone; the marketdata RFC 3339 parser now delegates to `UtcNanos::parse_rfc3339`. Still open: a live quotes check in `tests/live.rs` and a quotes download in the M1 exit run, both needing market-data keys |
 | E2-4 Sessions and corporate actions | Merged (all four PRs) | [#71](https://github.com/kunwarshivam/mandate/pull/71) (tests), [#85](https://github.com/kunwarshivam/mandate/pull/85) (implementation), [#74](https://github.com/kunwarshivam/mandate/pull/74) (corporate actions), [#96](https://github.com/kunwarshivam/mandate/pull/96) (`inspect` wiring) | `cursor`: the NYSE calendar 2018 to 2028 as data, four sessions per trading day, `session_at`, DST through the bundled tzdb; corporate actions adjusted through `mandate_num::SplitRatio::mark` and fetched by ex-date. #96: each missing bar slot classed as session closure, no trade, true gap, or unclassified by SIP and IEX venue hours checked in as data; `download` stores the corporate actions with the dataset; raw and split-adjusted prices in the report |
 
 ## Reference cases
@@ -62,10 +63,11 @@ issues are the record; this table is the summary
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
 | E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation, #80 follow-up tests); claim closed | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl`, `agent/e3-3-followup-tests` |
-| E4-1 simulated execution (backtest fill model) | `claude-code` | #58, #105 (implementation) | Tests PR merged (#75) after three review rounds; the task brief and DEC-106 merged in #61; implementation PR open (claim #105), status PR follows (DEC-77) | `agent/e4-1-sim-impl-2` (implementation); `agent/e4-1-sim-tests-2` (#75); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
+| E4-1 simulated execution (backtest fill model) | `claude-code` | #58, #62, #105 | Merged (#61 brief, #75 tests, #111 implementation, #113 status); all three claims closed | `agent/e4-1-sim-tests-2` (#75), `agent/e4-1-sim-impl-2` (#111), `agent/e4-1-sim-status-2` (#113); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
+| E4-2 baseline backtest and metrics report (stream E) | `claude-code` | [#110](https://github.com/kunwarshivam/mandate/issues/110), [#114](https://github.com/kunwarshivam/mandate/issues/114) (shared crate `mandate-num`) | Brief merged ([#112](https://github.com/kunwarshivam/mandate/pull/112), DEC-127); the DEC-77 tests PR is next on `agent/e4-2-tests` with the new `mandate-backtest` crate | `agent/e4-2-brief` (#112), then `agent/e4-2-tests` |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | E5-3 Postgres journal | `cursor` | #77 | Merged (#82 tests, #92 implementation); DEC-109 recorded; claims #77 and #78 closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
-| Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
+| Track C: mandate spec rewrite for DEC-97 to DEC-103 and DEC-111 | `claude-code` | #50, #103 | Merged ([#109](https://github.com/kunwarshivam/mandate/pull/109), no code, ES-22) after three review rounds: the ten rewrite questions answered as DEC-117 to DEC-126 (Proposed, the founder may veto after the fact); mandate spec v0.6, both schemas, the journal spec's event catalogue, the reference implementation, and 298 reference cases (from 215, every id kept). Claims closed. The Rust harness for the mandate cases follows in a later story | `agent/track-c-mandate-rewrite` (#109) |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS and rebased; the founder's confirmation of DEC-99 to DEC-103 pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Merged (#71 tests, #85 sessions implementation, #74 corporate actions, #96 `inspect` wiring); claim closed; the M1 rehearsal's follow-ups are claim #116 | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
@@ -77,11 +79,12 @@ issues are the record; this table is the summary
 | `mandate-marketdata` safe concurrent dataset writes | `cursor` | #86 | Claimed | — |
 | `mandate-time`: `UtcNanos` fractional seconds (shared crate, for E2-1) | `cursor` | #91 | Merged (#93 tests, #98 implementation, the latter cherry-picked onto main by the coordinator while Cursor was paused); claim closed | `cursor/utcnanos-fraction-tests-2652` (#93), `agent/utcnanos-fraction-impl` (#98) |
 | E2-3 top-of-book quotes | `cursor` | #94 | Slice 1 merged (#95); claim closed | `cursor/e2-3-quotes-v2-a075` (#95); `cursor/e2-3-quotes-a075` superseded |
-| E2-3 CLI slice and the RFC 3339 workaround retirement (stream B) | `claude-code` | #106 | `download --kind quotes`, quote statistics in `inspect` (DEC-116), and the Alpaca timestamp parse routed through `UtcNanos::parse_rfc3339`; PR #107 open, checks green locally | `agent/e2-3-cli-quotes` (#107) |
+| E2-3 CLI slice and the RFC 3339 workaround retirement (stream B) | `claude-code` | #106 | Merged ([#107](https://github.com/kunwarshivam/mandate/pull/107)); DEC-116 recorded; claims #106 and #94 closed | `agent/e2-3-cli-quotes` (#107) |
 | `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | Merged (#90); claim closed | `cursor/marketdata-write-safety` (#90) |
 | Thesis revision loop: DEC-111, E17-9, R-28 | `claude-code` | — | Merged (#99); the story waits on E17-8 | docs only |
-| E5-4 journal verification and artifact commands | `claude-code` | #104 | PR #108 open with green checks, waiting on the merge coordinator's independent review; DEC-115 reserved | `agent/e5-4-verify-cli` (#108) |
+| E5-4 journal verification and artifact commands | `claude-code` | #104 | Merged ([#108](https://github.com/kunwarshivam/mandate/pull/108)) after two review rounds; DEC-115 recorded; claim closed | `agent/e5-4-verify-cli` (#108) |
 | CI short path for documentation-only changes (DEC-112) | `claude-code` | — | Merged (#100) at the founder's request; a docs PR now costs under two runner minutes | `.github/scripts/` |
+| `mandate-marketdata`: proactive rate limiting in the Alpaca client (E2-1 follow-up) | `cursor` | #115 | Claimed 2026-09-26 19:20Z by a `cursor` session while the founder had Cursor paused; the coordinator has not launched it and leaves it for the founder to confirm or close | — |
 | `inspect` data-quality reporting (M1 rehearsal follow-up to E2-2 and E2-4) | `cursor` | #116 | PR open, waiting on the merge coordinator's review: the IEX early-close evening closed from 17:00, records while the venue is closed, zero-volume and single-trade-spread warnings, inconsistent bars as problems, closed-day counts, the restatement note, and the live test behind `live-alpaca` | `cursor/inspect-quality-39ba` |
 
 ## Waiting on the founder
@@ -120,9 +123,14 @@ them in the decision log.
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
 | ~~`mandate-marketdata` keeps its own RFC 3339 parser (`timestamp::parse_rfc3339_utc`), the workaround for the fractional-seconds gap that #93 and #98 closed~~ **Resolved (claim #106, PR #107):** `parse_rfc3339_utc` now only narrows `UtcNanos::parse_rfc3339` to the UTC form Alpaca sends, and the duplicated parser is deleted; `mandate-time`'s differential test keeps a copy pinned to `c8efb09` as an oracle of its own | `claude-code` |
-| GitHub Actions minutes: 90 percent of the month's 3,000 used by 2026-09-26; DEC-112 makes docs PRs cheap, and the ruleset's up-to-date rule still re-runs every open PR after each merge | Founder: decide whether to relax the up-to-date rule |
+| GitHub Actions minutes: 90 percent of the month's 3,000 used by 2026-09-26; DEC-112 makes docs PRs cheap and DEC-113 turned the up-to-date rule off, so a merge no longer re-runs every open PR; the coordinator runs `cargo xtask check` on `main` after each code merge instead. GitHub creates no `pull_request` run for a PR that conflicts with `main`, so a branch behind a merge that touched the shared tables shows no checks until `main` is merged into it | Founder: raise or reset the Actions budget on 2026-10-01 |
 | Postgres in the agent environment: `.cursor/install.sh` installs PostgreSQL 18 only where apt.postgresql.org is reachable, and `MANDATE_PG_URL` must be exported by hand (`environment.json` cannot set it) | E5-3 (CI has it: a service container in `full` and nightly) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
+| `mandate-sim` accepts `Session::Continuous` bars for a `UsEquity` instrument, so an equity stop on continuous bars fills where spec §4.3 says such input cannot exist (DEC-114 item 2 discloses it); add a `SessionOffAssetClass` validation (Continuous only for crypto) in a tests PR | E4-2 tests PR, or the next `mandate-sim` story |
+| `Bps::sqrt_impact` returns `too_precise` for an impact coefficient with more than 10 decimal places; the backtest config validation should bound the coefficient's scale, or the doc should say so | E4-2 |
+| `mandate journal verify`: an unreadable export or anchor path is reported through anyhow context with no `Refusal` code (an I/O failure, exit non-zero); scripts that key on the first word need one there too | Next `mandate-cli` touch |
+| `mandate inspect` on a quotes dataset with corporate actions applied and no row quoting any side prints no split-adjusted line and no reason | Next `mandate-cli` touch |
+| The mandate reference cases (298, spec v0.6) have no Rust harness yet: the mandate crates that would read `mandate.yaml` do not exist; DEC-117 to DEC-126 stay Proposed (founder) until confirmed | The story that creates `mandate-spec` |
 
 ## Lessons encoded today
 
@@ -172,35 +180,35 @@ after each code merge.
 
 | Stream | Work | Depends on | Reserved IDs | State |
 |---|---|---|---|---|
-| A | E4-1 implementation PR (`mandate-sim`, `mandate-num`; test files only lose `pending E4-1` markers), then the status PR moving RC-10, RC-12, RC-19 to passing | #75 (merged) | DEC-114 | implementation PR [#111](https://github.com/kunwarshivam/mandate/pull/111) open, ready for review; status PR after it merges |
-| B | E2-3 CLI slice (`download --kind quotes`, quote statistics in `inspect`) and retiring `mandate-marketdata`'s own RFC 3339 parser for `UtcNanos::parse_rfc3339` | #95, #98 (merged) | DEC-116 | builder launched |
-| C | E5-4: `mandate-cli journal verify` over an exported stream and its artifact store, and artifact put and fetch | E5-1 to E5-3 (merged); the founder's confirmation of E5-4 taken from the delegation | DEC-115 | PR [#108](https://github.com/kunwarshivam/mandate/pull/108) open, waiting on review |
-| D | Track C: answer the rewrite questions as decisions proposed to the founder, then the mandate spec, schemas, reference implementation, and cases for DEC-97 to DEC-103 and DEC-111 (spec-change PR, no code) | nothing; the founder can veto any proposed answer before the spec PR merges | DEC-117 to DEC-126 | builder launched |
-| E | E4-2 task brief and interpretations, then the baseline backtest and metrics | A's implementation API | DEC-127 | after A opens |
+| A | E4-1 implementation PR (`mandate-sim`, `mandate-num`; test files only lose `pending E4-1` markers), then the status PR moving RC-10, RC-12, RC-19 to passing | #75 (merged) | DEC-114 | merged: [#111](https://github.com/kunwarshivam/mandate/pull/111), [#113](https://github.com/kunwarshivam/mandate/pull/113) |
+| B | E2-3 CLI slice (`download --kind quotes`, quote statistics in `inspect`) and retiring `mandate-marketdata`'s own RFC 3339 parser for `UtcNanos::parse_rfc3339` | #95, #98 (merged) | DEC-116 | merged: [#107](https://github.com/kunwarshivam/mandate/pull/107) |
+| C | E5-4: `mandate-cli journal verify` over an exported stream and its artifact store, and artifact put and fetch | E5-1 to E5-3 (merged); the founder's confirmation of E5-4 taken from the delegation | DEC-115 | merged: [#108](https://github.com/kunwarshivam/mandate/pull/108) |
+| D | Track C: answer the rewrite questions as decisions proposed to the founder, then the mandate spec, schemas, reference implementation, and cases for DEC-97 to DEC-103 and DEC-111 (spec-change PR, no code) | nothing; the founder can veto any proposed answer after the fact | DEC-117 to DEC-126 | merged: [#109](https://github.com/kunwarshivam/mandate/pull/109) |
+| E | E4-2 task brief and interpretations (docs only), then the DEC-77 tests PR for the baseline backtest and metrics in a new layer-7 `mandate-backtest` crate, plus the `mandate-num` metric arithmetic under shared-crate claim #114, then the implementation PR | #75, #111, #113 (all merged) | DEC-127 | brief merged: [#112](https://github.com/kunwarshivam/mandate/pull/112); tests PR next (builder E, `agent/e4-2-tests`) |
 | Founder | Alpaca market-data keys in the Cursor environment (M1 exit run); paper and OpenRouter keys and egress in the cloud environment, then go for spike paper runs; counsel; branch cleanup; key rotation | | | waiting |
 
 ## Next, in order
 
-1. **E4-1** implementation and status PRs (cloud builder), then **E4-2**.
-2. **E2-4** PR 4 (gap classification in `inspect`, `cursor`): closes M1 with the M1 exit run once
-   the founder adds market-data keys. **E2-3** (Should) later.
-3. **E5-3** implementation PR (`cursor`), then **E5-4** once the founder confirms it.
+1. **E4-2** tests PR (stream E, builder running: the `mandate-backtest` crate skeleton with the
+   layers.toml entry, the `mandate-num` metric arithmetic under claim #114, every test
+   `#[ignore = "pending E4-2"]`), then its implementation PR; both reviewed on a different model
+   and merged through the one queue.
+2. **M1 exit run** once the founder adds market-data keys to an agent environment; the Alpaca
+   client's proactive rate limiting (claim #115) if the founder confirms that `cursor` claim.
+3. **Journal:** the cold store, segment manifests, and the `segment_*` and `tsa_token_invalid`
+   checks (E5 follow-ups).
 4. The spec-only change for DEC-104 items 2 and 5 once the founder decides item 5.
-5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
-   DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
-   the envelope fields and the universe as runtime state, the research agent
-   contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
-   restated for envelope fields.
-6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the team's
-   internal paper workspaces with the research basket as the fixed test data universe, every
-   admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation (E17-8). The
-   full E17-3, for users' agents under their own envelopes, follows only after that evaluation
-   passes. **E17-9**, the thesis revision loop, follows E17-8 and one completed evaluation
-   ([DEC-111](04-decision-log.md#decisions)); it is never built against backtests.
+5. **Founder:** confirm or veto DEC-117 to DEC-126 (the rewrite answers the spec v0.6 is built on)
+   and DEC-99 to DEC-103; confirm the `mandate-backtest` layer-7 entry (DEC-127 item 1).
+6. **M5** starts with decision DEC-17 (messaging) and the Rust harness for the 298 mandate reference
+   cases, and adds E17 (research agent and dynamic universe), starting with the DEC-103 thin slice:
+   the team's internal paper workspaces with the research basket as the fixed test data universe,
+   every admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation
+   (E17-8). The full E17-3, for users' agents under their own envelopes, follows only after that
+   evaluation passes. **E17-9**, the thesis revision loop, follows E17-8 and one completed
+   evaluation ([DEC-111](04-decision-log.md#decisions)); it is never built against backtests.
 
-E4-1, E2-4, and E5-3 touch different crates and can run in parallel; reviews and merges run one at a
-time.
+Streams that touch different crates run in parallel; reviews and merges run one at a time.
 
 ## How the work runs
 
