@@ -1,0 +1,21 @@
+[package]
+name = "mandate-journal-pg"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The Postgres journal hot store: durable append with the journal's protocol and verification (journal spec §5.1, §6.1; backlog E5-3)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-time.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
