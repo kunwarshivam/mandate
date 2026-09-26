@@ -108,8 +108,10 @@ guard, or the stub itself), so that run shows only that each test is wired in. E
 assertion is shown here instead. Every bug below was planted on its own in the implementation
 (`cursor/e5-3-pg-impl-e15e`, with the tests of this PR merged), and the crate's 26 tests were run
 against a local PostgreSQL 18.6 (`MANDATE_PG_URL`, `MANDATE_PG_REQUIRED=1`,
-`cargo nextest run -p mandate-journal-pg --no-fail-fast`). The bug was then reverted. The first
-column is the test the bug was aimed at.
+`cargo nextest run -p mandate-journal-pg --no-fail-fast`). The bug was then reverted. The whole
+set ran twice, on the implementation merged with this branch before and after `main` brought in
+#84. Both runs gave the same results, except where noted: the differential draws new random
+sequences each run. The first column is the test the bug was aimed at.
 All 28 bugs were caught, and each of the 26 tests failed on at least one of them. The aimed-at
 test failed in 27 of the 28. The exception is the repeated `event_id` bug, which
 `C::append_vectors` does not catch, though `C::stream_rules` and the differential do.
@@ -138,8 +140,8 @@ test failed in 27 of the 28. The exception is the repeated `event_id` bug, which
 | `C::new_streams_start_empty` | An unknown stream's head reports writer epoch 1 | that test, `C::matches_the_memory_journal_on_random_sequences` |
 | `C::stream_rules` | The stream's environment is not taken from its stored head event | that test |
 | `C::ownership_and_fencing` | A writer with a newer epoch than the stream's is not fenced (`<` instead of `!=`) | that test, `C::rejected_batches_write_nothing_and_use_no_seq`, `C::matches_the_memory_journal_on_random_sequences` |
-| `C::risk_clock_never_decreases_along_a_stream` | The stream's stored `risk_clock` is not passed to the stream rules (the head trigger then rejects the head update, so the outcome is `Unavailable`, not `Invalid`) | that test |
-| `C::identical_retries_return_the_stored_events` | A batch that only partly overlaps stored events returns the stored ones as `AlreadyCommitted` | that test, `C::append_vectors`, `C::matches_the_memory_journal_on_random_sequences` |
+| `C::risk_clock_never_decreases_along_a_stream` | The stream's stored `risk_clock` is not passed to the stream rules (the head trigger then rejects the head update, so the outcome is `Unavailable`, not `Invalid`) | that test; `C::matches_the_memory_journal_on_random_sequences` in one of the two runs |
+| `C::identical_retries_return_the_stored_events` | A batch that only partly overlaps stored events returns the stored ones as `AlreadyCommitted` | that test, `C::append_vectors`; `C::matches_the_memory_journal_on_random_sequences` in one of the two runs |
 | `C::rejected_batches_write_nothing_and_use_no_seq` | The risk clock is not carried from draft to draft within a batch | that test, `C::risk_clock_never_decreases_along_a_stream`, `C::matches_the_memory_journal_on_random_sequences`, `the_database_rejects_bad_rows_forks_gaps_and_head_rollbacks` |
 | `C::chain_vectors_byte_for_byte` | `recorded_at` is stored truncated to microseconds, as the `timestamptz` column DEC-109 rejects would store it | that test and 19 others: every test that reads stored rows back fails on `column_mismatch` |
 | `C::append_vectors` | A batch that repeats an `event_id` is not rejected before the database is asked | `C::stream_rules`, `C::matches_the_memory_journal_on_random_sequences` (`C::append_vectors` fails on the partial-overlap, `recorded_at`, and `HeadMismatch` bugs) |
