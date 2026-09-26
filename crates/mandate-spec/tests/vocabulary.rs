@@ -513,3 +513,28 @@ fn the_reachable_accessors_return_what_they_were_given() {
         "the entry that was put in is the entry that comes out"
     );
 }
+
+/// A hard breach waits `min(breach_confirm_s, 10)` seconds for its second quote (§5.6, DEC-63).
+///
+/// Live rather than pending: the wait is a total function of one number, not part of the risk fold
+/// that tests PR 2 owns, and review round 1's mutation run showed it unpinned — a mutant returning
+/// zero would have made a single bad tick a hard trigger, which is exactly what the wait prevents.
+#[test]
+fn a_hard_breach_waits_the_shorter_of_the_confirm_window_and_ten_seconds() {
+    use mandate_spec::risk::{Confirmation, MAX_BREACH_CONFIRM_S, hard_wait_s};
+
+    assert_eq!(hard_wait_s(300), 10, "a long window still waits only 10s");
+    assert_eq!(hard_wait_s(MAX_BREACH_CONFIRM_S), 10);
+    assert_eq!(hard_wait_s(5), 5, "a shorter window is the whole wait");
+    assert_eq!(hard_wait_s(10), 10);
+    assert_eq!(
+        hard_wait_s(0),
+        0,
+        "a zero window confirms at once, and never waits a second it was not given"
+    );
+    assert!(
+        !Confirmation::default().is_pending(),
+        "a fresh confirmation has accumulated nothing"
+    );
+    assert_eq!(Confirmation::default().accumulated_s(), 0);
+}
