@@ -1,13 +1,18 @@
-//! Shared test support: recorded Alpaca responses and the datasets they belong to.
+//! Shared test support: recorded Alpaca responses, a scripted transport, and a pause that only
+//! records.
 
 #![allow(
     dead_code,
     reason = "each test binary uses a different subset of the helpers"
 )]
 
+use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
+use mandate_marketdata::client::{Pause, Response, Transport, TransportError};
 use mandate_marketdata::model::{AssetClass, DatasetId, Feed, Kind, Symbol, Timeframe};
 use mandate_time::Date;
 
@@ -32,6 +37,81 @@ pub fn scenario(name: &str) -> Scenario {
         .map(|n| fs::read(dir.join(format!("page-{n}.json"))).unwrap())
         .collect();
     Scenario { requests, bodies }
+}
+
+pub fn ok(body: &[u8]) -> Result<Response, TransportError> {
+    Ok(Response {
+        status: 200,
+        body: body.to_vec(),
+    })
+}
+
+pub fn status(code: u16) -> Result<Response, TransportError> {
+    Ok(Response {
+        status: code,
+        body: br#"{"message":"scripted"}"#.to_vec(),
+    })
+}
+
+#[derive(Default)]
+struct Script {
+    replies: VecDeque<Result<Response, TransportError>>,
+    requested: Vec<String>,
+}
+
+/// Answers each request with the next scripted reply and records what was asked.
+#[derive(Clone, Default)]
+pub struct FakeTransport {
+    script: Arc<Mutex<Script>>,
+}
+
+impl FakeTransport {
+    pub fn serving(replies: impl IntoIterator<Item = Result<Response, TransportError>>) -> Self {
+        let fake = Self::default();
+        fake.push(replies);
+        fake
+    }
+
+    pub fn push(&self, replies: impl IntoIterator<Item = Result<Response, TransportError>>) {
+        self.script.lock().unwrap().replies.extend(replies);
+    }
+
+    pub fn requested(&self) -> Vec<String> {
+        self.script.lock().unwrap().requested.clone()
+    }
+
+    pub fn unused(&self) -> usize {
+        self.script.lock().unwrap().replies.len()
+    }
+}
+
+impl Transport for FakeTransport {
+    async fn get(&self, path_and_query: &str) -> Result<Response, TransportError> {
+        let mut script = self.script.lock().unwrap();
+        script.requested.push(path_and_query.to_owned());
+        script
+            .replies
+            .pop_front()
+            .unwrap_or_else(|| panic!("unscripted request {path_and_query}"))
+    }
+}
+
+/// Records each pause instead of waiting.
+#[derive(Clone, Default)]
+pub struct RecordingPause {
+    pauses: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl RecordingPause {
+    pub fn pauses(&self) -> Vec<Duration> {
+        self.pauses.lock().unwrap().clone()
+    }
+}
+
+impl Pause for RecordingPause {
+    async fn pause(&self, duration: Duration) {
+        self.pauses.lock().unwrap().push(duration);
+    }
 }
 
 pub fn day(s: &str) -> Date {
