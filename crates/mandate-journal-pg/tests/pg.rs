@@ -669,6 +669,36 @@ fn a_connection_lost_during_commit_is_ambiguous_and_atomic() {
     assert_eq!(rows[0].seq, 3);
 }
 
+#[test]
+#[ignore = "pending E5-3"]
+fn an_error_while_appending_is_unavailable_and_not_retried() {
+    let Some(db) = TestDb::new() else { return };
+    let journal = db.journal();
+    let (s, epoch) = db.block_on(opened(&journal, 1));
+    db.admin_execute(
+        "CREATE SEQUENCE append_attempts;
+         CREATE FUNCTION append_fault() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER AS $$
+         BEGIN
+           IF nextval('append_attempts') = 1 THEN RAISE EXCEPTION 'injected failure'; END IF;
+           RETURN NEW;
+         END $$;
+         CREATE TRIGGER append_fault BEFORE INSERT ON events
+           FOR EACH ROW EXECUTE FUNCTION append_fault()",
+    );
+    assert_eq!(
+        db.block_on(journal.append(&s, 2, epoch, now(), &[&mark(2)])),
+        Ok(AppendOutcome::Unavailable),
+        "only a lost race is rerun; any other error ends the append, even one a rerun would pass"
+    );
+    let attempts: i64 = db
+        .block_on(sqlx::query_scalar("SELECT last_value FROM append_attempts").fetch_one(&db.admin))
+        .unwrap();
+    assert_eq!(attempts, 1);
+    assert_eq!(db.block_on(journal.rows(&s)).unwrap().len(), 2);
+    let rows = committed(db.block_on(journal.append(&s, 2, epoch, now(), &[&mark(2)])));
+    assert_eq!(rows[0].seq, 3);
+}
+
 /// Changes stored rows as a superuser with the journal's triggers switched off for the session,
 /// the way an operator with direct database access could; CHECK constraints still apply.
 async fn tamper(db: &TestDb, sql: &str) {
@@ -837,7 +867,11 @@ async fn opened_with_artifact_marks(journal: &PgJournal) -> StreamId {
     let artifacts = [artifact_mark_draft(1, 'a'), artifact_mark_draft(2, 'b')];
     let refs: Vec<&[u8]> = artifacts.iter().map(Vec::as_slice).collect();
     committed(journal.append(&s, 1, epoch, now(), &refs).await);
-    committed(journal.append(&s, 3, epoch, now(), &[&mark(3), &mark(4)]).await);
+    committed(
+        journal
+            .append(&s, 3, epoch, now(), &[&mark(3), &mark(4)])
+            .await,
+    );
     s
 }
 
