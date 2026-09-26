@@ -66,7 +66,8 @@ every workspace crate and reference-case suite has an entry and that every path 
   (I1, I3, I5, I6 and the split, mark, dividend, and receivable rules against an i128 oracle),
   `crates/mandate-accounting/tests/settlement.rs` (hand-calculated buying power in cash and margin
   accounts, pending charges, reservations), `crates/mandate-accounting/tests/settlement_properties.rs`
-  (buying power and the no-debit rule I4 against an i128 oracle, with a gated generator).
+  (buying power and the no-debit rule I4 against an i128 oracle whose holidays come from the
+  `us_2026` calendar fixture, with a gated generator and a live guard on the branches it reaches).
 - **Reference cases:** `trading_domain::*` in `fixtures/refcases/trading-domain.json`.
 - **Run:** `cargo nextest run -p mandate-accounting`.
 

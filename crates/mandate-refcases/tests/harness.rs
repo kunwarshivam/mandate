@@ -1,7 +1,8 @@
 //! The `trading_domain` harness checks every key of every interpreted expectation (DEC-85). RC-08
 //! and RC-18's cash variant, run without their `propose_order` step (E6-3), show that the account
 //! type and the `buying_power` expectation are read (DEC-105): the founder's values pass, and a
-//! wrong account type, a wrong buying power, or an account type the profile forbids fails.
+//! wrong account type, a wrong buying power, an account type the profile forbids, or an unknown
+//! broker profile fails.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -98,6 +99,24 @@ fn rc_08_accounting_steps_pass_and_a_wrong_account_type_or_buying_power_fails() 
     assert_eq!(
         alpaca_cash,
         Err("an alpaca account is never a cash account".to_owned())
+    );
+}
+
+/// An unknown `broker_profile` is reported as the unknown profile it is, with the profiles the
+/// harness knows and the account types each accepts. RC-08's `cash` account is valid (DEC-105), so
+/// no unknown profile may report it as an unknown account type.
+#[test]
+fn an_unknown_broker_profile_names_the_profile_and_never_the_cash_account_type() {
+    let unknown = run(
+        accounting_steps_of("RC-08", |c| c["broker_profile"] = json!("schwab")),
+        "RC-08",
+    );
+    assert_eq!(
+        unknown,
+        Err(
+            "unknown broker_profile `schwab`: the harness knows `alpaca` (margin accounts only) and `generic` (`cash` or `margin`)"
+                .to_owned()
+        )
     );
 }
 
