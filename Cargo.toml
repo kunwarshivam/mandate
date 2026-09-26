@@ -9,6 +9,7 @@ mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
+mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }
