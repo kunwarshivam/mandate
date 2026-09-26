@@ -1,5 +1,5 @@
-//! Shared test support: recorded Alpaca responses, a scripted transport, a pause that only
-//! records, and scratch directories.
+//! Shared test support: recorded Alpaca responses, a scripted transport, a clock that moves only
+//! when paused and records each pause, and scratch directories.
 
 #![allow(
     dead_code,
@@ -13,9 +13,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mandate_marketdata::client::{Pause, Response, Transport, TransportError};
+use mandate_marketdata::client::{Pause, RateHeaders, Response, Transport, TransportError};
 use mandate_marketdata::model::{AssetClass, DatasetId, Feed, Kind, Symbol, Timeframe};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/alpaca")
@@ -43,8 +43,31 @@ pub fn scenario(name: &str) -> Scenario {
 pub fn ok(body: &[u8]) -> Result<Response, TransportError> {
     Ok(Response {
         status: 200,
+        rate: RateHeaders::default(),
         body: body.to_vec(),
     })
+}
+
+/// A success carrying `X-Ratelimit-Limit`, `-Remaining`, and `-Reset` (Unix seconds).
+pub fn ok_rated(
+    body: &[u8],
+    limit: u32,
+    remaining: u32,
+    reset: i64,
+) -> Result<Response, TransportError> {
+    Ok(Response {
+        status: 200,
+        rate: rate(limit, remaining, reset),
+        body: body.to_vec(),
+    })
+}
+
+pub fn rate(limit: u32, remaining: u32, reset: i64) -> RateHeaders {
+    RateHeaders {
+        limit: Some(limit.to_string()),
+        remaining: Some(remaining.to_string()),
+        reset: Some(reset.to_string()),
+    }
 }
 
 /// A corporate-actions page with no action, as Alpaca answers for a symbol without any.
@@ -53,6 +76,7 @@ pub const NO_ACTIONS: &[u8] = br#"{"corporate_actions":{},"next_page_token":null
 pub fn status(code: u16) -> Result<Response, TransportError> {
     Ok(Response {
         status: code,
+        rate: RateHeaders::default(),
         body: br#"{"message":"scripted"}"#.to_vec(),
     })
 }
@@ -100,19 +124,53 @@ impl Transport for FakeTransport {
     }
 }
 
-/// Records each pause instead of waiting.
-#[derive(Clone, Default)]
+/// 2026-09-26T00:00:00Z, a whole minute, where [`RecordingPause`] starts by default.
+pub const START_SECS: i64 = 1_790_380_800;
+
+/// A clock that stands still until paused: each pause is recorded and moves it forward by exactly
+/// its duration, so no test waits.
+#[derive(Clone)]
 pub struct RecordingPause {
+    start: UtcNanos,
     pauses: Arc<Mutex<Vec<Duration>>>,
 }
 
+impl Default for RecordingPause {
+    fn default() -> Self {
+        Self::starting_at(UtcNanos::from_parts(START_SECS, 0).unwrap())
+    }
+}
+
 impl RecordingPause {
+    pub fn starting_at(start: UtcNanos) -> Self {
+        Self {
+            start,
+            pauses: Arc::default(),
+        }
+    }
+
     pub fn pauses(&self) -> Vec<Duration> {
         self.pauses.lock().unwrap().clone()
+    }
+
+    /// Time since the start, the sum of every pause.
+    pub fn elapsed(&self) -> Duration {
+        self.pauses.lock().unwrap().iter().sum()
     }
 }
 
 impl Pause for RecordingPause {
+    fn now(&self) -> UtcNanos {
+        let elapsed = self.elapsed();
+        let nanos = u64::from(self.start.nanos()) + u64::from(elapsed.subsec_nanos());
+        let secs = self.start.secs() + i64::try_from(elapsed.as_secs()).unwrap();
+        UtcNanos::from_parts(
+            secs + i64::try_from(nanos / 1_000_000_000).unwrap(),
+            u32::try_from(nanos % 1_000_000_000).unwrap(),
+        )
+        .unwrap()
+    }
+
     async fn pause(&self, duration: Duration) {
         self.pauses.lock().unwrap().push(duration);
     }

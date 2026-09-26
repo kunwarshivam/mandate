@@ -73,6 +73,10 @@ impl NumError {
 const QTY_SCALE: u32 = 9;
 /// Reporting marks have at most 12 fractional digits (spec §2.1).
 const MARK_SCALE: u32 = 12;
+/// A backtest report holds its ratios at up to 24 fractional digits, because an exact sum of squares
+/// of 12-place returns needs 24; every figure the report rounds is rounded at 12
+/// ([E4-2 task brief](../../../docs/project/tasks/E4-2-backtest-baseline.md), DEC-127).
+const RATIO_SCALE: u32 = 24;
 /// Money and rates keep full precision up to the stored maximum.
 const FULL_SCALE: u32 = 28;
 const BPS_PER_UNIT: u64 = 10_000;
@@ -166,6 +170,14 @@ decimal_type!(
 decimal_type!(
     /// A non-negative number of basis points.
     Bps
+);
+decimal_type!(
+    /// A signed ratio with at most 24 fractional digits: a backtest report's returns, variance,
+    /// squared Sharpe, drawdown, and turnover (DEC-127). Every figure the report rounds is rounded
+    /// at 12 places; the extra digits exist because an exact sum of squares of 12-place returns
+    /// needs 24, and because a squared Sharpe is unbounded above
+    /// ([E4-2 task brief](../../../docs/project/tasks/E4-2-backtest-baseline.md)).
+    Ratio
 );
 /// A non-negative fraction of one, at most one, with at most 9 fractional digits: the backtest
 /// volume-cap fraction ([trading-domain spec §6.4] rule 3). The upper bound is part of the type
@@ -311,6 +323,24 @@ impl Price {
         };
         moved.to_decimal(QTY_SCALE).and_then(positive).map(Self)
     }
+
+    /// The nearest price on `tick`'s grid, moved against the order: down for a buy limit
+    /// ([`Adverse::Up`] is the direction slippage moves a buy, so a buy's limit rounds the other
+    /// way) and up for a sell limit, which is spec §2.1's rule for limit and stop prices. A price
+    /// already on the grid is returned unchanged. `not_positive` when rounding a buy limit down
+    /// reaches zero, and `division_by_zero` for an increment of zero.
+    pub fn on_tick(self, tick: TickRule, adverse: Adverse) -> Result<Self, NumError> {
+        let _ = (tick, adverse);
+        Err(NumError::Overflow)
+    }
+}
+
+/// The price grid an order's limit must sit on (spec §2.1): Reg NMS Rule 612 for US equities, 0.01
+/// at or above 1.00 USD and 0.0001 below it, or the venue's own increment for crypto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TickRule {
+    RegNmsEquity,
+    Increment(Price),
 }
 
 /// Which way slippage moves a price: against the order, so a buy pays more and a sell receives
@@ -518,6 +548,23 @@ impl Usd {
             .to_decimal(FULL_SCALE)
             .map(Self)
     }
+
+    /// `round(self ÷ denominator, scale, mode)` as a [`Ratio`]: one rounding of one quotient, which
+    /// is how a backtest report takes a return, a drawdown rung, and its turnover (DEC-127 items 4,
+    /// 9, and 10). `division_by_zero` when `denominator` is zero, which the caller avoids by
+    /// checking that the equity it divides by is positive.
+    pub fn ratio_to(self, denominator: Usd, scale: u32, mode: Rounding) -> Result<Ratio, NumError> {
+        let _ = (denominator, scale, mode);
+        Err(NumError::Overflow)
+    }
+
+    /// `truncate(self ÷ price, increment)`: the shares this amount of money buys at `price`, never
+    /// more (spec §2.1 truncates an order quantity to the increment). `division_by_zero` cannot
+    /// happen, because a [`Price`] is positive.
+    pub fn shares_at(self, price: Price, increment: ShareIncrement) -> Result<Qty, NumError> {
+        let _ = (price, increment);
+        Err(NumError::Overflow)
+    }
 }
 
 impl CostBasis {
@@ -605,6 +652,95 @@ impl Bps {
             .mul(root)?
             .to_decimal(FULL_SCALE)
             .map(Self)
+    }
+}
+
+impl Ratio {
+    pub const ZERO: Self = Self(Decimal::ZERO);
+
+    /// Canonical text of a signed value with at most 24 fractional digits.
+    pub fn parse(text: &str) -> Result<Self, NumError> {
+        parse(text, RATIO_SCALE).map(Self)
+    }
+
+    /// Whether the value is below zero.
+    pub fn is_negative(self) -> bool {
+        self.0 < Decimal::ZERO
+    }
+
+    /// The same magnitude with the opposite sign.
+    pub fn negated(self) -> Self {
+        Self(self.0.neg_exact())
+    }
+
+    /// `self + other`, exact.
+    pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
+        let _ = (self.exact(), other.exact());
+        Err(NumError::Overflow)
+    }
+
+    /// `self − other`, exact: a backtest report's excess return over its benchmark (DEC-127).
+    pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
+        let _ = other;
+        Err(NumError::Overflow)
+    }
+
+    /// `self × factor`, exact: annualizing a variance or a squared Sharpe by the period count
+    /// (DEC-127 items 6 and 7), which is exact because the factor is an integer.
+    pub fn times_int(self, factor: u32) -> Result<Self, NumError> {
+        let _ = factor;
+        Err(NumError::Overflow)
+    }
+
+    /// `Σ values`, exact: a backtest report's `return_sum`.
+    pub fn sum(values: &[Self]) -> Result<Self, NumError> {
+        let _ = values;
+        Err(NumError::Overflow)
+    }
+
+    /// `Σ values²`, exact: a backtest report's `return_sum_of_squares`, which needs 24 places when
+    /// the values hold 12.
+    pub fn sum_of_squares(values: &[Self]) -> Result<Self, NumError> {
+        let _ = values;
+        Err(NumError::Overflow)
+    }
+
+    /// `round(Σ values ÷ n, 12, half_even)`: the mean of a period-return series (DEC-127 item 4).
+    /// `division_by_zero` for an empty series.
+    pub fn mean(values: &[Self]) -> Result<Self, NumError> {
+        let _ = values;
+        Err(NumError::Overflow)
+    }
+
+    /// `round((n × Σr² − (Σr)²) ÷ (n × (n − 1)), 12, half_even)`, the sample variance of a period
+    /// return series as one rounding of one formula (DEC-127 item 5). The caller passes the sums the
+    /// report shows, so the figure recomputes from the report. `division_by_zero` below two periods,
+    /// which the caller reports as absent instead.
+    pub fn sample_variance(sum: Self, sum_of_squares: Self, count: u32) -> Result<Self, NumError> {
+        let _ = (sum, sum_of_squares, count);
+        Err(NumError::Overflow)
+    }
+
+    /// `round(numerator² ÷ denominator, 12, half_even)`: a squared Sharpe from an excess mean and a
+    /// variance (DEC-127 item 7). `division_by_zero` for a zero denominator, which the caller
+    /// reports as absent instead.
+    pub fn squared_quotient(numerator: Self, denominator: Self) -> Result<Self, NumError> {
+        let _ = (numerator, denominator);
+        Err(NumError::Overflow)
+    }
+
+    /// The greatest value with 12 fractional digits whose square is at or below `self`, so a root
+    /// taken this way never overstates the figure it stands for: a report's Sharpe with a
+    /// non-negative sign (DEC-127 item 7). `negative` below zero.
+    pub fn root_floor(self) -> Result<Self, NumError> {
+        Err(NumError::Overflow)
+    }
+
+    /// The least value with 12 fractional digits whose square is at or above `self`, so a root taken
+    /// this way never understates the figure it stands for: a report's volatility, and the magnitude
+    /// of a negative Sharpe (DEC-127 items 6 and 7). `negative` below zero.
+    pub fn root_ceiling(self) -> Result<Self, NumError> {
+        Err(NumError::Overflow)
     }
 }
 
