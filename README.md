@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mandate-mark-reversed.svg">
+    <img src="assets/brand/mandate-mark.svg" alt="Mandate" width="88">
+  </picture>
+</p>
+
 # Mandate
 
 A deterministic core for autonomous trading agents that run on their owner's own brokerage
