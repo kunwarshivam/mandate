@@ -111,7 +111,8 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Tests:** `crates/mandate-journal/tests/artifacts.rs` (SHA-256 vectors, round trip, one address
   per content, flipped bits, no overwrite, verification through the store),
   `crates/mandate-artifacts-fs/tests/fs.rs` (the same on disk, plus layout, permissions, missing
-  versus unavailable, reopening, and concurrent puts).
+  versus unavailable, reopening, concurrent puts, readers during a write, and crashed writes).
+  Planted bugs per test: the task brief.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-artifacts-fs`.
 
 ## Reference-case harness
