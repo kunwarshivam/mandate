@@ -1043,49 +1043,37 @@ fn has_pending_tests(dir: &str) -> Result<bool> {
 }
 
 /// A DEC-77 tests PR marks a test `#[ignore = "pending <story>"]` because it cannot pass on the
-/// PR's stubs. One that passes anyway pins nothing, so every test the change newly marks pending
-/// is run and must fail; a failure by panic, `todo!()` included, counts.
-/// Outside a PR, or with no new pending test, there is nothing to run.
+/// PR's stubs. One that passes anyway pins nothing, so every pending test in the workspace is run
+/// and must fail; a failure by panic, `todo!()` included, counts (DEC-110). With no pending test
+/// there is nothing to run.
 fn pending() -> Result<()> {
-    let Some(base) = base_ref() else {
-        eprintln!("    pending: HEAD is the base; nothing to check");
-        return Ok(());
-    };
-    report(pending_problems(Path::new("."), &base)?, "pending")
+    report(pending_problems(Path::new("."))?, "pending")
 }
 
-/// Runs the tests that the working tree marks pending and the merge base with `base` did not, and
-/// names each one that passes or does not run.
-fn pending_problems(root: &Path, base: &str) -> Result<Vec<String>> {
-    let merge_base = output_in(root, "git", &["merge-base", base, "HEAD"])?
-        .trim()
-        .to_owned();
-    let mut diff_args = vec![
-        "diff",
-        "--name-only",
-        "--no-renames",
-        "--diff-filter=d",
-        &merge_base,
+/// Runs every test the working tree marks pending and names each one that passes or does not run.
+fn pending_problems(root: &Path) -> Result<Vec<String>> {
+    let mut args = vec![
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
         "--",
     ];
-    diff_args.extend(CODE_PATHS);
-    let mut untracked_args = vec!["ls-files", "--others", "--exclude-standard", "--"];
-    untracked_args.extend(CODE_PATHS);
-    let files = output_in(root, "git", &diff_args)? + &output_in(root, "git", &untracked_args)?;
+    args.extend(CODE_PATHS);
+    let files = output_in(root, "git", &args)?;
     let packages = package_dirs(root)?;
     let mut tests = Vec::new();
     for file in files.lines().filter(|f| f.ends_with(".rs")) {
-        let head =
-            fs::read_to_string(root.join(file)).with_context(|| format!("reading {file}"))?;
-        let before =
-            output_in(root, "git", &["show", &format!("{merge_base}:{file}")]).unwrap_or_default();
-        let new = newly_pending(&before, &head);
-        if new.is_empty() {
+        let Ok(text) = fs::read_to_string(root.join(file)) else {
+            continue;
+        };
+        let found = pending_tests(&text);
+        if found.is_empty() {
             continue;
         }
         let (package, binary) = test_binary(&packages, file)
             .with_context(|| format!("{file} has pending tests but no workspace package"))?;
-        tests.extend(new.into_iter().map(|test| NewPendingTest {
+        tests.extend(found.into_iter().map(|test| PendingTestRun {
             file: file.to_owned(),
             package: package.clone(),
             binary: binary.clone(),
@@ -1093,12 +1081,12 @@ fn pending_problems(root: &Path, base: &str) -> Result<Vec<String>> {
         }));
     }
     if tests.is_empty() {
-        eprintln!("    pending: no new pending tests");
+        eprintln!("    pending: no pending tests");
         return Ok(Vec::new());
     }
     let filter = tests
         .iter()
-        .map(NewPendingTest::filterset)
+        .map(PendingTestRun::filterset)
         .collect::<Vec<_>>()
         .join(" | ");
     let args = [
@@ -1116,7 +1104,7 @@ fn pending_problems(root: &Path, base: &str) -> Result<Vec<String>> {
         &filter,
     ];
     eprintln!(
-        "    pending: {} new pending test(s) must fail on this change's code",
+        "    pending: {} pending test(s) must fail on this change's code",
         tests.len()
     );
     eprintln!("    $ cargo {}", args.join(" "));
@@ -1154,17 +1142,17 @@ struct PendingTest {
     line: usize,
 }
 
-/// A newly pending test and the nextest binaries it can be compiled into: exactly `binary` for an
+/// A pending test and the nextest binaries it can be compiled into: exactly `binary` for an
 /// integration-test crate root, whose tests are named by their path in the file, and otherwise any
 /// binary of `package`, whose test names end with that path.
-struct NewPendingTest {
+struct PendingTestRun {
     file: String,
     package: String,
     binary: Option<String>,
     test: PendingTest,
 }
 
-impl NewPendingTest {
+impl PendingTestRun {
     fn filterset(&self) -> String {
         let path = &self.test.path;
         match &self.binary {
@@ -1186,8 +1174,8 @@ impl NewPendingTest {
     }
 }
 
-/// A problem for each new pending test that passed in any binary or ran in none.
-fn verdicts(tests: &[NewPendingTest], outcomes: &[TestOutcome]) -> Vec<String> {
+/// A problem for each pending test that passed in any binary or ran in none.
+fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
     tests
         .iter()
         .filter_map(|t| {
@@ -1296,15 +1284,6 @@ fn test_binary(packages: &[(String, String)], file: &str) -> Option<(String, Opt
         package.clone(),
         target.map(|name| format!("{package}::{name}")),
     ))
-}
-
-/// Tests pending in `head` whose path was not pending in `base`.
-fn newly_pending(base: &str, head: &str) -> Vec<PendingTest> {
-    let before: BTreeSet<String> = pending_tests(base).into_iter().map(|t| t.path).collect();
-    pending_tests(head)
-        .into_iter()
-        .filter(|t| !before.contains(&t.path))
-        .collect()
 }
 
 /// Every function carrying `#[ignore = "pending <story>"]`, however the attribute is spaced, split
@@ -1642,9 +1621,9 @@ mod tests {
     use anyhow::{Context, Result};
 
     use super::{
-        NewPendingTest, PendingTest, TestOutcome, backticked_paths, classify, contains_dec_id,
-        contains_word, is_pending_marker, newly_pending, output_in, pending_problems,
-        pending_tests, plain_comment_lines, repo_root, test_binary, test_outcomes, verdicts,
+        PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify, contains_dec_id,
+        contains_word, is_pending_marker, output_in, pending_problems, pending_tests,
+        plain_comment_lines, repo_root, test_binary, test_outcomes, verdicts,
     };
 
     #[test]
@@ -1830,31 +1809,6 @@ mod tests {
     }
 
     #[test]
-    fn only_tests_not_pending_at_the_base_are_new() {
-        let base = concat!(
-            "#[test]\n#[ignore = \"pending E1-1\"]\nfn old() {}\n",
-            "#[test]\nfn was_live() {}\n",
-            "mod m {\n#[test]\n#[ignore = \"pending E1-1\"]\nfn same_name() {}\n}\n",
-        );
-        let head = concat!(
-            "#[test]\n#[ignore = \"pending E1-2\"]\nfn old() {}\n",
-            "#[test]\n#[ignore = \"pending E1-1\"]\nfn was_live() {}\n",
-            "#[test]\n#[ignore = \"pending E1-1\"]\nfn same_name() {}\n",
-            "#[test]\n#[ignore = \"pending E1-1\"]\nfn brand_new() {}\n",
-        );
-        let paths = |tests: Vec<PendingTest>| tests.into_iter().map(|t| t.path).collect::<Vec<_>>();
-        assert_eq!(
-            paths(newly_pending(base, head)),
-            ["was_live", "same_name", "brand_new"]
-        );
-        assert_eq!(
-            paths(newly_pending("", head)),
-            ["old", "was_live", "same_name", "brand_new"]
-        );
-        assert!(newly_pending(head, head).is_empty());
-    }
-
-    #[test]
     fn a_file_maps_to_its_package_and_integration_test_binary() {
         let packages = [
             ("root".to_owned(), String::new()),
@@ -1904,7 +1858,7 @@ mod tests {
                 outcome("a", "tests::unit", true),
             ]
         );
-        let new = |line, binary: Option<&str>, path: &str| NewPendingTest {
+        let new = |line, binary: Option<&str>, path: &str| PendingTestRun {
             file: "f.rs".to_owned(),
             package: "a".to_owned(),
             binary: binary.map(str::to_owned),
@@ -1981,7 +1935,7 @@ mod tests {
             Ok(())
         }
 
-        fn commit(&self) -> Result<String> {
+        fn commit(&self) -> Result<()> {
             output_in(&self.0, "git", &["add", "-A"])?;
             output_in(
                 &self.0,
@@ -2001,9 +1955,7 @@ mod tests {
                     "fixture",
                 ],
             )?;
-            Ok(output_in(&self.0, "git", &["rev-parse", "HEAD"])?
-                .trim()
-                .to_owned())
+            Ok(())
         }
     }
 
@@ -2014,15 +1966,16 @@ mod tests {
     }
 
     #[test]
-    fn the_gate_fails_exactly_the_new_pending_tests_that_pass_on_the_stubs() -> Result<()> {
+    fn the_gate_fails_exactly_the_pending_tests_that_pass_on_the_stubs() -> Result<()> {
         let fx = Fixture::new("pending")?;
-        let on_main = concat!(
-            "#[test]\n#[ignore = \"pending E1-1\"]\n",
-            "fn pending_on_main_and_passing() { assert!(fx::lookup().is_err()); }\n",
+        let live = "#[test]\nfn live() { assert!(fx::lookup().is_err()); }\n";
+        fx.write("crates/fx/tests/stubs.rs", live)?;
+        fx.commit()?;
+        assert_eq!(
+            pending_problems(&fx.0)?,
+            Vec::<String>::new(),
+            "with no pending test there is nothing to run"
         );
-        fx.write("crates/fx/tests/stubs.rs", on_main)?;
-        let base = fx.commit()?;
-        assert_eq!(pending_problems(&fx.0, &base)?, Vec::<String>::new());
 
         let failing = concat!(
             "#[test]\n#[ignore = \"pending E1-1\"]\n",
@@ -2032,10 +1985,10 @@ mod tests {
             "mod inner {\n#[test]\n#[ignore = \"pending E1-1\"]\n",
             "fn passes_on_the_stubs() { assert_eq!(fx::answer(), 42); }\n}\n",
         );
-        fx.write("crates/fx/tests/stubs.rs", &format!("{on_main}{failing}"))?;
+        fx.write("crates/fx/tests/stubs.rs", &format!("{live}{failing}"))?;
         fx.commit()?;
         assert_eq!(
-            pending_problems(&fx.0, &base)?,
+            pending_problems(&fx.0)?,
             Vec::<String>::new(),
             "pending tests that fail on the stubs pass the gate"
         );
@@ -2048,23 +2001,30 @@ mod tests {
         );
         fx.write(
             "crates/fx/tests/stubs.rs",
-            &format!("{on_main}{failing}{passing}"),
+            &format!("{live}{failing}{passing}"),
+        )?;
+        fx.commit()?;
+        fx.write(
+            "crates/fx/tests/untracked.rs",
+            "#[test]\n#[ignore = \"pending E1-2\"]\nfn untracked_and_passing() {}\n",
         )?;
         let unit = concat!(
             "#[cfg(test)]\nmod tests {\n#[test]\n#[ignore = \"pending E1-1\"]\n",
             "fn unit_passes() { assert!(super::lookup().is_err()); }\n}\n",
         );
         fx.write("crates/fx/src/lib.rs", &format!("{STUBS}{unit}"))?;
-        let problems: Vec<String> = pending_problems(&fx.0, &base)?
+        let mut problems: Vec<String> = pending_problems(&fx.0)?
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
             .collect();
+        problems.sort();
         assert_eq!(
             problems,
             [
                 "crates/fx/src/lib.rs:9: `tests::unit_passes` (pending E1-1) passes on this change's code",
-                "crates/fx/tests/stubs.rs:17: `passes_on_the_stubs` (pending E1-1) passes on this change's code",
-                "crates/fx/tests/stubs.rs:21: `never_compiled` (pending E1-1) did not run",
+                "crates/fx/tests/stubs.rs:16: `passes_on_the_stubs` (pending E1-1) passes on this change's code",
+                "crates/fx/tests/stubs.rs:20: `never_compiled` (pending E1-1) did not run",
+                "crates/fx/tests/untracked.rs:3: `untracked_and_passing` (pending E1-2) passes on this change's code",
             ]
         );
         Ok(())
