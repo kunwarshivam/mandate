@@ -125,9 +125,10 @@ below makes that unrepresentable rather than merely forbidden.
 | The account stream, the intent protocol, idempotency keys, the order state machine, submission, cancel, replace, reconciliation, protective sequences, unprotected intervals, reservations, the shadow ledger, the broker client | **This stream (K)** |
 | The agent stream, the runtime loop, decisions, approvals, mode application, `IntentProposed`, the agent-side kill switch | Stream I (`mandate-runtime`), brief [#126](https://github.com/kunwarshivam/mandate/pull/126) |
 | The binding gate's rules: the eight §9.1 checks, US account rules, the eligibility floor, conduct controls, restrictions, the flatten plan | Stream G (`mandate-risk`), brief [#127](https://github.com/kunwarshivam/mandate/pull/127) |
-| The mandate document, validation, policy, change classification, risk state | Stream F (`mandate-spec`, `mandate-domain`), brief [#129](https://github.com/kunwarshivam/mandate/pull/129) |
+| The mandate document, validation, policy, change classification, and the risk-state fold **as arithmetic** | Stream F (`mandate-spec`, `mandate-domain`), brief [#129](https://github.com/kunwarshivam/mandate/pull/129) |
+| **Appending** the risk-state records and `UniverseChanged` on the account stream (`MandateVersionApplied`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted`, `RiskDayStarted`) | **This stream (K)**, as the stream's single writer; the values come from F's fold and J's admission (interpretation 3, Decisions needed 8) |
 | Autonomy classification and order sizing | Stream H (`mandate-builder`), brief [#128](https://github.com/kunwarshivam/mandate/pull/128) |
-| Theses, admission, the working universe | Stream J (E17 thin slice) |
+| Theses, admission, and the working universe's content | Stream J (E17 thin slice), brief [#138](https://github.com/kunwarshivam/mandate/pull/138) |
 | Positions, cash, fees, settlement, corporate actions as a fold | `mandate-accounting` (E3-1 to E3-3, merged), used unchanged |
 | Drafts, canonical bytes, the append protocol, artifacts | `mandate-journal`, `mandate-journal-pg`, `mandate-artifacts-fs`, used unchanged |
 | OAuth, connection scopes, key-permission checks | E7-1, **M8**, out of scope |
@@ -153,18 +154,21 @@ Each row gets a named test whose oracle computes the answer its own way.
 | E7-3 zero duplicates: a crash at any of the twelve injection points leaves the broker having seen at most one order per intent | `properties::no_crash_point_makes_the_broker_see_two_orders_for_one_intent`, the twelve `fault::crash_at_*` cases |
 | Journal §5.2, trading §5.7 an `OrderSubmitted` with no acknowledgment is resolved by a query on `client_order_id`, never by a blind resubmit | `hand::an_unacknowledged_submission_queries_before_it_resubmits`, `hand::an_order_the_broker_confirms_present_is_adopted_not_resent`, `properties::no_recovery_submits_without_a_confirmed_absence` |
 | Trading §5.7 `Unknown → Intent` only after N confirmed absences over T seconds, then the gate re-runs and an intent older than `max_intent_age` is abandoned | `hand::one_absent_lookup_does_not_resubmit`, `hand::an_absence_confirmed_over_the_window_resubmits_the_same_id`, `hand::a_stale_intent_is_abandoned_rather_than_resubmitted`, `hand::a_gate_denial_on_re_check_abandons_the_intent` |
+| Trading §5.7 the age check guards **every** `Intent → Submitting` transition, not only a resubmission, so an intent re-handed after an outage is abandoned rather than submitted stale | `hand::a_stale_intent_is_abandoned_at_its_first_submission`, `properties::no_submission_carries_an_intent_older_than_its_maximum_age` |
 | Trading §5.7 terminal states are final, and a fill for a terminal order is a `late_fill` that is still applied and triggers reconciliation | `hand::a_fill_after_a_terminal_state_is_applied_as_a_late_fill`, `hand::a_late_fill_triggers_a_reconciliation`, `properties::no_terminal_order_leaves_its_terminal_state` |
 | Trading §5.7 filled quantity is non-decreasing, at most the order quantity, and equals the sum of unique fills | `properties::filled_quantity_equals_the_sum_of_unique_fills`, `hand::a_repeated_fill_id_changes_nothing` |
 | Trading §5.7 an illegal transition is journaled and ignored, and fills in it are still applied | `hand::an_illegal_transition_is_journaled_and_ignored`, `hand::a_fill_inside_an_illegal_transition_is_still_applied` |
 | Trading §5.7 the status mapping is total over the table and any other value pauses the agent and alerts | `hand::every_broker_status_maps_to_the_table_row`, `hand::an_unknown_broker_status_pauses_the_agent_and_alerts`, `properties::the_status_map_is_total_and_never_silently_ignores` |
 | Trading §5.7, §5.3 rule 9 an `Unknown` order reserves its maximum cost, counts as filled for exposure, and blocks new orders in that instrument | `hand::an_unknown_order_reserves_its_maximum_cost`, `hand::an_unknown_order_blocks_new_orders_in_the_instrument`, `properties::a_reservation_is_never_released_before_a_terminal_state` |
-| Trading §11, §6 the broker is the source of truth: every difference is resolved to the broker with a journaled compensating event | `properties::reconciliation_always_adopts_the_broker_side`, `hand::a_journal_only_order_is_reconciled_away_not_kept`, `hand::every_adoption_journals_a_compensating_event_with_the_difference` |
-| E7-3 full reconciliation: after the run, every broker order and position is accounted for or the agent is paused | `properties::a_reconciliation_leaves_nothing_unexplained_and_unpaused`, `hand::an_unexplained_position_pauses_the_agent_and_alerts` |
+| Trading §5.7 a reservation is released by every one of the six terminal states, `Abandoned` and `Replaced` included, and a `Replaced` order's reservation passes to the linked new order | `properties::every_terminal_state_releases_its_reservation`, `hand::an_abandoned_order_releases_its_reservation`, `hand::a_replaced_orders_reservation_passes_to_the_new_order` |
+| Trading §11, §6 the broker is the source of truth for **open orders**: an order-state difference is adopted with a journaled compensating event, and a missing fill is ingested | `properties::every_order_difference_adopts_the_broker_with_a_compensating_event`, `hand::a_journal_only_order_is_reconciled_away_not_kept`, `hand::every_adoption_journals_a_compensating_event_with_the_difference` |
+| Trading §11 a position, cash, or fee difference is **never adopted**: §11's on-mismatch column pauses, alerts, or refuses to adjust, so nothing outside the order set is silently overwritten either way | `properties::no_position_cash_or_fee_difference_is_ever_adopted`, `hand::a_position_difference_is_not_written_away_as_a_compensating_event`, `hand::a_fee_difference_is_alerted_and_never_adjusted` |
+| E7-3 full reconciliation: after the run every broker order is matched or adopted, every missing fill is ingested, and every remaining position difference has paused its agents | `properties::a_reconciliation_leaves_nothing_unexplained_and_unpaused`, `hand::an_unexplained_position_pauses_the_agent_and_alerts` |
 | Trading §11 fills and orders are reconciled before positions, so a missing fill explains a difference instead of pausing on it | `hand::a_missing_fill_explains_the_position_and_pauses_nothing`, `properties::the_reconciliation_order_is_orders_then_fills_then_positions_then_cash_then_fees` |
 | Trading §11 the tolerances are the spec's: equity exact except `pending_corporate_action`, crypto net plus unposted asset fees until posting, cash within the stated band, fees exact once posted and never silently adjusted | `hand::an_equity_difference_of_one_share_is_a_mismatch`, `hand::a_pending_corporate_action_difference_is_not_a_mismatch`, `hand::unposted_crypto_asset_fees_explain_the_crypto_difference`, `hand::a_fee_difference_is_alerted_and_never_adjusted`, `properties::cash_within_the_band_never_pauses_and_outside_it_always_alerts` |
 | Trading §11, §7.1 an order the broker has and we do not is external activity: it is ingested, journaled, and every agent on the account goes `exits_only` | `hand::an_unknown_broker_order_becomes_external_activity`, `hand::external_activity_switches_every_agent_to_exits_only`, `hand::a_reject_for_an_unknown_client_order_id_is_not_external_activity_without_a_fill` |
 | Trading §11 the executor never lifts a reconciliation pause: only an owner acknowledgment with step-up does | `hand::the_executor_never_lifts_a_reconciliation_pause_itself`, `properties::no_input_but_an_acknowledged_owner_ack_clears_a_mismatch_pause` |
-| Journal §2, DEC-131 item 13 the `ReconciliationRun` the runtime's startup hold waits for is journaled at or after the last observed submission | `hand::a_startup_reconciliation_covers_every_submission_it_reports_on`, `hand::a_reconciliation_that_predates_a_submission_does_not_claim_to_cover_it` |
+| Journal §2, DEC-131 item 13 a `ReconciliationRun` is never positioned after a submission it did not cover, so stream I's positional rule holds without reading the payload | `properties::no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover`, `hand::a_submission_between_the_snapshot_and_the_run_recomputes_the_run`, `hand::a_startup_reconciliation_covers_every_submission_it_reports_on` |
 | Trading §5.4 the tranche model: each protected entry is one GTC bracket, and Σ protective sell quantity never exceeds the position | `properties::protective_sell_quantity_never_exceeds_the_position`, `hand::an_add_is_a_new_bracket_not_a_replacement` |
 | Trading §5.4 bracket legs are held until the entry is completely filled, and a partial entry becomes a GTC OCO for the filled quantity at the bracket's prices | `hand::a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity`, `hand::an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d`, `hand::a_terminal_partly_filled_entry_is_oco_d_at_once` |
 | Trading §5.4, E7-4 every unprotected interval is journaled from start to end, bounded by `max_unprotected_s`, and alerted beyond the limit | `properties::every_unprotected_interval_has_a_journaled_start_and_end`, `hand::an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts`, `properties::no_interval_exceeds_the_limit_without_an_alert` |
@@ -191,7 +195,7 @@ Each row gets a named test whose oracle computes the answer its own way.
 | ES-23 broker numbers never pass through `f64`: every quantity, price, and amount is parsed from raw text into `mandate-num` | `hand::a_broker_decimal_with_nine_places_parses_exactly`, `hand::a_broker_number_in_exponent_form_is_rejected_with_its_code`, and the crate's lint header |
 | AGENTS.md rule 7, ES-09 credentials never appear in a log, an error, a draft, a fixture, or `Debug` | `hand::credentials_are_redacted_in_debug_output`, `hand::a_transport_error_names_no_url_and_no_header`, `hand::recorded_fixtures_contain_no_credential`, `properties::no_draft_payload_holds_a_credential_or_an_account_number` |
 | Journal §6.4, trading §13 the broker's account number is held by reference and never journaled or logged | `hand::the_account_ref_is_an_opaque_id_not_an_account_number`, `properties::no_draft_holds_a_broker_account_number` |
-| Journal §9 `BrokerExchangeRecorded` records the raw request and response with credentials redacted, by artifact reference when large | `hand::a_broker_exchange_is_recorded_with_its_credentials_redacted`, `hand::a_large_exchange_is_recorded_by_artifact_reference` |
+| Journal §9, §6.4 `BrokerExchangeRecorded` redacts the authorisation headers **and** every personal-data field in the body before the bytes are hashed or stored, by artifact reference when large | `hand::a_broker_exchange_is_recorded_with_its_credentials_redacted`, `hand::an_account_body_is_recorded_with_its_account_number_replaced_by_a_pii_ref`, `hand::a_large_exchange_is_recorded_by_artifact_reference`, `properties::no_recorded_exchange_holds_an_account_number_or_an_account_id` |
 | AGENTS.md rule 6, DEC-11 alert payloads carry opaque IDs and generic text only | `hand::an_alert_carries_only_opaque_ids`, `properties::no_alert_payload_holds_an_instrument_a_price_or_a_quantity` |
 | Journal §5.1 idempotency and fencing: a retry after `Unavailable` or `Ambiguous` derives the same `event_id`, and a `Fenced` append stops the process | `hand::a_retried_append_derives_the_same_event_id`, `hand::a_fenced_append_stops_the_executor`, `properties::a_derived_event_id_is_a_function_of_epoch_head_and_ordinal` |
 | Journal §2 gapless `seq`, and the copied facts carry `causation_id` to their origin | `hand::a_gap_in_seq_fails_the_fold`, `hand::a_copied_agent_mode_points_at_the_originating_event`, `properties::every_copied_draft_cites_its_origin` |
@@ -199,6 +203,7 @@ Each row gets a named test whose oracle computes the answer its own way.
 | ES-21, journal §8 state is a fold: replaying the drafts a run journaled reproduces its state and emits nothing | `properties::folding_the_journaled_drafts_reproduces_the_live_state`, `properties::a_replay_emits_no_draft_and_no_broker_effect`, `hand::the_golden_journal_folds_to_the_committed_state` |
 | ES-21 determinism: two runs of the same inputs give equal effect lists; ordered containers, no floats, no clock, no randomness | `properties::two_runs_of_the_same_inputs_give_equal_effects`, and the crate's lint header |
 | ES-06 the priority channel: a kill-switch command is handled before a full queue of ordinary inputs, and the handling order is what gets journaled | `hand::a_kill_switch_jumps_a_full_queue`, `hand::the_journaled_order_is_the_handling_order` |
+| DEC-131, ES-02 this crate declares no `IntentSink` and names no `mandate-runtime` type: an intent enters only as `Input::Intent`, and the adapter is the shell's | `hand::an_intent_enters_only_as_an_input`, and `cargo xtask layers` |
 | DEC-85 an uninterpreted input fails loudly, naming the owning story | `hand::an_unknown_event_type_fails_the_fold`, `hand::an_uninterpreted_broker_field_names_its_story`, `properties::every_catalogue_event_is_interpreted_or_named` |
 | ES-09 every error variant has a stable `code()` and the set is exhaustive | `hand::every_error_code_is_stable_and_unique` |
 
@@ -232,10 +237,13 @@ a seeded bug before it is trusted; the planted-bug table below is that evidence.
 
 - **In scope, new: `mandate-executor`.** Recommended `layer = 6`, `pure = true`,
   `safety_critical = true`, `allowed_external = ["thiserror"]`, with a CODEOWNERS line. It depends on
-  `mandate-num`, `mandate-time`, `mandate-canon`, `mandate-journal`, `mandate-accounting`, and — from
-  the implementation PR, once stream G's crate exists — `mandate-risk` (layer 4). Layer 6 is what
-  ES-02 plans and what lets the executor see the gate (4) and the mandate view (3) while sitting beside
-  `mandate-runtime` rather than under it.
+  `mandate-num`, `mandate-time`, `mandate-canon`, `mandate-journal`, and `mandate-accounting` from the
+  tests PR, and on three M5 crates from the implementation PR, once they exist: `mandate-domain`
+  (layer 1) and `mandate-spec` (layer 3) for the mandate view `Ports` reads, and `mandate-risk`
+  (layer 4) for the binding gate. Layer 6 is what ES-02 plans and what lets the executor see all three
+  while sitting beside `mandate-runtime` rather than under it. It does **not** depend on
+  `mandate-runtime`: they are the same layer, so the `IntentSink` adapter is the shell's (see Data
+  shapes).
 - **In scope, new: `mandate-alpaca`.** Recommended `layer = 6`, `pure = false`,
   `safety_critical = true`, `allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]`,
   with a CODEOWNERS line. It depends on `mandate-num`, `mandate-time`, and `mandate-executor` (it
@@ -353,8 +361,8 @@ pub enum BrokerRequest {
 }
 ```
 
-The connector trait itself is shell-driven, in the `IntentSink` shape (ES-20). `mandate-alpaca`
-implements it; the core only builds the request and folds the answer:
+The connector trait is shell-driven, in the same shape as stream I's shell-side ports (ES-20).
+`mandate-alpaca` implements it; the core only builds the request and folds the answer:
 
 ```rust
 /// One broker round trip. Implemented by `mandate-alpaca` and by the tests' fake connector. An
@@ -363,12 +371,18 @@ pub trait BrokerConnector {
     fn call(&mut self, request: &BrokerRequest)
         -> impl Future<Output = Result<BrokerOutcome, BrokerUnknown>>;
 }
-
-/// Where a runtime's intent arrives (stream I, DEC-131). The executor's adapter is the
-/// implementation: it turns a handoff into `Input::Intent` and returns only whether the handoff was
-/// accepted for journaling, never a trading verdict.
-pub trait IntentSink { fn hand(&mut self, handoff: &IntentHandoff) -> Result<(), SinkError>; }
 ```
+
+**`IntentSink` is declared once, in `mandate-runtime`, and this crate does not re-declare it.**
+`mandate-runtime` and `mandate-executor` are both layer 6, so neither can name the other's types and
+neither can implement the other's trait: a second declaration here would be a second, incompatible
+trait with the same name. What this crate exposes instead is `Input::Intent`, and **the adapter that
+implements stream I's `IntentSink` by handing a proposal to this executor lives in the shell**, at
+layer 7, which is the one place that may depend on both (review round 1, finding 4). In one process the
+adapter is a direct call; across processes it is DEC-131 item 5's notify-and-tail, where the executor
+reads the agent stream from its folded position and journals `IntentReceived` — the durable path being
+the journal either way. Nothing about the executor changes between the two, which is why the shell owns
+the choice and this brief does not.
 
 The idempotency key is a type, not a convention:
 
@@ -534,19 +548,33 @@ and on a schedule (trading §11). The order of the steps is part of the algorith
    while remaining in P&L and buying power (§10).
 5. **Fees.** Exact once posted. A difference alerts and is never silently adjusted.
 6. **`ReconciliationRun` last**, carrying what was compared, every difference, the corrected event ids,
-   and the checkpoint it advances to. Its position in the stream is what lifts stream I's startup hold,
-   and only if it is at or after that runtime's last observed submission (DEC-131 item 13), so the run
-   records the submission high-water mark it covers rather than leaving the runtime to guess.
+   and the checkpoint it advances to. Its **position** in the stream is what lifts stream I's startup
+   hold (DEC-131 item 13), and this stream carries the whole of that contract: **the executor never
+   appends a `ReconciliationRun` positioned after a submission it did not cover.** The run is appended
+   with `expected_head` equal to the head the snapshot was taken at, so an `OrderSubmitted` that landed
+   in between makes the append answer `HeadMismatch` and the reconciliation is recomputed against a
+   fresh snapshot rather than published as covering something it never saw. The payload still records
+   the high-water mark, as the audit record of what was compared, but **stream I does not have to read
+   it**: positional is enough, which is why this needs no change on I's side (review round 1,
+   finding 6).
 
 **A mismatch pauses and alerts, and the executor never lifts it.** Resuming a paused agent requires an
 owner acknowledgment with step-up authentication (§11), which arrives as a copied `OwnerAcknowledged`
 on the account stream. Nothing in this crate clears a mismatch on its own, at any tick, on any later
 reconciliation that happens to agree.
 
-**Adopting the broker is never "trusting the broker over the journal" in the audit sense**: the journal
+**Adoption is scoped to the order set, because that is the only row §11's on-mismatch column adopts.**
+An order-state difference is adopted (with a compensating event) and a missing fill is ingested; a
+position, cash, or fee difference is **never** written away. Positions pause the agents holding the
+instrument, cash alerts above the band and pauses when persistent, and fees are alerted and never
+silently adjusted. Writing a compensating event for a position difference would make the ledger agree
+with the broker while destroying the evidence that they disagreed, which is the opposite of what §11
+asks for (review round 1, finding 1).
+
+**Adopting an order is never "trusting the broker over the journal" in the audit sense**: the journal
 keeps both, the adoption is itself a journaled event with the difference, and a replay reproduces the
 adoption rather than the original assumption. The failure mode this rules out is the opposite one —
-keeping our own number because it is ours — which is planted bug 3.
+keeping our own order state because it is ours — which is planted bug 3.
 
 ## Fault injection (E7-3's acceptance clause)
 
@@ -556,29 +584,30 @@ is a named position in one submission's effect pipeline; each has a `fault::cras
 the state at that point, replays the fold from the journal, runs `Input::Started`, drives the
 reconciliation, and asserts the four properties below.
 
-| # | Crash point | What a wrong executor does here |
-|---|---|---|
-| 1 | Before the `IntentReceived` append | Loses the intent silently, or re-journals it twice on the re-hand |
-| 2 | After `IntentReceived`, before the binding gate | Submits on the re-hand without gating |
-| 3 | After `GateDecided`, before the `OrderSubmitted` append | Submits an order the journal never named |
-| 4 | **After the `OrderSubmitted` append, before the request** | Blindly resubmits: the duplicate window R-03 names |
-| 5 | During the request, no response (timeout) | Treats the timeout as a rejection and submits again |
-| 6 | During the request, an ambiguous response (5xx after the broker accepted) | Same, with a live order at the broker |
-| 7 | After the response, before the `OrderStateChanged` append | Re-derives state from memory instead of querying |
-| 8 | After `OrderStateChanged`, before the fill append | Double-applies the fill, or loses it |
-| 9 | After the protective cancel request, before its confirmation | Submits the exit into a still-resting OCO (a self-cross reject) |
-| 10 | Between the cancel confirmation and the exit submit | Leaves the position unprotected with no journaled interval |
-| 11 | Between an entry fill and the OCO for the filled quantity | Leaves a partially filled tranche unprotected for ever |
-| 12 | During reconciliation, between adopting an order and appending its compensating event | Adopts twice, or leaves a mismatch unpaused |
+| # | Crash point | Test | What a wrong executor does here |
+|---|---|---|---|
+| 1 | Before the `IntentReceived` append | `fault::crash_at_before_intent_received` | Loses the intent silently, or re-journals it twice on the re-hand |
+| 2 | After `IntentReceived`, before the binding gate | `fault::crash_at_intent_received_before_gate` | Submits on the re-hand without gating |
+| 3 | After `GateDecided`, before the `OrderSubmitted` append | `fault::crash_at_gate_before_order_submitted` | Submits an order the journal never named |
+| 4 | **After the `OrderSubmitted` append, before the request** | `fault::crash_at_journal_before_request` | Blindly resubmits: the duplicate window R-03 names |
+| 5 | During the request, no response (timeout) | `fault::crash_at_request_no_response` | Treats the timeout as a rejection and submits again |
+| 6 | During the request, an ambiguous response (5xx after the broker accepted) | `fault::crash_at_request_ambiguous_response` | Same, with a live order at the broker |
+| 7 | After the response, before the `OrderStateChanged` append | `fault::crash_at_response_before_state_change` | Re-derives state from memory instead of querying |
+| 8 | After `OrderStateChanged`, before the fill append | `fault::crash_at_state_change_before_fill` | Double-applies the fill, or loses it |
+| 9 | After the protective cancel request, before its confirmation | `fault::crash_at_cancel_before_confirmation` | Submits the exit into a still-resting OCO (a self-cross reject) |
+| 10 | Between the cancel confirmation and the exit submit | `fault::crash_at_confirmation_before_exit_submit` | Leaves the position unprotected with no journaled interval |
+| 11 | Between an entry fill and the OCO for the filled quantity | `fault::crash_between_entry_fill_and_oco` | Leaves a partially filled tranche unprotected for ever |
+| 12 | During reconciliation, between adopting an order and appending its compensating event | `fault::crash_mid_reconciliation_before_the_compensating_event` | Adopts twice, or leaves a mismatch unpaused |
 
 Asserted at every point:
 
 - **Zero duplicates.** The fake connector's independent counter shows at most one accepted submission
   per client order id, and the journal holds at most one `OrderSubmitted` per `(intent_id, attempt)`
   with no repeated `event_id`.
-- **Full reconciliation.** After the run, every broker order and every broker position is either
-  matched, adopted with a compensating event, or recorded as a mismatch with the agent paused. Nothing
-  is unexplained and unpaused.
+- **Full reconciliation.** After the run, every broker order is matched or adopted with a compensating
+  event, every fill missing from the journal is ingested, and every remaining position difference has
+  paused the agents holding that instrument, with the cash and fee rows alerted per §11. Nothing is
+  unexplained and unpaused — and nothing outside the order set is adopted.
 - **Protection is accounted for.** Every unprotected interval the protection accountant finds has a
   journaled start and end, and none exceeds `max_unprotected_s` without an alert.
 - **The fold is faithful.** Replaying the drafts reproduces the state the run ended in, and the replay
@@ -642,10 +671,17 @@ The spec gives the sequences; this stream's contribution is that each is one eff
 
 ## The fixture plan
 
-Fixtures follow `mandate-marketdata`'s recorded-scenario shape so a real recording can replace a
-hand-built body without touching a test:
-`crates/mandate-alpaca/tests/fixtures/alpaca-trading/<scenario>/requests.txt` (method, path, and the
-canonical request body of each call, in order) and `response-N.json` beside it.
+Fixtures follow `mandate-marketdata`'s recorded-scenario shape, **adapted for a write API**, so a real
+recording can replace a hand-built body without touching a test:
+`crates/mandate-alpaca/tests/fixtures/alpaca-trading/<scenario>/requests.txt` and `response-N.json`
+beside it. Three differences from the market-data shape are deliberate and are what the adaptation is
+for (review round 1, finding 8): a `requests.txt` line carries the **method and the canonical request
+body** as well as the path and query, because a trading call is identified by what it sends and not only
+by where it sends it; the response files are `response-N.json` rather than `page-N.json`, because these
+endpoints answer with one object and not a page of a cursor walk; and the transport trait is
+`TradingTransport::send` rather than `Transport::get`, for the same reason. The recording script is
+therefore its own, `crates/mandate-alpaca/tests/fixtures/record.sh`, beside market data's rather than
+shared with it, and it records the method and body lines the fake transport asserts against.
 
 **In the tests PR, every fixture is hand-built** from the spec's own vocabulary — trading §5.2's
 capability matrix, §5.7's status table, §7.2's account fields, §7.3's reject signals, §6.1's fill record
@@ -668,17 +704,28 @@ capability matrix, §5.7's status table, §7.2's account fields, §7.3's reject 
 | `late_fill_after_terminal` | A fill for a terminal order |
 | `open_orders_page`, `positions`, `account_active`, `account_blocked`, `activities_fills` | The reconciliation snapshot's four sources |
 | `status_unrecognised` | A status outside the table, which must pause and alert rather than parse |
+| `cancel_all_account_scope` | The account-wide `cancel-all`, `Unknown` orders included, with each cancellation confirmed |
+| `close_position_account_scope` | The account-wide `close-position` per instrument, the only path that may use it |
 
 Every fixture is asserted to contain no credential, no broker account number, and no personal data, the
 way E2-1's `fixtures::recorded_fixtures_contain_no_credentials` does. The parser accepts unknown extra
 fields (a later recording carries more than a hand-built body), while an unknown **status** value still
 fails loudly (§5.7's last row), so the permissiveness is exactly where it is safe.
 
-**Real recordings are a later step, outside this environment and outside this stream's scope.** They
-need the founder's paper credentials and egress that this sandbox does not have, and the tracker already
-lists them as waiting on the founder. When they land, they replace the hand-built bodies scenario by
-scenario, and a test that fails at that point is a test that was wrong about the broker, which is the
-whole reason for the shape.
+**The tests PR's contract is the hand-built fixtures**, computed from the spec, so the suite is
+reviewable and runs with no network whatever the environment has. Real recordings then *replace* those
+bodies scenario by scenario, and a test that fails at that point is a test that was wrong about the
+broker, which is the whole reason for the shape.
+
+The coordinator's round-1 review reports that the cloud environment now **does** have the paper keys and
+egress to the paper trading host, so a recording pass is possible in the tests stage rather than only
+later on the founder's machine (finding 8). This brief keeps it out of the tests PR's required scope and
+records it as the coordinator's call (Decisions needed 7): the fixtures the tests PR must contain are
+the hand-built ones, and a recording pass is an addition on top. Whenever it happens, the same rules
+hold without exception — the credentials are read through the injected lookup, never printed, never
+logged, never written to a file, and never committed; the recorded bodies have every account number and
+account id replaced before they are saved; and `cargo xtask ci supply-chain` and the fixture scan are
+what prove it (AGENTS.md rules 7 and 8, ES-23: paper only).
 
 ## Credentials and the paper boundary
 
@@ -723,11 +770,27 @@ founder-owned files; the items under "Decisions needed" that would add a number 
    opens the startup reconciliation and resolves unacknowledged submissions by **query**, never by
    resubmission. This is DEC-131 item 2's shape, deliberately, so the two M5/M6 state machines read the
    same way.
-3. **One writer, one stream.** The executor is the account stream's single writer (journal §2) and
-   reads the agent streams it follows without writing to them. Cross-stream facts it needs
-   (`AgentModeChanged`, `TradingDayStarted`, `ClockAdvanced`, `OwnerAcknowledged`, `OwnerExitRequested`)
-   are copied into the account stream by the executor with `causation_id` pointing at the original, and
-   every risk input it copies carries the `risk_clock` the stream requires, never decreasing.
+3. **One writer, one stream, and the executor writes *everything* on the account stream.** The executor
+   is the account stream's single writer (journal §2) and reads the agent streams it follows without
+   writing to them. That makes it the appender of three groups, not one, and the earlier draft named
+   only the first (review round 1, finding 7):
+   - **Copied facts** — `AgentModeApplied` (from the agent stream's `AgentModeChanged`),
+     `TradingDayStarted`, `ClockAdvanced`, and `OwnerAcknowledged` (from the control stream) — each with
+     `causation_id` pointing at the original, and `RiskDayStarted` **derived** there from the copied
+     `ClockAdvanced` crossing midnight America/New_York, as journal §2 requires.
+   - **The risk-state records** — `MandateVersionApplied`, `RiskLimitTriggered`, `RiskLimitLifted`,
+     `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, and `GoalCompleted`
+     (journal §9's account table, mandate spec §5.10) — journaled by the executor as the account-stream
+     record of a fold that is **stream F's**, called as a library exactly as the gate is. The executor
+     owns the append; it does not own the arithmetic.
+   - **`UniverseChanged`** — copied from the agent stream's `ThesisProposed` or `ThesisRevised`, or from
+     a `MandateVersionApplied` that changed a pinned universe (journal §2, mandate spec §2.3). The
+     admission decision is **stream J's**; the append is the executor's.
+
+   Every risk input it appends carries the `risk_clock` the stream requires, never decreasing. Which of
+   the three groups this stream's tests PR interprets, and which arrive with F and J, is Decisions
+   needed 8; until then `fold` returns `NotInterpreted` naming the owning story for any of them it does
+   not yet interpret, which is item 27 doing its job rather than a gap.
 4. **The binding gate is a dependency, not a port.** The executor calls `mandate-risk` directly. It is
    not injected, not behind a trait, and not replaceable by configuration, because a binding gate that
    a caller can substitute is not independent of agent logic (AGENTS.md rule 1; journal §2: "the risk
@@ -759,24 +822,37 @@ founder-owned files; the items under "Decisions needed" that would add a number 
 10. **A timeout is never a rejection.** An unknown outcome is `Unknown`, with its reservation held, its
     quantity counted as filled for exposure and concentration, and no new order in that instrument
     (§5.3 rule 9) until it resolves. Treating silence as a rejection is how a duplicate is born.
-11. **`Abandoned` is exactly the spec's two cases.** An intent is abandoned when the gate re-check denies
-    it, or when it is older than `max_intent_age` at the moment resubmission would occur; nothing else
-    abandons an intent, and an abandoned intent is never re-sent (`OrderAbandoned` is terminal, and a
-    later handoff of the same intent id hits item 8's lookup and produces nothing).
+11. **`Abandoned` is exactly the spec's two cases, and the age check guards every submission.** An
+    intent is abandoned when the gate denies it, or when it is older than `max_intent_age` — checked at
+    **every** `Intent → Submitting` transition, not only at a resubmission. §5.7's diagram states
+    `Intent --> Abandoned: intent too old` unqualified, and an intent re-handed after a long outage
+    would otherwise be gated and sent at its *first* submission however stale, since crash points 1 and
+    2 leave it with no submission behind it (review round 1, finding 2). Nothing else abandons an
+    intent, and an abandoned intent is never re-sent: `OrderAbandoned` is terminal, and a later handoff
+    of the same intent id hits item 8's lookup and produces nothing.
 12. **Reconciliation's step order is part of the algorithm:** orders, then fills, then positions, then
     cash, then fees, then `ReconciliationRun`. Positions are compared only after the missing fills are
     ingested, because a position difference that a missing fill explains is not a mismatch, and pausing
     on it would pause a healthy agent at every restart.
-13. **The broker is adopted, with the difference journaled.** Every difference resolves to the broker's
-    value through `OrderStateChanged` or a `CompensatingEvent` naming what changed and which event ids
-    were corrected (§11). Our own number is never kept because it is ours; the journal keeps both, and a
-    replay reproduces the adoption.
+13. **Adoption is scoped to the order set, which is the only row §11 adopts.** An order-state
+    difference resolves to the broker's value through `OrderStateChanged` plus a `CompensatingEvent`
+    naming what changed and which event ids were corrected, and a missing fill is ingested. A
+    **position, cash, or fee difference is never adopted**: §11's on-mismatch column pauses the agents
+    holding the instrument, alerts above the cash band and pauses when persistent, and refuses to
+    adjust a fee silently. Writing a compensating event for a position difference would make the ledger
+    agree with the broker while destroying the evidence that they disagreed (review round 1,
+    finding 1). Within the order set, our own state is never kept because it is ours; the journal keeps
+    both, and a replay reproduces the adoption.
 14. **A mismatch pauses and alerts, and this crate never lifts it.** `AgentModeApplied(paused)` plus an
     alert, lifted only by a copied `OwnerAcknowledged` carrying step-up evidence (§11). No tick, no
     later agreeing reconciliation, and no restart clears it.
-15. **`ReconciliationRun` states the submission high-water mark it covers**, so stream I's startup hold
-    lifts on a run that demonstrably covers that runtime's last submission (DEC-131 item 13) instead of
-    on the next run that happens to arrive. A run that predates a submission says so and lifts nothing.
+15. **A `ReconciliationRun` is never positioned after a submission it did not cover**, so stream I's
+    hold stays positional (a run at or after the last submission by `seq`, DEC-131 item 13) and stream I
+    needs no change and no payload read. The run is appended with `expected_head` equal to the head its
+    snapshot was taken at, so an `OrderSubmitted` that landed in between answers `HeadMismatch` and the
+    reconciliation is recomputed against a fresh snapshot instead of being published as covering
+    something it never saw. The payload still records the high-water mark, as the audit record of what
+    was compared — not as a field another stream must read (review round 1, finding 6).
 16. **External activity is defined by the broker's side.** An order or fill at the broker with no
     `client_order_id` of ours is external: `ExternalActivityIngested`, every agent on the account to
     `exits_only` until the owner acknowledges, and the instrument blocked from being claimed (§7.1). A
@@ -811,18 +887,32 @@ founder-owned files; the items under "Decisions needed" that would add a number 
 23. **Broker numbers never pass through a float** (ES-23): every quantity, price, and amount is read as
     raw text and parsed by `mandate-num`. A value in exponent form, with more places than the
     instrument's increment, or already rounded by a JSON float is a typed error with a stable code.
-24. **`BrokerExchangeRecorded` records the exchange with credentials redacted**, inline while small and
-    by `sha256:` artifact reference above the inline limit (journal §6.3, DEC-107), because trading §13
-    keeps raw broker requests and responses as records and AGENTS.md rule 7 keeps credentials out of them.
+24. **`BrokerExchangeRecorded` is redacted before it is recorded, for credentials *and* for personal
+    data**, inline while small and by `sha256:` artifact reference above the inline limit (journal §6.3,
+    DEC-107). Trading §13 keeps raw broker requests and responses as records, and AGENTS.md rule 7 keeps
+    credentials out of them — but the raw body of `/v2/account` also carries the broker's
+    `account_number` and account `id`, which journal §6.4 keeps in the vault and holds by reference
+    (review round 1, finding 3). So the redaction pass runs over the body as well as the headers: the
+    authorisation headers are removed, and every personal-data field is replaced by an opaque `pii_refs`
+    entry, **before** the bytes are hashed or stored, so nothing that reaches the journal or the
+    artifact store has ever held either. The pass is a total function over the wire types rather than a
+    denylist of field names — only a field the wire type names is recorded at all — so a field the
+    broker adds later cannot slip through unredacted.
 25. **Paper's simulated fees and dividends are marked, not hidden.** They are booked with
     `simulated = true`, excluded from the cash and fee comparisons in reconciliation, and included in
     reported P&L and in buying power (§10, R-22). A simulated record that reached a cash comparison would
     make every paper reconciliation fail; one that was left out of buying power would make paper flatter
     than live, which is the risk R-22 names.
-26. **Reservations are folded state.** An `Unknown` order reserves its maximum cost; a reservation is
-    released only by a terminal state (`canceled`, `expired`, `rejected`, `filled`) or by an adoption
-    that supersedes it, never by a timeout and never by a restart, and buying power is the lower of the
-    model and the broker (§7.2, DEC-34, DEC-104).
+26. **Reservations are folded state, released by §5.7's whole terminal set.** An `Unknown` order
+    reserves its maximum cost; a reservation is released by any of `Filled`, `Canceled`, `Rejected`,
+    `Expired`, `Replaced`, and `Abandoned` — the six terminal states §5.7's diagram names, not the four
+    broker statuses the earlier draft listed. `Abandoned` and `Replaced` matter most: an `Unknown` order
+    confirmed absent and then abandoned, and an order the broker replaced, would otherwise hold their
+    reservation for ever and starve the account's buying power (review round 1, finding 5). A
+    `Replaced` order's reservation passes to the linked new order rather than vanishing, so the pair
+    never double-reserves and never under-reserves. Nothing else releases a reservation: not a timeout,
+    not a restart, not a reconciliation that merely disagrees. Buying power is the lower of the model
+    and the broker (§7.2, DEC-34, DEC-104).
 27. **An uninterpreted input fails loudly** (DEC-85): an event type, a payload field, a broker status, or
     a command this crate does not interpret returns `NotInterpreted` naming the owning story. A broker
     status outside §5.7's table pauses the agent and alerts, which is the spec's own last row.
@@ -841,8 +931,9 @@ founder-owned files; the items under "Decisions needed" that would add a number 
 
 ## Planted bugs
 
-Seventeen, each to be seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
-per DEC-83), run, and reverted. The tests PR reports the result for each; a row whose bug is not caught
+Twenty-one, each to be seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
+per DEC-83), run, and reverted. The last five come from review round 1's findings, which is what makes
+those fixes testable rather than merely written down. The tests PR reports the result for each; a row whose bug is not caught
 means the test is wrong, not the bug.
 
 | Planted bug | Must be caught by |
@@ -863,7 +954,11 @@ means the test is wrong, not the bug.
 | An unprotected interval's start is journaled but the `max_unprotected_s` bound is never checked, so a stuck exit leaves a position unprotected indefinitely with no alert | `hand::an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts`, `properties::no_interval_exceeds_the_limit_without_an_alert` |
 | A broker status outside §5.7's table folds as a no-op, so a suspended or unrecognised order silently stays Accepted | `hand::an_unknown_broker_status_pauses_the_agent_and_alerts`, `properties::the_status_map_is_total_and_never_silently_ignores` |
 | A fill is applied by arrival rather than by fill id, so a reconciliation that re-ingests a fill double-counts the position | `properties::filled_quantity_equals_the_sum_of_unique_fills`, `hand::a_repeated_fill_id_changes_nothing`, `fault::crash_at_state_change_before_fill` |
-| `ReconciliationRun` reports a high-water mark it did not cover, so stream I's startup hold lifts before the account is actually reconciled and the agent resumes on unverified state | `hand::a_reconciliation_that_predates_a_submission_does_not_claim_to_cover_it`, `hand::a_startup_reconciliation_covers_every_submission_it_reports_on` |
+| A `ReconciliationRun` is appended at the current head rather than the snapshot's, so a submission that landed in between is positioned before a run that never saw it and stream I's startup hold lifts on unverified state | `properties::no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover`, `hand::a_submission_between_the_snapshot_and_the_run_recomputes_the_run` |
+| A position difference is written away as a `CompensatingEvent`, so the ledger agrees with the broker and the evidence that they disagreed is gone — and the agent is never paused | `properties::no_position_cash_or_fee_difference_is_ever_adopted`, `hand::a_position_difference_is_not_written_away_as_a_compensating_event`, `hand::an_unexplained_position_pauses_the_agent_and_alerts` |
+| The age check runs only on a resubmission, so an intent re-handed after a long outage is submitted at its first attempt however stale | `hand::a_stale_intent_is_abandoned_at_its_first_submission`, `properties::no_submission_carries_an_intent_older_than_its_maximum_age` |
+| A reservation is released only on the four broker statuses, so an `Unknown` order confirmed absent and abandoned holds its reservation for ever and the account's buying power drains | `properties::every_terminal_state_releases_its_reservation`, `hand::an_abandoned_order_releases_its_reservation` |
+| `BrokerExchangeRecorded` redacts the authorisation headers but records the account body as sent, so the broker's account number reaches the journal and the artifact store | `hand::an_account_body_is_recorded_with_its_account_number_replaced_by_a_pii_ref`, `properties::no_recorded_exchange_holds_an_account_number_or_an_account_id` |
 
 ## Decisions needed
 
@@ -914,6 +1009,22 @@ means the test is wrong, not the bug.
    call site as a crate-private function and the implementation PR adds the dependency. The coordinator
    may prefer to hold this stream's implementation PR until stream G's implementation merges; the tests
    PR does not need it.
+
+7. **Whether a real fixture recording happens in the tests stage.** The round-1 review reports that this
+   cloud environment now has the paper keys and egress to the paper trading host, which the brief had
+   assumed it did not. Recommendation: the tests PR's required contract stays the **hand-built**
+   fixtures — they are what makes the suite reviewable and network-free — and a recording pass is an
+   addition the coordinator may ask for in the same stage, under the rules in "The fixture plan"
+   (credentials only through the injected lookup, never printed, logged, written, or committed; account
+   numbers and ids replaced before a body is saved). The coordinator's call, not the founder's.
+8. **Which account-stream events this stream's tests PR interprets, and which arrive with F and J.**
+   Interpretation 3 settles *who appends* the risk-state records and `UniverseChanged` — the executor,
+   because journal §2 gives the account stream one writer — but not *when* this stream interprets them,
+   since the values come from stream F's risk-state fold and stream J's admission. Recommendation: the
+   tests PR interprets the copied facts and `RiskDayStarted` (they need nothing from F or J) and leaves
+   the risk-state records and `UniverseChanged` returning `NotInterpreted` with their owning story named,
+   so the loud failure of DEC-85 is what covers the gap until F and J land. A coordination question for
+   the merge coordinator.
 
 ## The integration story: the first paper order (not done here)
 

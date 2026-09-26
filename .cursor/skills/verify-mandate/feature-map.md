@@ -199,9 +199,11 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   E7-2, E7-3, E7-4.
 - **Code:** `mandate-executor` (new; `fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
-  reservations, the protective sequences and the exit ladder, reconciliation, the `BrokerRequest` enum
-  whose account-wide variants need an `AccountWideScope`, the `BrokerConnector` trait, and the
-  `IntentSink` implementation stream I's runtime hands intents to) and `mandate-alpaca` (new; the paper
+  reservations released by the whole terminal set, the protective sequences and the exit ladder,
+  reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
+  account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
+  the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
   reject mappings). It calls `mandate-risk` directly as the binding gate and reads
@@ -213,8 +215,9 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   against four independent oracles: a broker-side submission counter inside the fake connector, a
   shadow order book rebuilt from the drafts' canonical bytes, an `i128` shadow position ledger, and a
   protection accountant that finds every unprotected interval. Alpaca fixtures follow
-  `mandate-marketdata`'s recorded-scenario shape and are hand-built until the founder records real
-  ones. Planted bugs per test: the task brief.
+  `mandate-marketdata`'s recorded-scenario shape adapted for a write API (method and body in
+  `requests.txt`, `response-N.json`, its own `record.sh`) and are hand-built; a recording pass against
+  the paper host is an addition on top. Planted bugs per test (21): the task brief.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
