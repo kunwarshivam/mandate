@@ -624,7 +624,8 @@ fn account_type(account: &Json, profile: &str) -> Result<AccountType, String> {
         ("generic", Some(Some("cash"))) => Ok(AccountType::Cash),
         ("alpaca", Some(Some("cash"))) => Err("an alpaca account is never a cash account".into()),
         (_, None) => Err(format!("a {profile} account needs `initial.account.type`")),
-        (_, Some(other)) => Err(format!("unknown account type {other:?}")),
+        (_, Some(Some(other))) => Err(format!("unknown account type `{other}`")),
+        (_, Some(None)) => Err("`initial.account.type` is not a string".into()),
     }
 }
 

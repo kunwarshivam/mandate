@@ -62,22 +62,28 @@ story. This story closes milestone M2.
   missing type on a generic broker, and a cash account on the alpaca profile fail.
 
   **Planted bugs**, each planted in a local implementation of the stubs (kept out of this PR per
-  DEC-83) and caught (tests that failed in brackets): cash buying power counts unsettled proceeds
-  [rc_08 hand, oracle property, difference property, charging property, both harness tests]; margin
-  buying power ignores unsettled proceeds [rc_18 hand, oracle, difference, I4, harness tests];
+  DEC-83) and caught (tests that failed in brackets; re-run after review round 2 with the
+  oracle-only I4 bound and the scenario-typed properties): cash buying power counts unsettled
+  proceeds [rc_08, rc_18, fee-debit, and account-type hand tests, oracle property, difference
+  property, charging property, both harness tests]; margin buying power ignores unsettled proceeds
+  [rc_18 and account-type hand tests, oracle, difference, charging, I4, both harness tests];
   accrued fees rounded once as a total instead of per bucket [per-bucket hand test, oracle,
-  charging property]; accrued fees rounded half-even instead of up [rc_08 hand, debit hand test,
-  oracle, charging property, harness rc_08]; reservations added instead of subtracted [rc_18 hand,
-  both reservation tests, oracle]; a negative reservation total accepted [both reservation tests];
-  a crypto sell leaves settled cash unchanged [crypto hand test, oracle, I4, per-bucket hand test];
-  `account_type` always reports margin [account-type hand test, rc_08 hand, oracle, charging
-  property]; the opening type dropped and margin stored [account-type, rc_08, rc_18, fee-debit hand
-  tests, oracle, difference property, both harness tests]; the equities charge rounds up to a tenth
-  of a dollar [rc_08, rc_18, per-bucket, debit, and fee-debit hand tests, oracle, charging property,
-  I4, both harness tests]; the harness reads `type: cash` as margin [both harness tests]; the harness
-  never checks the `buying_power` key [both harness tests]. The `i4` property also caught, before
-  it was stated exactly, that the spec's cash-account wording is stricter than its fee model allows
-  (DEC-99 item 5).
+  charging property]; accrued fees rounded half-even instead of up [rc_08, debit, per-bucket, and
+  account-type hand tests, oracle, charging property, harness rc_08]; reservations added instead of
+  subtracted [rc_18 hand test, both reservation tests, oracle]; a negative reservation total
+  accepted [both reservation tests]; a crypto sell leaves settled cash unchanged [crypto and
+  per-bucket hand tests, oracle, I4]; `account_type` always reports margin [account-type and rc_08
+  hand tests, oracle]; the opening type dropped and margin stored [rc_08, rc_18, fee-debit, and
+  account-type hand tests, oracle, difference, charging, both harness tests]; the equities charge
+  rounds up to a tenth of a dollar [rc_08, rc_18, per-bucket, debit, fee-debit, and account-type
+  hand tests, oracle, charging, I4, both harness tests]; a charge debits settled cash twice
+  [rc_08, rc_18, per-bucket, and fee-debit hand tests, oracle, charging, I4 (its cash bound is
+  the oracle's charges, so an over-debiting fold cannot widen it), harness rc_08]; the harness
+  reads `type: cash` as margin [both harness tests]; the harness never checks the `buying_power`
+  key [both harness tests]. The `i4` property also caught, before it was stated exactly, that the
+  spec's cash-account wording is stricter than its fee model allows (DEC-99 item 5), and
+  `the_gated_generator_produces_fee_debits_while_proceeds_are_unsettled` (live) shows the gated
+  generator reaches that state, so the bound is exercised.
 
 - **Crates in scope:** `mandate-accounting` (`AccountType`, `Reservations`, `Account::opening`
   takes the type, `Account::account_type`, `Account::buying_power`), `mandate-refcases` (the
@@ -119,8 +125,9 @@ the executor opens the fold with the observed type. Buying power is a derived va
    accrued ≥ 0 after every event (both); settled ≥ 0 in a cash account whenever nothing is
    unsettled, and never below minus the charges posted since then while something is. This item is
    Proposed (founder): it reads a safety rule more loosely than its text, so the property asserts
-   the strictest reading the fee model allows until the founder decides; the §8.3 and I4 wording
-   follows in a spec-only change.
+   the strictest reading the fee model's rounded charges allow until the founder decides. A
+   spec-only change follows for the §8.3 and I4 wording and for §7.2's "round(accrued, 2,
+   ceiling)", which item 2's per-bucket rounding contradicts.
 6. **Harness.** `initial.account.type`: alpaca defaults to margin and rejects cash; generic must
    state it. `buying_power` is compared with the fold's buying power and no reservations. RC-08 and
    RC-18's cash variant stay pending on E6-3 and E6-6.
