@@ -3,8 +3,8 @@
 //! independent of the library's 256-bit sign-and-magnitude arithmetic.
 
 use mandate_num::{
-    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, MarkPrice, NumError, Price, Qty, Rounding,
-    ShareIncrement, SignedQty, SplitRatio, Usd,
+    Adverse, Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice, NumError, Price,
+    Qty, Rounding, ShareIncrement, SignedQty, SplitRatio, Usd,
 };
 use proptest::prelude::*;
 
@@ -421,6 +421,7 @@ fn error_codes_are_stable() {
         (NumError::Negative, "negative"),
         (NumError::NotPositive, "not_positive"),
         (NumError::DivisionByZero, "division_by_zero"),
+        (NumError::AboveOne, "above_one"),
     ];
     for (error, code) in all {
         assert_eq!(error.code(), code);
@@ -726,4 +727,261 @@ fn hand_calculated_split_values_from_the_reference_cases() {
             .to_string(),
         "0.000000000001"
     );
+}
+
+/// The backtest fill model's arithmetic (trading-domain spec §6.4, DEC-106; claim #62). A
+/// `Fraction` is the volume-cap fraction: non-negative, at most one, at most 9 places.
+#[test]
+#[ignore = "pending E4-1"]
+fn fractions_run_from_zero_to_one_inclusive() {
+    for accepted in ["0", "0.1", "0.000000001", "0.5", "1"] {
+        assert_eq!(
+            Fraction::parse(accepted).unwrap().to_string(),
+            accepted,
+            "{accepted}"
+        );
+    }
+    assert_eq!(Fraction::parse("1.000000001"), Err(NumError::AboveOne));
+    assert_eq!(Fraction::parse("2"), Err(NumError::AboveOne));
+    assert_eq!(Fraction::parse("-0.1"), Err(NumError::Negative));
+    assert_eq!(Fraction::parse("0.0000000001"), Err(NumError::TooPrecise));
+    assert_eq!(Fraction::parse("0.10"), Err(NumError::NotCanonical));
+    assert!(Fraction::parse("0").unwrap().is_zero());
+    assert_eq!(NumError::AboveOne.code(), "above_one");
+}
+
+/// Hand-calculated slippage and volume caps (spec §6.4 rules 3 to 7). s = 3 bps moves a 100.00 open
+/// by 100.00 × 0.0003 = 0.03, so a buy pays 100.03 and a sell receives 99.97. A slippage that needs
+/// more than the 9 places a price holds is rounded up, once, so both sides move against the order:
+/// 100.00 × 0.000123456789 = 0.0123456789 becomes 0.012345679 (DEC-106 item 2). The cap truncates:
+/// 10% of 5000 shares is 500 either way, while 10% of 5005 is 500.5, which whole shares truncate to
+/// 500 and a fractionable instrument keeps.
+#[test]
+#[ignore = "pending E4-1"]
+fn hand_calculated_slippage_and_volume_caps() {
+    let three_bps = Bps::parse("3").unwrap();
+    let hundred = Price::parse("100").unwrap();
+    assert_eq!(
+        hundred.slipped(three_bps, Adverse::Up).unwrap().to_string(),
+        "100.03"
+    );
+    assert_eq!(
+        hundred
+            .slipped(three_bps, Adverse::Down)
+            .unwrap()
+            .to_string(),
+        "99.97"
+    );
+    let ten_places = Bps::parse("1.23456789").unwrap();
+    assert_eq!(
+        hundred
+            .slipped(ten_places, Adverse::Up)
+            .unwrap()
+            .to_string(),
+        "100.012345679"
+    );
+    assert_eq!(
+        hundred
+            .slipped(ten_places, Adverse::Down)
+            .unwrap()
+            .to_string(),
+        "99.987654321"
+    );
+    assert_eq!(
+        Price::parse("0.000000001")
+            .unwrap()
+            .slipped(Bps::parse("10000").unwrap(), Adverse::Down),
+        Err(NumError::NotPositive)
+    );
+
+    let tenth = Fraction::parse("0.1").unwrap();
+    assert_eq!(
+        Qty::parse("5000")
+            .unwrap()
+            .portion(tenth, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "500"
+    );
+    assert_eq!(
+        Qty::parse("5005")
+            .unwrap()
+            .portion(tenth, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "500"
+    );
+    assert_eq!(
+        Qty::parse("5005")
+            .unwrap()
+            .portion(tenth, ShareIncrement::Fractional)
+            .unwrap()
+            .to_string(),
+        "500.5"
+    );
+    assert_eq!(
+        Qty::parse("5000")
+            .unwrap()
+            .portion(Fraction::ZERO, ShareIncrement::Whole)
+            .unwrap(),
+        Qty::ZERO
+    );
+}
+
+/// Hand-calculated `sqrt` impacts (spec §6.4, DEC-106 item 3). The root of the filled share of the
+/// reference volume is taken at 18 places and rounded up, so the impact is never understated:
+/// √0.25 = 0.5 exactly; √0.1 = 0.31622776601683793319…, which rounds up to 0.316227766016837934, so
+/// a 10 bps coefficient gives 3.16227766016837934 bps; √0.5 = 0.70710678118654752440… rounds up to
+/// 0.707106781186547525, giving 7.07106781186547525 bps; and √2 = 1.41421356237309504880… rounds up
+/// to 1.414213562373095049, giving 14.14213562373095049 bps.
+#[test]
+#[ignore = "pending E4-1"]
+fn hand_calculated_sqrt_impacts() {
+    let ten = Bps::parse("10").unwrap();
+    let cases = [
+        ("1", "4", "5"),
+        ("1", "10", "3.16227766016837934"),
+        ("1", "2", "7.07106781186547525"),
+        ("2", "1", "14.14213562373095049"),
+        ("1", "1", "10"),
+        ("3", "7", "6.54653670707977144"),
+    ];
+    for (fill, reference, impact) in cases {
+        assert_eq!(
+            Bps::sqrt_impact(
+                ten,
+                Qty::parse(fill).unwrap(),
+                Qty::parse(reference).unwrap()
+            )
+            .unwrap()
+            .to_string(),
+            impact,
+            "{fill} of {reference}"
+        );
+    }
+    assert_eq!(
+        Bps::sqrt_impact(ten, Qty::parse("1").unwrap(), Qty::ZERO),
+        Err(NumError::DivisionByZero)
+    );
+    assert_eq!(
+        Bps::sqrt_impact(
+            Bps::ZERO,
+            Qty::parse("1").unwrap(),
+            Qty::parse("2").unwrap()
+        )
+        .unwrap(),
+        Bps::ZERO
+    );
+}
+
+/// A fraction of one at 9 places: the mantissa runs from 0 to 10⁹.
+fn fractions() -> impl Strategy<Value = i128> {
+    0i128..=pow10(9)
+}
+
+proptest! {
+    /// Adding quantities and basis points is exact or an error (ES-04).
+    #[test]
+    #[ignore = "pending E4-1"]
+    fn adding_quantities_and_basis_points_is_exact(
+        a in unsigned(i64::MAX, 9),
+        b in unsigned(i64::MAX, 9),
+    ) {
+        exact_or_overflow(
+            qty(a).checked_add(qty(b)).map(|v| v.to_string()),
+            scaled(a, 9) + scaled(b, 9),
+            9,
+        )?;
+        let (x, y) = ((a.0, a.1.min(8)), (b.0, b.1.min(8)));
+        exact_or_overflow(
+            Bps::parse(&text(x.0, x.1)).unwrap()
+                .checked_add(Bps::parse(&text(y.0, y.1)).unwrap())
+                .map(|v| v.to_string()),
+            scaled(x, 8) + scaled(y, 8),
+            8,
+        )?;
+    }
+
+    /// Spec §6.4 rule 3: a volume cap is the product truncated to the increment, never above the
+    /// exact product, and never above the quantity it comes from when the fraction is at most one.
+    #[test]
+    #[ignore = "pending E4-1"]
+    fn a_volume_cap_is_the_truncated_product_and_never_above_it(
+        volume in unsigned(1_000_000_000, 9),
+        mantissa in fractions(),
+        increment in increments(),
+    ) {
+        let fraction = Fraction::parse(&text(mantissa, 9)).unwrap();
+        let exact = scaled(volume, 9) * mantissa / pow10(9);
+        let expected = match increment {
+            ShareIncrement::Fractional => exact,
+            ShareIncrement::Whole => exact / pow10(9) * pow10(9),
+        };
+        let capped = qty(volume).portion(fraction, increment).unwrap();
+        prop_assert_eq!(at_scale(&capped.to_string(), 9), Some(expected));
+        prop_assert!(expected <= exact);
+        prop_assert!(capped <= qty(volume));
+    }
+
+    /// DEC-106 item 2: slippage is `ceil(price × bps ÷ 10⁴)` at 9 places, added for a buy and taken
+    /// away for a sell, so the price always moves against the order; a sell price that reaches zero
+    /// is `not_positive` rather than a price. Prices stay below 10⁹ and basis points below 10⁶ so
+    /// that the `i128` oracle's own product is exact.
+    #[test]
+    #[ignore = "pending E4-1"]
+    fn slippage_moves_a_price_against_the_order_by_a_rounded_up_amount(
+        p in positive(1_000_000_000, 9),
+        b in unsigned(1_000_000, 8),
+    ) {
+        let (price, bps) = (
+            Price::parse(&text(p.0, p.1)).unwrap(),
+            Bps::parse(&text(b.0, b.1)).unwrap(),
+        );
+        let (price_units, bps_units) = (scaled(p, 9), scaled(b, 8));
+        let slip = div_round(price_units * bps_units, pow10(12), Rounding::Ceiling);
+        exact_or_overflow(
+            price.slipped(bps, Adverse::Up).map(|v| v.to_string()),
+            price_units + slip,
+            9,
+        )?;
+        let down = price.slipped(bps, Adverse::Down);
+        if price_units - slip <= 0 {
+            prop_assert_eq!(down, Err(NumError::NotPositive));
+        } else {
+            exact_or_overflow(down.map(|v| v.to_string()), price_units - slip, 9)?;
+        }
+    }
+
+    /// DEC-106 item 3: the `sqrt` impact is the coefficient exactly when the fill is the whole
+    /// reference volume, never above it below that, never below it above that, and never falls as
+    /// the fill grows.
+    #[test]
+    #[ignore = "pending E4-1"]
+    fn sqrt_impact_is_monotone_and_bounded_by_its_coefficient(
+        reference in positive(100_000, 9),
+        smaller in positive(100_000, 9),
+        larger in positive(100_000, 9),
+        c in unsigned(10_000, 8),
+    ) {
+        let coefficient = Bps::parse(&text(c.0, c.1)).unwrap();
+        let reference_qty = qty(reference);
+        let (low, high) = if scaled(smaller, 9) <= scaled(larger, 9) {
+            (qty(smaller), qty(larger))
+        } else {
+            (qty(larger), qty(smaller))
+        };
+        let at_low = Bps::sqrt_impact(coefficient, low, reference_qty).unwrap();
+        let at_high = Bps::sqrt_impact(coefficient, high, reference_qty).unwrap();
+        prop_assert!(at_low <= at_high, "the impact fell as the fill grew");
+        prop_assert_eq!(
+            Bps::sqrt_impact(coefficient, reference_qty, reference_qty).unwrap(),
+            coefficient
+        );
+        if low <= reference_qty {
+            prop_assert!(at_low <= coefficient);
+        }
+        if high >= reference_qty {
+            prop_assert!(at_high >= coefficient);
+        }
+    }
 }
