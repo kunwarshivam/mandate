@@ -1,12 +1,15 @@
 //! Corporate actions as the broker announces them (trading domain spec §4.5, §8.5): forward and
 //! reverse splits and cash dividends as typed records, and every other action kept by kind so none
-//! is silently dropped. Bars stay raw (DEC-89); split-adjusted bars are derived point in time, with
-//! exact integer arithmetic that rounds once or fails, never through a float.
+//! is silently dropped. Bars stay raw (DEC-89); split-adjusted bars are derived point in time. The
+//! split ratio and the §8.5 mark rule are `mandate_num`'s (DEC-91), so market data and the
+//! accounting fold adjust a price the same way; volumes use exact integer arithmetic that rounds
+//! once or fails, never through a float.
 
-use mandate_canon::DecStr;
+use mandate_canon::{DecError, DecStr};
+use mandate_num::{MarkPrice, NumError, Rounding, SplitRatio};
 use mandate_time::{Date, TimeError, UtcNanos, new_york_midnight};
 
-use crate::model::{Bar, Symbol};
+use crate::model::{Bar, DayRange, Symbol};
 use crate::number::{NumberError, from_units, to_units};
 
 /// Fractional digits of an adjusted price: the mark rule of spec §8.5 and §2.1.
@@ -16,12 +19,20 @@ pub const ADJUSTED_PRICE_SCALE: u8 = 12;
 /// (changes happen at 02:00), so the offset is the same on every date.
 const EVENING_TO_MIDNIGHT_SECS: i64 = 4 * 3_600;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AdjustmentError {
-    #[error("a split ratio needs positive share counts, got {new}:{old}")]
-    ZeroRatio { new: u64, old: u64 },
-    #[error("the cumulative split ratio does not fit 128 bits")]
+    #[error("split ratio {new}:{old}: {source}")]
+    Ratio {
+        new: u64,
+        old: u64,
+        source: NumError,
+    },
+    #[error("the cumulative split ratio does not fit 64-bit terms")]
     RatioOverflow,
+    #[error("price {price}: {source}")]
+    Price { price: DecStr, source: NumError },
+    #[error("the adjusted price {0} is not a decimal: {1}")]
+    AdjustedPrice(String, DecError),
     #[error("the adjusted value does not fit 38 digits")]
     Overflow,
     #[error("{0}")]
@@ -32,10 +43,12 @@ pub enum AdjustmentError {
 
 impl AdjustmentError {
     /// Stable reason code (ADR-0001 ES-09).
-    pub fn code(self) -> &'static str {
+    pub fn code(&self) -> &'static str {
         match self {
-            Self::ZeroRatio { .. } => "zero_ratio",
+            Self::Ratio { .. } => "ratio",
             Self::RatioOverflow => "ratio_overflow",
+            Self::Price { .. } => "price",
+            Self::AdjustedPrice(..) => "adjusted_price",
             Self::Overflow => "overflow",
             Self::Number(_) => "number",
             Self::Time(_) => "time",
@@ -43,59 +56,18 @@ impl AdjustmentError {
     }
 }
 
-/// A split of `old` shares into `new` (spec §8.5: integer ratio new:old), in lowest terms. The
-/// product of several splits is again a ratio.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SplitRatio {
-    new: u128,
-    old: u128,
+/// The split of `old` shares into `new`, as `mandate_num` checks it (both positive).
+pub fn split_ratio(new: u64, old: u64) -> Result<SplitRatio, AdjustmentError> {
+    SplitRatio::new(new, old).map_err(|source| AdjustmentError::Ratio { new, old, source })
 }
 
-impl SplitRatio {
-    pub const ONE: Self = Self { new: 1, old: 1 };
-
-    pub fn new(new: u64, old: u64) -> Result<Self, AdjustmentError> {
-        if new == 0 || old == 0 {
-            return Err(AdjustmentError::ZeroRatio { new, old });
-        }
-        Ok(Self::reduced(u128::from(new), u128::from(old)))
-    }
-
-    pub fn new_shares(self) -> u128 {
-        self.new
-    }
-
-    pub fn old_shares(self) -> u128 {
-        self.old
-    }
-
-    /// This split followed by `next`.
-    pub fn then(self, next: Self) -> Result<Self, AdjustmentError> {
-        let new = self.new.checked_mul(next.new);
-        let old = self.old.checked_mul(next.old);
-        new.zip(old)
-            .map(|(new, old)| Self::reduced(new, old))
-            .ok_or(AdjustmentError::RatioOverflow)
-    }
-
-    /// A pre-split price in post-split terms: round(price × old ÷ new, 12, half_even).
-    pub fn adjust_price(self, price: &DecStr) -> Result<DecStr, AdjustmentError> {
-        scaled(price, self.old, self.new, ADJUSTED_PRICE_SCALE)
-    }
-
-    /// A pre-split share quantity in post-split terms: round(quantity × new ÷ old, scale,
-    /// half_even).
-    pub fn adjust_quantity(self, quantity: &DecStr, scale: u8) -> Result<DecStr, AdjustmentError> {
-        scaled(quantity, self.new, self.old, scale)
-    }
-
-    fn reduced(new: u128, old: u128) -> Self {
-        let divisor = gcd(new, old);
-        Self {
-            new: new / divisor,
-            old: old / divisor,
-        }
-    }
+/// `first` followed by `then`, in lowest terms.
+pub fn compose(first: SplitRatio, then: SplitRatio) -> Result<SplitRatio, AdjustmentError> {
+    let new = u128::from(first.new_shares()) * u128::from(then.new_shares());
+    let old = u128::from(first.old_shares()) * u128::from(then.old_shares());
+    let divisor = gcd(new, old);
+    let term = |n: u128| u64::try_from(n / divisor).map_err(|_| AdjustmentError::RatioOverflow);
+    split_ratio(term(new)?, term(old)?)
 }
 
 fn gcd(mut a: u128, mut b: u128) -> u128 {
@@ -105,22 +77,43 @@ fn gcd(mut a: u128, mut b: u128) -> u128 {
     a
 }
 
-/// round(value × mul ÷ div, scale, half_even), exactly: one division of integers, rounded once.
-fn scaled(value: &DecStr, mul: u128, div: u128, scale: u8) -> Result<DecStr, AdjustmentError> {
-    let digits = value
+fn is_unit(ratio: SplitRatio) -> bool {
+    ratio.new_shares() == ratio.old_shares()
+}
+
+/// A pre-split price in post-split terms: `mandate_num`'s round(price × old ÷ new, 12,
+/// half_even). The price must be a positive mark of at most 12 places, and so must the result.
+pub fn adjust_price(ratio: SplitRatio, price: &DecStr) -> Result<DecStr, AdjustmentError> {
+    let failed = |source| AdjustmentError::Price {
+        price: price.clone(),
+        source,
+    };
+    let mark = MarkPrice::parse(price.as_str()).map_err(failed)?;
+    let adjusted = ratio
+        .mark(mark, u32::from(ADJUSTED_PRICE_SCALE), Rounding::HalfEven)
+        .map_err(failed)?
+        .to_string();
+    DecStr::parse(&adjusted).map_err(|e| AdjustmentError::AdjustedPrice(adjusted, e))
+}
+
+/// A pre-split share quantity in post-split terms: round(quantity × new ÷ old, scale, half_even).
+pub fn adjust_quantity(
+    ratio: SplitRatio,
+    quantity: &DecStr,
+    scale: u8,
+) -> Result<DecStr, AdjustmentError> {
+    let digits = quantity
         .as_str()
         .split_once('.')
         .map_or(0, |(_, fraction)| fraction.len());
     let from = u8::try_from(digits).map_err(|_| AdjustmentError::Overflow)?;
-    let units = to_units(value, from).map_err(AdjustmentError::Number)?;
-    let mul = i128::try_from(mul).map_err(|_| AdjustmentError::Overflow)?;
-    let div = i128::try_from(div).map_err(|_| AdjustmentError::Overflow)?;
+    let units = to_units(quantity, from).map_err(AdjustmentError::Number)?;
     let numerator = units
-        .checked_mul(mul)
+        .checked_mul(i128::from(ratio.new_shares()))
         .and_then(|n| n.checked_mul(power_of_ten(scale.saturating_sub(from))?))
         .ok_or(AdjustmentError::Overflow)?;
     let denominator = power_of_ten(from.saturating_sub(scale))
-        .and_then(|p| div.checked_mul(p))
+        .and_then(|p| i128::from(ratio.old_shares()).checked_mul(p))
         .ok_or(AdjustmentError::Overflow)?;
     let rounded = divide_half_even(numerator, denominator).ok_or(AdjustmentError::Overflow)?;
     from_units(rounded, scale).map_err(AdjustmentError::Number)
@@ -184,7 +177,15 @@ pub struct CashDividend {
 pub struct OtherAction {
     pub id: String,
     pub kind: String,
+    pub ex_date: Option<Date>,
     pub process_date: Date,
+}
+
+impl OtherAction {
+    /// The date the action is dated by: its ex-date, or its process date when it has none.
+    pub fn date(&self) -> Date {
+        self.ex_date.unwrap_or(self.process_date)
+    }
 }
 
 /// The corporate actions the broker reports for one symbol.
@@ -210,6 +211,16 @@ impl CorporateActions {
         self.splits.is_empty() && self.cash_dividends.is_empty() && self.other.is_empty()
     }
 
+    /// Only the actions dated in `range`: splits and cash dividends by ex-date, every other action
+    /// per [`OtherAction::date`].
+    pub fn dated_in(mut self, range: DayRange) -> Self {
+        let inside = |date: Date| range.first() <= date && date <= range.last();
+        self.splits.retain(|s| inside(s.ex_date));
+        self.cash_dividends.retain(|d| inside(d.ex_date));
+        self.other.retain(|o| inside(o.date()));
+        self
+    }
+
     /// Every action's ID, in the order split, cash dividend, other.
     pub fn ids(&self) -> impl Iterator<Item = &str> {
         let splits = self.splits.iter().map(|s| s.id.as_str());
@@ -225,18 +236,18 @@ impl CorporateActions {
         at: UtcNanos,
         as_of: Date,
     ) -> Result<SplitRatio, AdjustmentError> {
-        let mut ratio = SplitRatio::ONE;
+        let mut ratio = split_ratio(1, 1)?;
         for split in &self.splits {
             if split.ex_date <= as_of && at < split.effective_at()? {
-                ratio = ratio.then(split.ratio)?;
+                ratio = compose(ratio, split.ratio)?;
             }
         }
         Ok(ratio)
     }
 
-    /// `bar` split-adjusted as of `as_of`: prices per [`SplitRatio::adjust_price`], volume per
-    /// [`SplitRatio::adjust_quantity`] at `volume_scale`, and the trade count unchanged. A bar no
-    /// split applies to comes back unchanged.
+    /// `bar` split-adjusted as of `as_of`: prices per [`adjust_price`] and volume per
+    /// [`adjust_quantity`] at `volume_scale`, each by the product of the splits that apply and so
+    /// rounded once, and the trade count unchanged. A bar no split applies to comes back unchanged.
     pub fn adjust_bar(
         &self,
         bar: &Bar,
@@ -244,17 +255,17 @@ impl CorporateActions {
         volume_scale: u8,
     ) -> Result<Bar, AdjustmentError> {
         let ratio = self.split_ratio_after(bar.start, as_of)?;
-        if ratio == SplitRatio::ONE {
+        if is_unit(ratio) {
             return Ok(bar.clone());
         }
         Ok(Bar {
             start: bar.start,
-            open: ratio.adjust_price(&bar.open)?,
-            high: ratio.adjust_price(&bar.high)?,
-            low: ratio.adjust_price(&bar.low)?,
-            close: ratio.adjust_price(&bar.close)?,
-            volume: ratio.adjust_quantity(&bar.volume, volume_scale)?,
-            vwap: ratio.adjust_price(&bar.vwap)?,
+            open: adjust_price(ratio, &bar.open)?,
+            high: adjust_price(ratio, &bar.high)?,
+            low: adjust_price(ratio, &bar.low)?,
+            close: adjust_price(ratio, &bar.close)?,
+            volume: adjust_quantity(ratio, &bar.volume, volume_scale)?,
+            vwap: adjust_price(ratio, &bar.vwap)?,
             trade_count: bar.trade_count,
         })
     }

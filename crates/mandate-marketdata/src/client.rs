@@ -189,12 +189,13 @@ impl<T: Transport, P: Pause> Client<T, P> {
         }
     }
 
-    /// Every corporate action of `symbol` processed in `range`, following page tokens to the end.
-    /// An action ID seen on two pages is an error.
+    /// Every corporate action of `symbol` dated in `ex_dates` ([`CorporateActions::dated_in`]),
+    /// following page tokens to the end of the wider process-date window Alpaca filters on. An
+    /// action ID seen on two pages is an error.
     pub async fn fetch_corporate_actions(
         &self,
         symbol: &Symbol,
-        range: DayRange,
+        ex_dates: DayRange,
     ) -> Result<CorporateActions, FetchError> {
         let limit = self.page_limit.min(alpaca::MAX_CORPORATE_ACTIONS_LIMIT);
         let mut actions = CorporateActions::none(symbol.clone());
@@ -204,7 +205,8 @@ impl<T: Transport, P: Pause> Client<T, P> {
         let mut page = 0_usize;
         loop {
             page = page.saturating_add(1);
-            let path = alpaca::corporate_actions_path(symbol, range, limit, token.as_deref());
+            let path = alpaca::corporate_actions_path(symbol, ex_dates, limit, token.as_deref())
+                .map_err(FetchError::Request)?;
             let body = self.get_with_retry(&path).await?;
             let parsed = alpaca::parse_corporate_actions(symbol, &body)
                 .map_err(|source| FetchError::Wire { page, source })?;
@@ -216,7 +218,7 @@ impl<T: Transport, P: Pause> Client<T, P> {
             actions.cash_dividends.extend(parsed.actions.cash_dividends);
             actions.other.extend(parsed.actions.other);
             match parsed.next_page_token {
-                None => return Ok(actions),
+                None => return Ok(actions.dated_in(ex_dates)),
                 Some(next) => {
                     if !seen_tokens.insert(next.clone()) {
                         return Err(FetchError::RepeatedPageToken { page });

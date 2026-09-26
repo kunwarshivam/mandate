@@ -14,8 +14,9 @@ use mandate_time::{Date, TimeError, UtcNanos};
 
 pub use corporate_action::{
     ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction, Split,
-    SplitRatio,
+    adjust_price, adjust_quantity, compose, split_ratio,
 };
+pub use mandate_num::SplitRatio;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ModelError {

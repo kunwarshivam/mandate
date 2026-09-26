@@ -1,1 +1,1 @@
-/v1/corporate-actions?symbols=GE&start=2018-01-01&end=2026-09-25&limit=1000&sort=asc
+/v1/corporate-actions?symbols=GE&start=2017-12-01&end=2027-09-26&limit=1000&sort=asc

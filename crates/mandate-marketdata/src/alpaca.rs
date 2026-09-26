@@ -13,7 +13,7 @@ use serde_json::value::RawValue;
 
 use crate::model::{
     AdjustmentError, AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Kind,
-    OtherAction, Records, Split, SplitRatio, Symbol, Trade,
+    OtherAction, Records, Split, Symbol, Trade, split_ratio,
 };
 use crate::number::{NumberError, decimal_from_json, unsigned_from_json};
 use crate::timestamp::{TimestampError, day_start, parse_rfc3339_utc};
@@ -22,6 +22,15 @@ use crate::timestamp::{TimestampError, day_start, parse_rfc3339_utc};
 pub const MAX_PAGE_LIMIT: u32 = 10_000;
 /// Largest page Alpaca serves for corporate actions.
 pub const MAX_CORPORATE_ACTIONS_LIMIT: u32 = 1_000;
+/// How many days before the first ex-date of a request its process-date window starts. Alpaca
+/// filters corporate actions only by process date, and nothing it documents keeps the process
+/// date from preceding the ex-date.
+pub const PROCESS_DATE_DAYS_BEFORE: u32 = 31;
+/// How many days after the last ex-date of a request its process-date window ends. A cash
+/// dividend is processed on its payable date, weeks after its ex-date (up to 52 days in the
+/// recorded GE history).
+pub const PROCESS_DATE_DAYS_AFTER: u32 = 366;
+const SECS_PER_DAY: i64 = 86_400;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WireError {
@@ -176,24 +185,40 @@ pub struct CorporateActionsPage {
     pub next_page_token: Option<String>,
 }
 
-/// The path and query of one page of every corporate action of `symbol` whose process date falls
-/// in `range` (Alpaca filters and sorts on the process date), ascending.
+/// The path and query of one page of the corporate actions of `symbol` that may have an ex-date in
+/// `ex_dates`. Alpaca filters and sorts on the process date only, so the request covers the process
+/// dates from [`PROCESS_DATE_DAYS_BEFORE`] days before the range to [`PROCESS_DATE_DAYS_AFTER`]
+/// days after it, and the caller keeps the actions dated in the range
+/// ([`CorporateActions::dated_in`]).
 pub fn corporate_actions_path(
     symbol: &Symbol,
-    range: DayRange,
+    ex_dates: DayRange,
     limit: u32,
     page_token: Option<&str>,
-) -> String {
+) -> Result<String, TimestampError> {
+    let start = shift_days(ex_dates.first(), -i64::from(PROCESS_DATE_DAYS_BEFORE))?;
+    let end = shift_days(ex_dates.last(), i64::from(PROCESS_DATE_DAYS_AFTER))?;
     let mut path = format!(
-        "/v1/corporate-actions?symbols={}&start={}&end={}&limit={limit}&sort=asc",
+        "/v1/corporate-actions?symbols={}&start={start}&end={end}&limit={limit}&sort=asc",
         percent_encode(symbol.as_str()),
-        range.first(),
-        range.last()
     );
     if let Some(token) = page_token {
         path.push_str(&format!("&page_token={}", percent_encode(token)));
     }
-    path
+    Ok(path)
+}
+
+fn shift_days(day: Date, days: i64) -> Result<Date, TimestampError> {
+    let offset = days
+        .checked_mul(SECS_PER_DAY)
+        .ok_or(TimestampError::Overflow)?;
+    let secs = day_start(day)?
+        .secs()
+        .checked_add(offset)
+        .ok_or(TimestampError::Overflow)?;
+    UtcNanos::from_parts(secs, 0)
+        .map(UtcNanos::date)
+        .map_err(TimestampError::Time)
 }
 
 /// Parses one page of corporate actions requested for `symbol`. Splits and cash dividends must
@@ -245,6 +270,7 @@ pub fn parse_corporate_actions(
                     actions.other.push(OtherAction {
                         id: w.id,
                         kind: member.clone(),
+                        ex_date: optional_date("ex_date", w.ex_date)?,
                         process_date: date("process_date", &w.process_date)?,
                     });
                 }
@@ -272,7 +298,7 @@ fn expect_symbol(wanted: &Symbol, got: &str) -> Result<(), WireError> {
 fn split(w: WireSplit<'_>) -> Result<Split, WireError> {
     let new = count("new_rate", w.new_rate)?;
     let old = count("old_rate", w.old_rate)?;
-    let ratio = SplitRatio::new(new, old).map_err(|source| WireError::Split {
+    let ratio = split_ratio(new, old).map_err(|source| WireError::Split {
         id: w.id.clone(),
         source,
     })?;
@@ -330,6 +356,7 @@ struct WireDividend<'a> {
 #[derive(Deserialize)]
 struct WireOther {
     id: String,
+    ex_date: Option<String>,
     process_date: String,
 }
 

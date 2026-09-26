@@ -53,8 +53,8 @@ record crypto-bars-btcusd-1hour-2026-09-24 \
 record crypto-trades-btcusd-2026-09-24-paged \
   "/v1beta3/crypto/us/trades?symbols=BTC%2FUSD&$(day 2026-09-24 2026-09-25)&limit=300&sort=asc"
 record corporate-actions-aapl-2020-2021-paged \
-  "/v1/corporate-actions?symbols=AAPL&start=2020-01-01&end=2021-12-31&limit=5&sort=asc"
+  "/v1/corporate-actions?symbols=AAPL&start=2019-12-01&end=2023-01-01&limit=5&sort=asc"
 record corporate-actions-ge-2018-2026 \
-  "/v1/corporate-actions?symbols=GE&start=2018-01-01&end=2026-09-25&limit=1000&sort=asc"
+  "/v1/corporate-actions?symbols=GE&start=2017-12-01&end=2027-09-26&limit=1000&sort=asc"
 record corporate-actions-nvda-2021-2024 \
-  "/v1/corporate-actions?symbols=NVDA&start=2021-01-01&end=2024-12-31&limit=1000&sort=asc"
+  "/v1/corporate-actions?symbols=NVDA&start=2020-12-01&end=2026-01-01&limit=1000&sort=asc"

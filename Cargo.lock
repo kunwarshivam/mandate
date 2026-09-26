@@ -1048,6 +1048,7 @@ dependencies = [
  "arrow-array",
  "arrow-schema",
  "mandate-canon",
+ "mandate-num",
  "mandate-time",
  "parquet",
  "proptest",
