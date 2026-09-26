@@ -144,9 +144,11 @@ instant a `mandate_time::UtcNanos`.
 
 ```rust
 pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError>;
+pub fn evaluate_cancel(input: &CancelInput<'_>) -> Result<Decision, GateError>;
 
 pub struct GateInput<'a> {
     pub now: UtcNanos,                       // the risk clock's latest tick, never a wall clock
+    pub pass: GatePass,                      // First, or BeforeSubmission (§5.3's re-run)
     pub config: &'a GateConfig,              // the organization's settings; `test_default` in the cases
     pub mandate: &'a Mandate,                // stream F: the validated document
     pub risk: &'a RiskState,                 // stream F: E, H, E0, C, L, latched limits, restrictions
@@ -157,6 +159,17 @@ pub struct GateInput<'a> {
     pub conduct: &'a ConductState,
     pub universe: &'a WorkingUniverse,
     pub proposed: &'a ProposedOrder,
+}
+
+pub enum GatePass { First, BeforeSubmission }
+
+pub struct CancelInput<'a> {
+    pub now: UtcNanos,
+    pub config: &'a GateConfig,
+    pub order: &'a WorkingOrder,
+    pub resting_since: UtcNanos,
+    pub precedes_risk_reducing_order: bool,  // §9.6 exempts such a cancel from resting time
+    pub marketable: bool,                    // the rule binds non-marketable opening orders only
 }
 
 pub enum WorkingUniverse {
@@ -193,10 +206,9 @@ pub struct AccountSnapshot {
     pub regime: DayTradeRegime,              // IntradayMargin { maintenance_excess } | LegacyPdt
     pub equity: Usd,
     pub prior_close_equity: Usd,             // the broker's `last_equity` (§9.2)
-    pub model_buying_power: Usd,             // `Account::buying_power` (DEC-34, DEC-104)
-    pub broker_buying_power: Usd,
+    pub model_buying_power: Usd,             // `Account::buying_power(reservations)`: already net
+    pub broker_buying_power: Usd,            // of reservations and pending charges (DEC-34, DEC-104)
     pub broker_non_marginable_buying_power: Usd,
-    pub reservations: Usd,
     pub positions: BTreeMap<InstrumentId, SignedQty>,
     pub market_values: BTreeMap<InstrumentId, Usd>,    // signed; the gate takes |MV|
     pub working_orders: BTreeMap<ClientOrderId, WorkingOrder>,  // every agent on the account
@@ -242,7 +254,25 @@ pub struct MarketSnapshot {
     pub last_trade: Option<(Price, UtcNanos)>,
     pub trailing_5m_volume: Option<Qty>,     // §9.6 order-size participation
     pub adv_20d: Option<Qty>,                // §9.6 daily participation
-    pub session: SessionAt,                  // derived from `now` by `mandate-time`, not supplied
+}
+
+pub struct SessionAt {                       // derived inside the gate; never a caller's label
+    pub session: Session,                    // Overnight, PreMarket, Regular, AfterHours, Continuous
+    pub start: UtcNanos,
+    pub end: UtcNanos,                       // the early-close calendar decides it
+    pub opening_auction: bool,               // 09:28 to 09:30 ET
+    pub close_window: bool,                  // the last `close_window_minutes` of the regular session
+}
+
+pub struct WorkingOrder {
+    pub agent: AgentId,
+    pub instrument: InstrumentId,
+    pub side: Side,
+    pub max_cost: Usd,                       // what §5.3 and MC-G01 count toward exposure
+    pub open_qty: Qty,
+    pub protective: bool,
+    pub opening: bool,                       // an opening or increasing order, for §9.2's `required`
+    pub submitted_on: Date,
 }
 
 pub struct ConductState {
@@ -276,8 +306,8 @@ And the ladder and the flatten, each a pure function of state:
 ```rust
 pub fn size_factor(mandate: &Mandate, risk: &RiskState) -> Result<Fraction, GateError>;
 pub fn trim_proposals(
-    mandate: &Mandate, risk: &RiskState, agent: &AgentSnapshot,
-    instruments: &BTreeMap<InstrumentId, InstrumentSnapshot>, session: SessionAt,
+    now: UtcNanos, config: &GateConfig, mandate: &Mandate, risk: &RiskState,
+    agent: &AgentSnapshot, instruments: &BTreeMap<InstrumentId, InstrumentSnapshot>,
 ) -> Result<Vec<TrimProposal>, GateError>;
 pub fn agent_flatten(input: &FlattenInput<'_>) -> Result<FlattenPlan, GateError>;
 
@@ -293,8 +323,8 @@ pub struct FlattenPlan {
 ```
 
 `GateError` names one cause each with a stable code (ES-09):
-`WorkingUniverseUnavailable`, `RiskStateStale`, `PurposeUnassignable`, `PositionMissingForExit`,
-`QuoteUnsane`, `ConfigOutOfRange`, `InstrumentUnknown`, `DayTradeLedgerOutOfOrder`, plus the
+`WorkingUniverseUnavailable`, `RiskStateStale`, `PurposeUnassignable`, `QuoteUnsane`,
+`ConfigOutOfRange`, `InstrumentUnknown`, `DayTradeLedgerOutOfOrder`, plus the
 numeric, time, and `mandate-spec` errors it wraps. **An error is never an allow** and never a
 deny either: it is a refusal to decide, which the executor treats as the safe default of
 [AGENTS.md](../../../AGENTS.md) rule 3 — no new risk, exits still available through the paths that
@@ -321,12 +351,24 @@ story that implements it and the reason codes it can emit.
 |---|---|---|---|
 | 1 | Account status (§7.3), then agent mode (§7.4) | E6-9 | `account_trading_blocked`, `account_restricted`, `crypto_account_inactive`, `agent_exits_only`, `agent_paused`, `agent_stopped` |
 | 2 | The working universe (mandate §2.3, §5.3), then the eligibility floor (§3.2 items 1 to 7, in list order), then concentration (§3.3 and the mandate per-instrument cap), then mandate order size, then the re-entry cooldown | E6-3 (universe, concentration, size, cooldown), E6-7 (floor) | `not_in_working_universe`, `not_in_universe`, `ineligible_exchange`, `ipo_not_tradable`, `below_price_floor`, `below_liquidity_floor`, `leveraged_etp_not_enabled`, `concentration_limit`, `max_order_size`, `reentry_cooldown` |
-| 3 | Session, auction window, halt (§4.3, §4.4) | E6-6 (sessions), E6-9 (halts) | `session_not_allowed`, `extended_hours_opening_not_allowed`, `auction_window`, `instrument_halted`, and the defers `discretionary_exit_regular_session_only` and `owner_confirmation_required` |
-| 4 | Order constraints (§5.3 rules 1 to 9, in list order) | E6-6 | `would_cross_zero`, `sell_exceeds_available`, `working_order_limit`, `add_blocked_by_protective_order`, `unknown_order_in_flight`, `market_order_not_allowed` |
+| 3 | Session, auction window, halt (§4.3, §4.4) | E6-6 (sessions), E6-9 (halts) | `session_not_allowed`, `extended_hours_opening_not_allowed`, `auction_window` (the opening auction and market orders only — interpretation 18), `instrument_halted`, and the defers `discretionary_exit_regular_session_only` and `owner_confirmation_required` |
+| 4 | Order constraints (§5.3 rules 1 to 9, in list order); `GateInput::pass` decides whether rules 4 to 6 exclude the agent's own protective and resting opening orders (`First`) or apply in full (`BeforeSubmission`) | E6-6 | `would_cross_zero`, `sell_exceeds_available`, `working_order_limit`, `add_blocked_by_protective_order`, `unknown_order_in_flight`, `market_order_not_allowed`, and — pending the founder's registry entry, Decisions needed item 3 — rule 2's minimum size and increment |
 | 5 | Mark freshness and the price collar (§8.2, §9.6) | E6-8 | `stale_mark`, `price_outside_collar` |
-| 6 | Market-conduct controls (§9.6), the close window, and the mandate's orders per day | E6-8 (conduct), E6-3 (`max_orders_per_day`) | `min_resting_time`, `opposite_fill_interval`, `conduct_limit_breached`, `close_window`, `max_orders_per_day`, `order_rate_limited` |
+| 6 | Market-conduct controls (§9.6), the close window, and the mandate's orders per day | E6-8 (conduct), E6-3 (`max_orders_per_day`) | `min_resting_time` (on a cancel, through `evaluate_cancel`), `opposite_fill_interval`, `conduct_limit_breached`, `close_window`, `max_orders_per_day` |
 | 7 | Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate limit) | E6-6 (buying power), E6-3 (gross exposure) | `insufficient_buying_power`, `insufficient_settled_buying_power`, `gross_exposure_limit` |
 | 8 | Day-trade budget (§9.2) | E6-6 | `legacy_pdt_day_trade_budget` |
+
+`order_rate_limited` is **not** in this table: §9.7's platform per-second and per-day counters
+belong to the runtime (stream I), which sets the `rate_limit` restriction that reaches check 1 as an
+agent mode. Only the mandate's own `max_orders_per_day` is the gate's, at check 6.
+
+**The closing auction window and the close window are the same ten minutes** (§4.3: "closing: the
+last 10 minutes of the regular session"; §9.6: the close window, `close_window_minutes: 10`), and
+check 3 runs before check 6, so a naive reading reports `auction_window` where `RC-25` step 2
+expects `close_window`. Interpretation 18 settles it: check 3's `auction_window` covers the
+**opening** auction (09:28 to 09:30 ET) and **market orders** in either window, and the denial of an
+opening or increasing order in the closing ten minutes is check 6's `close_window`, which is exactly
+how the reason registry annotates the two.
 
 **Which failure is journaled first.** The gate evaluates in this order and **stops at the first
 failure**, so the journaled reason is the first failing check's, which is what
@@ -359,23 +401,61 @@ The gate computes it from `Origin`, `Side`, and the agent's position:
 
 A buy is never an exit, whatever the proposer says, and there is no v1 path by which a buy reduces
 risk: v1 holds no shorts (DEC-32), so `would_cross_zero` and the sell-side table are the whole of
-it. A protective leg's quantity is checked against position + entry quantity (§5.3).
+it. A protective leg's quantity is checked against position + entry quantity (§5.3). A sell in an
+instrument the agent holds nothing in is the `quantity > position` row, so it is denied
+`would_cross_zero` at check 4 and needs no error of its own.
+
+**Where the assignment is exercised, and where it is not.** `ref.py`'s `gate` takes `prop["purpose"]`
+as given and returns `allow` for any reducing purpose before it looks at a position, which is why
+`MC-G15` allows a `discretionary_exit` of quantity 1 in an instrument with no `positions_mv` entry.
+The `kind: gate` harness therefore passes the case's `purpose` through as an **already-assigned**
+purpose and runs only the mandate-limit checks that `gate` implements (interpretation 19). Purpose
+assignment and check 4's `would_cross_zero` are exercised by the trading-domain cases — `RC-03`'s
+`gate_rejects_zero_crossing_order`, already passing — and by hand tests over `Origin`, side, and
+position. Nothing in the `kind: gate` path can therefore turn `MC-G15` into a denial.
 
 ### The exemptions, in one place
 
 This is MI-1, [AGENTS.md](../../../AGENTS.md) rule 13, and the reason the gate exists in this shape.
 
-| Purpose | Exempt from | Paced by | Can be held by |
-|---|---|---|---|
-| `Protective` | every conduct control, eligibility, the day-trade budget, buying power, and the opening-session rules | nothing | `paused` only for a *new* protective order that is not a re-placement before expiry; `stopped`; an `Unknown` order in the instrument; the broker |
-| `RiskExit` (risk engine, automated kill switches, `trim_to_target`, the stop watchdog) | all of the above, and §9.6 entirely | nothing | `stopped`; an `Unknown` order; the broker. A kill switch's own orders are exempt even from `paused` |
-| `OwnerExit` | all of the above | the participation caps only | `stopped`; an `Unknown` order; the broker. Outside the regular session an equity sell is **deferred** until the owner confirms the displayed bid, then allowed with a floor price |
-| `DiscretionaryExit` | denial: it is **never** denied by a conduct control, the eligibility floor, a day-trade budget, buying power, or an opening-session rule | the collar prices it, the participation caps slice it, the close window makes it a marketable limit, and outside the regular session an equity one is **deferred** | `paused`, `stopped`; an `Unknown` order; the broker |
-| `Open`, `Increase` | nothing | nothing | every check above |
+**The mode rule, stated once**, exactly as `ref.py`'s `order_decision` implements it, because
+interpretation 2 makes it the fuzz's oracle for MI-1:
+
+```
+hold, reason agent_<mode>, when
+      mode == stopped
+   or mode == paused and not (purpose == Protective
+                              or (purpose in {RiskExit, OwnerExit} and from a kill switch))
+```
+
+So `Protective` is **never** held by a mode — protection that cannot be placed leaves a position
+unprotected, which is the opposite of the safe default — `RiskExit` and `OwnerExit` **are** held by
+`paused` unless they are a kill switch's own orders (trading spec §5.5: "Kill-switch orders are
+exempt from the agent's mode"), `DiscretionaryExit` is held by `paused`, and everything is held by
+`stopped`. Trading spec §7.4's prose is narrower for the protective case ("no new orders except
+re-placing protection before expiry"); interpretation 17 records why the crate follows `ref.py`.
+
+| Purpose | Exempt from | Paced by | Held by mode | Also held by |
+|---|---|---|---|---|
+| `Protective` | every conduct control, eligibility, the day-trade budget, buying power, and the opening-session rules | nothing | `stopped` only | an `Unknown` order in the instrument; the broker |
+| `RiskExit` (risk engine, automated kill switches, `trim_to_target`, the stop watchdog) | all of the above, and §9.6 entirely | nothing | `stopped`, and `paused` unless it is a kill switch's own order | an `Unknown` order; the broker |
+| `OwnerExit` | all of the above | the participation caps only | `stopped`, and `paused` unless it is a kill switch's own order | an `Unknown` order; the broker. Outside the regular session an equity sell is **deferred** until the owner confirms the displayed bid, then allowed with a floor price |
+| `DiscretionaryExit` | denial: it is **never** denied by a conduct control, the eligibility floor, a day-trade budget, buying power, or an opening-session rule | the collar prices it, the participation caps slice it, the close window makes it a marketable limit, and outside the regular session an equity one is **deferred** | `paused`, `stopped` | an `Unknown` order; the broker |
+| `Open`, `Increase` | nothing | nothing | `exits_only`, `paused`, `stopped` | every check below |
 
 A `Defer` is never converted to a `Deny` (§9.1), and a deferred intent is not stored: the order
 builder proposes again at the next evaluation and at the regular-session open. The kill switch is
 always available, touches only its scope, and does not depend on model state.
+
+**What MI-1 does and does not promise.** MI-1's own words are "risk reduction is never denied by a
+**mandate limit, conduct control, session rule, or instrument restriction**", and its list of things
+that may hold an exit ends with "or the broker". An account the broker has blocked (§7.3 status
+other than `ACTIVE`, `trading_blocked`, `account_blocked`, `trade_suspended_by_user`) is that broker
+arm: check 1 denies **every** purpose with `account_trading_blocked`, a risk exit included, which is
+what `RC-15`'s `status_not_active` variant expects. That is not the platform denying an exit by a
+limit; it is the platform reporting that the venue is shut to this account, and sending the order
+anyway would only collect a reject. The `closing_only` state is the opposite case and still allows
+every exit (`RC-15` step 4). The fuzz property is scoped to MI-1's own words accordingly.
 
 ## The drawdown ladder as a pure function
 
@@ -399,8 +479,9 @@ from the account stream. Three pure functions read that state and nothing else:
    position (a zero quantity produces no sell). Outside the regular session an automated flatten
    defers equity sells to the regular-session open and sends crypto now; an owner kill switch with a
    confirmed bid sells equities now through the exit price ladder with
-   `floor_price = confirmed_bid × (1 − max_exit_offset)` and a remainder that rests at the floor,
-   and without confirmation defers them. This function decides; the executor (E7-2) carries it out.
+   `floor_price = confirmed_bid × (1 − max_exit_offset)`, or an explicit `owner_floor_price` when
+   the owner supplied one (`ref.py` takes the override first), and a remainder that rests at the
+   floor, and without confirmation defers them. This function decides; the executor (E7-2) carries it out.
 
 The daily loss is the same shape: stream F latches it and sets the restriction, and this crate's
 only part is that the resulting mode reaches the gate's check 1 and that the exemptions above still
@@ -453,14 +534,71 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
   opening and increasing orders ≤ `max_orders_per_day`; no opening order within `reentry_cooldown_s`
   of an exit fill in the group; and the instrument in the working universe. The oracle is shown to
   fail on each of the planted bugs below before it is trusted.
-- **MI-1, the other half.** For every generated state and every reducing purpose, assert the
-  verdict is never `Deny`, and that it is `Hold` only for the four causes MI-1 names. A generator
-  that produces a state where an exit *should* be held is required (a `paused` mode, an `Unknown`
-  order), so the property cannot pass vacuously.
+- **MI-1, the other half,** scoped to MI-1's own words. For every generated state and every
+  reducing purpose, assert the verdict is never `Deny` **by a mandate limit, a conduct control, a
+  session rule, an instrument restriction, the eligibility floor, a day-trade budget, or buying
+  power** — the property matches on the reason code, so a deny carrying `account_trading_blocked`
+  (the broker arm of MI-1's own list, `RC-15`'s `status_not_active`) is the one permitted denial and
+  is asserted to be reachable, not merely tolerated. Assert further that a `Hold` carries only
+  `agent_paused` or `agent_stopped` and follows the mode rule above exactly, and that a
+  `DiscretionaryExit` is never denied at all. Generators must produce a `paused` mode, a `stopped`
+  mode, an `Unknown` order, and a blocked account, so no arm of the property passes vacuously.
 - **MI-8.** Every generated input is evaluated twice, and the two `Decision`s compared field by
   field, including the check list's order.
 - **Anti-vacuity.** A coverage assertion requires the run to have produced at least one allow, one
   deny of each mandate limit, one defer, and one hold; a fuzz that only ever denies proves nothing.
+
+## Spec clause → test
+
+One row per clause the crate must hold, with the tests the tests PR writes for it. Property names
+are `crates/mandate-risk/tests/properties.rs` unless another file is named; `hand` is `tests/hand.rs`,
+`fuzz` is `tests/fuzz.rs`, and a case id is the reference case itself.
+
+| Spec clause or invariant | Test |
+|---|---|
+| §9.1 the eight checks run in order and the **first** failure's code is reported | `properties::the_first_failing_check_decides`, `hand::two_simultaneous_failures_report_the_earlier_check`, `RC-16` (floor before concentration), `RC-25` (close window after the session) |
+| §9.1 every decision, allows included, carries the checks evaluated | `properties::every_decision_lists_the_checks_it_reached`, `hand::checks_after_the_failure_are_not_reached` |
+| §9.1 purpose is assigned by the gate, never taken from the proposer | `hand::purpose_is_assigned_from_origin_side_and_position` (one case per row of the purpose table), `properties::a_buy_is_never_an_exit` |
+| §9.1 verdicts are allow, deny, or defer, and a defer is never converted to a deny | `properties::a_discretionary_exit_is_never_denied`, `RC-25` steps 5, 7, 8 |
+| MI-1 risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction | `fuzz::mi1_reduction_is_never_denied_by_a_limit`, `MC-G08`, `MC-G09`, `MC-G10`, `MC-G15`, `RC-09B` step 4, `RC-15` step 4, `RC-16` step 8, `RC-25` steps 4 and 6 |
+| MI-1 an exit is held only by `paused`, `stopped`, an `Unknown` order, or the broker | `properties::a_hold_follows_the_mode_rule_exactly`, `hand::a_kill_switch_order_is_exempt_from_paused`, `hand::a_protective_order_is_never_held_by_a_mode`, `hand::an_unknown_order_holds_every_order_in_its_instrument`, `RC-15::status_not_active` (the broker arm) |
+| MI-6 a stricter mode never turns a deny into an allow | `properties::a_stricter_mode_is_never_more_permissive` |
+| MI-8 identical inputs give identical decisions | `fuzz::mi8_identical_inputs_give_identical_decisions` |
+| MI-15, MI-19, MI-20 nothing opens outside the working universe, and a removed instrument is exits-only in that instrument | `MC-G14`, `MC-G15`, `MC-G16`, `properties::an_opening_needs_the_working_universe`, `hand::a_removed_instrument_restricts_only_itself` |
+| mandate §2.3 an absent working universe is an error, an empty one denies | `hand::an_absent_working_universe_is_an_error`, `MC-G16` |
+| mandate §5.3 per-instrument cap = min(usd, fraction × E), counting position + working + proposed | `MC-G01`, `MC-G02`, `MC-G05`, `properties::position_cap_is_the_lower_of_both_bounds`, `fuzz` oracle |
+| mandate §5.3 order size, orders per day, gross exposure bounded by E | `MC-G03`, `MC-G04`, `MC-G06`, `MC-G07`, `properties::gross_exposure_is_bounded_by_equity`, `hand::a_rejected_order_still_counts` |
+| mandate §5.3 re-entry cooldown across the instrument group | `MC-G11`, `MC-G12`, `MC-G13`, `properties::cooldown_covers_the_whole_group` |
+| mandate §5.3 these limits never deny an exit | `MC-G08` to `MC-G10`, `MC-G15`, `fuzz::mi1_...` |
+| mandate §5.5, trading §5.5 the agent flatten: mode first, own order ids, no cancel-all or close-position, sub-ledger quantity | `MC-F01`, `properties::an_agent_flatten_never_touches_another_agent`, `hand::the_final_mode_is_applied_first` |
+| mandate §5.5 automated flattens defer equity sells outside the regular session; crypto goes now | `MC-F02`, `hand::a_crypto_sell_never_waits_for_a_session` |
+| trading §5.5 an owner kill switch prices to a floor once the bid is confirmed, and defers without it | `MC-F03`, `MC-F04`, `hand::an_explicit_owner_floor_price_overrides_the_computed_one` |
+| mandate §5.5 the size factor is the product of the active rungs | `hand::two_active_rungs_multiply`, `properties::the_size_factor_never_exceeds_one` |
+| mandate §5.5 `trim_to_target` sells down to factor × cap, rounded up, regular session only, never while Holding | `hand::a_trim_rounds_up_to_the_increment`, `hand::a_trim_waits_for_the_regular_session`, `hand::no_trim_while_holding`, `properties::a_trim_never_sells_below_the_target` |
+| mandate §5.9 the effective mode is the strictest restriction, and openings stop at `exits_only` | `RC-22` last step, `properties::a_stricter_mode_is_never_more_permissive` |
+| trading §3.2 the eligibility floor, items 1 to 7 in list order | `RC-16` steps 1 to 7, `hand::the_floor_reports_the_first_failing_item` |
+| trading §3.2 item 6 an unclassified or stale ETP fails closed | `hand::an_unclassified_etp_is_complex`, `hand::a_stale_classification_denies_an_etp_opening`, `properties::etp_fails_closed`, `RC-16::leveraged_etps_enabled` |
+| trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::mi1_...` |
+| trading §4.3 sessions: regular-session openings, extended-hours exits as limit orders, nothing overnight | `hand::an_opening_outside_the_regular_session_is_denied`, `hand::an_extended_hours_opening_needs_a_limit`, `RC-25` |
+| trading §4.3 the opening auction and market orders are `auction_window`; the closing ten minutes are `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order`, `hand::the_close_window_follows_the_early_close_calendar` |
+| trading §4.4 a halt, and a dropped status feed as a presumed halt | `hand::a_halted_instrument_denies_an_opening`, `hand::a_dropped_status_feed_is_a_presumed_halt` |
+| trading §5.3 rules 1 to 9 in list order, and the first-pass exclusion of the agent's own orders | `hand::order_constraints_report_the_first_failing_rule`, `hand::the_first_pass_excludes_the_agents_own_protective_orders`, `RC-03::gate_rejects_zero_crossing_order` |
+| trading §7.3 account states: `blocked` denies every purpose, `closing_only` allows exits | `RC-15` and its three variants, `hand::a_blocked_account_holds_even_a_risk_exit`, `hand::three_consecutive_unexplained_403s_restrict_the_account` |
+| trading §8.2 an opening order needs a fresh quote-based risk mark; a reducing one takes any source | `hand::an_opening_needs_a_fresh_quote`, `hand::a_risk_exit_accepts_a_last_trade_mark`, `properties::mark_freshness_never_blocks_a_reduction` |
+| trading §9.2 the `legacy_pdt` window, count, `remaining`, and `required` | `RC-09`, `RC-09B`, `hand::the_window_is_today_plus_four`, `hand::crypto_never_counts`, `properties::required_counts_every_component` |
+| trading §9.2 `intraday_margin` denies no 1× long-only opening | `RC-09::alpaca_intraday_margin`, `hand::a_reported_deficit_is_an_account_state_not_a_denial` |
+| trading §9.3 1× gross exposure including the proposed order; no short sales | `MC-G04`, `MC-G06`, `hand::a_sell_above_the_position_is_would_cross_zero` |
+| trading §9.5 buying power is the lower of model and broker, with the fee reservation, subtracted once | `RC-08` step 3, `RC-18` step 3, `RC-18::generic_cash_account`, `properties::buying_power_is_the_lower_of_the_two`, `hand::a_reservation_includes_the_rounded_fee` |
+| trading §9.6 the collar binds aggressive prices only, within the passive band, by tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid` |
+| trading §9.6 the opposite-fill interval | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval` |
+| trading §9.6 minimum resting time on a cancel, exempt before a risk-reducing order | `hand::a_cancel_inside_the_resting_window_is_denied`, `hand::a_cancel_before_a_risk_reducing_order_is_exempt` |
+| trading §9.6 participation caps slice a discretionary exit rather than denying it | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied` |
+| trading §9.6 order-to-fill after 20 orders, compared without dividing | `hand::the_order_to_fill_ratio_needs_twenty_orders`, `properties::the_ratio_is_compared_without_dividing` |
+| trading §9.6 self-trade prevention across related accounts | `hand::an_opposite_side_rest_in_a_related_account_blocks_an_opening` |
+| trading §9.6 the daily surveillance report states figures and makes no judgement | `hand::the_surveillance_report_matches_a_hand_computed_day`, `properties::the_report_flags_every_threshold_it_crosses` |
+| §2.1, ES-04 the new arithmetic is exact or an error, one rounding per formula, never in the order's favour | `mandate-num`'s `num::hand_calculated_gate_bounds`, `num::a_collar_bound_rounds_against_the_order`, `properties::a_value_exactly_at_a_limit_passes` |
+| ES-21 determinism: no clock, no randomness, `BTreeMap` only | `fuzz::mi8_identical_inputs_give_identical_decisions`, and clippy's `disallowed-types` on a `pure` crate |
+| E6-3 acceptance: fuzzing never produces an order outside limits | `fuzz::no_allowed_sequence_ever_exceeds_a_limit` against the shadow-ledger oracle, with the coverage assertion |
 
 ## Interpretations (recorded as DEC-129)
 
@@ -509,9 +647,14 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
    under `intraday_margin` check 8 denies nothing; it only reads the broker's reported maintenance
    excess, and a reported deficit is an account state (`closing_only`, mode `exits_only`) set by
    E6-9's check 1, not a per-order denial. RC-09's `alpaca_intraday_margin` variant is exactly this.
-8. **Buying power is the lower of model and broker (DEC-34), compared without dividing.** Check 7
-   compares `qty × limit_price + round(estimated fees, 2, ceiling) ≤ buying_power − reservations`,
-   every term exact. A cash account's failure is `insufficient_settled_buying_power` and a margin
+8. **Buying power is the lower of model and broker (DEC-34), and reservations are subtracted
+   once.** `Account::buying_power(reservations)` already subtracts them, and the pending fee
+   charges besides, so check 7 compares
+   `qty × limit_price + round(estimated fees, 2, ceiling) ≤ min(model, broker)` and subtracts
+   nothing further; §9.5's "≤ buying power − existing reservations" is the same figure, written
+   before DEC-104 moved the subtraction into the fold. `AccountSnapshot` therefore carries no
+   separate `reservations` field for check 7 to use, so the double subtraction is unrepresentable
+   rather than merely avoided. Every term is exact. A cash account's failure is `insufficient_settled_buying_power` and a margin
    account's is `insufficient_buying_power`, which is what RC-08 and RC-18's variant distinguish.
    Crypto uses `min(model, broker non-marginable)` and a fee reservation of 0 (§7.2).
 9. **The gate derives the session; the caller does not label it.** See "how it is fed without a
@@ -538,9 +681,16 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
     already returns `{"verdict": "hold"}` for `paused` and `stopped`, so the Rust keeps the same
     four verdicts. The trading-domain reason registry has `agent_paused` and `agent_stopped` for it.
 13. **The surveillance report is a pure function, and it supervises nothing.** E6-8's daily report
-    is `fn surveillance(day, workspace_state) -> SurveillanceReport`: self-trade checks,
-    order-to-fill ratios, close-window activity, and concentration, with the threshold breaches
-    flagged. §9.6 is explicit that "the platform does not supervise users' trading", so the report
+    is `fn surveillance(day: Date, input: &SurveillanceInput<'_>) -> Result<SurveillanceReport,
+    GateError>`, where `SurveillanceInput` is the day's folded figures and nothing else:
+    `orders: BTreeMap<(AgentId, InstrumentId), OrderCounts { submitted, filled, cancels_excluded }>`
+    for the order-to-fill ratios, `opposite_side_rests: BTreeMap<InstrumentId, BTreeSet<AccountId>>`
+    for the self-trade checks, `close_window_orders: BTreeMap<(AgentId, InstrumentId), u32>`,
+    `end_of_day_market_values: BTreeMap<(AgentId, InstrumentId), Usd>` with each agent's equity for
+    concentration, and the `GateConfig` thresholds. Every field is a fold of account-stream events
+    the executor already journals, so "pure function of journaled events" is a shape, not a claim:
+    self-trade checks, order-to-fill ratios, close-window activity, and concentration, with the
+    threshold breaches flagged. §9.6 is explicit that "the platform does not supervise users' trading", so the report
     states figures and flags thresholds and makes no judgement, and routing it to the owner and
     journaling the acknowledgment is the runtime's (stream I's), not this crate's.
 14. **The gate never journals.** "Journal before acting" ([AGENTS.md](../../../AGENTS.md) rule 5) is
@@ -555,14 +705,45 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
 16. **Fee reservations for buying power** — the follow-up the work tracker assigns to E6-6 — are
     `round(estimated fees, 2, ceiling)` per order from the pinned fee configuration (§9.5), computed
     through `mandate-accounting`'s fee rules rather than a second copy here, and 0 for a crypto buy
-    (the fee is paid in the asset). The reservation is an input to check 7 only; the executor holds
-    the reservation itself.
+    (the fee is paid in the asset). The reservation is a term of check 7's left-hand side only; the
+    executor holds the reservation itself, and the fold has already netted the existing ones out of
+    buying power (item 8).
+17. **A protective order is never held by a mode; a risk or owner exit is held by `paused` unless a
+    kill switch sent it.** This is `ref.py`'s `order_decision` exactly. Trading spec §7.4's prose is
+    narrower for the protective case ("no new orders except re-placing protection before expiry"),
+    but nothing in the gate's input distinguishes a re-placement from a first placement, `ref.py`
+    draws no such line, and holding protection under `paused` would leave a position unprotected —
+    the opposite of rule 3's safe default. MI-1 is satisfied either way: it says an exit *may* be
+    held only by those four things, not that each of them always holds one. The rule is written once
+    in "The exemptions, in one place" and the fuzz compares against `order_decision`.
+18. **`auction_window` is the opening auction and market orders; the closing ten minutes are
+    `close_window`.** §4.3's closing auction window and §9.6's close window are the same interval
+    and both bar opening orders, and check 3 runs before check 6, so without this the first code
+    would always win and `RC-25` step 2 could not pass. Check 3 therefore emits `auction_window`
+    only for the 09:28 to 09:30 opening auction and for a market order in either window (§4.3:
+    "exits in them use limit orders, never market orders"), and the denial of an opening or
+    increasing order in the closing ten minutes is check 6's `close_window`, which is how the reason
+    registry annotates the two. Nothing is lost: an opening order at 09:28 is in pre-market and
+    check 3's session rule already denies it.
+19. **The `kind: gate` harness runs `ref.py`'s `gate`, not the whole of §9.1** (DEC-85 style). Those
+    cases carry a `purpose`, a `state`, and a `proposed` order and nothing that could feed checks 1,
+    3, 4, 5, or 8 — no session, no quote, no account status — so the harness passes the case's
+    `purpose` through as already assigned and runs only the mandate-limit checks `gate` implements.
+    Purpose assignment, `would_cross_zero`, sessions, the collar, and the day-trade budget are
+    exercised by the trading-domain cases and by hand tests. Anything a mandate case states that
+    this path does not read stays "not interpreted until <story>".
+20. **A cancel is a gate decision too.** §9.6's minimum resting time is a rule about canceling a
+    non-marketable opening order, and its exemption ("does not apply to cancels that precede a
+    risk-reducing order") is a risk judgement, not an executor convenience. So the crate exposes
+    `evaluate_cancel` beside `evaluate`, and the executor asks before it cancels. Putting the rule
+    in the executor would place a conduct control outside the independent gate, which item 5 already
+    rules out for every other control.
 
 ## Decisions needed
 
-Neither can be taken by an agent: both would change a founder-owned file
-([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). Both are listed as `Proposed (founder)` in the
-DEC-129 row.
+None can be taken by an agent: each would change a founder-owned file
+([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 21, 22, and 23,
+each `Proposed (founder)`.
 
 1. **Two reason codes for one condition: `not_in_universe` and `not_in_working_universe`.**
    [mandate spec §5.3](../../specs/mandate.md#53-position-exposure-order-size-count-and-cooldown)
@@ -584,6 +765,14 @@ DEC-129 row.
    (proposal: 7 days) in the next spec window, and, if the founder wants it pinned by a case, one
    step in `RC-16`. Until then, interpretation 10's crate default stands and the rule is exercised
    by hand tests only.
+3. **§5.3 rule 2 denies an order with no registered reason code.** "Quantity ≥ `min_order_size`
+   and a multiple of the increment, except a sell closing the full position" is a check-4 denial,
+   but the `reason_codes` registry in
+   [`trading-domain.yaml`](../../specs/reference-cases/trading-domain.yaml) has no code for either
+   half, so the gate would have to invent one and ES-09's "stable reason code" would not be stable.
+   No case exercises it today. **Recommendation:** register `below_min_order_size` and
+   `quantity_off_increment` under "order constraints" in the next spec window. Until then the tests
+   PR's hand tests assert the *verdict* and leave the code unasserted rather than minting one.
 
 ## Dependencies
 
@@ -636,7 +825,7 @@ missing test, and the tests PR does not merge with one.
 | 10 | The eligibility floor runs its items out of §3.2 order, so `below_price_floor` is reported where `ineligible_exchange` should be | `RC-16` steps 2 and 3, `hand::the_floor_reports_the_first_failing_item` |
 | 11 | An unclassified ETP is treated as plain | `hand::an_unclassified_etp_is_complex`, `properties::etp_fails_closed` |
 | 12 | The eligibility floor is applied to a `risk_exit` in a held instrument | `RC-16` step 8, `MC-G15`, `properties::mi1_...` |
-| 13 | `account_trading_blocked` is treated as `exits_only` rather than `paused`, so a `risk_exit` is allowed | `RC-15::status_not_active`, `hand::a_blocked_account_holds_even_a_risk_exit` |
+| 13 | `account_trading_blocked` is treated as `exits_only` rather than blocking the account, so a `risk_exit` is allowed | `RC-15::status_not_active`, `hand::a_blocked_account_holds_even_a_risk_exit` |
 | 14 | The unexplained-403 counter resets on an unrelated success, so the threshold is never reached | `RC-15::unexplained_403s`, `hand::three_consecutive_unexplained_403s_restrict_the_account` |
 | 15 | The day-trade window is the four prior trading days without today | `RC-09`, `hand::the_window_is_today_plus_four` |
 | 16 | `required` omits open same-day positions | `RC-09B` step 3, `properties::required_counts_every_component` |
@@ -664,6 +853,12 @@ missing test, and the tests PR does not merge with one.
 | 38 | `size_factor` sums the rungs' factors instead of multiplying them | `hand::two_active_rungs_multiply`, `properties::the_size_factor_never_exceeds_one` |
 | 39 | `trim_to_target` rounds the sell quantity down to the increment | `hand::a_trim_rounds_up_to_the_increment` |
 | 40 | The decision is not deterministic: the check list is built from a `HashMap` iteration | `properties::mi8_identical_inputs_give_identical_decisions` (and clippy's `disallowed-types`, which is why the crate is `pure`) |
+| 41 | `paused` holds a protective order, or lets a non-kill-switch `risk_exit` through | `hand::a_protective_order_is_never_held_by_a_mode`, `hand::a_paused_agent_holds_a_plain_risk_exit`, `properties::a_hold_follows_the_mode_rule_exactly` |
+| 42 | A kill switch's own `risk_exit` is held by `paused` | `hand::a_kill_switch_order_is_exempt_from_paused`, `MC-F02` (the flatten's own sells) |
+| 43 | The closing ten minutes report `auction_window` instead of `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order` (the other half: the opening auction still reports `auction_window`) |
+| 44 | Check 7 subtracts reservations a second time from `Account::buying_power`'s figure | `RC-18` step 3 (449.97 after the reservation, not 449.97 less it again), `properties::buying_power_is_the_lower_of_the_two` |
+| 45 | `evaluate_cancel` applies the resting-time rule to a cancel that precedes a risk-reducing order | `hand::a_cancel_before_a_risk_reducing_order_is_exempt`, `properties::a_cancel_that_precedes_a_reduction_is_never_denied` |
+| 46 | The `kind: gate` harness reassigns the case's `purpose` from side and position, turning `MC-G15` into a denial | `MC-G15`, `harness::a_gate_case_purpose_is_passed_through` |
 
 ## Not done
 
