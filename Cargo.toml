@@ -4,6 +4,7 @@ members = ["xtask", "crates/*"]
 
 # Versions of every shared dependency live here; each is registered in docs/dependencies.md.
 [workspace.dependencies]
+mandate-accounting = { path = "crates/mandate-accounting", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
