@@ -1302,6 +1302,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-backtest"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-num",
+ "mandate-sim",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-canon"
 version = "0.0.0"
 dependencies = [
