@@ -73,8 +73,8 @@ story. This story closes milestone M2.
   `account_type` always reports margin [account-type hand test, rc_08 hand, oracle, charging
   property]; the opening type dropped and margin stored [account-type, rc_08, rc_18, fee-debit hand
   tests, oracle, difference property, both harness tests]; the equities charge rounds up to a tenth
-  of a dollar [every hand test but the reservation and crypto ones, oracle, charging property, I4,
-  both harness tests]; the harness reads `type: cash` as margin [both harness tests]; the harness
+  of a dollar [rc_08, rc_18, per-bucket, debit, and fee-debit hand tests, oracle, charging property,
+  I4, both harness tests]; the harness reads `type: cash` as margin [both harness tests]; the harness
   never checks the `buying_power` key [both harness tests]. The `i4` property also caught, before
   it was stated exactly, that the spec's cash-account wording is stricter than its fee model allows
   (DEC-99 item 5).
@@ -117,7 +117,10 @@ the executor opens the fold with the observed type. Buying power is a derived va
    the proceeds settle, so settled ≥ 0 cannot hold after every approved sell. The property asserts:
    settled ≥ 0 (cash) and buying power ≥ 0 (both) after every approved buy; settled + Σ unsettled −
    accrued ≥ 0 after every event (both); settled ≥ 0 in a cash account whenever nothing is
-   unsettled. Founder to confirm; the §8.3 and I4 wording follows in a spec-only change.
+   unsettled, and never below minus the charges posted since then while something is. This item is
+   Proposed (founder): it reads a safety rule more loosely than its text, so the property asserts
+   the strictest reading the fee model allows until the founder decides; the §8.3 and I4 wording
+   follows in a spec-only change.
 6. **Harness.** `initial.account.type`: alpaca defaults to margin and rejects cash; generic must
    state it. `buying_power` is compared with the fold's buying power and no reservations. RC-08 and
    RC-18's cash variant stay pending on E6-3 and E6-6.

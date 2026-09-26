@@ -141,7 +141,7 @@ impl Reservations {
     }
 
     pub fn total(self) -> Usd {
-        self.0
+        self.0.negated()
     }
 }
 
