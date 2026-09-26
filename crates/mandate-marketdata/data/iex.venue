@@ -14,7 +14,9 @@
 #   IEX has published no change to them within the range.
 #
 # IEX does not trade overnight. On an early-close day its hours after the 1:00 p.m. regular close
-# are unpublished, so they stay unclassified until the overnight session would begin at 8:00 p.m.
+# are unpublished, so they are unclassified until the earliest of 8:00 p.m. (the record below),
+# IEX's own 5:00 p.m. close, and the calendar's 5:00 p.m. after-hours end; from then on IEX is
+# closed.
 valid 2018-01-01 2028-12-31
 hours 08:00 09:30 16:00 17:00
 unpublished_after_early_close 20:00

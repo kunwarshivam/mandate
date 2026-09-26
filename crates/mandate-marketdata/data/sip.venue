@@ -12,7 +12,9 @@
 #       until the calendar's after-hours session ends. The overnight session is always closed.
 #   unpublished_after_early_close <until>
 #       The venue does not publish when it closes on an early-close day, so every minute from the
-#       calendar's regular close to <until> is unclassified. SIP has no such record.
+#       calendar's regular close to the earliest of <until>, the venue's <close>, and the
+#       calendar's after-hours end is unclassified, and later minutes are closed. SIP has no such
+#       record.
 #
 # Sources (retrieved 2026-09-26):
 # - SEC Release No. 34-105779 (CTA and CQ Plans) and No. 34-105780 (UTP Plan), 2026

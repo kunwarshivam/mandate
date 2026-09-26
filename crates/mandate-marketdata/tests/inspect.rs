@@ -286,12 +286,12 @@ fn iex_gaps_split_into_no_trade_closures_true_gaps_and_the_unclassified_early_cl
                 at("2026-11-27", 17),
                 at("2026-11-30", 13),
                 vec![
-                    stretch(Unclassified, at("2026-11-27", 18), at("2026-11-28", 0), 7),
+                    stretch(Unclassified, at("2026-11-27", 18), at("2026-11-27", 21), 4),
                     stretch(
                         SessionClosure,
-                        at("2026-11-28", 1),
+                        at("2026-11-27", 22),
                         at("2026-11-30", 12),
-                        60
+                        63
                     ),
                 ],
             ),
