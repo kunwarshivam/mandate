@@ -64,6 +64,12 @@ safety_critical = true
 pure = false
 allowed_external = ["libtest-mimic", "serde_json", "toml"]
 
+[crates.mandate-sim]
+layer = 6
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-marketdata]
 layer = 6
 safety_critical = false
