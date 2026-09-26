@@ -432,21 +432,46 @@ pub mod oracle {
         NotInUniverse,
     }
 
-    /// The §5.3 limits, each compared with `>` so a value exactly at the limit passes (MC-G02).
+    /// Every §5.3 limit, each compared with `>` so a value exactly at the limit passes (MC-G02).
+    ///
+    /// All six [`Breach`] variants are reachable: an oracle that can only report three of the
+    /// limits it names would pass a gate that broke the other three.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Limits {
+        pub cap: i128,
+        pub max_order: i128,
+        pub gross_cap: i128,
+        pub max_orders_per_day: u32,
+        pub reentry_cooldown_s: i64,
+    }
+
+    /// What the proposal is measured against, accumulated by the caller.
+    #[derive(Debug, Clone, Copy)]
+    pub struct Proposal {
+        pub instrument_total: i128,
+        pub order: i128,
+        pub gross: i128,
+        pub orders_today: u32,
+        pub seconds_since_group_exit: Option<i64>,
+        pub in_universe: bool,
+    }
+
     #[must_use]
-    pub fn breached(
-        instrument_total: i128,
-        cap: i128,
-        order: i128,
-        max_order: i128,
-        gross: i128,
-        gross_cap: i128,
-    ) -> Option<Breach> {
-        if instrument_total > cap {
+    pub fn breached(p: Proposal, l: Limits) -> Option<Breach> {
+        if !p.in_universe {
+            Some(Breach::NotInUniverse)
+        } else if p.instrument_total > l.cap {
             Some(Breach::Concentration)
-        } else if order > max_order {
+        } else if p.order > l.max_order {
             Some(Breach::OrderSize)
-        } else if gross > gross_cap {
+        } else if p
+            .seconds_since_group_exit
+            .is_some_and(|s| s < l.reentry_cooldown_s)
+        {
+            Some(Breach::ReentryCooldown)
+        } else if p.orders_today.saturating_add(1) > l.max_orders_per_day {
+            Some(Breach::OrdersPerDay)
+        } else if p.gross > l.gross_cap {
             Some(Breach::GrossExposure)
         } else {
             None

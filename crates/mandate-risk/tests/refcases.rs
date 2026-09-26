@@ -295,13 +295,10 @@ fn run_gate(id: &str) {
         "defer" => Verdict::Defer,
         other => panic!("unknown verdict {other}"),
     };
-    let want_reason = expect.get("reason").and_then(Value::as_str).map(|r| {
-        ALL_CODES
-            .iter()
-            .find(|c| c.as_str() == r)
-            .copied()
-            .unwrap_or_else(|| panic!("{id} names an unregistered reason {r}"))
-    });
+    let want_reason = expect
+        .get("reason")
+        .and_then(Value::as_str)
+        .map(|r| reason_code(r, id));
     assert_eq!(
         (d.verdict, d.reason),
         (want_verdict, want_reason),
@@ -313,6 +310,34 @@ fn run_gate(id: &str) {
         expected_purpose(&purpose_text),
         "{id}: the gate assigns the purpose the case states"
     );
+
+    compare_computed(id, expect, &d);
+}
+
+/// The `computed` block, which 13 of the 16 G cases carry and which is the case's own arithmetic.
+///
+/// Comparing the verdict alone would let a gate reach the right answer from the wrong figures — the
+/// exact failure mode `MC-G05` exists to catch, where the cap binds at 1425 rather than 1500. Every
+/// key the case states is compared; a key the harness cannot yet produce fails as "not interpreted
+/// until <story>" rather than being skipped (DEC-85).
+fn compare_computed(id: &str, expect: &Value, d: &mandate_risk::Decision) {
+    let Some(computed) = expect.get("computed").and_then(Value::as_object) else {
+        return;
+    };
+    for (key, want) in computed {
+        let want_text = match want {
+            Value::String(s) => s.clone(),
+            Value::Number(n) => n.to_string(),
+            other => panic!("{id}: computed.{key} is text or a number, not {other}"),
+        };
+        let got = d.computed.get(key.as_str()).unwrap_or_else(|| {
+            panic!(
+                "{id}: the case states computed.{key} = {want_text}, which this gate does not \
+                 report; a figure the case pins is not optional"
+            )
+        });
+        assert_eq!(got, want_text, "{id}: computed.{key}");
+    }
 }
 
 /// Drives one `kind: agent_flatten` case and compares its whole plan.
@@ -507,14 +532,19 @@ fn run_flatten(id: &str) {
     }
 }
 
-/// Every reason code the harness can name, so an unregistered one in a case fails loudly.
-const ALL_CODES: [ReasonCode; 5] = [
-    ReasonCode::NotInWorkingUniverse,
-    ReasonCode::ConcentrationLimit,
-    ReasonCode::MaxOrderSize,
-    ReasonCode::ReentryCooldown,
-    ReasonCode::GrossExposureLimit,
-];
+/// Resolves a case's reason text through [`ReasonCode`]'s own registered spellings.
+///
+/// An enumerated subset here is a trap: a case naming a code the list forgot panics as
+/// "unregistered" on a **correct** gate, which is how `MC-G07`'s `max_orders_per_day` would have
+/// failed. Searching every variant means the only way to fail is a code the crate genuinely cannot
+/// emit.
+fn reason_code(text: &str, case_id: &str) -> ReasonCode {
+    ReasonCode::ALL
+        .iter()
+        .find(|c| c.as_str() == text)
+        .copied()
+        .unwrap_or_else(|| panic!("{case_id} names {text}, which no ReasonCode variant spells"))
+}
 
 macro_rules! gate_case {
     ($name:ident, $id:literal) => {
@@ -557,6 +587,17 @@ flatten_case!(mc_f01, "MC-F01");
 flatten_case!(mc_f02, "MC-F02");
 flatten_case!(mc_f03, "MC-F03");
 flatten_case!(mc_f04, "MC-F04");
+
+/// The harness passes a case's `purpose` through rather than re-deriving it (DEC-129 item 19).
+///
+/// `MC-G15` is the case that makes the difference: a `discretionary_exit` of 1 in an instrument the
+/// state gives no `positions_mv` entry. A harness that re-derived the purpose from side and
+/// position would call it a zero crossing and deny; the case expects an allow.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_gate_case_purpose_is_passed_through() {
+    run_gate("MC-G15");
+}
 
 /// The fixture really does carry the twenty cases this file drives, so a renamed or removed case
 /// fails here rather than silently reducing the suite. Not pending: it reads the fixture only.

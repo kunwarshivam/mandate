@@ -434,7 +434,23 @@ proptest! {
                 let total = ledger.instrument_total(INSTRUMENT_3, notional);
                 let gross = ledger.gross(notional);
                 prop_assert_eq!(
-                    breached(total, cap, notional, scaled("1000"), gross, gross_cap),
+                    breached(
+                        common::oracle::Proposal {
+                            instrument_total: total,
+                            order: notional,
+                            gross,
+                            orders_today: ledger.opening_orders_today,
+                            seconds_since_group_exit: None,
+                            in_universe: true,
+                        },
+                        common::oracle::Limits {
+                            cap,
+                            max_order: scaled("1000"),
+                            gross_cap,
+                            max_orders_per_day: 50,
+                            reentry_cooldown_s: 3_600,
+                        },
+                    ),
                     None::<Breach>,
                     "an allowed order left the ledger past a limit: total {}, cap {}, gross {}, \
                      gross cap {}",
@@ -443,6 +459,142 @@ proptest! {
                 ledger.apply_opening(INSTRUMENT_3, notional);
             }
         }
+    }
+}
+
+proptest! {
+    /// §9.1: whichever checks would fail, the earliest one decides the reported code.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn the_first_failing_check_decides(
+        outside_universe in any::<bool>(),
+        oversized in any::<bool>(),
+    ) {
+        let mut s = Scenario::allowing();
+        if outside_universe {
+            s.universe = common::working_universe(&[]);
+        }
+        if oversized {
+            s.proposed = proposal(INSTRUMENT_3, Side::Buy, "11", "100", Origin::OrderBuilder);
+        }
+        let d = evaluate(&s.input()).expect("the gate decides");
+        if outside_universe {
+            prop_assert_eq!(
+                d.reason, Some(ReasonCode::NotInWorkingUniverse),
+                "the universe is the first item of check 2"
+            );
+        } else if oversized {
+            prop_assert_eq!(d.reason, Some(ReasonCode::MaxOrderSize), "order size follows it");
+        }
+    }
+
+    /// Mark freshness is a check on openings; it never blocks a reduction.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn mark_freshness_never_blocks_a_reduction(has_quote in any::<bool>()) {
+        let mut s = Scenario::allowing();
+        if !has_quote {
+            s.market.quote = None;
+        }
+        s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+        s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert_ne!(
+            d.reason, Some(ReasonCode::StaleMark),
+            "a risk exit accepts any mark source"
+        );
+    }
+
+    /// Nothing opens outside the working universe, whatever the other inputs say.
+    #[test]
+    #[ignore = "pending E6-3"]
+    fn an_opening_needs_the_working_universe(inside in any::<bool>(), shares in 1_u32..5) {
+        let mut s = Scenario::allowing();
+        s.universe = if inside {
+            common::working_universe(&[INSTRUMENT_2, INSTRUMENT_3])
+        } else {
+            common::working_universe(&[INSTRUMENT_2])
+        };
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, &shares.to_string(), "100", Origin::OrderBuilder,
+        );
+        let d = evaluate(&s.input()).expect("the gate decides");
+        prop_assert_eq!(
+            d.reason == Some(ReasonCode::NotInWorkingUniverse), !inside,
+            "an opening is denied exactly when its instrument is outside the universe"
+        );
+    }
+
+    /// §9.6: only an **opposite**-side fill starts the sixty-second interval.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn only_an_opposite_side_fill_starts_the_interval(
+        opposite in any::<bool>(),
+        elapsed in 0_i64..120,
+    ) {
+        let mut s = Scenario::allowing();
+        let fill_at = mandate_time::UtcNanos::from_parts(s.now.secs() - elapsed, 0)
+            .expect("the test instant is in range");
+        let side = if opposite {
+            mandate_risk::RestingSide::Sell
+        } else {
+            mandate_risk::RestingSide::Buy
+        };
+        s.conduct.last_opposite_fill_at.insert((asset(INSTRUMENT_3), side), fill_at);
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        let blocked = d.reason == Some(ReasonCode::OppositeFillInterval);
+        prop_assert_eq!(
+            blocked, opposite && elapsed < 60,
+            "a buy after a sell fill within 60 s is blocked; a buy after a buy fill is not"
+        );
+    }
+
+    /// A cancel that precedes a risk-reducing order is never denied, whatever the resting time.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn a_cancel_that_precedes_a_reduction_is_never_denied(elapsed in 0_i64..10) {
+        let config = common::test_default_config();
+        let order = common::open_order(mandate_risk::AgentId(1), INSTRUMENT_3, "100");
+        let resting = common::at("2026-09-21T15:00:00Z");
+        let now = mandate_time::UtcNanos::from_parts(resting.secs() + elapsed, 0)
+            .expect("the test instant is in range");
+
+        let d = mandate_risk::evaluate_cancel(&mandate_risk::CancelInput {
+            now,
+            config: &config,
+            order: &order,
+            resting_since: resting,
+            precedes_risk_reducing_order: true,
+            marketable: false,
+        })
+        .expect("the gate decides the cancel");
+        prop_assert_ne!(
+            d.verdict, Verdict::Deny,
+            "the resting-time rule does not apply before a risk-reducing order"
+        );
+    }
+
+    /// The surveillance report flags every threshold it crosses, and none it does not.
+    #[test]
+    #[ignore = "pending E6-8"]
+    fn the_report_flags_every_threshold_it_crosses(orders in 0_u32..60, fills in 0_u32..10) {
+        let mut input = mandate_risk::SurveillanceInput::default();
+        input.orders.insert(
+            (mandate_risk::AgentId(1), asset(INSTRUMENT_3)),
+            mandate_risk::OrderCounts { submitted: orders, filled: fills, cancels_excluded: 0 },
+        );
+        let day = mandate_time::Date::parse("2026-09-21").expect("a date parses");
+        let report = mandate_risk::surveillance(day, &common::test_default_config(), &input)
+            .expect("the report computes");
+
+        let breaches = orders >= 20 && orders > 10 * fills.max(1);
+        prop_assert_eq!(
+            report.breaches.contains(&mandate_risk::SurveillanceBreach::OrderToFill),
+            breaches,
+            "{} orders to {} fills", orders, fills
+        );
     }
 }
 

@@ -104,6 +104,50 @@ pub enum ReasonCode {
 }
 
 impl ReasonCode {
+    /// Every variant, so a caller that needs the whole set cannot hand-list a stale subset. A new
+    /// variant that is not added here fails the exhaustiveness check in `ReasonCode::as_str`'s
+    /// match and the length assertion below it.
+    pub const ALL: [Self; 38] = [
+        Self::AccountTradingBlocked,
+        Self::AccountRestricted,
+        Self::CryptoAccountInactive,
+        Self::AgentExitsOnly,
+        Self::AgentPaused,
+        Self::AgentStopped,
+        Self::NotInWorkingUniverse,
+        Self::IneligibleExchange,
+        Self::IpoNotTradable,
+        Self::BelowPriceFloor,
+        Self::BelowLiquidityFloor,
+        Self::LeveragedEtpNotEnabled,
+        Self::ConcentrationLimit,
+        Self::MaxOrderSize,
+        Self::ReentryCooldown,
+        Self::SessionNotAllowed,
+        Self::ExtendedHoursOpeningNotAllowed,
+        Self::AuctionWindow,
+        Self::InstrumentHalted,
+        Self::WouldCrossZero,
+        Self::SellExceedsAvailable,
+        Self::WorkingOrderLimit,
+        Self::AddBlockedByProtectiveOrder,
+        Self::UnknownOrderInFlight,
+        Self::MarketOrderNotAllowed,
+        Self::StaleMark,
+        Self::PriceOutsideCollar,
+        Self::MinRestingTime,
+        Self::OppositeFillInterval,
+        Self::ConductLimitBreached,
+        Self::MaxOrdersPerDay,
+        Self::CloseWindow,
+        Self::DiscretionaryExitRegularSessionOnly,
+        Self::OwnerConfirmationRequired,
+        Self::GrossExposureLimit,
+        Self::InsufficientBuyingPower,
+        Self::InsufficientSettledBuyingPower,
+        Self::LegacyPdtDayTradeBudget,
+    ];
+
     /// The registered spelling, which is what the reference cases compare against.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -259,6 +303,23 @@ impl Origin {
 /// Which pass of §5.3 this is: the first gate decision excludes the agent's own protective and
 /// resting opening orders from rules 4 to 6, because the executor cancels them first; the re-run
 /// immediately before submission applies every rule in full.
+/// A side, orderable so it can key a set. `mandate_accounting::Side` is the same two values but
+/// is not `Ord`, and ES-21 forbids a `HashSet`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RestingSide {
+    Buy,
+    Sell,
+}
+
+impl From<Side> for RestingSide {
+    fn from(side: Side) -> Self {
+        match side {
+            Side::Buy => Self::Buy,
+            Side::Sell => Self::Sell,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GatePass {
     First,
@@ -311,6 +372,44 @@ pub struct Decision {
     pub purpose: Purpose,
     pub pacing: Option<Pacing>,
     pub checks: Vec<CheckOutcome>,
+    /// The figures the deciding check compared, which the reference cases pin and which §9.1
+    /// journals with the decision. Reporting the verdict without them would let a gate reach the
+    /// right answer from the wrong arithmetic: `MC-G05` allows and denies the same order depending
+    /// only on whether the cap is 1500 or 1425.
+    pub computed: Computed,
+}
+
+/// The `computed` block of a `kind: gate` reference case: every figure a check compared, `None`
+/// where the gate stopped before computing it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Computed {
+    pub instrument_total: Option<Usd>,
+    pub cap: Option<Usd>,
+    pub order_usd: Option<Usd>,
+    pub gross: Option<Usd>,
+    pub gross_limit: Option<Usd>,
+    pub orders_today: Option<u32>,
+    pub last_exit_fill_at: Option<UtcNanos>,
+    pub instrument: Option<AssetId>,
+}
+
+impl Computed {
+    /// One figure by the name the reference cases use, as the canonical text they compare against.
+    /// An unknown key is `None`, which the harness reports rather than skipping (DEC-85).
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<String> {
+        match key {
+            "instrument_total" => self.instrument_total.map(|v| v.to_string()),
+            "cap" => self.cap.map(|v| v.to_string()),
+            "order_usd" => self.order_usd.map(|v| v.to_string()),
+            "gross" => self.gross.map(|v| v.to_string()),
+            "gross_limit" => self.gross_limit.map(|v| v.to_string()),
+            "orders_today" => self.orders_today.map(|v| v.to_string()),
+            "last_exit_fill_at" => self.last_exit_fill_at.map(|v| v.to_string()),
+            "instrument" => self.instrument.as_ref().map(|v| v.as_str().to_owned()),
+            _ => None,
+        }
+    }
 }
 
 /// The organization's settings. `test_default` in the reference cases.
@@ -446,7 +545,7 @@ pub struct AccountSnapshot {
     pub market_values: BTreeMap<AssetId, Usd>,
     pub working_orders: BTreeMap<ClientOrderId, WorkingOrder>,
     pub unknown_orders: BTreeSet<AssetId>,
-    pub related_account_resting: BTreeMap<AssetId, BTreeSet<Side>>,
+    pub related_account_resting: BTreeMap<AssetId, BTreeSet<RestingSide>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -495,7 +594,7 @@ pub struct MarketSnapshot {
 pub struct ConductState {
     pub filled_today: BTreeMap<AssetId, u32>,
     pub orders_today_per_instrument: BTreeMap<AssetId, u32>,
-    pub last_opposite_fill_at: BTreeMap<(AssetId, Side), UtcNanos>,
+    pub last_opposite_fill_at: BTreeMap<(AssetId, RestingSide), UtcNanos>,
     pub participation_today: BTreeMap<AssetId, Qty>,
     pub resting_since: BTreeMap<ClientOrderId, UtcNanos>,
 }
@@ -503,8 +602,15 @@ pub struct ConductState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProposedKind {
     Plain,
-    Bracket { take_profit: Price, stop: Price },
+    Bracket {
+        take_profit: Price,
+        stop: Price,
+    },
     Ioc,
+    /// Reducing orders only, and only in the regular session outside an auction window with current
+    /// status data (§5.1, §4.3). The variant exists so the gate can refuse one where those
+    /// conditions do not hold, rather than the type making the refusal untestable.
+    Market,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

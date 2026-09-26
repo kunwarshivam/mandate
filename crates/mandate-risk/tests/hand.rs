@@ -11,12 +11,12 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, at, fraction, mandate_with, open_order, price,
-    proposal, qty, usd, working_universe,
+    INSTRUMENT_1, INSTRUMENT_2, INSTRUMENT_3, Scenario, asset, at, fraction, mandate_with,
+    open_order, price, proposal, qty, usd, working_universe,
 };
 use mandate_risk::{
     AgentId, AgentMode, AgentPosition, AssetClass, ClientOrderId, FlattenInitiator, FlattenInput,
-    Origin, Purpose, ReasonCode, Session, Side, Verdict, agent_flatten, evaluate,
+    FlattenPricing, Origin, Purpose, ReasonCode, Session, Side, Verdict, agent_flatten, evaluate,
 };
 
 /// An unread working universe is an error, never an allow and never a deny (DEC-129 item 3).
@@ -536,6 +536,11 @@ fn a_flatten_sells_the_sub_ledger_not_the_brokers_position() {
 }
 
 /// Two active `scale_sizes` rungs multiply: 0.5 x 0.4 = 0.2, which their sum 0.9 cannot equal.
+///
+/// The position is 1000 against a 1500 cap, so the target is 0.2 x 1500 = 300 and the trim sells
+/// 700 worth. Under a summed factor of 0.9 the target would be 1350, above the position, and no
+/// trim would be proposed at all — so the two readings differ in whether a sell exists, not only in
+/// its size.
 #[test]
 #[ignore = "pending E6-4"]
 fn two_active_rungs_multiply() {
@@ -543,19 +548,133 @@ fn two_active_rungs_multiply() {
     s.mandate = mandate_with(common::two_scaling_rungs());
     s.risk.active_rungs = [0_u8, 1].into_iter().collect();
     s.risk.size_factor = fraction("0.2");
+    s.risk.rung_active_for_s = [(0_u8, 120_u32), (1, 120)].into_iter().collect();
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd("1000"));
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
 
-    let factor = mandate_risk::trim_proposals(
+    let trims = mandate_risk::trim_proposals(
         s.now,
         &s.config,
         &s.mandate,
         &s.risk,
         &s.agent,
-        &BTreeMap::new(),
+        &instruments,
+    )
+    .expect("the trims compute");
+
+    assert_eq!(
+        trims.len(),
+        1,
+        "a position of 1000 is above the target 0.2 x 1500 = 300, so one trim is proposed"
     );
+    let trim = trims.first().expect("the trim exists");
+    assert_eq!(
+        (trim.instrument.clone(), trim.qty, trim.purpose),
+        (asset(INSTRUMENT_2), qty("7"), Purpose::RiskExit),
+        "selling down to 300 of a 1000 position at 100 a share is 7 shares, rounded up"
+    );
+}
+
+/// A trim rounds the quantity **up** to the increment, so it never leaves the position above its
+/// target (§5.5).
+#[test]
+#[ignore = "pending E6-4"]
+fn a_trim_rounds_up_to_the_increment() {
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(common::two_scaling_rungs());
+    s.risk.active_rungs = [0_u8].into_iter().collect();
+    s.risk.size_factor = fraction("0.5");
+    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd("1000"));
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+
+    let trims = mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &instruments,
+    )
+    .expect("the trims compute");
+    assert_eq!(
+        trims.first().map(|t| t.qty),
+        Some(qty("3")),
+        "the target is 0.5 x 1500 = 750, so 250 of a 1000 position must go: 2.5 shares rounded up"
+    );
+}
+
+/// A trim waits for the regular session for an equity (§5.5).
+#[test]
+#[ignore = "pending E6-4"]
+fn a_trim_waits_for_the_regular_session() {
+    let mut s = Scenario::allowing();
+    s.now = at("2026-09-22T21:00:00Z");
+    s.mandate = mandate_with(common::two_scaling_rungs());
+    s.risk.active_rungs = [0_u8].into_iter().collect();
+    s.risk.size_factor = fraction("0.5");
+    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd("1000"));
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+
+    let trims = mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &instruments,
+    )
+    .expect("the trims compute");
     assert!(
-        factor.is_ok(),
-        "the trim reads the folded size factor 0.5 x 0.4 = 0.2, never 0.9"
+        trims.is_empty(),
+        "an equity trim runs in the regular session only; after hours there is none to propose"
     );
+}
+
+/// No trim while the goal is Holding (DEC-65).
+#[test]
+#[ignore = "pending E6-4"]
+fn no_trim_while_holding() {
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_risk::ValidatedMandate::from_validated_parts(
+        common::two_scaling_rungs(),
+        mandate_risk::spec_types::GoalState::Holding,
+        false,
+        false,
+    );
+    s.risk.active_rungs = [0_u8].into_iter().collect();
+    s.risk.size_factor = fraction("0.5");
+    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+    s.agent
+        .market_values
+        .insert(asset(INSTRUMENT_2), usd("1000"));
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+
+    let trims = mandate_risk::trim_proposals(
+        s.now,
+        &s.config,
+        &s.mandate,
+        &s.risk,
+        &s.agent,
+        &instruments,
+    )
+    .expect("the trims compute");
+    assert!(trims.is_empty(), "a Holding goal is never trimmed");
 }
 
 /// The close window is the last ten minutes of the session the calendar gives, not of 16:00.
@@ -599,7 +718,9 @@ fn an_increase_in_the_closing_ten_minutes_is_close_window() {
     );
 }
 
-/// The opening auction denies a market order, which is what `auction_window` is for.
+/// The opening auction denies a market order, which is what `auction_window` is for: an *opening*
+/// order at 09:29 is already denied by the session rule, so the code has to be reachable through a
+/// market order or not at all (DEC-129 item 18).
 #[test]
 #[ignore = "pending E6-6"]
 fn the_opening_auction_denies_a_market_order() {
@@ -612,6 +733,19 @@ fn the_opening_auction_denies_a_market_order() {
     assert!(
         session.opening_auction,
         "09:29 ET is inside the 09:28 to 09:30 opening auction"
+    );
+
+    let mut s = Scenario::allowing();
+    s.now = at("2026-09-22T13:29:00Z");
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "120", Origin::RiskEngine);
+    s.proposed.kind = mandate_risk::ProposedKind::Market;
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
+        "exits in an auction window use limit orders, never market orders (spec 4.3)"
     );
 }
 
@@ -767,25 +901,98 @@ fn a_reservation_includes_the_rounded_fee() {
     );
 }
 
-/// §9.2's `required` counts every component the rule names.
+/// §9.2's `required` counts every component the rule names: the order itself, a sale of the same
+/// security earlier today, open same-day positions, and working same-day opening orders elsewhere.
+///
+/// Each row moves exactly one component, so a `required` that omits any one of them allows a case
+/// this denies.
 #[test]
 #[ignore = "pending E6-6"]
 fn required_counts_every_component() {
+    let base_ledger = mandate_risk::DayTradeLedger {
+        window_count: 2,
+        flagged_pattern_day_trader: false,
+        sold_earlier_today: BTreeSet::new(),
+        open_same_day_positions: BTreeSet::new(),
+    };
+    let rows: [(&str, mandate_risk::DayTradeLedger, bool); 4] = [
+        ("required 1, remaining 1", base_ledger.clone(), true),
+        (
+            "an open same-day position makes required 2",
+            mandate_risk::DayTradeLedger {
+                open_same_day_positions: [asset(INSTRUMENT_2)].into_iter().collect(),
+                ..base_ledger.clone()
+            },
+            false,
+        ),
+        (
+            "the same security sold earlier today makes required 2",
+            mandate_risk::DayTradeLedger {
+                sold_earlier_today: [asset(INSTRUMENT_3)].into_iter().collect(),
+                ..base_ledger.clone()
+            },
+            false,
+        ),
+        (
+            "a flagged account below the threshold has remaining 0",
+            mandate_risk::DayTradeLedger {
+                flagged_pattern_day_trader: true,
+                ..base_ledger.clone()
+            },
+            false,
+        ),
+    ];
+    for (why, ledger, allowed) in rows {
+        let mut s = Scenario::allowing();
+        s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
+        s.account.prior_close_equity = usd("10000");
+        s.agent.day_trades = ledger;
+        let d = evaluate(&s.input()).expect("the gate decides");
+        assert_eq!(
+            d.reason != Some(ReasonCode::LegacyPdtDayTradeBudget),
+            allowed,
+            "{why}"
+        );
+    }
+}
+
+/// The window is today plus the four prior trading days (§9.2), not the four prior alone.
+#[test]
+#[ignore = "pending E6-6"]
+fn the_window_is_today_plus_four() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
     s.account.prior_close_equity = usd("10000");
     s.agent.day_trades = mandate_risk::DayTradeLedger {
-        window_count: 2,
+        window_count: 3,
         flagged_pattern_day_trader: false,
         sold_earlier_today: BTreeSet::new(),
-        open_same_day_positions: [asset(INSTRUMENT_2)].into_iter().collect(),
+        open_same_day_positions: BTreeSet::new(),
     };
 
     let d = evaluate(&s.input()).expect("the gate decides");
     assert_eq!(
         (d.verdict, d.reason),
         (Verdict::Deny, Some(ReasonCode::LegacyPdtDayTradeBudget)),
-        "remaining 3 - 2 = 1, required 1 + 1 open same-day position = 2"
+        "three day trades in the window leaves remaining 0, and a window one day short would \
+         count two and allow this"
+    );
+}
+
+/// `intraday_margin` denies nothing per order: a reported deficit is an account state (§9.2).
+#[test]
+#[ignore = "pending E6-6"]
+fn a_reported_deficit_is_an_account_state_not_a_denial() {
+    let mut s = Scenario::allowing();
+    s.account.regime = mandate_risk::DayTradeRegime::IntradayMargin {
+        maintenance_excess: usd("0"),
+    };
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_ne!(
+        d.reason,
+        Some(ReasonCode::LegacyPdtDayTradeBudget),
+        "check 8 denies nothing under intraday_margin; a deficit reaches check 1 as a mode"
     );
 }
 
@@ -865,47 +1072,363 @@ fn the_surveillance_report_matches_a_hand_computed_day() {
     );
 }
 
-/// Every code [`ReasonCode`] can produce, listed once so a new variant must be added here too.
-const ALL_REASON_CODES: [ReasonCode; 38] = [
-    ReasonCode::AccountTradingBlocked,
-    ReasonCode::AccountRestricted,
-    ReasonCode::CryptoAccountInactive,
-    ReasonCode::AgentExitsOnly,
-    ReasonCode::AgentPaused,
-    ReasonCode::AgentStopped,
-    ReasonCode::NotInWorkingUniverse,
-    ReasonCode::IneligibleExchange,
-    ReasonCode::IpoNotTradable,
-    ReasonCode::BelowPriceFloor,
-    ReasonCode::BelowLiquidityFloor,
-    ReasonCode::LeveragedEtpNotEnabled,
-    ReasonCode::ConcentrationLimit,
-    ReasonCode::MaxOrderSize,
-    ReasonCode::ReentryCooldown,
-    ReasonCode::SessionNotAllowed,
-    ReasonCode::ExtendedHoursOpeningNotAllowed,
-    ReasonCode::AuctionWindow,
-    ReasonCode::InstrumentHalted,
-    ReasonCode::WouldCrossZero,
-    ReasonCode::SellExceedsAvailable,
-    ReasonCode::WorkingOrderLimit,
-    ReasonCode::AddBlockedByProtectiveOrder,
-    ReasonCode::UnknownOrderInFlight,
-    ReasonCode::MarketOrderNotAllowed,
-    ReasonCode::StaleMark,
-    ReasonCode::PriceOutsideCollar,
-    ReasonCode::MinRestingTime,
-    ReasonCode::OppositeFillInterval,
-    ReasonCode::ConductLimitBreached,
-    ReasonCode::MaxOrdersPerDay,
-    ReasonCode::CloseWindow,
-    ReasonCode::DiscretionaryExitRegularSessionOnly,
-    ReasonCode::OwnerConfirmationRequired,
-    ReasonCode::GrossExposureLimit,
-    ReasonCode::InsufficientBuyingPower,
-    ReasonCode::InsufficientSettledBuyingPower,
-    ReasonCode::LegacyPdtDayTradeBudget,
-];
+/// Crypto trades continuously, so a crypto sell in a flatten never waits for a session.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_crypto_sell_never_waits_for_a_session() {
+    let orders = BTreeMap::new();
+    let positions = vec![AgentPosition {
+        agent: AgentId(1),
+        instrument: asset(INSTRUMENT_1),
+        asset_class: AssetClass::Crypto,
+        qty: qty("0.05"),
+    }];
+    let broker = BTreeMap::new();
+    let plan = agent_flatten(&FlattenInput {
+        agent: AgentId(1),
+        open_orders: &orders,
+        agent_positions: &positions,
+        broker_positions: &broker,
+        session: Session::AfterHours,
+        initiator: FlattenInitiator::RiskLimit,
+        owner_confirmed_bid: None,
+        max_exit_offset: fraction("0.03"),
+        owner_floor_price: None,
+    })
+    .expect("the flatten plans");
+    assert_eq!(
+        (plan.sells.len(), plan.deferred_sells.len()),
+        (1, 0),
+        "crypto has no session to wait for"
+    );
+}
+
+/// A flatten prices by the session alone: the same position, two sessions, two pricings.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_flatten_prices_by_session_alone() {
+    let regular = flatten_of(Session::Regular, FlattenInitiator::RiskLimit, None, None);
+    let after = flatten_of(
+        Session::AfterHours,
+        FlattenInitiator::Owner,
+        Some("100"),
+        None,
+    );
+    assert_eq!(
+        (
+            regular.sells.first().map(|s| s.pricing),
+            after.sells.first().map(|s| s.pricing)
+        ),
+        (
+            Some(FlattenPricing::MarketOrLadder),
+            Some(FlattenPricing::ExitPriceLadder)
+        ),
+        "the asset class decides whether a sell is deferred, never how it is priced"
+    );
+}
+
+/// §4.4: a halted instrument takes no opening order.
+#[test]
+#[ignore = "pending E6-9"]
+fn a_halted_instrument_denies_an_opening() {
+    let mut s = Scenario::allowing();
+    s.instrument.halted = true;
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::InstrumentHalted)),
+        "no new opening orders in a halted instrument"
+    );
+}
+
+/// §4.4: a dropped status feed is a presumed halt, so no market order.
+#[test]
+#[ignore = "pending E6-9"]
+fn a_dropped_status_feed_is_a_presumed_halt() {
+    let mut s = Scenario::allowing();
+    s.instrument.status_feed_current = false;
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
+    s.proposed.kind = mandate_risk::ProposedKind::Market;
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
+        "a presumed halt takes marketable limits, never market orders"
+    );
+}
+
+/// §3.2 item 5's threshold is `≥`, so a volume exactly at it is the liquid tier.
+#[test]
+#[ignore = "pending E6-8"]
+fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
+    let mut s = Scenario::allowing();
+    s.instrument.median_dollar_volume_20d = Some(usd("50000000"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "101", Origin::OrderBuilder);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        d.reason,
+        Some(ReasonCode::PriceOutsideCollar),
+        "at exactly 50 M the tier is liquid, so x is 1 percent and 101 is above ask x 1.01"
+    );
+}
+
+/// §9.6: the collar binds aggressive prices only; a passive price inside the band is allowed.
+#[test]
+#[ignore = "pending E6-8"]
+fn a_passive_price_inside_the_band_is_allowed() {
+    let mut s = Scenario::allowing();
+    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "90", Origin::OrderBuilder);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_ne!(
+        d.reason,
+        Some(ReasonCode::PriceOutsideCollar),
+        "90 is far below the ask, which is passive and inside the 20 percent band"
+    );
+}
+
+/// §5.3: the day's count is of submitted orders, rejected ones included.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_rejected_order_still_counts() {
+    let mut limits = common::two_stock_swing_limits();
+    limits.max_orders_per_day = 2;
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(limits);
+    s.agent.orders_today = 2;
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::MaxOrdersPerDay)),
+        "each client_order_id counts once, including rejected ones"
+    );
+}
+
+/// MI-19: a removed instrument is exits-only in that instrument, and nowhere else.
+#[test]
+#[ignore = "pending E6-3"]
+fn a_removed_instrument_restricts_only_itself() {
+    let mut s = Scenario::allowing();
+    s.agent.instrument_restrictions.insert(
+        asset(INSTRUMENT_2),
+        [mandate_risk::InstrumentRestriction::RemovedInstrument]
+            .into_iter()
+            .collect(),
+    );
+    let other = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        other.verdict,
+        Verdict::Allow,
+        "a restriction on instrument 2 says nothing about instrument 3"
+    );
+
+    s.instrument = common::equity_instrument(INSTRUMENT_2);
+    s.proposed = proposal(INSTRUMENT_2, Side::Buy, "1", "100", Origin::OrderBuilder);
+    let restricted = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (restricted.verdict, restricted.reason),
+        (Verdict::Deny, Some(ReasonCode::NotInWorkingUniverse)),
+        "a removed instrument is the working-universe check (DEC-129 item 23)"
+    );
+}
+
+/// §8.2: an opening needs a fresh quote-based risk mark; a reduction takes any source.
+#[test]
+#[ignore = "pending E6-8"]
+fn an_opening_needs_a_fresh_quote() {
+    let mut s = Scenario::allowing();
+    s.market.quote = None;
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::StaleMark)),
+        "an opening order requires a fresh quote-based risk mark"
+    );
+}
+
+#[test]
+#[ignore = "pending E6-8"]
+fn a_risk_exit_accepts_a_last_trade_mark() {
+    let mut s = Scenario::allowing();
+    s.market.quote = None;
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        d.verdict,
+        Verdict::Allow,
+        "risk-reducing orders accept any mark source"
+    );
+}
+
+/// §4.3: an opening outside the regular session is denied, and an extended-hours one needs a limit.
+#[test]
+#[ignore = "pending E6-6"]
+fn an_opening_outside_the_regular_session_is_denied() {
+    let mut s = Scenario::allowing();
+    s.now = at("2026-09-22T21:00:00Z");
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::SessionNotAllowed)),
+        "equity openings are regular-session only"
+    );
+}
+
+#[test]
+#[ignore = "pending E6-6"]
+fn an_extended_hours_opening_needs_a_limit() {
+    let mut s = Scenario::allowing();
+    s.now = at("2026-09-22T21:00:00Z");
+    s.proposed.extended_hours = true;
+    s.proposed.kind = mandate_risk::ProposedKind::Market;
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (
+            Verdict::Deny,
+            Some(ReasonCode::ExtendedHoursOpeningNotAllowed)
+        ),
+        "extended hours takes limit orders only, and openings not at all in v1"
+    );
+}
+
+/// §9.6: self-trade prevention across the owner's related accounts.
+#[test]
+#[ignore = "pending E6-8"]
+fn an_opposite_side_rest_in_a_related_account_blocks_an_opening() {
+    let mut s = Scenario::allowing();
+    s.account.related_account_resting.insert(
+        asset(INSTRUMENT_3),
+        [mandate_risk::RestingSide::Sell].into_iter().collect(),
+    );
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::ConductLimitBreached)),
+        "an opposite-side rest in a related account would be a self-trade"
+    );
+}
+
+/// §9.6: the order-to-fill ratio is only evaluated after twenty orders.
+#[test]
+#[ignore = "pending E6-8"]
+fn the_order_to_fill_ratio_needs_twenty_orders() {
+    let mut s = Scenario::allowing();
+    s.conduct
+        .orders_today_per_instrument
+        .insert(asset(INSTRUMENT_3), 19);
+    s.conduct.filled_today.insert(asset(INSTRUMENT_3), 0);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_ne!(
+        d.reason,
+        Some(ReasonCode::ConductLimitBreached),
+        "19 orders is below the 20-order floor, whatever the ratio"
+    );
+}
+
+/// §5.3: the constraints report the first failing rule of the list, not the worst.
+#[test]
+#[ignore = "pending E6-6"]
+fn order_constraints_report_the_first_failing_rule() {
+    let mut s = Scenario::allowing();
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("5"));
+    s.account.unknown_orders.insert(asset(INSTRUMENT_3));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "6", "100", Origin::OrderBuilder);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        d.reason,
+        Some(ReasonCode::WouldCrossZero),
+        "rule 3 fails before rule 9, so the zero crossing is reported"
+    );
+}
+
+/// §5.3: the first pass excludes the agent's own protective and resting opening orders.
+#[test]
+#[ignore = "pending E6-6"]
+fn the_first_pass_excludes_the_agents_own_protective_orders() {
+    let mut s = Scenario::allowing();
+    let mut protective = open_order(AgentId(1), INSTRUMENT_3, "0");
+    protective.protective = true;
+    protective.side = Side::Sell;
+    s.account
+        .working_orders
+        .insert(ClientOrderId(5), protective);
+    s.agent.working_orders.insert(ClientOrderId(5));
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
+
+    s.pass = mandate_risk::GatePass::First;
+    let first = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        first.verdict,
+        Verdict::Allow,
+        "the executor cancels the protective order first, so the first pass excludes it"
+    );
+
+    s.pass = mandate_risk::GatePass::BeforeSubmission;
+    let resubmit = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        resubmit.reason,
+        Some(ReasonCode::SellExceedsAvailable),
+        "the re-run before submission applies every rule in full"
+    );
+}
+
+/// §9.1: when two checks would fail, the earlier one is reported.
+#[test]
+#[ignore = "pending E6-3"]
+fn two_simultaneous_failures_report_the_earlier_check() {
+    let mut s = Scenario::allowing();
+    s.universe = working_universe(&[]);
+    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "11", "100", Origin::OrderBuilder);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        d.reason,
+        Some(ReasonCode::NotInWorkingUniverse),
+        "the universe is check 2's first item and order size its third, so the universe wins"
+    );
+}
+
+/// §7.3: three consecutive unexplained 403s restrict the account.
+#[test]
+#[ignore = "pending E6-9"]
+fn three_consecutive_unexplained_403s_restrict_the_account() {
+    let mut s = Scenario::allowing();
+    s.account.state = mandate_risk::AccountState::ClosingOnly;
+    let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        (d.verdict, d.reason),
+        (Verdict::Deny, Some(ReasonCode::AccountRestricted)),
+        "the threshold is the connector's to count; the gate reads the resulting state"
+    );
+}
+
+/// §9.6: a sliced exit reports which control sliced it.
+#[test]
+#[ignore = "pending E6-8"]
+fn a_sliced_exit_reports_what_it_applied() {
+    let mut s = Scenario::allowing();
+    s.market.adv_20d = Some(qty("1000"));
+    s.agent.positions.insert(asset(INSTRUMENT_3), qty("900"));
+    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "900", "100", Origin::OrderBuilder);
+
+    let d = evaluate(&s.input()).expect("the gate decides");
+    let pacing = d.pacing.expect("a paced exit says what it applied");
+    assert!(
+        !pacing.applied.is_empty(),
+        "a slice that names no control cannot be audited"
+    );
+}
 
 /// Every reason code the gate can emit is registered in the founder-owned case file, with exactly
 /// one known exception.
@@ -940,7 +1463,7 @@ fn every_reason_code_is_registered_in_the_case_file() {
         registered.len()
     );
 
-    let missing: Vec<&str> = ALL_REASON_CODES
+    let missing: Vec<&str> = ReasonCode::ALL
         .iter()
         .map(|c| c.as_str())
         .filter(|c| !registered.contains(c) && !KNOWN_UNREGISTERED.contains(c))

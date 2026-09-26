@@ -578,16 +578,16 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | mandate §5.3 per-instrument cap = min(usd, fraction × E), counting position + working + proposed | `MC-G01`, `MC-G02`, `MC-G05`, `properties::position_cap_is_the_lower_of_both_bounds`, `fuzz` oracle |
 | mandate §5.3 order size, orders per day, gross exposure bounded by E | `MC-G03`, `MC-G04`, `MC-G06`, `MC-G07`, `properties::gross_exposure_is_bounded_by_equity`, `hand::a_rejected_order_still_counts` |
 | mandate §5.3 re-entry cooldown across the instrument group | `MC-G11`, `MC-G12`, `MC-G13`, `properties::cooldown_covers_the_whole_group` |
-| mandate §5.3 these limits never deny an exit | `MC-G08` to `MC-G10`, `MC-G15`, `fuzz::mi1_...` |
+| mandate §5.3 these limits never deny an exit | `MC-G08` to `MC-G10`, `MC-G15`, `fuzz::no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits` |
 | mandate §5.5, trading §5.5 the agent flatten: mode first, own order ids, no cancel-all or close-position, sub-ledger quantity | `MC-F01`, `properties::an_agent_flatten_never_touches_another_agent`, `hand::the_final_mode_is_applied_first` |
 | mandate §5.5 automated flattens defer equity sells outside the regular session; crypto goes now | `MC-F02`, `hand::a_crypto_sell_never_waits_for_a_session` |
 | trading §5.5 an owner kill switch prices to a floor once the bid is confirmed, and defers without it | `MC-F03`, `MC-F04`, `hand::an_explicit_owner_floor_price_overrides_the_computed_one` |
-| mandate §5.5 the size factor is the product of the active rungs | `hand::two_active_rungs_multiply`, `properties::the_size_factor_never_exceeds_one` |
+| mandate §5.5 the size factor is the product of the active rungs | `hand::two_active_rungs_multiply`, `hand::two_active_rungs_multiply` |
 | mandate §5.5 `trim_to_target` sells down to factor × cap, rounded up, regular session only, never while Holding | `hand::a_trim_rounds_up_to_the_increment`, `hand::a_trim_waits_for_the_regular_session`, `hand::no_trim_while_holding`, `properties::a_trim_never_sells_below_the_target` |
 | mandate §5.9 the effective mode is the strictest restriction, and openings stop at `exits_only` | `RC-22` last step, `properties::a_stricter_mode_is_never_more_permissive` |
 | trading §3.2 the eligibility floor, items 1 to 7 in list order | `RC-16` steps 1 to 7, `hand::the_floor_reports_the_first_failing_item` |
 | trading §3.2 item 6 an unclassified or stale ETP fails closed | `hand::an_unclassified_etp_is_complex`, `hand::a_stale_classification_denies_an_etp_opening`, `properties::etp_fails_closed`, `RC-16::leveraged_etps_enabled` |
-| trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::mi1_...` |
+| trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits` |
 | trading §4.3 sessions: regular-session openings, extended-hours exits as limit orders, nothing overnight | `hand::an_opening_outside_the_regular_session_is_denied`, `hand::an_extended_hours_opening_needs_a_limit`, `RC-25` |
 | trading §4.3 the opening auction and market orders are `auction_window`; the closing ten minutes are `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order`, `hand::the_close_window_follows_the_early_close_calendar` |
 | trading §4.4 a halt, and a dropped status feed as a presumed halt | `hand::a_halted_instrument_denies_an_opening`, `hand::a_dropped_status_feed_is_a_presumed_halt` |
@@ -837,6 +837,14 @@ each `Proposed (founder)`.
   implementation PR after F's tests PR merges deletes the module and takes F's types; it is
   `#[doc(hidden)]` and named in the PR body so the deletion is not forgotten. If F's tests PR merges
   first, the module is never written.
+- **The first implementation PR takes `mandate-domain`'s and `mandate-spec`'s types and deletes
+  `spec_types.rs`** (the coordinator's ruling on the #136 review round 2). Stream F's #140 confirms
+  the shapes match: `WorkingUniverse` is `mandate-domain`'s exactly, F's `Snapshot` carries the same
+  field names, and `mandate-domain` also owns `Purpose`, `Side`, `AgentMode` and `AssetClass`, which
+  this crate currently takes from `mandate-accounting`. Two differences are settled before either
+  implementation lands: F's `size_factor` is a `Ratio` where this crate's snapshot field is a
+  `Fraction`, and F's `AssetId::parse` is a strict uuid where this crate's `AssetId::new` takes any
+  non-empty string. The question is posted on #140; whichever F takes, this crate follows.
 - **`size_factor` is stream F's, not this crate's** (the coordinator's ruling on the #136 review,
   amending interpretation 1's reading of E6-4). It is folded risk state and F's `Snapshot` already
   carries it, so computing it here as well would let two crates disagree about the same number.
@@ -879,23 +887,23 @@ missing test, and the tests PR does not merge with one.
 | 5 | Gross exposure caps at `max_gross_exposure_usd` without also capping at E | `MC-G06`, `properties::gross_exposure_is_bounded_by_equity` |
 | 6 | The re-entry cooldown checks only the proposed instrument, not its group | `MC-G12`, `properties::cooldown_covers_the_whole_group` |
 | 7 | An exit is run through the mandate limits instead of returning early | `MC-G08`, `MC-G09`, `MC-G10`, `MC-G15`, `properties::mi1_reduction_is_never_denied` |
-| 8 | An absent working universe is treated as "everything allowed" | `hand::an_absent_working_universe_is_an_error`, `properties::mi1_...` cannot catch it, which is why the hand test exists |
+| 8 | An absent working universe is treated as "everything allowed" | `hand::an_absent_working_universe_is_an_error`, `properties::mi1_reduction_is_never_denied_by_a_limit` cannot catch it, which is why the hand test exists |
 | 9 | An empty working universe is treated as absent (an error) rather than as denying | `MC-G16` |
 | 10 | The eligibility floor runs its items out of §3.2 order, so `below_price_floor` is reported where `ineligible_exchange` should be | `RC-16` steps 2 and 3, `hand::the_floor_reports_the_first_failing_item` |
 | 11 | An unclassified ETP is treated as plain | `hand::an_unclassified_etp_is_complex`, `properties::etp_fails_closed` |
-| 12 | The eligibility floor is applied to a `risk_exit` in a held instrument | `RC-16` step 8, `MC-G15`, `properties::mi1_...` |
+| 12 | The eligibility floor is applied to a `risk_exit` in a held instrument | `RC-16` step 8, `MC-G15`, `properties::mi1_reduction_is_never_denied_by_a_limit` |
 | 13 | `account_trading_blocked` is treated as `exits_only` rather than blocking the account, so a `risk_exit` is allowed | `RC-15::status_not_active`, `hand::a_blocked_account_holds_even_a_risk_exit` |
 | 14 | The unexplained-403 counter resets on an unrelated success, so the threshold is never reached | `RC-15::unexplained_403s`, `hand::three_consecutive_unexplained_403s_restrict_the_account` |
 | 15 | The day-trade window is the four prior trading days without today | `RC-09`, `hand::the_window_is_today_plus_four` |
 | 16 | `required` omits open same-day positions | `RC-09B` step 3, `properties::required_counts_every_component` |
 | 17 | Crypto counts as a day trade | `RC-09` step 3, `hand::crypto_never_counts` |
-| 18 | The day-trade budget denies an exit | `RC-09B` step 4, `properties::mi1_...` |
+| 18 | The day-trade budget denies an exit | `RC-09B` step 4, `properties::mi1_reduction_is_never_denied_by_a_limit` |
 | 19 | `intraday_margin` inherits the `legacy_pdt` budget | `RC-09::alpaca_intraday_margin` |
 | 20 | The collar is applied to passive prices as well as aggressive ones | `RC-22` step 2, `hand::a_passive_price_inside_the_band_is_allowed` |
 | 21 | The collar's tier threshold compares with `>` where the spec says `≥ 50 M` | `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid` |
 | 22 | The opposite-fill interval is checked in the wrong direction (a same-side fill blocks) | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval` |
 | 23 | The close window is computed from 16:00 on an early-close day | `hand::the_close_window_follows_the_early_close_calendar` |
-| 24 | The close window denies a discretionary exit instead of pacing it | `RC-25` step 3, `properties::mi1_...` |
+| 24 | The close window denies a discretionary exit instead of pacing it | `RC-25` step 3, `properties::mi1_reduction_is_never_denied_by_a_limit` |
 | 25 | A discretionary exit outside the regular session is denied rather than deferred | `RC-25` step 5, `properties::a_discretionary_exit_is_never_denied` |
 | 26 | An owner exit outside the session is allowed without a confirmed bid | `RC-25` steps 7 and 8, `hand::an_unconfirmed_owner_exit_defers` |
 | 27 | A crypto discretionary exit outside the regular session is deferred (the equity rule applied to crypto) | `hand::crypto_exits_run_at_all_hours`, `properties::...` |
@@ -909,7 +917,7 @@ missing test, and the tests PR does not merge with one.
 | 35 | An automated after-hours flatten sells equities now instead of deferring | `MC-F02` |
 | 36 | An owner after-hours flatten without a confirmed bid sells equities now | `MC-F04` |
 | 37 | The owner's floor price is `bid × max_exit_offset` rather than `bid × (1 − max_exit_offset)` | `MC-F03` (97, not 3) |
-| 38 | `size_factor` sums the rungs' factors instead of multiplying them | `hand::two_active_rungs_multiply`, `properties::the_size_factor_never_exceeds_one` |
+| 38 | `size_factor` sums the rungs' factors instead of multiplying them | `hand::two_active_rungs_multiply`, `hand::two_active_rungs_multiply` |
 | 39 | `trim_to_target` rounds the sell quantity down to the increment | `hand::a_trim_rounds_up_to_the_increment` |
 | 40 | The decision is not deterministic: the check list is built from a `HashMap` iteration | `properties::mi8_identical_inputs_give_identical_decisions` (and clippy's `disallowed-types`, which is why the crate is `pure`) |
 | 41 | `paused` holds a protective order, or lets a non-kill-switch `risk_exit` through | `hand::a_protective_order_is_never_held_by_a_mode`, `hand::a_paused_agent_holds_a_plain_risk_exit`, `properties::a_hold_follows_the_mode_rule_exactly` |
