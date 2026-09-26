@@ -5,12 +5,14 @@ requires-python = "==3.14.*"
 [manifest]
 members = [
     "mandate-tools",
+    "research-spike",
 ]
 
 [manifest.dependency-groups]
 dev = [
     { name = "mandate-tools", editable = "mandate_tools" },
     { name = "pytest", specifier = "==9.1.1" },
+    { name = "research-spike", editable = "research_spike" },
     { name = "ruff", specifier = "==0.16.9" },
 ]
 
@@ -91,6 +93,11 @@ name = "pyyaml"
 version = "6.0.1"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/cd/e5/af35f7ea75cf72f2cd079c95ee16797de7cd71f29ea7c68ae5ce7be1eda0/PyYAML-6.0.1.tar.gz", hash = "sha256:bfdf460b1736c775f2ba9f6a92bca30bc2095067b8a9d77876d1fad6cc3b4a43", size = 125201, upload-time = "2023-07-18T00:00:23.308Z" }
+
+[[package]]
+name = "research-spike"
+version = "0.0.0"
+source = { editable = "research_spike" }
 
 [[package]]
 name = "ruff"

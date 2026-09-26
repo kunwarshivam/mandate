@@ -572,14 +572,49 @@ fn registry() -> Result<BTreeSet<(String, String)>> {
     Ok(entries)
 }
 
+/// The uv workspace root and every member listed in its `[tool.uv.workspace].members`.
+fn python_manifests() -> Result<Vec<String>> {
+    let root = "python/pyproject.toml";
+    let doc: toml::Value =
+        toml::from_str(&fs::read_to_string(root)?).with_context(|| format!("parsing {root}"))?;
+    let members = doc
+        .get("tool")
+        .and_then(|t| t.get("uv"))
+        .and_then(|u| u.get("workspace"))
+        .and_then(|w| w.get("members"))
+        .and_then(toml::Value::as_array)
+        .context("python/pyproject.toml has no [tool.uv.workspace].members")?;
+    let mut manifests = vec![root.to_owned()];
+    for member in members {
+        let dir = member
+            .as_str()
+            .context("a uv workspace member is not a string")?;
+        manifests.push(format!("python/{dir}/pyproject.toml"));
+    }
+    Ok(manifests)
+}
+
 fn python_direct_dependencies() -> Result<BTreeSet<String>> {
     let mut found = BTreeSet::new();
-    for manifest in [
-        "python/pyproject.toml",
-        "python/mandate_tools/pyproject.toml",
-    ] {
-        let doc: toml::Value = toml::from_str(&fs::read_to_string(manifest)?)
+    let mut workspace_members = BTreeSet::new();
+    for manifest in python_manifests()? {
+        let doc: toml::Value = toml::from_str(&fs::read_to_string(&manifest)?)
             .with_context(|| format!("parsing {manifest}"))?;
+        if let Some(sources) = doc
+            .get("tool")
+            .and_then(|t| t.get("uv"))
+            .and_then(|u| u.get("sources"))
+            .and_then(toml::Value::as_table)
+        {
+            workspace_members.extend(
+                sources
+                    .iter()
+                    .filter(|(_, source)| {
+                        source.get("workspace").and_then(toml::Value::as_bool) == Some(true)
+                    })
+                    .map(|(name, _)| name.to_lowercase()),
+            );
+        }
         let mut lists = Vec::new();
         if let Some(deps) = doc
             .get("project")
@@ -596,7 +631,7 @@ fn python_direct_dependencies() -> Result<BTreeSet<String>> {
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
                 .collect();
-            if !name.is_empty() && name != "mandate-tools" {
+            if !name.is_empty() && !workspace_members.contains(&name.to_lowercase()) {
                 found.insert(name.to_lowercase());
             }
         }
