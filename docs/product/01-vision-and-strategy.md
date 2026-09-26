@@ -71,6 +71,14 @@ unsure, and records every decision. **Unlike** agent frameworks (TradingAgents, 
 or research copilots (Multiplier, finbar), Mandate runs agents in production against real
 accounts, on the customer's infrastructure if required.
 
+Put another way: a fund is six steps, source ideas, test them, size them, execute, manage risk,
+report. Machines now do four. Mandate keeps the two a machine cannot own with the owner, the
+mandate and the accountability, and runs the other four inside that envelope with evidence the
+owner can audit. Testing means forward paper against pre-registered baselines, never a backtest of
+a model that may have seen the answer ([DEC-99](../project/04-decision-log.md#decisions));
+improving means a journaled revision scored from zero, never a strategy rewriting itself against a
+test it can game ([DEC-111](../project/04-decision-log.md#decisions)).
+
 See [Competitive landscape](03-competitive-landscape.md).
 
 ## Strategy
