@@ -842,7 +842,6 @@ async fn opened_with_artifact_marks(journal: &PgJournal) -> StreamId {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn reads_pass_over_artifact_checks_and_verify_every_other_check() {
     let rewrite = |seq: u64| {
         format!(
