@@ -16,7 +16,7 @@ story.
 - **Decisions that apply:** DEC-72 (ADR-0001), DEC-77 (tests PR, then implementation, then
   status), DEC-79, DEC-80 (no plain comments), DEC-82 (the 12-place mark type belongs here),
   DEC-83 (mutants skip crates with pending markers), DEC-84 to DEC-87 (E3-1 fold), DEC-91 to
-  DEC-96 (recorded by this story).
+  DEC-96 (recorded by this story; DEC-94 is proposed and awaits the founder).
 
 ## Scope
 
@@ -40,7 +40,7 @@ story.
   | §8.5 residual basis and cash in lieu, one rounding each | `num::the_residual_basis_is_one_rounding_of_the_exact_fraction`, `num::cash_in_lieu_is_one_rounding_of_the_residual_times_the_price` |
   | Every reported value after every event | `corporate_action_properties::every_reported_value_matches_the_oracle_after_every_event` |
   | I1 conservation, with income | `corporate_action_properties::i1_conservation_with_income_holds_for_every_event` |
-  | I3 splits (bound as corrected by DEC-94) | `corporate_action_properties::i3_a_split_moves_market_value_only_by_the_mark_rounding`, `corporate_actions::i3_is_bounded_by_the_raw_quantity_not_the_split_quantity` |
+  | I3 splits (bound as corrected by DEC-94, proposed) | `corporate_action_properties::i3_a_split_moves_market_value_only_by_the_mark_rounding`, `corporate_actions::i3_is_bounded_by_the_raw_quantity_not_the_split_quantity` |
   | §8.5 residual removal never exceeds the basis held (DEC-86, DEC-92) | `corporate_action_properties::a_split_removes_the_residuals_basis_and_never_more_than_the_basis_held` |
   | §8.5 every stored mark is adjusted | `corporate_action_properties::every_stored_mark_is_replaced_by_the_adjusted_mark` |
   | I5 quantity, with split truncations | `corporate_action_properties::i5_quantity_is_the_fold_of_fills_and_split_truncations` |
@@ -118,8 +118,10 @@ for the executor to journal.
    applies and provably never removes more than the basis held.
 3. **Cash in lieu (DEC-93).** round(f × p, 2, half_even), signed like Q; a posting settles the
    earliest outstanding cash in lieu of exactly that amount, else `cash_in_lieu_mismatch`.
-4. **I3 (DEC-94).** The bound is \|Q_raw\| × 5 × 10⁻¹³, not \|Q'\| × 5 × 10⁻¹³. The founder should
-   confirm this: it corrects a stated tolerance, and the fold's arithmetic is unchanged.
+4. **I3 (DEC-94, proposed; founder to confirm).** The bound is \|Q_raw\| × 5 × 10⁻¹³, not
+   \|Q'\| × 5 × 10⁻¹³. It loosens the approved I3 tolerance, which DEC-79 leaves to the founder, so
+   it is not accepted until the founder confirms it. The fold's arithmetic is unchanged; only the
+   bound the I3 tests check moves.
 5. **Order and dividends (DEC-95).** Duplicate, then out of order (ex-date on or before a fill's
    trade date, or before an applied ex-date), then fills before an applied ex-date are rejected;
    dividends round half-even on the position at application; `due` lists settlements before
