@@ -23,6 +23,10 @@ CRYPTO_QTY_STEP = Decimal("0.000001")
 TERMINAL_STATUSES = frozenset({"filled", "canceled", "expired", "rejected", "replaced", "done_for_day"})
 
 
+class OrderSizeError(Exception):
+    pass
+
+
 @dataclass(frozen=True)
 class Quote:
     bid: Decimal
@@ -61,18 +65,17 @@ class Intent:
 
 
 def choose_quote(raw: dict | None, last_close: Decimal | None) -> tuple[Quote | None, str]:
-    """The live quote when it is complete and within 5% of the last close; otherwise the last close."""
+    """The live quote when bid and ask are both within 5% of the last close; otherwise the last close.
+
+    Without a last close nothing is priced: an unchecked quote never becomes an order."""
+    if last_close is None or last_close <= 0:
+        return None, "none"
     raw = raw or {}
     bid, ask = Decimal(str(raw.get("bp") or 0)), Decimal(str(raw.get("ap") or 0))
-    if (
-        bid > 0
-        and ask > 0
-        and (last_close is None or abs(ask - last_close) <= last_close * QUOTE_SANITY_FRACTION)
-    ):
+    tolerance = last_close * QUOTE_SANITY_FRACTION
+    if bid > 0 and ask > 0 and abs(ask - last_close) <= tolerance and abs(bid - last_close) <= tolerance:
         return Quote(bid, ask), "quote"
-    if last_close is not None and last_close > 0:
-        return Quote(last_close, last_close), "close"
-    return None, "none"
+    return Quote(last_close, last_close), "close"
 
 
 def tick_size(price: Decimal, crypto: bool) -> Decimal:
@@ -90,8 +93,10 @@ def entry_notional(conviction: Decimal, confidence: Decimal) -> Decimal:
     return min(notional, MAX_ORDER_USD)
 
 
-def entry_quantity(notional: Decimal, ask: Decimal, crypto: bool) -> Decimal:
-    raw = notional / ask
+def entry_quantity(notional: Decimal, limit_price: Decimal, crypto: bool) -> Decimal:
+    """Whole shares (crypto: six places) that the notional buys at the limit price, so that
+    qty times limit never exceeds the notional and therefore never MAX_ORDER_USD."""
+    raw = notional / limit_price
     return (
         raw.quantize(CRYPTO_QTY_STEP, rounding=ROUND_DOWN)
         if crypto
@@ -134,11 +139,12 @@ def plan_entries(
             break
         crypto = is_crypto(symbol)
         ask = quotes[symbol].ask
-        notional = entry_notional(thesis.conviction, thesis.confidence)
-        qty = entry_quantity(notional, ask, crypto)
-        if qty <= 0 or ask <= 0:
+        if ask <= 0:
             continue
         limit = entry_limit(ask, crypto)
+        qty = entry_quantity(entry_notional(thesis.conviction, thesis.confidence), limit, crypto)
+        if qty <= 0:
+            continue
         expires_on = (today + timedelta(days=thesis.horizon_days)).isoformat()
         intents.append(
             Intent(
@@ -146,7 +152,7 @@ def plan_entries(
                 "buy",
                 qty,
                 limit,
-                (qty * limit).quantize(Decimal("0.01")),
+                (qty * limit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                 time_in_force(symbol),
                 "entry",
                 thesis_id,
@@ -188,7 +194,7 @@ def plan_exits(
                 "sell",
                 position.qty,
                 limit,
-                (position.qty * limit).quantize(Decimal("0.01")),
+                (position.qty * limit).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
                 time_in_force(symbol),
                 reason,
                 thesis_id,
@@ -223,6 +229,10 @@ def submit(
         f"rs-{now.strftime('%Y%m%d')}-{intent.side}-{intent.symbol.replace('/', '')}-{intent.thesis_id[:8]}"
     )
     order = intent.order(client_order_id)
+    if intent.side == "buy" and intent.qty * intent.limit_price > MAX_ORDER_USD:
+        raise OrderSizeError(
+            f"{intent.symbol}: {intent.qty} x {intent.limit_price} exceeds {MAX_ORDER_USD} USD"
+        )
     submitted = journal.append("order_submitted", {**asdict(intent), "order": order, "dry_run": dry_run}, now)
     if dry_run or client is None:
         return submitted
@@ -245,7 +255,8 @@ def submit(
 
 
 def sync_orders(client: AlpacaClient, journal: Journal) -> list[dict]:
-    """Fetch every non-terminal order once; journal the update and the fill when it filled."""
+    """Fetch every order that is neither terminal nor already filled in the journal; journal a status
+    change as an update and a complete fill (quantity and price present) as a fill."""
     latest: dict[str, dict] = {}
     for update in journal.records("order_update"):
         latest[update["payload"]["submission"]] = update["payload"]
@@ -258,20 +269,18 @@ def sync_orders(client: AlpacaClient, journal: Journal) -> list[dict]:
             or update.get("status") in TERMINAL_STATUSES - {"filled"}
         ):
             continue
-        if update.get("status") == "filled":
-            order = update.get("reply") or {}
-        else:
-            order = client.order(update["order_id"])
+        order = client.order(update["order_id"])
+        if order.get("status") != update.get("status"):
             journal.append("order_update", {**update, "status": order.get("status"), "reply": order})
-        if order.get("status") == "filled":
+        if order.get("status") == "filled" and order.get("filled_qty") and order.get("filled_avg_price"):
             fill = {
                 "submission": submission,
                 "order_id": update["order_id"],
                 "thesis_id": update["thesis_id"],
                 "symbol": update["symbol"],
                 "side": update["side"],
-                "qty": str(order.get("filled_qty")),
-                "price": str(order.get("filled_avg_price")),
+                "qty": str(Decimal(str(order["filled_qty"]))),
+                "price": str(Decimal(str(order["filled_avg_price"]))),
                 "filled_at": str(order.get("filled_at")),
             }
             fills.append(journal.append("fill", fill, datetime.now(UTC)))

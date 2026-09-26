@@ -3,7 +3,7 @@
 import json
 import os
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from research_spike.http import Transport, request_json, urllib_transport
@@ -57,7 +57,7 @@ def model_prices(model: str, data_dir: Path, transport: Transport = urllib_trans
 
 def cost(prices: Prices, prompt_tokens: int, completion_tokens: int) -> Decimal:
     total = prices.prompt_per_token * prompt_tokens + prices.completion_per_token * completion_tokens
-    return total.quantize(Decimal("0.000001"))
+    return total.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
 def complete(

@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 
-from research_spike.config import MAX_HORIZON_DAYS, MAX_THESES, Basket
+from research_spike.config import BENCHMARK, MAX_HORIZON_DAYS, MAX_THESES, Basket
 from research_spike.http import decode
 
 FIELDS = frozenset(
@@ -72,7 +72,11 @@ def build_user_prompt(
     held: dict[str, str],
     as_of: datetime,
 ) -> str:
-    lines = [f"As of {as_of.isoformat(timespec='seconds')}.", f"Basket: {', '.join(basket.symbols)}."]
+    lines = [
+        f"As of {as_of.isoformat(timespec='seconds')}.",
+        f"Basket: {', '.join(basket.proposable)}.",
+        f"{BENCHMARK} is the benchmark: context only, never a thesis.",
+    ]
     lines.append("Held: " + (", ".join(f"{s} (qty {q})" for s, q in held.items()) or "nothing") + ".")
     lines.append("\nDaily bars, oldest first:")
     for symbol in basket.symbols:
@@ -112,6 +116,8 @@ def parse_thesis(raw: object, basket: Basket, news_ids: set[str], held: set[str]
     if set(raw) != FIELDS:
         raise ThesisError(f"fields must be exactly {sorted(FIELDS)}, got {sorted(raw)}")
     instrument = _text(raw["instrument"], "instrument")
+    if instrument == BENCHMARK:
+        raise ThesisError(f"{instrument} is the benchmark, not a candidate")
     if instrument not in basket:
         raise ThesisError(f"{instrument} is not in the basket")
     if raw["direction"] != "long":
@@ -124,8 +130,10 @@ def parse_thesis(raw: object, basket: Basket, news_ids: set[str], held: set[str]
     if isinstance(horizon, bool) or not isinstance(horizon, int) or not 1 <= horizon <= MAX_HORIZON_DAYS:
         raise ThesisError(f"horizon_days must be an integer in [1, {MAX_HORIZON_DAYS}]")
     thesis = _text(raw["thesis"], "thesis")
-    if match := FORBIDDEN_LANGUAGE.search(thesis):
-        raise ThesisError(f"thesis contains forbidden language: {match.group(0)!r}")
+    invalidation = _text(raw["invalidation"], "invalidation")
+    for name, text in (("thesis", thesis), ("invalidation", invalidation)):
+        if match := FORBIDDEN_LANGUAGE.search(text):
+            raise ThesisError(f"{name} contains forbidden language: {match.group(0)!r}")
     evidence = raw["evidence"]
     if not isinstance(evidence, list) or not all(isinstance(e, str | int) for e in evidence):
         raise ThesisError("evidence must be a list of news ids")

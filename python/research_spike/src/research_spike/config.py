@@ -37,6 +37,11 @@ class Basket:
     def symbols(self) -> tuple[str, ...]:
         return self.equities + self.crypto
 
+    @property
+    def proposable(self) -> tuple[str, ...]:
+        """Symbols a thesis may name: the basket without the benchmark."""
+        return tuple(s for s in self.symbols if s != BENCHMARK)
+
     def __contains__(self, symbol: object) -> bool:
         return symbol in self.symbols
 

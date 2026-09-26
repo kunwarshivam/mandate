@@ -1,7 +1,7 @@
 """Realized return per thesis against SPY over the same window, with the LLM cost per thesis."""
 
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from research_spike.config import BENCHMARK, MAX_POSITION_USD, MAX_POSITIONS
@@ -27,11 +27,15 @@ class Outcome:
 
     @property
     def ret(self) -> Decimal:
-        return ((self.exit_price - self.entry_price) / self.entry_price).quantize(PLACES)
+        return ((self.exit_price - self.entry_price) / self.entry_price).quantize(
+            PLACES, rounding=ROUND_HALF_UP
+        )
 
     @property
     def benchmark_ret(self) -> Decimal:
-        return ((self.benchmark_exit - self.benchmark_entry) / self.benchmark_entry).quantize(PLACES)
+        return ((self.benchmark_exit - self.benchmark_entry) / self.benchmark_entry).quantize(
+            PLACES, rounding=ROUND_HALF_UP
+        )
 
     @property
     def excess(self) -> Decimal:
@@ -39,7 +43,9 @@ class Outcome:
 
     @property
     def pnl_usd(self) -> Decimal:
-        return ((self.exit_price - self.entry_price) * self.qty).quantize(Decimal("0.01"))
+        return ((self.exit_price - self.entry_price) * self.qty).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
 
 
 def _close_at(marks: list[dict], symbol: str, at: str) -> Decimal | None:
@@ -56,7 +62,7 @@ def _close_at(marks: list[dict], symbol: str, at: str) -> Decimal | None:
 def outcomes(journal: Journal) -> tuple[list[Outcome], list[str]]:
     """Filled theses with their outcomes, and the ids of accepted theses that never filled."""
     marks = journal.records("mark")
-    fills = journal.records("fill")
+    fills = [f for f in journal.records("fill") if f["payload"].get("price") and f["payload"].get("qty")]
     latest_ts = marks[-1]["ts"] if marks else ""
     results: list[Outcome] = []
     unfilled: list[str] = []
@@ -115,7 +121,11 @@ def outcomes(journal: Journal) -> tuple[list[Outcome], list[str]]:
 
 
 def _mean(values: list[Decimal]) -> Decimal:
-    return (sum(values, Decimal(0)) / len(values)).quantize(PLACES) if values else Decimal(0)
+    return (
+        (sum(values, Decimal(0)) / len(values)).quantize(PLACES, rounding=ROUND_HALF_UP)
+        if values
+        else Decimal(0)
+    )
 
 
 def summarize(journal: Journal) -> dict:
@@ -142,8 +152,12 @@ def summarize(journal: Journal) -> dict:
         "mean_excess_return": str(_mean([r.excess for r in results])),
         "expectancy_usd": str(_mean([r.pnl_usd for r in results])),
         "total_pnl_usd": str(sum((r.pnl_usd for r in results), Decimal(0))),
-        "cost_per_thesis_usd": str((llm_cost / len(accepted)).quantize(PLACES) if accepted else llm_cost),
-        "turnover": str((traded / (MAX_POSITIONS * MAX_POSITION_USD)).quantize(PLACES)),
+        "cost_per_thesis_usd": str(
+            (llm_cost / len(accepted)).quantize(PLACES, rounding=ROUND_HALF_UP) if accepted else llm_cost
+        ),
+        "turnover": str(
+            (traded / (MAX_POSITIONS * MAX_POSITION_USD)).quantize(PLACES, rounding=ROUND_HALF_UP)
+        ),
         "outcomes": [
             {
                 "thesis_id": r.thesis_id[:12],

@@ -26,6 +26,11 @@ def _plain(value: object) -> str:
     raise TypeError(f"{type(value).__name__} is not journalable")
 
 
+def plain_payload(payload: dict) -> dict:
+    """The payload as it will read back from the file: floats become decimal strings, never floats."""
+    return json.loads(canonical(json.loads(canonical(payload), parse_float=Decimal)))
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -62,7 +67,7 @@ class Journal:
             "ts": (at or datetime.now(UTC)).isoformat(timespec="microseconds"),
             "kind": kind,
             "prev": self.last_hash(),
-            "payload": json.loads(canonical(payload)),
+            "payload": plain_payload(payload),
         }
         record["hash"] = record_hash(record)
         with self.path.open("a", encoding="utf-8") as handle:

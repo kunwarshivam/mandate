@@ -24,7 +24,8 @@ plans exits. Equity orders go out only while the regular session is open; crypto
 
 ## Rules (all constants in `config.py`)
 
-- Basket from `config/research-basket.toml`; at most 4 theses per day, at most 6 positions,
+- Basket from `config/research-basket.toml`, minus SPY, which is the benchmark and only context in
+  the prompt (a thesis naming it is rejected); at most 4 theses per day, at most 6 positions,
   2000 USD per position and per order, conviction at least 0.3 to enter.
 - Sizing is fixed and has no LLM in it: notional = round(conviction × confidence × 2000, 2); whole
   shares (crypto: six places); buy limit = ask × 1.002 and sell limit = bid × 0.998, both rounded
