@@ -1,11 +1,10 @@
 //! Verification (journal spec §11): ordered per-event checks over stored rows, and anchor checks.
 
-use std::collections::BTreeMap;
-
 use mandate_canon::{Digest, Value, parse, to_canonical};
 
-use crate::schema::parse_digest_ref;
-use crate::{Anchor, StoredEvent, StreamId, merkle_root};
+use crate::{
+    Anchor, ArtifactError, ArtifactRef, ArtifactSource, StoredEvent, StreamId, merkle_root,
+};
 
 /// Per-event checks in the order they run; the first failure is reported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,18 +77,9 @@ pub struct Verified {
     pub last_hash: Digest,
 }
 
-/// Content-addressed artifact bytes by digest (journal spec §6.3).
-pub trait ArtifactSource {
-    fn artifact(&self, digest: &Digest) -> Option<&[u8]>;
-}
-
-impl ArtifactSource for BTreeMap<Digest, Vec<u8>> {
-    fn artifact(&self, digest: &Digest) -> Option<&[u8]> {
-        self.get(digest).map(Vec::as_slice)
-    }
-}
-
-/// Walks `rows` in order from `start`, running the per-event checks of spec §11 in order.
+/// Walks `rows` in order from `start`, running the per-event checks of spec §11 in order. The
+/// artifact check re-hashes what `artifacts` returns itself; an artifact the source cannot read
+/// (`Unavailable`) fails as `artifact_missing`, so an unreachable store never passes verification.
 pub fn verify_events(
     rows: &[StoredEvent],
     start: TrustedStart,
@@ -123,13 +113,21 @@ pub fn verify_events(
             .and_then(Value::as_array)
             .unwrap_or_default()
         {
-            let digest = reference.as_str().and_then(parse_digest_ref);
-            match digest.and_then(|d| artifacts.artifact(&d).map(|bytes| (d, bytes))) {
-                None => return Err(fail(EventCheck::ArtifactMissing)),
-                Some((d, bytes)) if Digest::of(bytes) != d => {
+            let read = reference
+                .as_str()
+                .and_then(ArtifactRef::parse)
+                .map(|r| (r, artifacts.read_artifact(&r)));
+            match read {
+                None | Some((_, Err(ArtifactError::Missing | ArtifactError::Unavailable))) => {
+                    return Err(fail(EventCheck::ArtifactMissing));
+                }
+                Some((_, Err(ArtifactError::Corrupt))) => {
                     return Err(fail(EventCheck::ArtifactMismatch));
                 }
-                Some(_) => {}
+                Some((r, Ok(bytes))) if Digest::of(&bytes) != r.digest() => {
+                    return Err(fail(EventCheck::ArtifactMismatch));
+                }
+                Some((_, Ok(_))) => {}
             }
         }
         prev_hash = row.hash;
