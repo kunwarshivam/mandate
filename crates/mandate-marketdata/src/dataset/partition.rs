@@ -19,7 +19,7 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 
 use super::{BAR_SCALE, DatasetError, PRICE_SCALE, SIZE_SCALE};
-use crate::model::{Bar, DatasetId, Kind, Records, Trade};
+use crate::model::{Bar, DatasetId, Kind, Quote, Records, Trade};
 use crate::number::{self, PRECISION};
 use crate::timestamp;
 
@@ -62,7 +62,18 @@ pub fn schema(kind: Kind) -> SchemaRef {
             Field::new("tape", DataType::Utf8, true),
             Field::new("taker_side", DataType::Utf8, true),
         ],
-        Kind::Quotes => vec![],
+        Kind::Quotes => vec![
+            Field::new("symbol", DataType::Utf8, false),
+            Field::new("time", time(), false),
+            Field::new("bid_price", decimal(PRICE_SCALE), false),
+            Field::new("bid_size", decimal(SIZE_SCALE), false),
+            Field::new("ask_price", decimal(PRICE_SCALE), false),
+            Field::new("ask_size", decimal(SIZE_SCALE), false),
+            Field::new("bid_exchange", DataType::Utf8, true),
+            Field::new("ask_exchange", DataType::Utf8, true),
+            Field::new("conditions", conditions(), true),
+            Field::new("tape", DataType::Utf8, true),
+        ],
     };
     Arc::new(Schema::new(fields))
 }
@@ -128,19 +139,23 @@ fn bar_columns(symbol: &str, bars: &[Bar]) -> Result<Vec<ArrayRef>, DatasetError
     ])
 }
 
-fn trade_columns(symbol: &str, trades: &[Trade]) -> Result<Vec<ArrayRef>, DatasetError> {
-    let mut conditions = ListBuilder::new(StringBuilder::new());
-    for trade in trades {
-        match &trade.conditions {
+fn condition_lists<T>(rows: &[T], value: impl Fn(&T) -> Option<&[String]>) -> ArrayRef {
+    let mut lists = ListBuilder::new(StringBuilder::new());
+    for row in rows {
+        match value(row) {
             Some(list) => {
                 for condition in list {
-                    conditions.values().append_value(condition);
+                    lists.values().append_value(condition);
                 }
-                conditions.append(true);
+                lists.append(true);
             }
-            None => conditions.append(false),
+            None => lists.append(false),
         }
     }
+    Arc::new(lists.finish())
+}
+
+fn trade_columns(symbol: &str, trades: &[Trade]) -> Result<Vec<ArrayRef>, DatasetError> {
     Ok(vec![
         strings(trades, |_| Some(symbol)),
         times(trades, |t| t.time)?,
@@ -148,9 +163,24 @@ fn trade_columns(symbol: &str, trades: &[Trade]) -> Result<Vec<ArrayRef>, Datase
         decimals(trades, "size", SIZE_SCALE, |t| &t.size)?,
         Arc::new(trades.iter().map(|t| t.trade_id).collect::<UInt64Array>()),
         strings(trades, |t| t.exchange.as_deref()),
-        Arc::new(conditions.finish()),
+        condition_lists(trades, |t| t.conditions.as_deref()),
         strings(trades, |t| t.tape.as_deref()),
         strings(trades, |t| t.taker_side.as_deref()),
+    ])
+}
+
+fn quote_columns(symbol: &str, quotes: &[Quote]) -> Result<Vec<ArrayRef>, DatasetError> {
+    Ok(vec![
+        strings(quotes, |_| Some(symbol)),
+        times(quotes, |q| q.time)?,
+        decimals(quotes, "bid_price", PRICE_SCALE, |q| &q.bid_price)?,
+        decimals(quotes, "bid_size", SIZE_SCALE, |q| &q.bid_size)?,
+        decimals(quotes, "ask_price", PRICE_SCALE, |q| &q.ask_price)?,
+        decimals(quotes, "ask_size", SIZE_SCALE, |q| &q.ask_size)?,
+        strings(quotes, |q| q.bid_exchange.as_deref()),
+        strings(quotes, |q| q.ask_exchange.as_deref()),
+        condition_lists(quotes, |q| q.conditions.as_deref()),
+        strings(quotes, |q| q.tape.as_deref()),
     ])
 }
 
@@ -160,7 +190,7 @@ pub fn encode(dataset: &DatasetId, records: &Records) -> Result<Vec<u8>, Dataset
     let columns = match records {
         Records::Bars(bars) => bar_columns(symbol, bars)?,
         Records::Trades(trades) => trade_columns(symbol, trades)?,
-        Records::Quotes(_) => vec![],
+        Records::Quotes(quotes) => quote_columns(symbol, quotes)?,
     };
     let schema = schema(dataset.kind());
     let batch = RecordBatch::try_new(Arc::clone(&schema), columns).map_err(parquet_error)?;
@@ -344,6 +374,46 @@ fn read_trades(c: &Columns<'_>, out: &mut Vec<Trade>) -> Result<(), DatasetError
     Ok(())
 }
 
+fn read_quotes(c: &Columns<'_>, out: &mut Vec<Quote>) -> Result<(), DatasetError> {
+    let time = c.times("time")?;
+    let bid_price = c.decimals("bid_price")?;
+    let bid_size = c.decimals("bid_size")?;
+    let ask_price = c.decimals("ask_price")?;
+    let ask_size = c.decimals("ask_size")?;
+    let bid_exchange = c.strings("bid_exchange")?;
+    let ask_exchange = c.strings("ask_exchange")?;
+    let conditions = c.lists("conditions")?;
+    let tape = c.strings("tape")?;
+    let rows = time
+        .into_iter()
+        .zip(bid_price)
+        .zip(bid_size)
+        .zip(ask_price)
+        .zip(ask_size)
+        .zip(bid_exchange)
+        .zip(ask_exchange)
+        .zip(conditions)
+        .zip(tape);
+    for (
+        (((((((time, bid_price), bid_size), ask_price), ask_size), bid_exchange), ask_exchange), conditions),
+        tape,
+    ) in rows
+    {
+        out.push(Quote {
+            time,
+            bid_price,
+            bid_size,
+            ask_price,
+            ask_size,
+            bid_exchange,
+            ask_exchange,
+            conditions,
+            tape,
+        });
+    }
+    Ok(())
+}
+
 /// Reads a partition written by [`encode`]; a file with another schema is an error.
 pub fn read(path: &Path, kind: Kind) -> Result<Records, DatasetError> {
     let file = File::open(path).map_err(|source| DatasetError::Io {
@@ -370,7 +440,7 @@ pub fn read(path: &Path, kind: Kind) -> Result<Records, DatasetError> {
         match &mut records {
             Records::Bars(bars) => read_bars(&columns, bars)?,
             Records::Trades(trades) => read_trades(&columns, trades)?,
-            Records::Quotes(_) => {}
+            Records::Quotes(quotes) => read_quotes(&columns, quotes)?,
         }
         offset = offset.saturating_add(batch.num_rows());
     }
