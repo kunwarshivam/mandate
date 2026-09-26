@@ -26,3 +26,13 @@ condition = "AND"
 paths = ['''^crates/mandate-marketdata/tests/fixtures/alpaca/[a-z0-9-]+/(?:page-[0-9]+\.json|requests\.txt)$''']
 regexTarget = "match"
 regexes = ['''^(?:next_page_token":"[A-Za-z0-9+/=]+"|page_token=[A-Za-z0-9+/%=]+)$''']
+
+# The key-ID-shaped sentinel that the redaction test checks never reaches output (E2-1, DEC-89),
+# allowed only in that test file.
+[[allowlists]]
+description = "Redaction test sentinel"
+targetRules = ["alpaca-key-id"]
+condition = "AND"
+paths = ['''^crates/mandate-marketdata/tests/http\.rs$''']
+regexTarget = "match"
+regexes = ['''^PKSENTINELKEYID00000$''']
