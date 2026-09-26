@@ -3,7 +3,9 @@ use std::time::SystemTime;
 
 use anyhow::{Context, bail};
 use clap::Parser;
-use mandate_cli::{Cli, Command, download, inspect};
+use mandate_cli::artifact::ArtifactCommand;
+use mandate_cli::journal::JournalCommand;
+use mandate_cli::{Cli, Command, artifact, download, inspect, journal};
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
 use mandate_time::{Date, UtcNanos};
@@ -35,6 +37,21 @@ async fn main() -> anyhow::Result<()> {
             if problems > 0 {
                 bail!("{problems} problems found");
             }
+            Ok(())
+        }
+        Command::Journal(JournalCommand::Verify(args)) => {
+            let outcome = journal::verify(&args, &mut io::stdout().lock())?;
+            if outcome.failed() {
+                bail!("{outcome}");
+            }
+            Ok(())
+        }
+        Command::Artifact(ArtifactCommand::Put(args)) => {
+            artifact::put(&args, &mut io::stdout().lock())?;
+            Ok(())
+        }
+        Command::Artifact(ArtifactCommand::Get(args)) => {
+            artifact::get(&args, &mut io::stdout().lock())?;
             Ok(())
         }
     }

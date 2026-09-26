@@ -466,7 +466,7 @@ fn parse(args: &[&str]) -> Result<InspectArgs, clap::Error> {
     let argv = ["mandate", "inspect"].iter().chain(args).copied();
     Cli::try_parse_from(argv).map(|cli| match cli.command {
         Command::Inspect(args) => args,
-        Command::Download(_) => panic!("`inspect` parsed as `download`"),
+        other => panic!("`inspect` parsed as {other:?}"),
     })
 }
 

@@ -1318,10 +1318,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "mandate-artifacts-fs",
  "mandate-canon",
+ "mandate-journal",
  "mandate-marketdata",
  "mandate-time",
  "serde",
+ "serde_json",
  "tokio",
  "toml",
 ]
