@@ -1,0 +1,17 @@
+[package]
+name = "mandate-artifacts-fs"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Filesystem backend for the content-addressed artifact store: write-once objects under sha256:{hex}, atomic publish, checked reads (journal spec §6.3, backlog E5-2, DEC-107)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-journal.workspace = true
+
+[dev-dependencies]
+mandate-time.workspace = true
+proptest.workspace = true

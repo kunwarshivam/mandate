@@ -16,7 +16,8 @@
 #   3  mandate-spec
 #   4  mandate-risk
 #   5  mandate-builder
-#   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-executor, mandate-alpaca
+#   6  mandate-sim, mandate-marketdata, mandate-journal-pg, mandate-artifacts-fs, mandate-executor,
+#      mandate-alpaca
 #   7  mandate-cli
 #   tool  mandate-refcases, xtask
 
@@ -72,3 +73,9 @@ pure = false
 layer = 7
 safety_critical = false
 pure = false
+
+[crates.mandate-artifacts-fs]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = []
