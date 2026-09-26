@@ -279,11 +279,11 @@ impl UtcNanos {
             }
             None => (0, rest),
         };
-        let offset_secs = offset_secs(zone)?;
+        let offset = offset_secs(zone)?;
         let local = Self::parse(&format!("{seconds}.000000000Z"))?;
         let secs = local
             .secs
-            .checked_sub(offset_secs)
+            .checked_sub(offset)
             .ok_or(TimeError::OutOfRange)?;
         Self::from_parts(secs, nanos)
     }
