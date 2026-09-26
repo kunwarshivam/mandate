@@ -3,7 +3,9 @@
 
 mod common;
 
-use common::{Fill, at, charge, d, equity, id, mark, no_fees, step, test_default, text, usd};
+use common::{
+    Fill, at, charge, d, equity, fee_cap, id, mark, no_fees, step, test_default, text, usd,
+};
 use mandate_accounting::{
     Account, AccountingError, AssetClass, FeeFamily, FeeKind, Input, Liquidity, Position, Record,
     Side, TafCapBasis,
@@ -431,7 +433,7 @@ fn rc_07_crypto_fees_in_the_received_asset() {
 #[ignore = "pending E3-1"]
 fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
     let mut config = test_default();
-    config.equities.taf_cap = usd("0.015");
+    config.equities.taf_cap = fee_cap("0.015");
     let fill = |fill_id, order, side, qty, price, time| {
         Fill {
             fill_id,
@@ -872,4 +874,177 @@ fn positions_list_open_instruments_and_errors_name_the_unmarked_one() {
     let error = a.unrealized().unwrap_err();
     assert_eq!(error, AccountingError::NoMark(id("AAA")));
     assert_eq!(error.to_string(), "no mark or fill price for AAA");
+}
+
+fn build(qty: &str, basis: &str) -> Result<Position, AccountingError> {
+    Position::new(
+        SignedQty::parse(qty).unwrap(),
+        CostBasis::parse(basis).unwrap(),
+    )
+}
+
+/// A position's basis has the sign of its quantity: a long has paid (B ≥ 0), a short has received
+/// (B ≤ 0), and a flat position holds none (DEC-86). A long of 1 with basis −100 would realize
+/// 100 − (−100) = 200 on a close at 100, so it cannot be built; neither can a short with a positive
+/// basis, a flat position with any basis, or a long whose basis is below zero by 10⁻¹⁸. A zero
+/// basis on an open position is allowed: a reduction can leave one (see
+/// `a_reduction_never_removes_more_basis_than_the_position_holds`).
+#[test]
+#[ignore = "pending E3-1"]
+fn positions_whose_basis_opposes_the_quantity_are_rejected() {
+    for (qty, basis) in [
+        ("1", "-100"),
+        ("-1", "100"),
+        ("0", "1"),
+        ("0", "-1"),
+        ("0.000000001", "-0.000000000000000001"),
+    ] {
+        assert_eq!(
+            build(qty, basis),
+            Err(AccountingError::InvalidPosition),
+            "{qty} {basis}"
+        );
+    }
+    for (qty, basis) in [
+        ("1", "100"),
+        ("-1", "-100"),
+        ("1", "0"),
+        ("-1", "0"),
+        ("0", "0"),
+    ] {
+        let p = build(qty, basis).unwrap();
+        assert_eq!((text(p.qty()), text(p.basis())), (qty.into(), basis.into()));
+    }
+}
+
+/// Closing a position at its average cost realizes nothing: a long of 1 with B 100 sold at 100
+/// realizes −(−1 × 100) − 100 = 0, and a short of 1 with B −100 bought back at 100 realizes
+/// −(1 × 100) − (−100) = 0. Both end flat with zero basis.
+#[test]
+#[ignore = "pending E3-1"]
+fn closing_at_the_average_cost_realizes_nothing() {
+    let config = no_fees();
+    for (qty, basis, side) in [("1", "100", Side::Sell), ("-1", "-100", Side::Buy)] {
+        let a = Account::opening(usd("1000"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = step(
+            &a,
+            &equity("f1", "XYZ", side, "1", "100", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), ("0".into(), "0".into()), "{qty}");
+        assert_eq!(text(a.realized_gross()), "0", "{qty}");
+    }
+}
+
+/// A reduction never removes more basis than the position holds (DEC-86). Buying 0.00000001 at
+/// 0.00009 gives B = 0.0000000000009, below the 12-place grid of the removed basis. Selling
+/// 0.000000009 (nine tenths) rounds the removal to round(0.00000000000081, 12, half_even) =
+/// 0.000000000001, more than B, so the removal is limited to B: Q 0.000000001, B 0, realized
+/// 0.00000000000081 − 0.0000000000009 = −0.00000000000009. Closing the rest at 0.00009 realizes
+/// 0.00000000000009 − 0, so the round trip at one price realizes 0 in total. The short mirror
+/// (sell, then buy back) has every basis and P&L negated.
+#[test]
+#[ignore = "pending E3-1"]
+fn a_reduction_never_removes_more_basis_than_the_position_holds() {
+    let config = no_fees();
+    for (open, close, opened, left, realized) in [
+        (
+            Side::Buy,
+            Side::Sell,
+            ("0.00000001", "0.0000000000009"),
+            "0.000000001",
+            "-0.00000000000009",
+        ),
+        (
+            Side::Sell,
+            Side::Buy,
+            ("-0.00000001", "-0.0000000000009"),
+            "-0.000000001",
+            "0.00000000000009",
+        ),
+    ] {
+        let fill = |fill_id, side, qty, time| equity(fill_id, "XYZ", side, qty, "0.00009", time);
+        let a = Account::opening(usd("1"), []);
+        let a = step(
+            &a,
+            &fill("f1", open, "0.00000001", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), (opened.0.into(), opened.1.into()));
+        let a = step(
+            &a,
+            &fill("f2", close, "0.000000009", "2026-09-21T10:01:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), (left.into(), "0".into()));
+        assert_eq!(text(a.realized_gross()), realized);
+        let a = step(
+            &a,
+            &fill("f3", close, "0.000000001", "2026-09-21T10:02:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), ("0".into(), "0".into()));
+        assert_eq!(text(a.realized_gross()), "0");
+    }
+}
+
+fn taf(record: &Record) -> Vec<String> {
+    match record {
+        Record::Fill { fees, .. } => fees
+            .iter()
+            .filter(|f| f.kind == FeeKind::Taf)
+            .map(|f| text(f.usd))
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Both TAF cap modes follow one rule: TAF = min(rate × shares, cap − TAF already charged on the
+/// order), where only per-order mode counts earlier executions of the same order (DEC-87). Selling
+/// 100 shares at 50 at 0.0002 per share is 0.02 uncapped: a zero cap charges 0, a cap of 0.015
+/// charges 0.015, and 9.79 charges 0.02, in both modes, with a client order ID (`o1`) and without
+/// one. A second execution of `o1` pays the same again per execution; per order it pays only what
+/// is left: 0 − 0 = 0, 0.015 − 0.015 = 0, and min(0.02, 9.79 − 0.02) = 0.02.
+#[test]
+#[ignore = "pending E3-1"]
+fn both_taf_cap_modes_charge_one_execution_orders_alike() {
+    let sell = |fill_id, order| {
+        Fill {
+            fill_id,
+            order,
+            instrument: "XYZ",
+            asset_class: AssetClass::UsEquity,
+            side: Side::Sell,
+            qty: "100",
+            price: "50",
+            liquidity: None,
+            at: "2026-09-21T11:00:00-04:00",
+        }
+        .input()
+    };
+    for (cap, capped, per_order_again) in [
+        ("0", "0", "0"),
+        ("0.015", "0.015", "0"),
+        ("9.79", "0.02", "0.02"),
+    ] {
+        for (basis, again) in [
+            (TafCapBasis::PerExecution, capped),
+            (TafCapBasis::PerOrder, per_order_again),
+        ] {
+            let mut config = test_default();
+            config.equities.taf_cap = fee_cap(cap);
+            config.equities.taf_cap_basis = basis;
+            let held = build("300", "14700").unwrap();
+            let a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+            let first = a.apply(&sell("f1", Some("o1")), &config).unwrap();
+            assert_eq!(taf(&first.record), [capped], "{cap} {basis:?} f1");
+            let second = first.account.apply(&sell("f2", None), &config).unwrap();
+            assert_eq!(taf(&second.record), [capped], "{cap} {basis:?} f2");
+            let third = second
+                .account
+                .apply(&sell("f3", Some("o1")), &config)
+                .unwrap();
+            assert_eq!(taf(&third.record), [again], "{cap} {basis:?} f3");
+        }
+    }
 }

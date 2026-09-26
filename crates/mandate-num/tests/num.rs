@@ -3,7 +3,7 @@
 //! independent of the library's 256-bit sign-and-magnitude arithmetic.
 
 use mandate_num::{
-    Bps, CostBasis, FeePerShare, FeeRate, NumError, Price, Qty, Rounding, SignedQty, Usd,
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, NumError, Price, Qty, Rounding, SignedQty, Usd,
 };
 use proptest::prelude::*;
 
@@ -289,6 +289,26 @@ fn results_that_do_not_fit_are_errors() {
         widest.times_bps(Bps::parse("30000").unwrap(), Rounding::HalfEven),
         Err(NumError::Overflow),
         "237684487542793012780.631851005 has the full 9 places, so it is too wide, not too precise"
+    );
+}
+
+/// A fee cap is a non-negative amount of money: a negative cap would turn a capped fee into a
+/// credit (DEC-87).
+#[test]
+#[ignore = "pending E3-1"]
+fn fee_caps_are_non_negative_amounts_of_money() {
+    assert_eq!(FeeCap::parse("-0.01"), Err(NumError::Negative));
+    assert_eq!(FeeCap::parse("9.790"), Err(NumError::NotCanonical));
+    assert_eq!(FeeCap::parse("0").unwrap().to_usd(), Usd::ZERO);
+    assert_eq!(
+        FeeCap::parse("9.79").unwrap().to_usd(),
+        Usd::parse("9.79").unwrap()
+    );
+    assert_eq!(
+        FeeCap::parse("0.0000000000000000000000000001")
+            .unwrap()
+            .to_usd(),
+        Usd::parse("0.0000000000000000000000000001").unwrap()
     );
 }
 

@@ -13,7 +13,7 @@ story.
   §8.6 (invariants), §12 (journal events); HLD "Event-sourced state".
 - **Decisions that apply:** DEC-72 (ADR-0001: ES-02, ES-04, ES-05, ES-09, ES-11, ES-13, ES-15),
   DEC-77 (two-PR mechanics), DEC-79 (agents merge after CI and an independent review), DEC-80 (no
-  plain comments), DEC-82 to DEC-85 (recorded by this story).
+  plain comments), DEC-82 to DEC-87 (recorded by this story).
 
 ## Scope
 
@@ -81,6 +81,36 @@ story.
 - **Size budget:** 400 non-generated lines per safety-critical PR (ES-13). The tests PRs exceed it
   because each holds one crate pair's full test suite, which is reviewed as a unit; the split
   follows E5-1.
+
+## Review round 1 (DEC-86, DEC-87)
+
+The independent review merged the tests PRs and the `mandate-num`/`mandate-time` implementation and
+failed the accounting implementation. What changed, and why:
+
+1. **Cost basis follows the quantity's sign (DEC-86).** `Position::new` rejected only a flat position
+   with a basis, so a long with a negative basis could be built and closing it at 100 reported 200
+   realized. The constructor now rejects a basis whose sign opposes the quantity; initial positions
+   and the harness's fixture loading go through it, and each fold transition builds its result
+   through it. A reduction's removed basis is limited to the basis held, which matters only when the
+   basis has digits below the 12th place.
+2. **Fee configuration is non-negative by type (DEC-87).** `EquityFees::taf_cap` was a signed
+   `Usd`: a negative cap made per-execution TAF negative while per-order mode clamped it to 0. It is
+   now `FeeCap` (parsed at the boundary; negative text is rejected), and both modes use
+   min(uncapped, cap − TAF already charged on the order).
+3. **`Halve` in the property generator** is resolved from the oracle's position at that point in
+   the run, not from the opening state, so it halves what is held after earlier events.
+
+New tests (pending in the tests PR, live in the implementation PR):
+
+| Finding | Test |
+|---|---|
+| Basis sign follows quantity | `hand::positions_whose_basis_opposes_the_quantity_are_rejected` |
+| Closing P&L stays correct | `hand::closing_at_the_average_cost_realizes_nothing`, `hand::a_reduction_never_removes_more_basis_than_the_position_holds`, `properties::reductions_keep_the_basis_on_the_position_side_and_a_close_realizes_cash_flow` |
+| Negative cap rejected | `num::fee_caps_are_non_negative_amounts_of_money` |
+| Cap modes agree | `hand::both_taf_cap_modes_charge_one_execution_orders_alike` |
+
+`crates/mandate-refcases/status.toml` is unchanged: the status PR still marks the same cases as
+passing.
 
 ## Journal events that feed the fold (spec §12)
 
