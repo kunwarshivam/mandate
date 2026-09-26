@@ -118,7 +118,6 @@ fn exact_or_overflow(
 
 proptest! {
     #[test]
-    #[ignore = "pending E3-1"]
     fn canonical_text_round_trips_and_nothing_else_parses(v in decimal(i64::MAX, 9)) {
         let canonical = text(v.0, v.1);
         prop_assert_eq!(SignedQty::parse(&canonical).unwrap().to_string(), canonical.as_str());
@@ -133,7 +132,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn quantities_and_prices_never_round_on_the_way_in(m in 1..=i64::MAX, extra in 1u32..=10) {
         let canonical = text(i128::from(m) * 10 + 1, 9 + extra);
         prop_assert_eq!(Qty::parse(&canonical), Err(NumError::TooPrecise));
@@ -142,7 +140,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn signs_are_checked_on_the_way_in(v in decimal(i64::MAX, 9)) {
         let canonical = text(v.0, v.1);
         match v.0.signum() {
@@ -165,7 +162,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn money_addition_and_subtraction_are_exact(a in decimal(i64::MAX, 18), b in decimal(i64::MAX, 18)) {
         exact_or_overflow(usd(a).checked_add(usd(b)).map(|v| v.to_string()), scaled(a, WIDE) + scaled(b, WIDE), WIDE)?;
         exact_or_overflow(usd(a).checked_sub(usd(b)).map(|v| v.to_string()), scaled(a, WIDE) - scaled(b, WIDE), WIDE)?;
@@ -175,7 +171,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn signed_quantities_add_exactly(a in decimal(i64::MAX / 2, 9), b in decimal(i64::MAX / 2, 9)) {
         let sum = signed(a).checked_add(signed(b)).unwrap();
         prop_assert_eq!(at_scale(&sum.to_string(), 9), Some(scaled(a, 9) + scaled(b, 9)));
@@ -185,7 +180,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn quantity_subtraction_is_exact_or_negative(a in unsigned(i64::MAX, 9), b in unsigned(i64::MAX, 9)) {
         let expected = scaled(a, 9) - scaled(b, 9);
         match qty(a).checked_sub(qty(b)) {
@@ -199,7 +193,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn products_are_exact(q in decimal(100_000_000_000_000, 9), p in unsigned(100_000_000_000_000, 9)) {
         prop_assume!(p.0 > 0);
         let price = Price::parse(&text(p.0, p.1)).unwrap();
@@ -212,7 +205,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn rate_times_proceeds_is_exact(q in unsigned(1_000_000_000, 9), p in unsigned(1_000_000_000, 9), r in unsigned(1_000_000, 9)) {
         prop_assume!(p.0 > 0);
         let proceeds = qty(q).notional(Price::parse(&text(p.0, p.1)).unwrap()).unwrap();
@@ -221,7 +213,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn rounding_matches_the_floor_based_oracle(v in decimal(i64::MAX, 18), scale in 0u32..=12, mode in modes()) {
         let rounded = usd(v).round(scale, mode).unwrap();
         let expected = if v.1 <= scale { scaled(v, scale) } else { div_round(v.0, pow10(v.1 - scale), mode) };
@@ -229,7 +220,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn crypto_fee_quantity_is_rounded_once(g in unsigned(i64::MAX / 10_000, 9), bps in 0i64..=10_000, mode in modes()) {
         let fee = qty(g).times_bps(Bps::parse(&bps.to_string()).unwrap(), mode).unwrap();
         let expected = div_round(scaled(g, 9) * i128::from(bps), 10_000, mode);
@@ -237,7 +227,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn usd_fee_in_basis_points_is_rounded_once(x in unsigned(1_000_000_000_000, 18), bps in unsigned(10_000, 2), mode in modes()) {
         let fee = usd(x).times_bps(Bps::parse(&text(bps.0, bps.1)).unwrap(), 2, mode).unwrap();
         let expected = div_round(scaled(x, 18) * scaled(bps, 2), 10_000 * pow10(18), mode);
@@ -245,7 +234,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn basis_reduction_is_one_rounding_of_the_exact_proportion(
         b in decimal(1_000_000_000_000, 12),
         whole_units in 1i64..=10_000_000_000_000,
@@ -261,7 +249,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn cost_basis_moves_exactly(b in decimal(i64::MAX, 18), a in decimal(i64::MAX, 18)) {
         let basis = CostBasis::parse(&text(b.0, b.1)).unwrap();
         exact_or_overflow(basis.checked_add(usd(a)).map(|v| v.to_string()), scaled(b, WIDE) + scaled(a, WIDE), WIDE)?;
@@ -272,7 +259,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn results_that_do_not_fit_are_errors() {
     let max = Usd::parse("79228162514264337593543950335").unwrap();
     assert_eq!(
@@ -307,7 +293,6 @@ fn results_that_do_not_fit_are_errors() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn zero_is_accepted_where_allowed_and_is_never_negative() {
     assert_eq!(Qty::parse("0"), Ok(Qty::ZERO));
     assert_eq!(Usd::parse("0"), Ok(Usd::ZERO));
@@ -323,7 +308,6 @@ fn zero_is_accepted_where_allowed_and_is_never_negative() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn hand_calculated_values_from_the_reference_cases() {
     let bps = |s: &str| Bps::parse(s).unwrap();
     let q = |s: &str| Qty::parse(s).unwrap();
@@ -409,7 +393,6 @@ fn hand_calculated_values_from_the_reference_cases() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn error_codes_are_stable() {
     let all = [
         (NumError::NotCanonical, "not_canonical"),
