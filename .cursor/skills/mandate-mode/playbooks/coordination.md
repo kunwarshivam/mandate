@@ -21,7 +21,7 @@ The current allocation. Change it by editing this table in a PR, never by starti
 | Coordinator | Stories | Crates and paths |
 |---|---|---|
 | `claude-code` | E3-3, E4-1, E4-2, E17-0 (spike), the DEC-97 and DEC-98 spec rewrite (Track C) | `mandate-accounting`, `mandate-sim`, `python/research_spike/`, `docs/specs/mandate.md`, `schemas/mandate.schema.json`, `schemas/policy.schema.json`, `reference/mandate/` |
-| `cursor` | E2-4, E2-2, E5-2, E5-3 | `mandate-marketdata`, `mandate-cli`, `mandate-journal`, `mandate-journal-pg`, `.cursor/install.sh` and CI environment work |
+| `cursor` | E2-4, E2-2, E5-2, E5-3, E5-4 (`mandate-cli journal verify` and an artifact-store command), the M1 exit run (download and inspect the stock/ETF basket and BTC/USD history), E2-3 (Should), market-data write safety, `UtcNanos` fractional seconds in `mandate-time` (shared crate: own claim) | `mandate-marketdata`, `mandate-cli`, `mandate-journal`, `mandate-journal-pg`, `mandate-artifacts-fs`, `.cursor/install.sh` and CI environment work |
 
 Shared, owned by no one: `mandate-num`, `mandate-time`, `mandate-canon`, `xtask`, and
 `mandate-refcases` with `status.toml` and `docs/specs/reference-cases/`. In the harness and the

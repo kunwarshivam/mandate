@@ -90,6 +90,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   heads with writer fencing) so that records cannot be altered by application code.
 - **E5-2 (Must)** As an engineer, I want large artifacts stored by content hash so that the
   journal stays small and verifiable.
+- **E5-4 (Must)** As an auditor, I want `mandate-cli journal verify` over an exported stream and
+  its artifact store, and a CLI command to put and fetch artifacts, so that I can check a journal
+  without writing code (M4's verification tool; deferred from the E5-1 and E5-2 briefs).
+  *Accepted when:* for each [tamper case](../specs/reference-cases/journal.yaml) its input can
+  express, the command reports the expected first failure; a deleted or altered artifact reports
+  `artifact_missing` or `artifact_mismatch` ([journal spec](../specs/journal.md) §11).
 
 ### E6 Agent runtime and risk
 

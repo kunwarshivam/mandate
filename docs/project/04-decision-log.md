@@ -151,3 +151,4 @@ reservation keeps its row and its number is never reused.
 | DEC-108 | `claude-code` | #58 | E4-1 tests-PR crate, arithmetic, and harness shapes (DEC-106 is reserved for the story's interpretations; DEC-107 is `cursor`'s) | In this PR |
 | DEC-109 | `cursor` | #77 | E5-3: Postgres journal client and test setup (sqlx 0.9 without query macros, `stream_heads.risk_clock`, Postgres tests in `full` only) | In #82 |
 | DEC-110 | `cursor` | #76 | `xtask` pending-tests gate: every `#[ignore = "pending <story>"]` test fails on the PR's code; ADR-0001 ES-12 names it in `fast` | Reserved |
+| E5-4 | `cursor` | #87 | Story: `mandate-cli journal verify` and an artifact-store command (M4's verification tool) | In this PR |
