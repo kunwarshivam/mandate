@@ -411,8 +411,8 @@ New in `mandate-num` (shared-crate claim on this story):
 | `Conviction`: signed, in [−1, 1], at most **18** places | a model output's conviction and the two combined convictions. The two combined values are `round₁₂` results, so they use 12 of the 18; their bound is a consequence of the formula (\|F\| ≤ W and F − M ≥ −W) and is therefore checked, not assumed |
 | `Signed`: signed, at most **18** places | `daily_pnl_fraction` and `position_pnl_fraction`, which §5.2 defines at 12 places, and their condition values, which the schema does not bound |
 | `Unit::weighted_ratio(&[(SizeFraction, Unit)], &[SizeFraction])` and `Conviction::weighted_ratio(&[(SizeFraction, Conviction, Unit)], &[SizeFraction], &[SizeFraction])` | the three `round₁₂` quotients of step 1 as **one** formula each on 256-bit intermediates: the numerator terms, the weights counted as −1 (the missing models of the buy conviction), and the denominator terms, summed exactly and divided once |
-| `UsdExact`: a signed USD amount carried exactly on 256-bit intermediates, wider than `Usd`, converted to `Usd` only by an explicit rounding | cap, the target, and Delta. `Usd` holds 28 places on a 96-bit significand and cap alone reaches 33 (a 12-place fraction times an equity that holds 21, from a 9-place quantity at a 12-place mark), so `Usd` cannot carry them and rounding them would be a rounding the spec does not state |
-| `UsdExact::{checked_add, checked_sub, min, times_unit, times_conviction, is_positive, round}` and `UsdExact::shares_at(Price, ShareIncrement)` | the step 3 chain and its one truncation to the increment |
+| `UsdExact`: a signed USD amount carried exactly on 256-bit intermediates, wider than `Usd`, converted to `Usd` only by an explicit rounding | cap, the target, and Delta. `Usd` holds 28 places on a 96-bit significand and `Ratio` 24, while cap alone reaches 33 (a 12-place fraction times an equity that holds 21, from a 9-place quantity at a 12-place mark), so neither existing type can carry them and rounding them would be a rounding the spec does not state |
+| `UsdExact::{checked_add, checked_sub, min, times_size_fraction, times_conviction, is_positive, round}` and `UsdExact::shares_at(Price, ShareIncrement)`, the wide counterpart of the existing `Usd::shares_at` | the step 3 chain and its one truncation to the increment |
 
 **Digit budget**, with `SizeFraction` at 12 places, `Unit` and `Conviction` at 18, marks at 12,
 quantities and prices at 9 (trading spec §2.1), and a value ceiling of 10¹² USD. 256 bits holds about
@@ -535,9 +535,12 @@ is the test that keeps this true; anything outside returns `overflow` rather tha
 - **Stream I (E6-1, DEC-131).** The runtime that sequences risk engine → builder → gate → autonomy
   (items 3 and 16) and does the journaling of item 20.
 - **`mandate-num` shared-crate claim.** The additions of the arithmetic section. Stream E's E4-2
-  adds `Ratio`, `Usd::ratio_to`, and `Price::on_tick` to the same crate (DEC-127 item 14); the two
-  sets do not overlap, and `Ratio`'s 24-place bound is why this story adds `UsdExact` rather than
-  widening it.
+  tests PR (#118, merged) already added `Ratio` with `RATIO_SCALE = 24`, its statistics operations,
+  `Usd::ratio_to`, `Usd::shares_at`, and `Price::on_tick` as stubs (DEC-127 item 14), which E4-2's
+  implementation PR fills. The two sets do not overlap: `Ratio`'s 24-place bound is exactly why this
+  story adds `UsdExact` rather than widening it, and `UsdExact::shares_at` mirrors the existing
+  `Usd::shares_at` for a wide numerator. This story's tests PR must not edit E4-2's stubs, so it
+  lands after that implementation PR or the coordinator sequences the two.
 
 ## Decisions needed
 

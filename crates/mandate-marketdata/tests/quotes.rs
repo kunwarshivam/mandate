@@ -434,7 +434,7 @@ async fn quote_pages_are_followed_to_the_end_in_time_order() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn rate_limited_quote_requests_retry_with_backoff_and_order_is_checked() {
+async fn rate_limited_quote_requests_retry_after_a_window_and_order_is_checked() {
     let body = cphc_page(&[good_quote()], None);
     let transport = FakeTransport::serving([
         status(429),
@@ -449,7 +449,7 @@ async fn rate_limited_quote_requests_retry_with_backoff_and_order_is_checked() {
         .await
         .unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(pause.pauses(), [1, 2, 4].map(Duration::from_secs).to_vec());
+    assert_eq!(pause.pauses(), [60, 1, 2].map(Duration::from_secs).to_vec());
     let requested = transport.requested();
     assert_eq!(requested.len(), 4);
     assert!(requested.iter().all(|r| r == &requested[0]));

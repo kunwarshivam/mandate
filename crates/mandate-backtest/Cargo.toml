@@ -1,0 +1,21 @@
+[package]
+name = "mandate-backtest"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The backtest loop and its metrics report: bars and a baseline strategy in, one exact-decimal report out (PRD FR-4.1, FR-4.2, FR-4.5)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-canon.workspace = true
+mandate-num.workspace = true
+mandate-sim.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
