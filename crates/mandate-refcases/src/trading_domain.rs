@@ -7,10 +7,11 @@
 //! accounting expectation keys; E3-2 adds `corporate_action_applied` (splits and cash dividends),
 //! `broker_cash_posting` (cash in lieu), dividend payment on `advance_clock`, and the `receivables`
 //! and `income` expectations (DEC-96); E3-3 adds the account type (`initial.account.type`) and the
-//! `buying_power` expectation, the fold's model buying power with no reservations (DEC-105). A
-//! case that uses anything owned by a later story fails with "not interpreted until <story>" for
-//! each such item; anything the vocabulary does not know fails as unknown. Every key of every
-//! interpreted expectation is checked.
+//! `buying_power` expectation, the fold's model buying power with no reservations (DEC-105); E4-1
+//! adds the backtest cases — `bars`, `orders`, `isolation`, and the `fills` and `canceled_legs`
+//! expectations, run through `mandate-sim` (DEC-106 item 11). A case that uses anything owned by a
+//! later story fails with "not interpreted until <story>" for each such item; anything the
+//! vocabulary does not know fails as unknown. Every key of every interpreted expectation is checked.
 
 use core::fmt::Display;
 use std::collections::BTreeSet;
@@ -23,15 +24,21 @@ use mandate_accounting::{
 };
 use mandate_canon::DecStr;
 use mandate_num::{
-    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, Rounding, ShareIncrement, SignedQty,
-    SplitRatio, Usd,
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, Rounding, ShareIncrement,
+    SignedQty, SplitRatio, Usd,
 };
-use mandate_time::{Date, TradingCalendar, UtcNanos};
+use mandate_sim::{
+    Eligibility, FirstBarVolumes, Instrument, Nanos, OcoLeg, OrderKind, OrderRef, Session, SimBar,
+    SimConfig, SimError, SimFill, SimOrder, SimOutcome, Slippage, TimeInForce, simulate,
+};
+use mandate_time::{Date, TradingCalendar, UtcNanos, new_york_date_and_hour, new_york_midnight};
 use serde_json::{Map, json};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, u64_at};
 
 const SUITE: &str = "trading_domain";
+/// The broker profile of a backtest case (spec §6.4): no broker, only bars.
+const BACKTEST_PROFILE: &str = "backtest";
 const SCHEMA_VERSION: u64 = 3;
 const CALENDAR_RULE: &str = "weekdays not listed as holidays are trading days";
 const MAX_EXTENDS: usize = 8;
@@ -59,15 +66,9 @@ const PENDING_EXPECT: &[(&str, &str)] = &[
     ("actions", "E7-4"),
     ("agent_mode", "E6-9"),
     ("day_trade_count", "E6-6"),
-    ("fills", "E4-1"),
-    ("canceled_legs", "E4-1"),
     ("reconciliation", "E7-3"),
     ("protective_sell_qty", "E7-4"),
 ];
-
-/// Case-level keys of backtest cases.
-const PENDING_CASE_KEYS: &[(&str, &str)] =
-    &[("bars", "E4-1"), ("orders", "E4-1"), ("isolation", "E4-1")];
 
 const PENDING_INITIAL: &[(&str, &str)] = &[("open_orders", "E7-4"), ("agents", "E7-5")];
 
@@ -259,12 +260,6 @@ fn pending(case: &Json) -> BTreeSet<String> {
         out.insert(format!("{what} not interpreted until {story}"));
     };
     let empty = Map::new();
-    let members = case.as_object().unwrap_or(&empty);
-    for key in members.keys() {
-        if let Some(story) = owner(PENDING_CASE_KEYS, key) {
-            note(format!("case key `{key}`"), story);
-        }
-    }
     let instruments = case.get("instruments").and_then(Json::as_object);
     for instrument in instruments.into_iter().flat_map(Map::values) {
         for key in instrument.as_object().unwrap_or(&empty).keys() {
@@ -323,6 +318,9 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let pending = pending(case);
     if !pending.is_empty() {
         return Err(pending.into_iter().collect::<Vec<_>>().join("; "));
+    }
+    if str_at(case, "broker_profile")? == BACKTEST_PROFILE {
+        return backtest::run(fixture, case);
     }
     fields(
         case,
@@ -1117,4 +1115,584 @@ fn check_conservation(
         check_dec(&format!("conservation.{field}"), actual, value)?;
     }
     Ok(())
+}
+
+/// The backtest cases (trading-domain spec §6.4; RC-10, RC-12, RC-19; DEC-106 item 11). A backtest
+/// case has `bars` and `orders` instead of `steps`: every order carries its own expectation, and
+/// `isolation: per_order` simulates each one alone against a fresh volume cap.
+///
+/// Sessions, session starts, auction bars, and trading dates are the labels `mandate-sim` reads from
+/// each bar (spec §4.1). The harness derives them from the bar's instant: the New York hour comes
+/// from `mandate-time`, and the minute of an instant is its UTC minute, because every New York
+/// offset is a whole number of hours. A bar starting exactly at the regular session's open is the
+/// auction bar (DEC-106 item 5).
+mod backtest {
+    use super::*;
+
+    /// 04:00, 09:30, 16:00, 13:00 on an early close, and 20:00 ET, as minutes from New York midnight
+    /// (spec §4.3).
+    const PRE_MARKET_OPEN: i64 = 4 * 60;
+    const REGULAR_OPEN: i64 = 9 * 60 + 30;
+    const EARLY_CLOSE: i64 = 13 * 60;
+    const REGULAR_CLOSE: i64 = 16 * 60;
+    const OVERNIGHT_OPEN: i64 = 20 * 60;
+    const SECONDS_PER_DAY: i64 = 24 * 60 * 60;
+
+    const PURPOSES: [&str; 5] = [
+        "open",
+        "protective",
+        "risk_exit",
+        "discretionary_exit",
+        "owner_exit",
+    ];
+
+    /// One 20-session median, from the case's `first_bar_reference_volume`, for every bar that opens
+    /// a session (spec §6.4 rule 3).
+    struct Medians(Option<Qty>);
+
+    impl FirstBarVolumes for Medians {
+        fn median_at(&self, _bar_start: UtcNanos) -> Option<Qty> {
+            self.0
+        }
+    }
+
+    fn sim<T>(result: Result<T, SimError>) -> Result<T, String> {
+        result.map_err(|e| format!("{e} ({})", e.code()))
+    }
+
+    pub(super) fn run(fixture: &Json, case: &Json) -> Result<(), String> {
+        fields(
+            case,
+            "backtest case",
+            &[
+                "id",
+                "title",
+                "scope",
+                "broker_profile",
+                "config",
+                "config_overrides",
+                "calendar",
+                "instruments",
+                "isolation",
+                "bars",
+                "orders",
+            ],
+        )?;
+        let config = config_of(fixture, case)?;
+        let name = str_at(case, "calendar")?;
+        let calendar = calendar(fixture, name)?;
+        let early = early_closes(fixture, name)?;
+        let listed = instruments(case)?;
+        let (_, _, class, fractionable) = match listed.as_slice() {
+            [only] => only,
+            _ => return Err("a backtest case names exactly one instrument".to_owned()),
+        };
+        let instrument = Instrument {
+            asset_class: *class,
+            increment: match fractionable {
+                Some(true) => ShareIncrement::Fractional,
+                _ => ShareIncrement::Whole,
+            },
+        };
+        let per_order = match case.get("isolation").map(Json::as_str) {
+            None => false,
+            Some(Some("per_order")) => true,
+            Some(other) => return Err(format!("unknown isolation {other:?}")),
+        };
+        let shared = case.get("bars");
+        let mut orders = Vec::new();
+        for listed in list_at(case, "orders")? {
+            let name = str_at(listed, "name")?.to_owned();
+            fields(
+                listed,
+                &format!("order `{name}`"),
+                &[
+                    "name",
+                    "initial_position",
+                    "decided_at",
+                    "order",
+                    "bars",
+                    "first_bar_reference_volume",
+                    "expect",
+                ],
+            )
+            .and_then(|_| {
+                let bars = listed
+                    .get("bars")
+                    .or(shared)
+                    .ok_or("neither the case nor the order has `bars`")?;
+                let bars: Vec<SimBar> = list_at(&json!({ "bars": bars }), "bars")?
+                    .iter()
+                    .map(|bar| bar_of(bar, *class, &calendar, &early))
+                    .collect::<Result<_, String>>()?;
+                let median = match listed.get("first_bar_reference_volume") {
+                    None => None,
+                    Some(volume) => Some(num(
+                        Qty::parse(dec(volume, "first_bar_reference_volume")?.as_str()),
+                        "first_bar_reference_volume",
+                    )?),
+                };
+                let order = order_of(listed)?;
+                Ok((bars, median, order, listed.get("expect")))
+            })
+            .map_err(|e: String| format!("order `{name}`: {e}"))
+            .map(|built| orders.push((name, built)))?;
+        }
+        ensure(per_order || orders.len() <= 1 || shared.is_some(), || {
+            "orders without `isolation: per_order` need the case's own `bars`".to_owned()
+        })?;
+        if per_order {
+            for (name, (bars, median, order, expect)) in &orders {
+                let outcome = simulated(&config, &instrument, bars, &Medians(*median), &[*order])?;
+                if let Some(expect) = expect {
+                    check(expect, &outcome, OrderRef::new(0))
+                        .map_err(|e| format!("order `{name}`: {e}"))?;
+                }
+            }
+            return Ok(());
+        }
+        let bars = orders
+            .first()
+            .map(|(_, (bars, _, _, _))| bars.clone())
+            .unwrap_or_default();
+        let median = orders.first().and_then(|(_, (_, median, _, _))| *median);
+        let submitted: Vec<SimOrder> = orders.iter().map(|(_, (_, _, o, _))| *o).collect();
+        let outcome = simulated(&config, &instrument, &bars, &Medians(median), &submitted)?;
+        for (index, (name, (_, _, _, expect))) in orders.iter().enumerate() {
+            if let Some(expect) = expect {
+                check(expect, &outcome, OrderRef::new(index))
+                    .map_err(|e| format!("order `{name}`: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    fn simulated(
+        config: &SimConfig,
+        instrument: &Instrument,
+        bars: &[SimBar],
+        medians: &Medians,
+        orders: &[SimOrder],
+    ) -> Result<SimOutcome, String> {
+        let coverage_start = bars
+            .first()
+            .map(|b| b.start)
+            .ok_or("a backtest case needs at least one bar")?;
+        sim(simulate(
+            config,
+            instrument,
+            bars,
+            coverage_start,
+            medians,
+            orders,
+        ))
+    }
+
+    /// The `backtest` block of the case's configuration (spec §6.4). A configuration that states a
+    /// reference, a first-bar source, or a tick rounding other than the spec's fixed ones fails.
+    fn config_of(fixture: &Json, case: &Json) -> Result<SimConfig, String> {
+        let resolved = resolved_config(fixture, case)?;
+        let backtest = at(&resolved, "backtest")?;
+        fields(
+            backtest,
+            "config backtest",
+            &[
+                "decision_latency_ms",
+                "approval_latency_ms",
+                "slippage",
+                "volume_cap",
+                "fill_price_tick_rounding",
+            ],
+        )?;
+        fixed(backtest, "fill_price_tick_rounding", &json!("none"))?;
+        let slippage = at(backtest, "slippage")?;
+        fields(
+            slippage,
+            "config backtest.slippage",
+            &[
+                "half_spread_bps",
+                "impact_model",
+                "impact_bps",
+                "impact_coefficient_bps",
+            ],
+        )?;
+        let half_spread_bps = num(
+            Bps::parse(dec_at(slippage, "half_spread_bps")?.as_str()),
+            "half_spread_bps",
+        )?;
+        let slippage = match str_at(slippage, "impact_model")? {
+            "fixed" => Slippage::Fixed {
+                half_spread_bps,
+                impact_bps: num(
+                    Bps::parse(dec_at(slippage, "impact_bps")?.as_str()),
+                    "impact_bps",
+                )?,
+            },
+            "sqrt" => Slippage::Sqrt {
+                half_spread_bps,
+                coefficient_bps: num(
+                    Bps::parse(dec_at(slippage, "impact_coefficient_bps")?.as_str()),
+                    "impact_coefficient_bps",
+                )?,
+            },
+            other => return Err(format!("unknown impact_model `{other}`")),
+        };
+        let cap = at(backtest, "volume_cap")?;
+        fields(
+            cap,
+            "config backtest.volume_cap",
+            &["fraction", "reference", "first_bar"],
+        )?;
+        fixed(cap, "reference", &json!("previous_bar_same_session"))?;
+        fixed(cap, "first_bar", &json!("median_same_minute_20_sessions"))?;
+        Ok(SimConfig {
+            decision_latency: sim(Nanos::from_millis(u64_at(backtest, "decision_latency_ms")?))?,
+            approval_latency: sim(Nanos::from_millis(u64_at(backtest, "approval_latency_ms")?))?,
+            slippage,
+            volume_cap_fraction: num(
+                Fraction::parse(dec_at(cap, "fraction")?.as_str()),
+                "fraction",
+            )?,
+        })
+    }
+
+    /// The calendar's early closes, on which the regular session ends at 13:00 ET (spec §4.3).
+    fn early_closes(fixture: &Json, name: &str) -> Result<Vec<Date>, String> {
+        let listed = at(fixture, "calendars")?
+            .get(name)
+            .ok_or_else(|| format!("no calendar `{name}`"))?;
+        dates(at(listed, "early_closes")?, "early_closes")
+    }
+
+    /// One bar, with the session labels the fill model reads (spec §4.1, §4.3).
+    fn bar_of(
+        bar: &Json,
+        class: AssetClass,
+        calendar: &TradingCalendar,
+        early: &[Date],
+    ) -> Result<SimBar, String> {
+        fields(
+            bar,
+            "bar",
+            &["start", "open", "high", "low", "close", "volume", "session"],
+        )?;
+        let start = UtcNanos::parse_rfc3339(str_at(bar, "start")?)
+            .map_err(|e| format!("bar `start`: {e}"))?;
+        let (session, session_start, trade_date) = label(start, class, calendar, early)?;
+        if let Some(stated) = bar.get("session") {
+            let stated = stated
+                .as_str()
+                .ok_or("a bar's `session` is not a string")?
+                .to_owned();
+            expect_eq("bar session", name_of(session), stated.as_str())?;
+        }
+        let price = |key: &str| num(Price::parse(dec_at(bar, key)?.as_str()), key);
+        Ok(SimBar {
+            start,
+            open: price("open")?,
+            high: price("high")?,
+            low: price("low")?,
+            close: price("close")?,
+            volume: num(Qty::parse(dec_at(bar, "volume")?.as_str()), "volume")?,
+            trade_date,
+            session,
+            session_start,
+            auction: session == Session::Regular && start == session_start,
+        })
+    }
+
+    fn name_of(session: Session) -> &'static str {
+        match session {
+            Session::Overnight => "overnight",
+            Session::PreMarket => "pre_market",
+            Session::Regular => "regular",
+            Session::AfterHours => "after_hours",
+            Session::Continuous => "continuous",
+        }
+    }
+
+    /// The session, its first instant, and the trading day of an instant. Crypto trades continuously,
+    /// in a day that ends at 00:00 UTC (spec §2.2, §4.3).
+    fn label(
+        start: UtcNanos,
+        class: AssetClass,
+        calendar: &TradingCalendar,
+        early: &[Date],
+    ) -> Result<(Session, UtcNanos, Date), String> {
+        if class == AssetClass::Crypto {
+            let midnight = start
+                .secs()
+                .checked_sub(start.secs().rem_euclid(SECONDS_PER_DAY))
+                .ok_or("a bar's start is out of range")?;
+            let session_start =
+                UtcNanos::from_parts(midnight, 0).map_err(|e| format!("bar `start`: {e}"))?;
+            return Ok((Session::Continuous, session_start, start.date()));
+        }
+        let (date, hour) =
+            new_york_date_and_hour(start).map_err(|e| format!("bar `start`: {e}"))?;
+        let minute = start.secs().rem_euclid(3600) / 60;
+        let minutes = i64::from(hour)
+            .checked_mul(60)
+            .and_then(|h| h.checked_add(minute))
+            .ok_or("a bar's start is out of range")?;
+        let close = if early.contains(&date) {
+            EARLY_CLOSE
+        } else {
+            REGULAR_CLOSE
+        };
+        let (session, session_minutes) = match minutes {
+            m if m < PRE_MARKET_OPEN => {
+                (Session::Overnight, -(SECONDS_PER_DAY / 60) + OVERNIGHT_OPEN)
+            }
+            m if m < REGULAR_OPEN => (Session::PreMarket, PRE_MARKET_OPEN),
+            m if m < close => (Session::Regular, REGULAR_OPEN),
+            m if m < OVERNIGHT_OPEN => (Session::AfterHours, close),
+            _ => (Session::Overnight, OVERNIGHT_OPEN),
+        };
+        let midnight = new_york_midnight(date).map_err(|e| format!("bar `start`: {e}"))?;
+        let session_start = midnight
+            .secs()
+            .checked_add(session_minutes.saturating_mul(60))
+            .ok_or("a bar's session start is out of range")
+            .and_then(|secs| {
+                UtcNanos::from_parts(secs, 0).map_err(|_| "a bar's session start is out of range")
+            })?;
+        let trade_date = calendar
+            .equity_trade_date(start)
+            .map_err(|e| format!("bar `start`: {e}"))?;
+        Ok((session, session_start, trade_date))
+    }
+
+    /// One order, and the position it exits. A sell may never exceed the position held: v1 has no
+    /// short sales (DEC-32), so a case cannot describe one.
+    ///
+    /// No backtest case states a time in force or `extended_hours`, so neither is interpreted
+    /// (DEC-85): every order is a day order that trades only the regular session, the most
+    /// restrictive reading, and a case that states either key fails as an unknown one.
+    fn order_of(listed: &Json) -> Result<SimOrder, String> {
+        let held = match listed.get("initial_position") {
+            None => Qty::ZERO,
+            Some(position) => {
+                fields(position, "initial_position", &["qty"])?;
+                num(Qty::parse(dec_at(position, "qty")?.as_str()), "qty")?
+            }
+        };
+        let order = at(listed, "order")?;
+        fields(
+            order,
+            "order",
+            &[
+                "side",
+                "type",
+                "qty",
+                "limit_price",
+                "stop_price",
+                "legs",
+                "purpose",
+                "resting_since_bar",
+                "resting_since",
+            ],
+        )?;
+        let eligible_from = match (
+            order.get("resting_since_bar"),
+            order.get("resting_since"),
+            listed.get("decided_at"),
+        ) {
+            (Some(bar), None, None) => Eligibility::Resting {
+                from_bar: usize::try_from(u64_at(order, "resting_since_bar")?)
+                    .map_err(|_| format!("`resting_since_bar` {bar} is not a bar index"))?,
+            },
+            (None, Some(since), None) => {
+                expect_eq(
+                    "resting_since",
+                    since.as_str(),
+                    Some("previous_trading_day"),
+                )?;
+                Eligibility::Resting { from_bar: 0 }
+            }
+            (None, None, Some(decided)) => Eligibility::DecidedAt {
+                at: UtcNanos::parse_rfc3339(
+                    decided.as_str().ok_or("`decided_at` is not a string")?,
+                )
+                .map_err(|e| format!("`decided_at`: {e}"))?,
+                approval_required: false,
+            },
+            _ => {
+                return Err(
+                    "an order needs exactly one of `decided_at`, `resting_since_bar`, and \
+                     `resting_since`"
+                        .to_owned(),
+                );
+            }
+        };
+        let price = |key: &str| num(Price::parse(dec_at(order, key)?.as_str()), key);
+        let (side, qty, kind) = match str_at(order, "type")? {
+            "oco" => oco(order)?,
+            other => {
+                let side = side_of(str_at(order, "side")?)?;
+                let qty = num(Qty::parse(dec_at(order, "qty")?.as_str()), "qty")?;
+                let kind = match other {
+                    "market" => OrderKind::Market,
+                    "limit" => OrderKind::Limit {
+                        limit: price("limit_price")?,
+                    },
+                    "stop" => OrderKind::Stop {
+                        stop: price("stop_price")?,
+                    },
+                    "stop_limit" => OrderKind::StopLimit {
+                        stop: price("stop_price")?,
+                        limit: price("limit_price")?,
+                    },
+                    unknown => return Err(format!("unknown order type `{unknown}`")),
+                };
+                (side, qty, kind)
+            }
+        };
+        if let Some(purpose) = order.get("purpose") {
+            let purpose = purpose.as_str().ok_or("`purpose` is not a string")?;
+            ensure(PURPOSES.contains(&purpose), || {
+                format!("unknown purpose `{purpose}`")
+            })?;
+            ensure(purpose == "open" || !held.is_zero(), || {
+                format!("a `{purpose}` order has no position to exit")
+            })?;
+        }
+        ensure(side == Side::Buy || qty <= held, || {
+            "a sell exceeds the position held, which v1 never does (DEC-32)".to_owned()
+        })?;
+        Ok(SimOrder {
+            side,
+            qty,
+            kind,
+            tif: TimeInForce::Day,
+            extended_hours: false,
+            eligible_from,
+        })
+    }
+
+    /// A protective pair: one limit leg and one stop leg, the same side and quantity (spec §5.4).
+    fn oco(order: &Json) -> Result<(Side, Qty, OrderKind), String> {
+        let legs = list_at(order, "legs")?;
+        let [first, second] = legs else {
+            return Err("an OCO has exactly two legs".to_owned());
+        };
+        let mut limit = None;
+        let mut stop = None;
+        let mut sides = Vec::new();
+        let mut quantities = Vec::new();
+        for leg in [first, second] {
+            fields(
+                leg,
+                "OCO leg",
+                &["side", "type", "qty", "limit_price", "stop_price"],
+            )?;
+            sides.push(side_of(str_at(leg, "side")?)?);
+            quantities.push(num(Qty::parse(dec_at(leg, "qty")?.as_str()), "qty")?);
+            match str_at(leg, "type")? {
+                "limit" => {
+                    limit = Some(num(
+                        Price::parse(dec_at(leg, "limit_price")?.as_str()),
+                        "limit_price",
+                    )?);
+                }
+                "stop" => {
+                    stop = Some(num(
+                        Price::parse(dec_at(leg, "stop_price")?.as_str()),
+                        "stop_price",
+                    )?);
+                }
+                other => return Err(format!("an OCO leg is limit or stop, not `{other}`")),
+            }
+        }
+        match (limit, stop, sides.as_slice(), quantities.as_slice()) {
+            (Some(limit), Some(stop), [a, b], [x, y]) if a == b && x == y => {
+                Ok((*a, *x, OrderKind::Oco { limit, stop }))
+            }
+            (Some(_), Some(_), _, _) => {
+                Err("an OCO's legs have the same side and quantity".to_owned())
+            }
+            _ => Err("an OCO has one limit leg and one stop leg".to_owned()),
+        }
+    }
+
+    fn side_of(text: &str) -> Result<Side, String> {
+        match text {
+            "buy" => Ok(Side::Buy),
+            "sell" => Ok(Side::Sell),
+            other => Err(format!("unknown side `{other}`")),
+        }
+    }
+
+    /// The `fills` and `canceled_legs` expectations of one order. Every key a case states is
+    /// compared; liquidity is compared only where the case states it (DEC-106 item 11).
+    fn check(expect: &Json, outcome: &SimOutcome, order: OrderRef) -> Result<(), String> {
+        let stated = fields(expect, "expect", &["fills", "canceled_legs"])?;
+        for (key, value) in stated {
+            match key.as_str() {
+                "fills" => check_fills(value, outcome, order)?,
+                _ => {
+                    let expected: Vec<&str> = value
+                        .as_array()
+                        .ok_or("`canceled_legs` is not a list")?
+                        .iter()
+                        .map(|leg| leg.as_str().ok_or("a canceled leg is not a string"))
+                        .collect::<Result<_, _>>()?;
+                    let actual: Vec<&str> = outcome
+                        .canceled_legs
+                        .iter()
+                        .filter(|canceled| canceled.order == order)
+                        .map(|canceled| leg_name(canceled.leg))
+                        .collect();
+                    expect_eq("canceled_legs", actual, expected)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn check_fills(expected: &Json, outcome: &SimOutcome, order: OrderRef) -> Result<(), String> {
+        let expected = expected.as_array().ok_or("`fills` is not a list")?;
+        let actual: Vec<&SimFill> = outcome.fills_of(order).collect();
+        expect_eq("fills: count", actual.len(), expected.len())?;
+        for (n, (fill, wanted)) in actual.iter().zip(expected).enumerate() {
+            let what = |key: &str| format!("fills[{n}].{key}");
+            let stated = fields(
+                wanted,
+                &format!("fills[{n}]"),
+                &["bar", "qty", "price", "leg", "liquidity"],
+            )?;
+            for (key, value) in stated {
+                match key.as_str() {
+                    "bar" => expect_eq(
+                        &what("bar"),
+                        u64::try_from(fill.bar).unwrap_or(u64::MAX),
+                        u64_at(wanted, "bar")?,
+                    )?,
+                    "qty" => check_dec(&what("qty"), fill.qty, value)?,
+                    "price" => check_dec(&what("price"), fill.price, value)?,
+                    "leg" => expect_eq(&what("leg"), fill.leg.map(leg_name), value.as_str())?,
+                    _ => expect_eq(
+                        &what("liquidity"),
+                        fill.liquidity.map(liquidity_name),
+                        value.as_str(),
+                    )?,
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn leg_name(leg: OcoLeg) -> &'static str {
+        match leg {
+            OcoLeg::Limit => "limit",
+            OcoLeg::Stop => "stop",
+        }
+    }
+
+    fn liquidity_name(liquidity: Liquidity) -> &'static str {
+        match liquidity {
+            Liquidity::Maker => "maker",
+            Liquidity::Taker => "taker",
+        }
+    }
 }
