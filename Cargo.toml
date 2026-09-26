@@ -11,7 +11,11 @@ mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
+<<<<<<< HEAD
 mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
+=======
+mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
+>>>>>>> origin/main
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 anyhow = "1.0.104"
