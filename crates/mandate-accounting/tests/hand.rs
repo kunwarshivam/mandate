@@ -1155,3 +1155,81 @@ fn per_order_taf_room_counts_executions_charged_per_execution() {
         a = applied.account;
     }
 }
+
+/// Closing a position at its average cost realizes nothing: a long of 1 with B 100 sold at 100
+/// realizes −(−1 × 100) − 100 = 0, and a short of 1 with B −100 bought back at 100 realizes
+/// −(1 × 100) − (−100) = 0. Both end flat with zero basis.
+#[test]
+fn closing_at_the_average_cost_realizes_nothing() {
+    let config = no_fees();
+    for (qty, basis, side) in [("1", "100", Side::Sell), ("-1", "-100", Side::Buy)] {
+        let a = Account::opening(usd("1000"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = step(
+            &a,
+            &equity("f1", "XYZ", side, "1", "100", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), ("0".into(), "0".into()), "{qty}");
+        assert_eq!(text(a.realized_gross()), "0", "{qty}");
+    }
+}
+
+fn taf(record: &Record) -> Vec<String> {
+    match record {
+        Record::Fill { fees, .. } => fees
+            .iter()
+            .filter(|f| f.kind == FeeKind::Taf)
+            .map(|f| text(f.usd))
+            .collect(),
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Both TAF cap modes follow one rule: TAF = min(rate × shares, cap − TAF already charged on the
+/// order), where only per-order mode counts earlier executions of the same order (DEC-87). Selling
+/// 100 shares at 50 at 0.0002 per share is 0.02 uncapped: a zero cap charges 0, a cap of 0.015
+/// charges 0.015, and 9.79 charges 0.02, in both modes, with a client order ID (`o1`) and without
+/// one. A second execution of `o1` pays the same again per execution; per order it pays only what
+/// is left: 0 − 0 = 0, 0.015 − 0.015 = 0, and min(0.02, 9.79 − 0.02) = 0.02.
+#[test]
+fn both_taf_cap_modes_charge_one_execution_orders_alike() {
+    let sell = |fill_id, order| {
+        Fill {
+            fill_id,
+            order,
+            instrument: "XYZ",
+            asset_class: AssetClass::UsEquity,
+            side: Side::Sell,
+            qty: "100",
+            price: "50",
+            liquidity: None,
+            at: "2026-09-21T11:00:00-04:00",
+        }
+        .input()
+    };
+    for (cap, capped, per_order_again) in [
+        ("0", "0", "0"),
+        ("0.015", "0.015", "0"),
+        ("9.79", "0.02", "0.02"),
+    ] {
+        for (basis, again) in [
+            (TafCapBasis::PerExecution, capped),
+            (TafCapBasis::PerOrder, per_order_again),
+        ] {
+            let mut config = test_default();
+            config.equities.taf_cap = fee_cap(cap);
+            config.equities.taf_cap_basis = basis;
+            let held = build("300", "14700").unwrap();
+            let a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+            let first = a.apply(&sell("f1", Some("o1")), &config).unwrap();
+            assert_eq!(taf(&first.record), [capped], "{cap} {basis:?} f1");
+            let second = first.account.apply(&sell("f2", None), &config).unwrap();
+            assert_eq!(taf(&second.record), [capped], "{cap} {basis:?} f2");
+            let third = second
+                .account
+                .apply(&sell("f3", Some("o1")), &config)
+                .unwrap();
+            assert_eq!(taf(&third.record), [again], "{cap} {basis:?} f3");
+        }
+    }
+}
