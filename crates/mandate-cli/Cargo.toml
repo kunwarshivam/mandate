@@ -21,3 +21,6 @@ mandate-time.workspace = true
 serde.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 toml.workspace = true
+
+[dev-dependencies]
+mandate-canon.workspace = true

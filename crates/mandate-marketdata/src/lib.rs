@@ -10,6 +10,7 @@ pub mod client;
 pub mod dataset;
 pub mod download;
 pub mod http;
+pub mod inspect;
 pub mod model;
 pub mod number;
 pub mod timestamp;
