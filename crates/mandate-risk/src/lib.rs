@@ -58,7 +58,7 @@ pub use spec_types::{
 /// [the trading-domain reference cases](../../../docs/specs/reference-cases/trading-domain.yaml).
 ///
 /// Every variant is a code that file's `reason_codes` list registers. §5.3 rule 2's minimum size
-/// and increment have no registered code, which is why no variant names them: DEC-129 item 26
+/// and increment have no registered code, which is why no variant names them: DEC-129 item 27
 /// proposes `below_min_order_size` and `quantity_off_increment` to the founder, and until they are
 /// registered the gate denies without minting one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -433,7 +433,7 @@ pub struct GateConfig {
     pub daily_participation: Fraction,
     pub close_window_minutes: u32,
     pub legacy_pdt_equity_threshold: Usd,
-    /// §3.2 item 6's "configured age", which `test_default` does not carry (DEC-129 items 10, 25).
+    /// §3.2 item 6's "configured age", which `test_default` does not carry (DEC-129 items 10, 26).
     pub etp_classification_max_age_s: u32,
 }
 

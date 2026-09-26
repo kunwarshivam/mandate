@@ -1513,6 +1513,6 @@ fn every_reason_code_is_registered_in_the_case_file() {
         .collect();
     assert!(
         resolved.is_empty(),
-        "DEC-129 item 24 is settled for {resolved:?}: drop it from KNOWN_UNREGISTERED"
+        "DEC-129 item 25 is settled for {resolved:?}: drop it from KNOWN_UNREGISTERED"
     );
 }
