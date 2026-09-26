@@ -1,5 +1,5 @@
-//! Parquet partitions hold every vendor value exactly, as `Decimal128(38, s)` at a fixed scale per
-//! column (ADR-0001 ES-23, DEC-89).
+//! Parquet partitions hold every vendor value exactly, as `Decimal128(38, s)` with the scale the
+//! manifest records (ADR-0001 ES-23, DEC-89).
 
 mod common;
 
@@ -9,7 +9,7 @@ use arrow_schema::{DataType, TimeUnit};
 use common::{Scratch, btc_1hour, btc_trades, day, scenario, shy_iex_trades, spy_sip_1hour};
 use mandate_canon::DecStr;
 use mandate_marketdata::alpaca;
-use mandate_marketdata::dataset::{self, DatasetError};
+use mandate_marketdata::dataset::{self, DatasetError, Store};
 use mandate_marketdata::model::{DatasetId, Records};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -67,24 +67,36 @@ fn encoding_is_deterministic() {
 }
 
 #[test]
-fn columns_are_decimal128_at_their_documented_scales() {
+fn columns_are_decimal128_with_the_scales_the_manifest_records() {
     let scratch = Scratch::new("scales");
+    let store = Store::new(scratch.path());
     for (id, records) in every_recording() {
-        let path = scratch.path().join("partition.parquet");
-        fs::write(&path, dataset::encode(&id, &records).unwrap()).unwrap();
-        let schema = ParquetRecordBatchReaderBuilder::try_new(File::open(&path).unwrap())
+        let outcome = store.put_day(&id, day("2026-09-24"), &records).unwrap();
+        assert!(outcome.file.is_some());
+        let dir = store.dataset_dir(&id);
+        let manifest = fs::read(dir.join(dataset::MANIFEST)).unwrap();
+        let manifest = mandate_canon::parse(&manifest).unwrap();
+        let scales = manifest.get("scales").and_then(|s| s.as_object()).unwrap();
+        let file = File::open(dir.join("2026-09-24.parquet")).unwrap();
+        let schema = ParquetRecordBatchReaderBuilder::try_new(file)
             .unwrap()
             .schema()
             .clone();
-        let decimals: Vec<(&str, u8)> = schema
-            .fields()
-            .iter()
-            .filter_map(|f| match f.data_type() {
-                DataType::Decimal128(38, s) => Some((f.name().as_str(), u8::try_from(*s).unwrap())),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(decimals, dataset::decimal_scales(id.kind()), "{id:?}");
+        assert_eq!(
+            scales.len(),
+            dataset::decimal_scales(id.kind()).len(),
+            "{id:?}"
+        );
+        for (column, scale) in scales {
+            let scale = u8::try_from(scale.as_int().unwrap()).unwrap();
+            let field = schema.field_with_name(column.as_str()).unwrap();
+            assert_eq!(
+                field.data_type(),
+                &DataType::Decimal128(38, i8::try_from(scale).unwrap()),
+                "{id:?} {}",
+                column.as_str()
+            );
+        }
         let time = schema.field(1);
         assert_eq!(
             time.data_type(),
