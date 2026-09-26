@@ -99,6 +99,29 @@ every workspace crate and reference-case suite has an entry and that every path 
   `cargo test -p mandate-refcases --test refcases -- --include-ignored --exact trading_domain::RC-10
   trading_domain::RC-12 trading_domain::RC-19`.
 
+## Baseline backtest and metrics report
+
+Planned by [the E4-2 task brief](../../../docs/project/tasks/E4-2-backtest-baseline.md) and DEC-127;
+the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/trading-domain.md` §2.1 (decimals, one rounding per formula, limit prices on
+  the tick), §2.2 (trade dates), §5.1 and §5.3 (the order policy the baseline obeys), §6.2 and §6.3
+  (fees), §8.2 to §8.4 (the backtest mark is the bar close, cash, settlement); PRD FR-4.1, FR-4.2,
+  FR-4.5; `docs/specs/journal.md` §12 (`BacktestRunRecorded`, appended by a later story). The metric
+  definitions have no spec section yet: they live in the brief and DEC-127.
+- **Code:** `mandate-backtest` (new; the loop over bars, the moving-average baseline, the
+  buy-and-hold benchmark, and the metrics report with its canonical serialization), driving
+  `mandate-sim`'s fill model and `mandate-accounting`'s fold unchanged; the exact arithmetic
+  (`Ratio`, ratios, truncated share counts, sample variance, the 12-place roots, and the Reg NMS
+  tick) is `mandate-num`'s.
+- **Tests:** the hand-calculated metric block of the brief, the loop-ordering and no-look-ahead
+  cases, the signal and benchmark cases, and property tests against an independent `i128` ledger and
+  an independent statistics oracle; a committed golden report pins the canonical bytes and digest.
+  Planted bugs per test: the task brief.
+- **Reference cases:** none. The backtest cases `trading_domain::RC-10`, `RC-12`, and `RC-19` belong
+  to E4-1, and `fixtures/refcases/trading-domain.json` holds no metrics case.
+- **Run:** `cargo nextest run -p mandate-backtest`.
+
 ## Journal drafts and the event catalogue
 
 - **Spec:** `docs/specs/journal.md` §2, §3, §9.
