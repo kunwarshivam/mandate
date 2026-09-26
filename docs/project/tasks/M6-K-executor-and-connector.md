@@ -308,8 +308,10 @@ pub enum Input {
     /// An event tailed from a stream the executor follows, in `seq` order. The agent streams it
     /// follows are where `IntentProposed` arrives from.
     Journal(FoldedEvent),
-    /// An intent handed in process by `IntentSink` (ES-20). Carries no authority: it is journaled as
-    /// `IntentReceived` and then gated like any other.
+    /// An intent the shell's adapter took from stream I's `IntentSink` (ES-20). Carries no authority:
+    /// it is journaled as `IntentReceived` and then gated like any other. Both `IntentBody` variants
+    /// arrive here, an `Order` and a `Flatten(FlattenPlan)`, so the agent-scoped kill switch's plan
+    /// comes down the same path as an ordinary proposal.
     Intent(IntentHandoff),
     /// What the connector answered, or that it answered nothing. The only way a broker fact enters.
     Broker(BrokerOutcome),
@@ -384,6 +386,36 @@ reads the agent stream from its folded position and journals `IntentReceived` �
 the journal either way. Nothing about the executor changes between the two, which is why the shell owns
 the choice and this brief does not.
 
+Stream I's tests PR has merged ([#134](https://github.com/kunwarshivam/mandate/pull/134)), so the
+contract is code rather than prose and this brief pins it to what landed:
+
+```rust
+// mandate_runtime::ports — stream I's, not re-declared here.
+pub trait IntentSink { fn hand(&mut self, handoff: &IntentHandoff) -> Result<(), SinkError>; }
+pub enum SinkError { Unavailable, Refused { reason: String } }
+
+// mandate_runtime::types
+pub struct IntentHandoff { pub intent_id: EventId, pub body: IntentBody }
+pub enum IntentBody {
+    Order { instrument: InstrumentId, side: Side, qty: Qty, limit: Price, purpose: Purpose },
+    Flatten(FlattenPlan),
+}
+```
+
+Three things follow, and each is a test in this stream rather than a note:
+
+- **`intent_id` is already the `IntentProposed` `event_id`**, as the merged doc comment says, so the
+  idempotency chain's first link needs nothing added — the fold lookup of interpretation 8 is the whole
+  of the deduplication.
+- **A `Flatten` handoff is an intent like any other on the way in**, and the agent-scoped rules apply on
+  the way out: cancel by client order id with each confirmed, sells of exactly the sub-ledger quantity,
+  and no path to the account-wide endpoints (interpretation 18).
+- **`SinkError` never carries a trading verdict.** `mandate-runtime` maps *either* variant to
+  `RuntimeError::NotInterpreted { story: "E7-2" }`, which is this story, so the adapter returns `Ok`
+  once `IntentReceived` has committed and `Unavailable` when it could not, and **never** `Refused` for a
+  gate denial — a denial is a journaled `GateDecided`, not a sink failure. An adapter that answered
+  `Refused` on a deny would turn every denied proposal into a runtime error in stream I.
+
 The idempotency key is a type, not a convention:
 
 ```rust
@@ -416,7 +448,10 @@ impl ClientOrderId {
 /// same id out, so a retry after `Unavailable` or `Ambiguous` re-derives it.
 pub trait IdGen { fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId; }
 
-/// Stream F's mandate view and stream G's instrument snapshot, read-only.
+/// Stream F's mandate view and stream G's instrument snapshot, read-only. `MandateView` is stream F's
+/// type once `mandate-spec` lands; until then each layer-6 crate declares the narrow view it reads
+/// (stream I already does), and the two converge on F's type in the implementation PR rather than one
+/// same-layer crate importing the other's.
 pub struct Ports<'a> {
     pub ids: &'a dyn IdGen,
     pub mandates: &'a dyn MandateView,

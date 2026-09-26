@@ -1,0 +1,21 @@
+[package]
+name = "mandate-runtime"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The agent runtime core: a pure state machine whose state is a fold of journaled events, with kill switches (backlog E6-1, E6-5)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-canon.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
