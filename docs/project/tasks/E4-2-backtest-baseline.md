@@ -104,7 +104,8 @@ story. This story closes the M3 loop that E4-1 opened: bars in, a signal, an ord
   | Every derived figure recomputes from the figures the report shows (DEC-127 item 15) | `properties::every_reported_statistic_recomputes_from_the_reported_inputs` |
   | FR-4.5, ES-21 identical inputs give byte-identical reports and the same digest | `properties::identical_inputs_give_byte_identical_reports`, `hand::the_report_serializes_to_the_committed_canonical_bytes`, `hand::a_changed_bar_changes_the_bars_digest` |
   | ES-21 no clock, no randomness, no floats, ordered containers only | `properties::a_run_repeated_in_the_same_process_is_equal`, and the crate's lint header |
-  | §6.4 the loop drives the fill model without re-deriving it: the run's fills equal `simulate`'s over the whole bar slice, and a day order's cancellation is read from `SimOutcome::end_of`, never recomputed | `properties::the_runs_fills_are_exactly_what_simulate_returned`, `hand::an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median`, `hand::a_day_orders_remainder_ends_where_simulate_says_it_does` |
+  | §6.4 the loop drives the fill model without re-deriving it: the run's fills equal `simulate`'s over the whole bar slice, and a day order's cancellation is read from the `OrderEnd` that `SimOutcome::end_of` returns, never recomputed | `properties::the_runs_fills_are_exactly_what_simulate_returned`, `hand::an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median`, `hand::a_day_orders_remainder_ends_where_simulate_says_it_does` |
+  | §5.3 rule 6 an order works through the end of the bar that ends it, so that bar submits nothing | `hand::the_bar_that_ends_an_order_submits_no_replacement` |
   | §6.1, §6.2, DEC-87 each fill carries a unique `fill_id` and its order's `client_order_id`, so the per-order TAF cap binds across the order's executions | `hand::two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap`, `properties::no_fill_id_is_ever_reused` |
   | §6.2, §6.3 fees are charged at 20:00 ET for an equity trade date and at 00:00 UTC for a crypto date, and an accrual whose instant the bars never reach stays accrued | `hand::equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`, `hand::crypto_fees_are_charged_at_midnight_utc`, `hand::an_accrual_the_bars_never_reach_stays_accrued` |
   | §8.2 a period closes at its last regular-session bar (an equity) or its last bar of the UTC date (crypto), and a date with no closing bar is no period | `hand::an_after_hours_bar_does_not_close_an_equity_period`, `hand::a_date_covered_only_outside_the_regular_session_is_no_period` |
@@ -353,9 +354,12 @@ An order is simulated by **one `simulate` call over the whole `bars` slice**, wi
 `Eligibility::DecidedAt { at: bars[i + 1].start, approval_required: false }`. The slice is never
 trimmed and the loop never computes an order's last eligible session: §6.4 rule 1 keeps every bar
 before eligibility from filling, and rule 2 decides where a day order's remainder is canceled, which
-the loop reads back as `SimOutcome::end_of` (`Filled`, `Expired { at_bar }`, or `Open`). The order
-stops working after its last fill's bar, after `at_bar`, or not at all, and the loop may submit again
-at the first period close after that.
+the loop reads back as `SimOutcome::end_of`, which returns the order's `OrderEnd`
+(`OrderEnd::Filled`, `Expired { at_bar }`, or `Open`). An order works **through the end of the bar in
+which it stops** — its last fill's bar, or `at_bar` — so step 6 of that bar still sees it as working
+and the loop may submit again only from a later period close. That is the literal reading of §5.3
+rule 6 (never two working orders in one instrument) and costs nothing: a decision is timed at the
+next bar's start anyway, so no fill is lost by waiting one period.
 
 Trimming the slice would change the fills. A bar with no earlier bar of its session **in the slice it
 is given** is the session's first covered bar (DEC-106 item 4), so its cap would come from the
@@ -604,7 +608,10 @@ Three rules hold across the table:
     RC-10, RC-12, and RC-19. Rule 1 keeps earlier bars from filling and rule 2 cancels a day order's
     remainder, which the loop reads back as `SimOutcome::end_of` rather than recomputing. One call per
     order is enough because the baseline keeps at most one order working; multi-order cap sharing
-    stays E4-1's tested behaviour, and a runner with several instruments is a later story.
+    stays E4-1's tested behaviour, and a runner with several instruments is a later story. An order
+    works through the end of the bar in which it stops (its last fill's bar, or the `at_bar` of
+    `OrderEnd::Expired`), so the bar that ends it submits nothing and the next submission comes from a
+    later period close.
 19. **The account** is the broker's type (DEC-105): a margin account, because every Alpaca account
     is one (OD-08), with no reservations and no buying-power check — the risk gate is not in this
     loop (see "Not done"), so a fee can leave settled cash slightly negative, which §8.3 allows for
