@@ -584,7 +584,7 @@ fn an_unresolved_append_is_retried_before_any_new_input() {
     assert_eq!(
         drafted_ids(&resolved),
         drafted,
-        "the retry sends the same drafts with the same derived ids, which is what makes the          append answer AlreadyCommitted rather than appending a second event"
+        "the retry sends the same drafts with the same derived ids, which is what makes the append answer AlreadyCommitted rather than appending a second event"
     );
 }
 
@@ -1628,6 +1628,12 @@ fn a_kill_switch_cancels_every_pending_approval() {
         "the fixture leaves an approval pending"
     );
 
+    let armed_before: Vec<TimerId> = shell.armed.keys().cloned().collect();
+    assert!(
+        !armed_before.is_empty(),
+        "the fixture leaves the approval's deadline armed"
+    );
+
     let ran = shell.run(kill(this_agent(), Initiator::Owner, None), &ports);
     assert!(
         ran.draft_types().contains(&"ApprovalCanceled"),
@@ -1637,6 +1643,21 @@ fn a_kill_switch_cancels_every_pending_approval() {
     assert!(
         shell.state.pending_approvals().is_empty(),
         "so none is left"
+    );
+    for timer in &armed_before {
+        assert!(
+            ran.timers.iter().any(|request| matches!(
+                request,
+                TimerRequest::Cancel { id } if id == timer
+            )),
+            "and the switch disarms what it cancelled, which is kill-switch step 5: {timer:?} was \
+             left armed among {:?}",
+            ran.timers
+        );
+    }
+    assert!(
+        shell.armed.is_empty(),
+        "leaving no timer that could wake the runtime for an approval it has cancelled"
     );
 }
 
@@ -1907,7 +1928,7 @@ fn the_runtime_never_lifts_a_risk_limit_restriction_itself() {
     assert_eq!(
         shell.state.effective_mode(),
         Mode::Paused,
-        "only a copied AgentModeApplied changes the runtime's view, whichever limit latched:          drawdown_flatten lifts by acknowledgment once flat (mandate §5.8), daily_loss          automatically on a new risk day (§5.4), and lifetime_floor only by a loosened version          (§5.7). The runtime lifts none of them itself"
+        "only a copied AgentModeApplied changes the runtime's view, whichever limit latched: drawdown_flatten lifts by acknowledgment once flat (mandate §5.8), daily_loss automatically on a new risk day (§5.4), and lifetime_floor only by a loosened version (§5.7). The runtime lifts none of them itself"
     );
 }
 
@@ -2013,12 +2034,27 @@ fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
     );
     shell.fold_one(&taken).expect("folds");
 
-    let (_after, started) = shell.restart(&ports);
+    let (after, started) = shell.restart(&ports);
     assert!(
         started.handed.is_empty(),
-        "an intent the account stream has taken has a terminal outcome, so it is no longer \
-         outstanding and a restart must not hand it again: {:?}",
+        "the executor has the intent, so handing it again achieves nothing: {:?}",
         started.handed
+    );
+    assert!(
+        after
+            .state
+            .outstanding()
+            .contains_key(&mandate_runtime::EventId(intent.clone())),
+        "but it is still a live order until a terminal outcome, so it stays outstanding: a fold \
+         that dropped it here would leave it out of a flatten's cancel list"
+    );
+    assert!(
+        after
+            .state
+            .pending_handoffs()
+            .iter()
+            .all(|o| o.intent_id.0 != intent),
+        "and out of the set a restart hands again"
     );
 }
 

@@ -385,9 +385,24 @@ pub struct SignalInputs {
     pub now: RiskClock,
 }
 
-/// An outstanding intent, as the fold sees it.
+/// Whether the executor is known to hold an intent yet.
+///
+/// The two states answer different questions and conflating them loses one of them. `Pending` means
+/// the handoff may not have arrived, so `Input::Started` hands it again; `Taken` means the account
+/// stream carries `IntentReceived` for it, so re-handing is pointless. **Both are still live orders**
+/// until a terminal outcome, so both belong in a flatten's `working_orders`: an order the executor
+/// took and is working is exactly the one a kill switch must name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Handoff {
+    Pending,
+    Taken,
+}
+
+/// An intent the fold still holds live: proposed, and with no terminal outcome on the account stream
+/// (an `OrderAbandoned`, a `GateDecided` denial, or a terminal order state).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outstanding {
     pub intent_id: EventId,
     pub purpose: Purpose,
+    pub handoff: Handoff,
 }

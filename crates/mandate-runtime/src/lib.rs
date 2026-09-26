@@ -59,7 +59,8 @@ pub use step::handle;
 pub use types::{
     AgentId, ApprovalOutcome, ApprovalVerdict, Autonomy, Command, ConnectionId, Deployment,
     DryRunVerdict, Effect, EventDraft, EventId, FlattenLeg, FlattenPlan, FlattenRequest,
-    FoldedEvent, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold, MandateView,
-    Mode, ModelOutput, NotificationRef, Observation, Outstanding, OwnerConfirmation, Proposal,
-    Purpose, RiskClock, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId, WriterEpoch,
+    FoldedEvent, Handoff, Initiator, Input, IntentBody, IntentHandoff, KillScope, LocalHold,
+    MandateView, Mode, ModelOutput, NotificationRef, Observation, Outstanding, OwnerConfirmation,
+    Proposal, Purpose, RiskClock, Seq, SignalInputs, TimerId, TimerRequest, WorkspaceId,
+    WriterEpoch,
 };

@@ -339,8 +339,31 @@ proptest! {
     #[ignore = "pending E6-1"]
     fn every_intent_effect_follows_the_draft_that_records_it(
         script in prop::collection::vec(scripted(), 1..8),
+        initiator in initiator(),
     ) {
-        let (_, effects, _) = play(&script, Autonomy::Auto);
+        let ids = TestIds;
+        let gate = AllowGate;
+        let plan = FixedPlan::opening(Autonomy::Auto);
+        let flatten = common::FixedFlatten::one_equity();
+        let view = universe(&["AAPL"]);
+        let switch_ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+        let (mut shell, mut effects, _) = play(&script, Autonomy::Auto);
+        let switched = shell.run(
+            Input::Command(Command::KillSwitch {
+                scope: KillScope::Agent(mandate_runtime::AgentId(common::AGENT.to_owned())),
+                initiator,
+                confirmation: None,
+            }),
+            &switch_ports,
+        );
+        effects.extend(switched.effects);
+        prop_assert!(
+            effects.iter().any(|e| matches!(
+                e,
+                Effect::Intent(handoff) if matches!(handoff.body, IntentBody::Flatten(_))
+            )),
+            "the script ends with a kill switch, so a flatten handoff is always present and the              flatten's own traceability is under test rather than exempted"
+        );
         let mut recorded: BTreeSet<String> = BTreeSet::new();
         for effect in &effects {
             match effect {
@@ -742,7 +765,7 @@ proptest! {
         let (_, effects, _) = play(&script, Autonomy::Auto);
         prop_assert!(
             !effects.is_empty(),
-            "the script starts with a model output, so there is always something to inspect and              this property can never pass vacuously"
+ "the script starts with a model output, so there is always something to inspect and this property can never pass vacuously"
         );
         for effect in &effects {
             match effect {
@@ -757,7 +780,7 @@ proptest! {
                 e,
                 Effect::Journal(_) | Effect::Timer(_) | Effect::Notify(_) | Effect::Intent(_)
             )),
-            "the exhaustive matches above are the assertion: `Effect` and `IntentBody` have no              variant that names a broker, an endpoint, or a credential, so the runtime cannot              reach one (AGENTS.md rule 12). A new variant breaks this test to compile"
+ "the exhaustive matches above are the assertion: `Effect` and `IntentBody` have no variant that names a broker, an endpoint, or a credential, so the runtime cannot reach one (AGENTS.md rule 12). A new variant breaks this test to compile"
         );
     }
 
@@ -1019,7 +1042,7 @@ proptest! {
                     Initiator::RiskLimit => "paused",
                 }
                 .to_owned(),
-                "a switch that journals no mode change found the mode already at its final value,                  which MI-6 requires it not to re-journal"
+ "a switch that journals no mode change found the mode already at its final value, which MI-6 requires it not to re-journal"
             );
         }
     }

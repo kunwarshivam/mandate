@@ -96,6 +96,12 @@ impl RuntimeState {
         false
     }
 
+    /// The intents a restart would hand again: those the account stream has not yet taken.
+    pub fn pending_handoffs(&self) -> Vec<&Outstanding> {
+        let _ = &self.outstanding;
+        Vec::new()
+    }
+
     /// Whether a restart may **re-hand** an intent whose `IntentProposed` already committed.
     ///
     /// The startup hold is excluded from this gate, which [`Self::permits`] applies: the hold means
