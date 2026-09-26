@@ -40,6 +40,7 @@ story.
   | Pagination follows every token, once | `client::pagination_follows_tokens_until_null_in_order`, `client::a_repeated_page_token_is_an_error` |
   | Rate limits and server errors back off; client errors do not retry | `client::rate_limits_and_server_errors_retry_with_exponential_backoff`, `client::retries_stop_after_the_attempt_budget`, `client::client_errors_are_not_retried` |
   | AGENTS.md rule 7: credentials never reach logs, fixtures, or errors | `http::credentials_are_redacted_in_debug_output`, `http::missing_credentials_name_the_variable_not_a_value`, `fixtures::recorded_fixtures_contain_no_credentials` |
+  | Secret-scan exceptions apply only in their own files: page tokens in the recorded fixture pages, the sentinel key ID in `tests/http.rs` (DEC-89) | `cargo xtask ci supply-chain` (`gitleaks-exceptions`: planted cases in a temporary directory) |
   | ES-23 only the paper and data hosts are compiled in | `http::the_data_host_is_the_only_alpaca_host_in_the_source`, `http::only_market_data_paths_are_requested` |
   | ES-19 CI never calls Alpaca | `live::paper_data_smoke` runs only with `MANDATE_LIVE_ALPACA_DATA=1` |
 

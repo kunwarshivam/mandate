@@ -120,8 +120,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Code:** `mandate-marketdata`: `crates/mandate-marketdata/src/number.rs` (raw JSON number text to
   `DecStr` and `Decimal128` units, exact or rejected), `crates/mandate-marketdata/src/timestamp.rs`
   (vendor timestamps, UTC days), `crates/mandate-marketdata/src/model.rs` (datasets, symbols, feeds,
-  timeframes, day ranges, bars and trades).
-- **Tests:** `crates/mandate-marketdata/tests/`.
+  timeframes, day ranges, bars and trades), `crates/mandate-marketdata/src/alpaca.rs` (request
+  paths, page parsing).
+- **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in
+  `crates/mandate-marketdata/tests/fixtures/alpaca/`.
 - **Run:** `cargo nextest run -p mandate-marketdata`.
 
 ## Repository automation
