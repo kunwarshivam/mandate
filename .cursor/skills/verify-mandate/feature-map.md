@@ -325,6 +325,37 @@ the paths arrive with the tests PR, which updates this entry.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
   `cargo test -p mandate-refcases -- --include-ignored mandate::`.
 
+## Research-agent contract, admission, and lineages
+
+Planned by [the stream-J task brief](../../../docs/project/tasks/M5-J-research-thin-slice.md) and
+DEC-132; the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/mandate.md` §1.1 (MI-15 to MI-20), §2.3 (the working universe at runtime),
+  §4.3 (the internal research profile and the keys the overlay supplies), §8.1 (the signal model
+  contract and the research agent as its one exception), §8.2 (the output shape and freshness), §8.4
+  (the research agent: the thesis fields, the cost cap, correlated flow, the stagger, the thin
+  slice), §8.5 (the seventeen ordered admission checks), §8.6 (thesis lifetime and revision
+  lineages), §11; `docs/specs/trading-domain.md` §3.2 and §7.1 (the eligibility floor and
+  instrument-group claims, whose verdicts arrive as facts), §9.6 (the conduct controls the stagger
+  sits inside); `docs/specs/journal.md` §9 (`ThesisProposed`, `ThesisRevised`, `UniverseChanged`);
+  `docs/adr/0002-autonomous-ideation-and-retail.md`; ADR-0001 ES-02, ES-09, ES-21.
+- **Code:** `mandate-research` (new; the thesis as typed data, the §8.5 checks as one pure function,
+  the §8.6 lineage fold with the revision cap and retirement, thesis expiry, the deterministic §8.4
+  stagger offset hashed through `mandate-canon`, and the three journal entries the crate produces).
+  It **never calls a model:** a model output arrives as a typed value, and the platform boundary that
+  produces it is E17-2's shell story. The spike that found the shape is
+  `python/research_spike/` (E17-0, a spike, not product code).
+- **Tests:** per the brief: one named test per §8.5 check and per removal reason, the family-N
+  figures recomputed by hand, and property tests whose oracles rebuild the working universe from the
+  emitted `UniverseChanged` entries, compute the failing-check set unordered and take its minimum,
+  count lineage revisions in their own accumulator, and reduce the stagger digest
+  least-significant-first. Planted bugs per test: the task brief.
+- **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
+  thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
+  with streams F, G, and H.
+- **Run:** `cargo nextest run -p mandate-research` and
+  `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
