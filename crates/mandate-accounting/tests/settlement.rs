@@ -1,5 +1,5 @@
 //! Hand-calculated settlement and buying-power cases (trading-domain spec §7.2, §8.3, §8.4;
-//! DEC-99). Each expected value is worked out by hand in its doc comment from the spec's formulas,
+//! DEC-104). Each expected value is worked out by hand in its doc comment from the spec's formulas,
 //! not produced by running the code.
 
 mod common;
@@ -193,7 +193,7 @@ fn rc_18_margin_account_reuses_unsettled_proceeds_and_its_cash_variant_does_not(
     assert!(usd(QQQ_ORDER_REQUIREMENT) > cash.buying_power(Reservations::NONE).unwrap());
 }
 
-/// The accrued-fee term is the charge each open bucket will post, summed (DEC-99). Two equity
+/// The accrued-fee term is the charge each open bucket will post, summed (DEC-104). Two equity
 /// buys of 5 at 1.00 on different trade dates each accrue CAT 0.00005; a crypto sell of 0.001 BTC
 /// at 50000 (notional 50, taker 25 bps: 0.125, half-up 0.13) accrues 0.13 on its UTC day. Cash:
 /// 100 − 5 − 5 + 50 = 140. Charges due: 0.01 + 0.01 + 0.13 = 0.15, so buying power is 139.85,
@@ -303,7 +303,7 @@ fn crypto_proceeds_are_settled_at_fill_in_a_cash_account() {
 }
 
 /// The fold records every fill the broker reports, including one the gate should have denied
-/// (DEC-99): a buy of 2 at 100 in a cash account with 100 settled leaves settled −100 and, with
+/// (DEC-104): a buy of 2 at 100 in a cash account with 100 settled leaves settled −100 and, with
 /// CAT 0.00002 rounded up to 0.01, buying power −100.01. The no-debit rule is the gate's promise
 /// (I4), not a rejection in the fold.
 #[test]
@@ -398,7 +398,7 @@ fn the_account_type_is_set_at_opening_and_kept_through_the_fold() {
 /// is 0 − round(0.01755, 2, ceiling) = −0.02 and every buy is denied. The charge at 20:00 debits
 /// ceil(0.01755, 2) = 0.02 from settled cash before the proceeds settle:
 /// settled −0.02, a debit bounded by the charge that exists only while a bucket is unsettled
-/// (DEC-99). Settlement leaves 549.98.
+/// (DEC-104). Settlement leaves 549.98.
 #[test]
 #[ignore = "pending E3-3"]
 fn a_cash_account_sale_can_leave_a_fee_debit_until_its_proceeds_settle() {

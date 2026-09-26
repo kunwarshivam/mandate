@@ -1,5 +1,5 @@
 //! Buying power and the no-debit rule as properties (trading-domain spec §7.2, §8.3, §8.4, I4;
-//! DEC-99), over random sequences of equity and crypto fills, fee charges, and settlements in
+//! DEC-104), over random sequences of equity and crypto fills, fee charges, and settlements in
 //! cash and margin accounts, with and without a gate in front of the buys.
 //!
 //! The oracle is a separate ledger on `i128` integers: money in units of 10⁻¹², quantities in
@@ -538,7 +538,7 @@ proptest! {
         }
     }
 
-    /// I4 and spec §8.3 for the fills of orders the gate approved (DEC-99, item 5 proposed to the
+    /// I4 and spec §8.3 for the fills of orders the gate approved (DEC-104, item 5 proposed to the
     /// founder; this asserts the strictest reading the fee model's rounded charges allow). After
     /// every such buy, settled cash is ≥ 0 in a cash account and buying power is ≥ 0 in both: a
     /// buy never spends unsettled proceeds or the cash the pending charges need. After every
@@ -612,7 +612,7 @@ proptest! {
     }
 
     /// Charging every open fee bucket leaves settled cash (cash account) or total cash (margin)
-    /// exactly at the buying power reported before the charges (DEC-99): buying power subtracts
+    /// exactly at the buying power reported before the charges (DEC-104): buying power subtracts
     /// the sum of the per-bucket ceilings, which is what the charges debit, not the ceiling of the
     /// sum.
     #[test]
@@ -641,7 +641,7 @@ proptest! {
     }
 }
 
-/// The gated generator reaches the state DEC-99 item 5 describes: a cash account whose settled
+/// The gated generator reaches the state DEC-104 item 5 describes: a cash account whose settled
 /// cash a fee charge took below zero while sale proceeds were unsettled, counted with the oracle
 /// over a deterministic run of 4000 scenarios, so the bound in `i4_…` is exercised.
 #[test]

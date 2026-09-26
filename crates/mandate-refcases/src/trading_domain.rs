@@ -7,7 +7,7 @@
 //! accounting expectation keys; E3-2 adds `corporate_action_applied` (splits and cash dividends),
 //! `broker_cash_posting` (cash in lieu), dividend payment on `advance_clock`, and the `receivables`
 //! and `income` expectations (DEC-96); E3-3 adds the account type (`initial.account.type`) and the
-//! `buying_power` expectation, the fold's model buying power with no reservations (DEC-100). A
+//! `buying_power` expectation, the fold's model buying power with no reservations (DEC-105). A
 //! case that uses anything owned by a later story fails with "not interpreted until <story>" for
 //! each such item; anything the vocabulary does not know fails as unknown. Every key of every
 //! interpreted expectation is checked.
@@ -617,7 +617,7 @@ fn instrument<'a>(
 }
 
 /// The account type (spec §7.2): the alpaca profile defaults to margin and has no cash accounts;
-/// a generic broker's case must say which it is (DEC-100).
+/// a generic broker's case must say which it is (DEC-105).
 fn account_type(account: &Json, profile: &str) -> Result<AccountType, String> {
     match (profile, account.get("type").map(Json::as_str)) {
         ("alpaca", None) | (_, Some(Some("margin"))) => Ok(AccountType::Margin),

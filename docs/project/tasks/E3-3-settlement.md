@@ -18,13 +18,13 @@ story. This story closes milestone M2.
   use settled + unsettled; settled-only for cash accounts), DEC-72 (ADR-0001), DEC-77 (tests PR,
   then implementation), DEC-79, DEC-80 (no plain comments), DEC-83 (mutants skip crates with pending
   markers; tests PRs hold stubs only), DEC-84 to DEC-87 (E3-1 fold), DEC-95 and DEC-96 (E3-2 fold
-  and harness), DEC-99 and DEC-100 (recorded by this story).
+  and harness), DEC-104 and DEC-105 (recorded by this story).
 
 ## Scope
 
 - **Reference cases that must move from pending to passing:** none. Every `buying_power`
   expectation in the suite (RC-08, RC-17, RC-18) sits in a case with `propose_order` steps and a
-  `decision` expectation, which E6-3 owns (DEC-100). `trading_domain::RC-01`, `RC-02`, `RC-03`,
+  `decision` expectation, which E6-3 owns (DEC-105). `trading_domain::RC-01`, `RC-02`, `RC-03`,
   `RC-05`, `RC-06` and variant, `RC-13`, `RC-23` and variant keep passing.
 - **Stay pending, with their owners:** `RC-08` and `RC-18::generic_cash_account` lose their E3-3
   items and wait on `propose_order` and `decision` (E6-3) and reservations (E6-6). Their accounting
@@ -41,12 +41,12 @@ story. This story closes milestone M2.
   | §7.2 cash account: settled − reservations − rounded accrued fees | `settlement::rc_08_cash_account_buying_power_is_settled_cash_less_pending_charges`, `settlement_properties::buying_power_matches_the_oracle_after_every_event` |
   | §7.2 margin account: settled + Σ unsettled − reservations − rounded accrued fees (DEC-34) | `settlement::rc_18_margin_account_reuses_unsettled_proceeds_and_its_cash_variant_does_not`, `settlement_properties::margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds` |
   | §7.2, §9.5 reservations come off one for one and are never negative | `settlement::reservations_reduce_buying_power_and_are_never_negative`, `settlement_properties::reservations_reduce_buying_power_one_for_one_and_are_never_negative` |
-  | §7.2 round(accrued, 2, ceiling) per charge bucket (DEC-99) | `settlement::pending_charges_are_rounded_up_per_family_and_day`, `settlement_properties::charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash` |
-  | §8.3 no-debit rule, I4, after every gate-approved fill (DEC-99) | `settlement_properties::i4_the_no_debit_rule_holds_after_every_gate_approved_fill`, `settlement::a_cash_account_sale_can_leave_a_fee_debit_until_its_proceeds_settle` |
+  | §7.2 round(accrued, 2, ceiling) per charge bucket (DEC-104) | `settlement::pending_charges_are_rounded_up_per_family_and_day`, `settlement_properties::charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash` |
+  | §8.3 no-debit rule, I4, after every gate-approved fill (DEC-104) | `settlement_properties::i4_the_no_debit_rule_holds_after_every_gate_approved_fill`, `settlement::a_cash_account_sale_can_leave_a_fee_debit_until_its_proceeds_settle` |
   | §8.4 crypto settles at fill | `settlement::crypto_proceeds_are_settled_at_fill_in_a_cash_account` |
-  | The fold records debit-creating fills (DEC-99) | `settlement::a_fill_that_creates_a_debit_is_recorded_and_buying_power_reports_the_shortfall` |
+  | The fold records debit-creating fills (DEC-104) | `settlement::a_fill_that_creates_a_debit_is_recorded_and_buying_power_reports_the_shortfall` |
   | The account type is explicit, kept, and part of the state (I6) | `settlement::the_account_type_is_set_at_opening_and_kept_through_the_fold`; `account_type` compared after every event in the oracle property |
-  | Harness reads `initial.account.type` and checks `buying_power` (DEC-85, DEC-100) | `harness::rc_08_accounting_steps_pass_and_a_wrong_account_type_or_buying_power_fails`, `harness::rc_18_cash_variant_accounting_steps_pass_and_the_margin_case_reads_the_default_type` |
+  | Harness reads `initial.account.type` and checks `buying_power` (DEC-85, DEC-105) | `harness::rc_08_accounting_steps_pass_and_a_wrong_account_type_or_buying_power_fails`, `harness::rc_18_cash_variant_accounting_steps_pass_and_the_margin_case_reads_the_default_type` |
 
   **Oracles.** `settlement_properties.rs` keeps an `i128` cash ledger (money at 10⁻¹², quantities
   at 10⁻⁹, prices in cents) with its own SEC, TAF (capped), CAT, and crypto fee arithmetic, its
@@ -81,7 +81,7 @@ story. This story closes milestone M2.
   the oracle's charges, so an over-debiting fold cannot widen it), harness rc_08]; the harness
   reads `type: cash` as margin [both harness tests]; the harness never checks the `buying_power`
   key [both harness tests]. The `i4` property also caught, before it was stated exactly, that the
-  spec's cash-account wording is stricter than its fee model allows (DEC-99 item 5), and
+  spec's cash-account wording is stricter than its fee model allows (DEC-104 item 5), and
   `the_gated_generator_produces_fee_debits_while_proceeds_are_unsettled` (live) shows the gated
   generator reaches that state, so the bound is exercised.
 
@@ -92,9 +92,9 @@ story. This story closes milestone M2.
   `AccountStateObserved` payload comes with E6-9), `mandate-domain`.
 - **New dependencies allowed:** none.
 - **Safety-critical:** yes. Delivered per DEC-77: this **tests PR** (API stubs, 15 tests marked
-  `#[ignore = "pending E3-3"]`, the harness, this brief, DEC-99 and DEC-100, the feature map), then
+  `#[ignore = "pending E3-3"]`, the harness, this brief, DEC-104 and DEC-105, the feature map), then
   the implementation PR, whose test-file changes are only marker deletions. There is no status PR:
-  no case moves to passing (DEC-100). Spec wording for DEC-99 item 5 goes in a separate spec-only
+  no case moves to passing (DEC-105). Spec wording for DEC-104 item 5 goes in a separate spec-only
   change.
 - **Size budget:** 400 non-generated lines per safety-critical PR (ES-13). The tests PR exceeds it
   because it holds the story's full test suite and the harness, reviewed as a unit, as for E3-1 and
@@ -106,7 +106,7 @@ No new input. The account type is opening state today; when E6-9 journals `Accou
 the executor opens the fold with the observed type. Buying power is a derived value the gate reads
 (`GateDecided` records it, E6-3); reservations arrive from the account ledger (E6-6).
 
-## Interpretations (DEC-99, DEC-100)
+## Interpretations (DEC-104, DEC-105)
 
 1. **Account type on the account.** `Account::opening(account_type, settled, positions)`; no
    default; reported by `account_type()`; unchanged within a fold.

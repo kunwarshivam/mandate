@@ -1,6 +1,6 @@
 //! The `trading_domain` harness checks every key of every interpreted expectation (DEC-85). RC-08
 //! and RC-18's cash variant, run without their `propose_order` step (E6-3), show that the account
-//! type and the `buying_power` expectation are read (DEC-100): the founder's values pass, and a
+//! type and the `buying_power` expectation are read (DEC-105): the founder's values pass, and a
 //! wrong account type, a wrong buying power, or an account type the profile forbids fails.
 
 use std::path::Path;
