@@ -352,9 +352,9 @@ story that implements it and the reason codes it can emit.
 | §9.1 | Check | Story | Reason codes |
 |---|---|---|---|
 | 1 | Account status (§7.3), then agent mode (§7.4) | E6-9 | `account_trading_blocked`, `account_restricted`, `crypto_account_inactive`, `agent_exits_only`, `agent_paused`, `agent_stopped` |
-| 2 | The working universe (mandate §2.3, §5.3), then the eligibility floor (§3.2 items 1 to 7, in list order), then concentration (§3.3 and the mandate per-instrument cap), then mandate order size, then the re-entry cooldown | E6-3 (universe, concentration, size, cooldown), E6-7 (floor) | `not_in_working_universe`, `not_in_universe`, `ineligible_exchange`, `ipo_not_tradable`, `below_price_floor`, `below_liquidity_floor`, `leveraged_etp_not_enabled`, `concentration_limit`, `max_order_size`, `reentry_cooldown` |
+| 2 | The working universe (mandate §2.3, §5.3) — which is also where a `removed_instrument` restriction lands, interpretation 23 — then the eligibility floor (§3.2 items 1 to 7, in list order), then concentration (§3.3 and the mandate per-instrument cap), then mandate order size, then the re-entry cooldown | E6-3 (universe, concentration, size, cooldown), E6-7 (floor) | `not_in_working_universe`, `not_in_universe`, `ineligible_exchange`, `ipo_not_tradable`, `below_price_floor`, `below_liquidity_floor`, `leveraged_etp_not_enabled`, `concentration_limit`, `max_order_size`, `reentry_cooldown` |
 | 3 | Session, auction window, halt (§4.3, §4.4) | E6-6 (sessions), E6-9 (halts) | `session_not_allowed`, `extended_hours_opening_not_allowed`, `auction_window` (the opening auction and market orders only — interpretation 18), `instrument_halted`, and the defers `discretionary_exit_regular_session_only` and `owner_confirmation_required` |
-| 4 | Order constraints (§5.3 rules 1 to 9, in list order); `GateInput::pass` decides whether rules 4 to 6 exclude the agent's own protective and resting opening orders (`First`) or apply in full (`BeforeSubmission`) | E6-6 | `would_cross_zero`, `sell_exceeds_available`, `working_order_limit`, `add_blocked_by_protective_order`, `unknown_order_in_flight`, `market_order_not_allowed`, and — pending the founder's registry entry, Decisions needed item 3 — rule 2's minimum size and increment |
+| 4 | Order constraints (§5.3 rules 1 to 9, in list order); `GateInput::pass` decides whether rules 4 to 6 exclude the agent's own protective and resting opening orders (`First`) or apply in full (`BeforeSubmission`) | E6-6 | `would_cross_zero`, `sell_exceeds_available`, `working_order_limit`, `add_blocked_by_protective_order`, `unknown_order_in_flight` (**deny** for an opening, **hold** for a reduction — interpretation 22), `market_order_not_allowed`, and — pending the founder's registry entry, Decisions needed item 3 — rule 2's minimum size and increment |
 | 5 | Mark freshness and the price collar (§8.2, §9.6) | E6-8 | `stale_mark`, `price_outside_collar` |
 | 6 | Market-conduct controls (§9.6), the close window, and the mandate's orders per day | E6-8 (conduct), E6-3 (`max_orders_per_day`) | `min_resting_time` (on a cancel, through `evaluate_cancel`), `opposite_fill_interval`, `conduct_limit_breached`, `close_window`, `max_orders_per_day` |
 | 7 | Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate limit) | E6-6 (buying power), E6-3 (gross exposure) | `insufficient_buying_power`, `insufficient_settled_buying_power`, `gross_exposure_limit` |
@@ -511,7 +511,7 @@ folds from the account stream:
 | Daily participation vs 20-day ADV (≤ 5%) | `ConductState::participation_today` and `MarketSnapshot::adv_20d` | Exact `Qty` comparison |
 | Order-to-fill ratio (≤ 10 after ≥ 20 orders) | `ConductState::orders_today_per_instrument`, `filled_today` | `orders ÷ max(fills, 1)`, compared without dividing: `orders > 10 × max(fills, 1)` |
 | No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last < 60 s` |
-| Close window (last 10 minutes of the regular session) | `MarketSnapshot::session` | `now ≥ session_end − 10 min`, with the early-close calendar giving `session_end` |
+| Close window (last 10 minutes of the regular session) | the `SessionAt` the gate derives from `now` | `now ≥ session_end − close_window_minutes`, with the early-close calendar giving `session_end` |
 | Self-trade prevention across related accounts | `AccountSnapshot::related_account_resting` | Set membership; the executor supplies the group |
 
 The session, the auction windows, and the close window are **derived by the gate** from `now` and
@@ -547,7 +547,8 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
   power** — the property matches on the reason code, so a deny carrying `account_trading_blocked`
   (the broker arm of MI-1's own list, `RC-15`'s `status_not_active`) is the one permitted denial and
   is asserted to be reachable, not merely tolerated. Assert further that a `Hold` carries only
-  `agent_paused` or `agent_stopped` and follows the mode rule above exactly, and that a
+  `agent_paused`, `agent_stopped`, or `unknown_order_in_flight`, follows the mode rule above
+  exactly, and that a
   `DiscretionaryExit` is never denied at all. Generators must produce a `paused` mode, a `stopped`
   mode, an `Unknown` order, and a blocked account, so no arm of the property passes vacuously.
 - **MI-8.** Every generated input is evaluated twice, and the two `Decision`s compared field by
@@ -687,6 +688,12 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     it one would make MI-1 false in the code while true in the spec. `ref.py`'s `order_decision`
     already returns `{"verdict": "hold"}` for `paused` and `stopped`, so the Rust keeps the same
     four verdicts. The trading-domain reason registry has `agent_paused` and `agent_stopped` for it.
+    **The harness mapping:** schema v3's expectation vocabulary is `allow | deny | defer` with no
+    hold, so the trading-domain harness compares a `Hold` against a case's `deny` carrying the same
+    reason code. No case in the file expects a verdict for an exit under `paused`, `stopped`, or an
+    `Unknown` order, so the mapping is exercised by nothing today and is recorded here so the tests
+    PR does not have to invent it. The `kind: gate` harness needs no mapping: `ref.py` has the same
+    four verdicts.
 13. **The surveillance report is a pure function, and it supervises nothing.** E6-8's daily report
     is `fn surveillance(day: Date, input: &SurveillanceInput<'_>) -> Result<SurveillanceReport,
     GateError>`, where `SurveillanceInput` is the day's folded figures and nothing else:
@@ -749,11 +756,29 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     session, `exit_price_ladder` outside it. This is `ref.py`'s `agent_flatten` exactly, and it is
     the whole difference between `MC-F01`'s crypto sell (regular) and `MC-F02`'s and `MC-F03`'s
     (after hours). The asset class decides whether a sell is *deferred*, never how it is priced.
+22. **An `Unknown` order denies an opening and holds a reduction, under one code.** §5.3 rule 9 says
+    "no new orders in that instrument (`unknown_order_in_flight`) until resolved", and MI-1 lists an
+    `Unknown` order among the things that may **hold** an exit, beside `paused` and `stopped`. Both
+    are true at once only if the verdict depends on the purpose: `Deny` for `Open` and `Increase`,
+    `Hold` for every reducing purpose, with `unknown_order_in_flight` as the code either way. Any
+    other reading breaks something — denying the exit contradicts MI-1's own wording, and letting it
+    through contradicts rule 9 and risks doubling a position whose true size is unknown. So the
+    fuzz's `Hold` codes are `agent_paused`, `agent_stopped`, and `unknown_order_in_flight`, while
+    `account_trading_blocked` stays the only denial a reducing purpose may carry.
+23. **A `removed_instrument` restriction is the working-universe check, not a separate one.** An
+    instrument becomes `removed_instrument` exactly when it leaves the working universe (mandate
+    §2.3's state machine and §5.9), so the same fold produces both and check 2 reports it as
+    `not_in_working_universe`, which is registered. That matters because `removed_instrument`
+    itself is **not** in the trading-domain reason registry, and inventing a code would break
+    ES-09's promise that a reason code is stable. `stale_mark` is the other instrument restriction
+    and is registered: it is evaluated at check 5 with mark freshness, which is where §9.1 puts it.
+    `ref.py`'s `order_decision` returns the restriction's own name because it models the two as one
+    parameter; the split by code is this crate's, and it changes no verdict.
 
 ## Decisions needed
 
 None can be taken by an agent: each would change a founder-owned file
-([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 22, 23, and 24,
+([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 24, 25, and 26,
 each `Proposed (founder)`.
 
 1. **Two reason codes for one condition: `not_in_universe` and `not_in_working_universe`.**
@@ -865,7 +890,7 @@ missing test, and the tests PR does not merge with one.
 | 39 | `trim_to_target` rounds the sell quantity down to the increment | `hand::a_trim_rounds_up_to_the_increment` |
 | 40 | The decision is not deterministic: the check list is built from a `HashMap` iteration | `properties::mi8_identical_inputs_give_identical_decisions` (and clippy's `disallowed-types`, which is why the crate is `pure`) |
 | 41 | `paused` holds a protective order, or lets a non-kill-switch `risk_exit` through | `hand::a_protective_order_is_never_held_by_a_mode`, `hand::a_paused_agent_holds_a_plain_risk_exit`, `properties::a_hold_follows_the_mode_rule_exactly` |
-| 42 | A kill switch's own `risk_exit` is held by `paused` | `hand::a_kill_switch_order_is_exempt_from_paused`, `MC-F02` (the flatten's own sells) |
+| 42 | A kill switch's own `risk_exit` is held by `paused` | `hand::a_kill_switch_order_is_exempt_from_paused`, `properties::a_hold_follows_the_mode_rule_exactly`. Not `MC-F02`: `agent_flatten` takes no mode and never runs the mode rule, so no `kind: agent_flatten` case can catch this |
 | 43 | The closing ten minutes report `auction_window` instead of `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order` (the other half: the opening auction still reports `auction_window`) |
 | 44 | Check 7 subtracts reservations a second time from `Account::buying_power`'s figure | `RC-18` step 3 (449.97 after the reservation, not 449.97 less it again), `properties::buying_power_is_the_lower_of_the_two` |
 | 45 | `evaluate_cancel` applies the resting-time rule to a cancel that precedes a risk-reducing order | `hand::a_cancel_before_a_risk_reducing_order_is_exempt`, `properties::a_cancel_that_precedes_a_reduction_is_never_denied` |
@@ -914,7 +939,7 @@ MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci spec-guard
 
 Stop and write a DEC proposal instead of continuing if any of these happen:
 
-- the spec is ambiguous or seems wrong (the two found so far are under Decisions needed);
+- the spec is ambiguous or seems wrong (the three found so far are under Decisions needed);
 - a new dependency seems necessary;
 - a test would have to be weakened, skipped, or deleted;
 - a reference case would have to change to make the code pass;
