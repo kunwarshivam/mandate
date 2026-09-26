@@ -192,8 +192,10 @@ pub struct ProposedOrder {
 
 pub enum Origin {
     OrderBuilder, GoalCompletion, RemovedInstrument,   // discretionary
-    RiskEngine, AutomatedKillSwitch, TrimToTarget, StopWatchdog,  // risk
-    Owner,                                             // owner close or kill switch
+    RiskEngine, TrimToTarget, StopWatchdog,            // risk, paced by nothing but held by `paused`
+    AutomatedKillSwitch,                               // risk, and exempt from `paused`
+    OwnerClose,                                        // owner exit, held by `paused`
+    OwnerKillSwitch,                                   // owner exit, and exempt from `paused`
     ProtectiveLeg,                                     // protective
 }
 
@@ -395,7 +397,7 @@ The gate computes it from `Origin`, `Side`, and the agent's position:
 | Buy, position held | any non-protective | `Increase` |
 | Any side | `ProtectiveLeg` | `Protective` |
 | Sell, quantity ≤ the agent's position | `RiskEngine`, `AutomatedKillSwitch`, `TrimToTarget`, `StopWatchdog` | `RiskExit` |
-| Sell, quantity ≤ the agent's position | `Owner` | `OwnerExit` |
+| Sell, quantity ≤ the agent's position | `OwnerClose`, `OwnerKillSwitch` | `OwnerExit` |
 | Sell, quantity ≤ the agent's position | `OrderBuilder`, `GoalCompletion`, `RemovedInstrument` | `DiscretionaryExit` |
 | Sell, quantity > the agent's position | any | denied `would_cross_zero` (§5.3 rule 3) |
 
@@ -430,8 +432,10 @@ hold, reason agent_<mode>, when
 
 So `Protective` is **never** held by a mode — protection that cannot be placed leaves a position
 unprotected, which is the opposite of the safe default — `RiskExit` and `OwnerExit` **are** held by
-`paused` unless they are a kill switch's own orders (trading spec §5.5: "Kill-switch orders are
-exempt from the agent's mode"), `DiscretionaryExit` is held by `paused`, and everything is held by
+`paused` unless they are a kill switch's own orders — `Origin::AutomatedKillSwitch` or
+`Origin::OwnerKillSwitch`, which is why `Origin` distinguishes a kill switch from a risk-engine exit
+and from an owner's ordinary close (trading spec §5.5: "Kill-switch orders are exempt from the
+agent's mode"; an owner closing one position under `paused` is not a kill switch and is held) — `DiscretionaryExit` is held by `paused`, and everything is held by
 `stopped`. Trading spec §7.4's prose is narrower for the protective case ("no new orders except
 re-placing protection before expiry"); interpretation 17 records why the crate follows `ref.py`.
 
@@ -476,9 +480,12 @@ from the account stream. Three pure functions read that state and nothing else:
    `ref.py`'s `agent_flatten` exactly: the final mode first (`paused` for a mandate limit, `stopped`
    for an owner kill switch), then only this agent's `client_order_id`s sorted ascending, never the
    cancel-all or close-position endpoint, then a sell of exactly the agent's sub-ledger quantity per
-   position (a zero quantity produces no sell). Outside the regular session an automated flatten
-   defers equity sells to the regular-session open and sends crypto now; an owner kill switch with a
-   confirmed bid sells equities now through the exit price ladder with
+   position (a zero quantity produces no sell). **Every sell it does emit is priced by the session
+   alone** — `market_or_ladder` in the regular session, `exit_price_ladder` outside it — which is
+   `ref.py` exactly and is what separates `MC-F01`'s crypto sell (regular, `market_or_ladder`) from
+   `MC-F02`'s and `MC-F03`'s (after hours, `exit_price_ladder`). Outside the regular session an
+   automated flatten defers equity sells to the regular-session open and sends crypto now; an owner
+   kill switch with a confirmed bid sells equities now through the exit price ladder with
    `floor_price = confirmed_bid × (1 − max_exit_offset)`, or an explicit `owner_floor_price` when
    the owner supplied one (`ref.py` takes the override first), and a remainder that rests at the
    floor, and without confirmation defers them. This function decides; the executor (E7-2) carries it out.
@@ -738,11 +745,15 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     `evaluate_cancel` beside `evaluate`, and the executor asks before it cancels. Putting the rule
     in the executor would place a conduct control outside the independent gate, which item 5 already
     rules out for every other control.
+21. **An agent flatten prices every sell by the session alone:** `market_or_ladder` in the regular
+    session, `exit_price_ladder` outside it. This is `ref.py`'s `agent_flatten` exactly, and it is
+    the whole difference between `MC-F01`'s crypto sell (regular) and `MC-F02`'s and `MC-F03`'s
+    (after hours). The asset class decides whether a sell is *deferred*, never how it is priced.
 
 ## Decisions needed
 
 None can be taken by an agent: each would change a founder-owned file
-([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 21, 22, and 23,
+([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 22, 23, and 24,
 each `Proposed (founder)`.
 
 1. **Two reason codes for one condition: `not_in_universe` and `not_in_working_universe`.**
@@ -859,6 +870,8 @@ missing test, and the tests PR does not merge with one.
 | 44 | Check 7 subtracts reservations a second time from `Account::buying_power`'s figure | `RC-18` step 3 (449.97 after the reservation, not 449.97 less it again), `properties::buying_power_is_the_lower_of_the_two` |
 | 45 | `evaluate_cancel` applies the resting-time rule to a cancel that precedes a risk-reducing order | `hand::a_cancel_before_a_risk_reducing_order_is_exempt`, `properties::a_cancel_that_precedes_a_reduction_is_never_denied` |
 | 46 | The `kind: gate` harness reassigns the case's `purpose` from side and position, turning `MC-G15` into a denial | `MC-G15`, `harness::a_gate_case_purpose_is_passed_through` |
+| 47 | An owner's ordinary close is treated as a kill switch, so `paused` lets it through | `hand::a_paused_agent_holds_an_owner_close_but_not_an_owner_kill_switch`, `properties::a_hold_follows_the_mode_rule_exactly` |
+| 48 | A flatten prices every sell `market_or_ladder`, ignoring the session | `MC-F02`, `MC-F03` (both crypto sells), `hand::a_flatten_prices_by_session_alone` |
 
 ## Not done
 
