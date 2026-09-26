@@ -858,7 +858,7 @@ fn a_crossed_spread_is_negative_and_locked_and_one_sided_rows_are_counted() {
 fn every_stored_quote_row_falls_in_exactly_one_class() {
     let scratch = Scratch::new("quotes-classes-cover");
     for (n, (id, quotes)) in every_recording().into_iter().enumerate() {
-        let store = Store::new(&scratch.path().join(n.to_string()));
+        let store = Store::new(scratch.path().join(n.to_string()));
         store
             .put_day(&id, day("2026-09-24"), &Records::Quotes(quotes.clone()))
             .unwrap();

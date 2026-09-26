@@ -127,7 +127,7 @@ fn kind(args: &DownloadArgs) -> anyhow::Result<Kind> {
             bail!("--timeframe applies only to --kind bars")
         }
         (KindArg::Trades, None) => Ok(Kind::Trades),
-        (KindArg::Quotes, None) => bail!("--kind quotes is not wired up yet"),
+        (KindArg::Quotes, None) => Ok(Kind::Quotes),
     }
 }
 

@@ -440,7 +440,10 @@ async fn a_quotes_run_follows_every_page_and_stores_them_under_the_quotes_direct
     );
     assert!(lines[0].ends_with(" written"), "{report}");
     assert!(
-        scratch.0.join("alpaca/sip/quotes/CPHC/2026-09-24.parquet").exists(),
+        scratch
+            .0
+            .join("alpaca/sip/quotes/CPHC/2026-09-24.parquet")
+            .exists(),
         "{report}"
     );
 
