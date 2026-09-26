@@ -27,7 +27,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E12 Audit explorer | M9 | 6.7 | Must |
 | E13 Hybrid deployment | M11 | 6.9 | Must |
 | E14 Billing | M12 | 6.10 | Must |
-| E15 Signal models: LLM and fast models, scorecards | M5 (LLM research); Phase 3 (fast models, scorecards) | 6.3, 6.5 | Must (E15-1); Should |
+| E15 Signal models: LLM and fast models, scorecards | M5 (LLM research, scorecards); Phase 3 (fast models) | 6.3, 6.5 | Must (E15-1, E15-3); Should |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
 | E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
 
@@ -150,7 +150,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   nothing else ([DEC-98](04-decision-log.md#decisions),
   [OD-12](04-decision-log.md#open-decisions)).
   *Accepted when:* the connector can place, cancel, and reconcile equity orders in the dedicated
-  account only; every MCP exchange is journaled; beta terms are recorded.
+  account only; every MCP exchange is journaled; beta terms are recorded; the connector requests and
+  stores only the agentic account's data; account numbers are held by reference (journal spec §6.4)
+  and never logged.
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
@@ -232,14 +234,23 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E15-1 (Must)** As an operator, I want an LLM research signal model that writes theses
   asynchronously without blocking trading.
 - **E15-2 (Should)** As an operator, I want a fast decision model with a hard deadline.
-- **E15-3 (Should)** As an operator, I want each signal model's confidence measured against outcomes and
-  shown in scorecards.
+- **E15-3 (Must, Phase 1)** As an operator, I want each signal model's confidence measured against
+  outcomes and shown in scorecards ([DEC-99](04-decision-log.md#decisions)).
+  *Accepted when:* every thesis is scored after its horizon against the pre-registered baselines
+  (buy-and-hold of the eligible basket, and a broad index ETF), net of modeled costs; scores come
+  from forward paper trading only, never from historical backtests of LLM theses; the scorecard
+  shows each signal model's results beside the baselines.
 - **E15-4 (Could)** As an operator, I want shadow mode for a new mandate version.
 
 ### E17 Research agent and dynamic universe
 
 Design: [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) ([DEC-97](04-decision-log.md#decisions)).
 The mandate spec, schemas, reference implementation, and cases are rewritten first in spec-change PRs.
+The first delivery is the [DEC-103](04-decision-log.md#decisions) thin slice: the research agent
+runs only in the team's internal paper workspaces, with the research basket (DEC-90) as its fixed
+test data universe, every admission `ask`, paper only, and scorecards on. The basket is never a
+user's instrument choice. The full E17-3, for users' agents under their own envelopes, follows only
+after the DEC-99 evaluation (E17-8) passes on the thin slice.
 
 - **E17-0 (Must, now)** research spike: an LLM loop over news and prices, paper-traded on the
   research basket with fixed sizing, to de-risk E17-2 before it is product code
@@ -261,8 +272,36 @@ The mandate spec, schemas, reference implementation, and cases are rewritten fir
   exceeds the envelope; prompt-injection fixtures never reach an order.
 - **E17-4 (Must)** As a fund, I want a bring-your-own-strategy mode that pins the universe and
   disables the research agent, so that today's behavior stays available.
-- **E17-5 (Should)** As an owner, I want the input-drift detector (`unusual_input`, V-018) so that
-  unusual inputs escalate before the research agent acts on them.
+- **E17-5 (Must)** As an owner, I want the input-drift detector (`unusual_input`, V-018) so that
+  unusual inputs escalate before the research agent acts on them
+  ([DEC-101](04-decision-log.md#decisions)).
+- **E17-6 (Must)** As an operator, I want to see and stop research-agent flow across the accounts
+  of a deployment, so that one thesis cannot concentrate orders from many accounts in one instrument
+  unnoticed ([DEC-100](04-decision-log.md#decisions)).
+  *Accepted when:* no workspace's gate reads another workspace's state (a two-workspace test shows
+  one's positions never change the other's decisions); the aggregate-flow monitor sums research-agent
+  exposure per instrument over its deployment's workspaces, in dollars and as a share of average
+  daily dollar volume, alerts the operator above the thresholds, writes to no workspace, and sends
+  nothing to the global control plane; the operator per-thesis halt, journaled in each workspace as
+  a `PlatformOperatorAction`, stops matching research-agent admissions and openings in every
+  workspace of the deployment while exits and protection continue, and never permits anything a
+  workspace's own limits deny; openings on a new thesis wait for the workspace's deterministic
+  stagger offset within the conduct controls; bring-your-own-strategy agents keep per-account
+  controls only.
+- **E17-7 (Must)** As an owner, I want the research agent to read only vetted sources and to admit an
+  instrument only on corroborated evidence, so that one planted source cannot admit an instrument
+  ([DEC-101](04-decision-log.md#decisions)).
+  *Accepted when:* the source allowlist is versioned configuration; the agent reads no source outside
+  it; an admission without corroboration by an independent source, or by market data consistent with
+  the thesis, is rejected; the corroboration is recorded in `ThesisProposed`; prompt-injection
+  fixtures for every input source never reach an order.
+- **E17-8 (Must)** As the founder, I want a forward paper evaluation harness, so that thesis quality
+  is judged on outcomes the model cannot have seen ([DEC-99](04-decision-log.md#decisions)).
+  *Accepted when:* the evaluation window, metric, and pass threshold come from a recorded decision
+  made before the evaluation starts; it runs on the team's internal paper workspaces (DEC-103), so
+  no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
+  the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
+  against the threshold and is reproducible from the journal.
 
 ### E16 Kraken Derivatives US connector (Phase 3)
 
@@ -291,5 +330,4 @@ From the final review of mandate spec v0.3:
 - Define whether the 1.25× floor hard level scales C × f or the remaining loss budget when L > 0.
 - Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
 - Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
-- Roadmap: replace "learning loop" in Phase 3 with "scorecards and shadow mode".
 - Add fuzz coverage for multiple agents, trims, and owner exits.

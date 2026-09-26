@@ -245,6 +245,18 @@ impl CorporateActions {
         Ok(ratio)
     }
 
+    /// Split adjustment as of `as_of` for many prices, each split's effective instant computed
+    /// once.
+    pub fn price_adjuster(&self, as_of: Date) -> Result<PriceAdjuster, AdjustmentError> {
+        let splits = self
+            .splits
+            .iter()
+            .filter(|split| split.ex_date <= as_of)
+            .map(|split| Ok((split.effective_at()?, split.ratio)))
+            .collect::<Result<_, AdjustmentError>>()?;
+        Ok(PriceAdjuster { splits })
+    }
+
     /// `bar` split-adjusted as of `as_of`: prices per [`adjust_price`] and volume per
     /// [`adjust_quantity`] at `volume_scale`, each by the product of the splits that apply and so
     /// rounded once, and the trade count unchanged. A bar no split applies to comes back unchanged.
@@ -268,5 +280,30 @@ impl CorporateActions {
             vwap: adjust_price(ratio, &bar.vwap)?,
             trade_count: bar.trade_count,
         })
+    }
+}
+
+/// The splits known as of one date ([`CorporateActions::price_adjuster`]), each with the instant
+/// it takes effect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PriceAdjuster {
+    splits: Vec<(UtcNanos, SplitRatio)>,
+}
+
+impl PriceAdjuster {
+    /// `price`, observed at `at`, in the terms of the adjuster's date: as
+    /// [`CorporateActions::adjust_bar`] adjusts a bar's prices, and unchanged when no split
+    /// applies.
+    pub fn adjust(&self, price: &DecStr, at: UtcNanos) -> Result<DecStr, AdjustmentError> {
+        let mut ratio = split_ratio(1, 1)?;
+        for &(effective, split) in &self.splits {
+            if at < effective {
+                ratio = compose(ratio, split)?;
+            }
+        }
+        if is_unit(ratio) {
+            return Ok(price.clone());
+        }
+        adjust_price(ratio, price)
     }
 }

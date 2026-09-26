@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Accepted ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions)) |
+| **Status** | Accepted ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions)); follow-ups in [DEC-99](../project/04-decision-log.md#decisions) to [DEC-103](../project/04-decision-log.md#decisions) |
 | **Date** | 2026-09-26 |
 | **Deciders** | Founder |
 
