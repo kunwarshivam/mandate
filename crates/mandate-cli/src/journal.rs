@@ -8,12 +8,18 @@
 //! compares are read from the body itself (see [`row`]).
 
 use std::fmt;
+use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::{Context, anyhow, bail};
 use clap::{Args, Subcommand};
-use mandate_canon::Digest;
-use mandate_journal::{EventFailure, RangeCheck};
+use mandate_artifacts_fs::FsArtifactStore;
+use mandate_canon::{Digest, Value, parse};
+use mandate_journal::{
+    Anchor, AnchorLeaf, ArtifactError, ArtifactRef, ArtifactSource, EventCheck, EventFailure,
+    RangeCheck, StoredEvent, StreamId, TrustedStart, verify_anchor, verify_events,
+};
 
 #[derive(Debug, Subcommand)]
 pub enum JournalCommand {
@@ -102,6 +108,239 @@ impl fmt::Display for Outcome {
 /// Verifies the export `args` names, writing the report to `report`. The returned outcome carries
 /// the exit status: [`Outcome::failed`].
 pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outcome> {
-    let _ = (args, report);
-    Ok(Outcome::Verified(None))
+    let start = trusted_start(args)?;
+    let export = fs::read(&args.export)
+        .with_context(|| format!("reading the export {}", args.export.display()))?;
+    let artifacts = open_source(args.store.as_deref())?;
+    let anchor = args.anchor.as_deref().map(read_anchor).transpose()?;
+    let outcome = check(&export, start, artifacts.as_ref(), anchor.as_ref())?;
+    let lines = [
+        format!("export: {}", args.export.display()),
+        format!("lines: {}", line_count(&export)),
+        format!(
+            "trusted start: seq {}, prev_hash {}",
+            start.from_seq, start.prev_hash
+        ),
+        format!("artifact store: {}", shown(args.store.as_deref())),
+        format!("anchor: {}", shown(args.anchor.as_deref())),
+        format!("result: {outcome}"),
+    ];
+    writeln!(report, "{}", lines.join("\n")).context("writing the report")?;
+    Ok(outcome)
+}
+
+/// The path as given, or `none given`, so the report says which inputs the result covers.
+fn shown(path: Option<&Path>) -> String {
+    path.map_or_else(|| "none given".to_owned(), |p| p.display().to_string())
+}
+
+/// Lines the export holds, counting a final line without its line feed, which [`rows`] rejects.
+fn line_count(export: &[u8]) -> usize {
+    export
+        .split(|b| *b == b'\n')
+        .filter(|line| !line.is_empty())
+        .count()
+}
+
+/// Runs spec §11 in its order: the per-event checks over the whole range first, then the per-range
+/// anchor checks. Reading the export is part of check 1, so an unreadable line fails there.
+fn check(
+    export: &[u8],
+    start: TrustedStart,
+    artifacts: &dyn ArtifactSource,
+    anchor: Option<&Anchor>,
+) -> anyhow::Result<Outcome> {
+    let rows = match rows(export, start.from_seq) {
+        Ok(rows) => rows,
+        Err(failure) => return Ok(Outcome::Event(failure)),
+    };
+    if let Err(failure) = verify_events(&rows, start, artifacts) {
+        return Ok(Outcome::Event(failure));
+    }
+    let (Some(first), Some(last)) = (rows.first(), rows.last()) else {
+        return Ok(Outcome::Verified(None));
+    };
+    if let Some(other) = rows.iter().find(|r| r.stream_id != first.stream_id) {
+        bail!(
+            "the export mixes streams (`{}` at seq {}, `{}` at seq {}); a segment is one stream's \
+             contiguous seq range (journal spec §6.2)",
+            first.stream_id,
+            first.seq,
+            other.stream_id,
+            other.seq
+        );
+    }
+    let stream = StreamId::parse(&first.stream_id).ok_or_else(|| {
+        anyhow!(
+            "`{}` is not a stream_id of journal spec §2",
+            first.stream_id
+        )
+    })?;
+    if let Some(anchor) = anchor
+        && let Err(check) = verify_anchor(anchor, &stream, &rows)
+    {
+        return Ok(Outcome::Range(check));
+    }
+    Ok(Outcome::Verified(Some(Span {
+        stream_id: first.stream_id.clone(),
+        first_seq: first.seq,
+        last_seq: last.seq,
+        last_hash: last.hash,
+    })))
+}
+
+/// The export's events as stored rows, in file line order, or the first line no canonical body can
+/// be read from. Spec §6.2 gives every line a line feed, so a final line without one is truncated
+/// and is not read as an event.
+fn rows(export: &[u8], from_seq: u64) -> Result<Vec<StoredEvent>, EventFailure> {
+    let mut rows = Vec::new();
+    let mut rest = export;
+    let mut expected_seq = from_seq;
+    while !rest.is_empty() {
+        let unreadable = EventFailure {
+            seq: expected_seq,
+            check: EventCheck::NonCanonical,
+        };
+        let row = rest
+            .iter()
+            .position(|b| *b == b'\n')
+            .and_then(|end| rest.split_at_checked(end))
+            .and_then(|(line, after)| Some((row_from_line(line, expected_seq)?, after.get(1..)?)));
+        let Some((row, after)) = row else {
+            return Err(unreadable);
+        };
+        rows.push(row);
+        rest = after;
+        expected_seq = expected_seq.saturating_add(1);
+    }
+    Ok(rows)
+}
+
+/// 64 lowercase hex characters, the form a hash is written in (journal spec §3).
+const HEX_DIGEST: usize = 64;
+
+/// The stored row a §6.2 export line describes, or `None` when the line is not one. `"body"` sorts
+/// before `"hash"`, so the body is an exact byte slice of the line and is never re-serialized.
+fn row_from_line(line: &[u8], expected_seq: u64) -> Option<StoredEvent> {
+    let inner = line.strip_prefix(br#"{"body":"#)?.strip_suffix(br#""}"#)?;
+    let (rest, hex) = inner
+        .len()
+        .checked_sub(HEX_DIGEST)
+        .and_then(|at| inner.split_at_checked(at))?;
+    let hash = Digest::from_hex(str::from_utf8(hex).ok()?)?;
+    let body = rest.strip_suffix(br#","hash":""#)?;
+    Some(row(body.to_vec(), hash, expected_seq))
+}
+
+/// The stored columns of spec §6.1 read from `body`, because an export carries no separate columns
+/// and check 2 compares columns with the body. A column the body cannot supply is left at a value
+/// the body does not hold (`seq` at the line's expected value, the rest empty or 64 zeros), so a
+/// body missing an envelope field fails check 2 instead of being accepted.
+fn row(body: Vec<u8>, hash: Digest, expected_seq: u64) -> StoredEvent {
+    let parsed = parse(&body).ok();
+    let field = |name: &str| parsed.as_ref().and_then(|body| body.get(name));
+    let text = |name: &str| {
+        field(name)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let int = |name: &str| field(name).and_then(Value::as_int);
+    StoredEvent {
+        stream_id: text("stream_id"),
+        seq: int("seq").unwrap_or(expected_seq),
+        event_id: text("event_id"),
+        event_type: text("event_type"),
+        schema_version: int("schema_version").unwrap_or_default(),
+        environment: text("environment"),
+        recorded_at: text("recorded_at"),
+        prev_hash: Digest::from_hex(&text("prev_hash")).unwrap_or(Digest::ZERO),
+        hash,
+        body,
+    }
+}
+
+/// Where verification starts (spec §11): the genesis start by default, or the `seq` and hash the
+/// auditor takes from a manifest or anchor. The two are given together or not at all.
+fn trusted_start(args: &VerifyArgs) -> anyhow::Result<TrustedStart> {
+    match (args.from_seq, args.trusted_prev_hash.as_deref()) {
+        (None, None) => Ok(TrustedStart::GENESIS),
+        (Some(from_seq), Some(hex)) if from_seq >= 1 => Ok(TrustedStart {
+            from_seq,
+            prev_hash: Digest::from_hex(hex).ok_or_else(|| {
+                anyhow!("--trusted-prev-hash is 64 lowercase hex characters, not `{hex}`")
+            })?,
+        }),
+        (Some(_), Some(_)) => bail!("--from-seq is 1 or more (journal spec §3)"),
+        _ => bail!("--from-seq and --trusted-prev-hash come from one manifest or anchor, together"),
+    }
+}
+
+/// No artifact store was given, so every reference is missing: an export naming an artifact never
+/// verifies without the store it belongs to.
+struct NoArtifacts;
+
+impl ArtifactSource for NoArtifacts {
+    fn read_artifact(&self, _: &ArtifactRef) -> Result<Vec<u8>, ArtifactError> {
+        Err(ArtifactError::Missing)
+    }
+}
+
+/// The store references are checked against. A `--store` that is not a directory is refused rather
+/// than created, so a mistyped path cannot report a verified export it never read.
+fn open_source(dir: Option<&Path>) -> anyhow::Result<Box<dyn ArtifactSource>> {
+    match dir {
+        None => Ok(Box::new(NoArtifacts)),
+        Some(dir) if dir.is_dir() => FsArtifactStore::open(dir)
+            .map(|store| Box::new(store) as Box<dyn ArtifactSource>)
+            .map_err(|e| anyhow!("{}: opening the artifact store {}", e.code(), dir.display())),
+        Some(dir) => bail!("the artifact store {} is not a directory", dir.display()),
+    }
+}
+
+/// The anchor in `path`: the leaves and root an `AnchorComputed` event records (spec §10, DEC-115).
+fn read_anchor(path: &Path) -> anyhow::Result<Anchor> {
+    let bytes = fs::read(path).with_context(|| format!("reading the anchor {}", path.display()))?;
+    let value = parse(&bytes).map_err(|e| {
+        anyhow!(
+            "{}: the anchor {} is not JSON of journal spec §4",
+            e.kind.code(),
+            path.display()
+        )
+    })?;
+    let missing = |what: &str| {
+        anyhow!(
+            "the anchor {} has no {what} (journal spec §10)",
+            path.display()
+        )
+    };
+    let digest = |at: Option<&Value>, what: &str| {
+        at.and_then(Value::as_str)
+            .and_then(Digest::from_hex)
+            .ok_or_else(|| missing(what))
+    };
+    let leaves = value
+        .get("leaves")
+        .and_then(Value::as_array)
+        .ok_or_else(|| missing("`leaves` array"))?
+        .iter()
+        .map(|leaf| {
+            Ok(AnchorLeaf {
+                stream_id: leaf
+                    .get("stream_id")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| missing("leaf `stream_id`"))?
+                    .to_owned(),
+                seq: leaf
+                    .get("seq")
+                    .and_then(Value::as_int)
+                    .ok_or_else(|| missing("leaf `seq`"))?,
+                hash: digest(leaf.get("hash"), "leaf `hash`")?,
+            })
+        })
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok(Anchor {
+        leaves,
+        root: digest(value.get("root"), "`root`")?,
+    })
 }
