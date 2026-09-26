@@ -122,6 +122,33 @@ the paths arrive with the tests PR, which updates this entry.
   to E4-1, and `fixtures/refcases/trading-domain.json` holds no metrics case.
 - **Run:** `cargo nextest run -p mandate-backtest`.
 
+## Agent runtime and kill switches
+
+Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
+and DEC-131; the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
+  universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
+  switch), 5.9 (restrictions and the effective mode, MI-6), 6.4 (approvals and the `skip` timeout);
+  `docs/specs/trading-domain.md` section 5.5 (kill switch), 5.6 (exit pricing), 7.4 (agent modes);
+  `docs/specs/journal.md` section 2 (streams, single writers, copied facts, a kill switch as a
+  command), 5.1 (append and fencing), 5.2 (write before acting, crash recovery), 8 (replay and
+  `fold_version`), 9 (the agent-stream catalogue); `docs/HLD.md` section 5; ADR-0001 ES-06, ES-20,
+  ES-21, ES-24.
+- **Code:** `mandate-runtime` (new; `fold`, `handle`, `resume`, the mode lattice, the kill-switch
+  routing, approvals, and the `IntentSink`, `TimerSource`, `IdGen`, `GateDryRun`, and `OrderPlan`
+  ports), over `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
+  Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
+- **Tests:** the hand cases of the brief (the kill-switch order and scope, recovery, approvals,
+  version application, error codes) and property tests against three independent oracles: a shadow
+  fold over the emitted drafts' canonical bytes, a separately written restriction lattice, and an
+  interval accumulator for durations. A committed golden journal pins `fold_version` 1. Planted bugs
+  per test: the task brief.
+- **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
+  `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
+  `mandate-risk`.
+- **Run:** `cargo nextest run -p mandate-runtime`.
+
 ## Journal drafts and the event catalogue
 
 - **Spec:** `docs/specs/journal.md` §2, §3, §9.
