@@ -59,13 +59,25 @@ for entry in "${TOOLS[@]}"; do
   install -m 0755 "$tmp/$member" "$BIN/$name"
 done
 
-if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
+if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ] ||
+  [ "$(uvx --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
   echo "installing uv $UV_VERSION"
   uv_member="uv-x86_64-unknown-linux-gnu"
   curl -sSfL -o "$tmp/uv.tgz" "https://github.com/astral-sh/uv/releases/download/$UV_VERSION/$uv_member.tar.gz"
   echo "$UV_SHA256  $tmp/uv.tgz" | sha256sum --check --quiet
   tar -xzf "$tmp/uv.tgz" -C "$tmp" "$uv_member/uv" "$uv_member/uvx"
   install -m 0755 "$tmp/$uv_member/uv" "$tmp/$uv_member/uvx" "$HOME/.local/bin/"
+fi
+
+# The export above reaches only this script, and .cursor/environment.json cannot set environment
+# variables, so the mirror goes into uv's user config for every later uv call in the session. A
+# top-level key is prepended because TOML allows none after the first table; a mirror the user
+# already set is left alone.
+uv_config="${XDG_CONFIG_HOME:-$HOME/.config}/uv/uv.toml"
+if ! grep -qs '^[[:space:]]*python-install-mirror[[:space:]]*=' "$uv_config"; then
+  mkdir -p "$(dirname "$uv_config")"
+  { echo "python-install-mirror = \"$UV_PYTHON_INSTALL_MIRROR\""; cat "$uv_config" 2>/dev/null || true; } >"$tmp/uv.toml"
+  mv "$tmp/uv.toml" "$uv_config"
 fi
 uv python install "$PYTHON_VERSION"
 

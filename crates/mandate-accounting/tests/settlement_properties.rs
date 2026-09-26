@@ -4,22 +4,24 @@
 //!
 //! The oracle is a separate ledger on `i128` integers: money in units of 10⁻¹², quantities in
 //! 10⁻⁹, prices in cents. It has its own fee arithmetic, its own trade-date and settlement-day
-//! counting (a fixed −4 h offset and weekdays, valid for the generated window), its own per-bucket
-//! ceilings, and its own buying power, with which the gated generator approves buys. Every
-//! reported cash value is compared with it after every event, in the account under test and in a
-//! twin of the other type folding the same inputs.
+//! counting (a fixed −4 h offset, its own weekday arithmetic, and the holidays it reads off the
+//! `us_2026` calendar fixture the fold is configured with), its own per-bucket ceilings, and its
+//! own buying power, with which the gated generator approves buys. Every reported cash value is
+//! compared with it after every event, in the account under test and in a twin of the other type
+//! folding the same inputs.
 
 mod common;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 
-use common::{d, id, test_default, usd};
+use common::{d, id, test_default, us_2026, usd};
 use mandate_accounting::{
     Account, AccountType, AccountingError, AssetClass, Config, Execution, FeeFamily, Input,
     Liquidity, Position, Reservations, Side,
 };
 use mandate_num::{CostBasis, NumError, Price, Qty, SignedQty, Usd};
-use mandate_time::{Date, UtcNanos};
+use mandate_time::{Date, TimeError, TradingCalendar, UtcNanos};
 use proptest::collection::vec;
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
@@ -32,8 +34,10 @@ const NANO: i128 = 1_000_000_000;
 const LOCAL_BASE: i64 = 1_789_963_200;
 /// 2026-09-21T00:00:00Z.
 const UTC_BASE: i64 = 1_789_948_800;
-/// 2026-10-12 (a settlement holiday) as a day index from 2026-09-21.
-const BANK_HOLIDAY: i64 = 21;
+/// The last day index a generated scenario may reach (2026-10-31): inside the daylight-saving
+/// window the −4 h offset assumes, inside the `us_2026` calendar's validity, and the bound the
+/// derived holiday sets cover.
+const WINDOW_DAYS: i64 = 40;
 /// The `test_default` rates: SEC 0.00003 of the notional, TAF 0.0002 per share capped at 9.79 per
 /// execution, CAT 0.00001 per share, crypto 15 bps maker and 25 bps taker.
 const SEC_NUMERATOR: i128 = 3;
@@ -122,12 +126,41 @@ fn is_weekday(day: i64) -> bool {
     day.rem_euclid(7) < 5
 }
 
+/// The weekdays of the generated window that the `us_2026` fixture does not trade on.
+static TRADING_HOLIDAYS: LazyLock<BTreeSet<i64>> =
+    LazyLock::new(|| holidays(TradingCalendar::is_trading_day));
+
+/// The weekdays of the generated window that the `us_2026` fixture does not settle on: its
+/// Federal Reserve holidays, 2026-10-12 among them, and any non-trading weekday.
+static SETTLEMENT_HOLIDAYS: LazyLock<BTreeSet<i64>> =
+    LazyLock::new(|| holidays(TradingCalendar::is_settlement_day));
+
+/// Reads the holidays off the calendar fixture the fold is configured with, as day indices, so no
+/// date is written here twice and a change to the fixture reaches the oracle.
+fn holidays(open: impl Fn(&TradingCalendar, Date) -> Result<bool, TimeError>) -> BTreeSet<i64> {
+    let calendar = us_2026();
+    (0..=WINDOW_DAYS)
+        .filter(|day| is_weekday(*day) && !open(&calendar, day_date(*day)).unwrap())
+        .collect()
+}
+
+/// Whether the market or the settlement system is shut on `day`, by the oracle's own weekday
+/// arithmetic and the fixture's holidays. A day past the window fails the test rather than passing
+/// for an ordinary weekday, since neither the derived sets nor the −4 h offset reach it.
+fn closed(day: i64, holidays: &BTreeSet<i64>) -> bool {
+    assert!(
+        day <= WINDOW_DAYS,
+        "day {day} is past the generated window of {WINDOW_DAYS} days"
+    );
+    !is_weekday(day) || holidays.contains(&day)
+}
+
 /// The equity trade day of a fill at `secs`: the New York date, the next day from 20:00, then
-/// the first weekday on or after it (spec §2.2).
+/// the first trading day on or after it (spec §2.2).
 fn trade_day(secs: i64) -> i64 {
     let local = secs - LOCAL_BASE;
     let mut day = local.div_euclid(86_400) + i64::from(local.rem_euclid(86_400) >= 20 * 3_600);
-    while !is_weekday(day) {
+    while closed(day, &TRADING_HOLIDAYS) {
         day += 1;
     }
     day
@@ -136,7 +169,17 @@ fn trade_day(secs: i64) -> i64 {
 /// T+1 on the settlement calendar (spec §8.4).
 fn settle_day(trade: i64) -> i64 {
     let mut day = trade + 1;
-    while !is_weekday(day) || day == BANK_HOLIDAY {
+    while closed(day, &SETTLEMENT_HOLIDAYS) {
+        day += 1;
+    }
+    day
+}
+
+/// T+1 with no settlement holiday in the way, so a delayed settlement can be told from an ordinary
+/// one without asking the fold or repeating the fixture's dates.
+fn settle_day_without_holidays(trade: i64) -> i64 {
+    let mut day = trade + 1;
+    while !is_weekday(day) {
         day += 1;
     }
     day
@@ -196,8 +239,33 @@ struct Scenario {
     /// Whole shares of AAA held at the opening, so that a gated scenario can sell with no cash.
     opening_shares: u32,
     settled_cents: u32,
+    /// Drawn against the settled balance, so that the reservation term of buying power binds
+    /// instead of rounding to nothing beside it.
     reserved_cents: u32,
+    /// The day index of the first event and the longest gap between events.
+    window: (i64, u32),
     events: Vec<(Event, u32)>,
+}
+
+/// Where a scenario runs. Two in five start at the base day with gaps up to 20 h; the rest start in
+/// the days before 2026-10-12, a settlement holiday of the `us_2026` fixture, with gaps short
+/// enough that the whole scenario stays within `WINDOW_DAYS` and long enough that a settlement the
+/// holiday pushed out still falls due inside it.
+fn window() -> impl Strategy<Value = (i64, u32)> {
+    prop_oneof![
+        2 => Just((0i64, 72_000u32)),
+        3 => (10i64..=19).prop_map(|start| (start, 32_000u32)),
+    ]
+}
+
+/// Reservations from nothing to the whole settled balance (spec §9.5), with a band that does not
+/// depend on it so that a total above a small balance is drawn too.
+fn reserved_cents(settled_cents: u32) -> impl Strategy<Value = u32> {
+    prop_oneof![
+        1 => Just(0u32),
+        1 => 0u32..=100_000,
+        3 => 0u32..=settled_cents,
+    ]
 }
 
 fn scenario() -> impl Strategy<Value = Scenario> {
@@ -206,19 +274,23 @@ fn scenario() -> impl Strategy<Value = Scenario> {
         any::<bool>(),
         prop_oneof![9 => 0u32..=500, 1 => 0u32..=100_000],
         prop_oneof![1 => Just(0u32), 1 => 0u32..=10_000, 2 => 0u32..=20_000_000],
-        0u32..=100_000,
-        vec((event(), 0u32..=72_000), 1..40),
+        window(),
     )
-        .prop_map(
-            |(cash, gated, opening_shares, settled_cents, reserved_cents, events)| Scenario {
-                cash,
-                gated,
-                opening_shares,
-                settled_cents,
-                reserved_cents,
-                events,
-            },
-        )
+        .prop_flat_map(|(cash, gated, opening_shares, settled_cents, window)| {
+            (
+                reserved_cents(settled_cents),
+                vec((event(), 0u32..=window.1), 1..40),
+            )
+                .prop_map(move |(reserved_cents, events)| Scenario {
+                    cash,
+                    gated,
+                    opening_shares,
+                    settled_cents,
+                    reserved_cents,
+                    window,
+                    events,
+                })
+        })
 }
 
 /// The oracle ledger: cash only, since buying power needs no positions or marks.
@@ -274,11 +346,27 @@ struct Step {
     oracle: Oracle,
 }
 
+/// How often the generator reached the branches the properties above would otherwise assert
+/// nothing about, counted by the oracle while a scenario runs.
+#[derive(Debug, Clone, Copy, Default)]
+struct Reached {
+    /// Sales whose T+1 settlement a settlement holiday pushed out.
+    holiday_settlements: u32,
+    /// Settlements posted for a day a settlement holiday had pushed out.
+    holiday_settlements_posted: u32,
+    /// Buys the reservations alone denied: affordable with none held, not with the scenario's.
+    buys_denied_by_reservations: u32,
+    /// Buys approved that left less buying power behind than the reservations held, so that "a buy
+    /// never spends the reservations" is more than arithmetic on a large balance.
+    buys_at_the_reservation_bound: u32,
+}
+
 /// A scenario's steps and its final state, which is the opening state when no input was applied.
 struct Run {
     steps: Vec<Step>,
     account: Account,
     oracle: Oracle,
+    reached: Reached,
 }
 
 fn account_type(cash: bool) -> AccountType {
@@ -334,7 +422,10 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
     };
     oracle.held.insert(0, held);
     let mut steps = Vec::new();
-    let mut secs = LOCAL_BASE + 10 * 3_600;
+    let mut reached = Reached::default();
+    let mut delayed: BTreeSet<i64> = BTreeSet::new();
+    let (start_day, _) = s.window;
+    let mut secs = LOCAL_BASE + start_day * 86_400 + 10 * 3_600;
     for (n, (event, gap)) in s.events.iter().enumerate() {
         secs += i64::from(*gap);
         let at = UtcNanos::from_parts(secs, 0).unwrap();
@@ -356,9 +447,11 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
                 let p = i128::from(*cents);
                 let notional = traded * p * 10;
                 let cat = exact_div(traded * CAT_PER_SHARE, NANO);
-                let fits = !s.gated
-                    || !*buy
-                    || oracle.buying_power(s.cash, reserved) >= notional + ceil_cents(cat);
+                let need = notional + ceil_cents(cat);
+                let fits = !s.gated || !*buy || oracle.buying_power(s.cash, reserved) >= need;
+                if s.gated && *buy && !fits && oracle.buying_power(s.cash, 0) >= need {
+                    reached.buys_denied_by_reservations += 1;
+                }
                 if traded <= 0 || !fits {
                     continue;
                 }
@@ -367,12 +460,20 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
                     oracle.settled -= notional;
                     cat
                 } else {
-                    *oracle.unsettled.entry(settle_day(day)).or_default() += notional;
+                    let settles = settle_day(day);
+                    if settles != settle_day_without_holidays(day) {
+                        reached.holiday_settlements += 1;
+                        delayed.insert(settles);
+                    }
+                    *oracle.unsettled.entry(settles).or_default() += notional;
                     let sec = exact_div(notional * SEC_NUMERATOR, SEC_DENOMINATOR);
                     let taf = exact_div(traded * TAF_PER_SHARE, NANO).min(TAF_CAP);
                     sec + taf + cat
                 };
                 *oracle.accrued.entry((false, day)).or_default() += fees;
+                if *buy && reserved > 0 && oracle.buying_power(s.cash, reserved) < reserved {
+                    reached.buys_at_the_reservation_bound += 1;
+                }
                 *oracle.held.entry(*instrument).or_default() += if *buy { traded } else { -traded };
                 let fill = Input::Fill(Execution {
                     fill_id: format!("f{n}"),
@@ -403,6 +504,9 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
                 let p = i128::from(*cents);
                 let notional = traded * p * 10;
                 let fits = !s.gated || !*buy || oracle.buying_power(s.cash, reserved) >= notional;
+                if s.gated && *buy && !fits && oracle.buying_power(s.cash, 0) >= notional {
+                    reached.buys_denied_by_reservations += 1;
+                }
                 if traded <= 0 || !fits {
                     continue;
                 }
@@ -416,6 +520,9 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
                     oracle.settled += notional;
                     *oracle.accrued.entry((true, utc_day(secs))).or_default() += fee;
                     *oracle.held.entry(CRYPTO).or_default() -= traded;
+                }
+                if *buy && reserved > 0 && oracle.buying_power(s.cash, reserved) < reserved {
+                    reached.buys_at_the_reservation_bound += 1;
                 }
                 let fill = Input::Fill(Execution {
                     fill_id: format!("f{n}"),
@@ -471,6 +578,9 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
                     .collect();
                 for day in due {
                     oracle.settled += oracle.unsettled.remove(&day).unwrap();
+                    if delayed.remove(&day) {
+                        reached.holiday_settlements_posted += 1;
+                    }
                     inputs.push((
                         Input::SettlementPosted {
                             date: day_date(day),
@@ -494,6 +604,7 @@ fn run(s: &Scenario) -> Result<Run, TestCaseError> {
         steps,
         account,
         oracle,
+        reached,
     })
 }
 
@@ -579,29 +690,40 @@ proptest! {
     }
 
     /// Folding the same inputs, a margin account's buying power exceeds a cash account's by exactly
-    /// the unsettled proceeds (spec §7.2, DEC-34): nothing else differs between the types.
+    /// the unsettled proceeds (spec §7.2, DEC-34): nothing else differs between the types. Each
+    /// side is compared with the oracle's figure for that type first, so the difference is two
+    /// checked values apart rather than two folds that could be wrong together.
     #[test]
     fn margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds(s in scenario()) {
         for step in run(&s)?.steps {
             let (cash, margin) = if s.cash { (&step.after, &step.twin) } else { (&step.twin, &step.after) };
-            let difference = money(margin.buying_power(Reservations::NONE).unwrap()) - money(cash.buying_power(Reservations::NONE).unwrap());
-            prop_assert_eq!(difference, step.oracle.unsettled_total(), "{:?}", step.input);
-            prop_assert_eq!(money(cash.settled()), money(margin.settled()));
-            prop_assert_eq!(money(cash.fees_accrued().unwrap()), money(margin.fees_accrued().unwrap()));
+            let cash_power = money(cash.buying_power(Reservations::NONE).unwrap());
+            let margin_power = money(margin.buying_power(Reservations::NONE).unwrap());
+            prop_assert_eq!(cash_power, step.oracle.buying_power(true, 0), "cash buying power after {:?}", step.input);
+            prop_assert_eq!(margin_power, step.oracle.buying_power(false, 0), "margin buying power after {:?}", step.input);
+            prop_assert_eq!(margin_power - cash_power, step.oracle.unsettled_total(), "{:?}", step.input);
+            prop_assert_eq!(money(cash.settled()), step.oracle.settled, "cash settled");
+            prop_assert_eq!(money(margin.settled()), step.oracle.settled, "margin settled");
+            prop_assert_eq!(money(cash.fees_accrued().unwrap()), step.oracle.accrued_total(), "cash accrued");
+            prop_assert_eq!(money(margin.fees_accrued().unwrap()), step.oracle.accrued_total(), "margin accrued");
         }
     }
 
     /// Reservations come off buying power one for one, whatever the state, and a negative total is
-    /// rejected (spec §7.2, §9.5).
+    /// rejected (spec §7.2, §9.5). Both totals are compared with the oracle's buying power for
+    /// that total first, so the difference is not one fold against itself.
     #[test]
     fn reservations_reduce_buying_power_one_for_one_and_are_never_negative(
         s in scenario(),
-        other in 0u32..=100_000,
+        other in 0u32..=20_000_000,
         negative in 1u32..=100_000,
     ) {
-        let last = run(&s)?.account;
-        let with_scenario = money(last.buying_power(reservations(s.reserved_cents)).unwrap());
-        let with_other = money(last.buying_power(reservations(other)).unwrap());
+        let last = run(&s)?;
+        let account = last.account;
+        let with_scenario = money(account.buying_power(reservations(s.reserved_cents)).unwrap());
+        let with_other = money(account.buying_power(reservations(other)).unwrap());
+        prop_assert_eq!(with_scenario, last.oracle.buying_power(s.cash, i128::from(s.reserved_cents) * CENT), "the scenario's reservations");
+        prop_assert_eq!(with_other, last.oracle.buying_power(s.cash, i128::from(other) * CENT), "another reservation total");
         prop_assert_eq!(with_scenario - with_other, (i128::from(other) - i128::from(s.reserved_cents)) * CENT);
         let rejected = Reservations::new(usd(&format!("-{}", cents_text(i128::from(negative)))));
         prop_assert_eq!(rejected, Err(AccountingError::Num(NumError::Negative)));
@@ -610,12 +732,14 @@ proptest! {
     /// Charging every open fee bucket leaves settled cash (cash account) or total cash (margin)
     /// exactly at the buying power reported before the charges (DEC-104): buying power subtracts
     /// the sum of the per-bucket ceilings, which is what the charges debit, not the ceiling of the
-    /// sum.
+    /// sum. The buying power before and the cash after are each compared with the oracle's own
+    /// figure, so a fold that rounds the fee term and the charge the same wrong way fails here.
     #[test]
     fn charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash(s in scenario()) {
         let last = run(&s)?;
         let config = test_default();
         let before = money(last.account.buying_power(Reservations::NONE).unwrap());
+        prop_assert_eq!(before, last.oracle.buying_power(s.cash, 0), "buying power before the charges");
         let mut account = last.account;
         for (crypto, day) in last.oracle.accrued.keys() {
             let charge = Input::FeesCharged {
@@ -627,12 +751,75 @@ proptest! {
             account = applied.unwrap().account;
         }
         prop_assert_eq!(money(account.fees_accrued().unwrap()), 0);
+        let charged_settled = last.oracle.settled - last.oracle.charges_due();
+        prop_assert_eq!(money(account.settled()), charged_settled, "settled after the charges");
+        prop_assert_eq!(money(account.cash_total().unwrap()), charged_settled + last.oracle.unsettled_total(), "total cash after the charges");
         let remaining = if s.cash {
             money(account.settled())
         } else {
             money(account.cash_total().unwrap())
         };
         prop_assert_eq!(remaining, before);
+    }
+}
+
+/// The least often each branch must be reached over the deterministic 4000 scenarios of
+/// `the_gated_generator_reaches_the_settlement_holiday_and_the_reservation_bound`, set at about a
+/// third of what the seed reaches today so that a generator change which empties a property fails
+/// rather than passing quietly.
+const HOLIDAY_SETTLEMENTS: u32 = 120;
+const HOLIDAY_SETTLEMENTS_POSTED: u32 = 20;
+const DENIED_BY_RESERVATIONS: u32 = 220;
+const AT_THE_RESERVATION_BOUND: u32 = 210;
+
+/// Each branch the properties above rely on is reached, counted with the oracle over a
+/// deterministic run of 4000 gated scenarios: a sale whose T+1 settlement a settlement holiday of
+/// the `us_2026` fixture pushed out, the posting of such a settlement, a buy the reservations alone
+/// denied, and a buy approved with less buying power left than the reservations held. Without these
+/// the holiday arm of `settle_day` and the reservation term of buying power would be asserted over
+/// scenarios that never exercise them.
+#[test]
+fn the_gated_generator_reaches_the_settlement_holiday_and_the_reservation_bound() {
+    let mut runner = TestRunner::deterministic();
+    let mut holiday_settlements = 0;
+    let mut holiday_settlements_posted = 0;
+    let mut denied_by_reservations = 0;
+    let mut at_the_reservation_bound = 0;
+    for _ in 0..4_000 {
+        let s = scenario().new_tree(&mut runner).unwrap().current();
+        let s = Scenario { gated: true, ..s };
+        let reached = run(&s).unwrap().reached;
+        holiday_settlements += u32::from(reached.holiday_settlements > 0);
+        holiday_settlements_posted += u32::from(reached.holiday_settlements_posted > 0);
+        denied_by_reservations += u32::from(reached.buys_denied_by_reservations > 0);
+        at_the_reservation_bound += u32::from(reached.buys_at_the_reservation_bound > 0);
+    }
+    for (branch, count, least) in [
+        (
+            "a settlement a holiday pushed out",
+            holiday_settlements,
+            HOLIDAY_SETTLEMENTS,
+        ),
+        (
+            "posting such a settlement",
+            holiday_settlements_posted,
+            HOLIDAY_SETTLEMENTS_POSTED,
+        ),
+        (
+            "a buy the reservations alone denied",
+            denied_by_reservations,
+            DENIED_BY_RESERVATIONS,
+        ),
+        (
+            "a buy left with less than the reservations",
+            at_the_reservation_bound,
+            AT_THE_RESERVATION_BOUND,
+        ),
+    ] {
+        assert!(
+            count >= least,
+            "only {count} of 4000 gated scenarios reached {branch}, fewer than the {least} the properties need"
+        );
     }
 }
 
