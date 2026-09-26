@@ -92,6 +92,7 @@ Each row gets a named test whose oracle computes the answer its own way.
 | Journal §5.2, AGENTS.md rule 5 journal before acting: every `Effect::Intent` is preceded in the same list by the `Effect::Journal` that records it | `properties::every_intent_effect_follows_the_draft_that_records_it`, `hand::a_proposal_journals_before_it_reaches_the_sink` |
 | Journal §5.2 a crash between the append and the handoff re-hands the same intent and never re-journals it | `hand::a_restart_after_an_intent_committed_re_hands_it_without_re_journaling`, `properties::resume_emits_only_handoffs_and_timers` |
 | Journal §5.1 idempotency: a retry after `Unavailable` or `Ambiguous` derives the same `event_id` | `hand::a_retried_append_derives_the_same_event_id`, `properties::a_derived_event_id_is_a_function_of_epoch_head_and_ordinal` |
+| Journal §5.1 a batch in doubt is retried with the same drafts, and no input is handled at an unresolved head | `hand::an_unresolved_append_is_retried_before_any_new_input`, `hand::a_tick_during_an_unresolved_append_does_not_change_the_drafts` |
 | Journal §5.1 fencing: a new process increments `writer_epoch`, and a `Fenced` append stops the runtime instead of retrying | `hand::a_fenced_append_stops_the_runtime`, `hand::two_epochs_never_derive_one_event_id` |
 | Journal §2 gapless `seq`: the fold rejects a gap, a repeat, and a stream it does not follow | `hand::a_gap_in_seq_fails_the_fold`, `hand::a_repeated_seq_fails_the_fold`, `properties::the_fold_rejects_every_out_of_order_sequence` |
 | Journal §2 copied facts carry `causation_id` pointing at the originating event | `hand::a_copied_mode_change_points_at_the_originating_event`, `properties::every_copied_draft_cites_its_origin` |
@@ -416,7 +417,13 @@ the founder, because it edits founder-owned files.
    collide with the new writer's ID at the same head, which would return `IdempotencyConflict` and
    hide the `Fenced` the old process needs to see. A ULID's time component carries no meaning
    (journal §3), so a derived ULID is a conforming one, and uniqueness holds because a stream's
-   (epoch, head, ordinal) is unique.
+   (epoch, head, ordinal) is unique. A derived ID puts one obligation on the shell: **a batch whose
+   outcome is in doubt is retried with the same drafts**, and no new input is handled at a head whose
+   append is unresolved (journal §5.1 says `Unavailable` is safe to retry with the same drafts). If
+   the runtime instead re-folded and recomputed at the same head, a tick that expired a deadline in
+   the meantime would produce different drafts under the same derived ID and the append would answer
+   `IdempotencyConflict` for ever. The retry is therefore part of the contract, asserted on the
+   in-memory shell the tests drive.
 7. **Effects are ordered and write-before-acting is structural.** Within one list every
    `Effect::Intent` follows the `Effect::Journal` that records it, and the shell runs the list in
    order, stopping at the first append that is neither `Committed` nor `AlreadyCommitted` and
@@ -477,7 +484,7 @@ the founder, because it edits founder-owned files.
 
 ## Planted bugs
 
-Twelve, each to be seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
+Thirteen, each to be seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
 per DEC-83), run, and reverted. The tests PR reports the result for each; a row whose bug is not
 caught means the test is wrong, not the bug.
 
@@ -491,6 +498,7 @@ caught means the test is wrong, not the bug.
 | An agent-scoped kill switch hands a plan carrying the account-wide `cancel-all`, so another agent's orders and the owner's shares are touched | `hand::the_runtime_never_emits_a_cancel_all_or_a_close_position`, `hand::a_kill_switch_for_another_agent_changes_nothing` |
 | The intent effect is emitted before the draft that records it, so a crash between them sends an order the journal never recorded | `properties::every_intent_effect_follows_the_draft_that_records_it`, `hand::a_proposal_journals_before_it_reaches_the_sink` |
 | `IdGen` mints a fresh ULID on every call, so a retry after `Ambiguous` appends a second `IntentProposed` | `hand::a_retried_append_derives_the_same_event_id`, `hand::two_epochs_never_derive_one_event_id` |
+| The shell handles the next input before an unresolved append is retried, so a recomputed batch collides with its own derived IDs and every retry answers `IdempotencyConflict` | `hand::an_unresolved_append_is_retried_before_any_new_input`, `hand::a_tick_during_an_unresolved_append_does_not_change_the_drafts` |
 | A duration is credited by the state at the end of each interval, so inserting ticks changes when a deadline fires | `properties::extra_ticks_never_change_the_journaled_drafts`, `properties::durations_match_the_interval_oracle` |
 | The fold accepts a `seq` gap and keeps going, so a missed event silently changes the state a run resumes from | `hand::a_gap_in_seq_fails_the_fold`, `properties::the_fold_rejects_every_out_of_order_sequence`, `properties::folding_the_journaled_drafts_reproduces_the_live_state` |
 | An unknown event type folds as a no-op instead of failing, so a later story's event passes unnoticed | `hand::an_unknown_event_type_fails_the_fold`, `properties::every_catalogue_event_is_interpreted_or_named` |
