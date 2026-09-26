@@ -911,8 +911,10 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     equity's staleness and scale-lift timers in regular-session seconds, this crate holds no calendar,
     and taking the clock as a parameter is what keeps "nothing reads a clock" (ES-21) true rather than
     hiding a calendar behind a pure crate. Two further shapes moved under review: `SchemaDec`
-    compares **by value**, with `PartialEq`, `Eq`, and `Hash` hand-written on the text so they agree
-    with `Ord` (the grammar is a witness, not identity), and `ParseError::OffGrammar` carries the
+    compares **by value**, with `PartialEq` and `Eq` hand-written so they agree with `Ord` (the
+    grammar is a witness, not identity) and with **no `Hash` at all**: ES-21 bans `HashMap` and
+    `HashSet`, so a hash of a document value has no legitimate caller, and a hand-written one only
+    added a mutant nothing could catch. `ParseError::OffGrammar` carries the
     `Pointer` every other variant carries, with `SchemaDec::parse` returning a path-less
     `GrammarMismatch` the document parser wraps.
 

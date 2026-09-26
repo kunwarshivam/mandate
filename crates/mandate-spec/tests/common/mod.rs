@@ -35,7 +35,7 @@ pub fn obj(members: Vec<(&str, Value)>) -> Value {
 }
 
 const SHA: &str = "sha256:1111111111111111111111111111111111111111111111111111111111111111";
-const ASSET_A: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
+pub const ASSET_A: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
 const ASSET_B: &str = "7b4a1c2e-3333-4a2b-9c3d-000000000003";
 
 /// A document that should parse. Every test below starts here and changes one thing.

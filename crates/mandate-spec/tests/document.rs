@@ -6,7 +6,7 @@
 
 mod common;
 
-use common::{arr, b, base, i, obj, s, with};
+use common::{ASSET_A, arr, b, base, i, obj, s, with, with_all};
 use mandate_canon::Value;
 use mandate_spec::{Mandate, ParseError};
 
@@ -31,7 +31,8 @@ fn pointer_of(value: &Value) -> String {
             | ParseError::NotInEnum { path }
             | ParseError::OffPattern { path }
             | ParseError::OutOfBounds { path }
-            | ParseError::TooDeep { path },
+            | ParseError::TooDeep { path }
+            | ParseError::OffGrammar { path, .. },
         ) => path.as_str().to_owned(),
         Err(other) => format!("no pointer: {}", other.code()),
         Ok(_) => "accepted".to_owned(),
@@ -56,7 +57,8 @@ fn an_unknown_member_names_itself() {
     assert_eq!(pointer_of(&document), "/leverage");
 }
 
-/// MC-S10 removes a goal parameter, MC-S22 a model's output age, MC-S27 the research cost cap.
+/// MC-S22 removes a model's output age, MC-S27 the research cost cap, and the rest are the members
+/// every mandate needs.
 #[test]
 #[ignore = "pending E10-1"]
 fn a_missing_required_member_names_itself() {
@@ -73,6 +75,34 @@ fn a_missing_required_member_names_itself() {
         assert_eq!(code_of(&document), "missing_member", "removing {path}");
         assert_eq!(pointer_of(&document), path);
     }
+}
+
+/// MC-S10 removes an accumulate goal's `max_spend_usd`.
+///
+/// The builder's base goal is `continuous`, which has no such member, so the row round 2 found in the
+/// test above was checking a member of a goal the case does not use. The goal is a discriminated
+/// `oneOf`: with `type: accumulate` and no `max_spend_usd` the document matches none of the three
+/// branches, and a parse that dispatches on `type` names the member the accumulate branch needs
+/// rather than reporting the whole goal as off its union.
+#[test]
+#[ignore = "pending E10-1"]
+fn an_accumulate_goal_missing_its_spend_cap_names_that_member() {
+    let accumulate = obj(vec![
+        ("type", s("accumulate")),
+        ("instrument", s(ASSET_A)),
+        ("target_qty", s("0.5")),
+        ("max_avg_price", Value::Null),
+        ("max_spend_usd", s("5000")),
+        ("end_date", Value::Null),
+        ("on_complete", s("hold_protected")),
+    ]);
+    assert!(
+        parse(&with("/goal", Some(accumulate.clone()))).is_ok(),
+        "the accumulate goal this row breaks must itself be valid"
+    );
+    let document = with_all(&[("/goal", Some(accumulate)), ("/goal/max_spend_usd", None)]);
+    assert_eq!(code_of(&document), "missing_member");
+    assert_eq!(pointer_of(&document), "/goal/max_spend_usd");
 }
 
 /// MC-S06 and MC-S16. The journal grammar is a text-level type; a JSON number could not carry 28 places and would not round-trip (journal spec §4.6).
@@ -108,7 +138,11 @@ fn a_value_off_its_enum_names_itself() {
     }
 }
 
-/// MC-S03, MC-S04, MC-S13, MC-S14, MC-S17: each is a decimal the schema's `$def` for that field rejects, so the code is the grammar's and not a pointer's.
+/// MC-S03, MC-S04, MC-S13, MC-S14, MC-S17: each is a decimal the schema's `$def` for that field
+/// rejects, so the rejection names both the grammar the field declares and the field itself.
+///
+/// The pointer is the half review round 2 found unpinned: a rejection that says only "off_grammar"
+/// leaves an author hunting for which of a mandate's forty decimals it meant.
 #[test]
 #[ignore = "pending E10-1"]
 fn a_decimal_off_its_fields_grammar_says_which_grammar() {
@@ -117,23 +151,29 @@ fn a_decimal_off_its_fields_grammar_says_which_grammar() {
         "/risk/hysteresis",
         "/risk/drawdown_ladder/0/factor",
     ] {
+        let document = with(path, Some(s("8")));
         assert_eq!(
-            code_of(&with(path, Some(s("8")))),
+            code_of(&document),
             "off_grammar",
             "{path} = 8 is outside the open unit interval"
         );
+        assert_eq!(pointer_of(&document), path, "{path} names itself");
     }
+    let trailing_zero = with("/risk/max_daily_loss", Some(s("0.020")));
     assert_eq!(
-        code_of(&with("/risk/max_daily_loss", Some(s("0.020")))),
+        code_of(&trailing_zero),
         "off_grammar",
         "MC-S04: a trailing zero is not canonical, and DecStr would have normalised it away"
     );
+    assert_eq!(pointer_of(&trailing_zero), "/risk/max_daily_loss");
     let twenty_nine = format!("0.{}11", "0".repeat(27));
+    let too_many_places = with("/risk/max_daily_loss", Some(s(&twenty_nine)));
     assert_eq!(
-        code_of(&with("/risk/max_daily_loss", Some(s(&twenty_nine)))),
+        code_of(&too_many_places),
         "off_grammar",
         "MC-S17: 29 fractional digits"
     );
+    assert_eq!(pointer_of(&too_many_places), "/risk/max_daily_loss");
 }
 
 /// MC-S09, MC-S21, MC-S24, MC-S25, MC-S30, MC-S31.
@@ -290,15 +330,25 @@ fn the_remaining_schema_rejections_name_their_reason() {
 
 /// MC-S15: `protection` carries an `if enabled then stop_distance` conditional, so enabling protection
 /// without a stop is a schema rejection rather than a V-rule.
+///
+/// The code is `wrong_type`, not `off_grammar`. `stop_distance` is `oneOf [open_fraction, null]`, so a
+/// null passes the property's own schema and is refused only by the `then` clause, whose
+/// `$ref: open_fraction` is `type: string`. A null is not a string off a grammar; it is the wrong type,
+/// and that is what `jsonschema` reports for this case too, which ES-22 requires the two to agree on.
+/// Review round 2 raised the choice; this is the side the schema takes.
 #[test]
 #[ignore = "pending E10-1"]
 fn protection_enabled_needs_a_stop_distance() {
     let document = with("/protection/stop_distance", Some(Value::Null));
-    assert_eq!(code_of(&document), "off_grammar");
-    assert_eq!(
-        pointer_of(&document),
-        "no pointer: off_grammar",
-        "the grammar error carries the pointer, which this helper reports separately"
+    assert_eq!(code_of(&document), "wrong_type");
+    assert_eq!(pointer_of(&document), "/protection/stop_distance");
+    assert!(
+        parse(&with_all(&[
+            ("/protection/enabled", Some(b(false))),
+            ("/protection/stop_distance", Some(Value::Null)),
+        ]))
+        .is_ok(),
+        "the same null is valid with protection disabled, so the conditional is what rejects it"
     );
 }
 

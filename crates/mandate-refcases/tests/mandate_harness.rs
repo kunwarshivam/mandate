@@ -176,3 +176,73 @@ fn the_fixture_holds_the_families_this_stream_expects() {
         "298 cases plus `version` and `version_vector`"
     );
 }
+
+/// Every member of every owned case's `expect` is one the harness reads, at the top level and inside
+/// a `risk_state` step.
+///
+/// This is planted bug 26's oracle, and review round 2 found it missing: sweeping only the top-level
+/// keys let an `expect` grow a member that nothing compared, so the case would pass while checking
+/// less than it claims. The bug is the silence, not the wrong value, so the planted key is inserted
+/// beside the real expectations rather than replacing one.
+#[test]
+fn every_owned_expectation_member_is_read() {
+    let owned = [
+        "schema",
+        "semantic",
+        "policy",
+        "change",
+        "risk_state",
+        "risk_day",
+        "goal",
+    ];
+    let fixture = fixture();
+    let cases = fixture["cases"].as_array().expect("a case list");
+    let mut top_level = 0;
+    let mut in_steps = 0;
+    for case in cases {
+        let kind = case["kind"].as_str().expect("a kind");
+        if !owned.contains(&kind) {
+            continue;
+        }
+        let id = case["id"].as_str().expect("an id");
+        let mut doctored = fixture.clone();
+        let slot = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .expect("the case");
+        let planted = "an_expectation_the_harness_does_not_read".to_owned();
+        let mut planted_somewhere = false;
+        if let Some(expect) = slot.get_mut("expect").and_then(Json::as_object_mut) {
+            expect.insert(planted.clone(), Json::Null);
+            planted_somewhere = true;
+            top_level += 1;
+        }
+        for step in slot
+            .get_mut("steps")
+            .and_then(Json::as_array_mut)
+            .map(Vec::as_mut_slice)
+            .unwrap_or_default()
+        {
+            if let Some(expect) = step.get_mut("expect").and_then(Json::as_object_mut) {
+                expect.insert(planted.clone(), Json::Null);
+                planted_somewhere = true;
+                in_steps += 1;
+            }
+        }
+        assert!(
+            planted_somewhere,
+            "{id}: an owned case with no expectation at all would be checking nothing"
+        );
+        let failure = run(doctored, id).expect_err("an unread expectation must fail the case");
+        assert!(
+            failure.contains(&planted),
+            "{id}: the failure must name the expectation it did not read, got: {failure}"
+        );
+    }
+    assert!(
+        top_level >= 170 && in_steps >= 50,
+        "both sweeps must have been exercised, got {top_level} top-level and {in_steps} in steps"
+    );
+}

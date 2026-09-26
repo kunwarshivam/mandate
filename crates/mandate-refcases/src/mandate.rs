@@ -124,8 +124,51 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
     }
 }
 
-/// Fails the case for any top-level key the harness does not know, so a key added to the fixture
-/// cannot be silently ignored (DEC-85).
+/// The `expect` members each owned family reads. A family's set is exhaustive: an `expect` key the
+/// fixture grows and this harness does not read would otherwise be silently satisfied, which is
+/// planted bug 26 and what review round 2 found still uncaught.
+const EXPECT_KEYS: &[(&str, &[&str])] = &[
+    ("schema", &["schema_valid"]),
+    ("semantic", &["violations", "warnings", "worst_case"]),
+    ("policy", &["valid", "violations"]),
+    (
+        "change",
+        &[
+            "classification",
+            "changed_paths",
+            "old_version",
+            "new_version",
+            "step_up_required",
+        ],
+    ),
+    (
+        "risk_day",
+        &["risk_day", "starts_at", "ends_at", "length_s"],
+    ),
+    ("goal", &["done", "reason", "then", "stop_reason"]),
+];
+
+/// A `risk_state` case expects per step, not once, so its keys are swept on every step's `expect`.
+const STEP_EXPECT_KEYS: &[&str] = &[
+    "agent_equity",
+    "high_water_mark",
+    "drawdown",
+    "day_start_equity",
+    "daily_pnl",
+    "daily_pnl_fraction",
+    "capital_base",
+    "net_contributed",
+    "size_factor",
+    "restrictions",
+    "instrument_restrictions",
+    "agent_mode",
+    "journal",
+    "pending",
+    "error",
+];
+
+/// Fails the case for any key the harness does not know, at the top level and inside every `expect`,
+/// so a key added to the fixture cannot be silently ignored (DEC-85).
 fn unread_keys(case: &Json) -> Result<(), String> {
     let known: BTreeSet<&str> = CASE_KEYS.iter().copied().collect();
     let members = case
@@ -138,7 +181,59 @@ fn unread_keys(case: &Json) -> Result<(), String> {
         .collect();
     ensure(unknown.is_empty(), || {
         format!("case keys not interpreted: {}", unknown.join(", "))
-    })
+    })?;
+    unread_expect_keys(case)
+}
+
+/// The `expect` sweep, one level down from [`unread_keys`].
+fn unread_expect_keys(case: &Json) -> Result<(), String> {
+    let kind = str_at(case, "kind")?;
+    if kind == "risk_state" {
+        for (index, step) in case
+            .get("steps")
+            .and_then(Json::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            if let Some(expect) = step.get("expect") {
+                unknown_members(expect, STEP_EXPECT_KEYS).map_err(|unknown| {
+                    format!(
+                        "step {}: expectations not interpreted: {unknown}",
+                        index.saturating_add(1)
+                    )
+                })?;
+            }
+        }
+        return Ok(());
+    }
+    let Some((_, keys)) = EXPECT_KEYS.iter().find(|(k, _)| *k == kind) else {
+        return Err(format!("no expectation keys declared for kind `{kind}`"));
+    };
+    match case.get("expect") {
+        Some(expect) => unknown_members(expect, keys)
+            .map_err(|unknown| format!("expectations not interpreted: {unknown}")),
+        None => Ok(()),
+    }
+}
+
+/// The members of `value` that are not in `known`, joined, or `Ok` when there are none.
+fn unknown_members(value: &Json, known: &[&str]) -> Result<(), String> {
+    let known: BTreeSet<&str> = known.iter().copied().collect();
+    let members = value
+        .as_object()
+        .ok_or_else(|| "not an object".to_owned())?;
+    let unknown: Vec<&str> = members
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !known.contains(k))
+        .collect();
+    if unknown.is_empty() {
+        Ok(())
+    } else {
+        Err(unknown.join(", "))
+    }
 }
 
 /// The base mandate a case names, as a canonical value.
