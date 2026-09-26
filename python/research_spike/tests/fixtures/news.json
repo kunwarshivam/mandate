@@ -1,0 +1,33 @@
+{
+ "news": [
+  {
+   "id": 48123456,
+   "headline": "Apple reports record services revenue",
+   "summary": "Services revenue rose 14% year over year.",
+   "source": "benzinga",
+   "created_at": "2026-09-25T13:02:11Z",
+   "updated_at": "2026-09-25T13:02:11Z",
+   "url": "https://www.benzinga.com/news/48123456",
+   "author": "Wire",
+   "symbols": [
+    "AAPL"
+   ],
+   "images": []
+  },
+  {
+   "id": 48123457,
+   "headline": "Bitcoin ETF inflows reach a weekly high",
+   "summary": "Spot ETFs took in 1.2 billion USD this week.",
+   "source": "benzinga",
+   "created_at": "2026-09-25T09:30:00Z",
+   "updated_at": "2026-09-25T09:30:00Z",
+   "url": "https://www.benzinga.com/news/48123457",
+   "author": "Wire",
+   "symbols": [
+    "BTCUSD"
+   ],
+   "images": []
+  }
+ ],
+ "next_page_token": null
+}
