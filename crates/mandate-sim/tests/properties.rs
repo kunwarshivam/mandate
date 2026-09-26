@@ -1041,7 +1041,6 @@ proptest! {
     /// plus the decision latency, and the approval latency too when approval was required. The bar
     /// that produced the decision starts strictly earlier than the decision, so it never fills.
     #[test]
-    #[ignore = "pending E4-1"]
     fn no_fill_before_eligibility(s in scenario()) {
         let outcome = simulated(&s)?;
         for fill in &outcome.fills {
@@ -1068,7 +1067,6 @@ proptest! {
     /// truncate(fraction × reference volume, increment), and is 0 when the reference volume is
     /// unavailable (DEC-106 item 4).
     #[test]
-    #[ignore = "pending E4-1"]
     fn fills_never_exceed_the_shared_volume_cap(s in scenario()) {
         let outcome = simulated(&s)?;
         for index in 0..s.bars.len() {
@@ -1087,7 +1085,6 @@ proptest! {
     /// An order never fills more than it asked for, and every fill is a positive multiple of the
     /// instrument's quantity increment (spec §2.1, §6.4 rule 3).
     #[test]
-    #[ignore = "pending E4-1"]
     fn orders_never_overfill(s in scenario()) {
         let outcome = simulated(&s)?;
         for (index, order) in s.orders.iter().enumerate() {
@@ -1111,7 +1108,6 @@ proptest! {
     /// Spec §6.4 rule 5: a resting limit fills only when the bar's extreme passes it **strictly**. A
     /// bar whose low (buy) or high (sell) merely touches the limit is not a fill.
     #[test]
-    #[ignore = "pending E4-1"]
     fn a_touch_is_never_a_fill(s in scenario()) {
         let outcome = simulated(&s)?;
         for fill in &outcome.fills {
@@ -1129,7 +1125,6 @@ proptest! {
     /// Spec §6.4 rule 5 and rule 7: a buy never pays above its limit and a sell never receives below
     /// it, whatever the slippage.
     #[test]
-    #[ignore = "pending E4-1"]
     fn limit_prices_are_never_violated(s in scenario()) {
         let outcome = simulated(&s)?;
         for fill in &outcome.fills {
@@ -1155,7 +1150,6 @@ proptest! {
     /// while every price moves against the order. Compared with the same scenario at zero slippage,
     /// each buy pays at least as much and each sell receives at most as much.
     #[test]
-    #[ignore = "pending E4-1"]
     fn slippage_and_rounding_are_adverse(s in scenario()) {
         let frictionless = Scenario { half_spread: 0, impact: 0, ..s.clone() };
         let with_slippage = reported(&simulated(&s)?);
@@ -1179,7 +1173,6 @@ proptest! {
     /// Spec §6.4 rule 2 and rule 6: a fill only ever happens in a session the order may trade, and a
     /// stop only ever fills on a regular-session bar for an equity.
     #[test]
-    #[ignore = "pending E4-1"]
     fn fills_respect_sessions(s in scenario()) {
         let outcome = simulated(&s)?;
         for fill in &outcome.fills {
@@ -1199,7 +1192,6 @@ proptest! {
     /// Spec §6.4 rule 2: a day order fills nothing after the last bar of its last eligible session,
     /// and its remainder is reported canceled at that bar.
     #[test]
-    #[ignore = "pending E4-1"]
     fn day_orders_expire_at_session_end(s in scenario()) {
         let outcome = simulated(&s)?;
         for (index, order) in s.orders.iter().enumerate() {
@@ -1227,7 +1219,6 @@ proptest! {
     /// Spec §6.4 rule 8 and DEC-106 item 8: at most one leg of an OCO ever fills, and the first fill
     /// of that leg cancels the other, at that bar.
     #[test]
-    #[ignore = "pending E4-1"]
     fn oco_fills_at_most_one_leg(s in scenario()) {
         let outcome = simulated(&s)?;
         for (index, order) in s.orders.iter().enumerate() {
@@ -1262,7 +1253,6 @@ proptest! {
 
     /// Replay (ADR-0001 ES-21): the same inputs give the same fills, cancellations, and end states.
     #[test]
-    #[ignore = "pending E4-1"]
     fn identical_inputs_give_identical_fills(s in scenario()) {
         prop_assert_eq!(ran(&s)?, ran(&s)?);
     }
@@ -1270,7 +1260,6 @@ proptest! {
     /// Every fill, cancellation, and end state matches the order-major integer simulator in this
     /// file, which computes them its own way.
     #[test]
-    #[ignore = "pending E4-1"]
     fn fills_match_the_independent_simulator(s in scenario()) {
         let outcome = ran(&s)?;
         let expected = oracle(&s);
