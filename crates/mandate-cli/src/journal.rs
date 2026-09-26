@@ -134,7 +134,8 @@ fn shown(path: Option<&Path>) -> String {
     path.map_or_else(|| "none given".to_owned(), |p| p.display().to_string())
 }
 
-/// Lines the export holds, counting a final line without its line feed, which [`rows`] rejects.
+/// Non-empty lines the export holds, including a final one without its line feed; [`rows`] rejects
+/// both that and an empty line, so the count says how many lines were read, not how many verified.
 fn line_count(export: &[u8]) -> usize {
     export
         .split(|b| *b == b'\n')
