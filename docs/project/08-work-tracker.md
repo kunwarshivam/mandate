@@ -67,7 +67,7 @@ issues are the record; this table is the summary
 | E4-2 baseline backtest and metrics report (stream E) | `claude-code` | [#110](https://github.com/kunwarshivam/mandate/issues/110) | Brief PR open ([#112](https://github.com/kunwarshivam/mandate/pull/112), docs only, DEC-112): the task brief, DEC-127, the feature map, and these rows; the DEC-77 tests PR follows once the brief merges and the coordinator confirms the crate placement | `agent/e4-2-brief`, then `agent/e4-2-tests` |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | E5-3 Postgres journal | `cursor` | #77 | Merged (#82 tests, #92 implementation); DEC-109 recorded; claims #77 and #78 closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
-| Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
+| Track C: mandate spec rewrite for DEC-97 to DEC-103 and DEC-111 | `claude-code` | #50, #103 | One spec-change PR open (no code, ES-22): the ten rewrite questions answered as DEC-117 to DEC-126 (Proposed, founder may veto); mandate spec v0.6, both schemas, the journal spec's event catalogue, the reference implementation, and 291 reference cases. The Rust harness for the mandate cases is Not done and follows in a later PR | `agent/track-c-mandate-rewrite` (#109) |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS and rebased; the founder's confirmation of DEC-99 to DEC-103 pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Tests (#71), sessions implementation (#85) and corporate actions (#74) merged; PR 4 (#96) in review, and the claim closes when it merges | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
@@ -176,7 +176,7 @@ after each code merge.
 | A | E4-1 implementation PR (`mandate-sim`, `mandate-num`; test files only lose `pending E4-1` markers), then the status PR moving RC-10, RC-12, RC-19 to passing | #75 (merged) | DEC-114 | implementation PR [#111](https://github.com/kunwarshivam/mandate/pull/111) open, ready for review; status PR after it merges |
 | B | E2-3 CLI slice (`download --kind quotes`, quote statistics in `inspect`) and retiring `mandate-marketdata`'s own RFC 3339 parser for `UtcNanos::parse_rfc3339` | #95, #98 (merged) | DEC-116 | builder launched |
 | C | E5-4: `mandate-cli journal verify` over an exported stream and its artifact store, and artifact put and fetch | E5-1 to E5-3 (merged); the founder's confirmation of E5-4 taken from the delegation | DEC-115 | PR [#108](https://github.com/kunwarshivam/mandate/pull/108) open, waiting on review |
-| D | Track C: answer the rewrite questions as decisions proposed to the founder, then the mandate spec, schemas, reference implementation, and cases for DEC-97 to DEC-103 and DEC-111 (spec-change PR, no code) | nothing; the founder can veto any proposed answer before the spec PR merges | DEC-117 to DEC-126 | builder launched |
+| D | Track C: answer the rewrite questions as decisions proposed to the founder, then the mandate spec, schemas, reference implementation, and cases for DEC-97 to DEC-103 and DEC-111 (spec-change PR, no code) | nothing; the founder can veto any proposed answer before the spec PR merges | DEC-117 to DEC-126 | PR #109 open, ready for the coordinator |
 | E | E4-2 task brief and interpretations (docs only), then the DEC-77 tests PR for the baseline backtest and metrics: a new `mandate-backtest` crate if the founder takes the layer-7 entry, otherwise modules in `mandate-sim`, plus the `mandate-num` metric arithmetic under a shared-crate claim | #75, #111, #113 (all merged); the brief is written against that API and re-checked against #111 | DEC-127 | brief PR [#112](https://github.com/kunwarshivam/mandate/pull/112) open, claim #110 |
 | Founder | Alpaca market-data keys in the Cursor environment (M1 exit run); paper and OpenRouter keys and egress in the cloud environment, then go for spike paper runs; counsel; branch cleanup; key rotation | | | waiting |
 
@@ -187,11 +187,16 @@ after each code merge.
    the founder adds market-data keys. **E2-3** (Should) later.
 3. **E5-3** implementation PR (`cursor`), then **E5-4** once the founder confirms it.
 4. The spec-only change for DEC-104 items 2 and 5 once the founder decides item 5.
-5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
-   DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
-   the envelope fields and the universe as runtime state, the research agent
-   contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
-   restated for envelope fields.
+5. **Before M5:** done in the Track C spec-change PR (#109) — the mandate spec is at v0.6, both
+   schemas, the journal spec's event catalogue, the reference implementation, and 291 reference cases
+   are rewritten for DEC-97 to DEC-103 and DEC-111
+   ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)): the envelope and strategy fields
+   split, the working universe as runtime state, the research-agent and admission contract,
+   `ThesisProposed`, `ThesisRevised`, and `UniverseChanged`, the retail profile, and V-020, V-022, and
+   MI-12 restated for envelope fields. The ten rewrite questions are answered as DEC-117 to DEC-126
+   (`Proposed (founder)`). **Still to do:** the founder's confirmation of those ten rows and of
+   DEC-99 to DEC-103, and the **Rust harness** for the mandate reference cases (the mandate crates
+   that would read `mandate.yaml` do not exist yet, so no code shipped with the spec).
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
    E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the team's
    internal paper workspaces with the research basket as the fixed test data universe, every
