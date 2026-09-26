@@ -30,3 +30,4 @@
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
+/crates/mandate-journal-pg/ @kunwarshivam
