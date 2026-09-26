@@ -302,6 +302,7 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
         vec![
             recorded("stock-bars-sip-spy-1hour-2026-09-23"),
             recorded("stock-bars-sip-spy-1hour-2026-09-24"),
+            br#"{"corporate_actions":{"forward_splits":[{"id":"spy-split","symbol":"SPY","cusip":"78462F103","new_rate":2,"old_rate":1,"process_date":"2026-09-24","ex_date":"2026-09-24","record_date":"2026-09-23","payable_date":"2026-09-23"}]},"next_page_token":null}"#.to_vec(),
         ]
     };
 
@@ -322,11 +323,22 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
     assert!(first.bytes > 0);
     let report = String::from_utf8(report).unwrap();
     let lines: Vec<&str> = report.lines().collect();
-    assert_eq!(lines.len(), 3, "{report}");
+    assert_eq!(lines.len(), 4, "{report}");
     assert!(lines[0].starts_with("SPY bars-1Hour (sip) 2026-09-23 16 rows "));
     assert!(lines[0].ends_with(" written"));
     assert!(lines[0].contains(" sha256 "));
-    assert!(lines[2].starts_with("total: 1 datasets, 2 days, 32 rows"));
+    assert_eq!(
+        lines[2],
+        "SPY bars-1Hour (sip) corporate actions 2026-09-23 to 2026-09-24: 1 splits, 0 cash dividends, 0 other written"
+    );
+    assert!(lines[3].starts_with("total: 1 datasets, 2 days, 32 rows"));
+    let stored = fs::read_to_string(
+        scratch
+            .0
+            .join("alpaca/sip/bars-1Hour/SPY/corporate-actions.json"),
+    )
+    .unwrap();
+    assert!(stored.contains(r#""id":"spy-split""#), "{stored}");
 
     let mut report = Vec::new();
     let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
@@ -335,7 +347,7 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
     assert_eq!(second.bytes, first.bytes);
     let report = String::from_utf8(report).unwrap();
     assert!(
-        report.lines().take(2).all(|l| l.ends_with(" unchanged")),
+        report.lines().take(3).all(|l| l.ends_with(" unchanged")),
         "{report}"
     );
 }

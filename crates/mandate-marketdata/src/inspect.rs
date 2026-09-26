@@ -1,8 +1,9 @@
-//! `inspect` (backlog E2-2): what a stored dataset covers and whether to trust it. It reads the
-//! manifest and every partition it lists, and reports the days listed, empty, and never fetched;
-//! exact statistics; gaps between consecutive bars; records that share a key; and every
-//! partition that is missing, altered, unreadable, or not listed. Gaps are not yet classified as
-//! no-trade intervals, session closures, or true gaps (E2-4, trading domain spec §4.2).
+//! `inspect` (backlog E2-2, E2-4): what a stored dataset covers and whether to trust it. It reads
+//! the manifest and every partition it lists, and reports the days listed, empty, and never
+//! fetched; exact statistics, with prices also split-adjusted by the corporate actions stored
+//! with a stock dataset; gaps between consecutive bars, each missing bar slot classified as a
+//! session closure, no trade, a true gap, or unclassified (trading domain spec §4.2); records
+//! that share a key; and every partition that is missing, altered, unreadable, or not listed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,14 +13,25 @@ use std::path::Path;
 use mandate_canon::{DecStr, Digest};
 use mandate_time::{Date, TimeError, UtcNanos};
 
+use crate::actions::{ActionsError, RecordedActions, read_actions};
 use crate::dataset::{self, BAR_SCALE, DatasetError, ListedDay, PRICE_SCALE, SIZE_SCALE};
-use crate::model::{DatasetId, DayRange, Kind, ModelError, Records, TimeUnit, Timeframe};
+use crate::model::{
+    AdjustmentError, AssetClass, DatasetId, DayRange, Kind, ModelError, PriceAdjuster, Records,
+    TimeUnit, Timeframe,
+};
 use crate::number::{self, NumberError};
+use crate::venue::{Venue, VenueError, VenueState};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InspectError {
     #[error(transparent)]
     Dataset(#[from] DatasetError),
+    #[error(transparent)]
+    Actions(#[from] ActionsError),
+    #[error("venue hours: {0}")]
+    Venue(#[from] VenueError),
+    #[error("split adjustment: {0}")]
+    Adjustment(#[from] AdjustmentError),
     #[error("column `{column}`: {source}")]
     Number {
         column: &'static str,
@@ -31,6 +43,8 @@ pub enum InspectError {
     Time(#[from] TimeError),
     #[error("day range: {0}")]
     Range(#[from] ModelError),
+    #[error("inspect does not summarize stored {} yet", .0.dir_name())]
+    Unsupported(Kind),
 }
 
 impl InspectError {
@@ -38,10 +52,14 @@ impl InspectError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Dataset(e) => e.code(),
+            Self::Actions(e) => e.code(),
+            Self::Venue(_) => "venue",
+            Self::Adjustment(_) => "adjustment",
             Self::Number { .. } => "number",
             Self::Overflow { .. } => "overflow",
             Self::Time(_) => "time",
             Self::Range(_) => "range",
+            Self::Unsupported(_) => "unsupported",
         }
     }
 }
@@ -53,8 +71,9 @@ pub struct Inspection {
     pub coverage: Coverage,
     /// Over every record of the partitions without problems; `None` when there are none.
     pub stats: Option<Stats>,
+    pub corporate_actions: ActionsReport,
     /// Between consecutive bars in time order, across partitions; always empty for trades.
-    pub gaps: Vec<Gap>,
+    pub gaps: Vec<ClassifiedGap>,
     /// In key order.
     pub duplicates: Vec<Duplicate>,
     /// Listed days first, in date order, then unlisted files by name.
@@ -78,7 +97,36 @@ pub struct Stats {
     pub rows: u64,
     pub first: UtcNanos,
     pub last: UtcNanos,
+    /// Raw, as stored (DEC-89).
     pub values: Values,
+    /// Split-adjusted as of the span's last day; `Some` exactly when the corporate actions are
+    /// [`ActionsReport::Applied`].
+    pub adjusted: Option<AdjustedPrices>,
+}
+
+/// The extremes of a dataset's prices (bar lows and highs, or trade prices), each split-adjusted
+/// point in time to the terms of one date (spec §4.5, §8.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdjustedPrices {
+    pub low: DecStr,
+    pub high: DecStr,
+}
+
+/// The corporate actions stored with a dataset and whether its prices are adjusted by them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionsReport {
+    /// Crypto has no corporate actions.
+    NotApplicable,
+    /// A stock dataset without them: stored before E2-4, or not by `download`.
+    NotRecorded,
+    /// Recorded for days that do not cover the span, so no price is adjusted.
+    Incomplete(RecordedActions),
+    /// Recorded for the whole span: every split with ex-date up to `as_of`, the span's last day,
+    /// adjusts [`Stats::adjusted`]; later splits, cash dividends, and other actions do not.
+    Applied {
+        recorded: RecordedActions,
+        as_of: Date,
+    },
 }
 
 /// Exact extremes and totals of the decimal columns.
@@ -103,6 +151,46 @@ pub enum Values {
 pub struct Gap {
     pub previous: UtcNanos,
     pub next: UtcNanos,
+}
+
+/// Why an expected bar slot has no bar (brief interpretation 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GapClass {
+    /// The feed's venue is closed at the slot's start.
+    SessionClosure,
+    /// The venue is open and the slot's day was fetched cleanly: nothing traded.
+    NoTrade,
+    /// The venue is open and the slot's day was never fetched or cannot be trusted.
+    TrueGap,
+    /// The venue's published hours do not say whether it is open.
+    Unclassified,
+}
+
+impl GapClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SessionClosure => "session closure",
+            Self::NoTrade => "no trade",
+            Self::TrueGap => "true gap",
+            Self::Unclassified => "unclassified",
+        }
+    }
+}
+
+/// A run of consecutive missing slots of one class: the starts of the first and last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stretch {
+    pub class: GapClass,
+    pub first: UtcNanos,
+    pub last: UtcNanos,
+    pub slots: u64,
+}
+
+/// A gap and its missing slots, in time order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedGap {
+    pub gap: Gap,
+    pub stretches: Vec<Stretch>,
 }
 
 /// Records sharing a key: a bar's start, or a trade's time, ID, exchange, and tape.
@@ -149,7 +237,17 @@ pub enum Problem {
 /// partition is a [`Problem`] in the result.
 pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
     let (dataset, days) = dataset::read_manifest(dir)?;
-    let mut totals = Totals::new(dataset.kind());
+    let coverage = coverage(&days)?;
+    let corporate_actions = actions_report(dir, &dataset, coverage.span)?;
+    let adjuster = match &corporate_actions {
+        ActionsReport::Applied { recorded, as_of } => {
+            Some(recorded.actions.price_adjuster(*as_of)?)
+        }
+        ActionsReport::NotApplicable
+        | ActionsReport::NotRecorded
+        | ActionsReport::Incomplete(_) => None,
+    };
+    let mut totals = Totals::new(dataset.kind(), adjuster);
     let mut problems = Vec::new();
     for listed in days.iter().filter(|d| d.file.is_some()) {
         match load(dir, listed, dataset.kind()) {
@@ -158,13 +256,105 @@ pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
         }
     }
     problems.extend(unlisted(dir, &days)?);
+    let untrusted: BTreeSet<Date> = problems.iter().filter_map(Problem::day).collect();
+    let clean: BTreeSet<Date> = days
+        .iter()
+        .map(|d| d.day)
+        .filter(|day| !untrusted.contains(day))
+        .collect();
+    let venue = Venue::of(dataset.feed())?;
+    let mut gaps = Vec::new();
+    if let (Kind::Bars(timeframe), Some(finder)) = (dataset.kind(), totals.gaps.take()) {
+        for gap in finder.gaps {
+            gaps.push(ClassifiedGap {
+                gap,
+                stretches: classify(timeframe, gap, &venue, &clean)?,
+            });
+        }
+    }
     Ok(Inspection {
-        coverage: coverage(&days)?,
+        coverage,
         stats: totals.stats()?,
-        gaps: totals.gaps.map(|finder| finder.gaps).unwrap_or_default(),
+        corporate_actions,
+        gaps,
         duplicates: totals.duplicates,
         problems,
         dataset,
+    })
+}
+
+/// The missing slots of `gap` between bars of `timeframe`, in runs of one class: a slot is a
+/// session closure or unclassified by the venue's state at its start, and otherwise no trade when
+/// its UTC day is in `clean` (listed and without problems) and a true gap when not. For `1Day`,
+/// the slots are the calendar days strictly between the bars' days, classified by the whole day.
+pub fn classify(
+    timeframe: Timeframe,
+    gap: Gap,
+    venue: &Venue,
+    clean: &BTreeSet<Date>,
+) -> Result<Vec<Stretch>, InspectError> {
+    let daily = timeframe.unit() == TimeUnit::Day;
+    let mut states = venue.states();
+    let mut stretches: Vec<Stretch> = Vec::new();
+    let mut slot = one_bar_later(timeframe, gap.previous)?;
+    loop {
+        let missing = if daily {
+            slot.date() < gap.next.date()
+        } else {
+            slot < gap.next
+        };
+        if !missing {
+            return Ok(stretches);
+        }
+        let state = if daily {
+            venue.day_state(slot.date())?
+        } else {
+            states.at(slot)?
+        };
+        let class = match state {
+            VenueState::Closed => GapClass::SessionClosure,
+            VenueState::Unclassified => GapClass::Unclassified,
+            VenueState::Open if clean.contains(&slot.date()) => GapClass::NoTrade,
+            VenueState::Open => GapClass::TrueGap,
+        };
+        match stretches.last_mut() {
+            Some(run) if run.class == class => {
+                run.last = slot;
+                run.slots = run.slots.saturating_add(1);
+            }
+            _ => stretches.push(Stretch {
+                class,
+                first: slot,
+                last: slot,
+                slots: 1,
+            }),
+        }
+        slot = one_bar_later(timeframe, slot)?;
+    }
+}
+
+fn actions_report(
+    dir: &Path,
+    dataset: &DatasetId,
+    span: Option<DayRange>,
+) -> Result<ActionsReport, InspectError> {
+    match dataset.asset_class() {
+        AssetClass::Crypto => return Ok(ActionsReport::NotApplicable),
+        AssetClass::UsEquity => {}
+    }
+    let Some(recorded) = read_actions(dir, dataset.symbol())? else {
+        return Ok(ActionsReport::NotRecorded);
+    };
+    Ok(match span {
+        Some(span)
+            if recorded.range.first() <= span.first() && span.last() <= recorded.range.last() =>
+        {
+            ActionsReport::Applied {
+                recorded,
+                as_of: span.last(),
+            }
+        }
+        _ => ActionsReport::Incomplete(recorded),
     })
 }
 
@@ -176,6 +366,20 @@ pub fn gaps(timeframe: Timeframe, starts: &[UtcNanos]) -> Result<Vec<Gap>, Inspe
         finder.push(start)?;
     }
     Ok(finder.gaps)
+}
+
+impl Problem {
+    /// The listed day the problem is with; `None` for an unlisted file.
+    fn day(&self) -> Option<Date> {
+        match self {
+            Self::Missing { day }
+            | Self::Altered { day }
+            | Self::Unreadable { day, .. }
+            | Self::RowCount { day, .. }
+            | Self::OutsideDay { day, .. } => Some(*day),
+            Self::Unlisted { .. } => None,
+        }
+    }
 }
 
 fn load(dir: &Path, listed: &ListedDay, kind: Kind) -> Result<Records, Problem> {
@@ -322,16 +526,24 @@ fn skips_a_slot(
     previous: UtcNanos,
     next: UtcNanos,
 ) -> Result<bool, InspectError> {
+    if timeframe.unit() == TimeUnit::Day {
+        return Ok(next.date() > previous.date().next()?);
+    }
+    Ok(next > one_bar_later(timeframe, previous)?)
+}
+
+/// The start of the bar slot after the one starting at `start`.
+fn one_bar_later(timeframe: Timeframe, start: UtcNanos) -> Result<UtcNanos, InspectError> {
     let unit_secs: i64 = match timeframe.unit() {
         TimeUnit::Minute => 60,
         TimeUnit::Hour => 3_600,
-        TimeUnit::Day => return Ok(next.date() > previous.date().next()?),
+        TimeUnit::Day => 86_400,
     };
-    let expected = i64::from(timeframe.amount())
+    let secs = i64::from(timeframe.amount())
         .checked_mul(unit_secs)
-        .and_then(|step| previous.secs().checked_add(step))
+        .and_then(|step| start.secs().checked_add(step))
         .ok_or(TimeError::OutOfRange)?;
-    Ok(next > UtcNanos::from_parts(expected, previous.nanos())?)
+    Ok(UtcNanos::from_parts(secs, start.nanos())?)
 }
 
 /// What makes two records the same record: a bar's start, or a trade's time, ID, exchange, and
@@ -375,14 +587,31 @@ fn sum(column: &'static str, total: i128, units: i128) -> Result<i128, InspectEr
         .ok_or(InspectError::Overflow { column })
 }
 
+/// The lowest and highest of some prices, in units of one scale.
+#[derive(Debug, Default)]
+struct Extremes {
+    low: Option<i128>,
+    high: Option<i128>,
+}
+
+impl Extremes {
+    fn include(&mut self, low: i128, high: i128) {
+        self.low = Some(self.low.map_or(low, |l| l.min(low)));
+        self.high = Some(self.high.map_or(high, |h| h.max(high)));
+    }
+}
+
 /// Running statistics, gaps, and duplicates over partitions added in date order.
 struct Totals {
     kind: Kind,
     rows: u64,
     first: Option<UtcNanos>,
     last: Option<UtcNanos>,
-    low: Option<i128>,
-    high: Option<i128>,
+    raw: Extremes,
+    /// At [`BAR_SCALE`] for bars and trades alike: adjusted prices carry up to
+    /// [`crate::model::ADJUSTED_PRICE_SCALE`] places.
+    adjusted: Extremes,
+    adjuster: Option<PriceAdjuster>,
     /// Bar volume or trade size, in units of its column's scale.
     quantity: i128,
     trade_count: u64,
@@ -391,39 +620,53 @@ struct Totals {
 }
 
 impl Totals {
-    fn new(kind: Kind) -> Self {
+    fn new(kind: Kind, adjuster: Option<PriceAdjuster>) -> Self {
         Self {
             kind,
             rows: 0,
             first: None,
             last: None,
-            low: None,
-            high: None,
+            raw: Extremes::default(),
+            adjusted: Extremes::default(),
+            adjuster,
             quantity: 0,
             trade_count: 0,
             gaps: match kind {
                 Kind::Bars(timeframe) => Some(GapFinder::new(timeframe)),
                 Kind::Trades => None,
+                Kind::Quotes => None,
             },
             duplicates: Vec::new(),
         }
     }
 
-    fn record(&mut self, time: UtcNanos, low: i128, high: i128) {
+    fn record(
+        &mut self,
+        time: UtcNanos,
+        (low_column, low): (&'static str, &DecStr),
+        (high_column, high): (&'static str, &DecStr),
+        scale: u8,
+    ) -> Result<(), InspectError> {
         self.rows = self.rows.saturating_add(1);
         self.first = Some(self.first.map_or(time, |t| t.min(time)));
         self.last = Some(self.last.map_or(time, |t| t.max(time)));
-        self.low = Some(self.low.map_or(low, |l| l.min(low)));
-        self.high = Some(self.high.map_or(high, |h| h.max(high)));
+        self.raw.include(
+            units(low_column, low, scale)?,
+            units(high_column, high, scale)?,
+        );
+        if let Some(adjuster) = &self.adjuster {
+            let low = units(low_column, &adjuster.adjust(low, time)?, BAR_SCALE)?;
+            let high = units(high_column, &adjuster.adjust(high, time)?, BAR_SCALE)?;
+            self.adjusted.include(low, high);
+        }
+        Ok(())
     }
 
     fn add(&mut self, records: &Records) -> Result<(), InspectError> {
         match records {
             Records::Bars(bars) => {
                 for bar in bars {
-                    let low = units("low", &bar.low, BAR_SCALE)?;
-                    let high = units("high", &bar.high, BAR_SCALE)?;
-                    self.record(bar.start, low, high);
+                    self.record(bar.start, ("low", &bar.low), ("high", &bar.high), BAR_SCALE)?;
                     let volume = units("volume", &bar.volume, BAR_SCALE)?;
                     self.quantity = sum("volume", self.quantity, volume)?;
                     self.trade_count = self.trade_count.checked_add(bar.trade_count).ok_or(
@@ -442,8 +685,8 @@ impl Totals {
             }
             Records::Trades(trades) => {
                 for trade in trades {
-                    let price = units("price", &trade.price, PRICE_SCALE)?;
-                    self.record(trade.time, price, price);
+                    let price = ("price", &trade.price);
+                    self.record(trade.time, price, price, PRICE_SCALE)?;
                     let size = units("size", &trade.size, SIZE_SCALE)?;
                     self.quantity = sum("size", self.quantity, size)?;
                 }
@@ -456,13 +699,14 @@ impl Totals {
                     )
                 }));
             }
+            Records::Quotes(_) => return Err(InspectError::Unsupported(Kind::Quotes)),
         }
         Ok(())
     }
 
     fn stats(&self) -> Result<Option<Stats>, InspectError> {
         let (Some(first), Some(last), Some(low), Some(high)) =
-            (self.first, self.last, self.low, self.high)
+            (self.first, self.last, self.raw.low, self.raw.high)
         else {
             return Ok(None);
         };
@@ -478,12 +722,21 @@ impl Totals {
                 high: decimal("price", high, PRICE_SCALE)?,
                 size: decimal("size", self.quantity, SIZE_SCALE)?,
             },
+            Kind::Quotes => return Err(InspectError::Unsupported(Kind::Quotes)),
+        };
+        let adjusted = match (self.adjusted.low, self.adjusted.high) {
+            (Some(low), Some(high)) => Some(AdjustedPrices {
+                low: decimal("low", low, BAR_SCALE)?,
+                high: decimal("high", high, BAR_SCALE)?,
+            }),
+            _ => None,
         };
         Ok(Some(Stats {
             rows: self.rows,
             first,
             last,
             values,
+            adjusted,
         }))
     }
 }

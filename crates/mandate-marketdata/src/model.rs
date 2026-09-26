@@ -1,6 +1,6 @@
 //! What a download names and returns: the dataset identity (asset class, feed, kind, symbol), the
-//! day range, the vendor's bar and trade records (trading domain spec §4.1), and the corporate
-//! actions around them (§4.5). The records live here with [`DecStr`] numbers until
+//! day range, the vendor's bar, trade, and quote records (trading domain spec §4.1), and the
+//! corporate actions around them (§4.5). The records live here with [`DecStr`] numbers until
 //! `mandate-domain` exists (DEC-89).
 
 mod corporate_action;
@@ -13,8 +13,8 @@ use mandate_canon::DecStr;
 use mandate_time::{Date, TimeError, UtcNanos};
 
 pub use corporate_action::{
-    ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction, Split,
-    adjust_price, adjust_quantity, compose, split_ratio,
+    ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction,
+    PriceAdjuster, Split, adjust_price, adjust_quantity, compose, split_ratio,
 };
 pub use mandate_num::SplitRatio;
 
@@ -206,14 +206,17 @@ impl FromStr for Timeframe {
 pub enum Kind {
     Bars(Timeframe),
     Trades,
+    /// Top-of-book quotes (backlog E2-3).
+    Quotes,
 }
 
 impl Kind {
-    /// The dataset directory name: `bars-<timeframe>` or `trades`.
+    /// The dataset directory name: `bars-<timeframe>`, `trades`, or `quotes`.
     pub fn dir_name(self) -> String {
         match self {
             Self::Bars(timeframe) => format!("bars-{timeframe}"),
             Self::Trades => "trades".to_owned(),
+            Self::Quotes => "quotes".to_owned(),
         }
     }
 }
@@ -387,11 +390,29 @@ pub struct Trade {
     pub taker_side: Option<String>,
 }
 
+/// A quote (trading domain spec §4.1): the best bid and ask as the vendor sent it, kept even when
+/// it is locked (bid = ask), crossed (bid > ask), or one-sided (a zero price and size on the side
+/// with no order). Whether a quote is sane enough to mark with (§8.2) is its reader's decision.
+/// Stock quotes carry each side's `exchange`, `conditions`, and `tape`; crypto quotes carry none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quote {
+    pub time: UtcNanos,
+    pub bid_price: DecStr,
+    pub bid_size: DecStr,
+    pub ask_price: DecStr,
+    pub ask_size: DecStr,
+    pub bid_exchange: Option<String>,
+    pub ask_exchange: Option<String>,
+    pub conditions: Option<Vec<String>>,
+    pub tape: Option<String>,
+}
+
 /// One day of one dataset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Records {
     Bars(Vec<Bar>),
     Trades(Vec<Trade>),
+    Quotes(Vec<Quote>),
 }
 
 impl Records {
@@ -399,6 +420,7 @@ impl Records {
         match kind {
             Kind::Bars(_) => Self::Bars(Vec::new()),
             Kind::Trades => Self::Trades(Vec::new()),
+            Kind::Quotes => Self::Quotes(Vec::new()),
         }
     }
 
@@ -406,6 +428,7 @@ impl Records {
         match self {
             Self::Bars(bars) => bars.len(),
             Self::Trades(trades) => trades.len(),
+            Self::Quotes(quotes) => quotes.len(),
         }
     }
 
@@ -418,6 +441,7 @@ impl Records {
         match self {
             Self::Bars(bars) => bars.iter().map(|b| b.start).collect(),
             Self::Trades(trades) => trades.iter().map(|t| t.time).collect(),
+            Self::Quotes(quotes) => quotes.iter().map(|q| q.time).collect(),
         }
     }
 }

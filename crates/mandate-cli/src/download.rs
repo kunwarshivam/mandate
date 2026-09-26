@@ -1,5 +1,6 @@
 //! `mandate download`: validate the request, plan one dataset per symbol, and store every UTC day
-//! of each, printing one line per partition and a total.
+//! of each, printing one line per partition, one for a stock dataset's corporate actions, and a
+//! total.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -10,7 +11,7 @@ use anyhow::{Context, bail};
 use clap::{Args, ValueEnum};
 use mandate_marketdata::client::{Client, Pause, Transport};
 use mandate_marketdata::dataset::{Outcome, Status, Store};
-use mandate_marketdata::download::{describe, download};
+use mandate_marketdata::download::{StoredActions, describe, download};
 use mandate_marketdata::model::{AssetClass, DatasetId, DayRange, Feed, Kind, Symbol, Timeframe};
 use mandate_time::Date;
 use serde::Deserialize;
@@ -160,20 +161,38 @@ pub fn plan(args: &DownloadArgs, today: Date) -> anyhow::Result<Plan> {
     })
 }
 
+fn status(status: Status) -> &'static str {
+    match status {
+        Status::Written => "written",
+        Status::Unchanged => "unchanged",
+    }
+}
+
 fn line(dataset: &DatasetId, outcome: &Outcome) -> String {
     let file = match outcome.file {
         Some((bytes, digest)) => format!("{bytes} bytes sha256 {}", digest.to_hex()),
         None => "no file".to_owned(),
     };
-    let status = match outcome.status {
-        Status::Written => "written",
-        Status::Unchanged => "unchanged",
-    };
     format!(
-        "{} {} {} rows {file} {status}",
+        "{} {} {} rows {file} {}",
         describe(dataset),
         outcome.day,
-        outcome.rows
+        outcome.rows,
+        status(outcome.status)
+    )
+}
+
+fn actions_line(dataset: &DatasetId, stored: &StoredActions) -> String {
+    let (range, actions) = (stored.recorded.range, &stored.recorded.actions);
+    format!(
+        "{} corporate actions {} to {}: {} splits, {} cash dividends, {} other {}",
+        describe(dataset),
+        range.first(),
+        range.last(),
+        actions.splits.len(),
+        actions.cash_dividends.len(),
+        actions.other.len(),
+        status(stored.status)
     )
 }
 
@@ -201,7 +220,7 @@ pub async fn run<T: Transport, P: Pause>(
     let mut totals = Totals::default();
     for dataset in &plan.datasets {
         let mut lines = Ok(());
-        download(client, &store, dataset, plan.days, |outcome| {
+        let downloaded = download(client, &store, dataset, plan.days, |outcome| {
             totals.add(outcome);
             if lines.is_ok() {
                 lines = writeln!(report, "{}", line(dataset, outcome));
@@ -209,6 +228,9 @@ pub async fn run<T: Transport, P: Pause>(
         })
         .await?;
         lines.context("writing the report")?;
+        if let Some(stored) = &downloaded.corporate_actions {
+            writeln!(report, "{}", actions_line(dataset, stored)).context("writing the report")?;
+        }
         totals.datasets = totals.datasets.saturating_add(1);
     }
     writeln!(

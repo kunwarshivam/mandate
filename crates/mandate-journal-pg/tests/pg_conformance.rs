@@ -8,6 +8,5 @@ mod conformance;
 mod support;
 
 conformance::conformance_tests! {
-    #[ignore = "pending E5-3"]
     fresh = support::PgBackend::fresh
 }

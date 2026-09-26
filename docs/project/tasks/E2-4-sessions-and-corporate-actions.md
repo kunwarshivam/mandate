@@ -124,9 +124,11 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    post-split (interpretation 2), and §8.5 applies splits at 20:00 ET on the last trading day
    before the ex-date, which differs only by closed days with no bars. Prices become
    round(p × Π old ÷ Π new, 12, half_even) per §8.5's mark rule; volumes become round(v × Π new ÷
-   Π old, 18, half_even) at the bar column scale (DEC-89); trade counts are unchanged. Arithmetic
-   is exact `i128` scaled units in `mandate-marketdata` (ES-04 keeps `rust_decimal` in
-   `mandate-num`), and an overflow is an error, never a rounding. Raw prices are what is stored
+   Π old, 18, half_even) at the bar column scale (DEC-89); trade counts are unchanged. Prices go
+   through `mandate_num::SplitRatio::mark` (DEC-91), so market data and the accounting fold round a
+   price the same way. Only volumes are exact `i128` scaled units in `mandate-marketdata` (ES-04
+   keeps `rust_decimal` in `mandate-num`). Either way an overflow is an error, never a rounding.
+   Raw prices are what is stored
    (DEC-89); adjusted prices are derived. Cash dividends are recorded and reported but do not
    adjust prices (the acceptance criterion asks for split-adjusted prices; §8.5 treats dividends
    as cash). Any other action type Alpaca reports (spin-offs, mergers, stock dividends, name
@@ -143,6 +145,67 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    unclassified, never as no trade or a session closure. Crypto trades continuously and has no
    closures.
 
+   A venue is open while the calendar has a pre-market, regular, or after-hours session *and* its
+   own hours say so, so SIP closes at 17:00 on an early-close day because after-hours does. The
+   files are `crates/mandate-marketdata/data/sip.venue` and `iex.venue`, each with a validity range;
+   any New York date outside it, or outside the calendar, is unclassified. SIP's range ends at
+   2026-12-05. From 2026-12-06 the SIPs run 21:00 Sunday to 20:00 Friday (SEC Releases 34-105779
+   and 34-105780; UTP Vendor Alert 2026-20). Those hours are not recorded, so later SIP slots are
+   unclassified rather than guessed. IEX's range is the calendar's (2018 to 2028), sourced from
+   IEX's trading-hours page and Rule 11.110(a) as quoted in SEC Release 34-105959. A slot's class
+   comes from the venue at the slot's start. A `1Day` slot is a UTC day strictly between the two
+   bars' days, classed by whether the venue trades that day at all.
+7. **Corporate actions are stored with the dataset (PR 4).** After storing its days, `download`
+   fetches a stock dataset's actions over its whole stored span (first to last listed day, not
+   just this run's days) and writes them as canonical JSON (journal spec §4) to
+   `corporate-actions.json` in the dataset directory. It compares bytes first, so a rerun changes
+   nothing. `inspect` adjusts prices as of the span's last day only when the recorded range covers
+   the span. Otherwise it reports the record as incomplete and applies nothing. Its report lists
+   every action with whether it was applied: a split after the span's last day is not yet known,
+   dividends are cash, and other kinds are not interpreted. A hand-edited or foreign file is
+   refused, as the manifest is.
+
+## PR 4: tests and planted bugs
+
+| Clause | Test |
+|---|---|
+| §4.2 session closures, no trade, true gaps (interpretation 4) | `iex_gaps_split_into_no_trade_closures_true_gaps_and_the_unclassified_early_close_evening`, `the_open_hours_of_a_day_whose_partition_cannot_be_trusted_are_true_gaps`, `a_gap_across_the_equity_overnight_session_is_a_session_closure`, `stretches_are_the_runs_of_missing_slots_each_classed_by_the_venue_and_the_fetch` (property), in `crates/mandate-marketdata/tests/inspect.rs` |
+| Daily bars classed by trading day, calendar edges unclassified | `a_skipped_day_is_a_closure_when_the_market_is_closed_and_a_true_gap_when_it_was_not_fetched` |
+| Venue hours (interpretation 6) | `sip_and_iex_agree_with_the_published_2026_schedule_at_every_minute` (property), `on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_20_00`, `minutes_outside_the_recorded_dates_are_unclassified`, `a_venue_is_open_only_while_both_the_calendar_and_its_own_hours_are`, and the parser tests in `tests/venue.rs` |
+| §4.5 raw and split-adjusted prices, point in time | `a_stock_dataset_reports_raw_and_split_adjusted_prices_as_of_its_last_day`, `a_split_after_the_last_day_is_not_yet_known_and_adjusts_nothing`, `trades_before_the_split_takes_effect_are_adjusted_and_the_overnight_session_into_the_ex_date_is_not`, `a_price_adjuster_agrees_with_adjust_bar` (property) |
+| Stored actions (interpretation 7) | `each_stock_download_records_the_actions_of_every_day_stored_so_far`, `a_failed_actions_fetch_keeps_the_stored_days_and_a_rerun_records_the_actions`, `actions_that_do_not_cover_the_span_give_no_adjusted_prices`, `tests/actions.rs` |
+| The report | `crates/mandate-cli/tests/inspect.rs` (`BARS_REPORT`, `each_gap_lists_its_missing_slots_by_class_with_a_total_per_class`, `every_problem_and_trade_duplicate_has_a_line`), `crates/mandate-cli/tests/download.rs` |
+
+**Oracles.** The venue property keeps its own 2026 closures and early closes and its own US
+daylight-saving rule, not the calendar file or the time-zone database. The classification
+property classes each slot on its own from `Venue::state_at` and the clean-day set, so it checks
+the run grouping and the slot grid, while the venue property checks the states.
+
+**Planted bugs**, each caught (failing tests in brackets):
+- every day treated as an early close [3 venue tests];
+- a venue's close ignoring the calendar's after-hours end [3];
+- a date outside the calendar closed rather than unclassified [1];
+- an open slot always no trade [5 inspect tests];
+- problem days counted as clean [1];
+- daily slots running to the next bar's instant rather than its day [1];
+- actions applied when they start after the span's first day [1];
+- the overnight session into the ex-date still pre-split [2];
+- splits after the as-of date applied [3];
+- a non-canonical actions file accepted [1];
+- an identical actions file rewritten [3];
+- actions fetched for this run's days only [2];
+- a later split reported as applied [1 CLI test];
+- per-class totals counting stretches instead of slots [3].
+
+`cargo mutants --in-diff` over PR 4's diff against its merge base, for `mandate-marketdata` and
+`mandate-cli`, first missed 4 mutants:
+- the venue's day-cache guard, where dropping it only recomputes the day;
+- `GapClass::as_str`, which only the CLI tests checked.
+
+The cache is now keyed by New York date, so a wrong key answers from another day, and
+`gap_classes_have_stable_names` pins the names. The final run: 167 mutants, 121 caught, 46
+unviable, 0 missed.
+
 ## Not done here (with the story that owns each)
 
 | Story | What |
@@ -150,9 +213,18 @@ time-zone database for its own date, so daylight saving is never hard-coded.
 | E2-2 (#64) | `inspect` itself: coverage, duplicates, statistics; PR 4 adds the classification to it |
 | E4-1, E4-2 (backtest) | Feeding corporate actions into the accounting fold at 20:00 ET before the ex-date (§8.5 timing) |
 | Live runtime stories | Refreshing the calendar from the broker; halts and LULD (§4.4) |
+| Unowned (needs a DEC or a backlog item) | The SIP 21:00-Sunday-to-20:00-Friday schedule from 2026-12-06; until its hours are recorded, SIP slots after 2026-12-05 are unclassified |
 
-Also not here: auction windows (§4.3, the gate's), crypto sessions (continuous), the settlement
-calendar (DEC-82's `TradingCalendar`, unchanged).
+Also not here:
+- auction windows (§4.3, the gate's);
+- crypto sessions (continuous);
+- the settlement calendar (DEC-82's `TradingCalendar`, unchanged);
+- slots before a dataset's first bar or after its last. They are not gaps under E2-2's
+  definition, so the report does not list them;
+- the [#85](https://github.com/kunwarshivam/mandate/pull/85) review's documentation minor in `mandate-time`: `session.rs` and
+  `data/us-equities.calendar` describe overnight as starting at the previous day's after-hours
+  close, but it starts at 20:00 even after an early close. It is deferred because another
+  session holds a claim on `mandate-time`.
 
 ## Commands
 
@@ -161,6 +233,7 @@ cargo xtask check
 cargo nextest run -p mandate-time
 cargo nextest run -p mandate-time --run-ignored all
 MANDATE_BASE_REF=<tests PR head> cargo xtask ci mutants
+cargo nextest run -p mandate-marketdata -p mandate-cli
 ```
 
 ## Stop conditions
@@ -177,7 +250,7 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 - [x] The cited reference cases pass, and none that passed before now fails (none are cited).
 - [x] Tests came first; each touched invariant has a property test whose oracle is independent and
       was shown to fail on a seeded bug.
-- [ ] New state changes emit journal events (none: market data is not journaled state).
-- [ ] Docs updated where behavior, interfaces, or decisions changed.
+- [x] New state changes emit journal events (none: market data is not journaled state).
+- [x] Docs updated where behavior, interfaces, or decisions changed.
 - [ ] `cargo xtask check` is green (paste the summary in the PR).
 - [ ] The PR description is complete (see the PR template).
