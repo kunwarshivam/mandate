@@ -13,7 +13,7 @@ use mandate_marketdata::actions::RecordedActions;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::inspect::{
     ActionsReport, AdjustedPrices, ClassifiedGap, Coverage, Duplicate, Extent, Gap, GapClass,
-    Inspection, Problem, Spread, Stats, Stretch, Values,
+    Inspection, Occurrences, Problem, Quality, Spread, Stats, Stretch, Values,
 };
 use mandate_marketdata::model::{
     AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Feed, Kind, OtherAction,
@@ -153,6 +153,10 @@ gaps: 1, missing bar slots: 0 session closure, 48 no trade, 24 true gap, 0 uncla
     no trade: 2 slots, 2026-09-24T00:00:00.000000000Z to 2026-09-24T01:00:00.000000000Z
 duplicates: 1
   2026-09-24T02:00:00.000000000Z x2 identical
+records while the venue is closed: 0
+bars with zero volume: 0
+bars of one trade whose prices differ: 1
+  2026-09-21T00:00:00.000000000Z
 problems: 0
 ";
 
@@ -231,6 +235,7 @@ fn every_problem_and_trade_duplicate_has_a_line() {
                 range("2026-09-19", "2026-09-20"),
                 range("2026-09-27", "2026-09-27"),
             ],
+            closed: 0,
             missing: vec![range("2026-09-28", "2026-09-29")],
         },
         stats: Some(Stats {
@@ -258,6 +263,7 @@ fn every_problem_and_trade_duplicate_has_a_line() {
             count: 2,
             identical: false,
         }],
+        quality: Quality::default(),
         problems: vec![
             Problem::Missing {
                 day: day("2026-09-21"),
@@ -292,6 +298,7 @@ coverage: 2026-09-19 to 2026-09-30, 9 days listed
   missing: 2026-09-28 to 2026-09-29
 rows: 3, first 2026-09-21T13:30:00.000000001Z, last 2026-09-30T19:59:59.999999999Z
 trades: low 81.19, high 81.2, size 300.5
+  size counts every stored trade: an official open or close reported again under another condition counts each time
 split-adjusted as of 2026-09-30: low 20.3, high 81.2
 corporate actions: recorded for 2026-09-01 to 2026-10-31, applied as of 2026-09-30
   split 4:1, ex-date 2026-09-22 (forward): applied
@@ -303,6 +310,7 @@ corporate actions: recorded for 2026-09-01 to 2026-10-31, applied as of 2026-09-
 gaps: not applicable to trades
 duplicates: 1
   2026-09-21T13:30:00.000000001Z trade 7 x2 differing
+records while the venue is closed: 0
 problems: 6
   2026-09-21.parquet: missing
   2026-09-22.parquet: size or SHA-256 differs from the manifest
@@ -314,6 +322,115 @@ problems: 6
     );
 }
 
+fn at(s: &str) -> UtcNanos {
+    time(&format!("{s}.000000000Z"))
+}
+
+#[test]
+fn warnings_give_their_count_and_first_times_and_bars_outside_their_range_are_a_problem() {
+    let found = Inspection {
+        dataset: id(
+            AssetClass::UsEquity,
+            Feed::Sip,
+            Kind::Bars("1Min".parse().unwrap()),
+            "SPY",
+        ),
+        coverage: Coverage {
+            span: Some(range("2024-01-01", "2024-12-31")),
+            listed: 366,
+            empty: vec![],
+            closed: 114,
+            missing: vec![],
+        },
+        stats: None,
+        corporate_actions: ActionsReport::NotRecorded,
+        gaps: vec![],
+        duplicates: vec![],
+        quality: Quality {
+            closed_period: Occurrences {
+                count: 7,
+                first: [
+                    "2024-03-27T00:00:00",
+                    "2024-05-01T00:00:00",
+                    "2024-06-15T00:00:00",
+                    "2024-06-21T00:00:00",
+                    "2024-11-29T22:00:00",
+                ]
+                .map(at)
+                .to_vec(),
+            },
+            zero_volume: Occurrences {
+                count: 1,
+                first: vec![at("2024-07-03T17:01:00")],
+            },
+            single_trade_spread: Occurrences::default(),
+        },
+        problems: vec![Problem::InconsistentBars {
+            day: day("2024-08-05"),
+            bars: 3,
+        }],
+    };
+    assert_eq!(
+        inspect::render(&found),
+        "\
+SPY bars-1Min (sip)
+coverage: 2024-01-01 to 2024-12-31, 366 days listed
+  empty while the venue is closed: 114 days
+rows: 0
+corporate actions: not recorded with this dataset; no split-adjusted prices
+gaps: 0
+duplicates: 0
+records while the venue is closed: 7
+  2024-03-27T00:00:00.000000000Z
+  2024-05-01T00:00:00.000000000Z
+  2024-06-15T00:00:00.000000000Z
+  2024-06-21T00:00:00.000000000Z
+  2024-11-29T22:00:00.000000000Z
+  and 2 more
+bars with zero volume: 1
+  2024-07-03T17:01:00.000000000Z
+bars of one trade whose prices differ: 0
+problems: 1
+  2024-08-05.parquet: 3 bars with an open or close outside their low to high
+"
+    );
+}
+
+#[test]
+fn a_crypto_trades_report_has_no_note_on_restated_closes() {
+    let found = Inspection {
+        dataset: id(AssetClass::Crypto, Feed::CryptoUs, Kind::Trades, "BTC/USD"),
+        coverage: Coverage {
+            span: Some(range("2026-09-24", "2026-09-24")),
+            listed: 1,
+            empty: vec![],
+            closed: 0,
+            missing: vec![],
+        },
+        stats: Some(Stats {
+            rows: 1,
+            first: at("2026-09-24T00:00:01"),
+            last: at("2026-09-24T00:00:01"),
+            values: Values::Trades {
+                low: dec("84391.985"),
+                high: dec("84391.985"),
+                size: dec("0.0001"),
+            },
+            adjusted: None,
+        }),
+        corporate_actions: ActionsReport::NotApplicable,
+        gaps: vec![],
+        duplicates: vec![],
+        quality: Quality::default(),
+        problems: vec![],
+    };
+    let report = inspect::render(&found);
+    assert!(
+        report.contains("trades: low 84391.985, high 84391.985, size 0.0001\ncorporate actions:"),
+        "{report}"
+    );
+}
+
 #[test]
 fn a_dataset_without_days_or_rows_says_so() {
     let found = Inspection {
@@ -322,12 +439,14 @@ fn a_dataset_without_days_or_rows_says_so() {
             span: None,
             listed: 0,
             empty: vec![],
+            closed: 0,
             missing: vec![],
         },
         stats: None,
         corporate_actions: ActionsReport::NotApplicable,
         gaps: vec![],
         duplicates: vec![],
+        quality: Quality::default(),
         problems: vec![],
     };
     assert_eq!(
@@ -339,6 +458,9 @@ rows: 0
 corporate actions: not applicable to crypto
 gaps: 0
 duplicates: 0
+records while the venue is closed: 0
+bars with zero volume: 0
+bars of one trade whose prices differ: 0
 problems: 0
 "
     );
@@ -370,6 +492,7 @@ fn each_gap_lists_its_missing_slots_by_class_with_a_total_per_class() {
             span: Some(range("2026-11-24", "2026-11-30")),
             listed: 5,
             empty: vec![],
+            closed: 0,
             missing: vec![],
         },
         stats: None,
@@ -415,6 +538,7 @@ fn each_gap_lists_its_missing_slots_by_class_with_a_total_per_class() {
             },
         ],
         duplicates: vec![],
+        quality: Quality::default(),
         problems: vec![],
     };
     assert_eq!(
@@ -432,6 +556,9 @@ gaps: 2, missing bar slots: 15 session closure, 1 no trade, 9 true gap, 7 unclas
     true gap: 9 slots, 2026-11-25T13:00:00.000000000Z to 2026-11-25T21:00:00.000000000Z
     unclassified: 7 slots, 2026-11-27T18:00:00.000000000Z to 2026-11-28T00:00:00.000000000Z
 duplicates: 0
+records while the venue is closed: 0
+bars with zero volume: 0
+bars of one trade whose prices differ: 0
 problems: 0
 "
     );
@@ -445,12 +572,14 @@ fn actions_that_do_not_cover_the_span_are_reported_and_left_unapplied() {
             span: Some(range("2026-09-21", "2026-09-30")),
             listed: 10,
             empty: vec![],
+            closed: 0,
             missing: vec![],
         },
         stats: None,
         corporate_actions: ActionsReport::Incomplete(spy_actions("2026-09-22", "2026-09-30")),
         gaps: vec![],
         duplicates: vec![],
+        quality: Quality::default(),
         problems: vec![],
     };
     let report = inspect::render(&found);
@@ -499,9 +628,11 @@ SPY trades (iex)
 coverage: 2026-09-24 to 2026-09-25, 2 days listed
 rows: 1, first 2026-09-24T14:00:00.000000000Z, last 2026-09-24T14:00:00.000000000Z
 trades: low 81.19, high 81.19, size 100
+  size counts every stored trade: an official open or close reported again under another condition counts each time
 corporate actions: not recorded with this dataset; no split-adjusted prices
 gaps: not applicable to trades
 duplicates: 0
+records while the venue is closed: 0
 problems: 1
   2026-09-25.parquet: size or SHA-256 differs from the manifest
 
@@ -541,6 +672,7 @@ fn quote_inspection(values: Values, corporate_actions: ActionsReport) -> Inspect
             span: Some(range("2026-09-23", "2026-09-24")),
             listed: 2,
             empty: vec![range("2026-09-23", "2026-09-23")],
+            closed: 0,
             missing: vec![],
         },
         stats: Some(Stats {
@@ -559,6 +691,7 @@ fn quote_inspection(values: Values, corporate_actions: ActionsReport) -> Inspect
         corporate_actions,
         gaps: vec![],
         duplicates: vec![],
+        quality: Quality::default(),
         problems: vec![],
     }
 }
@@ -604,6 +737,7 @@ quotes: 3 two-sided (1 locked, 1 crossed), 1 one-sided, 0 with neither side quot
 corporate actions: not recorded with this dataset; no split-adjusted prices
 gaps: not applicable to quotes
 duplicates: 0
+records while the venue is closed: 0
 problems: 0
 "
     );
@@ -659,6 +793,7 @@ corporate actions: recorded for 2026-09-23 to 2026-09-24, applied as of 2026-09-
   split 4:1, ex-date 2026-09-24 (cphc-split): applied
 gaps: not applicable to quotes
 duplicates: 0
+records while the venue is closed: 0
 problems: 0
 "
     );

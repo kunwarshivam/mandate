@@ -157,7 +157,9 @@ impl VenueHours {
     }
 
     /// Until when an early-close day is unclassified after the calendar's regular close, for a
-    /// venue that does not publish its early-close hours.
+    /// venue that does not publish its early-close hours. The window never outlasts the venue's
+    /// own close or the calendar's after-hours session: a venue is open, or possibly open, only
+    /// while both say so.
     pub fn unpublished_after_early_close(&self) -> Option<NewYorkTime> {
         self.unpublished_after_early_close
     }
@@ -277,7 +279,7 @@ impl VenueHours {
                 (open, regular.end(), VenueState::Open),
                 (
                     regular.end(),
-                    new_york_instant(date, until)?,
+                    close.min(new_york_instant(date, until)?),
                     VenueState::Unclassified,
                 ),
             ],
