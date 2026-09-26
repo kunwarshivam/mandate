@@ -173,5 +173,5 @@ reservation keeps its row and its number is never reused.
 | R-26, R-27 | `cursor` | #54 | Direction follow-ups: correlated flow, contaminated backtests | Reserved |
 | DEC-111, E17-9, R-28 | `claude-code` | — | Thesis revision loop: decision, story, and risk (coordinator docs PR at the founder's request) | Merged (#99) |
 | DEC-112 | `claude-code` | — | CI short path for documentation-only changes | In this PR |
-| DEC-117 to DEC-126 | `claude-code` | #103 | Track C: the recommended answers to the ten mandate-rewrite questions, one row per question | In #PRNUM |
+| DEC-117 to DEC-126 | `claude-code` | #103 | Track C: the recommended answers to the ten mandate-rewrite questions, one row per question | In #109 |
 | Compliance question 35 | `cursor` | #54 | Direction follow-ups: describing an agent that brings its own ideas | Reserved |

@@ -64,7 +64,7 @@ issues are the record; this table is the summary
 | E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Tests PR merged (#75) after three review rounds; the task brief and DEC-106 merged in #61; implementation and status PRs follow (DEC-77) | `agent/e4-1-sim-tests-2` (#75); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | E5-3 Postgres journal | `cursor` | #77 | Merged (#82 tests, #92 implementation); DEC-109 recorded; claims #77 and #78 closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
-| Track C: mandate spec rewrite for DEC-97 to DEC-103 and DEC-111 | `claude-code` | #50, #103 | One spec-change PR open (no code, ES-22): the ten rewrite questions answered as DEC-117 to DEC-126 (Proposed, founder may veto); mandate spec v0.6, both schemas, the journal spec's event catalogue, the reference implementation, and 291 reference cases. The Rust harness for the mandate cases is Not done and follows in a later PR | `agent/track-c-mandate-rewrite` (#PRNUM) |
+| Track C: mandate spec rewrite for DEC-97 to DEC-103 and DEC-111 | `claude-code` | #50, #103 | One spec-change PR open (no code, ES-22): the ten rewrite questions answered as DEC-117 to DEC-126 (Proposed, founder may veto); mandate spec v0.6, both schemas, the journal spec's event catalogue, the reference implementation, and 291 reference cases. The Rust harness for the mandate cases is Not done and follows in a later PR | `agent/track-c-mandate-rewrite` (#109) |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS and rebased; the founder's confirmation of DEC-99 to DEC-103 pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Tests (#71), sessions implementation (#85) and corporate actions (#74) merged; PR 4 (#96) in review, and the claim closes when it merges | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
@@ -164,7 +164,7 @@ them in the decision log.
    the founder adds market-data keys. **E2-3** (Should) later.
 3. **E5-3** implementation PR (`cursor`), then **E5-4** once the founder confirms it.
 4. The spec-only change for DEC-104 items 2 and 5 once the founder decides item 5.
-5. **Before M5:** done in the Track C spec-change PR (#PRNUM) — the mandate spec is at v0.6, both
+5. **Before M5:** done in the Track C spec-change PR (#109) — the mandate spec is at v0.6, both
    schemas, the journal spec's event catalogue, the reference implementation, and 291 reference cases
    are rewritten for DEC-97 to DEC-103 and DEC-111
    ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)): the envelope and strategy fields
