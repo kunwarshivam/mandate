@@ -7,8 +7,9 @@ use mandate_num::{CostBasis, MarkPrice, NumError, Price, Rounding, SignedQty, Us
 use mandate_time::{Date, UtcNanos, new_york_midnight};
 
 use crate::{
-    AccountingError, AssetClass, CashDividend, Config, CorporateAction, EquityFees, Execution, Fee,
-    FeeFamily, FeeKind, Input, InstrumentId, Liquidity, Side, Split, TafCapBasis,
+    AccountType, AccountingError, AssetClass, CashDividend, Config, CorporateAction, EquityFees,
+    Execution, Fee, FeeFamily, FeeKind, Input, InstrumentId, Liquidity, Reservations, Side, Split,
+    TafCapBasis,
 };
 
 /// Cost-basis reduction: `round(B × |q| ÷ |Q|, 12, half_even)` (spec §8.1).
@@ -213,11 +214,14 @@ pub struct Account {
 }
 
 impl Account {
-    /// An account holding `settled` cash and `positions` (without marks until one arrives).
+    /// A cash or margin account holding `settled` cash and `positions` (without marks until one
+    /// arrives). The type is the broker's (spec §7.2) and does not change within a fold.
     pub fn opening(
+        account_type: AccountType,
         settled: Usd,
         positions: impl IntoIterator<Item = (InstrumentId, Position)>,
     ) -> Self {
+        let _ = account_type;
         Self {
             positions: positions
                 .into_iter()
@@ -679,8 +683,20 @@ impl Account {
             .copied()
     }
 
+    pub fn account_type(&self) -> AccountType {
+        AccountType::Margin
+    }
+
     pub fn settled(&self) -> Usd {
         self.settled
+    }
+
+    /// Model buying power (spec §7.2, DEC-34): settled cash, plus Σ unsettled in a margin account,
+    /// less `reservations`, less the charges the accrued fees will post. The gate takes the lower of
+    /// this and the broker's figure (E6-6). Negative when a debit exists.
+    pub fn buying_power(&self, reservations: Reservations) -> Result<Usd, AccountingError> {
+        let _ = reservations;
+        Err(AccountingError::InvalidPosition)
     }
 
     pub fn unsettled(&self) -> impl Iterator<Item = (Date, Usd)> {

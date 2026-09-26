@@ -7,8 +7,8 @@ use common::{
     Fill, at, charge, d, equity, fee_cap, id, mark, no_fees, step, test_default, text, usd,
 };
 use mandate_accounting::{
-    Account, AccountingError, AssetClass, FeeFamily, FeeKind, Input, Liquidity, Position, Record,
-    Side, TafCapBasis,
+    Account, AccountType, AccountingError, AssetClass, FeeFamily, FeeKind, Input, Liquidity,
+    Position, Record, Side, TafCapBasis,
 };
 use mandate_num::{CostBasis, Qty, SignedQty, Usd};
 
@@ -34,7 +34,7 @@ fn unsettled(account: &Account) -> Vec<(String, String)> {
 #[test]
 fn rc_01_buy_partial_sell_accrual_charge_settlement() {
     let config = test_default();
-    let start = Account::opening(usd("10000"), []);
+    let start = Account::opening(AccountType::Margin, usd("10000"), []);
     let a = step(
         &start,
         &equity(
@@ -113,7 +113,7 @@ fn rc_01_buy_partial_sell_accrual_charge_settlement() {
 #[test]
 fn rc_02_averaging_in_and_reducing_keeps_average_cost() {
     let config = test_default();
-    let a = Account::opening(usd("100000"), []);
+    let a = Account::opening(AccountType::Margin, usd("100000"), []);
     let a = step(
         &a,
         &equity(
@@ -164,7 +164,7 @@ fn rc_02_averaging_in_and_reducing_keeps_average_cost() {
 #[test]
 fn rc_03_flip_through_flat() {
     let config = no_fees();
-    let a = Account::opening(usd("100000"), []);
+    let a = Account::opening(AccountType::Margin, usd("100000"), []);
     let a = step(
         &a,
         &equity(
@@ -226,7 +226,7 @@ fn rc_03_flip_through_flat() {
 #[test]
 fn crossing_fill_is_split_into_close_and_open() {
     let config = no_fees();
-    let a = Account::opening(usd("100000"), []);
+    let a = Account::opening(AccountType::Margin, usd("100000"), []);
     let a = step(
         &a,
         &equity(
@@ -299,7 +299,7 @@ fn reducing_a_short_rounds_the_removed_basis_once() {
         CostBasis::parse("-100").unwrap(),
     )
     .unwrap();
-    let a = Account::opening(usd("0"), [(id("XYZ"), short)]);
+    let a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), short)]);
     let a = step(
         &a,
         &equity(
@@ -356,7 +356,7 @@ fn rc_07_crypto_fees_in_the_received_asset() {
         }
         .input()
     };
-    let start = Account::opening(usd("100000"), []);
+    let start = Account::opening(AccountType::Margin, usd("100000"), []);
     let applied = start
         .apply(
             &crypto("c1", Side::Buy, "0.5", "60000", "2026-09-21T10:00:00-04:00"),
@@ -441,7 +441,7 @@ fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
         }
         .input()
     };
-    let a = Account::opening(usd("20000"), []);
+    let a = Account::opening(AccountType::Margin, usd("20000"), []);
     let a = step(
         &a,
         &fill(
@@ -500,7 +500,7 @@ fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
     assert_eq!(text(a.realized_net().unwrap()), "299.49");
 
     config.equities.taf_cap_basis = TafCapBasis::PerOrder;
-    let b = Account::opening(usd("20000"), []);
+    let b = Account::opening(AccountType::Margin, usd("20000"), []);
     let b = step(
         &b,
         &fill(
@@ -564,7 +564,7 @@ fn rc_11_trade_and_settlement_dates() {
         CostBasis::parse("40").unwrap(),
     )
     .unwrap();
-    let mut a = Account::opening(usd("0"), [(id("XYZ"), long)]);
+    let mut a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), long)]);
     let cases = [
         ("2026-09-21T21:00:00-04:00", "2026-09-22", "2026-09-23"),
         ("2026-10-09T10:00:00-04:00", "2026-10-09", "2026-10-13"),
@@ -631,7 +631,7 @@ fn crypto_maker_rates_and_cent_rounding() {
         }
         .input()
     };
-    let a = Account::opening(usd("1000"), []);
+    let a = Account::opening(AccountType::Margin, usd("1000"), []);
     let a = step(&a, &crypto("c1", Side::Buy, "1", "100"), &config);
     assert_eq!(position(&a, "ETHUSD"), ("0.9985".into(), "99.85".into()));
     assert_eq!(text(a.asset_fees()), "0.15");
@@ -653,7 +653,7 @@ fn crypto_maker_rates_and_cent_rounding() {
 #[test]
 fn rejected_inputs_leave_the_account_unchanged() {
     let config = test_default();
-    let a = Account::opening(usd("100"), []);
+    let a = Account::opening(AccountType::Margin, usd("100"), []);
     let buy = equity(
         "f1",
         "XYZ",
@@ -716,7 +716,7 @@ fn rejected_inputs_leave_the_account_unchanged() {
         CostBasis::parse("20").unwrap(),
     )
     .unwrap();
-    let unmarked = Account::opening(usd("0"), [(id("OLD"), held)]);
+    let unmarked = Account::opening(AccountType::Margin, usd("0"), [(id("OLD"), held)]);
     assert_eq!(unmarked.equity(), Err(AccountingError::NoMark(id("OLD"))));
     assert_eq!(
         unmarked.unrealized(),
@@ -747,7 +747,7 @@ fn rejected_inputs_leave_the_account_unchanged() {
 #[test]
 fn fill_prices_mark_only_until_a_mark_arrives() {
     let config = no_fees();
-    let a = Account::opening(usd("1000"), []);
+    let a = Account::opening(AccountType::Margin, usd("1000"), []);
     let a = step(
         &a,
         &equity(
@@ -803,7 +803,7 @@ fn reduction_ties_round_to_even() {
         CostBasis::parse("1.000000000001").unwrap(),
     )
     .unwrap();
-    let a = Account::opening(usd("0"), [(id("XYZ"), long)]);
+    let a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), long)]);
     let a = step(
         &a,
         &equity(
@@ -831,7 +831,7 @@ fn positions_list_open_instruments_and_errors_name_the_unmarked_one() {
         CostBasis::parse("30").unwrap(),
     )
     .unwrap();
-    let mut a = Account::opening(usd("1000"), [(id("AAA"), held)]);
+    let mut a = Account::opening(AccountType::Margin, usd("1000"), [(id("AAA"), held)]);
     for (fill, instrument, side) in [
         ("f1", "ZZZ", Side::Buy),
         ("f2", "BBB", Side::Buy),
@@ -930,7 +930,7 @@ fn a_reduction_never_removes_more_basis_than_the_position_holds() {
         ),
     ] {
         let fill = |fill_id, side, qty, time| equity(fill_id, "XYZ", side, qty, "0.00009", time);
-        let a = Account::opening(usd("1"), []);
+        let a = Account::opening(AccountType::Margin, usd("1"), []);
         let a = step(
             &a,
             &fill("f1", open, "0.00000001", "2026-09-21T10:00:00-04:00"),
@@ -1004,7 +1004,11 @@ fn the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held() 
             "0.5",
         ),
     ] {
-        let a = Account::opening(usd("0"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = Account::opening(
+            AccountType::Margin,
+            usd("0"),
+            [(id("XYZ"), build(qty, basis).unwrap())],
+        );
         let a = step(
             &a,
             &equity("f1", "XYZ", side, traded, "1", "2026-09-21T10:00:00-04:00"),
@@ -1066,7 +1070,7 @@ fn capped(cap: &str, basis: TafCapBasis) -> mandate_accounting::Config {
 #[test]
 fn per_order_taf_is_never_negative_when_the_cap_falls_within_an_order() {
     let held = build("400", "19600").unwrap();
-    let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+    let mut a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), held)]);
     for (n, (cap, taf, accrued)) in [
         ("0.015", "0.015", "0.166"),
         ("0", "0", "0.317"),
@@ -1097,7 +1101,7 @@ fn per_order_taf_is_never_negative_when_the_cap_falls_within_an_order() {
 #[test]
 fn a_daily_charge_is_never_a_credit_when_the_cap_falls() {
     let held = build("200", "100").unwrap();
-    let a = Account::opening(usd("100"), [(id("XYZ"), held)]);
+    let a = Account::opening(AccountType::Margin, usd("100"), [(id("XYZ"), held)]);
     let a = step(
         &a,
         &sell_on_order("f1", "o1", "0.01", "2026-09-21T11:00:00-04:00"),
@@ -1131,7 +1135,7 @@ fn a_daily_charge_is_never_a_credit_when_the_cap_falls() {
 #[test]
 fn per_order_taf_room_counts_executions_charged_per_execution() {
     let held = build("300", "14700").unwrap();
-    let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+    let mut a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), held)]);
     for (n, (cap, basis, taf)) in [
         ("0.015", TafCapBasis::PerExecution, "0.015"),
         ("0.015", TafCapBasis::PerOrder, "0"),
@@ -1163,7 +1167,11 @@ fn per_order_taf_room_counts_executions_charged_per_execution() {
 fn closing_at_the_average_cost_realizes_nothing() {
     let config = no_fees();
     for (qty, basis, side) in [("1", "100", Side::Sell), ("-1", "-100", Side::Buy)] {
-        let a = Account::opening(usd("1000"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = Account::opening(
+            AccountType::Margin,
+            usd("1000"),
+            [(id("XYZ"), build(qty, basis).unwrap())],
+        );
         let a = step(
             &a,
             &equity("f1", "XYZ", side, "1", "100", "2026-09-21T10:00:00-04:00"),
@@ -1220,7 +1228,7 @@ fn both_taf_cap_modes_charge_one_execution_orders_alike() {
             config.equities.taf_cap = fee_cap(cap);
             config.equities.taf_cap_basis = basis;
             let held = build("300", "14700").unwrap();
-            let a = Account::opening(usd("0"), [(id("XYZ"), held)]);
+            let a = Account::opening(AccountType::Margin, usd("0"), [(id("XYZ"), held)]);
             let first = a.apply(&sell("f1", Some("o1")), &config).unwrap();
             assert_eq!(taf(&first.record), [capped], "{cap} {basis:?} f1");
             let second = first.account.apply(&sell("f2", None), &config).unwrap();
