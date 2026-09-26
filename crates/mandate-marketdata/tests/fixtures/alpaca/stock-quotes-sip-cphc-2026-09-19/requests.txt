@@ -1,0 +1,1 @@
+/v2/stocks/quotes?symbols=CPHC&start=2026-09-19T00:00:00Z&end=2026-09-20T00:00:00Z&limit=10000&feed=sip&sort=asc
