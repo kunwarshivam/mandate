@@ -168,5 +168,6 @@ queue ([coordination playbook](.cursor/skills/mandate-mode/playbooks/coordinatio
 
 ## Licence and disclaimer
 
-No open-source licence has been granted for this repository yet; all rights are reserved. Mandate is
+All rights reserved; no licence is granted to use, copy, modify, or distribute this software beyond
+what GitHub's terms require for viewing a public repository ([LICENSE](LICENSE)). Mandate is
 software under development, not investment advice, and it holds no customer funds.
