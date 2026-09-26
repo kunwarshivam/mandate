@@ -1,0 +1,20 @@
+{
+ "id": "gen-0001",
+ "model": "anthropic/claude-sonnet-5",
+ "object": "chat.completion",
+ "choices": [
+  {
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "{\"theses\": [{\"instrument\": \"AAPL\", \"direction\": \"long\", \"conviction\": 0.6, \"confidence\": 0.5, \"horizon_days\": 5, \"thesis\": \"Services revenue grew 14% year over year and the close rose on three consecutive days.\", \"evidence\": [\"48123456\"], \"invalidation\": \"A close below the 20-day low.\"}]}"
+   },
+   "finish_reason": "stop"
+  }
+ ],
+ "usage": {
+  "prompt_tokens": 4000,
+  "completion_tokens": 200,
+  "total_tokens": 4200
+ }
+}
