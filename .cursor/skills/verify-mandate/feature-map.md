@@ -295,8 +295,8 @@ paths arrive with the tests PR, which updates this entry.
 
 ## Mandate document, validation, risk state, and change classification
 
-Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128;
-the paths arrive with the tests PR, which updates this entry.
+Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128.
+The crates exist; the rules above `SchemaDec` are stubs until their implementation PRs (DEC-77).
 
 - **Spec:** `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2 (lifecycle, provenance, the working
   universe), §3 (structure and goals), §4 (validation, warnings, the policy hierarchy), §5 (the risk
@@ -305,20 +305,32 @@ the paths arrive with the tests PR, which updates this entry.
   change classification), §11 (the reference cases); `docs/specs/trading-domain.md` §8.1 and §8.2
   (cost-basis reduction, risk marks); `docs/specs/journal.md` §4 (the canonical form the version
   hashes) and §9; ADR-0001 ES-02, ES-04, ES-09, ES-21, ES-22.
-- **Code:** `mandate-spec` (new; the mandate document parsed from canonical JSON with its decimals
-  kept as `SchemaDec`, the text checked against the field's whole schema `$def` before it is wrapped,
-  the V-rules and warnings, the policy hierarchy and its runtime
-  overlay, the risk-state fold, risk days, goals, the condition language, and change classification)
-  and `mandate-domain` (new; the vocabulary `mandate-risk`, `mandate-builder`, and the research
-  agent share), with the exact arithmetic in `mandate-num` as ES-04 requires.
-- **Tests:** per the brief: one named test per V-code and per §9.2 classification row, hand-checked
-  fixture figures, and property tests whose oracles rebuild the risk state from the emitted journal
-  events, accumulate breach time from the input list, scan the policy chain in the opposite
-  direction, and prove MI-11 by evaluating generated actions under both rule sets. Planted bugs per
-  test: the task brief.
+- **Code:** `mandate-spec`: `crates/mandate-spec/src/dec.rs` (`SchemaDec`, a decimal checked against
+  its field's whole schema `$def` — the pattern and, for `decimal`, the `-0` exclusion — so the text is
+  already the journal form and a version hash reproduces the confirmed document),
+  `crates/mandate-spec/src/document.rs` (the hashed envelope document and the strict parse),
+  `crates/mandate-spec/src/validate.rs` (the V-rules, the warnings, the closed platform-default list,
+  `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
+  `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
+  `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
+  classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
+  else); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
+  `mandate-builder`, and the research agent share). The exact arithmetic stays in `mandate-num`
+  (ES-04).
+- **Tests:** `crates/mandate-spec/tests/dec.rs` (live: every grammar's own values, the four things
+  `DecStr` normalises pinned as rejections, an integer oracle for the ordering, and the normal-form
+  identity the version hash rests on), `crates/mandate-spec/tests/document.rs` (the code and pointer
+  each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
+  rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
+  broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
+  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
+  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through a new `mandate` suite in `mandate-refcases`; families G, A, B, and N stay with streams G,
-  H, and J and fail as "not interpreted until" their owning story.
+  through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
+  and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
+  fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
+  refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
   `cargo test -p mandate-refcases -- --include-ignored mandate::`.
 

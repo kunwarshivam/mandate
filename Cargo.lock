@@ -1286,6 +1286,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 name = "mandate-accounting"
 version = "0.0.0"
 dependencies = [
+ "mandate-domain",
  "mandate-num",
  "mandate-time",
  "proptest",
@@ -1340,6 +1341,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "mandate-domain"
+version = "0.0.0"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]
@@ -1405,6 +1413,7 @@ dependencies = [
  "mandate-journal",
  "mandate-num",
  "mandate-sim",
+ "mandate-spec",
  "mandate-time",
  "serde_json",
  "toml",
@@ -1415,6 +1424,18 @@ name = "mandate-sim"
 version = "0.0.0"
 dependencies = [
  "mandate-accounting",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-spec"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-domain",
  "mandate-num",
  "mandate-time",
  "proptest",

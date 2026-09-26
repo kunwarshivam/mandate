@@ -147,11 +147,9 @@ impl Reservations {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssetClass {
-    UsEquity,
-    Crypto,
-}
+/// Re-exported from `mandate-domain`, which owns the shared vocabulary (ADR-0001 ES-02;
+/// DEC-128 item 1). The variants and their spelling are unchanged, so no call site moves.
+pub use mandate_domain::AssetClass;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Side {
