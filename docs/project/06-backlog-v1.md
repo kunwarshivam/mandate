@@ -240,9 +240,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 Design: [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) ([DEC-97](04-decision-log.md#decisions)).
 The mandate spec, schemas, reference implementation, and cases are rewritten first in spec-change PRs.
-The first delivery is the [DEC-103](04-decision-log.md#decisions) thin slice, which runs the research
-agent over the research basket (DEC-90) with every admission `ask`, paper only, and scorecards on.
-The full E17-3 follows only after the DEC-99 evaluation (E17-8) passes on the thin slice.
+The first delivery is the [DEC-103](04-decision-log.md#decisions) thin slice: the research agent
+runs only in the team's internal paper workspaces, with the research basket (DEC-90) as its fixed
+test data universe, every admission `ask`, paper only, and scorecards on. The basket is never a
+user's instrument choice. The full E17-3, for users' agents under their own envelopes, follows only
+after the DEC-99 evaluation (E17-8) passes on the thin slice.
 
 - **E17-0 (Must, now)** research spike: an LLM loop over news and prices, paper-traded on the
   research basket with fixed sizing, to de-risk E17-2 before it is product code
@@ -267,15 +269,19 @@ The full E17-3 follows only after the DEC-99 evaluation (E17-8) passes on the th
 - **E17-5 (Must)** As an owner, I want the input-drift detector (`unusual_input`, V-018) so that
   unusual inputs escalate before the research agent acts on them
   ([DEC-101](04-decision-log.md#decisions)).
-- **E17-6 (Must)** As an owner, I want platform-level controls on research-agent flow across
-  accounts, so that one thesis cannot concentrate orders from many accounts in one instrument
-  ([DEC-100](04-decision-log.md#decisions)).
-  *Accepted when:* the risk gate rejects an opening that would take aggregate research-agent exposure
-  in an instrument, across all workspaces, above the platform cap in dollars or as a share of average
-  daily dollar volume; orders from one thesis are staggered across accounts within the conduct
-  controls; the per-thesis kill switch stops admissions and openings from that thesis in every
-  account at once while exits and protection continue; bring-your-own-strategy agents keep
-  per-account controls only.
+- **E17-6 (Must)** As an operator, I want to see and stop research-agent flow across the accounts
+  of a deployment, so that one thesis cannot concentrate orders from many accounts in one instrument
+  unnoticed ([DEC-100](04-decision-log.md#decisions)).
+  *Accepted when:* no workspace's gate reads another workspace's state (a two-workspace test shows
+  one's positions never change the other's decisions); the aggregate-flow monitor sums research-agent
+  exposure per instrument over its deployment's workspaces, in dollars and as a share of average
+  daily dollar volume, alerts the operator above the thresholds, writes to no workspace, and sends
+  nothing to the global control plane; the operator per-thesis halt, journaled in each workspace as
+  a `PlatformOperatorAction`, stops matching research-agent admissions and openings in every
+  workspace of the deployment while exits and protection continue, and never permits anything a
+  workspace's own limits deny; openings on a new thesis wait for the workspace's deterministic
+  stagger offset within the conduct controls; bring-your-own-strategy agents keep per-account
+  controls only.
 - **E17-7 (Must)** As an owner, I want the research agent to read only vetted sources and to admit an
   instrument only on corroborated evidence, so that one planted source cannot admit an instrument
   ([DEC-101](04-decision-log.md#decisions)).
@@ -286,7 +292,8 @@ The full E17-3 follows only after the DEC-99 evaluation (E17-8) passes on the th
 - **E17-8 (Must)** As the founder, I want a forward paper evaluation harness, so that thesis quality
   is judged on outcomes the model cannot have seen ([DEC-99](04-decision-log.md#decisions)).
   *Accepted when:* the evaluation window, metric, and pass threshold come from a recorded decision
-  made before the evaluation starts; every thesis is scored after its horizon against buy-and-hold of
+  made before the evaluation starts; it runs on the team's internal paper workspaces (DEC-103), so
+  no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
   the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
   against the threshold and is reproducible from the journal.
 
@@ -317,5 +324,4 @@ From the final review of mandate spec v0.3:
 - Define whether the 1.25× floor hard level scales C × f or the remaining loss budget when L > 0.
 - Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
 - Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
-- Roadmap: replace "learning loop" in Phase 3 with "scorecards and shadow mode".
 - Add fuzz coverage for multiple agents, trims, and owner exits.

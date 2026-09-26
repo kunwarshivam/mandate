@@ -610,6 +610,17 @@ flowchart TD
 switch for the managed service. Hybrid and on-prem customers control their own; the managed
 global switch cannot reach into customer deployments.
 
+**Correlated research-agent flow** ([DEC-100](project/04-decision-log.md#decisions)): each
+workspace's risk gate decides from that workspace's own state only. Two operator controls run in
+the workspace deployment, outside the trade path and never in the global control plane. An
+aggregate-flow monitor sums research-agent exposure per instrument over the workspaces of its
+deployment (a managed cell or a customer site) and alerts the operator; it writes to no workspace.
+An operator per-thesis halt stops research-agent admissions and openings in a named instrument,
+optionally for one research-agent version, in every workspace of the deployment, while exits and
+protection continue; it only removes permissions and is journaled in each workspace. As with the
+global switch, the managed halt cannot reach into customer deployments, whose operators run their
+own monitor and halt from the same installer.
+
 ---
 
 ## 9. Intelligence layer

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product, with external counsel |
-| **Status** | Draft v0.6 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions): the platform originates ideas and serves retail from the start; posture under counsel review) |
+| **Status** | Draft v0.7 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions): the platform originates ideas and serves retail from the start; posture under counsel review). v0.7: counsel is engaged during Phase 0 ([DEC-102](../project/04-decision-log.md#decisions), accepted by the founder 2026-09-26); question 35 is Proposed (agent) until the founder accepts it ([DEC-79](../project/04-decision-log.md#decisions): compliance text is the founder's) |
 
 > This document records product positions and open questions. It is not legal advice.
 > Every position below must be confirmed by securities and data-protection counsel before
@@ -270,7 +270,8 @@ go-live screen.
     from the ideation mode, and should the terms distinguish them?
 35. How may the product describe an agent that "brings its own ideas" without implying expected
     performance, given the Marketing Rule's limits on testimonials and hypothetical performance?
-    What must the onboarding and go-live screens say?
+    What must the onboarding and go-live screens say? *(Proposed by agents, 2026-09-26; awaiting
+    the founder's acceptance, DEC-79.)*
 
 ## Data protection
 

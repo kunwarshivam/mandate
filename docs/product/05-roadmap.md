@@ -12,7 +12,7 @@ the previous phase's exit criteria are met.
 flowchart LR
     P0["Phase 0<br/>Core engine"] --> P1["Phase 1<br/>One autonomous agent<br/>on Alpaca paper"]
     P1 --> P2["Phase 2<br/>Platform v1<br/>design partners"]
-    P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>scorecards, shadow mode"]
+    P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>shadow mode"]
     P3 --> P4["Phase 4<br/>Equities, mobile,<br/>enterprise identity, on-prem"]
     P4 --> P5["Phase 5<br/>Research lab,<br/>shared data"]
 ```
@@ -42,9 +42,13 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 - Research agent: LLM ideation from market data, news, filings, and memory into theses; universe
   admission through the eligibility floor and the autonomy rules; bring-your-own-strategy mode
   ([DEC-97](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)).
-  The first slice runs over the research basket with every admission `ask`, paper only, and
-  scorecards on; dynamic admission follows once the forward-paper evaluation passes
+  The first slice runs in the team's internal paper workspaces, with the research basket as its
+  fixed test data universe, every admission `ask`, paper only, and scorecards on; dynamic admission
+  for users' agents, under their own envelopes, follows once the forward-paper evaluation passes
   ([DEC-103](../project/04-decision-log.md#decisions)).
+- Signal-model scorecards: every thesis scored after its horizon against pre-registered baselines on
+  forward paper trading, net of modeled costs ([DEC-99](../project/04-decision-log.md#decisions),
+  E15-3).
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
 - US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
@@ -77,11 +81,11 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 
 **Exit criteria:** PRD release criteria met; 5+ design partners on paper, 3+ live.
 
-### Phase 3: Hybrid at scale, fast models, scorecards
+### Phase 3: Hybrid at scale, fast models, shadow mode
 
 - Hybrid deployments hardened (upgrades, health, fallback approval channels).
 - Fast decision models (Laya in-process, Jev optional) with deadlines.
-- Signal-model scorecards (reporting); user-selectable sizing methods; calibration only as a user-selected, versioned method (DEC-47).
+- Scorecards extended to the fast decision models; user-selectable sizing methods; calibration only as a user-selected, versioned method (DEC-47).
 - Shadow mode for new mandate versions.
 - Kraken Derivatives US connector: CFTC-regulated crypto perpetuals, with perpetuals accounting
   (funding, margin, liquidation thresholds) and a funding/carry signal model.

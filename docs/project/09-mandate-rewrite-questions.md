@@ -9,8 +9,10 @@ The mandate spec rewrite for [DEC-97](04-decision-log.md#decisions) to
 [DEC-103](04-decision-log.md#decisions) ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md))
 depends on the design choices below. `AGENTS.md` ("Separate decisions from defects") asks for them
 before drafting, so that review rounds find defects rather than open choices. The founder decides
-them; agents give the options and a recommendation. Until a question is answered, agents continue
-with its most conservative option (`AGENTS.md` rule 9).
+them; agents give the options and a recommendation. Accepted decisions stand as written, and no
+recommendation here departs from one; a departure needs its own decision-log entry first
+(`AGENTS.md` rule 9). Until a question is answered, agents continue with its most conservative
+option consistent with those decisions.
 
 ## 1. `universe.max_instruments` default and platform ceiling
 
@@ -42,19 +44,20 @@ the autonomy rules again. A thesis that expires without renewal makes the instru
 exits-only, protection stays, and the discretionary exit follows §2.2. The horizon is also when
 DEC-99 scores the thesis, so the position and its score end together.
 
-## 3. The research agent's weight
+## 3. Bounds on the research agent's weight
 
-The research agent is one signal model with a user-confirmed weight (DEC-47, DEC-97). Its weight
-decides how far a thesis moves the combined conviction against the other configured models. It is
-the only model with outputs for newly admitted instruments.
+DEC-97 and ADR-0002 part 1 settle how the weight is set: the research agent is one signal model with
+a user-confirmed weight, an envelope field the compiler may propose and the user confirms (DEC-47
+stands). Its weight decides how far a thesis moves the combined conviction against the other
+configured models, and it is the only model with outputs for newly admitted instruments. Open is
+only whether anything bounds the user's value.
 
-- User-set only, like every other weight.
-- User-set within platform bounds (a minimum, a maximum, or both).
-- User-set, with organizations able to cap it through the policy hierarchy.
+- No bound beyond the user's confirmation.
+- Organizations may cap it through the policy hierarchy (DEC-51).
+- A platform minimum, maximum, or both, in addition.
 
-**Recommendation.** User-set and confirmed like every envelope field; the compiler may propose a
-value, shown as proposed. Organizations may cap it through the policy hierarchy (DEC-51). No
-platform bound until the DEC-99 evaluation gives evidence for one.
+**Recommendation.** Organizations may cap it through the policy hierarchy. No platform bound until
+the DEC-99 evaluation gives evidence for one.
 
 ## 4. Research-agent cost cap
 
@@ -69,18 +72,21 @@ the cap is reached, the research agent proposes no new theses until the next day
 are managed normally: their theses stay valid until they expire or are invalidated, and exits,
 protection, and kill switches are unaffected.
 
-## 5. The pinned universe in bring-your-own-strategy mode
+## 5. Switching into and out of bring-your-own-strategy mode
 
-DEC-97 moves the working universe out of the hashed mandate document. In bring-your-own-strategy
-mode the owner pins the universe and the research agent is off (E17-4).
+ADR-0002 part 1 settles the mode itself: pinning the universe disables the research agent and gives
+today's behavior, so the pinned universe stays in the hashed, confirmed mandate version under the
+existing change classification (DEC-43; E17-4). Open is how a switch between the modes is
+classified.
 
-- The pinned universe stays inside the hashed, confirmed mandate version, with the existing change
-  classification (adding an instrument is risk-increasing and needs step-up).
-- The pinned universe is runtime state, as in ideation mode.
+- Both directions are mandate changes with the existing classification of the fields they touch.
+- Pinning (the research agent off) is risk-reducing; unpinning (the research agent may admit
+  instruments) is risk-increasing and needs step-up.
 
-**Recommendation.** Keep it inside the hashed, confirmed mandate version with the existing change
-classification. The owner chose those instruments, so a change to them is a mandate change, as it is
-today (DEC-43).
+**Recommendation.** Both directions are mandate versions. Pinning is risk-reducing and applies at
+once; the research agent's instruments not in the pinned list become removed instruments (exits-only,
+protection stays, discretionary exit under §2.2). Unpinning is risk-increasing and needs step-up,
+because it lets the platform admit instruments the owner did not choose.
 
 ## 6. The DEC-99 evaluation window, metric, and pass threshold
 
@@ -99,25 +105,25 @@ baseline over the same holding window. The pass threshold is a one-sided 95% low
 above zero against both baselines. The E17-0 spike report gives the spread of outcomes needed to
 check that 100 theses can show a difference.
 
-## 7. The DEC-100 cap values and stagger interval
+## 7. The DEC-100 monitoring thresholds and stagger window
 
-The risk gate caps aggregate research-agent exposure per instrument across all workspaces, in
-dollars and as a share of the instrument's average daily dollar volume, and staggers one thesis's
-orders across accounts. The values are set before live trading.
+Each workspace's gate stays the only binding control, with its own participation cap (trading domain
+spec §9.6). The aggregate-flow monitor sums research-agent exposure per instrument over the
+workspaces of its deployment and alerts the operator above a threshold; the operator's per-thesis
+halt stops matching admissions and openings; each workspace staggers openings on a new thesis. The
+values are set before live trading.
 
-- Volume cap: 0.5%, 1%, or 5% of average daily dollar volume, over 20 days or another period.
-- Dollar cap: a fixed amount per instrument, or none beyond the volume cap.
-- Stagger: a fixed interval between accounts; or a random delay per account, spread over a window
-  inside the regular session.
-- Hybrid workspaces run on the customer's site, and the global control plane holds no positions
-  (DEC-10). The aggregate cap needs their exposure: they report it, or they are outside the research
-  agent until a design keeps trading intent on site.
+- Alert threshold: 0.5%, 1%, or 5% of average daily dollar volume, over 20 days or another period.
+- Dollar threshold: a fixed amount per instrument, or none beyond the volume threshold.
+- Stagger window: 5, 15, or 30 minutes inside the regular session.
+- Hybrid and on-prem deployments run the same monitor and halt over their own workspaces, operated
+  by the customer. Nothing crosses between deployments, and the global control plane carries none of
+  it (DEC-10).
 
-**Recommendation.** Start at 1% of the 20-day average daily dollar volume or 1,000,000 USD per
-instrument, whichever is lower. Stagger with a random delay per account, spread over 15 minutes and
-within the conduct controls. In v1 the research agent runs for managed workspaces only; hybrid use
-waits for a design that sends no trading intent to the control plane. Revisit the values before live
-trading.
+**Recommendation.** Alert at 1% of the 20-day average daily dollar volume or 1,000,000 USD per
+instrument per deployment, whichever is lower. Stagger over 15 minutes, within the conduct controls.
+The operator issues the halt; the monitor never halts by itself, so no workspace's state changes
+another's decisions without an operator's action. Revisit the values before live trading.
 
 ## 8. The Robinhood paper stage
 
@@ -134,18 +140,21 @@ Robinhood users; Alpaca paper is optional for users who also have an Alpaca acco
 would make Robinhood users open a second brokerage account. Whether any live Robinhood path is
 possible still depends on the OD-12 answers on client order IDs.
 
-## 9. `auto` for retail before counsel answers question 33
+## 9. `auto` for retail on paper before counsel answers question 33
 
-DEC-98 sets `auto_allowed: true` in the retail profile. Counsel question 33 asks what ceilings,
-disclosures, and checks `auto` needs for retail. Until counsel signs off, every retail user trades
-paper.
+DEC-98 stands: the retail profile has `auto_allowed: true`, and every retail user trades paper until
+counsel signs off. Counsel question 33 asks what ceilings, disclosures, and checks `auto` needs for
+retail live. Open is only what paper `auto` shows the user, so that a paper run does not set an
+expectation for live.
 
-- Allow `auto` for retail on paper now.
-- `ask` only for retail until counsel answers question 33.
+- No extra wording.
+- The retail profile screen and the go-live screen say that live `auto` depends on counsel's answer
+  to question 33 and may come with lower ceilings or be unavailable.
 
-**Recommendation.** `ask` only for retail until counsel answers question 33; DEC-98's
-`auto_allowed: true` applies afterwards if counsel agrees. Users who run `auto` on paper would expect
-it live, and waiting costs little while every retail user trades paper.
+**Recommendation.** Keep DEC-98 as written, with `auto` available to retail on paper now, and add the
+wording on the retail profile and go-live screens. The wording is compliance text, so the founder
+accepts it (DEC-79). Restricting retail to `ask` would need a decision-log entry superseding that
+part of DEC-98.
 
 ## 10. How theses are shown to the user
 

@@ -56,7 +56,7 @@ issues are the record; this table is the summary
 | E3-3 cash-account settlement | `claude-code` | #48 | Tests PR open, under review; decisions renumbered to DEC-104 and DEC-105 after #52 | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
-| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR open, under review; the #52 review findings are not yet addressed | `cursor/direction-follow-ups-v2` (supersedes `agent/direction-follow-ups`, #52) |
+| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR open; the #52 review findings are fixed; waiting for the merge coordinator's independent review | `cursor/direction-follow-ups-v2` (supersedes `agent/direction-follow-ups`, #52) |
 | E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
 
 ## Waiting on the founder
@@ -118,9 +118,11 @@ them in the decision log.
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the research
-   basket, every admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation
-   (E17-8). The full E17-3 follows only after that evaluation passes.
+   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the team's
+   internal paper workspaces with the research basket as the fixed test data universe, every
+   admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation (E17-8). The
+   full E17-3, for users' agents under their own envelopes, follows only after that evaluation
+   passes.
 
 E3-3, E2-4, and E5-2 touch different crates and can run in parallel; reviews run one at a time.
 
