@@ -4,13 +4,14 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use clap::Parser;
 use mandate_cli::download::{self, Plan, Totals};
 use mandate_cli::{Cli, Command};
-use mandate_marketdata::client::{Client, Pause, Response, Transport, TransportError};
+use mandate_marketdata::client::{Client, Pause, RateHeaders, Response, Transport, TransportError};
 use mandate_marketdata::model::{AssetClass, Feed, Kind};
-use mandate_time::Date;
+use mandate_time::{Date, UtcNanos};
 
 fn day(s: &str) -> Date {
     Date::parse(s).unwrap()
@@ -254,15 +255,26 @@ impl Transport for Replay {
         }
         Ok(Response {
             status: 200,
+            rate: RateHeaders::default(),
             body: bodies.remove(0),
         })
     }
 }
 
-struct NoPause;
+/// A clock that moves only when paused, and never waits.
+#[derive(Default)]
+struct NoPause(Mutex<Duration>);
 
 impl Pause for NoPause {
-    async fn pause(&self, _duration: std::time::Duration) {}
+    fn now(&self) -> UtcNanos {
+        let elapsed = *self.0.lock().unwrap();
+        let secs = 1_790_380_800 + i64::try_from(elapsed.as_secs()).unwrap();
+        UtcNanos::from_parts(secs, elapsed.subsec_nanos()).unwrap()
+    }
+
+    async fn pause(&self, duration: Duration) {
+        *self.0.lock().unwrap() += duration;
+    }
 }
 
 fn recorded(name: &str) -> Vec<u8> {
@@ -311,7 +323,7 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
     };
 
     let mut report = Vec::new();
-    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause::default());
     let first = download::run(&p, &client, &mut report).await.unwrap();
     assert_eq!(
         first,
@@ -345,7 +357,7 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
     assert!(stored.contains(r#""id":"spy-split""#), "{stored}");
 
     let mut report = Vec::new();
-    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause::default());
     let second = download::run(&p, &client, &mut report).await.unwrap();
     assert_eq!((second.written, second.unchanged), (0, 2));
     assert_eq!(second.bytes, first.bytes);
@@ -425,7 +437,7 @@ async fn a_quotes_run_follows_every_page_and_stores_them_under_the_quotes_direct
     };
 
     let mut report = Vec::new();
-    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause::default());
     let first = download::run(&p, &client, &mut report).await.unwrap();
     assert_eq!(
         (first.datasets, first.days, first.rows, first.written),
@@ -448,7 +460,7 @@ async fn a_quotes_run_follows_every_page_and_stores_them_under_the_quotes_direct
     );
 
     let mut report = Vec::new();
-    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause::default());
     let second = download::run(&p, &client, &mut report).await.unwrap();
     assert_eq!((second.written, second.unchanged), (0, 1));
     assert_eq!(second.bytes, first.bytes);
