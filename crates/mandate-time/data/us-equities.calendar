@@ -1,0 +1,175 @@
+# US-equities exchange calendar: the NYSE and Nasdaq trading schedule (trading domain spec §2.2,
+# §4.3), read by `mandate_time::ExchangeCalendar`.
+#
+# Times are America/New_York wall-clock times; `mandate-time` converts them to UTC with the bundled
+# time-zone database, so daylight-saving changes never live in this file.
+#
+# Records, one per line; `#` starts a comment line, and blank lines are ignored:
+#   valid <first date> <last date>
+#       The dates this file answers for. A question about any other date is an error.
+#   hours <pre-market open> <regular open> <regular close> <after-hours close>
+#       The sessions of a full trading day. The overnight session of a trading day runs from the
+#       after-hours close on the previous calendar day to the pre-market open.
+#   closed <date> <label>
+#       A weekday with no session at all. Weekends are always closed and are not listed.
+#   early_close <date> <regular close> <after-hours close> <label>
+#       A trading day whose regular and after-hours sessions end early.
+# Dates are listed in increasing order, each at most once.
+#
+# Provenance (retrieved 2026-09-26):
+# - Alpaca Trading API `GET /v2/calendar?start=2015-01-01&end=2029-12-31` on the paper host
+#   (paper-api.alpaca.markets), the broker the spec names as the calendar's source. Every record
+#   below was generated from it: the weekdays it omits are `closed`, and the days whose `close` is
+#   13:00 and `session_close` 1700 are `early_close`. Every other day it lists opens at 09:30 and
+#   04:00 and closes at 16:00 and 20:00, as `hours` states.
+# - NYSE, "Holidays & Trading Hours" (https://www.nyse.com/markets/hours-calendars): the live page
+#   for 2026 to 2028, and the Internet Archive's copies of it that list 2017 to 2019
+#   (web.archive.org/web/2017), 2018 to 2021 (2018), 2021 to 2023 (2020), 2022 to 2024 (20220301),
+#   2023 to 2025 (2022), and 2024 to 2026 (2023), including each year's early closes at 1:00 p.m.
+#   with late trading sessions closing at 5:00 p.m. Every holiday and early close of 2018 to 2028
+#   agrees with the records below; `crates/mandate-time/tests/session.rs` checks them against
+#   those lists typed independently.
+# - NYSE Group press releases for the two unscheduled closures: "New York Stock Exchange to Honor
+#   President George H. W. Bush" (2018-12-05) and "The New York Stock Exchange Will Close Markets
+#   on January 9 to Honor the Passing of Former President Jimmy Carter" (2025-01-09).
+# - Nasdaq Trader, "U.S. Equity and Options Markets Holiday Schedule 2026"
+#   (https://www.nasdaqtrader.com/trader.aspx?id=calendar): the same 2026 closures and early closes
+#   as NYSE.
+# - The same NYSE page for the session bounds: NYSE Arca Equities' early trading session opens at
+#   4:00 a.m., the core session runs 9:30 a.m. to 4:00 p.m., and the late trading session closes at
+#   8:00 p.m. (spec §4.3 uses the same hours).
+#
+# Alpaca's calendar stops listing days after 2029-12-24 and NYSE publishes three years ahead, so
+# this file ends at 2028-12-31. Extend it only from a newly published schedule.
+
+valid 2018-01-01 2028-12-31
+hours 04:00 09:30 16:00 20:00
+closed 2018-01-01 New Year's Day
+closed 2018-01-15 Martin Luther King, Jr. Day
+closed 2018-02-19 Washington's Birthday
+closed 2018-03-30 Good Friday
+closed 2018-05-28 Memorial Day
+early_close 2018-07-03 13:00 17:00 Day before Independence Day
+closed 2018-07-04 Independence Day
+closed 2018-09-03 Labor Day
+closed 2018-11-22 Thanksgiving Day
+early_close 2018-11-23 13:00 17:00 Day after Thanksgiving
+closed 2018-12-05 National Day of Mourning for President George H. W. Bush
+early_close 2018-12-24 13:00 17:00 Christmas Eve
+closed 2018-12-25 Christmas Day
+closed 2019-01-01 New Year's Day
+closed 2019-01-21 Martin Luther King, Jr. Day
+closed 2019-02-18 Washington's Birthday
+closed 2019-04-19 Good Friday
+closed 2019-05-27 Memorial Day
+early_close 2019-07-03 13:00 17:00 Day before Independence Day
+closed 2019-07-04 Independence Day
+closed 2019-09-02 Labor Day
+closed 2019-11-28 Thanksgiving Day
+early_close 2019-11-29 13:00 17:00 Day after Thanksgiving
+early_close 2019-12-24 13:00 17:00 Christmas Eve
+closed 2019-12-25 Christmas Day
+closed 2020-01-01 New Year's Day
+closed 2020-01-20 Martin Luther King, Jr. Day
+closed 2020-02-17 Washington's Birthday
+closed 2020-04-10 Good Friday
+closed 2020-05-25 Memorial Day
+closed 2020-07-03 Independence Day
+closed 2020-09-07 Labor Day
+closed 2020-11-26 Thanksgiving Day
+early_close 2020-11-27 13:00 17:00 Day after Thanksgiving
+early_close 2020-12-24 13:00 17:00 Christmas Eve
+closed 2020-12-25 Christmas Day
+closed 2021-01-01 New Year's Day
+closed 2021-01-18 Martin Luther King, Jr. Day
+closed 2021-02-15 Washington's Birthday
+closed 2021-04-02 Good Friday
+closed 2021-05-31 Memorial Day
+closed 2021-07-05 Independence Day
+closed 2021-09-06 Labor Day
+closed 2021-11-25 Thanksgiving Day
+early_close 2021-11-26 13:00 17:00 Day after Thanksgiving
+closed 2021-12-24 Christmas Day
+closed 2022-01-17 Martin Luther King, Jr. Day
+closed 2022-02-21 Washington's Birthday
+closed 2022-04-15 Good Friday
+closed 2022-05-30 Memorial Day
+closed 2022-06-20 Juneteenth National Independence Day
+closed 2022-07-04 Independence Day
+closed 2022-09-05 Labor Day
+closed 2022-11-24 Thanksgiving Day
+early_close 2022-11-25 13:00 17:00 Day after Thanksgiving
+closed 2022-12-26 Christmas Day
+closed 2023-01-02 New Year's Day
+closed 2023-01-16 Martin Luther King, Jr. Day
+closed 2023-02-20 Washington's Birthday
+closed 2023-04-07 Good Friday
+closed 2023-05-29 Memorial Day
+closed 2023-06-19 Juneteenth National Independence Day
+early_close 2023-07-03 13:00 17:00 Day before Independence Day
+closed 2023-07-04 Independence Day
+closed 2023-09-04 Labor Day
+closed 2023-11-23 Thanksgiving Day
+early_close 2023-11-24 13:00 17:00 Day after Thanksgiving
+closed 2023-12-25 Christmas Day
+closed 2024-01-01 New Year's Day
+closed 2024-01-15 Martin Luther King, Jr. Day
+closed 2024-02-19 Washington's Birthday
+closed 2024-03-29 Good Friday
+closed 2024-05-27 Memorial Day
+closed 2024-06-19 Juneteenth National Independence Day
+early_close 2024-07-03 13:00 17:00 Day before Independence Day
+closed 2024-07-04 Independence Day
+closed 2024-09-02 Labor Day
+closed 2024-11-28 Thanksgiving Day
+early_close 2024-11-29 13:00 17:00 Day after Thanksgiving
+early_close 2024-12-24 13:00 17:00 Christmas Eve
+closed 2024-12-25 Christmas Day
+closed 2025-01-01 New Year's Day
+closed 2025-01-09 National Day of Mourning for President Jimmy Carter
+closed 2025-01-20 Martin Luther King, Jr. Day
+closed 2025-02-17 Washington's Birthday
+closed 2025-04-18 Good Friday
+closed 2025-05-26 Memorial Day
+closed 2025-06-19 Juneteenth National Independence Day
+early_close 2025-07-03 13:00 17:00 Day before Independence Day
+closed 2025-07-04 Independence Day
+closed 2025-09-01 Labor Day
+closed 2025-11-27 Thanksgiving Day
+early_close 2025-11-28 13:00 17:00 Day after Thanksgiving
+early_close 2025-12-24 13:00 17:00 Christmas Eve
+closed 2025-12-25 Christmas Day
+closed 2026-01-01 New Year's Day
+closed 2026-01-19 Martin Luther King, Jr. Day
+closed 2026-02-16 Washington's Birthday
+closed 2026-04-03 Good Friday
+closed 2026-05-25 Memorial Day
+closed 2026-06-19 Juneteenth National Independence Day
+closed 2026-07-03 Independence Day
+closed 2026-09-07 Labor Day
+closed 2026-11-26 Thanksgiving Day
+early_close 2026-11-27 13:00 17:00 Day after Thanksgiving
+early_close 2026-12-24 13:00 17:00 Christmas Eve
+closed 2026-12-25 Christmas Day
+closed 2027-01-01 New Year's Day
+closed 2027-01-18 Martin Luther King, Jr. Day
+closed 2027-02-15 Washington's Birthday
+closed 2027-03-26 Good Friday
+closed 2027-05-31 Memorial Day
+closed 2027-06-18 Juneteenth National Independence Day
+closed 2027-07-05 Independence Day
+closed 2027-09-06 Labor Day
+closed 2027-11-25 Thanksgiving Day
+early_close 2027-11-26 13:00 17:00 Day after Thanksgiving
+closed 2027-12-24 Christmas Day
+closed 2028-01-17 Martin Luther King, Jr. Day
+closed 2028-02-21 Washington's Birthday
+closed 2028-04-14 Good Friday
+closed 2028-05-29 Memorial Day
+closed 2028-06-19 Juneteenth National Independence Day
+early_close 2028-07-03 13:00 17:00 Day before Independence Day
+closed 2028-07-04 Independence Day
+closed 2028-09-04 Labor Day
+closed 2028-11-23 Thanksgiving Day
+early_close 2028-11-24 13:00 17:00 Day after Thanksgiving
+closed 2028-12-25 Christmas Day
