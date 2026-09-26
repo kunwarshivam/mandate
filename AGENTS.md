@@ -77,8 +77,9 @@ stop and ask; do not silently pick one.
 ## Safety-critical paths
 
 Changes here require tests written or verified against approved reference cases before
-implementation, and before merge an independent review by an agent on a different model, zero
-missed mutants, and green CI (DEC-79):
+implementation, and before merge an independent review by an agent in a separate session with
+no shared context (DEC-134 allows the same model as the author), zero missed mutants, and green
+CI (DEC-79):
 
 - Accounting (positions, cash, fees, corporate actions, settlement, funding, P&L)
 - Risk gate, US account rules, eligibility, market-conduct controls, drawdown ladder, kill switches
