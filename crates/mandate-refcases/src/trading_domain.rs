@@ -338,10 +338,7 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
             "steps",
         ],
     )?;
-    let profile = str_at(case, "broker_profile")?;
-    ensure(["alpaca", "generic"].contains(&profile), || {
-        format!("unknown broker_profile `{profile}`")
-    })?;
+    let profile = BrokerProfile::parse(str_at(case, "broker_profile")?)?;
     let config = config(fixture, case)?;
     let instruments = instruments(case)?;
     let mut account = initial(case, profile, &instruments)?;
@@ -614,20 +611,49 @@ fn instrument<'a>(
         .ok_or_else(|| format!("unknown instrument `{name}`"))
 }
 
+/// The broker profiles the harness knows (spec §7.2). Parsed once, before any account is read, so
+/// that an unknown profile is reported as the profile it is and a stated `cash` account is never
+/// reported as an unknown account type.
+#[derive(Debug, Clone, Copy)]
+enum BrokerProfile {
+    Alpaca,
+    Generic,
+}
+
+impl BrokerProfile {
+    fn parse(profile: &str) -> Result<Self, String> {
+        match profile {
+            "alpaca" => Ok(Self::Alpaca),
+            "generic" => Ok(Self::Generic),
+            other => Err(format!(
+                "unknown broker_profile `{other}`: the harness knows `alpaca` (margin accounts only) and `generic` (`cash` or `margin`)"
+            )),
+        }
+    }
+}
+
 /// The account type (spec §7.2): the alpaca profile defaults to margin and has no cash accounts;
 /// a generic broker's case must say which it is (DEC-105).
-fn account_type(account: &Json, profile: &str) -> Result<AccountType, String> {
+fn account_type(account: &Json, profile: BrokerProfile) -> Result<AccountType, String> {
     match (profile, account.get("type").map(Json::as_str)) {
-        ("alpaca", None) | (_, Some(Some("margin"))) => Ok(AccountType::Margin),
-        ("generic", Some(Some("cash"))) => Ok(AccountType::Cash),
-        ("alpaca", Some(Some("cash"))) => Err("an alpaca account is never a cash account".into()),
-        (_, None) => Err(format!("a {profile} account needs `initial.account.type`")),
+        (BrokerProfile::Alpaca, None) | (_, Some(Some("margin"))) => Ok(AccountType::Margin),
+        (BrokerProfile::Generic, Some(Some("cash"))) => Ok(AccountType::Cash),
+        (BrokerProfile::Alpaca, Some(Some("cash"))) => {
+            Err("an alpaca account is never a cash account".into())
+        }
+        (BrokerProfile::Generic, None) => {
+            Err("a generic account needs `initial.account.type`".into())
+        }
         (_, Some(Some(other))) => Err(format!("unknown account type `{other}`")),
         (_, Some(None)) => Err("`initial.account.type` is not a string".into()),
     }
 }
 
-fn initial(case: &Json, profile: &str, instruments: &Instruments) -> Result<Account, String> {
+fn initial(
+    case: &Json,
+    profile: BrokerProfile,
+    instruments: &Instruments,
+) -> Result<Account, String> {
     let initial = at(case, "initial")?;
     fields(initial, "initial", &["account", "positions"])?;
     let account = at(initial, "account")?;

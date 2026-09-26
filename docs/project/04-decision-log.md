@@ -146,3 +146,4 @@ reservation keeps its row and its number is never reused.
 | DEC-107 | `cursor` | #59 | E5-2: the filesystem artifact backend's own crate (ES-02 crate list) | Reserved |
 | DEC-106 | `claude-code` | #58 | E4-1 backtest fill-model interpretations | Merged (#61) |
 | DEC-108 | `claude-code` | #58 | E4-1 tests-PR crate, arithmetic, and harness shapes (DEC-106 is reserved for the story's interpretations; DEC-107 is `cursor`'s) | In this PR |
+| DEC-109 | `cursor` | #77 | E5-3: Postgres journal client and test setup (sqlx 0.9 without query macros, `stream_heads.risk_clock`, Postgres tests in `full` only) | Reserved |
