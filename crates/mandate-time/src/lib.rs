@@ -14,14 +14,19 @@
 //! `YYYY-MM-DD`. Core code never reads a clock (ADR-0001 ES-05): values arrive as inputs.
 //!
 //! Trading calendars, equity trade dates, and America/New_York conversions live in [`calendar`];
-//! this is the only crate that touches the time-zone database (ADR-0001 ES-05).
+//! the US-equities exchange calendar and its sessions live in [`session`]. This is the only crate
+//! that touches the time-zone database (ADR-0001 ES-05).
 
 mod calendar;
+mod session;
 
 use core::fmt;
 use core::str::FromStr;
 
 pub use calendar::{TradingCalendar, new_york_date_and_hour, new_york_midnight};
+pub use session::{
+    CalendarDataError, ExchangeCalendar, NewYorkTime, Session, SessionSpan, new_york_instant,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TimeError {
