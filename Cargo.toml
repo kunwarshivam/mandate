@@ -9,6 +9,7 @@ mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
+mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }
@@ -26,6 +27,7 @@ secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_json_canonicalizer = "0.3.2"
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "tls-rustls-ring-native-roots"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = "2.0.21"
 tokio = { version = "~1.53.1", default-features = false }

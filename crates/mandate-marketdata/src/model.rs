@@ -1,6 +1,9 @@
 //! What a download names and returns: the dataset identity (asset class, feed, kind, symbol), the
-//! day range, and the vendor's bar and trade records (trading domain spec §4.1). The records live
-//! here with [`DecStr`] numbers until `mandate-domain` exists (DEC-89).
+//! day range, the vendor's bar and trade records (trading domain spec §4.1), and the corporate
+//! actions around them (§4.5). The records live here with [`DecStr`] numbers until
+//! `mandate-domain` exists (DEC-89).
+
+mod corporate_action;
 
 use std::fmt;
 use std::path::PathBuf;
@@ -8,6 +11,12 @@ use std::str::FromStr;
 
 use mandate_canon::DecStr;
 use mandate_time::{Date, TimeError, UtcNanos};
+
+pub use corporate_action::{
+    ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction, Split,
+    adjust_price, adjust_quantity, compose, split_ratio,
+};
+pub use mandate_num::SplitRatio;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ModelError {

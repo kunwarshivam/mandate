@@ -13,18 +13,18 @@ const NEW_YORK: &str = "America/New_York";
 /// Equity fills at or after 20:00 ET belong to the next trading day.
 const TRADE_DATE_CUTOFF_HOUR: u8 = 20;
 
-fn new_york() -> Result<TimeZone, TimeError> {
+pub(crate) fn new_york() -> Result<TimeZone, TimeError> {
     TimeZone::get(NEW_YORK).map_err(|_| TimeError::TimeZone)
 }
 
-fn to_civil(date: Date) -> Result<civil::Date, TimeError> {
+pub(crate) fn to_civil(date: Date) -> Result<civil::Date, TimeError> {
     let year = i16::try_from(date.year()).map_err(|_| TimeError::OutOfRange)?;
     let month = i8::try_from(date.month()).map_err(|_| TimeError::OutOfRange)?;
     let day = i8::try_from(date.day()).map_err(|_| TimeError::OutOfRange)?;
     civil::Date::new(year, month, day).map_err(|_| TimeError::OutOfRange)
 }
 
-fn from_civil(date: civil::Date) -> Result<Date, TimeError> {
+pub(crate) fn from_civil(date: civil::Date) -> Result<Date, TimeError> {
     let year = u16::try_from(date.year()).map_err(|_| TimeError::OutOfRange)?;
     let month = u8::try_from(date.month()).map_err(|_| TimeError::OutOfRange)?;
     let day = u8::try_from(date.day()).map_err(|_| TimeError::OutOfRange)?;
