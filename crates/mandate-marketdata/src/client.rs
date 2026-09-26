@@ -1,6 +1,7 @@
-//! Fetching one UTC day of one dataset: pagination, retries with exponential backoff for rate
-//! limits and server errors, and ordering checks. The transport and the pause are injected so
-//! tests replay recorded responses without a network or a clock (ADR-0001 ES-19).
+//! Fetching one UTC day of one dataset, or a symbol's corporate actions: pagination, retries with
+//! exponential backoff for rate limits and server errors, and ordering checks. The transport and
+//! the pause are injected so tests replay recorded responses without a network or a clock
+//! (ADR-0001 ES-19).
 
 use std::collections::BTreeSet;
 use std::future::Future;
@@ -9,7 +10,7 @@ use std::time::Duration;
 use mandate_time::{Date, UtcNanos};
 
 use crate::alpaca::{self, WireError};
-use crate::model::{DatasetId, Records};
+use crate::model::{CorporateActions, DatasetId, DayRange, Records, Symbol};
 use crate::timestamp::TimestampError;
 
 /// An HTTP response: the status code and the body bytes.
@@ -178,6 +179,44 @@ impl<T: Transport, P: Pause> Client<T, P> {
             append(&mut records, &mut last, parsed.records)?;
             match parsed.next_page_token {
                 None => return Ok(records),
+                Some(next) => {
+                    if !seen_tokens.insert(next.clone()) {
+                        return Err(FetchError::RepeatedPageToken { page });
+                    }
+                    token = Some(next);
+                }
+            }
+        }
+    }
+
+    /// Every corporate action of `symbol` processed in `range`, following page tokens to the end.
+    /// An action ID seen on two pages is an error.
+    pub async fn fetch_corporate_actions(
+        &self,
+        symbol: &Symbol,
+        range: DayRange,
+    ) -> Result<CorporateActions, FetchError> {
+        let limit = self.page_limit.min(alpaca::MAX_CORPORATE_ACTIONS_LIMIT);
+        let mut actions = CorporateActions::none(symbol.clone());
+        let mut ids = BTreeSet::new();
+        let mut seen_tokens = BTreeSet::new();
+        let mut token: Option<String> = None;
+        let mut page = 0_usize;
+        loop {
+            page = page.saturating_add(1);
+            let path = alpaca::corporate_actions_path(symbol, range, limit, token.as_deref());
+            let body = self.get_with_retry(&path).await?;
+            let parsed = alpaca::parse_corporate_actions(symbol, &body)
+                .map_err(|source| FetchError::Wire { page, source })?;
+            if let Some(repeated) = parsed.actions.ids().find(|id| !ids.insert(id.to_string())) {
+                let source = WireError::DuplicateAction(repeated.to_owned());
+                return Err(FetchError::Wire { page, source });
+            }
+            actions.splits.extend(parsed.actions.splits);
+            actions.cash_dividends.extend(parsed.actions.cash_dividends);
+            actions.other.extend(parsed.actions.other);
+            match parsed.next_page_token {
+                None => return Ok(actions),
                 Some(next) => {
                     if !seen_tokens.insert(next.clone()) {
                         return Err(FetchError::RepeatedPageToken { page });

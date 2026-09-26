@@ -4,15 +4,18 @@
 # and `page-<n>.json` (the response body, byte for byte). Credentials are sent only as headers and
 # are never written; the script fails if a recorded body contains either credential value.
 #
-# Usage: MANDATE_ALPACA_PAPER_KEY_ID=... MANDATE_ALPACA_PAPER_SECRET=... bash record.sh
+# Usage: MANDATE_ALPACA_PAPER_KEY_ID=... MANDATE_ALPACA_PAPER_SECRET=... bash record.sh [prefix]
+# With a prefix, only the scenarios whose names start with it are recorded again.
 set -euo pipefail
 cd "$(dirname "$0")"
 : "${MANDATE_ALPACA_PAPER_KEY_ID:?set MANDATE_ALPACA_PAPER_KEY_ID}"
 : "${MANDATE_ALPACA_PAPER_SECRET:?set MANDATE_ALPACA_PAPER_SECRET}"
 host="https://data.alpaca.markets"
+only="${1:-}"
 
 record() {
   local scenario="$1" first="$2" path token n=1
+  case "$scenario" in "$only"*) ;; *) return 0 ;; esac
   rm -rf "$scenario" && mkdir -p "$scenario"
   path="$first"
   while :; do
@@ -49,3 +52,9 @@ record crypto-bars-btcusd-1hour-2026-09-24 \
   "/v1beta3/crypto/us/bars?symbols=BTC%2FUSD&timeframe=1Hour&$(day 2026-09-24 2026-09-25)&limit=10000&sort=asc"
 record crypto-trades-btcusd-2026-09-24-paged \
   "/v1beta3/crypto/us/trades?symbols=BTC%2FUSD&$(day 2026-09-24 2026-09-25)&limit=300&sort=asc"
+record corporate-actions-aapl-2020-2021-paged \
+  "/v1/corporate-actions?symbols=AAPL&start=2020-01-01&end=2021-12-31&limit=5&sort=asc"
+record corporate-actions-ge-2018-2026 \
+  "/v1/corporate-actions?symbols=GE&start=2018-01-01&end=2026-09-25&limit=1000&sort=asc"
+record corporate-actions-nvda-2021-2024 \
+  "/v1/corporate-actions?symbols=NVDA&start=2021-01-01&end=2024-12-31&limit=1000&sort=asc"

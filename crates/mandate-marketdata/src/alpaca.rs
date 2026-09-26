@@ -1,20 +1,27 @@
-//! Alpaca's historical-data endpoints: the request path for one page of one UTC day, and the
-//! response page, parsed with every number read as raw text (ADR-0001 ES-23).
+//! Alpaca's historical-data endpoints: the request path for one page of one UTC day, the
+//! corporate-actions request for one symbol, and their response pages, parsed with every number
+//! read as raw text (ADR-0001 ES-23).
 
+use std::collections::BTreeSet;
 use std::fmt;
 
 use mandate_canon::DecStr;
-use mandate_time::{Date, UtcNanos};
+use mandate_time::{Date, TimeError, UtcNanos};
 use serde::de::{MapAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 use serde_json::value::RawValue;
 
-use crate::model::{AssetClass, Bar, DatasetId, Kind, Records, Trade};
+use crate::model::{
+    AdjustmentError, AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Kind,
+    OtherAction, Records, Split, SplitRatio, Symbol, Trade,
+};
 use crate::number::{NumberError, decimal_from_json, unsigned_from_json};
 use crate::timestamp::{TimestampError, day_start, parse_rfc3339_utc};
 
 /// Largest page Alpaca serves for bars and trades.
 pub const MAX_PAGE_LIMIT: u32 = 10_000;
+/// Largest page Alpaca serves for corporate actions.
+pub const MAX_CORPORATE_ACTIONS_LIMIT: u32 = 1_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WireError {
@@ -38,6 +45,16 @@ pub enum WireError {
     Timestamp { raw: String, source: TimestampError },
     #[error("record at {time} is outside the requested day {day}")]
     OutsideDay { time: UtcNanos, day: Date },
+    #[error("field `{field}` = {raw}: {source}")]
+    Date {
+        field: &'static str,
+        raw: String,
+        source: TimeError,
+    },
+    #[error("split {id}: {source}")]
+    Split { id: String, source: AdjustmentError },
+    #[error("the response lists corporate action {0} twice")]
+    DuplicateAction(String),
 }
 
 impl WireError {
@@ -52,6 +69,9 @@ impl WireError {
             Self::Negative { .. } => "negative",
             Self::Timestamp { .. } => "timestamp",
             Self::OutsideDay { .. } => "outside_day",
+            Self::Date { .. } => "date",
+            Self::Split { .. } => "split",
+            Self::DuplicateAction(_) => "duplicate_action",
         }
     }
 }
@@ -147,6 +167,170 @@ pub fn parse_page(dataset: &DatasetId, day: Date, body: &[u8]) -> Result<Page, W
         records,
         next_page_token,
     })
+}
+
+/// One response page of corporate actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorporateActionsPage {
+    pub actions: CorporateActions,
+    pub next_page_token: Option<String>,
+}
+
+/// The path and query of one page of every corporate action of `symbol` whose process date falls
+/// in `range` (Alpaca filters and sorts on the process date), ascending.
+pub fn corporate_actions_path(
+    symbol: &Symbol,
+    range: DayRange,
+    limit: u32,
+    page_token: Option<&str>,
+) -> String {
+    let mut path = format!(
+        "/v1/corporate-actions?symbols={}&start={}&end={}&limit={limit}&sort=asc",
+        percent_encode(symbol.as_str()),
+        range.first(),
+        range.last()
+    );
+    if let Some(token) = page_token {
+        path.push_str(&format!("&page_token={}", percent_encode(token)));
+    }
+    path
+}
+
+/// Parses one page of corporate actions requested for `symbol`. Splits and cash dividends must
+/// name `symbol`; any other kind is kept by its member name, ID, and process date, whatever role
+/// `symbol` plays in it.
+pub fn parse_corporate_actions(
+    symbol: &Symbol,
+    body: &[u8],
+) -> Result<CorporateActionsPage, WireError> {
+    let envelope: ActionsEnvelope<'_> = serde_json::from_slice(body).map_err(json)?;
+    let raw_actions = envelope
+        .corporate_actions
+        .ok_or(WireError::MissingMember("corporate_actions"))?;
+    let raw_token = envelope
+        .next_page_token
+        .ok_or(WireError::MissingMember("next_page_token"))?;
+    let next_page_token: Option<String> = serde_json::from_str(raw_token.get()).map_err(json)?;
+    let members = serde_json::from_str::<Entries<'_>>(raw_actions.get())
+        .map_err(json)?
+        .0;
+    let mut actions = CorporateActions::none(symbol.clone());
+    for (member, raw) in members {
+        match member.as_str() {
+            "forward_splits" | "reverse_splits" => {
+                let wire: Vec<WireSplit<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
+                for w in wire {
+                    expect_symbol(symbol, &w.symbol)?;
+                    actions.splits.push(split(w)?);
+                }
+            }
+            "cash_dividends" => {
+                let wire: Vec<WireDividend<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
+                for w in wire {
+                    expect_symbol(symbol, &w.symbol)?;
+                    actions.cash_dividends.push(CashDividend {
+                        id: w.id,
+                        ex_date: date("ex_date", &w.ex_date)?,
+                        record_date: optional_date("record_date", w.record_date)?,
+                        payable_date: optional_date("payable_date", w.payable_date)?,
+                        rate: amount("rate", w.rate)?,
+                        special: w.special,
+                        foreign: w.foreign,
+                    });
+                }
+            }
+            _ => {
+                let wire: Vec<WireOther> = serde_json::from_str(raw.get()).map_err(json)?;
+                for w in wire {
+                    actions.other.push(OtherAction {
+                        id: w.id,
+                        kind: member.clone(),
+                        process_date: date("process_date", &w.process_date)?,
+                    });
+                }
+            }
+        }
+    }
+    let mut ids = BTreeSet::new();
+    if let Some(repeated) = actions.ids().find(|id| !ids.insert(*id)) {
+        return Err(WireError::DuplicateAction(repeated.to_owned()));
+    }
+    Ok(CorporateActionsPage {
+        actions,
+        next_page_token,
+    })
+}
+
+fn expect_symbol(wanted: &Symbol, got: &str) -> Result<(), WireError> {
+    if got == wanted.as_str() {
+        Ok(())
+    } else {
+        Err(WireError::UnexpectedSymbol(got.to_owned()))
+    }
+}
+
+fn split(w: WireSplit<'_>) -> Result<Split, WireError> {
+    let new = count("new_rate", w.new_rate)?;
+    let old = count("old_rate", w.old_rate)?;
+    let ratio = SplitRatio::new(new, old).map_err(|source| WireError::Split {
+        id: w.id.clone(),
+        source,
+    })?;
+    Ok(Split {
+        ex_date: date("ex_date", &w.ex_date)?,
+        id: w.id,
+        ratio,
+    })
+}
+
+fn date(field: &'static str, raw: &str) -> Result<Date, WireError> {
+    Date::parse(raw).map_err(|source| WireError::Date {
+        field,
+        raw: raw.to_owned(),
+        source,
+    })
+}
+
+fn optional_date(field: &'static str, raw: Option<String>) -> Result<Option<Date>, WireError> {
+    raw.map(|text| date(field, &text)).transpose()
+}
+
+#[derive(Deserialize)]
+struct ActionsEnvelope<'a> {
+    #[serde(borrow, default, deserialize_with = "present")]
+    corporate_actions: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
+    next_page_token: Option<&'a RawValue>,
+}
+
+#[derive(Deserialize)]
+struct WireSplit<'a> {
+    id: String,
+    symbol: String,
+    ex_date: String,
+    #[serde(borrow)]
+    new_rate: &'a RawValue,
+    #[serde(borrow)]
+    old_rate: &'a RawValue,
+}
+
+#[derive(Deserialize)]
+struct WireDividend<'a> {
+    id: String,
+    symbol: String,
+    ex_date: String,
+    record_date: Option<String>,
+    payable_date: Option<String>,
+    #[serde(borrow)]
+    rate: &'a RawValue,
+    special: bool,
+    foreign: bool,
+}
+
+#[derive(Deserialize)]
+struct WireOther {
+    id: String,
+    process_date: String,
 }
 
 fn json(e: serde_json::Error) -> WireError {
