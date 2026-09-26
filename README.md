@@ -13,10 +13,12 @@ no live broker connector, and no real-money trading yet ([status](#status)).
 
 ## Design invariants
 
-- **Exact arithmetic, or an error.** Money, prices, and quantities are fixed-point `i128` values
-  with a fixed scale; every operation is checked and returns a typed error on overflow or on a
-  result that does not fit the scale. Safety-critical crates forbid `f32` and `f64`, `unwrap` and
-  `panic`, slice indexing, and `as` casts by a shared lint header that CI verifies.
+- **Exact arithmetic, or an error.** Money, prices, quantities, and basis points are typed
+  wrappers over a 96-bit decimal with a declared scale per type (quantities 9 places, marks 12,
+  ratios 24, up to 28); every operation is checked and returns a typed error on overflow or on a
+  result that does not fit the scale, and wide intermediates use 256-bit integers. Safety-critical
+  crates deny `f32` and `f64`, `unwrap` and `panic`, slice indexing, and `as` casts through a
+  shared lint header that CI verifies.
 - **Determinism.** Safety-critical crates read no clock and no randomness; identifiers come from an
   injected generator; ordered maps only (`BTreeMap`, never `HashMap`); state is a fold over journal
   events with a versioned fold, so a backtest, a paper run, and a live run share one core and only
@@ -38,7 +40,9 @@ checks the graph against the declaration in `xtask/layers.toml`.
 
 ```mermaid
 flowchart BT
-    num[mandate-num] --- time[mandate-time] --- canon[mandate-canon]
+    num[mandate-num]
+    time[mandate-time]
+    canon[mandate-canon]
     acct[mandate-accounting] --> num
     journal[mandate-journal] --> canon
     sim[mandate-sim] --> acct
@@ -47,13 +51,12 @@ flowchart BT
     fs[mandate-artifacts-fs] --> journal
     bt[mandate-backtest] --> sim
     cli[mandate-cli] --> md
-    cli --> bt
     cli --> fs
 ```
 
 | Layer | Crate | Responsibility | Safety-critical | Pure |
 |---|---|---|---|---|
-| 0 | `mandate-num` | Fixed-point `Usd`, `Price`, `Qty`, `Bps`, `Fraction`, `Ratio` with exact-or-error arithmetic, tick and increment rounding, integer roots | yes | yes |
+| 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction` with exact-or-error arithmetic, square-root impact and integer roots; `Ratio`, tick rounding, and the metric arithmetic are stubs with their tests merged, pending E4-2 | yes | yes |
 | 0 | `mandate-time` | `UtcNanos` (RFC 3339 with fractional seconds), dates, the NYSE calendar, trading sessions, trade-date rules | yes | yes |
 | 0 | `mandate-canon` | Canonical JSON, the decimal grammar, SHA-256 digests | yes | yes |
 | 2 | `mandate-accounting` | The account fold: positions, cost basis, cash and settlement, fees with per-order caps, marks, realized and unrealized P&L, corporate actions, buying power | yes | yes |
@@ -64,8 +67,8 @@ flowchart BT
 | 6 | `mandate-artifacts-fs` | Write-once objects under their SHA-256, atomic publish, checked reads | yes | no |
 | 7 | `mandate-backtest` | The backtest loop, a moving-average baseline, and an exact-decimal metrics report (tests merged; implementation in progress) | yes | yes |
 | 7 | `mandate-cli` | `mandate download`, `mandate inspect`, `mandate journal verify`, `mandate artifact put` and `get` | no | no |
-| tool | `mandate-refcases` | One named test per reference case, driven by `fixtures/refcases/*.json`; `status.toml` records which cases pass | | |
-| tool | `xtask` | The CI pipeline as a binary: `cargo xtask check` | | |
+| tool | `mandate-refcases` | One named test per reference case, driven by `fixtures/refcases/*.json`; `status.toml` records which cases pass | yes | no |
+| tool | `xtask` | The CI pipeline as a binary: `cargo xtask check` | no | no |
 
 Phase 1 adds `mandate-domain`, `mandate-spec` (the mandate document, validation, policy, change
 classification, risk state), `mandate-risk` (the gate), `mandate-builder` (autonomy and the order
@@ -81,22 +84,22 @@ sized under caps, paper orders, a hash-chained journal, a scorecard against SPY)
 | Spec | Version | Reference cases | How the code is held to it |
 |---|---|---|---|
 | [Trading domain](docs/specs/trading-domain.md) | v0.10, approved | 26 worked cases (RC-01 onward) and 40 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
-| [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
+| [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 10 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
 | [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness for these cases is Phase 1 work |
 
 ## Verification pipeline
 
-`cargo xtask check` runs every CI job locally, in this order:
+`cargo xtask check` runs every CI job locally, in this order (`spec-guard` runs earlier in the `fast` CI job):
 
 | Part | What it enforces |
 |---|---|
 | `lint` | `cargo fmt`, `clippy -D warnings`, the crate layering and safety-critical lint headers, debt markers, the feature map, `typos`, `ruff` |
 | `test` | `cargo nextest` across the workspace, doctests, `pytest` for the Python packages |
 | `pending` | Every test marked `#[ignore = "pending <story>"]` must fail on the current stubs, so a story's tests are proven to discriminate before its implementation lands |
-| `spec-guard` | Protected paths (`docs/specs/`, `schemas/`, `reference/`, `fixtures/refcases/`, `status.toml`) change only with a cited decision and no code |
 | `refcases` | The JSON fixtures are the exact export of the YAML specs |
 | `reference` | The mandate reference implementation regenerates its cases byte-identically; checker, fuzzer, and seeded mutants pass |
 | `supply-chain` | `cargo-deny` (advisories, bans, licences, sources), the direct-dependency registry in `docs/dependencies.md`, `gitleaks` |
+| `spec-guard` | Protected paths (`docs/specs/`, `schemas/`, `reference/`, `fixtures/refcases/`, `status.toml`) change only with a cited decision and no code |
 | `postgres` | The journal hot-store tests against a real PostgreSQL when `MANDATE_PG_URL` is set |
 | `mutants` | `cargo-mutants` over changed safety-critical library code: zero missed mutants, or a written equivalence argument |
 
@@ -106,7 +109,7 @@ a short path that runs `typos`, the spec guard, and the commit-trailer check in 
 ## Building and running
 
 Requirements: the pinned Rust toolchain (`rust-toolchain.toml`, 1.98.1, edition 2024); `uv` with
-Python 3.14 for the Python packages; PostgreSQL 16 or later only for the hot-store tests; Alpaca
+Python 3.14 for the Python packages; PostgreSQL 17 or later (18 in CI) only for the hot-store tests; Alpaca
 market-data keys only for `mandate download`. On Linux, `.cursor/install.sh` installs the CI tools
 at their pinned versions.
 
@@ -132,7 +135,7 @@ historical endpoints with keys you supply in the environment.
 | M2 Accounting | Done: verified against the hand-calculated reference cases including splits, dividends, partial fills, settlement |
 | M3 Simulated execution and backtest | Fill model done (RC-10, RC-12, RC-19 passing); the backtest loop and metrics report have their tests merged, implementation in progress |
 | M4 Journal | Done except the cold store and segment manifests: hash chain, verification, Postgres hot store, artifact store, the verification command |
-| M5 Agent runtime and risk (Phase 1) | Started: the briefs for the mandate document as code, the risk gate, the order builder, and the runtime skeleton are in review; the mandate spec v0.6 and its 298 cases are the contract |
+| M5 Agent runtime and risk (Phase 1) | Started: five streams (the mandate document as code with its case harness, the risk gate, the order builder, the runtime skeleton, the research-agent thin slice) run as brief, tests, and implementation pull requests; the first briefs are in review and the mandate spec v0.6 with its 298 cases is the contract |
 
 The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision
 with its PR numbers. Phase 1 ends when an agent trades an Alpaca paper account unattended through a
