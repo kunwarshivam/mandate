@@ -47,6 +47,7 @@ PRs 1 to 3 and E2-2 (#64) have merged.
   | §4.3 session hours, overnight Sunday night to Friday morning | `a_full_day_has_four_sessions_at_the_published_hours`, `a_trading_days_sessions_tile_from_the_previous_evening_to_its_after_hours_close` (property) |
   | §2.2 sessions evaluated in America/New_York across daylight-saving changes | `daylight_saving_changes_move_sessions_in_utc_but_not_in_new_york`, `new_york_instants_reject_times_a_daylight_saving_change_skips_or_repeats` |
   | `session_at` names the session holding any instant, `None` while closed | `session_at_names_the_session_holding_an_instant_at_each_boundary`, `session_at_agrees_with_the_published_schedule_at_every_instant` (property) |
+  | A session span holds its start but not its end | `a_session_span_holds_its_start_but_not_its_end` |
   | DEC-82: a date outside the validity range is an error | `every_date_outside_the_validity_range_is_an_error` |
   | The calendar format rejects malformed data with its line (ES-09 codes) | `a_calendar_needs_only_its_header_and_skips_comments_and_blank_lines`, `malformed_records_are_syntax_errors_on_their_line`, `bad_dates_and_times_are_value_errors_with_their_cause`, `valid_comes_first_and_hours_second_each_exactly_once`, `the_range_and_the_session_hours_must_increase`, `listed_dates_are_weekdays_inside_the_range_in_increasing_order`, `an_early_close_ends_inside_the_usual_sessions`, `line_numbers_count_comments_and_blank_lines`, `new_york_times_are_hh_mm_within_a_day` |
 
@@ -59,13 +60,14 @@ PRs 1 to 3 and E2-2 (#64) have merged.
   test the names and codes the stubs already carry, so they are live in PR 1.
 
   **Planted bugs**, each planted in a local implementation of the stubs (kept out of PR 1 per
-  DEC-83) and caught (failing tests in brackets): Thanksgiving 2026 removed from the data [weekday
-  scan, both properties]; the 2019-12-24 early close moved to 14:00 [weekday scan, early-close test,
-  both properties]; the after-hours session of an early-close day ends at 20:00 [7 tests, both
-  properties among them]; the overnight session starts the same evening instead of the previous
-  one [6 tests]; a fixed UTC−5 offset instead of America/New_York [9 tests]; `session_at` never
-  looks at the next day's overnight session [4 tests]. `cargo mutants` over PR 2's diff: 91
-  mutants, 72 caught, 19 unviable, 0 missed.
+  DEC-83) and caught (failing tests in brackets; the properties draw fresh cases on each run, so a
+  bug on a single date fails them only when a case lands on it): Thanksgiving 2026 removed from the
+  data [4 tests]; the 2019-12-24 early close moved to 14:00 [weekday scan]; the after-hours session
+  of an early-close day ends at 20:00 [7 tests, both properties among them]; the overnight session
+  starts the same evening instead of the previous one [8 tests]; a fixed UTC−5 offset instead of
+  America/New_York [9 tests]; `session_at` never looks at the next day's overnight session [4
+  tests]; `SessionSpan::contains` holds its end [3 tests]. `cargo mutants` over PR 2's diff: 75
+  mutants, 62 caught, 13 unviable, 0 missed.
 
 - **Crates in scope:** `mandate-time` (PRs 1 and 2: `ExchangeCalendar`, `Session`, `SessionSpan`,
   `NewYorkTime`, `new_york_instant`, `CalendarDataError`; three helpers in `calendar.rs` become
@@ -75,7 +77,7 @@ PRs 1 to 3 and E2-2 (#64) have merged.
   announcements), `mandate-journal`.
 - **New dependencies allowed:** none. `mandate-time` already has `jiff` with the bundled time-zone
   database (ES-05).
-- **Safety-critical:** `mandate-time` yes, delivered per DEC-77: PR 1 is the **tests PR** (21
+- **Safety-critical:** `mandate-time` yes, delivered per DEC-77: PR 1 is the **tests PR** (22
   tests marked `#[ignore = "pending E2-4"]`), PR 2 the **implementation PR**. `mandate-marketdata`
   and `mandate-cli` are not safety-critical, so PRs 3 and 4 each carry their code and tests
   together.
@@ -112,9 +114,10 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    20:00.
 4. **Gap classification (PR 4).** For each expected bar slot of a symbol and day, `inspect` reports
    a *session closure* when the feed's venue is closed at that minute (no session, or a session the
-   feed does not cover, as PR 4 records per feed), *no trade* when the venue is open
-   and the day's partition was fetched cleanly, and a *true gap* when the venue is open and the day
-   was never fetched or its fetch was not clean.
+   feed does not cover, per interpretation 6), *no trade* when the venue is open and the day's
+   partition was fetched cleanly, a *true gap* when the venue is open and the day was never fetched
+   or its fetch was not clean, and *unclassified* when the venue's published hours do not say
+   whether it is open at that minute.
 5. **Split adjustment (PRs 3 and 4).** Point in time (§4.5): as of date D, a bar is adjusted by
    every split with ex-date ≤ D that took effect after the bar started. A split takes effect at
    20:00 ET on the calendar day before its ex-date: the overnight session into the ex-date trades
@@ -129,6 +132,16 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    as cash). Any other action type Alpaca reports (spin-offs, mergers, stock dividends, name
    changes, and the rest) is kept by kind, ID, and process date and reported as not adjusted,
    never silently dropped (§8.5: anything else is out of scope and must be surfaced).
+6. **Each feed's venue hours are data (PR 4).** Like the US-equities calendar, each feed's venue
+   hours are a checked-in data file with its sources: the trading days, closures, and early closes
+   are the exchange calendar's, and the file gives the venue's session boundaries in ET. SIP covers
+   04:00 to 20:00 ET. IEX runs 08:00 to 17:00 ET (pre-market 08:00 to 09:30, regular 09:30 to
+   16:00, post-market 16:00 to 17:00; IEX Rule 11.110(a) and IEX's published trading hours).
+   Neither feed carries the overnight session, so its slots are session closures for both. On an
+   early-close day IEX publishes the 13:00 regular close but not when its post-market ends, so IEX
+   slots after 13:00 on those days, up to the next overnight session at 20:00, are reported as
+   unclassified, never as no trade or a session closure. Crypto trades continuously and has no
+   closures.
 
 ## Not done here (with the story that owns each)
 

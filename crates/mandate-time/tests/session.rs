@@ -301,10 +301,38 @@ fn every_weekday_from_2018_to_2028_trades_exactly_when_nyse_published_it_open() 
         match published(days) {
             None => assert!(sessions.is_empty(), "{text} has sessions"),
             Some((close, end)) => {
-                let regular = sessions[2];
-                assert_eq!(regular.session(), Session::Regular);
-                assert_eq!(regular.end().secs(), local_to_utc(days, close), "{text}");
-                assert_eq!(sessions[3].end().secs(), local_to_utc(days, end), "{text}");
+                let got: Vec<(Session, i64, u32, i64, u32)> = sessions
+                    .iter()
+                    .map(|s| {
+                        let (start, finish) = (s.start(), s.end());
+                        (
+                            s.session(),
+                            start.secs(),
+                            start.nanos(),
+                            finish.secs(),
+                            finish.nanos(),
+                        )
+                    })
+                    .collect();
+                let opens = local_to_utc(days, 4 * 60);
+                let bell = local_to_utc(days, 9 * 60 + 30);
+                let closes = local_to_utc(days, close);
+                assert_eq!(
+                    got,
+                    [
+                        (
+                            Session::Overnight,
+                            local_to_utc(days - 1, 20 * 60),
+                            0,
+                            opens,
+                            0
+                        ),
+                        (Session::PreMarket, opens, 0, bell, 0),
+                        (Session::Regular, bell, 0, closes, 0),
+                        (Session::AfterHours, closes, 0, local_to_utc(days, end), 0),
+                    ],
+                    "{text}"
+                );
                 if close != 16 * 60 {
                     early.insert(text.clone());
                 }
@@ -356,6 +384,36 @@ fn a_full_day_has_four_sessions_at_the_published_hours() {
             ),
         ]
     );
+}
+
+#[test]
+fn a_session_span_holds_its_start_but_not_its_end() {
+    let before = |t: UtcNanos| UtcNanos::from_parts(t.secs() - 1, 999_999_999).unwrap();
+    let after = |t: UtcNanos| UtcNanos::from_parts(t.secs(), 1).unwrap();
+    let sessions = us().sessions(date("2026-09-24")).unwrap();
+    assert_eq!(sessions.len(), 4);
+    for span in sessions {
+        let (start, end) = (span.start(), span.end());
+        let name = span.session();
+        assert!(
+            !span.contains(before(start)),
+            "{name} holds the nanosecond before its start"
+        );
+        assert!(span.contains(start), "{name} misses its start");
+        assert!(
+            span.contains(after(start)),
+            "{name} misses the nanosecond after its start"
+        );
+        assert!(
+            span.contains(before(end)),
+            "{name} misses the nanosecond before its end"
+        );
+        assert!(!span.contains(end), "{name} holds its end");
+        assert!(
+            !span.contains(after(end)),
+            "{name} holds the nanosecond after its end"
+        );
+    }
 }
 
 #[test]
