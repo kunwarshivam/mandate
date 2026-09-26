@@ -363,8 +363,8 @@ fn a_short_reverse_split_owes_cash_in_lieu() {
 }
 
 /// DEC-92. One share of non-fractionable ODD, B 7, 1:2 with 10 per new share: Q_raw 0.5, Q' 0.
-/// No share remains, so the whole basis is removed: R = B = 7; cash in lieu round(0.5 × 10, 2) = 5.00; realized 5 − 7 = −2; the position is
-/// flat and gone, and the mark still adjusts: 4 × 2 = 8.
+/// No share remains, so the whole basis is removed: R = B = 7; cash in lieu round(0.5 × 10, 2) =
+/// 5.00; realized 5 − 7 = −2; the position is flat and gone, and the mark still adjusts: 4 × 2 = 8.
 #[test]
 #[ignore = "pending E3-2"]
 fn a_split_leaving_no_share_removes_the_whole_basis() {

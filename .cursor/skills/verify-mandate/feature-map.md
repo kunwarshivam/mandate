@@ -33,7 +33,8 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 - **Spec:** `docs/specs/trading-domain.md` §2.1; ADR-0001 ES-04.
 - **Code:** `mandate-num`: `crates/mandate-num/src/lib.rs` (private-field newtypes `Qty`,
-  `SignedQty`, `Price`, `Usd`, `CostBasis`, `FeeRate`, `FeePerShare`, `Bps`, `FeeCap`; canonical
+  `SignedQty`, `Price`, `Usd`, `CostBasis`, `FeeRate`, `FeePerShare`, `Bps`, `FeeCap`; 12-place
+  `MarkPrice`, `SplitRatio`, `ShareIncrement`, and the `SplitQty` result of a split; canonical
   text in, exact-or-error operations), `crates/mandate-num/src/exact.rs` (256-bit intermediates,
   one rounding per formula).
 - **Tests:** `crates/mandate-num/tests/num.rs` (i128 oracle for every operation and rounding mode).
@@ -50,13 +51,17 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Accounting
 
 - **Spec:** `docs/specs/trading-domain.md` §6, §8 (invariants I1 to I7 in §8.6), §12 (the journal
-  events that feed the fold); task brief `docs/project/tasks/E3-1-accounting.md`.
-- **Code:** `mandate-accounting`: `crates/mandate-accounting/src/lib.rs` (inputs, fee
-  configuration, errors), `crates/mandate-accounting/src/account.rs` (the pure fold: positions,
-  cash buckets, fee accrual and charges, realized and unrealized P&L, equity).
+  events that feed the fold); task briefs `docs/project/tasks/E3-1-accounting.md` and
+  `docs/project/tasks/E3-2-corporate-actions.md`.
+- **Code:** `mandate-accounting`: `crates/mandate-accounting/src/lib.rs` (inputs, corporate
+  actions, fee configuration, errors), `crates/mandate-accounting/src/account.rs` (the pure fold:
+  positions, cash buckets, fee accrual and charges, splits, dividends, cash in lieu, receivables,
+  income, realized and unrealized P&L, equity).
 - **Tests:** `crates/mandate-accounting/tests/hand.rs` (hand-calculated cases, partial fills, flips),
   `crates/mandate-accounting/tests/properties.rs` (one property per invariant against an i128
-  ledger oracle).
+  ledger oracle), `crates/mandate-accounting/tests/corporate_actions.rs` (hand-calculated splits,
+  dividends, and cash in lieu), `crates/mandate-accounting/tests/corporate_action_properties.rs`
+  (I1, I3, I5, I6 and the split, mark, dividend, and receivable rules against an i128 oracle).
 - **Reference cases:** `trading_domain::*` in `fixtures/refcases/trading-domain.json`.
 - **Run:** `cargo nextest run -p mandate-accounting`.
 
@@ -94,13 +99,14 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
 - **Code:** `mandate-refcases`: `crates/mandate-refcases/src/journal.rs` (one interpretation per
-  prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges, and
-  settlement; every other step type and expectation key fails as "not interpreted until" its
+  prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges,
+  settlement, corporate actions, dividends, and cash-in-lieu postings; every other step type and
+  expectation key fails as "not interpreted until" its
   owning story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/status.toml`
   (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
-  `fixtures/refcases/trading-domain.json` (accounting cases from E3-1; the rest pending their
-  stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).
+  `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
+  pending their stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 
