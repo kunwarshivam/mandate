@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1)"
+description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1); `inspect` reports coverage, gaps, duplicates, and statistics (E2-2)"
 
 [lints]
 workspace = true

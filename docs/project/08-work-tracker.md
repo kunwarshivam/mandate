@@ -33,6 +33,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
 | E17-0 Research spike | PR open | [#44](https://github.com/kunwarshivam/mandate/pull/44) (code and docs), tests in a second PR | `python/research_spike/`: LLM theses over news and prices, fixed sizing, paper orders, hash-chained JSON Lines journal, score report. Two-to-three-week timebox; exits with a decision-log entry |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
+| E2-2 Inspect | PR open | claim [#56](https://github.com/kunwarshivam/mandate/issues/56) | `mandate inspect`: coverage, exact statistics, gaps with exact timestamps, duplicates, untrusted partitions. Gaps stay unclassified until E2-4 |
 
 ## Reference cases
 
@@ -57,7 +58,8 @@ issues are the record; this table is the summary
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
-| E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| E2-4 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| E2-2 dataset inspect | `cursor` | #56 | One PR (not safety-critical), open with CI green, awaiting review | `cursor/e2-2-inspect-2749` |
 
 ## Waiting on the founder
 
@@ -83,7 +85,7 @@ them in the decision log.
 | Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | Before any parallel download |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
-| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-2 or E2-4 |
+| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-4 (a shared `mandate-time` change; E2-2 reads stored nanoseconds and did not need it) |
 | Postgres is not installed in the agent environment or CI | E5-3 (add it to `.cursor/install.sh` and a CI service first) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
 
