@@ -37,15 +37,15 @@ brief fixes that shape before the gate, the builder, and the research agent are 
   spec](../../specs/trading-domain.md) §5.5 (kill switch), §5.6 (exit pricing), §7.4 (agent modes);
   [glossary](../../product/glossary.md) (deployment, workspace, kill switch, agent modes).
 - **Decisions that apply:** DEC-08 (one process per agent deployment), DEC-05 and DEC-06 (reducing
-  risk needs no approval; ambiguity resolves safe), DEC-16 and DEC-17 through ES-20 (DEC-17's
-  recommendation is the ground this brief stands on and is still `Proposed (founder)`), DEC-72
+  risk needs no approval; ambiguity resolves safe), DEC-16 and DEC-17 through ES-20 (DEC-17 is the
+  ground this brief stands on and the founder accepted it on 2026-09-26, #133), DEC-72
   (ADR-0001), DEC-77 (brief, tests PR, implementation PR), DEC-79 (agents land their own changes;
   the founder's reserved list), DEC-80 (no plain comments), DEC-83 (a tests PR holds stubs only),
   DEC-85 (an uninterpreted input fails loudly), DEC-89 and ES-21 (exact arithmetic, ordered
   containers, no clock, no randomness), DEC-97 (the owner sets the envelope, the platform brings the
   ideas), DEC-103 (the Phase 1 thin slice), DEC-110 (every pending test fails on the stubs),
-  DEC-111, DEC-117 to DEC-126 (the spec v0.6 answers this brief reads; still `Proposed (founder)`,
-  and a veto reopens this brief), DEC-127 (the E4-2 loop this runtime's tick is the live analogue
+  DEC-111, DEC-117 to DEC-126 (the spec v0.6 answers this brief reads, accepted by the founder on
+  2026-09-26 in #133), DEC-127 (the E4-2 loop this runtime's tick is the live analogue
   of), and DEC-131 (this story's interpretations, below).
 
 ## Scope
@@ -95,6 +95,14 @@ Each row gets a named test whose oracle computes the answer its own way.
 | Review finding 5 the startup hold is journaled before anything is re-handed, and lifts only on a reconciliation at or after the last submission | `hand::started_journals_the_startup_hold_before_its_first_handoff`, `hand::an_earlier_reconciliation_does_not_lift_the_startup_hold` |
 | Journal §5.1 idempotency: a retry after `Unavailable` or `Ambiguous` derives the same `event_id` | `hand::a_retried_append_derives_the_same_event_id`, `properties::a_derived_event_id_is_a_function_of_epoch_head_and_ordinal` |
 | Journal §5.1 a batch in doubt is retried with the same drafts, and no input is handled at an unresolved head | `hand::an_unresolved_append_is_retried_before_any_new_input`, `hand::a_tick_during_an_unresolved_append_does_not_change_the_drafts` |
+| E6-5 the plan's cancel list holds the working order the fold knows, so a switch cannot leave one behind | `hand::a_kill_switch_cancels_the_working_order_the_fold_knows` |
+| Journal §5.2 an intent the account stream has taken is no longer outstanding, so a restart does not hand it again | `hand::a_restart_re_hands_nothing_for_an_intent_the_account_already_took` |
+| ES-20 `Input::Started` re-arms every deadline the fold carries, at the same second | `hand::a_restart_re_arms_the_deadline_the_fold_carries` |
+| DEC-85 a command a later story owns fails loudly and names it: `Command::OwnerExit` answers `NotInterpreted { story: "E7-2" }` | `hand::an_owner_exit_of_one_instrument_names_its_story`, `hand::an_unhandled_command_names_its_story` |
+| E6-5 step 5 the switch disarms the timers of what it cancelled | `hand::a_kill_switch_cancels_every_pending_approval` |
+| Journal §5.1 the writer folds its own committed appends back, which is how it learns its head | `properties::folding_the_journaled_drafts_reproduces_the_live_state`, `hand::a_retried_append_derives_the_same_event_id` |
+| Rule 6 a skipped decision alerts the owner with the decision's id and a message key, and nothing else does | `hand::a_notification_carries_only_opaque_ids`, `properties::no_notification_payload_holds_an_instrument_or_a_price` |
+| Journal §9 a flatten handoff is identified by its `KillSwitchActivated` draft, since a flatten is never proposed | `properties::every_intent_effect_follows_the_draft_that_records_it` |
 | Journal §5.1 fencing: a new process increments `writer_epoch`, and a `Fenced` append stops the runtime instead of retrying | `hand::a_fenced_append_stops_the_runtime`, `hand::two_epochs_never_derive_one_event_id` |
 | Journal §2 gapless `seq`: the fold rejects a gap, a repeat, and a stream it does not follow | `hand::a_gap_in_seq_fails_the_fold`, `hand::a_repeated_seq_fails_the_fold`, `properties::the_fold_rejects_every_out_of_order_sequence` |
 | Journal §2 copied facts carry `causation_id` pointing at the originating event | `hand::a_copied_mode_change_points_at_the_originating_event`, `properties::every_copied_draft_cites_its_origin` |
@@ -130,11 +138,13 @@ Each row gets a named test whose oracle computes the answer its own way.
 `crates/mandate-runtime/tests/properties.rs` holds three implementations that share no code with
 the crate:
 
-1. **A shadow fold.** It rebuilds mode, restrictions, working universe, pending approvals,
-   outstanding intents, and deadlines from the emitted drafts alone, as a `BTreeMap` of fields keyed
-   by name, reading the canonical bytes of each draft rather than any core type. It is what
+1. **A shadow fold.** It rebuilds mode, pending approvals with their deadlines, outstanding intents,
+   and whether the agent has stopped, from the emitted drafts alone, reading each payload by field name
+   rather than through any core type. It is what
    `folding_the_journaled_drafts_reproduces_the_live_state` compares against, so a core that keeps
-   state the journal does not carry fails it.
+   state the journal does not carry fails it. The working universe is deliberately not in it: the
+   universe reaches the runtime through the injected `MandateView`, and folding `UniverseChanged` into
+   runtime state is stream J's.
 2. **A restriction lattice.** The effective mode is recomputed as the maximum of a separately
    written ordering over an independently accumulated restriction set (mandate §5.9), so a core that
    confuses `paused` with `exits_only`, or clears a latched restriction, fails.
@@ -238,6 +248,7 @@ pub enum Command {
     Pause,
     Resume,
     Stop,
+    /// Accepted by the type, refused by this story: see the contracts below.
     OwnerExit { instrument: InstrumentId, confirmation: Option<OwnerConfirmation> },
 }
 
@@ -266,12 +277,23 @@ pub trait GateDryRun { fn check(&self, proposal: &Proposal) -> DryRunVerdict; }
 /// Stream H's classification and sizing, and stream F's mandate view.
 pub trait OrderPlan { fn plan(&self, view: &MandateView, inputs: &SignalInputs) -> Option<Proposal>; }
 
+/// `mandate-risk`'s agent flatten (family F). The runtime carries the plan without computing it,
+/// and `FlattenPlan` has no account-wide variant, so no planner can return cancel-all either.
+pub trait FlattenPlanner { fn plan(&self, request: &FlattenRequest) -> FlattenPlan; }
+
 pub struct Ports<'a> {
     pub ids: &'a dyn IdGen,
     pub gate: &'a dyn GateDryRun,
     pub plan: &'a dyn OrderPlan,
+    pub flatten: &'a dyn FlattenPlanner,
+    pub view: &'a MandateView,
 }
 ```
+
+**The runtime knows which deployment it is.** `RuntimeState::new` takes a `Deployment` (the agent,
+connection, and workspace ids), because a kill switch addressed to a sibling must reach nothing here
+and another workspace's stream must not fold. Inferring the identity from the first event folded
+would let a fresh state accept anything, which is the opposite of what a scope check is for.
 
 **Shell-side, effectful, never called by the core.** The core only *describes* these in its effect
 list; the shell performs them in the order the list gives (ES-20):
@@ -299,9 +321,12 @@ story }`, the loud failure DEC-85 requires.
 The live analogue of E4-2's backtest loop (DEC-127 item 2), with one order fixed so that nothing
 depends on arrival luck:
 
-1. **Fold what the input carries.** Only `Input::Journal` carries a stream position, and it is
-   folded in `seq` order; every other variant is handled at the folded position as it stands, which
-   is why a tailer that is behind delays a decision rather than deciding on stale state.
+1. **Act on folded state; do not fold inside `handle`.** The tailer folds an event and *then* hands
+   it to `handle`, which reads the folded state and the event's identity (for the `causation_id` of any
+   copy it writes) but never folds it again. Only `Input::Journal` carries a stream position at all;
+   every other variant is handled at the folded position as it stands, which is why a tailer that is
+   behind delays a decision rather than deciding on stale state. Keeping the fold outside `handle` is
+   what lets replay and live input share one fold with no double application.
 2. **Apply the input** itself: an observation, a model output, or an approval response is journaled;
    a command is routed; a tick advances the risk clock.
 3. **Recompute the effective mode** from the restriction set (mandate §5.9) and journal
@@ -319,7 +344,25 @@ depends on arrival luck:
 
 The shell runs the list in order, appends through one fenced `StreamWriter`, and acts only on
 `Committed` or `AlreadyCommitted` (ES-06). It stops at the first append that is neither and discards
-the rest of the list; the next start re-derives from the fold, which is why discarding is safe.
+the rest of the list; the next start re-derives from the fold, which is why discarding is safe. **It
+also folds each committed append back into its own state**, which is how a single writer learns its own
+head and clears an unresolved batch: a writer that could not fold its own event back would be reading
+the stream it writes by a different rule from the one it replays.
+
+Four smaller contracts the effect list carries, each stated because a test depends on it:
+
+- **An owner alert accompanies a skipped decision.** When the dry run denies, the core journals
+  `DecisionMade` and emits one `Effect::Notify` whose subject is that draft, so the owner learns a
+  proposal was dropped without learning what it was (rule 6). Nothing else notifies in this story:
+  risk-limit and approval alerts are M7's.
+- **A flatten handoff's `intent_id` is its `KillSwitchActivated` `event_id`.** Journal §9 fixes the
+  intent id only for `IntentProposed`, and a flatten is never proposed, so the switch's own draft is
+  what identifies it. That keeps every handoff traceable to one journaled draft, which is what
+  write-before-acting means for a flatten.
+- **`Command::OwnerExit` is accepted by the type and refused by this story.** The owner's close of one
+  instrument needs the executor's exit ladder (trading §5.6), so the core answers
+  `NotInterpreted { story: "E7-2" }` rather than pretending to route it. The variant exists now so that
+  adding it later is not an API change.
 
 ES-24's budget is measured over step 5 alone: p99 under 1 ms from input to draft bytes, excluding
 the append and the sink. The implementation PR reports the measurement; the tests PR does not
@@ -350,7 +393,7 @@ wanted is re-proposed at the next evaluation under the new state, which is the �
 | `normal` | Everything the mandate, the dry run, and the autonomy rules allow |
 | `exits_only` | Proposes risk-reducing and protective intents; requests no approval that could open |
 | `paused` | Proposes nothing but the re-placement of protection before it expires; keeps folding, keeps timers for protection, honours the kill switch |
-| `stopped` | Terminal: folds, answers queries, and proposes nothing, ever. Only a new deployment (a new agent stream) starts fresh |
+| `stopped` | Terminal: folds, answers queries, and proposes nothing, ever. Only a new deployment (a new agent stream) starts fresh. An owner `Stop` sets this mode and cancels approvals but hands **no** flatten: stopping an agent leaves its positions where they are, and flattening them is what a kill switch is for (trading §5.5 gives the flatten to the switch) |
 
 An instrument under `removed_instrument` or outside the working universe is exits-only for that
 instrument alone (mandate §2.3, §5.9): protection stays, exits are still proposed, and model outputs
@@ -402,9 +445,17 @@ from one `handle` call:
    no way to reach `cancel-all` or `close-position`, which exist only on the account-wide path and
    are the executor's (AGENTS.md rule 13).
 
-**Outstanding intents.** An intent is *outstanding* from the moment its `IntentProposed` commits
-until the account stream carries a terminal outcome for its intent id: an `IntentReceived` followed
-by a `GateDecided` denial, an `OrderAbandoned`, or a terminal order state. A kill switch does not
+**Outstanding intents, in two states.** Conflating them loses one, so the brief names both:
+
+| State | Begins | Ends | What it governs |
+|---|---|---|---|
+| `Handoff::Pending` | `IntentProposed` commits | `IntentReceived` on the account stream | Whether `Input::Started` hands it again. Once the executor has it, handing it again achieves nothing |
+| *live* (in either handoff state) | `IntentProposed` commits | a terminal outcome: a `GateDecided` denial, an `OrderAbandoned`, or a terminal order state | Whether it belongs in a flatten's `working_orders`. **An order the executor took and is working is exactly the one a kill switch must name** |
+
+An earlier draft made these one set, ending at "`IntentReceived` followed by a terminal outcome",
+which is why the independent review found the brief and a test contradicting each other: with one
+set, either a restart re-hands an intent the executor already holds, or an order it took drops out of
+the cancel hint. Neither is acceptable, so there are two. A kill switch does not
 retract an outstanding intent, because the runtime cannot: whatever reached the executor is covered
 by the flatten plan's cancel list, and the executor's own binding gate denies an opening intent under
 the mode the account stream now carries. What the runtime does control is that it never hands such an
@@ -417,6 +468,14 @@ table's own permission set rather than one flat list:
 | `exits_only` | Exits, protective intents, and an unfinished flatten |
 | `paused` | The re-placement of protection before it expires, and an unfinished flatten; a discretionary exit is held, which rule 13 allows only `paused`, `stopped`, an `Unknown` order in the instrument, or the broker to do |
 | `stopped` | An unfinished flatten, and nothing else. The flatten survives because the kill switch is always available and `stopped` is the mode a kill switch sets, so a `stopped` agent that could not finish its own flatten could never be flattened at all |
+
+**The startup hold is not part of that gate**, and this is the one place the mode used for a re-hand
+differs from the mode used for a decision: `awaiting_reconciliation` means "the broker's truth is not
+yet confirmed", which is a reason not to *decide*, while dropping an exit already journaled would
+remove protection rather than add it. So the re-hand gate is the strictest of the copied account mode
+and the lifecycle state, and the hold governs new proposals alone. Writing the throwaway
+implementation for the planted-bug run is what forced this into the open: with the hold inside the
+gate, a restart could never re-hand an exit, which no reading of trading §5.5 or rule 13 supports.
 
 So an opening intent outstanding at a restart under `exits_only` or stricter is dropped, not re-sent
 (review finding 2). The agent-stream catalogue has no event for an intent the runtime abandons, so
@@ -456,20 +515,21 @@ property that has to hold from **every** reachable state rather than from a name
   `AgentModeChanged` draft that records `awaiting_reconciliation` when it changed the mode, and the
   re-handoffs follow it in the same list. That ordering is what makes the hold visible in the journal
   at all, and it is what the shadow-fold oracle reads (review finding 5).
-- **An intent whose append committed is re-handed, not re-proposed** — and only if the folded mode
-  permits it. The fold sees `IntentProposed` with no terminal outcome and leaves it outstanding;
-  `Started` re-hands exits, protective intents, and an unfinished flatten, and drops an opening
-  intent outside `normal`. A *terminal outcome* for an intent id is an `IntentReceived` followed by a
-  `GateDecided` denial, an `OrderAbandoned`, or a terminal order state on the account stream. The
-  sink is at-least-once by design: the intent ID is the `IntentProposed` `event_id`, so the executor's
-  own fold deduplicates a repeat (journal §2, §5.2).
+- **An intent whose append committed is re-handed, not re-proposed** — and only if it is still
+  `Handoff::Pending` and the folded mode permits it. `Started` re-hands exits, protective intents, and
+  an unfinished flatten, and drops an opening intent outside `normal`; it hands nothing the account
+  stream has already taken. The sink is at-least-once by design even so: the intent ID is the
+  `IntentProposed` `event_id`, so the executor's own fold deduplicates a repeat (journal §2, §5.2).
 - **An intent whose append is in doubt** (`Ambiguous`, `Unavailable`) is retried with the same
   drafts, and the derived `event_id` makes the retry `AlreadyCommitted` rather than a second event.
   No new input is handled while a head's append is unresolved, or a recomputed batch would collide
   with its own derived IDs.
 - **A `Fenced` append stops the process.** A newer epoch owns the stream, so this process is a
   ghost; it exits rather than retrying, and the effects it computed are void.
-- **Nothing resumes trading until the account reconciles.** The runtime holds
+- **Nothing resumes trading until the account reconciles.** The hold is taken at every `Started`
+  unless the fold proves the broker's truth is known: a clean `ReconciliationRun` at or after the last
+  observed submission **and** nothing still outstanding. An outstanding intent is exactly the case
+  where the runtime cannot know what the broker did with it, so it holds. The runtime holds
   `awaiting_reconciliation` (mode `paused`) until the account stream carries a `ReconciliationRun` at
   or after its last observed submission, which is the reconciliation trading §11 runs at startup and
   the reconciliation restriction mandate §5.9 names. HLD's lifecycle sends `Recovering` to `Paused` on
@@ -638,9 +698,11 @@ the founder, because it edits founder-owned files.
     `exits_only`; protection re-placement and an unfinished flatten in `paused`, a discretionary exit
     being held as rule 13 permits `paused` to; and in `stopped` an unfinished flatten alone, which
     survives because the kill switch is always available and `stopped` is the mode a kill switch sets.
-    An opening intent still outstanding at a restart under `exits_only` or stricter is dropped rather
-    than re-sent, because whatever already reached the executor is covered by the flatten plan's cancel
-    list and by the executor's binding gate. An intent is outstanding until the account stream carries a
+    The startup hold is excluded from that gate, and only from it: the hold is a reason not to decide,
+    not a reason to drop an exit already journaled, which trading §5.5 lets only `paused`, `stopped`, an
+    `Unknown` order, or the broker hold. An opening intent still outstanding at a restart under
+    `exits_only` or stricter is dropped rather than re-sent, because whatever already reached the
+    executor is covered by the flatten plan's cancel list and by the executor's binding gate. An intent is outstanding until the account stream carries a
     terminal outcome for its id: an `IntentReceived` then a `GateDecided` denial, an `OrderAbandoned`, or
     a terminal order state. `Started` also re-arms every timer from the deadlines the fold carries; a
     timer is a hint about when to look and never the deadline itself.
@@ -657,9 +719,9 @@ the founder, because it edits founder-owned files.
 
 ## Planted bugs
 
-Eighteen, each to be seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
+Twenty-four, each seeded alone in a throwaway implementation of the stubs (kept out of the tests PR
 per DEC-83), run, and reverted. The tests PR reports the result for each; a row whose bug is not
-caught means the test is wrong, not the bug.
+caught means the test is wrong, not the bug, and the tests PR says which rows needed that correction.
 
 | Planted bug | Must be caught by |
 |---|---|
@@ -668,19 +730,25 @@ caught means the test is wrong, not the bug.
 | The mode lattice orders `paused` below `exits_only`, so a paused agent proposes an opening order: a mode change that adds risk | `properties::the_effective_mode_is_the_maximum_of_the_restriction_lattice`, `properties::no_opening_intent_is_proposed_outside_normal` |
 | A restriction that lifts clears the whole set rather than its own entry, restoring `normal` while a latched restriction is still active | `hand::a_restriction_that_lifts_while_another_is_active_does_not_restore_normal` |
 | The kill switch journals `KillSwitchActivated` before applying the mode, so a decision in the same list runs while the agent is still `normal` | `hand::an_owner_kill_switch_applies_stopped_before_anything_else`, `properties::the_mode_draft_precedes_every_other_effect_of_a_kill_switch` |
-| An agent-scoped kill switch hands a plan carrying the account-wide `cancel-all`, so another agent's orders and the owner's shares are touched | `hand::the_runtime_never_emits_a_cancel_all_or_a_close_position`, `hand::a_kill_switch_for_another_agent_changes_nothing` |
+| The flatten request names `*` instead of this agent's working orders, so the planner is asked for an account-wide cancel | `hand::the_runtime_never_emits_a_cancel_all_or_a_close_position`, `hand::a_kill_switch_cancels_the_working_order_the_fold_knows` |
 | The intent effect is emitted before the draft that records it, so a crash between them sends an order the journal never recorded | `properties::every_intent_effect_follows_the_draft_that_records_it`, `hand::a_proposal_journals_before_it_reaches_the_sink` |
 | `IdGen` mints a fresh ULID on every call, so a retry after `Ambiguous` appends a second `IntentProposed` | `hand::a_retried_append_derives_the_same_event_id`, `hand::two_epochs_never_derive_one_event_id` |
 | The shell handles the next input before an unresolved append is retried, so a recomputed batch collides with its own derived IDs and every retry answers `IdempotencyConflict` | `hand::an_unresolved_append_is_retried_before_any_new_input`, `hand::a_tick_during_an_unresolved_append_does_not_change_the_drafts` |
-| A duration is credited by the state at the end of each interval, so inserting ticks changes when a deadline fires | `properties::extra_ticks_never_change_the_journaled_drafts`, `properties::durations_match_the_interval_oracle` |
+| A duration is credited by the state at the end of each interval, so a deadline fires a tick late | `hand::a_deadline_is_measured_in_whole_seconds_of_risk_clock`, `hand::an_approval_deadline_skips_the_action`, `properties::durations_match_the_interval_oracle`. Not `extra_ticks_never_change_the_journaled_drafts`: it plays under AUTO, where no deadline exists for a crediting bug to move |
 | The fold accepts a `seq` gap and keeps going, so a missed event silently changes the state a run resumes from | `hand::a_gap_in_seq_fails_the_fold`, `properties::the_fold_rejects_every_out_of_order_sequence`, `properties::folding_the_journaled_drafts_reproduces_the_live_state` |
 | An unknown event type folds as a no-op instead of failing, so a later story's event passes unnoticed | `hand::an_unknown_event_type_fails_the_fold`, `properties::every_catalogue_event_is_interpreted_or_named` |
 | An owner alert includes the instrument and the quantity so the message reads better | `hand::a_notification_carries_only_opaque_ids`, `properties::no_notification_payload_holds_an_instrument_or_a_price` |
-| A `PlatformOperator` kill switch falls through the initiator match and returns `NotInterpreted`, so the global kill switch errors instead of stopping the agent | `hand::a_platform_operator_stop_applies_stopped_as_a_risk_exit`, `properties::every_initiator_yields_a_mode_and_never_an_error` |
+| A `PlatformOperator` kill switch maps to `paused` rather than `stopped`, so an operator stop leaves the agent resumable | `hand::a_platform_operator_stop_applies_stopped_as_a_risk_exit` |
 | A restart re-hands an outstanding opening intent although the folded mode is `stopped`, so a stopped agent's order reaches the executor after the stop | `hand::a_restart_under_stopped_re_hands_no_opening_intent`, `properties::no_re_handed_intent_is_one_the_mode_forbids` |
 | A copied `AgentModeApplied(exits_only)` leaves pending approvals standing, so an approval granted afterwards proposes an opening order in an exits-only agent | `hand::a_copied_exits_only_cancels_every_pending_approval`, `properties::no_approval_outlives_the_mode_that_forbids_its_action` |
 | An owner kill switch omits `OwnerExitRequested`, so the executor has no confirmed bid or floor price and an after-hours owner exit either waits or prices unbounded | `hand::an_owner_kill_switch_journals_the_owner_exit_request_before_the_handoff` |
 | The startup hold is applied to the state but its `AgentModeChanged` is not journaled, so a replay of the journal shows a `normal` agent that was actually held | `hand::started_journals_the_startup_hold_before_its_first_handoff`, `properties::folding_the_journaled_drafts_reproduces_the_live_state` |
+| An `IntentReceived` leaves the intent `Handoff::Pending`, so a restart hands the executor an intent it has already taken | `hand::a_restart_re_hands_nothing_for_an_intent_the_account_already_took` |
+| An `IntentReceived` drops the intent instead of marking it taken, so an order the executor is working leaves the flatten's cancel hint | `hand::a_restart_re_hands_nothing_for_an_intent_the_account_already_took` |
+| The switch cancels an approval but leaves its deadline armed, so the runtime wakes for an approval that no longer exists | `hand::a_kill_switch_cancels_every_pending_approval` |
+| A flatten is handed under an id no draft records, so the handoff is untraceable in the journal | `properties::every_intent_effect_follows_the_draft_that_records_it` |
+| A skipped decision emits no owner alert, so a proposal disappears with nothing said | `properties::no_notification_payload_holds_an_instrument_or_a_price` |
+| `Input::Started` re-hands but arms no timer, so a crash silently costs every deadline the fold carries | `hand::a_restart_re_arms_the_deadline_the_fold_carries` |
 
 ## Decisions needed
 
@@ -695,11 +763,11 @@ caught means the test is wrong, not the bug.
    `mandate-executor` unchanged except the crate name, and the layer question disappears; the
    separation is the recommendation because a single crate would put the broker's client and the
    agent's loop under one lint header and one review surface.
-2. **DEC-17 itself stays `Proposed (founder)`.** This brief is built on the coordinator's
-   recommendation (Postgres `LISTEN`/`NOTIFY` plus journal tailing). Interpretation 5 is what makes the
-   choice cheap: if the founder picks NATS JetStream, the shell crate and one `docs/dependencies.md`
-   row change, and the core, the ports, and every test in this story do not. No veto reopens this
-   brief; it reopens only the shell story in M6.
+2. ~~**DEC-17 itself stays `Proposed (founder)`.**~~ **Settled:** the founder accepted DEC-17 on
+   2026-09-26 (#133) exactly as recommended, Postgres `LISTEN`/`NOTIFY` plus journal tailing for
+   Phase 1, with NATS JetStream reconsidered at M8. Interpretation 5 is what would have made a
+   different answer cheap, and it still earns its keep at M8: the core, the five ports, and every test
+   in this story name no transport, so the M8 reconsideration reaches only the shell crate.
 3. **The shell crate's own entry, later.** The impure shell (tokio, the Postgres client or a NATS
    client) needs its own `xtask/layers.toml` row at layer 7 when M6 wires the executor and the
    connector. This brief does not add it; it is named here so the founder sees it coming rather than
