@@ -76,12 +76,12 @@ impl AccountingError {
             Self::NoMark(_) => "no_mark",
             Self::InvalidPosition => "invalid_position",
             Self::EmptyInstrumentId => "empty_instrument_id",
-            Self::PayDateBeforeExDate
-            | Self::DuplicateCorporateAction(_)
-            | Self::CorporateActionOutOfOrder(_)
-            | Self::FillBeforeCorporateAction(_)
-            | Self::NoDividendDue(_)
-            | Self::CashInLieuMismatch(_) => "",
+            Self::PayDateBeforeExDate => "pay_date_before_ex_date",
+            Self::DuplicateCorporateAction(_) => "duplicate_corporate_action",
+            Self::CorporateActionOutOfOrder(_) => "corporate_action_out_of_order",
+            Self::FillBeforeCorporateAction(_) => "fill_before_corporate_action",
+            Self::NoDividendDue(_) => "no_dividend_due",
+            Self::CashInLieuMismatch(_) => "cash_in_lieu_mismatch",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }
@@ -258,8 +258,15 @@ impl CashDividend {
         pay_date: Date,
         per_share: Price,
     ) -> Result<Self, AccountingError> {
-        let _ = (instrument, ex_date, pay_date, per_share);
-        Err(AccountingError::PayDateBeforeExDate)
+        if pay_date < ex_date {
+            return Err(AccountingError::PayDateBeforeExDate);
+        }
+        Ok(Self {
+            instrument,
+            ex_date,
+            pay_date,
+            per_share,
+        })
     }
 
     pub fn instrument(&self) -> &InstrumentId {

@@ -7,8 +7,8 @@ use mandate_num::{CostBasis, MarkPrice, NumError, Price, Rounding, SignedQty, Us
 use mandate_time::{Date, UtcNanos, new_york_midnight};
 
 use crate::{
-    AccountingError, AssetClass, Config, EquityFees, Execution, Fee, FeeFamily, FeeKind, Input,
-    InstrumentId, Liquidity, Side, TafCapBasis,
+    AccountingError, AssetClass, CashDividend, Config, CorporateAction, EquityFees, Execution, Fee,
+    FeeFamily, FeeKind, Input, InstrumentId, Liquidity, Side, Split, TafCapBasis,
 };
 
 /// Cost-basis reduction: `round(B × |q| ÷ |Q|, 12, half_even)` (spec §8.1).
@@ -17,6 +17,10 @@ const BASIS_REDUCTION_SCALE: u32 = 12;
 const CHARGE_SCALE: u32 = 2;
 /// A crypto sell's USD fee: `round(x, 2, half_up)` (spec §6.3).
 const CRYPTO_USD_FEE_SCALE: u32 = 2;
+/// An adjusted mark: `round(mark × old ÷ new, 12, half_even)` (spec §8.5).
+const MARK_SCALE: u32 = 12;
+/// Dividends and cash in lieu are cents, `half_even` (spec §8.5, DEC-93).
+const CASH_SCALE: u32 = 2;
 
 fn sum(values: impl IntoIterator<Item = Usd>) -> Result<Usd, NumError> {
     values.into_iter().try_fold(Usd::ZERO, Usd::checked_add)
@@ -173,6 +177,13 @@ pub enum ReceivableKind {
     CashInLieu,
 }
 
+/// Which corporate actions of one instrument and ex-date have been applied: one of each at most.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ActionKind {
+    Split,
+    CashDividend,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Applied {
     pub account: Account,
@@ -184,8 +195,8 @@ pub struct Applied {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Account {
     positions: BTreeMap<InstrumentId, Position>,
-    marks: BTreeMap<InstrumentId, Price>,
-    last_fill_prices: BTreeMap<InstrumentId, Price>,
+    marks: BTreeMap<InstrumentId, MarkPrice>,
+    last_fill_prices: BTreeMap<InstrumentId, MarkPrice>,
     settled: Usd,
     unsettled: BTreeMap<Date, Usd>,
     accrued: BTreeMap<(FeeFamily, Date), Usd>,
@@ -194,6 +205,11 @@ pub struct Account {
     realized_gross: Usd,
     applied_fills: BTreeSet<String>,
     taf_by_order: BTreeMap<String, Usd>,
+    income: Usd,
+    receivables: BTreeMap<(InstrumentId, Date, ReceivableKind), Usd>,
+    last_trade_dates: BTreeMap<InstrumentId, Date>,
+    last_ex_dates: BTreeMap<InstrumentId, Date>,
+    applied_actions: BTreeSet<(InstrumentId, Date, ActionKind)>,
 }
 
 impl Account {
@@ -217,6 +233,11 @@ impl Account {
             realized_gross: Usd::ZERO,
             applied_fills: BTreeSet::new(),
             taf_by_order: BTreeMap::new(),
+            income: Usd::ZERO,
+            receivables: BTreeMap::new(),
+            last_trade_dates: BTreeMap::new(),
+            last_ex_dates: BTreeMap::new(),
+            applied_actions: BTreeSet::new(),
         }
     }
 
@@ -226,14 +247,23 @@ impl Account {
         let record = match input {
             Input::Fill(execution) => next.fill(execution, config)?,
             Input::Mark { instrument, price } => {
-                next.marks.insert(instrument.clone(), *price);
+                next.marks
+                    .insert(instrument.clone(), MarkPrice::from(*price));
                 Record::Mark
             }
             Input::FeesCharged { family, day } => next.charge(*family, *day)?,
             Input::SettlementPosted { date } => next.settle(*date)?,
-            Input::CorporateAction(_)
-            | Input::DividendPaid { .. }
-            | Input::CashInLieuPosted { .. } => return Err(AccountingError::InvalidPosition),
+            Input::CorporateAction(CorporateAction::Split(split)) => next.split(split)?,
+            Input::CorporateAction(CorporateAction::CashDividend(dividend)) => {
+                next.dividend(dividend)?
+            }
+            Input::DividendPaid {
+                instrument,
+                ex_date,
+            } => next.dividend_paid(instrument, *ex_date)?,
+            Input::CashInLieuPosted { instrument, amount } => {
+                next.cash_in_lieu_posted(instrument, *amount)?
+            }
         };
         Ok(Applied {
             account: next,
@@ -255,6 +285,20 @@ impl Account {
         let fees = match e.asset_class {
             AssetClass::UsEquity => {
                 let date = config.calendar.equity_trade_date(e.executed_at)?;
+                if self
+                    .last_ex_dates
+                    .get(&e.instrument)
+                    .is_some_and(|ex| date < *ex)
+                {
+                    return Err(AccountingError::FillBeforeCorporateAction(
+                        e.fill_id.clone(),
+                    ));
+                }
+                let latest = self
+                    .last_trade_dates
+                    .get(&e.instrument)
+                    .map_or(date, |d| date.max(*d));
+                self.last_trade_dates.insert(e.instrument.clone(), latest);
                 trade_date = Some(date);
                 match e.side {
                     Side::Buy => self.settled = self.settled.checked_sub(notional)?,
@@ -315,7 +359,8 @@ impl Account {
             self.positions.insert(e.instrument.clone(), position);
         }
         self.realized_gross = self.realized_gross.checked_add(realized)?;
-        self.last_fill_prices.insert(e.instrument.clone(), e.price);
+        self.last_fill_prices
+            .insert(e.instrument.clone(), MarkPrice::from(e.price));
         self.applied_fills.insert(e.fill_id.clone());
         Ok(Record::Fill {
             trade_date,
@@ -404,6 +449,145 @@ impl Account {
         Ok(Record::SettlementPosted { amount })
     }
 
+    /// Admits one action of `kind` on `instrument` for `ex_date`: at most once, after every fill
+    /// traded before the ex-date and before any fill traded on or after it (spec §8.5, DEC-95).
+    fn admit(
+        &mut self,
+        instrument: &InstrumentId,
+        ex_date: Date,
+        kind: ActionKind,
+    ) -> Result<(), AccountingError> {
+        let key = (instrument.clone(), ex_date, kind);
+        if self.applied_actions.contains(&key) {
+            return Err(AccountingError::DuplicateCorporateAction(
+                instrument.clone(),
+            ));
+        }
+        let traded_since = self
+            .last_trade_dates
+            .get(instrument)
+            .is_some_and(|d| ex_date <= *d);
+        let after_later_action = self
+            .last_ex_dates
+            .get(instrument)
+            .is_some_and(|d| ex_date < *d);
+        if traded_since || after_later_action {
+            return Err(AccountingError::CorporateActionOutOfOrder(
+                instrument.clone(),
+            ));
+        }
+        self.applied_actions.insert(key);
+        self.last_ex_dates.insert(instrument.clone(), ex_date);
+        Ok(())
+    }
+
+    /// Spec §8.5 with DEC-92: while a share remains, the residual's basis is removed by the
+    /// formula; when none remains, the whole basis is.
+    fn split(&mut self, s: &Split) -> Result<Record, AccountingError> {
+        self.admit(&s.instrument, s.ex_date, ActionKind::Split)?;
+        for marks in [&mut self.marks, &mut self.last_fill_prices] {
+            if let Some(mark) = marks.get_mut(&s.instrument) {
+                *mark = s.ratio.mark(*mark, MARK_SCALE, Rounding::HalfEven)?;
+            }
+        }
+        let held = self.position(&s.instrument);
+        let split = s.ratio.split(held.qty, s.increment)?;
+        let residual_basis = if split.after().is_zero() {
+            held.basis
+        } else {
+            split.residual_basis(held.basis, BASIS_REDUCTION_SCALE, Rounding::HalfEven)?
+        };
+        let cash_in_lieu = match s.cash_in_lieu_price {
+            Some(price) => split.cash_in_lieu(price, CASH_SCALE, Rounding::HalfEven)?,
+            None => Usd::ZERO,
+        };
+        let position = Position::new(split.after(), held.basis.checked_sub(residual_basis)?)?;
+        if position.qty.is_zero() {
+            self.positions.remove(&s.instrument);
+        } else {
+            self.positions.insert(s.instrument.clone(), position);
+        }
+        let realized = cash_in_lieu.checked_sub(residual_basis.to_usd())?;
+        self.realized_gross = self.realized_gross.checked_add(realized)?;
+        if !cash_in_lieu.is_zero() {
+            self.receivables.insert(
+                (s.instrument.clone(), s.ex_date, ReceivableKind::CashInLieu),
+                cash_in_lieu,
+            );
+        }
+        Ok(Record::Split {
+            before: held.qty,
+            after: position.qty,
+            residual_basis,
+            cash_in_lieu,
+            realized_gross: realized,
+        })
+    }
+
+    fn dividend(&mut self, c: &CashDividend) -> Result<Record, AccountingError> {
+        self.admit(c.instrument(), c.ex_date(), ActionKind::CashDividend)?;
+        let entitlement = self.position(c.instrument()).qty;
+        let amount = entitlement
+            .value_at(c.per_share())?
+            .round(CASH_SCALE, Rounding::HalfEven)?;
+        self.income = self.income.checked_add(amount)?;
+        if !amount.is_zero() {
+            let kind = ReceivableKind::Dividend {
+                pay_date: c.pay_date(),
+            };
+            self.receivables
+                .insert((c.instrument().clone(), c.ex_date(), kind), amount);
+        }
+        Ok(Record::CashDividend {
+            entitlement,
+            amount,
+        })
+    }
+
+    fn dividend_paid(
+        &mut self,
+        instrument: &InstrumentId,
+        ex_date: Date,
+    ) -> Result<Record, AccountingError> {
+        let key = self
+            .receivables
+            .keys()
+            .find(|(i, ex, kind)| {
+                i == instrument && *ex == ex_date && matches!(kind, ReceivableKind::Dividend { .. })
+            })
+            .cloned()
+            .ok_or_else(|| AccountingError::NoDividendDue(instrument.clone()))?;
+        self.settle_receivable(&key)
+            .map(|amount| Record::DividendPaid { amount })
+    }
+
+    /// Settles the earliest outstanding cash in lieu on `instrument` of exactly `amount` (DEC-93).
+    fn cash_in_lieu_posted(
+        &mut self,
+        instrument: &InstrumentId,
+        amount: Usd,
+    ) -> Result<Record, AccountingError> {
+        let key = self
+            .receivables
+            .iter()
+            .find(|((i, _, kind), owed)| {
+                i == instrument && *kind == ReceivableKind::CashInLieu && **owed == amount
+            })
+            .map(|(key, _)| key.clone())
+            .ok_or_else(|| AccountingError::CashInLieuMismatch(instrument.clone()))?;
+        self.settle_receivable(&key)
+            .map(|amount| Record::CashInLieuPosted { amount })
+    }
+
+    fn settle_receivable(
+        &mut self,
+        key: &(InstrumentId, Date, ReceivableKind),
+    ) -> Result<Usd, AccountingError> {
+        let amount = self.receivables.remove(key).unwrap_or(Usd::ZERO);
+        self.settled = self.settled.checked_add(amount)?;
+        Ok(amount)
+    }
+
     /// Settlement dates whose `SettlementPosted` (00:00 ET) is due at or before `at`, in order.
     pub fn settlements_due(&self, at: UtcNanos) -> Result<Vec<Date>, AccountingError> {
         let mut due = Vec::new();
@@ -419,31 +603,59 @@ impl Account {
     /// before `at`, by date; on one date, the settlement first, then dividends by instrument and
     /// ex-date.
     pub fn due(&self, at: UtcNanos) -> Result<Vec<Input>, AccountingError> {
-        Ok(self
+        let mut due: Vec<(Date, bool, Input)> = self
             .settlements_due(at)?
             .into_iter()
-            .map(|date| Input::SettlementPosted { date })
-            .collect())
+            .map(|date| (date, false, Input::SettlementPosted { date }))
+            .collect();
+        for (instrument, ex_date, kind) in self.receivables.keys() {
+            if let ReceivableKind::Dividend { pay_date } = kind
+                && new_york_midnight(*pay_date)? <= at
+            {
+                due.push((
+                    *pay_date,
+                    true,
+                    Input::DividendPaid {
+                        instrument: instrument.clone(),
+                        ex_date: *ex_date,
+                    },
+                ));
+            }
+        }
+        due.sort_by_key(|(date, dividend, _)| (*date, *dividend));
+        Ok(due.into_iter().map(|(_, _, input)| input).collect())
     }
 
     /// Outstanding receivables and payables, by instrument, ex-date, and kind.
     pub fn receivables(&self) -> Vec<Receivable> {
-        Vec::new()
+        self.receivables
+            .iter()
+            .map(|((instrument, ex_date, kind), amount)| Receivable {
+                instrument: instrument.clone(),
+                ex_date: *ex_date,
+                kind: *kind,
+                amount: *amount,
+            })
+            .collect()
     }
 
     /// Σ receivables − Σ payables.
     pub fn net_receivables(&self) -> Result<Usd, AccountingError> {
-        Err(AccountingError::InvalidPosition)
+        Ok(sum(self.receivables.values().copied())?)
     }
 
     /// Dividends earned (paid on shorts count negative), from the ex-date.
     pub fn income(&self) -> Usd {
-        Usd::ZERO
+        self.income
     }
 
     /// Gross realized + unrealized + income − fees (spec §8.2).
     pub fn total_pnl(&self) -> Result<Usd, AccountingError> {
-        Err(AccountingError::InvalidPosition)
+        Ok(self
+            .realized_gross
+            .checked_add(self.unrealized()?)?
+            .checked_add(self.income)?
+            .checked_sub(self.fees_total()?)?)
     }
 
     pub fn position(&self, instrument: &InstrumentId) -> Position {
@@ -464,7 +676,6 @@ impl Account {
             .get(instrument)
             .or_else(|| self.last_fill_prices.get(instrument))
             .copied()
-            .map(MarkPrice::from)
     }
 
     pub fn settled(&self) -> Usd {
@@ -509,14 +720,12 @@ impl Account {
         Ok(self.realized_gross.checked_sub(self.fees_total()?)?)
     }
 
-    fn marked(&self) -> Result<Vec<(Position, Price)>, AccountingError> {
+    fn marked(&self) -> Result<Vec<(Position, MarkPrice)>, AccountingError> {
         self.positions
             .iter()
             .map(|(id, p)| {
-                self.marks
-                    .get(id)
-                    .or_else(|| self.last_fill_prices.get(id))
-                    .map(|mark| (*p, *mark))
+                self.mark(id)
+                    .map(|mark| (*p, mark))
                     .ok_or_else(|| AccountingError::NoMark(id.clone()))
             })
             .collect()
@@ -527,7 +736,7 @@ impl Account {
         let values = self
             .marked()?
             .into_iter()
-            .map(|(p, mark)| p.qty.value_at(mark))
+            .map(|(p, mark)| p.qty.value_at_mark(mark))
             .collect::<Result<Vec<Usd>, NumError>>()?;
         Ok(sum(values)?)
     }
@@ -537,16 +746,17 @@ impl Account {
         let values = self
             .marked()?
             .into_iter()
-            .map(|(p, mark)| p.qty.value_at(mark)?.checked_sub(p.basis.to_usd()))
+            .map(|(p, mark)| p.qty.value_at_mark(mark)?.checked_sub(p.basis.to_usd()))
             .collect::<Result<Vec<Usd>, NumError>>()?;
         Ok(sum(values)?)
     }
 
-    /// settled + Σ unsettled − accrued fees + Σ market value (spec §8.2; receivables and payables
-    /// arrive with corporate actions).
+    /// settled + Σ unsettled + Σ receivables − Σ payables − accrued fees + Σ market value
+    /// (spec §8.2).
     pub fn equity(&self) -> Result<Usd, AccountingError> {
         Ok(self
             .cash_total()?
+            .checked_add(self.net_receivables()?)?
             .checked_sub(self.fees_accrued()?)?
             .checked_add(self.market_value()?)?)
     }
