@@ -188,6 +188,6 @@ reservation keeps its row and its number is never reused.
 | DEC-128 | `claude-code` | stream F | `mandate-spec` and `mandate-domain`: interpretations for the mandate document, validation, policy, change classification, and risk state as code, and the Rust harness for the mandate reference cases | Reserved |
 | DEC-129 | `claude-code` | stream G | `mandate-risk`: the gate, forced flatten, US account rules, eligibility floor, restrictions, and conduct controls | Reserved |
 | DEC-130 | `claude-code` | stream H | `mandate-builder`: autonomy classification and the order builder | Reserved |
-| DEC-131 | `claude-code` | stream I, claim [#122](https://github.com/kunwarshivam/mandate/issues/122) | E6-1 and E6-5: the agent runtime skeleton and kill switches, on the DEC-17 recommendation | In #123 |
+| DEC-131 | `claude-code` | stream I, claim [#122](https://github.com/kunwarshivam/mandate/issues/122) | E6-1 and E6-5: the agent runtime skeleton and kill switches, on the DEC-17 recommendation | In #126 |
 | DEC-132 | `claude-code` | stream J | E17 thin slice (DEC-103): the research-agent contract as code shape, admission, and the fixed research-basket universe | Reserved |
 | Compliance question 35 | `cursor` | #54 | Direction follow-ups: describing an agent that brings its own ideas | Reserved |
