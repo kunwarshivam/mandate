@@ -11,11 +11,12 @@ Scales: likelihood and impact are **H**igh, **M**edium, **L**ow.
 
 | ID | Risk | L | I | Mitigation | Owner |
 |---|---|---|---|---|---|
-| R-01 | Regulators treat agents trading user accounts as investment advice or discretion | M | H | Software-only posture ([compliance](../product/08-compliance-and-regulatory.md)); Mandate does not choose instruments, strategy, sizing, or limits (DEC-38); no custody or per-trade pricing; design-partner eligibility (individuals vs entities) decided with counsel (question 4) before onboarding | Founder |
+| R-01 | Regulators treat agents trading user accounts on platform-originated ideas as investment advice or discretion | H | H | Working assumption that Mandate may be an investment adviser ([DEC-98](04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)); counsel engaged before the Phase 1 exit (compliance questions 31 to 34); no live trading until counsel signs off; no custody or per-trade pricing; every thesis journaled with evidence and authorship | Founder |
 | R-02 | An agent causes significant user losses through a bug | M | H | Independent risk gate; drawdown ladder; fault-injection and fuzz testing; paper run required before live; broker-side OCO/bracket protective exits | Founder |
 | R-03 | Duplicate or orphaned orders after crashes | M | H | Write-ahead intents with idempotency keys; reconciliation on restart; fault-injection gate | Founder |
 | R-04 | Credential compromise | L | H | Trading-only OAuth scopes and keys (no fund movement); vault per workspace deployment; per-workspace encryption keys; penetration test | Founder |
-| R-05 | Prompt injection through news or social inputs drives trades | M | H | LLMs produce outputs only; deterministic order builder and risk gate; mandate limits; unusual-input escalation | Founder |
+| R-05 | Prompt injection through news, filings, or social inputs drives the research agent to admit an instrument or trade | H | H | LLMs produce outputs only; deterministic order builder and risk gate; envelope limits and `max_instruments`; admissions through the eligibility floor and autonomy rules (default `ask`); input-drift detector in Phase 1 (E17-5); prompt-injection fixtures in simulation fuzzing | Founder |
+| R-25 | Robinhood Agentic Trading beta access is denied, restricted to one agent per customer, or its terms change | M | M | Alpaca stays the first connector; beta access requested early ([OD-12](04-decision-log.md#open-decisions)); the connector is an adapter behind the executor | Founder |
 | R-06 | Broker or exchange API changes, outages, or rate limits | H | M | Connector abstraction; health checks; data-staleness halt; Kraken Derivatives US as second venue in Phase 3 | Founder |
 | R-07 | Jev access or pricing changes (early access, new vendor) | M | M | Model gateway abstraction; Laya self-hosted as fallback; LLM wrapper fallback | Founder |
 | R-08 | Users expect profits and churn when agents lose money | H | M | Clear positioning (control, not returns); baselines in reports; paper first; disclosures | Founder |
@@ -67,3 +68,5 @@ Scales: likelihood and impact are **H**igh, **M**edium, **L**ow.
 | D-07 | External counsel | M13 | Blocks launch with real capital |
 | D-08 | Durable execution engine (Restate) and NATS JetStream maturity for our use | M5–M8 | Fallback to Temporal / alternative messaging |
 | D-09 | Kraken Derivatives US demo access covering US perpetual contracts ([OD-07](04-decision-log.md#open-decisions)) | Phase 3 | Kraken connector testing delayed |
+| D-10 | Robinhood Agentic Trading beta access and terms ([OD-12](04-decision-log.md#open-decisions)) | M8 (E7-6) | Retail equities limited to Alpaca |
+| D-11 | Securities counsel on the adviser question (compliance questions 31 to 34) | Before the Phase 1 exit | No live trading for any user |

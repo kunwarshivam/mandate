@@ -121,9 +121,12 @@ flowchart LR
 ### The agent spec
 
 Users describe an agent in plain language or through a form. An LLM **compiles** the
-description into a structured spec, extracting only values the user stated; the user enters any
-judgment field left blank and confirms every one. The spec is binding: the agent cannot act
-outside it. The exact format is the [mandate spec](specs/mandate.md); an abbreviated example:
+description into a structured spec: it extracts the values the user stated and may propose the
+rest of the envelope (capital, goal, limits, autonomy rules, asset classes), each marked as
+proposed; the user confirms every envelope field. Strategy fields (universe, theses, signal
+models, thresholds) are produced by the research agent at runtime within that envelope
+([DEC-97](project/04-decision-log.md#decisions), [ADR-0002](adr/0002-autonomous-ideation-and-retail.md)).
+The spec is binding: the agent cannot act outside it. The exact format is the [mandate spec](specs/mandate.md); an abbreviated example:
 
 ```yaml
 name: btc-accumulator
@@ -313,6 +316,7 @@ Written in Rust. One process per agent deployment.
 flowchart TB
     per["Perception<br/>market data · news ·<br/>account events · timers"]
     mem["Memory<br/>positions · theses ·<br/>track records"]
+    res["Research agent<br/>ideas → theses →<br/>universe admission"]
 
     subgraph ADV["Signal models"]
         direction TB
@@ -331,7 +335,8 @@ flowchart TB
     broker[("Broker /<br/>exchange")]
     journal[("Journal<br/>append-only, hash-chained")]
 
-    per --> mem --> ADV --> dec --> pol
+    per --> mem --> res --> ADV --> dec --> pol
+    res -.->|record theses,<br/>admissions| journal
     pol -->|AUTO| risk
     pol -->|ASK| esc
     pol -->|DENY| deny
@@ -347,7 +352,8 @@ flowchart TB
 | Component | Responsibility |
 |---|---|
 | Perception | Subscribes to market data, news, account events, and timers; fills and position updates from the broker arrive here, closing the loop |
-| Memory | Positions, theses (why each position exists and what would invalidate it), and signal-model track records, kept for the user's review. In v1 it does not feed signal models ([DEC-62](project/04-decision-log.md#decisions)) |
+| Memory | Positions, theses (why each position exists and what would invalidate it), and signal-model track records, kept for the user's review and fed to the research agent ([DEC-97](project/04-decision-log.md#decisions)) |
+| Research agent | LLM-driven ideation, asynchronous and never blocking trading: ingests market data, news, filings, screens, and memory; proposes theses (instrument, direction, horizon, evidence, invalidation) journaled as `ThesisProposed`; admits instruments into the working universe through the eligibility floor, `max_instruments`, instrument-group claims, and the autonomy rules (`UniverseChanged`); its theses are signal-model outputs to the order builder. Disabled in bring-your-own-strategy mode ([ADR-0002](adr/0002-autonomous-ideation-and-retail.md)) |
 | Signal models | Produce outputs in a common format (conviction, confidence, horizon, thesis): quant models, fast decision models, LLM research. They never place orders |
 | Order builder | Combines model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score |
 | Autonomy policy | Classifies each proposed action as AUTO, ASK, or DENY according to the spec |
@@ -662,9 +668,10 @@ Speed tiers:
 
 ## 12. Risks and open decisions
 
-1. **Managed retail regulation.** Agents trading retail users' accounts is the riskiest
-   combination, even when users define the agents. Obtain a legal review before launching
-   retail. Business customers in hybrid or on-prem mode are the safest starting point.
+1. **Retail regulation (decided, [DEC-98](project/04-decision-log.md#decisions)).** Retail is in
+   scope from the start, with the platform originating ideas, so the working assumption is that
+   Mandate may be an investment adviser. Counsel is engaged before the Phase 1 exit and no user
+   trades live until counsel signs off.
 2. **NautilusTrader licensing.** It is LGPL-3.0. Distributing it inside on-prem software,
    particularly statically linked Rust, carries relinking obligations. Decide whether to use
    its connectors or write our own.
