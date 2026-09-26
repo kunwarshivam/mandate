@@ -67,7 +67,11 @@ agent that holds the token, which it never prints or persists. Cloud agents cann
 subagents: a delegated story agent builds and opens PRs, and the coordinating session runs the
 independent reviews (`playbooks/ship.md` step 3).
 
+Push with a token-bearing URL only in single commands; never with `git push -u` or `--set-upstream`, which writes the token into `.git/config`. Cursor's cloud-agent hook that adds a `Co-authored-by` trailer can come back on new machines: run `chmod -x ~/.cursor/agent-hooks/*/commit-msg.cursor.co-author` before committing.
+
 ## Reporting
 
 Lead with the outcome. Put evidence next to each claim (command and result). List the decisions
 you made and the founder-reserved ones you deferred, and say what was deliberately left out.
+
+At the end of a working session, update `docs/project/08-work-tracker.md`.
