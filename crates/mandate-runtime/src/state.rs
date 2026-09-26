@@ -58,8 +58,20 @@ impl RuntimeState {
         Mode::Normal
     }
 
-    /// Whether an intent of this purpose may be proposed or re-handed in the effective mode.
+    /// Whether an intent of this purpose may be **proposed** in the effective mode.
     pub fn permits(&self, _purpose: crate::types::Purpose) -> bool {
+        false
+    }
+
+    /// Whether a restart may **re-hand** an intent whose `IntentProposed` already committed.
+    ///
+    /// The startup hold is excluded from this gate, which [`Self::permits`] applies: the hold means
+    /// "the broker's truth is not yet confirmed", which is a reason not to *decide*, while dropping
+    /// an exit already journaled would remove protection rather than add it, and trading-domain spec
+    /// §5.5 lets only `paused`, `stopped`, an `Unknown` order, or the broker hold an exit. The copied
+    /// account mode and the lifecycle state still govern, so `stopped` re-hands a flatten alone and
+    /// `exits_only` re-hands no opening (DEC-131 item 22).
+    pub fn permits_rehand(&self, _purpose: crate::types::Purpose) -> bool {
         false
     }
 

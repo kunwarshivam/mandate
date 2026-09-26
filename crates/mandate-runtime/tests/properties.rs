@@ -180,6 +180,7 @@ fn play(script: &[Scripted], autonomy: Autonomy) -> (Shell, Vec<Effect>, Vec<Eve
 
     let mut shell = Shell::new(1);
     let mut seq = 1_u64;
+    let mut clock_floor = 100_i64;
     shell
         .fold_one(&event(
             ACCOUNT_STREAM,
@@ -194,22 +195,26 @@ fn play(script: &[Scripted], autonomy: Autonomy) -> (Shell, Vec<Effect>, Vec<Eve
 
     for step in script {
         let ran = match step {
-            Scripted::Tick(at) => shell.run(Input::Tick(clock(*at)), &ports),
+            Scripted::Tick(at) => {
+                clock_floor = (*at).max(clock_floor);
+                shell.run(Input::Tick(clock(clock_floor)), &ports)
+            }
             Scripted::Mark(at) => {
+                clock_floor = (*at).max(clock_floor);
+                let at = &clock_floor;
                 seq = seq.saturating_add(1);
                 let mark = event(
                     ACCOUNT_STREAM,
                     seq,
                     "MarkUpdated",
-                    with_clock(
-                        &[("instrument", text("AAPL")), ("price", text("150.00"))],
-                        *at,
-                    ),
+                    with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], *at),
                 );
                 shell.fold_one(&mark).expect("a mark folds");
                 shell.run(Input::Journal(mark), &ports)
             }
             Scripted::ModeTo(mode, at) => {
+                clock_floor = (*at).max(clock_floor);
+                let at = &clock_floor;
                 seq = seq.saturating_add(1);
                 let applied = event(
                     ACCOUNT_STREAM,
@@ -567,7 +572,7 @@ proptest! {
             ACCOUNT_STREAM,
             second,
             "MarkUpdated",
-            with_clock(&[("instrument", text("AAPL")), ("price", text("150.00"))], 100),
+            with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], 100),
         );
         let error = fold(&mut state, &next).expect_err("only seq 2 may follow seq 1");
         prop_assert_eq!(error.code(), "sequence_out_of_order");
@@ -591,7 +596,7 @@ proptest! {
             with_clock(
                 &[
                     ("instrument", text("AAPL")),
-                    ("price", text("150.00")),
+                    ("price", text("150")),
                     ("to", text("normal")),
                     ("result", text("clean")),
                 ],
@@ -683,8 +688,13 @@ proptest! {
     #[test]
     #[ignore = "pending E6-1"]
     fn no_effect_reaches_a_broker(script in prop::collection::vec(scripted(), 1..8)) {
+        let mut script = script;
+        script.insert(0, Scripted::Fresh(100));
         let (_, effects, _) = play(&script, Autonomy::Auto);
-        prop_assert!(!effects.is_empty(), "the script produced something to inspect");
+        prop_assert!(
+            !effects.is_empty(),
+            "the script starts with a model output, so there is always something to inspect and              this property can never pass vacuously"
+        );
         for effect in &effects {
             match effect {
                 Effect::Journal(_) | Effect::Timer(_) | Effect::Notify(_) => {}
@@ -799,13 +809,15 @@ proptest! {
     #[ignore = "pending E6-1"]
     fn the_same_events_give_the_same_run_whatever_woke_the_shell(
         script in prop::collection::vec(scripted(), 1..6),
-        pad in prop::collection::vec(100_i64..400, 0..3),
+        pad in prop::collection::vec(any::<bool>(), 0..3),
     ) {
         let (_, quiet, quiet_drafts) = play(&script, Autonomy::Auto);
         let mut noisy_script = Vec::new();
         for (index, step) in script.iter().enumerate() {
             noisy_script.push(step.clone());
-            if let Some(at) = pad.get(index) {
+            if pad.get(index).copied().unwrap_or(false)
+                && let Scripted::Tick(at) = step
+            {
                 noisy_script.push(Scripted::Tick(*at));
             }
         }
@@ -820,7 +832,10 @@ proptest! {
                 .iter()
                 .map(|d| d.event_type.clone())
                 .collect::<Vec<_>>(),
-            "a notification is only a hint: the journal decides what happens (DEC-131 item 5)"
+            "waking twice for one risk-clock second is inert: the second wakeup finds the same \
+             state at the same second and journals nothing, so a duplicate notification costs \
+             latency and never a duplicate draft (DEC-131 item 5). A tick that advances the second \
+             is the evaluation cadence, which is a different thing"
         );
     }
 }
@@ -882,16 +897,24 @@ proptest! {
             Initiator::Owner | Initiator::PlatformOperator => "stopped",
             Initiator::RiskLimit => "paused",
         };
-        let to = ran
-            .drafts
-            .first()
-            .and_then(|d| d.payload.as_object().cloned())
-            .and_then(|o| o.get("to").and_then(Value::as_str).map(str::to_owned));
         prop_assert_eq!(
-            to.as_deref(),
-            Some(expected),
+            Shadow::of_state(&shell.state).mode,
+            expected.to_owned(),
             "the final mode comes from the initiator, and every initiator has one"
         );
+        if let Some(first) = ran.drafts.first()
+            && first.event_type == "AgentModeChanged"
+        {
+            let to = first
+                .payload
+                .as_object()
+                .and_then(|o| o.get("to").and_then(Value::as_str).map(str::to_owned));
+            prop_assert_eq!(
+                to.as_deref(),
+                Some(expected),
+                "and when the mode changed, the draft records that final mode"
+            );
+        }
     }
 
     #[test]
@@ -916,12 +939,28 @@ proptest! {
             &ports,
         );
         prop_assert!(!ran.effects.is_empty(), "the switch did something");
-        let first = ran.effects.first();
-        prop_assert!(
-            matches!(first, Some(Effect::Journal(d)) if d.event_type == "AgentModeChanged"),
-            "the final mode is applied before anything else (trading §5.5): {:?}",
-            ran.draft_types()
-        );
+        let mode_at = ran
+            .effects
+            .iter()
+            .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AgentModeChanged"));
+        if let Some(at) = mode_at {
+            prop_assert_eq!(
+                at,
+                0,
+                "the final mode is applied before anything else (trading §5.5): {:?}",
+                ran.draft_types()
+            );
+        } else {
+            prop_assert_eq!(
+                Shadow::of_state(&shell.state).mode,
+                match initiator {
+                    Initiator::Owner | Initiator::PlatformOperator => "stopped",
+                    Initiator::RiskLimit => "paused",
+                }
+                .to_owned(),
+                "a switch that journals no mode change found the mode already at its final value,                  which MI-6 requires it not to re-journal"
+            );
+        }
     }
 
     #[test]
@@ -955,19 +994,25 @@ proptest! {
         );
 
         let mut seq = 1_u64;
+        let mut floor = 100_i64;
         for step in &after {
             let ran = match step {
-                Scripted::Tick(at) => shell.run(Input::Tick(clock(*at)), &ports),
+                Scripted::Tick(at) => {
+                    floor = (*at).max(floor);
+                    shell.run(Input::Tick(clock(floor)), &ports)
+                }
                 Scripted::Fresh(at) => shell.run(Input::ModelOutput(fresh_output(*at)), &ports),
                 Scripted::Stale(at) => shell.run(Input::ModelOutput(stale_output(*at)), &ports),
                 Scripted::Mark(at) | Scripted::ModeTo(_, at) => {
+                    floor = (*at).max(floor);
+                    let at = &floor;
                     seq = seq.saturating_add(1);
                     let mark = event(
                         ACCOUNT_STREAM,
                         seq,
                         "MarkUpdated",
                         with_clock(
-                            &[("instrument", text("AAPL")), ("price", text("150.00"))],
+                            &[("instrument", text("AAPL")), ("price", text("150"))],
                             *at,
                         ),
                     );

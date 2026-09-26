@@ -144,7 +144,7 @@ impl FixedPlan {
                 instrument: instrument("AAPL"),
                 side: Side::Buy,
                 qty: qty("10"),
-                limit: price("150.00"),
+                limit: price("155"),
                 purpose: Purpose::Open,
                 combined_score: text("0.5"),
             }),
@@ -159,7 +159,7 @@ impl FixedPlan {
                 instrument: instrument("AAPL"),
                 side: Side::Sell,
                 qty: qty("10"),
-                limit: price("149.00"),
+                limit: price("149"),
                 purpose: Purpose::DiscretionaryExit,
                 combined_score: text("-0.5"),
             }),
@@ -314,13 +314,20 @@ impl Shell {
                 Effect::Journal(draft) => match self.next_append {
                     AppendOutcome::Committed => {
                         let seq = self.head().0.saturating_add(1);
-                        self.agent_journal.push(FoldedEvent {
+                        let stored = FoldedEvent {
                             stream: AGENT_STREAM.to_owned(),
                             seq: Seq(seq),
                             event_id: draft.event_id.clone(),
                             event_type: draft.event_type.clone(),
                             causation_id: draft.causation_id.clone(),
                             payload: draft.payload.clone(),
+                        };
+                        self.agent_journal.push(stored.clone());
+                        fold(&mut self.state, &stored).unwrap_or_else(|e| {
+                            panic!(
+                                "the writer cannot fold back its own {}: {e}",
+                                stored.event_type
+                            )
                         });
                         ran.drafts.push(draft.clone());
                     }

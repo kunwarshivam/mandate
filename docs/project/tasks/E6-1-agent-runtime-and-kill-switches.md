@@ -418,6 +418,14 @@ table's own permission set rather than one flat list:
 | `paused` | The re-placement of protection before it expires, and an unfinished flatten; a discretionary exit is held, which rule 13 allows only `paused`, `stopped`, an `Unknown` order in the instrument, or the broker to do |
 | `stopped` | An unfinished flatten, and nothing else. The flatten survives because the kill switch is always available and `stopped` is the mode a kill switch sets, so a `stopped` agent that could not finish its own flatten could never be flattened at all |
 
+**The startup hold is not part of that gate**, and this is the one place the mode used for a re-hand
+differs from the mode used for a decision: `awaiting_reconciliation` means "the broker's truth is not
+yet confirmed", which is a reason not to *decide*, while dropping an exit already journaled would
+remove protection rather than add it. So the re-hand gate is the strictest of the copied account mode
+and the lifecycle state, and the hold governs new proposals alone. Writing the throwaway
+implementation for the planted-bug run is what forced this into the open: with the hold inside the
+gate, a restart could never re-hand an exit, which no reading of trading §5.5 or rule 13 supports.
+
 So an opening intent outstanding at a restart under `exits_only` or stricter is dropped, not re-sent
 (review finding 2). The agent-stream catalogue has no event for an intent the runtime abandons, so
 the record is the intent's own draft plus the mode change that precedes the drop; adding one would be
@@ -638,9 +646,11 @@ the founder, because it edits founder-owned files.
     `exits_only`; protection re-placement and an unfinished flatten in `paused`, a discretionary exit
     being held as rule 13 permits `paused` to; and in `stopped` an unfinished flatten alone, which
     survives because the kill switch is always available and `stopped` is the mode a kill switch sets.
-    An opening intent still outstanding at a restart under `exits_only` or stricter is dropped rather
-    than re-sent, because whatever already reached the executor is covered by the flatten plan's cancel
-    list and by the executor's binding gate. An intent is outstanding until the account stream carries a
+    The startup hold is excluded from that gate, and only from it: the hold is a reason not to decide,
+    not a reason to drop an exit already journaled, which trading §5.5 lets only `paused`, `stopped`, an
+    `Unknown` order, or the broker hold. An opening intent still outstanding at a restart under
+    `exits_only` or stricter is dropped rather than re-sent, because whatever already reached the
+    executor is covered by the flatten plan's cancel list and by the executor's binding gate. An intent is outstanding until the account stream carries a
     terminal outcome for its id: an `IntentReceived` then a `GateDecided` denial, an `OrderAbandoned`, or
     a terminal order state. `Started` also re-arms every timer from the deadlines the fold carries; a
     timer is a hint about when to look and never the deadline itself.

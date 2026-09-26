@@ -43,9 +43,9 @@ fn mode_applied(seq: u64, mode: &str, at: i64) -> mandate_runtime::FoldedEvent {
 
 fn owner_confirmation() -> OwnerConfirmation {
     OwnerConfirmation {
-        bid: price("155.00"),
+        bid: price("155"),
         bid_size: qty("100"),
-        floor: price("154.00"),
+        floor: price("154"),
         user: "user-1".to_owned(),
         step_up: "assertion-1".to_owned(),
     }
@@ -136,10 +136,7 @@ fn the_golden_journal_folds_to_the_committed_state() {
             ACCOUNT_STREAM,
             4,
             "MarkUpdated",
-            with_clock(
-                &[("instrument", text("AAPL")), ("price", text("150.00"))],
-                300,
-            ),
+            with_clock(&[("instrument", text("AAPL")), ("price", text("150"))], 300),
         ),
     ];
     let mut state = RuntimeState::new();
@@ -247,8 +244,13 @@ fn every_error_code_is_stable_and_unique() {
     );
 
     let mut state = RuntimeState::new();
+    fold(
+        &mut state,
+        &event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[])),
+    )
+    .expect("this deployment's own account stream binds the workspace");
     let foreign = event("acct:other-workspace:9", 1, "StreamOpened", object(&[]));
-    let error = fold(&mut state, &foreign).expect_err("a foreign stream is refused");
+    let error = fold(&mut state, &foreign).expect_err("a stream of another workspace is refused");
     assert_eq!(
         error.code(),
         "foreign_stream",
@@ -330,7 +332,7 @@ fn event_time_never_moves_a_deadline() {
         with_clock(
             &[
                 ("instrument", text("AAPL")),
-                ("price", text("151.00")),
+                ("price", text("151")),
                 ("event_time", text("2026-09-26T23:59:59Z")),
             ],
             100,
@@ -492,20 +494,27 @@ fn an_unresolved_append_is_retried_before_any_new_input() {
     let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::ModelOutput(fresh_output(100)), &ports);
 
+    let drafted_ids = |ran: &common::Ran| -> Vec<EventId> {
+        ran.effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Journal(draft) => Some(draft.event_id.clone()),
+                _ => None,
+            })
+            .collect()
+    };
+
     shell.next_append = AppendOutcome::Unresolved;
     let doubted = shell.run(Input::Tick(clock(100)), &ports);
-    let drafted: Vec<_> = doubted.drafts.iter().map(|d| d.event_id.clone()).collect();
+    let drafted = drafted_ids(&doubted);
+    assert!(!drafted.is_empty(), "the doubted batch had drafts to retry");
 
     shell.next_append = AppendOutcome::Committed;
     let resolved = shell.run(Input::Tick(clock(100)), &ports);
     assert_eq!(
-        resolved
-            .drafts
-            .iter()
-            .map(|d| d.event_id.clone())
-            .collect::<Vec<_>>(),
+        drafted_ids(&resolved),
         drafted,
-        "the retry sends the same drafts with the same derived ids"
+        "the retry sends the same drafts with the same derived ids, which is what makes the          append answer AlreadyCommitted rather than appending a second event"
     );
 }
 
@@ -544,22 +553,30 @@ fn a_restriction_that_lifts_while_another_is_active_does_not_restore_normal() {
     let plan = FixedPlan::silent();
     let view = universe(&["AAPL"]);
     let ports = ports(&ids, &gate, &plan, &view);
-    let mut shell = Shell::new(1);
-    shell.fold_one(&reconciliation(1, 10)).expect("folds");
+    let shell = Shell::new(1);
     let (mut shell, _) = shell.restart(&ports);
-
-    let paused = mode_applied(2, "paused", 20);
-    shell.fold_one(&paused).expect("folds");
-    shell.run(Input::Journal(paused), &ports);
-    shell.run(Input::Command(Command::Pause), &ports);
-
-    let lifted = mode_applied(3, "normal", 30);
-    shell.fold_one(&lifted).expect("folds");
-    shell.run(Input::Journal(lifted), &ports);
     assert_eq!(
         shell.state.effective_mode(),
         Mode::Paused,
-        "the owner's pause is still active, so the effective mode stays paused"
+        "a replay with nothing reconciled holds awaiting_reconciliation"
+    );
+    shell.run(Input::Command(Command::Pause), &ports);
+    shell.run(Input::Command(Command::Resume), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "lifting the owner's pause must not lift the startup hold with it. Each restriction lifts \
+         independently (mandate §5.9), so a lift that cleared the whole set would restore normal \
+         while the broker's truth is still unconfirmed"
+    );
+
+    let lifts_the_startup_hold = reconciliation(1, 30);
+    shell.fold_one(&lifts_the_startup_hold).expect("folds");
+    shell.run(Input::Journal(lifts_the_startup_hold), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "and once the last hold lifts, and only then, the agent is normal again"
     );
 }
 
@@ -1309,6 +1326,9 @@ fn a_restart_under_exits_only_still_re_hands_an_exit() {
     let exits_only = mode_applied(2, "exits_only", 110);
     shell.fold_one(&exits_only).expect("folds");
     shell.run(Input::Journal(exits_only), &ports);
+    shell
+        .fold_one(&reconciliation(3, 120))
+        .expect("a clean reconciliation lifts the startup hold, so the copied mode governs");
 
     let (_after, started) = shell.restart(&ports);
     assert_eq!(
@@ -1620,35 +1640,55 @@ fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
     let plan = FixedPlan::opening(Autonomy::Auto);
     let view = universe(&["AAPL"]);
     let ports = ports(&ids, &gate, &plan, &view);
-    let mut shell = armed_shell(&ports);
 
     for initiator in [
         Initiator::Owner,
         Initiator::RiskLimit,
         Initiator::PlatformOperator,
     ] {
-        let mut fresh = armed_shell(&ports);
-        let ran = fresh.run(kill(this_agent(), initiator, None), &ports);
-        for handoff in &ran.handed {
-            if let IntentBody::Flatten(plan) = &handoff.body {
-                assert!(
-                    !plan.cancel_client_order_ids.is_empty() || plan.sells.is_empty(),
-                    "cancels are named one client_order_id at a time (trading §5.5)"
-                );
-                for leg in &plan.sells {
-                    assert!(
-                        !leg.qty.is_zero(),
-                        "a sell names the agent's sub-ledger quantity, never a close-position"
-                    );
-                    assert!(
-                        matches!(leg.asset_class, AssetClass::UsEquity | AssetClass::Crypto),
-                        "and an asset class the schedule knows"
-                    );
-                }
-            }
+        let mut shell = armed_shell(&ports);
+        let known: Vec<String> = shell
+            .state
+            .outstanding()
+            .keys()
+            .map(|id| id.0.clone())
+            .collect();
+        let ran = shell.run(kill(this_agent(), initiator, None), &ports);
+        let handed = ran
+            .handed
+            .iter()
+            .find_map(|h| match &h.body {
+                IntentBody::Flatten(plan) => Some(plan.clone()),
+                IntentBody::Order { .. } => None,
+            })
+            .expect("every initiator hands a flatten");
+
+        for id in &handed.cancel_client_order_ids {
+            assert!(
+                !id.is_empty() && !id.contains('*') && !id.eq_ignore_ascii_case("all"),
+                "cancels name one client_order_id at a time, never a wildcard: {id}"
+            );
+            assert!(
+                known.contains(id),
+                "and only orders this agent knows about, never the account's (trading §5.5): \
+                 {id} is not one of {known:?}"
+            );
+        }
+        assert!(
+            !handed.sells.is_empty(),
+            "a flatten sells the agent's sub-ledger quantity"
+        );
+        for leg in &handed.sells {
+            assert!(
+                !leg.qty.is_zero(),
+                "a sell names an exact quantity, never a close-position endpoint"
+            );
+            assert!(
+                matches!(leg.asset_class, AssetClass::UsEquity | AssetClass::Crypto),
+                "and an asset class whose schedule trading §5.5 defines"
+            );
         }
     }
-    let _ = &mut shell;
 }
 
 #[test]
