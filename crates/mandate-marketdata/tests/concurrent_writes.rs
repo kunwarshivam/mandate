@@ -6,7 +6,9 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
-use std::fs;
+use std::fs::{self, Permissions};
+use std::io::ErrorKind;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Barrier;
@@ -162,7 +164,10 @@ fn concurrent_writers_of_one_partition_store_it_once_and_whole() {
         let partition = dir.join(dataset::partition_name(d));
         assert_eq!(fs::read(&partition).unwrap(), bytes, "round {round}");
         assert_eq!(dataset::read(&partition, id.kind()).unwrap(), records);
-        assert_eq!(dataset::read_manifest(&dir).unwrap(), (id.clone(), listing.clone()));
+        assert_eq!(
+            dataset::read_manifest(&dir).unwrap(),
+            (id.clone(), listing.clone())
+        );
         assert_eq!(
             names(&dir),
             expected_names(&listing),
@@ -208,7 +213,10 @@ fn concurrent_writers_with_different_data_keep_the_first_and_report_conflicts() 
             "round {round}: the stored partition is the first writer's, never replaced"
         );
         let listing = expected_listing(&id, &[(d, versions[winner].clone())]);
-        assert_eq!(dataset::read_manifest(&dir).unwrap(), (id.clone(), listing.clone()));
+        assert_eq!(
+            dataset::read_manifest(&dir).unwrap(),
+            (id.clone(), listing.clone())
+        );
         assert_eq!(names(&dir), expected_names(&listing), "round {round}");
     }
 }
@@ -273,7 +281,10 @@ fn concurrent_processes_writing_one_dataset_agree() {
         .collect();
     let listing = expected_listing(&id, &planned);
     let dir = Store::new(scratch.path()).dataset_dir(&id);
-    assert_eq!(dataset::read_manifest(&dir).unwrap(), (id.clone(), listing.clone()));
+    assert_eq!(
+        dataset::read_manifest(&dir).unwrap(),
+        (id.clone(), listing.clone())
+    );
     assert_eq!(names(&dir), expected_names(&listing));
     for (d, records) in planned.iter().filter(|(_, r)| !r.is_empty()) {
         let partition = dir.join(dataset::partition_name(*d));
@@ -281,7 +292,8 @@ fn concurrent_processes_writing_one_dataset_agree() {
     }
     let mut written: BTreeMap<String, usize> = BTreeMap::new();
     for index in 0..PROCESSES {
-        let report = fs::read_to_string(scratch.path().join(format!("writer-{index}.txt"))).unwrap();
+        let report =
+            fs::read_to_string(scratch.path().join(format!("writer-{index}.txt"))).unwrap();
         for line in report.lines() {
             let (d, status) = line.split_once(' ').unwrap();
             assert!(status == "Written" || status == "Unchanged", "{line}");
@@ -350,11 +362,22 @@ fn a_crashed_writes_leftovers_are_neither_reused_nor_published() {
         "a leftover does not block the write"
     );
     let partition = dir.join(dataset::partition_name(d));
-    assert_eq!(fs::read(&partition).unwrap(), bytes, "a leftover is never published");
+    assert_eq!(
+        fs::read(&partition).unwrap(),
+        bytes,
+        "a leftover is never published"
+    );
     let listing = expected_listing(&id, &[(d, records.clone())]);
-    assert_eq!(dataset::read_manifest(&dir).unwrap(), (id.clone(), listing.clone()));
+    assert_eq!(
+        dataset::read_manifest(&dir).unwrap(),
+        (id.clone(), listing.clone())
+    );
     for (name, content) in &leftovers {
-        assert_eq!(&fs::read(dir.join(name)).unwrap(), content, "{name} is never reused");
+        assert_eq!(
+            &fs::read(dir.join(name)).unwrap(),
+            content,
+            "{name} is never reused"
+        );
     }
     let expected: BTreeSet<String> = expected_names(&listing)
         .into_iter()
@@ -370,4 +393,27 @@ fn a_crashed_writes_leftovers_are_neither_reused_nor_published() {
         status_of(&store.put_day(&id, d, &records)),
         Ok(Status::Unchanged)
     );
+}
+
+#[test]
+fn a_temporary_file_that_cannot_be_created_is_an_error_not_a_retry() {
+    let id = spy_sip_1hour();
+    let d = day("2026-09-24");
+    let scratch = Scratch::new("read-only");
+    let store = Store::new(scratch.path());
+    let dir = store.dataset_dir(&id);
+    fs::create_dir_all(&dir).unwrap();
+    fs::set_permissions(&dir, Permissions::from_mode(0o555)).unwrap();
+    let probe = fs::File::create_new(dir.join("probe"));
+    let outcome = store.put_day(&id, d, &bars(d, "764.53"));
+    fs::set_permissions(&dir, Permissions::from_mode(0o755)).unwrap();
+    assert!(
+        probe.is_err(),
+        "this test needs a user that file permissions apply to, not root"
+    );
+    assert!(
+        matches!(&outcome, Err(DatasetError::Io { source, .. }) if source.kind() == ErrorKind::PermissionDenied),
+        "{outcome:?}"
+    );
+    assert_eq!(names(&dir), BTreeSet::new());
 }

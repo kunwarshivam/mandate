@@ -3,13 +3,15 @@
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::fs::{self, File};
+use std::path::Path;
 
 use arrow_schema::{DataType, TimeUnit};
 use common::{Scratch, btc_1hour, btc_trades, day, scenario, shy_iex_trades, spy_sip_1hour};
 use mandate_canon::DecStr;
 use mandate_marketdata::alpaca;
-use mandate_marketdata::dataset::{self, DatasetError, Store};
+use mandate_marketdata::dataset::{self, DatasetError, Outcome, Status, Store};
 use mandate_marketdata::model::{DatasetId, Records};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
@@ -161,6 +163,78 @@ fn a_value_that_does_not_fit_its_column_fails_the_partition() {
         ),
         "{err}"
     );
+}
+
+/// The recorded SPY day, and a revision of it with one bar's open changed.
+fn spy_day_and_revision() -> (DatasetId, Records, Records) {
+    let id = spy_sip_1hour();
+    let original = recorded("stock-bars-sip-spy-1hour-2026-09-24", &id);
+    let Records::Bars(mut bars) = original.clone() else {
+        panic!("bars expected")
+    };
+    bars[0].open = DecStr::parse("764.54").unwrap();
+    (id, original, Records::Bars(bars))
+}
+
+fn dir_contents(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| {
+            let path = entry.unwrap().path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            (name, fs::read(&path).unwrap())
+        })
+        .collect()
+}
+
+fn is_conflict(outcome: &Result<Outcome, DatasetError>) -> bool {
+    matches!(outcome, Err(DatasetError::Conflict { .. }))
+}
+
+#[test]
+fn a_partition_the_manifest_does_not_list_is_never_overwritten_or_adopted() {
+    let (id, original, revision) = spy_day_and_revision();
+    let scratch = Scratch::new("unlisted-partition");
+    let store = Store::new(scratch.path());
+    let dir = store.dataset_dir(&id);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("2026-09-24.parquet"),
+        dataset::encode(&id, &original).unwrap(),
+    )
+    .unwrap();
+    let before = dir_contents(&dir);
+    let outcome = store.put_day(&id, day("2026-09-24"), &revision);
+    assert!(is_conflict(&outcome), "different records: {outcome:?}");
+    assert_eq!(dir_contents(&dir), before);
+    let outcome = store.put_day(&id, day("2026-09-24"), &Records::empty(id.kind()));
+    assert!(is_conflict(&outcome), "no records: {outcome:?}");
+    assert_eq!(dir_contents(&dir), before);
+}
+
+#[test]
+fn a_listed_partition_that_was_deleted_is_restored_only_with_the_same_records() {
+    let (id, original, revision) = spy_day_and_revision();
+    let scratch = Scratch::new("deleted-partition");
+    let store = Store::new(scratch.path());
+    let dir = store.dataset_dir(&id);
+    let d = day("2026-09-24");
+    store.put_day(&id, d, &original).unwrap();
+    let stored = dir_contents(&dir);
+    fs::remove_file(dir.join("2026-09-24.parquet")).unwrap();
+    let deleted = dir_contents(&dir);
+    for records in [revision, Records::empty(id.kind())] {
+        let outcome = store.put_day(&id, d, &records);
+        assert!(
+            is_conflict(&outcome),
+            "{} records: {outcome:?}",
+            records.len()
+        );
+        assert_eq!(dir_contents(&dir), deleted, "a conflict writes nothing");
+    }
+    let outcome = store.put_day(&id, d, &original).unwrap();
+    assert_eq!(outcome.status, Status::Written);
+    assert_eq!(dir_contents(&dir), stored);
 }
 
 #[test]
