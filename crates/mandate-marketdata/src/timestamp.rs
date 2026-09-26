@@ -1,6 +1,6 @@
 //! Vendor timestamps and UTC days. Alpaca writes RFC 3339 in UTC with zero to nine fractional
 //! digits; they become [`UtcNanos`] exactly. Parquet stores nanoseconds since the epoch in an
-//! `i64`, so conversion checks the range (DEC-83).
+//! `i64`, so conversion checks the range (DEC-87).
 
 use mandate_time::{Date, TimeError, UtcNanos};
 

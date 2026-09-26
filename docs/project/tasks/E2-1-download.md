@@ -19,8 +19,8 @@ story.
   milestone M1 ([WBS](../02-milestones-and-wbs.md)).
 - **Decisions that apply:** DEC-23 (Alpaca first), DEC-35 (paper uses IEX; SIP for backtests),
   DEC-72 (ADR-0001: ES-02, ES-06, ES-09, ES-14, ES-19, ES-23), DEC-79 (agents merge after review),
-  DEC-80 (no plain comments); taken here: DEC-82 (dependencies), DEC-83 (dataset format and
-  idempotency), DEC-84 (research basket).
+  DEC-80 (no plain comments); taken here: DEC-86 (dependencies), DEC-87 (dataset format and
+  idempotency), DEC-88 (research basket).
 
 ## Scope
 
@@ -48,8 +48,8 @@ story.
   mutation gate.
 - **Crates out of scope:** `mandate-num` and `mandate-domain` (E3-1 is creating them in parallel;
   neither is on `main`, so vendor numbers stay `mandate_canon::DecStr` and the `Bar` and `Trade`
-  records live in `mandate-marketdata` until then, DEC-83); `mandate-time` calendars (E3-1).
-- **New dependencies allowed:** those registered by DEC-82: `reqwest`, `rustls`, `parquet`,
+  records live in `mandate-marketdata` until then, DEC-87); `mandate-time` calendars (E3-1).
+- **New dependencies allowed:** those registered by DEC-86: `reqwest`, `rustls`, `parquet`,
   `arrow-array`, `arrow-schema`, `clap` (new), and `tokio` (ES-06), `secrecy` (ES-09), `serde` and
   `serde_json` with `raw_value` (ES-23), `anyhow` (ES-09), `toml` (already registered).
 - **Safety-critical:** no.
@@ -66,7 +66,7 @@ story.
    interval `[D 00:00Z, D+1 00:00Z)`. A record stamped exactly at the next midnight belongs to the
    next day and is dropped from this one; a record outside the day is a vendor error. Days must be
    complete: `--end` must be before today's UTC date, so a partition never changes because it was
-   fetched while still open (DEC-83).
+   fetched while still open (DEC-87).
 2. **Partitions.** One Parquet file per symbol per UTC day, fetched by its own paginated query.
    Session interpretation (ET days, early closes) is E2-4's, from the calendar E3-1 is adding.
 3. **Feeds.** Stocks and ETFs require `--feed sip` or `--feed iex`, with no default: SIP is the
@@ -80,13 +80,13 @@ story.
    close, volume, VWAP) uses scale 18: bars are vendor aggregates that the spec does not bound,
    and the first live run found BTC/USD 1-minute bars with ten fractional digits in prices and
    VWAP and nine in volume. A value needing more digits than its column's scale is rejected,
-   never rounded, and the download fails (DEC-83).
+   never rounded, and the download fails (DEC-87).
 6. **Idempotency.** Every run re-fetches and compares bytes before writing. Identical bytes leave
    the file untouched; a new partition is written atomically (temporary file, fsync, rename);
    different bytes for a stored partition are a conflict that fails the run and leaves the file
    as it was. There is no overwrite flag: stored research data is never replaced in place.
 7. **Types.** `Bar` and `Trade` live in `mandate-marketdata` with `DecStr` numbers until
-   `mandate-domain` and `mandate-num` exist; then they move there (DEC-83).
+   `mandate-domain` and `mandate-num` exist; then they move there (DEC-87).
 
 ## Not done here (with the story that owns each)
 
@@ -110,8 +110,8 @@ cargo run -p mandate-cli -- download --basket config/research-basket.toml --asse
 
 ## Stop conditions
 
-Handled per DEC-79 ("decide, record, continue"): new dependencies are DEC-82; the dataset
-interpretations above are DEC-83; the basket is DEC-84. No test was weakened and no accepted
+Handled per DEC-79 ("decide, record, continue"): new dependencies are DEC-86; the dataset
+interpretations above are DEC-87; the basket is DEC-88. No test was weakened and no accepted
 decision is deviated from.
 
 ## Definition of done

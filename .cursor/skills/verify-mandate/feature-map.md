@@ -82,7 +82,7 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 ## Historical market data download
 
-- **Spec:** backlog E2-1; ADR-0001 ES-19, ES-23; DEC-82, DEC-83, DEC-84;
+- **Spec:** backlog E2-1; ADR-0001 ES-19, ES-23; DEC-86, DEC-87, DEC-88;
   `docs/project/tasks/E2-1-download.md`.
 - **Code:** `mandate-marketdata`: `crates/mandate-marketdata/src/number.rs` (raw JSON number text to
   `DecStr` and `Decimal128` units, exact or rejected), `crates/mandate-marketdata/src/timestamp.rs`

@@ -1,4 +1,4 @@
-//! Vendor timestamps parse exactly; Parquet's `i64` nanoseconds are range-checked (DEC-83).
+//! Vendor timestamps parse exactly; Parquet's `i64` nanoseconds are range-checked (DEC-87).
 
 use mandate_marketdata::timestamp::{
     day_start, from_unix_nanos, next_day, parse_rfc3339_utc, to_unix_nanos,
