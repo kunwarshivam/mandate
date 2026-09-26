@@ -9,7 +9,10 @@
 //! otherwise.
 //!
 //! Every expectation here was checked against a throwaway implementation of the stubs, which the
-//! twenty planted bugs listed in `properties.rs` were then broken against, one at a time.
+//! thirty planted bugs listed in `properties.rs` were then broken against, one at a time. Four of these
+//! tests exist because no reference case decides the rule they pin: DEC-106 item 7's "no fill in the
+//! trigger bar", item 8's never-marketable take-profit, item 10's market-order remainders, and
+//! DEC-30's overnight session.
 
 mod common;
 
@@ -142,9 +145,12 @@ fn rc_12_a_stop_gapped_through_fills_at_the_open_less_slippage() {
 }
 
 /// RC-12 `stop_limit_gap_rests_as_limit`. A sell stop-limit, stop 99.00 and limit 98.80. Bar 1 opens
-/// at 98.50, below the limit, so nothing fills and the order rests as a limit at 98.80 from bar 1
-/// (rule 7, DEC-106 item 7). Bar 1's high is 98.70, short of 98.80. Bar 2's high 98.90 passes it, so
-/// the fill is at the limit, 98.80, as maker (rule 5, DEC-106 item 6).
+/// at 98.50, below the limit: rule 7 gives no fill in that bar, and the order rests as a limit at
+/// 98.80 from bar 2 (DEC-106 item 7). Bar 2's high 98.90 passes the limit strictly, so the fill is at
+/// the limit, 98.80, as maker (rule 5, DEC-106 item 6). Bar 1's high, 98.70, does not reach the limit,
+/// so this case cannot tell rule 7's reading from one that fills in the trigger bar; the test below
+/// can.
+
 #[test]
 #[ignore = "pending E4-1"]
 fn rc_12_a_stop_limit_that_gaps_past_its_limit_rests_and_fills_at_the_limit() {
@@ -589,13 +595,14 @@ fn a_buy_stop_reached_by_the_high_fills_at_the_stop_and_is_not_tick_rounded() {
     );
 }
 
-/// Rule 7's triggered branch: the fill is the worse of the limit and the triggered price. A sell
-/// stop-limit with stop 99.00 and limit 98.90 on a bar that opens at 99.50 and falls to 98.80. The
-/// stop is reached inside the bar, so the triggered price is 99.00 × 0.9997 = 98.9703, and the limit
-/// does not bind because 98.9703 is above it: max(98.90, 98.9703) = 98.9703, taker.
+/// Rule 7's triggered branch: a sell fills at max(L, min(open, S) × (1 − s)), the better of the two
+/// for the seller, because the limit is a floor it will not sell below. Stop 99.00 and limit 98.90 on
+/// a bar that opens at 99.50 and falls to 98.80: the stop is reached inside the bar, so the triggered
+/// price is 99.00 × 0.9997 = 98.9703, and the limit does not bind because 98.9703 is above it —
+/// max(98.90, 98.9703) = 98.9703, taker.
 #[test]
 #[ignore = "pending E4-1"]
-fn a_triggered_stop_limit_fills_at_the_worse_of_its_limit_and_the_triggered_price() {
+fn a_triggered_stop_limit_fills_at_the_better_of_its_limit_and_the_triggered_price() {
     let bars = [auction("09:30", ["99.5", "99.6", "98.8", "98.9", "30000"])];
     assert_eq!(
         fills_with_median(
@@ -698,7 +705,192 @@ fn the_model_rejects_bars_and_orders_it_cannot_simulate() {
         ..order
     };
     assert_eq!(
-        simulate_with(&[good], &[far_future]),
+        simulate_with(std::slice::from_ref(&good), &[far_future]),
         Err("resting_bar_out_of_range")
     );
+
+    let off_increment = SimOrder {
+        qty: qty("100.5"),
+        ..order
+    };
+    assert_eq!(
+        simulate_with(std::slice::from_ref(&good), &[off_increment]),
+        Err("quantity_off_increment")
+    );
+
+    let extended_market = in_extended_hours(sell(market(), "100", resting_from(0)));
+    assert_eq!(
+        simulate_with(std::slice::from_ref(&good), &[extended_market]),
+        Err("extended_hours_needs_a_limit")
+    );
+
+    let fractional_oco = sell(oco("101", "99"), "1", resting_from(0));
+    assert_eq!(
+        run(
+            &test_default(),
+            &crypto(),
+            std::slice::from_ref(&good),
+            &NoMedian,
+            &[fractional_oco]
+        )
+        .map(|_| "ok")
+        .map_err(|e| e.code()),
+        Err("oco_on_a_fractional_instrument")
+    );
+
+    let crypto_day_order = for_the_day(sell(limit("99"), "1", resting_from(0)));
+    assert_eq!(
+        run(
+            &test_default(),
+            &crypto(),
+            std::slice::from_ref(&good),
+            &NoMedian,
+            &[crypto_day_order]
+        )
+        .map(|_| "ok")
+        .map_err(|e| e.code()),
+        Err("day_order_on_a_continuous_instrument")
+    );
+}
+
+/// DEC-106 item 7, the reading no reference case pins down. Bar 1 triggers the 99.00 stop on an open
+/// of 98.50, below the 98.80 limit, so rule 7's "no fill" holds for that whole bar even though its
+/// high of 98.90 prints through the limit; the order rests as a limit at 98.80 from bar 2, whose high
+/// of 98.90 passes the limit strictly and fills it at 98.80 as maker. A model that rested in the
+/// trigger bar would fill at bar 1 instead.
+#[test]
+#[ignore = "pending E4-1"]
+fn a_stop_limit_that_gaps_beyond_its_limit_does_not_fill_in_its_trigger_bar() {
+    let bars = [
+        bar("10:00", ["99.6", "99.8", "99.4", "99.5", "9000"]),
+        bar("10:01", ["98.5", "98.9", "98.2", "98.6", "9000"]),
+        bar("10:02", ["98.6", "98.9", "98.4", "98.85", "9000"]),
+    ];
+    assert_eq!(
+        fills(
+            &bars,
+            &[sell(stop_limit("99", "98.8"), "100", resting_from(0))]
+        ),
+        [(2, "100".to_owned(), "98.8".to_owned(), "maker")]
+    );
+}
+
+/// DEC-106 items 8 and 10 with a volume cap. A protective pair on 800 shares, resting from bar 0:
+/// take-profit 101.00 and stop 99.00. Bar 0's cap is 0, its session having started before the data.
+/// Bar 1 caps at 10% of bar 0's 5000 = 500; its open, 100.00, reaches neither leg, its high of 100.50
+/// does not pass the take-profit, and its low of 98.70 reaches the stop, so 500 fill at
+/// 99.00 × 0.9997 = 98.9703 on the stop leg and the take-profit is canceled at that bar. The stop's
+/// remainder is a market order (item 10), so bar 2, capped at 10% of 9000 = 900, fills the last 300
+/// at its open: 101.50 × 0.9997 = 101.50 − 0.03045 = 101.46955.
+#[test]
+#[ignore = "pending E4-1"]
+fn a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder() {
+    let bars = [
+        bar("10:00", ["100", "100.2", "99.8", "100", "5000"]),
+        bar("10:01", ["100", "100.5", "98.7", "99", "9000"]),
+        bar("10:02", ["101.5", "101.6", "101.2", "101.4", "9000"]),
+    ];
+    let outcome = run(
+        &test_default(),
+        &equity(),
+        &bars,
+        &NoMedian,
+        &[sell(oco("101", "99"), "800", resting_from(0))],
+    )
+    .unwrap();
+    assert_eq!(
+        reported_legs(&outcome),
+        [
+            (1, "stop", "500".to_owned(), "98.9703".to_owned(), "taker"),
+            (2, "stop", "300".to_owned(), "101.46955".to_owned(), "taker"),
+        ]
+    );
+    assert_eq!(canceled(&outcome), [(1, "limit")]);
+    assert_eq!(outcome.end_of(first_order()), Some(OrderEnd::Filled));
+}
+
+/// DEC-106 item 8: a protective pair's take-profit leg is a working order away from the market, so it
+/// is never marketable on arrival even when its **first eligible** bar opens past it. Decided at
+/// 10:01, so bar 1 is that bar, and it opens at 101.20, beyond the 101.00 take-profit: the leg fills
+/// at its limit, 101.00, as maker, not at 101.20 × 0.9997 = 101.16964, the better price a marketable
+/// limit would have taken. Bar 1's cap is 10% of bar 0's 5000 = 500.
+#[test]
+#[ignore = "pending E4-1"]
+fn an_ocos_take_profit_is_never_marketable_on_arrival() {
+    let bars = [
+        bar("10:00", ["100", "100.2", "99.8", "100", "5000"]),
+        bar("10:01", ["101.2", "101.5", "100.9", "101.4", "9000"]),
+    ];
+    let outcome = run(
+        &test_default(),
+        &equity(),
+        &bars,
+        &NoMedian,
+        &[sell(oco("101", "99"), "100", decided("10:01"))],
+    )
+    .unwrap();
+    assert_eq!(
+        reported_legs(&outcome),
+        [(1, "limit", "100".to_owned(), "101".to_owned(), "maker")]
+    );
+    assert_eq!(canceled(&outcome), [(1, "stop")]);
+}
+
+/// DEC-106 item 10: once a stop has triggered, its remainder is a market order, filled at later
+/// opens even when they are back above the stop. 700 shares on a 99.00 stop resting from bar 0. Bar 1
+/// caps at 10% of bar 0's 5000 = 500 and its low of 98.80 reaches the stop, filling 500 at
+/// 99.00 × 0.9997 = 98.9703. Bar 2 opens at 99.50, above the stop, and the remaining 200 fill there
+/// as a market order: 99.50 × 0.9997 = 99.50 − 0.02985 = 99.47015.
+#[test]
+#[ignore = "pending E4-1"]
+fn a_triggered_stops_remainder_is_a_market_order() {
+    let bars = [
+        bar("10:00", ["99.6", "99.8", "99.4", "99.5", "5000"]),
+        bar("10:01", ["99.5", "99.6", "98.8", "98.9", "9000"]),
+        bar("10:02", ["99.5", "99.7", "99.4", "99.6", "9000"]),
+    ];
+    assert_eq!(
+        fills(&bars, &[sell(stop("99"), "700", resting_from(0))]),
+        [
+            (1, "500".to_owned(), "98.9703".to_owned(), "taker"),
+            (2, "200".to_owned(), "99.47015".to_owned(), "taker"),
+        ]
+    );
+}
+
+/// Spec §4.3 and §5.2: the extended sessions take limit orders alone, so a market order waits for the
+/// regular session. The pre-market bar's open would have filled it at 99.47015; instead it fills on
+/// the regular session's first bar, whose 20-session median of 9000 caps it at 900:
+/// 99.20 × 0.9997 = 99.20 − 0.02976 = 99.17024.
+#[test]
+#[ignore = "pending E4-1"]
+fn a_market_order_waits_for_the_regular_session() {
+    let bars = [
+        pre_market("09:00", ["99.5", "99.6", "98", "99.3", "2000"]),
+        auction("09:30", ["99.2", "99.5", "99.1", "99.4", "9000"]),
+    ];
+    assert_eq!(
+        fills_with_median("9000", &bars, &[sell(market(), "100", decided("09:00"))]),
+        [(1, "100".to_owned(), "99.17024".to_owned(), "taker")]
+    );
+}
+
+/// DEC-30 and DEC-106 item 9: nothing trades overnight, whatever the order. The bar opens its own
+/// session, so its cap is 10% of the 9000 median = 900, and its low of 98.50 passes the resting buy
+/// limit at 99.50 strictly — the session is the only reason there is no fill, and `extended_hours`
+/// does not reach it.
+#[test]
+#[ignore = "pending E4-1"]
+fn an_overnight_bar_never_fills() {
+    let bars = [in_session(
+        Session::Overnight,
+        "2026-09-21T20:05:00-04:00",
+        bar_at(
+            "2026-09-21T20:05:00-04:00",
+            ["99", "99.6", "98.5", "99.2", "9000"],
+        ),
+    )];
+    let exit = buy(limit("99.5"), "100", resting());
+    assert!(fills_with_median("9000", &bars, &[exit]).is_empty());
+    assert!(fills_with_median("9000", &bars, &[in_extended_hours(exit)]).is_empty());
 }

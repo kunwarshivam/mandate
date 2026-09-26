@@ -9,7 +9,7 @@
 //! and `income` expectations (DEC-96); E3-3 adds the account type (`initial.account.type`) and the
 //! `buying_power` expectation, the fold's model buying power with no reservations (DEC-105); E4-1
 //! adds the backtest cases — `bars`, `orders`, `isolation`, and the `fills` and `canceled_legs`
-//! expectations, run through `mandate-sim` (DEC-106 item 10). A case that uses anything owned by a
+//! expectations, run through `mandate-sim` (DEC-106 item 11). A case that uses anything owned by a
 //! later story fails with "not interpreted until <story>" for each such item; anything the
 //! vocabulary does not know fails as unknown. Every key of every interpreted expectation is checked.
 
@@ -1091,7 +1091,7 @@ fn check_conservation(
     Ok(())
 }
 
-/// The backtest cases (trading-domain spec §6.4; RC-10, RC-12, RC-19; DEC-106 item 10). A backtest
+/// The backtest cases (trading-domain spec §6.4; RC-10, RC-12, RC-19; DEC-106 item 11). A backtest
 /// case has `bars` and `orders` instead of `steps`: every order carries its own expectation, and
 /// `isolation: per_order` simulates each one alone against a fresh volume cap.
 ///
@@ -1439,6 +1439,10 @@ mod backtest {
 
     /// One order, and the position it exits. A sell may never exceed the position held: v1 has no
     /// short sales (DEC-32), so a case cannot describe one.
+    ///
+    /// No backtest case states a time in force or `extended_hours`, so neither is interpreted
+    /// (DEC-85): every order is a day order that trades only the regular session, the most
+    /// restrictive reading, and a case that states either key fails as an unknown one.
     fn order_of(listed: &Json) -> Result<SimOrder, String> {
         let held = match listed.get("initial_position") {
             None => Qty::ZERO,
@@ -1461,8 +1465,6 @@ mod backtest {
                 "purpose",
                 "resting_since_bar",
                 "resting_since",
-                "time_in_force",
-                "extended_hours",
             ],
         )?;
         let eligible_from = match (
@@ -1536,15 +1538,8 @@ mod backtest {
             side,
             qty,
             kind,
-            tif: match order.get("time_in_force").map(Json::as_str) {
-                None | Some(Some("day")) => TimeInForce::Day,
-                Some(Some("gtc")) => TimeInForce::Gtc,
-                Some(other) => return Err(format!("unknown time_in_force {other:?}")),
-            },
-            extended_hours: match order.get("extended_hours") {
-                None => false,
-                Some(flag) => flag.as_bool().ok_or("`extended_hours` is not a boolean")?,
-            },
+            tif: TimeInForce::Day,
+            extended_hours: false,
             eligible_from,
         })
     }
@@ -1603,7 +1598,7 @@ mod backtest {
     }
 
     /// The `fills` and `canceled_legs` expectations of one order. Every key a case states is
-    /// compared; liquidity is compared only where the case states it (DEC-106 item 10).
+    /// compared; liquidity is compared only where the case states it (DEC-106 item 11).
     fn check(expect: &Json, outcome: &SimOutcome, order: OrderRef) -> Result<(), String> {
         let stated = fields(expect, "expect", &["fills", "canceled_legs"])?;
         for (key, value) in stated {

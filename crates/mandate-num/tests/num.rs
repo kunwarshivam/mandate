@@ -747,7 +747,17 @@ fn fractions_run_from_zero_to_one_inclusive() {
     assert_eq!(Fraction::parse("0.0000000001"), Err(NumError::TooPrecise));
     assert_eq!(Fraction::parse("0.10"), Err(NumError::NotCanonical));
     assert!(Fraction::parse("0").unwrap().is_zero());
+    assert_eq!(Fraction::ONE.to_string(), "1");
+    assert_eq!(Fraction::parse("1").unwrap(), Fraction::ONE);
     assert_eq!(NumError::AboveOne.code(), "above_one");
+    assert_eq!(
+        Qty::parse("100.5")
+            .unwrap()
+            .portion(Fraction::ONE, ShareIncrement::Whole)
+            .unwrap()
+            .to_string(),
+        "100"
+    );
 }
 
 /// Hand-calculated slippage and volume caps (spec §6.4 rules 3 to 7). s = 3 bps moves a 100.00 open

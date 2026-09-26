@@ -31,18 +31,25 @@ use mandate_time::UtcNanos;
 /// 6. **Stop orders** fill at the open moved by `s` when the open has already passed the stop, and
 ///    at the stop moved by `s` when the bar's extreme reaches it. An equity stop triggers only on a
 ///    regular-session bar (rule 6).
-/// 7. **Stop-limit orders** whose trigger bar opens beyond the limit rest as a limit at `L` from
-///    that same bar; otherwise the triggered fill is at the limit or the triggered price, whichever
-///    is worse for the order (rule 7, DEC-106 item 7).
+/// 7. **Stop-limit orders** whose trigger bar opens beyond the limit fill nothing in that bar, even
+///    if it later prints through the limit, and rest as a limit at `L` from the **next** bar;
+///    otherwise the triggered fill is at the limit or the triggered price, whichever is better for
+///    the order (rule 7, DEC-106 item 7).
 /// 8. **OCO pairs.** If the open reaches a leg, that leg fills first under its own rule; otherwise,
 ///    with both legs reachable inside the bar, the stop fills first. The first fill of either leg,
 ///    partial or whole, cancels the other (rule 8, DEC-106 item 8).
 /// 9. Fill prices are **not tick-rounded** (rule 9). A price needing more than the 9 places spec
 ///    §2.1 allows is rounded against the order (DEC-106 item 2).
 ///
+/// A trigger or a change of phase happens on the bar that causes it even when the cap lets nothing
+/// fill there, and a triggered stop's remainder — an OCO's too, once its stop leg fills — is a
+/// market order (DEC-106 item 10).
+///
 /// Errors: a bar sequence that is not strictly increasing, inconsistent, or labelled with a session
-/// that starts after it; an order with no quantity, crossed stop-limit or OCO prices, or a resting
-/// bar the sequence does not hold; and any arithmetic that is not exact.
+/// that starts after it; an order outside the v1 policy of spec §5.1 and §5.2 (no quantity, a
+/// quantity off the instrument's increment, `extended_hours` on anything but a limit order, crossed
+/// stop-limit or OCO prices, an OCO on a fractional instrument, a day order on a continuous
+/// instrument, or a resting bar the sequence does not hold); and any arithmetic that is not exact.
 pub fn simulate(
     config: &SimConfig,
     instrument: &Instrument,

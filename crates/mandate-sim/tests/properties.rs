@@ -9,12 +9,15 @@
 //! it on every bar, so that order-major walk must produce the same allocation as the bar-major walk
 //! the crate makes, and any disagreement is a defect in one of them.
 //!
+//! Every property runs the model through `simulated`, which first checks the number of fills against
+//! the oracle's, so no property can pass on an empty fill list.
+//!
 //! Generated scenarios use the `fixed` impact model. The `sqrt` model needs an 18-place square root,
 //! whose independent oracle would need arbitrary-precision integers; it is covered instead by
 //! hand-computed cases in `hand.rs` and in `mandate-num`'s own tests.
 //!
-//! **Planted bugs.** Every rule below was broken on purpose in a throwaway implementation of this
-//! story's stubs, kept out of this change (DEC-83), and every one was caught. The tests that failed
+//! **Planted bugs.** Each of the thirty below was broken on purpose in a throwaway implementation of
+//! this story's stubs, kept out of this change (DEC-83), one at a time, and every one was caught. The tests that failed
 //! are named in brackets; `oracle` is `fills_match_the_independent_simulator`, `harness rc_10` and
 //! `harness rc_12` are the two tests in `mandate-refcases/tests/harness.rs`, and `RC-nn` is that
 //! reference case run with `--include-ignored`.
@@ -50,6 +53,33 @@
 //!     `first_bar_reference_volume`, never compares a fill's price, never compares canceled legs,
 //!     accepts a sell above the position held, or ignores `decided_at` [harness rc_10 or rc_12, and
 //!     RC-10, RC-12, and RC-19 for the two that change a fill].
+//!
+//! A second sweep, after the first independent review revised DEC-106 items 7 to 11, planted ten
+//! more; every one was caught too.
+//!
+//! 21. A stop-limit fills in its trigger bar, item 7's earlier reading
+//!     [`a_stop_limit_that_gaps_beyond_its_limit_does_not_fill_in_its_trigger_bar`, oracle, and six
+//!     more properties].
+//! 22. An OCO's take-profit is marketable on arrival, against item 8
+//!     [`an_ocos_take_profit_is_never_marketable_on_arrival`, oracle].
+//! 23. A triggered stop's remainder stops filling, against item 10
+//!     [`a_triggered_stops_remainder_is_a_market_order`,
+//!     `a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder`, oracle, nine more
+//!     properties].
+//! 24. `extended_hours` is accepted on any order kind, against §5.2
+//!     [`the_model_rejects_bars_and_orders_it_cannot_simulate`].
+//! 25. A quantity off the instrument's increment is accepted [the same test].
+//! 26. The extended sessions are open to every order, not only those marked for them
+//!     [`an_exit_marked_for_extended_hours_fills_after_hours`,
+//!     `a_day_orders_remainder_is_canceled_after_its_last_eligible_session`, oracle, eight more
+//!     properties].
+//! 27. The overnight session trades, against DEC-30 [`an_overnight_bar_never_fills`, oracle, eight
+//!     more properties].
+//! 28. The auction exception never applies [RC-12,
+//!     `rc_12_a_resting_limit_gapped_through_at_an_auction_fills_at_the_open`, oracle, harness
+//!     rc_12]. The oracle catching it is also what shows generated scenarios reach auction bars.
+//! 29. An OCO on a fractional instrument is accepted, against §5.4 and DEC-36 [the rejection test].
+//! 30. A day order on a continuous instrument is accepted [the rejection test].
 //!
 //! Bug 10 survived the first sweep: RC-19's `marketable_remainder_becomes_resting` cannot tell it
 //! apart, because no later bar there opens back inside the limit. It is what
@@ -90,6 +120,7 @@ const CENT: i128 = UNIT / 100;
 const PRE_MARKET: u8 = 0;
 const REGULAR: u8 = 1;
 const AFTER_HOURS: u8 = 2;
+const OVERNIGHT: u8 = 3;
 
 const MAKER: u8 = 0;
 const TAKER: u8 = 1;
@@ -100,7 +131,7 @@ const STOP_LEG: u8 = 1;
 
 /// Every minute a generated bar may occupy: its session, its start, its session's start, and its
 /// trading day. Two trading days, so a day order's expiry has a day after it.
-const SLOTS: [(u8, &str, &str, u8); 10] = [
+const SLOTS: [(u8, &str, &str, u8); 11] = [
     (PRE_MARKET, "2026-09-21T09:00:00-04:00", PRE_MARKET_OPEN, 0),
     (PRE_MARKET, "2026-09-21T09:15:00-04:00", PRE_MARKET_OPEN, 0),
     (REGULAR, REGULAR_OPEN, REGULAR_OPEN, 0),
@@ -117,6 +148,12 @@ const SLOTS: [(u8, &str, &str, u8); 10] = [
         AFTER_HOURS,
         "2026-09-21T16:05:00-04:00",
         AFTER_HOURS_OPEN,
+        0,
+    ),
+    (
+        OVERNIGHT,
+        "2026-09-21T20:05:00-04:00",
+        "2026-09-21T20:00:00-04:00",
         0,
     ),
     (
@@ -291,6 +328,12 @@ impl Scenario {
         }
     }
 
+    /// Spec §5.2: only a limit order may carry `extended_hours`, so the generator never pairs them
+    /// with anything else and the model rejects the pair.
+    fn well_formed(order: &GOrder) -> bool {
+        !order.extended || matches!(order.kind, GKind::Limit(_))
+    }
+
     /// An equity stop triggers only on a regular-session bar (spec §6.4 rule 6).
     fn stop_allowed(&self, index: usize) -> bool {
         self.bars.get(index).map(|b| b.session) == Some(REGULAR)
@@ -456,7 +499,7 @@ fn leg_action(
             }
             if !marketable(limit) {
                 *phase = Phase::Resting(limit);
-                return resting_fill(limit);
+                return None;
             }
             let trigger = if buy {
                 bar.open.max(stop)
@@ -506,7 +549,7 @@ fn oracle(s: &Scenario) -> Oracle {
         let (mut legs, single) = match order.kind {
             GKind::Oco { limit, stop } => (
                 vec![
-                    (Some(LIMIT_LEG), GKind::Limit(limit), start_of(limit)),
+                    (Some(LIMIT_LEG), GKind::Limit(limit), Phase::Resting(limit)),
                     (Some(STOP_LEG), GKind::Stop(stop), Phase::Fresh),
                 ],
                 false,
@@ -644,6 +687,7 @@ fn session_of(code: u8) -> Session {
     match code {
         PRE_MARKET => Session::PreMarket,
         AFTER_HOURS => Session::AfterHours,
+        OVERNIGHT => Session::Overnight,
         _ => Session::Regular,
     }
 }
@@ -721,7 +765,21 @@ fn sim_config(s: &Scenario) -> SimConfig {
     }
 }
 
+/// Runs the model, and checks the number of fills against the oracle's before any property looks at
+/// them: a property about "no fill that breaks rule R" would otherwise pass on an empty list.
 fn simulated(s: &Scenario) -> Result<SimOutcome, TestCaseError> {
+    let outcome = ran(s)?;
+    let expected = oracle(s).fills.len();
+    if outcome.fills.len() != expected {
+        return Err(TestCaseError::fail(format!(
+            "the model reported {} fills where the oracle expects {expected}",
+            outcome.fills.len()
+        )));
+    }
+    Ok(outcome)
+}
+
+fn ran(s: &Scenario) -> Result<SimOutcome, TestCaseError> {
     let bars = sim_bars(s);
     let orders = sim_orders(s);
     let median = s.median.map(qty_of);
@@ -845,8 +903,8 @@ fn order(bars: usize, base: i128) -> impl Strategy<Value = GOrder> {
                 buy,
                 qty: shares * UNIT,
                 kind: mirrored(kind, buy),
+                extended: extended && matches!(mirrored(kind, buy), GKind::Limit(_)),
                 day_order,
-                extended,
                 elig: match decided {
                     Some(slot) => GElig::Decided {
                         at: secs(SLOTS.get(slot).map_or(REGULAR_OPEN, |s| s.1)),
@@ -970,6 +1028,9 @@ fn scenario() -> impl Strategy<Value = Scenario> {
             },
         )
         .prop_filter("at least one bar", |s| !s.bars.is_empty())
+        .prop_filter("only a limit order carries extended hours", |s| {
+            s.orders.iter().all(Scenario::well_formed)
+        })
 }
 
 proptest! {
@@ -1200,7 +1261,7 @@ proptest! {
     #[test]
     #[ignore = "pending E4-1"]
     fn identical_inputs_give_identical_fills(s in scenario()) {
-        prop_assert_eq!(simulated(&s)?, simulated(&s)?);
+        prop_assert_eq!(ran(&s)?, ran(&s)?);
     }
 
     /// Every fill, cancellation, and end state matches the order-major integer simulator in this
@@ -1208,7 +1269,7 @@ proptest! {
     #[test]
     #[ignore = "pending E4-1"]
     fn fills_match_the_independent_simulator(s in scenario()) {
-        let outcome = simulated(&s)?;
+        let outcome = ran(&s)?;
         let expected = oracle(&s);
         prop_assert_eq!(reported(&outcome), expected.fills, "fills");
         prop_assert_eq!(

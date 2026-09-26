@@ -89,8 +89,9 @@ every workspace crate and reference-case suite has an entry and that every path 
   `crates/mandate-refcases/tests/harness.rs` (the backtest harness reads every key the cases state).
 - **Reference cases:** `trading_domain::RC-10`, `RC-12`, and `RC-19` in
   `fixtures/refcases/trading-domain.json`.
-- **Run:** `cargo nextest run -p mandate-sim` and
-  `cargo test -p mandate-refcases --test refcases -- --include-ignored trading_domain::RC-1`.
+- **Run:** `cargo nextest run -p mandate-sim`, and for the three cases
+  `cargo test -p mandate-refcases --test refcases -- --include-ignored --exact trading_domain::RC-10
+  trading_domain::RC-12 trading_domain::RC-19`.
 
 ## Journal drafts and the event catalogue
 

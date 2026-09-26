@@ -19,8 +19,9 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
   overnight session), DEC-35 (data profiles), DEC-72
   (ADR-0001), DEC-77 (tests PR, implementation PR, status PR), DEC-79, DEC-80 (no plain comments),
   DEC-83 (tests PRs hold stubs only), DEC-85 (harness interpretations fail loudly until owned),
-  DEC-97 (backtests are the evidence an owner sees before go-live), and DEC-106 (recorded by this
-  story).
+  DEC-97 (backtests are the evidence an owner sees before go-live), DEC-106 (the fill model's
+  interpretations, recorded by this story), and DEC-108 (the tests PR's crate, arithmetic, and harness
+  shapes, recorded in the tests PR).
 
 ## Scope
 
@@ -37,32 +38,49 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
 - **Invariants touched** (each gets a named property test in the tests PR, with an oracle that
   computes the answer its own way):
 
-  | Clause | Planned test |
+  | Clause | Test |
   |---|---|
-  | §6.4.1 nothing fills before the first bar starting at or after decision + latency (+ approval latency), and never on the bar that produced the decision (a bar starting before `decided_at`; a bar starting exactly at it is eligible, as RC-10's `market_sell_exit` shows) | `properties::no_fill_before_eligibility` |
-  | §6.4.3 per bar and instrument, Σ fills over the account's orders ≤ truncate(fraction × reference volume, increment), allocated in submission order; 0 when the reference is unavailable | `properties::fills_never_exceed_the_shared_volume_cap` |
+  | §6.4.1 nothing fills before the first bar starting at or after decision + latency (+ approval latency), and never on the bar that produced the decision (a bar starting exactly at `decided_at` is eligible, as RC-10's `market_sell_exit` shows) | `properties::no_fill_before_eligibility`, `hand::latency_moves_eligibility_and_approval_latency_applies_only_when_approval_was_required` |
+  | §6.4.2 fills only in sessions the order may trade; the extended sessions take limit orders alone | `properties::fills_respect_sessions`, `hand::a_market_order_waits_for_the_regular_session`, `hand::an_exit_marked_for_extended_hours_fills_after_hours`, `hand::rc_12_an_equity_stop_does_not_trigger_in_extended_hours` |
+  | §6.4.2, DEC-30 nothing ever fills overnight | `hand::an_overnight_bar_never_fills` |
+  | §6.4.2 a day order has no fill after its last eligible session ends | `properties::day_orders_expire_at_session_end`, `hand::a_day_orders_remainder_is_canceled_after_its_last_eligible_session` |
+  | §6.4.3 per bar and instrument, Σ fills over the account's orders ≤ truncate(fraction × reference volume, increment), allocated in submission order; 0 when the reference is unavailable | `properties::fills_never_exceed_the_shared_volume_cap`, `hand::a_bars_volume_cap_is_shared_across_orders_in_submission_order`, `hand::a_sessions_first_bar_caps_on_the_twenty_session_median_and_on_zero_without_one`, `num::a_volume_cap_is_the_truncated_product_and_never_above_it` |
   | Σ fills of an order ≤ its quantity; every fill is positive and a multiple of the increment | `properties::orders_never_overfill` |
-  | §6.4.4 a market order fills at the slipped open of its first tradable bar | `hand::rc_10_market_sell_fills_at_the_slipped_open_of_the_first_eligible_bar`, `hand::a_market_order_waits_for_the_regular_session`; the oracle property |
-  | §6.4.5 a touch is not a fill (resting limit, extreme equal to the limit) | `properties::a_touch_is_never_a_fill` |
+  | §6.4.4 a market order fills at the slipped open of its first tradable bar | `hand::rc_10_a_market_sell_fills_at_the_first_eligible_open_less_slippage`, `num::hand_calculated_slippage_and_volume_caps` |
+  | §6.4.4 the `sqrt` impact model | `hand::sqrt_impact_takes_the_root_of_the_filled_share_of_reference_volume`, `num::hand_calculated_sqrt_impacts`, `num::sqrt_impact_is_monotone_and_bounded_by_its_coefficient` |
+  | §6.4.5 marketable on arrival, and a remainder that becomes resting and stays resting | `hand::rc_10_a_marketable_limit_buy_fills_at_the_slipped_open_inside_its_limit`, `hand::rc_19_a_marketable_remainder_becomes_resting_when_a_bar_opens_beyond_the_limit`, `hand::a_resting_remainder_does_not_become_marketable_again` |
+  | §6.4.5 a touch is not a fill (resting limit, extreme equal to the limit) | `properties::a_touch_is_never_a_fill`, `hand::rc_10_a_touch_is_not_a_fill_and_the_next_bar_through_the_limit_is`, `hand::rc_19_a_touch_on_the_arrival_bar_is_not_a_fill`, `hand::rc_19_a_resting_limit_can_fill_on_its_arrival_bar` |
+  | §6.4.5 continuous trading never prints through a resting limit; the auction bar is the exception | `hand::rc_12_a_resting_limit_gapped_through_in_continuous_trading_fills_at_the_limit`, `hand::rc_12_a_resting_limit_gapped_through_at_an_auction_fills_at_the_open` |
   | §6.4.5 a buy limit never fills above its limit and a sell limit never below it | `properties::limit_prices_are_never_violated` |
-  | Slippage and rounding never flatter a fill: a buy never pays less, and a sell never receives more, than the slippage-free price (DEC-106) | `properties::slippage_and_rounding_are_adverse` |
-  | §6.4.2, §6.4.6 fills only in sessions the order may trade in; equity stops trigger only in the regular session | `properties::fills_respect_sessions` |
-  | §6.4.2 a day order has no fill after its last eligible session ends | `properties::day_orders_expire_at_session_end` |
-  | §6.4.7 a triggered stop-limit fills at max(L, min(open, S) × (1 − s)) for a sell (symmetric for a buy), and rests as a limit when the bar opens beyond L | `hand::a_triggered_stop_limit_fills_at_the_better_of_limit_and_slipped_trigger_price`, `hand::rc_12_a_stop_limit_that_gaps_below_its_limit_rests_as_a_limit`; the oracle property |
-  | §6.4.9 fill prices are not tick-rounded (only the 9-place adverse rounding of DEC-106 item 2 applies) | `hand::fill_prices_round_against_the_order` (100.030000002), `hand::rc_10_the_volume_cap_is_ten_percent_of_the_previous_bar` (100.43012); `properties::slippage_and_rounding_are_adverse` |
-  | §6.4.8 at most one OCO leg fills; the first fill of either leg cancels the other (DEC-106) | `properties::oco_fills_at_most_one_leg` |
+  | Slippage and rounding never flatter a fill: a buy never pays less, and a sell never receives more, than the slippage-free price (DEC-106 item 2) | `properties::slippage_and_rounding_are_adverse`, `hand::a_fill_price_beyond_nine_places_rounds_against_the_order`, `num::slippage_moves_a_price_against_the_order_by_a_rounded_up_amount` |
+  | §6.4.6 stops: a gap fills at the open, a reach fills at the stop, equities in the regular session only | `hand::rc_12_a_stop_reached_inside_the_bar_fills_at_the_stop_less_slippage`, `hand::rc_12_a_stop_gapped_through_fills_at_the_open_less_slippage`, `hand::a_buy_stop_reached_by_the_high_fills_at_the_stop_and_is_not_tick_rounded`, `hand::a_crypto_stop_triggers_on_a_continuous_bar` |
+  | §6.4.7 a triggered stop-limit fills at max(L, min(open, S) × (1 − s)) for a sell, symmetric for a buy | `hand::a_triggered_stop_limit_fills_at_the_better_of_its_limit_and_the_triggered_price` |
+  | §6.4.7 a stop-limit whose trigger bar opens beyond L fills nothing in that bar and rests from the next (DEC-106 item 7) | `hand::a_stop_limit_that_gaps_beyond_its_limit_does_not_fill_in_its_trigger_bar`, `hand::rc_12_a_stop_limit_that_gaps_past_its_limit_rests_and_fills_at_the_limit` |
+  | §6.4.8 at most one OCO leg fills; the first fill of either leg cancels the other (DEC-106 item 8) | `properties::oco_fills_at_most_one_leg`, `hand::rc_12_an_oco_with_both_legs_reachable_fills_the_stop_first`, `hand::rc_12_an_oco_whose_open_reaches_the_take_profit_fills_that_leg`, `hand::a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder` |
+  | §6.4.8 a take-profit leg is never marketable on arrival, and its remainder keeps resting | `hand::an_ocos_take_profit_is_never_marketable_on_arrival` |
+  | DEC-106 item 10 a triggered stop's remainder, an OCO's included, is a market order | `hand::a_triggered_stops_remainder_is_a_market_order`, `hand::a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder` |
+  | §6.4.9 fill prices are not tick-rounded (only the 9-place adverse rounding of DEC-106 item 2 applies) | `hand::a_buy_stop_reached_by_the_high_fills_at_the_stop_and_is_not_tick_rounded`, `hand::rc_10_a_marketable_limit_fills_across_two_bars_under_the_volume_cap` (100.43012) |
+  | §5.1, §5.2 an order outside the v1 policy is rejected, never simulated | `hand::the_model_rejects_bars_and_orders_it_cannot_simulate` |
   | Replay: the same inputs give identical fills | `properties::identical_inputs_give_identical_fills` |
+  | The whole model, fills, cancellations, and end states, against the oracle | `properties::fills_match_the_independent_simulator` |
+  | §2.1, ES-04 the new arithmetic is exact or an error, with one rounding per formula | `num::fractions_run_from_zero_to_one_inclusive`, `num::adding_quantities_and_basis_points_is_exact` |
+  | The harness reads every key the backtest cases state (DEC-85, DEC-106 item 11) | `harness::rc_10_and_rc_19_pass_and_a_wrong_fill_or_decision_time_fails`, `harness::rc_12_passes_and_its_session_labels_median_and_canceled_leg_are_read` |
 
-  **Oracle.** `properties.rs` will hold a separate simulator. It works in `i128` at 10⁻⁹ for prices
-  and quantities, computes slippage as integer basis points, and walks bars and orders in a
-  different loop structure (order-major rather than bar-major). It will be shown to fail on planted
-  bugs before it is trusted: a fill at the touch, the decision bar filling, the cap not shared
-  across orders, sell slippage with the sign reversed, a stop triggering pre-market, and both OCO
-  legs filling, the remaining quantity never decreasing (`orders_never_overfill`), and day orders
-  never expiring (`day_orders_expire_at_session_end`). `identical_inputs_give_identical_fills` has
-  no plantable bug in a pure function with ordered collections; it guards against a future clock
-  read, random source, or unordered map. Hand tests in `hand.rs` reproduce each case of RC-10, RC-12, and RC-19, with the
-  arithmetic in each doc comment.
+  **Oracle.** `crates/mandate-sim/tests/properties.rs` holds a second fill model, written
+  order-major on purpose: each order in submission order consumes what it can from every bar's
+  remaining cap before the next order is considered, in `i128` integers at 10⁻⁹ with its own integer
+  ceiling arithmetic. Rule 3 gives every order strict priority over later ones on every bar, so the
+  two traversals must agree. Every property runs the model through one helper that first compares the
+  number of fills with the oracle's, so no property can pass on an empty fill list. Generated
+  scenarios use the `fixed` impact model; an independent oracle for the 18-place root would need
+  arbitrary-precision integers, so the `sqrt` model is pinned by hand-computed digits instead.
+
+  **Planted bugs.** Thirty, each broken in a throwaway implementation of the stubs (kept out of the
+  PR, DEC-83), one at a time, and every one caught. The full list, with the tests that failed for
+  each, is the module doc of `crates/mandate-sim/tests/properties.rs`. Writing that implementation
+  also found two defects in the tests' own first reading of §6.4, both caught by the reference cases:
+  the marketable-on-arrival test compares the open with the limit in the opposite direction from a
+  stop's trigger, and an order that is already resting must never take that test at all.
 
 - **Crates in scope:** new `mandate-sim` (layer 6 per `xtask/layers.toml`'s plan; `pure = true`;
   `safety_critical = true`, DEC-106 item 1; `allowed_external = ["thiserror"]`; CODEOWNERS line).
@@ -86,11 +104,12 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
 The caller's view, written before any logic. These are the tests PR's stubs, in `mandate-sim`.
 
 ```rust
+pub struct Nanos(u64);                       // from_millis; §6.4 configures latency in milliseconds
 pub struct SimConfig {
-    pub decision_latency_ms: u64,
-    pub approval_latency_ms: u64,
+    pub decision_latency: Nanos,
+    pub approval_latency: Nanos,
     pub slippage: Slippage,
-    pub volume_cap: Fraction,
+    pub volume_cap_fraction: Fraction,
 }
 pub enum Slippage {
     Fixed { half_spread_bps: Bps, impact_bps: Bps },
@@ -101,38 +120,49 @@ pub struct SimBar {
     pub start: UtcNanos,
     pub open: Price, pub high: Price, pub low: Price, pub close: Price,
     pub volume: Qty,
+    pub trade_date: Date,                    // with `session`, names the session instance
     pub session: Session,
     pub session_start: UtcNanos,
     pub auction: bool,
 }
-pub struct SimInstrument { pub asset_class: AssetClass, pub increment: ShareIncrement }
+pub struct Instrument { pub asset_class: AssetClass, pub increment: ShareIncrement }
+pub struct OrderRef(usize);                  // assigned by `simulate` from the submission index
 pub struct SimOrder {
     pub side: Side,
     pub qty: Qty,
     pub kind: OrderKind,
     pub tif: TimeInForce,
-    pub extended_hours: bool,
-    pub eligibility: Eligibility,
+    pub extended_hours: bool,                // only a limit order may carry it (§5.2)
+    pub eligible_from: Eligibility,
 }
 pub enum OrderKind {
     Market,
     Limit { limit: Price },
     Stop { stop: Price },
     StopLimit { stop: Price, limit: Price },
-    Oco { take_profit: Price, stop: Price },
+    Oco { limit: Price, stop: Price },       // the limit leg is the take-profit
 }
-pub enum Eligibility { DecidedAt { at: UtcNanos, approval_required: bool }, RestingFromBar(usize) }
+pub enum OcoLeg { Limit, Stop }
+pub enum TimeInForce { Day, Gtc }
+pub enum Eligibility {
+    DecidedAt { at: UtcNanos, approval_required: bool },
+    Resting { from_bar: usize },
+}
 pub struct SimFill {
-    pub order: usize, pub leg: Option<OcoLeg>, pub bar: usize,
+    pub order: OrderRef, pub leg: Option<OcoLeg>, pub bar: usize,
     pub qty: Qty, pub price: Price, pub liquidity: Option<Liquidity>,
 }
-pub struct SimOutcome { pub fills: Vec<SimFill>, pub orders: Vec<OrderState> }
-pub struct OrderState { pub end: OrderEnd, pub canceled_leg: Option<OcoLeg> }
-pub enum OrderEnd { Filled { bar: usize }, Expired, Open }
+pub struct CanceledLeg { pub order: OrderRef, pub leg: OcoLeg, pub bar: usize }
+pub enum OrderEnd { Filled, Expired { at_bar: usize }, Open }
+pub struct SimOutcome {
+    pub fills: Vec<SimFill>,
+    pub canceled_legs: Vec<CanceledLeg>,
+    pub ends: Vec<OrderEnd>,                 // indexed by `OrderRef`
+}
 
 pub fn simulate(
     config: &SimConfig,
-    instrument: &SimInstrument,
+    instrument: &Instrument,
     bars: &[SimBar],
     coverage_start: UtcNanos,
     first_bar_volumes: &dyn FirstBarVolumes,
@@ -140,18 +170,23 @@ pub fn simulate(
 ) -> Result<SimOutcome, SimError>;
 ```
 
-An order is identified by its index in `orders`, which is also its submission order. `SimOutcome`
-lists fills in bar order, then submission order, and each order's end: `Filled`, `Expired` (a day
-order past its last eligible session), or `Open`, plus the canceled OCO leg if any. `SimError` is
-`InvalidBar { bar }` (out of order, or a high or low that does not bound the open and close),
-`InvalidOrder { order }` (outside the v1 policy of §5.1 and §5.2: zero or off-increment quantity, a
-non-limit with `extended_hours`, an OCO whose legs are on the wrong sides or on a fractional
-instrument, a crypto day order), or a numeric or time error.
+An order is identified by its `OrderRef`, its index in `orders`, which is also its submission order.
+`SimOutcome` lists fills in bar order, then submission order, each canceled OCO leg with the bar of
+the fill that took it, and each order's end: `Filled`, `Expired { at_bar }` (a day order past its
+last eligible session), or `Open`. `SimError` names one cause each, with a stable code (ES-09):
+`BarsOutOfOrder`, `InconsistentBar`, and `BarBeforeItsSession` for the bars; and, for an order
+outside the v1 policy of §5.1 and §5.2, `ZeroQuantity`, `QuantityOffIncrement`,
+`ExtendedHoursNeedsALimit`, `StopLimitCrossed`, `OcoLegsCrossed`, `OcoOnAFractionalInstrument`,
+`DayOrderOnAContinuousInstrument`, and `RestingBarOutOfRange`, plus the numeric and time errors it
+wraps.
 
 The price and cap arithmetic lives in `mandate-num`, whose exact arithmetic is crate-private
-(ES-04), as additions only, under shared-crate claim #62: `Fraction`, `Qty::checked_add`,
-`Qty::portion` (truncate(fraction × qty, increment)), `Price::slipped(Bps, Adverse)` (rounded
-adversely at 9 places), `Bps::checked_add`, and `Bps::sqrt_impact`.
+(ES-04), as additions only, under shared-crate claim #62: `Fraction` (with `ZERO` and `ONE`),
+`Qty::checked_add`, `Qty::portion` (truncate(fraction × qty, increment)),
+`Price::slipped(Bps, Adverse)`, `Bps::checked_add`, and `Bps::sqrt_impact`. DEC-106 item 2's adverse
+rounding needs no new rounding mode: rounding the slippage **amount** up once at 9 places moves a buy
+up and a sell down, and equals ceil(p × (1 + s), 9) and floor(p × (1 − s), 9) exactly, because a price
+already sits on the 9-place grid (DEC-108 item 2).
 
 `FirstBarVolumes` supplies the §6.4.3 median for a session's first bar: the E4-2 runner computes
 it from the dataset, and the harness reads `first_bar_reference_volume`. The sim itself reads no
@@ -244,9 +279,10 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 ## Definition of done
 
 - [ ] RC-10, RC-12, and RC-19 pass, and no case that passed before now fails.
-- [ ] Tests came first; each invariant above has a property test whose oracle is independent and
+- [x] Tests came first; each invariant above has a property test whose oracle is independent and
       was shown to fail on a planted bug.
 - [ ] New state changes emit journal events (none: the sim is pure).
-- [ ] Docs updated: the feature map gains a "Backtest fill model" entry; the tracker's M3 row.
+- [x] Docs updated: the feature map gains a "Backtest fill model" entry; the tracker's M3 and Claims
+      rows.
 - [ ] `cargo xtask check` is green (summary in each PR).
 - [ ] Each PR description is complete (see the PR template).

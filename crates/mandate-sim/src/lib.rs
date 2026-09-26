@@ -46,10 +46,18 @@ pub enum SimError {
     BarBeforeItsSession(usize),
     #[error("an order's quantity must be positive")]
     ZeroQuantity,
+    #[error("an order's quantity is not a multiple of the instrument's increment")]
+    QuantityOffIncrement,
+    #[error("only a limit order may trade the extended sessions")]
+    ExtendedHoursNeedsALimit,
     #[error("a stop-limit's limit is on the far side of its stop")]
     StopLimitCrossed,
     #[error("an OCO's take-profit and stop are on the same side of the position")]
     OcoLegsCrossed,
+    #[error("protection on a fractional instrument is a stop-limit, not an OCO")]
+    OcoOnAFractionalInstrument,
+    #[error("a continuous instrument has no trading day to cancel a day order at")]
+    DayOrderOnAContinuousInstrument,
     #[error("an order rests from bar {0}, which the bars do not contain")]
     RestingBarOutOfRange(usize),
     /// The stub [`simulate`] of this story's tests PR returns this, so every pending test fails on
@@ -70,8 +78,12 @@ impl SimError {
             Self::InconsistentBar(_) => "inconsistent_bar",
             Self::BarBeforeItsSession(_) => "bar_before_its_session",
             Self::ZeroQuantity => "zero_quantity",
+            Self::QuantityOffIncrement => "quantity_off_increment",
+            Self::ExtendedHoursNeedsALimit => "extended_hours_needs_a_limit",
             Self::StopLimitCrossed => "stop_limit_crossed",
             Self::OcoLegsCrossed => "oco_legs_crossed",
+            Self::OcoOnAFractionalInstrument => "oco_on_a_fractional_instrument",
+            Self::DayOrderOnAContinuousInstrument => "day_order_on_a_continuous_instrument",
             Self::RestingBarOutOfRange(_) => "resting_bar_out_of_range",
             Self::Unsimulated => "unsimulated",
             Self::Num(e) => e.code(),
@@ -200,7 +212,10 @@ pub enum OrderKind {
     Oco { limit: Price, stop: Price },
 }
 
-/// Which leg of an [`OrderKind::Oco`] a fill or a cancellation belongs to.
+/// Which leg of an [`OrderKind::Oco`] a fill or a cancellation belongs to. Both legs of a protective
+/// pair are working orders away from the market, so neither is ever marketable on arrival: the
+/// take-profit leg rests at its limit and its remainder keeps resting there, while a stop leg that
+/// fills leaves a market-order remainder (DEC-106 items 8 and 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OcoLeg {
     Limit,
@@ -231,8 +246,9 @@ pub enum Eligibility {
 }
 
 /// One order submitted to the model. `extended_hours` is the flag the gate sets for an exit that
-/// may trade pre-market or after hours as a limit order (spec §4.3, §5.2, DEC-37); without it the
-/// order trades only the regular session.
+/// may trade pre-market or after hours (spec §4.3, §5.2, DEC-37); without it the order trades only
+/// the regular session, and only a [`OrderKind::Limit`] may carry it, because the extended sessions
+/// take limit orders alone. Nothing ever trades overnight (DEC-30).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SimOrder {
     pub side: Side,

@@ -3,7 +3,7 @@
 //! type and the `buying_power` expectation are read (DEC-105): the founder's values pass, and a
 //! wrong account type, a wrong buying power, or an account type the profile forbids fails.
 //!
-//! The backtest cases do the same for E4-1 (DEC-106 item 10): RC-10, RC-12, and RC-19 pass as the
+//! The backtest cases do the same for E4-1 (DEC-106 item 11): RC-10, RC-12, and RC-19 pass as the
 //! founder wrote them, and editing a fill's price, bar, or liquidity, a bar's session label, an
 //! order's decision time, its `first_bar_reference_volume`, its position, or a canceled leg makes
 //! the case fail. Six bugs planted in the backtest interpretation, one per key it reads, were each

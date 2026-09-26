@@ -580,6 +580,8 @@ impl Bps {
 
 impl Fraction {
     pub const ZERO: Self = Self(Decimal::ZERO);
+    /// The whole of a quantity: `Qty::portion(Fraction::ONE, increment)` truncates to the increment.
+    pub const ONE: Self = Self(Decimal::ONE);
 
     /// Canonical text of a value from zero to one inclusive: `negative` below zero, `above_one`
     /// above one, `too_precise` beyond 9 places.
