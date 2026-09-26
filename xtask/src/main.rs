@@ -1136,7 +1136,14 @@ fn pending_problems(root: &Path, base: &str) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    Ok(verdicts(&tests, &outcomes))
+    let problems = verdicts(&tests, &outcomes);
+    if problems.is_empty() {
+        eprintln!(
+            "    pending: all {} fail, as pending tests must; nextest's `test run failed` above is expected",
+            tests.len()
+        );
+    }
+    Ok(problems)
 }
 
 /// A test marked `#[ignore = "pending <story>"]`: its path within its file (enclosing inline `mod`
