@@ -93,7 +93,7 @@ them in the decision log.
 4. **E5-2** artifact store, then **E5-3** the Postgres journal (environment work first).
 5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
    DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
-   the envelope and strategy field split, the universe as runtime state, the research agent
+   the envelope fields and the universe as runtime state, the research agent
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds

@@ -28,8 +28,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 | E13 Hybrid deployment | M11 | 6.9 | Must |
 | E14 Billing | M12 | 6.10 | Must |
 | E15 Signal models: LLM and fast models, scorecards | M5 (LLM research); Phase 3 (fast models, scorecards) | 6.3, 6.5 | Must (E15-1); Should |
-| E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
 | E16 Kraken Derivatives US connector | Phase 3 | 6.2 (FR-2.5) | Should |
+| E17 Research agent and dynamic universe | M5 | 6.3 (FR-3.9), 6.5 | Must |
 
 ## Stories
 
@@ -140,7 +140,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   platform is down.
   *Accepted when:* RC-14 passes; unprotected windows are journaled and alerted beyond the limit.
 - **E7-6 (Must, M8)** As a retail user, I want to connect a Robinhood agentic trading account over
-  MCP so that my agent trades the funds I deposited there and nothing else ([DEC-98](04-decision-log.md#decisions),
+  MCP so that my agent trades US equities and crypto spot with the funds I deposited there and
+  nothing else ([DEC-98](04-decision-log.md#decisions),
   [OD-12](04-decision-log.md#open-decisions)).
   *Accepted when:* the connector can place, cancel, and reconcile equity orders in the dedicated
   account only; every MCP exchange is journaled; beta terms are recorded.
@@ -182,7 +183,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-1 (Must)** As an operator, I want to describe an agent in plain language and get a
   compiled mandate with inferred fields highlighted. *Accepted when:* compiled mandates validate
   against the [mandate spec](../specs/mandate.md) (schema, V-rules, policy hierarchy; reference
-  cases MC-S, MC-V, and MC-P pass); unstated judgment fields are left blank, never filled.
+  cases MC-S, MC-V, and MC-P pass); proposed envelope values are marked as proposed and no envelope
+  field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
   increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C35 pass.
@@ -233,8 +235,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 Design: [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) ([DEC-97](04-decision-log.md#decisions)).
 The mandate spec, schemas, reference implementation, and cases are rewritten first in spec-change PRs.
 
-- **E17-1 (Must)** As an owner, I want the mandate split into envelope fields I confirm and strategy
-  fields the platform produces at runtime, so that I set the risk and the agent brings the ideas.
+- **E17-1 (Must)** As an owner, I want the mandate split into envelope fields I confirm and a working
+  universe the platform produces at runtime, so that I set the risk and the agent brings the ideas.
   *Accepted when:* the rewritten mandate spec's cases pass; the compiler may propose envelope values,
   each marked as proposed; no envelope field activates unconfirmed.
 - **E17-2 (Must)** As an owner, I want a research agent that turns market data, news, filings, and
@@ -246,8 +248,8 @@ The mandate spec, schemas, reference implementation, and cases are rewritten fir
   `UniverseChanged`, and removed to exits-only when a thesis is invalidated.
   *Accepted when:* simulation fuzzing over random theses never admits an ineligible instrument or
   exceeds the envelope; prompt-injection fixtures never reach an order.
-- **E17-4 (Must)** As a fund, I want a bring-your-own-strategy mode that pins the strategy fields
-  and disables the research agent, so that today's behavior stays available.
+- **E17-4 (Must)** As a fund, I want a bring-your-own-strategy mode that pins the universe and
+  disables the research agent, so that today's behavior stays available.
 - **E17-5 (Should)** As an owner, I want the input-drift detector (`unusual_input`, V-018) so that
   unusual inputs escalate before the research agent acts on them.
 

@@ -12,7 +12,10 @@
 | **Signal model** | A registered component the user selects that produces an output (conviction, confidence, horizon, thesis): quant model, fast decision model, or LLM research. Never places orders. Formerly "advisor" |
 | **Order builder** | Combines signal-model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score. Formerly "decider" |
 | **Combined score** | The order builder's weighted average of model confidences; an input to autonomy rules, not a probability of profit |
-| **Judgment field** | A mandate field that expresses a trading decision (instruments, goal, allocation, models, sizing, protection, limits, `auto`); only the user sets it |
+| **Envelope field** | A mandate field the user confirms (capital, goal, limits, autonomy rules, signal models and weights, sizing, protection, cadence, allowed asset classes, `max_instruments`); the compiler may propose a value, shown as proposed, but nothing activates unconfirmed ([DEC-97](../project/04-decision-log.md#decisions)). Formerly "judgment field" |
+| **Strategy field** | The working universe and the theses behind it, produced by the research agent at runtime within the envelope, journaled, and outside the hashed mandate document |
+| **Research agent** | The LLM-driven runtime component that turns market data, news, filings, and memory into theses and admits instruments into the working universe through the eligibility floor and the autonomy rules ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)) |
+| **Thesis** | A research-agent output naming one instrument, direction, horizon, evidence, and invalidation conditions, with conviction and confidence; journaled as `ThesisProposed` |
 | **Risk exit / discretionary exit / owner exit** | An exit from the risk engine (limits, automated flatten, trim, stop watchdog), exempt from all controls; an owner's close or kill switch, paced only by participation caps; an exit from the order builder or goal, paced by conduct controls but never denied |
 | **Lifetime loss floor** | Equity level (contributed capital × (1 − `max_loss_from_allocation`)) at which an agent flattens and pauses permanently unless the owner loosens the mandate |
 | **Autonomy policy** | Rules that classify each proposed action as AUTO, ASK, or DENY |

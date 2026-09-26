@@ -97,7 +97,8 @@ precisely:
 - **Alpaca:** users open and verify accounts with Alpaca, which performs KYC; Mandate connects
   through OAuth and never performs KYC for trading accounts.
 - **Robinhood Agentic Trading:** the customer opens and funds a dedicated agentic trading account at
-  Robinhood, which performs KYC, and connects Mandate over MCP; Robinhood states that it does not
+  Robinhood, which performs KYC, and connects Mandate over MCP (equities, and crypto since
+  2026-08-17; options are out of scope for Mandate); Robinhood states that it does not
   supervise connected agents and that the customer is responsible for reviewing activity
   ([DEC-98](../project/04-decision-log.md#decisions), [OD-12](../project/04-decision-log.md#open-decisions)).
 - **Kraken Derivatives US:** eligibility (identity verification, futures eligibility check, some
@@ -226,9 +227,10 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     sizing method cure that?
 22. Do platform-model scores used in user-written ASK/AUTO rules, or any future calibration, amount
     to platform discretion?
-23. Do required judgment fields left blank for the user (rather than filled with platform values)
-    adequately avoid the platform "choosing limits"? Is quoted-span extraction by the compiler
-    acceptable?
+23. When the compiler or a template proposes envelope values (limits, allocation, autonomy rules)
+    that the user confirms ([DEC-97](../project/04-decision-log.md#decisions)), is the platform
+    "choosing limits"? What does the confirmation screen need to show for the user's confirmation
+    to carry the decision?
 24. What evidence (rendered text, version, authentication, timestamp) makes mandate confirmations
     and disclosure acceptances enforceable under E-SIGN and UETA, and adequate in a dispute?
 25. Should leveraged and inverse ETPs be prohibited, or limited by holding period, for retail users

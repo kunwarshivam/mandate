@@ -123,8 +123,8 @@ flowchart LR
 Users describe an agent in plain language or through a form. An LLM **compiles** the
 description into a structured spec: it extracts the values the user stated and may propose the
 rest of the envelope (capital, goal, limits, autonomy rules, asset classes), each marked as
-proposed; the user confirms every envelope field. Strategy fields (universe, theses, signal
-models, thresholds) are produced by the research agent at runtime within that envelope
+proposed; the user confirms every envelope field. The working universe and its theses are
+produced by the research agent at runtime within that envelope
 ([DEC-97](project/04-decision-log.md#decisions), [ADR-0002](adr/0002-autonomous-ideation-and-retail.md)).
 The spec is binding: the agent cannot act outside it. The exact format is the [mandate spec](specs/mandate.md); an abbreviated example:
 
@@ -353,7 +353,7 @@ flowchart TB
 |---|---|
 | Perception | Subscribes to market data, news, account events, and timers; fills and position updates from the broker arrive here, closing the loop |
 | Memory | Positions, theses (why each position exists and what would invalidate it), and signal-model track records, kept for the user's review and fed to the research agent ([DEC-97](project/04-decision-log.md#decisions)) |
-| Research agent | LLM-driven ideation, asynchronous and never blocking trading: ingests market data, news, filings, screens, and memory; proposes theses (instrument, direction, horizon, evidence, invalidation) journaled as `ThesisProposed`; admits instruments into the working universe through the eligibility floor, `max_instruments`, instrument-group claims, and the autonomy rules (`UniverseChanged`); its theses are signal-model outputs to the order builder. Disabled in bring-your-own-strategy mode ([ADR-0002](adr/0002-autonomous-ideation-and-retail.md)) |
+| Research agent | LLM-driven ideation, asynchronous and never blocking trading: ingests market data, news, filings, screens, and memory; proposes theses (instrument, direction, horizon, evidence, invalidation) journaled as `ThesisProposed`; admits instruments into the working universe through the eligibility floor, `max_instruments`, instrument-group claims, and the autonomy rules (`UniverseChanged`); its theses are its signal-model outputs to the order builder, combined at the user-confirmed weight with the other configured models. Disabled in bring-your-own-strategy mode ([ADR-0002](adr/0002-autonomous-ideation-and-retail.md)) |
 | Signal models | Produce outputs in a common format (conviction, confidence, horizon, thesis): quant models, fast decision models, LLM research. They never place orders |
 | Order builder | Combines model outputs with the user's fixed weights, sizes with the user-selected method, clips to limits, and proposes an action with a combined score |
 | Autonomy policy | Classifies each proposed action as AUTO, ASK, or DENY according to the spec |

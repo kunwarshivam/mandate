@@ -14,7 +14,7 @@ flowchart LR
     P1 --> P2["Phase 2<br/>Platform v1<br/>design partners"]
     P2 --> P3["Phase 3<br/>Hybrid, fast models,<br/>scorecards, shadow mode"]
     P3 --> P4["Phase 4<br/>Equities, mobile,<br/>enterprise identity, on-prem"]
-    P4 --> P5["Phase 5<br/>Retail, research lab,<br/>shared data"]
+    P4 --> P5["Phase 5<br/>Research lab,<br/>shared data"]
 ```
 
 ## Now
@@ -95,7 +95,7 @@ at least one hybrid customer in production.
 - SAML and SCIM; separation of duties; fully on-prem / air-gapped packaging.
 - SOC 2 readiness.
 
-### Phase 5: Retail, research lab, shared data
+### Phase 5: Research lab and shared data
 
 - Retail education and community features (retail itself starts in v1, [DEC-98](../project/04-decision-log.md#decisions)).
 - Research lab: users define and backtest mandate variants; promotion requires approval.

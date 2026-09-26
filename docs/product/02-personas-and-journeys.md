@@ -67,9 +67,11 @@ Personas are hypotheses to validate with design partners.
 
 ### 6. Jordan: retail investor (managed)
 
-- Wants a simple, conservative agent (for example, "accumulate BTC on dips, never more than
-  10% of my account"). Requires the retail policy profile (platform ceilings, not pre-filled
-  values), education, disclosures, and legal review before launch.
+- Wants an agent that brings its own ideas within limits they set (for example, "never more
+  than 10% of my account, ask me before anything new"), on Alpaca or a Robinhood agentic
+  account. Gets the retail policy profile (platform ceilings; proposed values shown as proposed),
+  education, and disclosures; trades paper until counsel signs off on live retail trading
+  ([DEC-98](../project/04-decision-log.md#decisions)).
 
 ## Roles in the product
 

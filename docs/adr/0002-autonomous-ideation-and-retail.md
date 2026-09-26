@@ -34,11 +34,11 @@ Findings that shape the decision:
    The software-only defense is gone and counsel must say what replaces it.
 3. **Robinhood** launched **Agentic Trading** in beta on 2026-05-27: a customer opens a dedicated
    agentic trading account, funds it with what they are willing to risk, and connects a third-party
-   agent through Robinhood's Model Context Protocol (MCP) servers. Equities only at launch; options,
-   crypto, event contracts, and futures announced as coming. Robinhood states that it does not
-   control, supervise, monitor, or audit connected agents, that customers are responsible for
-   reviewing activity, and that it does not guarantee any agent output. Robinhood also has a REST
-   crypto trading API for its crypto customers.
+   agent through Robinhood's Model Context Protocol (MCP) server. Equities at launch, options from
+   2026-07-06, and crypto from 2026-08-17, all through the same dedicated account; event contracts
+   and futures announced as coming. Robinhood states that it does not control, supervise, monitor,
+   or audit connected agents, that customers are responsible for reviewing activity, and that it
+   does not guarantee any agent output.
 4. **Fidelity** has no public retail trading API. Aggregators such as SnapTrade can read Fidelity
    and Robinhood accounts but cannot place trades on either. Fidelity's FIX access is institutional.
 
@@ -48,18 +48,21 @@ Findings that shape the decision:
    kinds:
    - **Envelope fields** are owned and confirmed by the user and keep every existing rule
      (validation, policy hierarchy, change classification, step-up for risk-increasing changes):
-     `environment`, `connection_id`, `capital`, `goal`, `risk.*`, `protection.enabled`,
-     `autonomy`, `notifications`, the allowed asset classes and the leveraged-ETP opt-in, and a new
-     `universe.max_instruments`. The compiler and templates may now **propose** values for them
-     (provenance `platform_proposed`); the user still confirms every one, and every proposed value
-     is shown as proposed.
-   - **Strategy fields** are produced by the platform at runtime, journaled, and bounded by the
-     envelope: the working universe, theses, the signal-model set and weights, entry and exit
-     thresholds, the rebalance band, protection distances, and cadence. They leave the hashed
-     mandate document; changing them is not a mandate version (amends
-     [DEC-43](../project/04-decision-log.md#decisions)).
-   - **Bring-your-own-strategy remains a mode.** An owner may pin the strategy fields, which
-     disables the research agent and gives today's behavior. Funds that want their own strategies
+     everything in the mandate today except `universe.instruments`, plus a new
+     `universe.max_instruments`. That includes the signal-model set and their fixed weights
+     ([DEC-47](../project/04-decision-log.md#decisions) stands: no calibration, and the research
+     agent is one signal model with a user-confirmed weight), entry and exit thresholds, the
+     rebalance band, protection distances, and cadence, which the mandate spec classifies as
+     risk-increasing when loosened (§9.2). The compiler and templates may now **propose** values
+     for envelope fields (provenance `platform_proposed`); the user still confirms every one, and
+     every proposed value is shown as proposed.
+   - **Strategy fields** are the working universe and the theses behind it. They are produced by
+     the platform at runtime, journaled, bounded by the envelope, and leave the hashed mandate
+     document: admitting or removing an instrument is not a mandate version (amends
+     [DEC-43](../project/04-decision-log.md#decisions) for `universe.instruments` only; every
+     other classification row is unchanged).
+   - **Bring-your-own-strategy remains a mode.** An owner may pin the universe, which disables
+     the research agent and gives today's behavior. Funds that want their own strategies
      keep it.
 2. **A research agent joins the runtime** (HLD §5), beside the signal models: LLM-driven,
    asynchronous, never blocking trading, metered through the model gateway. Its loop:
@@ -97,24 +100,26 @@ Findings that shape the decision:
    every retail user trades paper (`AGENTS.md` rule 8 is unchanged).
 6. **Connectors** (amends [DEC-23](../project/04-decision-log.md#decisions)): Alpaca stays first
    (paper environment, OAuth, stocks, ETFs, and crypto; in progress). **Robinhood Agentic Trading**
-   is second: the retail equities path, connected over MCP to the customer's dedicated agentic
-   account, which is a natural allocation boundary (the agent can only reach what the customer
-   deposited there). Robinhood's crypto API follows for crypto. Kraken Derivatives US moves to
-   third. Fidelity is deferred until it offers an official trading API; aggregator trading is not
+   is second: the retail path for US equities and crypto spot (options stay out of scope,
+   DEC-24), connected over MCP to the customer's dedicated agentic account, which is a natural
+   allocation boundary (the agent can only reach what the customer deposited there). Kraken
+   Derivatives US moves to third. Fidelity is deferred until it offers an official trading API; aggregator trading is not
    used.
 7. **Compliance posture.** The software-only, never-advises position is withdrawn. The working
    assumption is that Mandate may be an investment adviser under the Advisers Act and must plan
    for registration or a counsel-approved structure. Counsel engagement moves from M13 to before
    the Phase 1 exit. The compliance document records the new assumption and the questions this
    raises; no live trading for any user until counsel signs off.
-8. **Unchanged:** DEC-03 to DEC-07; the gate, ladder, floor, and breach confirmation; journal
-   before acting; kill switches; eligibility floor and conduct controls; no shorts, 1×, limit-only
+8. **Unchanged:** DEC-03 to DEC-07 and DEC-47; every change-classification row except
+   `universe.instruments`; the gate, ladder, floor, and breach confirmation; journal before acting; kill switches; eligibility floor and conduct controls; no shorts, 1×, limit-only
    openings; no custody, no per-trade pricing, no promises of returns.
 9. **Sequencing.** Phase 0 (market data, accounting, backtest, journal) is unchanged: E3-3 stays
    next. The mandate spec, its schemas, the reference implementation, and the 215 reference cases
    are rewritten in spec-change PRs before M5 (the field split, universe as runtime state, the
    research agent contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and
-   V-020, V-022, and MI-12 restated for envelope fields). Backlog: E15 (LLM signal models) becomes
+   V-020, V-022, and MI-12 restated for envelope fields). The mandate spec's current text at §1.2,
+   §4.3, §7, §8.1, and §10 and the trading domain spec's principle 5 carry the superseded posture
+   until then. Backlog: E15 (LLM signal models) becomes
    Must in Phase 1; a new epic E17 (research agent and dynamic universe) is Must in Phase 1; a
    Robinhood connector story joins E7; the retail profile joins E9. The Phase 1 exit criterion
    becomes an agent trading paper unattended on theses it generated.
