@@ -127,6 +127,12 @@ decimal_type!(
     Price
 );
 decimal_type!(
+    /// A positive reporting mark with at most 12 fractional digits. A mark arrives as a [`Price`]
+    /// (9 places); a split replaces it with `round(mark × old ÷ new, 12, half_even)` (spec §2.1,
+    /// §8.5), which a `Price` cannot hold.
+    MarkPrice
+);
+decimal_type!(
     /// A signed USD amount at full precision.
     Usd
 );
@@ -219,6 +225,12 @@ impl SignedQty {
             .to_decimal(FULL_SCALE)
             .map(Usd)
     }
+
+    /// `self × mark`, exact and signed.
+    pub fn value_at_mark(self, mark: MarkPrice) -> Result<Usd, NumError> {
+        let _ = mark.exact();
+        Err(NumError::Overflow)
+    }
 }
 
 impl From<Qty> for SignedQty {
@@ -235,6 +247,109 @@ impl Price {
         } else {
             Err(NumError::NotPositive)
         }
+    }
+}
+
+impl MarkPrice {
+    /// Canonical text of a positive value with at most 12 fractional digits.
+    pub fn parse(_text: &str) -> Result<Self, NumError> {
+        Err(NumError::NotCanonical)
+    }
+}
+
+impl From<Price> for MarkPrice {
+    fn from(price: Price) -> Self {
+        Self(price.0)
+    }
+}
+
+/// The quantity grid a split truncates to (spec §8.5): 10⁻⁹ shares for a fractionable
+/// instrument, whole shares otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShareIncrement {
+    Fractional,
+    Whole,
+}
+
+/// A split ratio `new:old` of positive integers: `new` shares for every `old` (spec §8.5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SplitRatio {
+    new: u64,
+    old: u64,
+}
+
+impl SplitRatio {
+    /// Both terms must be positive (`not_positive`).
+    pub fn new(new: u64, old: u64) -> Result<Self, NumError> {
+        let _ = (new, old);
+        Err(NumError::NotPositive)
+    }
+
+    pub fn new_shares(self) -> u64 {
+        self.new
+    }
+
+    pub fn old_shares(self) -> u64 {
+        self.old
+    }
+
+    /// Q' = Q × new ÷ old truncated toward zero to `increment`, with Q kept for the residual
+    /// formulas.
+    pub fn split(self, _qty: SignedQty, _increment: ShareIncrement) -> Result<SplitQty, NumError> {
+        Err(NumError::Overflow)
+    }
+
+    /// `round(mark × old ÷ new, scale, mode)`: one rounding; `not_positive` if it rounds to zero.
+    pub fn mark(
+        self,
+        _mark: MarkPrice,
+        _scale: u32,
+        _mode: Rounding,
+    ) -> Result<MarkPrice, NumError> {
+        Err(NumError::Overflow)
+    }
+}
+
+/// A position's quantity before (Q) and after (Q') a split. Only [`SplitRatio::split`] builds one,
+/// so Q' is always the truncation of Q_raw = Q × new ÷ old, and the residual f = Q_raw − Q' is
+/// always (Q·new − Q'·old) ÷ old.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SplitQty {
+    ratio: SplitRatio,
+    before: SignedQty,
+    after: SignedQty,
+}
+
+impl SplitQty {
+    pub fn before(self) -> SignedQty {
+        self.before
+    }
+
+    pub fn after(self) -> SignedQty {
+        self.after
+    }
+
+    /// `round(B × (Q·new − Q'·old) ÷ (Q·new), scale, mode)`: the basis of the residual, a single
+    /// division of terminating inputs (spec §8.5).
+    pub fn residual_basis(
+        self,
+        _basis: CostBasis,
+        _scale: u32,
+        _mode: Rounding,
+    ) -> Result<CostBasis, NumError> {
+        let _ = self.ratio;
+        Err(NumError::Overflow)
+    }
+
+    /// `round(f × price, scale, mode)` with f = (Q·new − Q'·old) ÷ old: cash in lieu of the
+    /// residual, signed like Q.
+    pub fn cash_in_lieu(
+        self,
+        _price: Price,
+        _scale: u32,
+        _mode: Rounding,
+    ) -> Result<Usd, NumError> {
+        Err(NumError::Overflow)
     }
 }
 

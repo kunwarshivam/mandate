@@ -11,7 +11,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{d, equity, fee_cap, id, no_fees, usd};
+use common::{d, equity, fee_cap, id, no_fees, round_trip, usd};
 use mandate_accounting::{
     Account, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily,
     FeeKind, Input, Liquidity, Position, Record, Side, TafCapBasis,
@@ -638,34 +638,6 @@ fn compare(account: &Account, oracle: &Oracle) -> Result<(), TestCaseError> {
 
 fn money(v: mandate_num::Usd) -> i128 {
     units(&v.to_string(), 12)
-}
-
-/// Rebuilds an input from the text of every field, as a journal round trip would.
-fn round_trip(input: &Input) -> Input {
-    match input {
-        Input::Fill(e) => Input::Fill(Execution {
-            fill_id: e.fill_id.clone(),
-            client_order_id: e.client_order_id.clone(),
-            instrument: id(e.instrument.as_str()),
-            asset_class: e.asset_class,
-            side: e.side,
-            qty_gross: Qty::parse(&e.qty_gross.to_string()).unwrap(),
-            price: Price::parse(&e.price.to_string()).unwrap(),
-            liquidity: e.liquidity,
-            executed_at: UtcNanos::parse(&e.executed_at.to_string()).unwrap(),
-        }),
-        Input::Mark { instrument, price } => Input::Mark {
-            instrument: id(instrument.as_str()),
-            price: Price::parse(&price.to_string()).unwrap(),
-        },
-        Input::FeesCharged { family, day } => Input::FeesCharged {
-            family: *family,
-            day: Date::parse(&day.to_string()).unwrap(),
-        },
-        Input::SettlementPosted { date } => Input::SettlementPosted {
-            date: Date::parse(&date.to_string()).unwrap(),
-        },
-    }
 }
 
 proptest! {

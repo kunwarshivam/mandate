@@ -3,7 +3,7 @@
 use core::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_num::{CostBasis, NumError, Price, Rounding, SignedQty, Usd};
+use mandate_num::{CostBasis, MarkPrice, NumError, Price, Rounding, SignedQty, Usd};
 use mandate_time::{Date, UtcNanos, new_york_midnight};
 
 use crate::{
@@ -131,6 +131,46 @@ pub enum Record {
     SettlementPosted {
         amount: Usd,
     },
+    Split {
+        before: SignedQty,
+        after: SignedQty,
+        /// The basis removed with the residual; the whole basis when no share remains.
+        residual_basis: CostBasis,
+        /// Signed like the position: receivable for a long, payable for a short.
+        cash_in_lieu: Usd,
+        /// cash in lieu − residual basis.
+        realized_gross: Usd,
+    },
+    CashDividend {
+        /// The position held when the dividend was applied.
+        entitlement: SignedQty,
+        /// Signed like the entitlement: receivable for a long, payable for a short.
+        amount: Usd,
+    },
+    DividendPaid {
+        amount: Usd,
+    },
+    CashInLieuPosted {
+        amount: Usd,
+    },
+}
+
+/// Cash a corporate action made due and the broker has not yet posted. `amount` is signed: positive
+/// is owed to the account, negative is owed by it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Receivable {
+    pub instrument: InstrumentId,
+    pub ex_date: Date,
+    pub kind: ReceivableKind,
+    pub amount: Usd,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReceivableKind {
+    /// Settled by `DividendPaid` at 00:00 ET on `pay_date`.
+    Dividend { pay_date: Date },
+    /// Settled by the broker's `CashInLieuPosted`.
+    CashInLieu,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -191,6 +231,9 @@ impl Account {
             }
             Input::FeesCharged { family, day } => next.charge(*family, *day)?,
             Input::SettlementPosted { date } => next.settle(*date)?,
+            Input::CorporateAction(_)
+            | Input::DividendPaid { .. }
+            | Input::CashInLieuPosted { .. } => return Err(AccountingError::InvalidPosition),
         };
         Ok(Applied {
             account: next,
@@ -372,6 +415,37 @@ impl Account {
         Ok(due)
     }
 
+    /// Every `SettlementPosted` and `DividendPaid` whose time (00:00 ET of its date) is at or
+    /// before `at`, by date; on one date, the settlement first, then dividends by instrument and
+    /// ex-date.
+    pub fn due(&self, at: UtcNanos) -> Result<Vec<Input>, AccountingError> {
+        Ok(self
+            .settlements_due(at)?
+            .into_iter()
+            .map(|date| Input::SettlementPosted { date })
+            .collect())
+    }
+
+    /// Outstanding receivables and payables, by instrument, ex-date, and kind.
+    pub fn receivables(&self) -> Vec<Receivable> {
+        Vec::new()
+    }
+
+    /// Σ receivables − Σ payables.
+    pub fn net_receivables(&self) -> Result<Usd, AccountingError> {
+        Err(AccountingError::InvalidPosition)
+    }
+
+    /// Dividends earned (paid on shorts count negative), from the ex-date.
+    pub fn income(&self) -> Usd {
+        Usd::ZERO
+    }
+
+    /// Gross realized + unrealized + income − fees (spec §8.2).
+    pub fn total_pnl(&self) -> Result<Usd, AccountingError> {
+        Err(AccountingError::InvalidPosition)
+    }
+
     pub fn position(&self, instrument: &InstrumentId) -> Position {
         self.positions
             .get(instrument)
@@ -383,12 +457,14 @@ impl Account {
         self.positions.iter().map(|(id, p)| (id, *p))
     }
 
-    /// The reporting mark: the latest `MarkUpdated`, else the last fill price (spec §8.2).
-    pub fn mark(&self, instrument: &InstrumentId) -> Option<Price> {
+    /// The reporting mark: the latest `MarkUpdated`, else the last fill price (spec §8.2), each
+    /// adjusted by every split since.
+    pub fn mark(&self, instrument: &InstrumentId) -> Option<MarkPrice> {
         self.marks
             .get(instrument)
             .or_else(|| self.last_fill_prices.get(instrument))
             .copied()
+            .map(MarkPrice::from)
     }
 
     pub fn settled(&self) -> Usd {
@@ -437,8 +513,10 @@ impl Account {
         self.positions
             .iter()
             .map(|(id, p)| {
-                self.mark(id)
-                    .map(|mark| (*p, mark))
+                self.marks
+                    .get(id)
+                    .or_else(|| self.last_fill_prices.get(id))
+                    .map(|mark| (*p, *mark))
                     .ok_or_else(|| AccountingError::NoMark(id.clone()))
             })
             .collect()
