@@ -52,7 +52,6 @@ fn rc_19_bars() -> Vec<SimBar> {
 /// 5000 = 500 ≥ 100 (rule 3). A market sell fills at the open less s: 100.00 × (1 − 0.0003) =
 /// 100.00 − 0.03 = 99.97, taker (rule 4, DEC-106 item 6).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_10_a_market_sell_fills_at_the_first_eligible_open_less_slippage() {
     assert_eq!(
         fills(&rc_10_bars(), &[sell(market(), "100", decided("09:41"))]),
@@ -65,7 +64,6 @@ fn rc_10_a_market_sell_fills_at_the_first_eligible_open_less_slippage() {
 /// fill. Bar 2's high 100.60 passes it strictly, so the order fills at its limit, 100.50, as maker;
 /// bar 2's cap is 10% of bar 1's 8000 = 800 ≥ 100.
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_10_a_touch_is_not_a_fill_and_the_next_bar_through_the_limit_is() {
     assert_eq!(
         fills(
@@ -80,7 +78,6 @@ fn rc_10_a_touch_is_not_a_fill_and_the_next_bar_through_the_limit_is() {
 /// marketable on arrival and fills at min(limit, open × (1 + s)) = min(100.10, 100.00 × 1.0003 =
 /// 100.03) = 100.03, taker (rule 5).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_10_a_marketable_limit_buy_fills_at_the_slipped_open_inside_its_limit() {
     assert_eq!(
         fills(
@@ -97,7 +94,6 @@ fn rc_10_a_marketable_limit_buy_fills_at_the_slipped_open_inside_its_limit() {
 /// marketable and fills at min(100.60, 100.40 × 1.0003) = 100.40 + 0.03012 = 100.43012 (rules 3
 /// and 5). Both fills are taker.
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_10_a_marketable_limit_fills_across_two_bars_under_the_volume_cap() {
     assert_eq!(
         fills(
@@ -116,7 +112,6 @@ fn rc_10_a_marketable_limit_fills_across_two_bars_under_the_volume_cap() {
 /// the stop, so the fill is at the stop less s: 99.00 × 0.9997 = 99.00 − 0.0297 = 98.9703, taker
 /// (rule 6).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_a_stop_reached_inside_the_bar_fills_at_the_stop_less_slippage() {
     let bars = [
         bar("10:00", ["99.6", "99.8", "99.4", "99.5", "9000"]),
@@ -132,7 +127,6 @@ fn rc_12_a_stop_reached_inside_the_bar_fills_at_the_stop_less_slippage() {
 /// so the fill is at the open less s: 98.50 × 0.9997 = 98.50 − 0.02955 = 98.47045 (rule 6, first
 /// branch). A gap gives the order the gapped price, never the stop.
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_a_stop_gapped_through_fills_at_the_open_less_slippage() {
     let bars = [
         bar("10:00", ["99.6", "99.8", "99.4", "99.5", "9000"]),
@@ -152,7 +146,6 @@ fn rc_12_a_stop_gapped_through_fills_at_the_open_less_slippage() {
 /// can.
 
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_a_stop_limit_that_gaps_past_its_limit_rests_and_fills_at_the_limit() {
     let bars = [
         bar("10:00", ["99.6", "99.8", "99.4", "99.5", "9000"]),
@@ -174,7 +167,6 @@ fn rc_12_a_stop_limit_that_gaps_past_its_limit_rests_and_fills_at_the_limit() {
 /// stop fills first, adverse first: 99.00 × 0.9997 = 98.9703, taker, and the limit leg is canceled
 /// at that bar (rule 8).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_an_oco_with_both_legs_reachable_fills_the_stop_first() {
     let bars = [
         bar("10:00", ["100", "100.2", "99.8", "100", "9000"]),
@@ -201,7 +193,6 @@ fn rc_12_an_oco_with_both_legs_reachable_fills_the_stop_first() {
 /// sell limit gapped through in continuous trading fills at its limit, 101.00, as maker, and the
 /// stop leg is canceled (rules 5 and 8).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_an_oco_whose_open_reaches_the_take_profit_fills_that_leg() {
     let bars = [
         bar("10:00", ["100", "100.2", "99.8", "100", "9000"]),
@@ -226,7 +217,6 @@ fn rc_12_an_oco_whose_open_reaches_the_take_profit_fills_that_leg() {
 /// opens at 98.50, through the limit, but this is continuous trading, not an auction: the market
 /// cannot print through a resting limit, so the fill is at the limit, 99.00, as maker (rule 5).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_a_resting_limit_gapped_through_in_continuous_trading_fills_at_the_limit() {
     let bars = [
         bar("10:00", ["99.4", "99.6", "99.1", "99.3", "9000"]),
@@ -244,7 +234,6 @@ fn rc_12_a_resting_limit_gapped_through_in_continuous_trading_fills_at_the_limit
 /// the limit at an auction, so the fill is at the open, with no slippage and neither maker nor taker
 /// (rule 5's exception, DEC-106 item 5).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_a_resting_limit_gapped_through_at_an_auction_fills_at_the_open() {
     let bars = [auction("09:30", ["98.5", "98.8", "98.4", "98.7", "30000"])];
     assert_eq!(
@@ -260,7 +249,6 @@ fn rc_12_a_resting_limit_gapped_through_at_an_auction_fills_at_the_open() {
 /// regular session's first covered bar, has a median of 9000 for a cap of 900, and its open 99.20
 /// and low 99.10 both stay above the stop. Nothing fills.
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_an_equity_stop_does_not_trigger_in_extended_hours() {
     let bars = [
         pre_market("09:00", ["99.5", "99.6", "98", "99.3", "2000"]),
@@ -276,7 +264,6 @@ fn rc_12_an_equity_stop_does_not_trigger_in_extended_hours() {
 /// and rests from that same bar; bar 1's low 99.60 passes 99.70 strictly, so it fills at the limit,
 /// 99.70, as maker, on its arrival bar (rule 5). Bar 1's cap is 10% of bar 0's 5000 = 500 ≥ 100.
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_19_a_resting_limit_can_fill_on_its_arrival_bar() {
     assert_eq!(
         fills(
@@ -294,7 +281,6 @@ fn rc_19_a_resting_limit_can_fill_on_its_arrival_bar() {
 /// Bar 3's low 99.90 passes 100.05 strictly, and its cap, 10% of bar 2's 6000 = 600, covers the
 /// remaining 500, which fills at the limit as maker (rule 5).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_19_a_marketable_remainder_becomes_resting_when_a_bar_opens_beyond_the_limit() {
     assert_eq!(
         fills(
@@ -312,7 +298,6 @@ fn rc_19_a_marketable_remainder_becomes_resting_when_a_bar_opens_beyond_the_limi
 /// it, so the order rests; bar 1's low is exactly 99.60, a touch, not a fill. No later bar's low
 /// reaches 99.60 (100.10 and 99.90), so nothing fills (rule 5).
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_19_a_touch_on_the_arrival_bar_is_not_a_fill() {
     assert!(
         fills(
@@ -331,7 +316,6 @@ fn rc_19_a_touch_on_the_arrival_bar_is_not_a_fill() {
 /// remainder rests and fills 100 at the limit as maker, its low 99.90 having passed it. Bar 2 opens
 /// at 100.00 again: a resting limit fills at its limit, 100.05, as maker, not at the slipped open.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_resting_remainder_does_not_become_marketable_again() {
     let bars = [
         auction("09:30", ["100", "100.2", "99.9", "100", "1000"]),
@@ -357,7 +341,6 @@ fn a_resting_remainder_does_not_become_marketable_again() {
 /// order that needed approval, which moves that order on to bar 2. Bar 0 is the regular session's
 /// first covered bar with a median of 5000, so a cap of 500 would have let it fill.
 #[test]
-#[ignore = "pending E4-1"]
 fn latency_moves_eligibility_and_approval_latency_applies_only_when_approval_was_required() {
     let config = SimConfig {
         decision_latency: Nanos::from_millis(60_000).unwrap(),
@@ -404,7 +387,6 @@ fn latency_moves_eligibility_and_approval_latency_applies_only_when_approval_was
 /// remainder rests at 100.10 and bar 2's low, exactly 100.10, is a touch, not a fill: it ends open
 /// with 300 unfilled.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_bars_volume_cap_is_shared_across_orders_in_submission_order() {
     let orders = [
         buy(limit("100.1"), "400", decided("09:41")),
@@ -434,7 +416,6 @@ fn a_bars_volume_cap_is_shared_across_orders_in_submission_order() {
 /// 100.00 × 1.0003 = 100.03. With no median for that minute the reference volume is unavailable and
 /// the bar's cap is 0, so nothing fills.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_sessions_first_bar_caps_on_the_twenty_session_median_and_on_zero_without_one() {
     let bars = [auction("09:30", ["100", "100.6", "99.8", "100.4", "30000"])];
     let orders = [buy(market(), "1000", decided("09:30"))];
@@ -451,7 +432,6 @@ fn a_sessions_first_bar_caps_on_the_twenty_session_median_and_on_zero_without_on
 /// its 99.00 limit. The same order as GTC fills on bar 3, at the limit as maker; bar 3 is the next
 /// day's first covered regular bar, with a median of 9000 for a cap of 900.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_day_orders_remainder_is_canceled_after_its_last_eligible_session() {
     let bars = [
         auction("09:30", ["100", "100.2", "99.8", "100", "9000"]),
@@ -504,7 +484,6 @@ fn a_day_orders_remainder_is_canceled_after_its_last_eligible_session() {
 /// resting sell limit at 99.05 whose 99.10 high the bar passes strictly, so it fills at the limit as
 /// maker. The bar opens its own session in the data, so its cap is 10% of the 9000 median = 900.
 #[test]
-#[ignore = "pending E4-1"]
 fn an_exit_marked_for_extended_hours_fills_after_hours() {
     let bars = [in_session(
         Session::AfterHours,
@@ -527,7 +506,6 @@ fn an_exit_marked_for_extended_hours_fills_after_hours() {
 /// 0.0416227766016837934, rounded up at 9 places to 0.041622777, so the buy fills at
 /// 100.041622777.
 #[test]
-#[ignore = "pending E4-1"]
 fn sqrt_impact_takes_the_root_of_the_filled_share_of_reference_volume() {
     let config = SimConfig {
         slippage: Slippage::Sqrt {
@@ -557,7 +535,6 @@ fn sqrt_impact_takes_the_root_of_the_filled_share_of_reference_volume() {
 /// unrounded 100.0123456789, and the sell receives 100.00 − 0.012345679 = 99.987654321, less than the
 /// unrounded 99.9876543211.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_fill_price_beyond_nine_places_rounds_against_the_order() {
     let config = SimConfig {
         slippage: Slippage::Fixed {
@@ -586,7 +563,6 @@ fn a_fill_price_beyond_nine_places_rounds_against_the_order() {
 /// = 5.0015. That price is not on the 0.01 tick the instrument trades in, and rule 9 leaves it
 /// alone.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_buy_stop_reached_by_the_high_fills_at_the_stop_and_is_not_tick_rounded() {
     let bars = [auction("09:30", ["4.9", "5.1", "4.85", "5.05", "30000"])];
     assert_eq!(
@@ -601,7 +577,6 @@ fn a_buy_stop_reached_by_the_high_fills_at_the_stop_and_is_not_tick_rounded() {
 /// price is 99.00 × 0.9997 = 98.9703, and the limit does not bind because 98.9703 is above it —
 /// max(98.90, 98.9703) = 98.9703, taker.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_triggered_stop_limit_fills_at_the_better_of_its_limit_and_the_triggered_price() {
     let bars = [auction("09:30", ["99.5", "99.6", "98.8", "98.9", "30000"])];
     assert_eq!(
@@ -619,7 +594,6 @@ fn a_triggered_stop_limit_fills_at_the_better_of_its_limit_and_the_triggered_pri
 /// the fill is 99.00 × 0.9997 = 98.9703 on a fractional quantity, and the cap truncates to the
 /// fractional increment: 10% of 5000 = 500 ≥ 0.25.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_crypto_stop_triggers_on_a_continuous_bar() {
     let bars = [
         continuous("01:00", ["99.6", "99.8", "99.4", "99.5", "5000"]),
@@ -642,7 +616,6 @@ fn a_crypto_stop_triggers_on_a_continuous_bar() {
 /// Inputs the model rejects rather than guessing about. Each error carries the stable code the
 /// runner reports (ADR-0001 ES-09).
 #[test]
-#[ignore = "pending E4-1"]
 fn the_model_rejects_bars_and_orders_it_cannot_simulate() {
     let good = bar("09:40", ["99.9", "100.2", "99.8", "100", "5000"]);
     let order = buy(limit("100"), "100", resting_from(0));
@@ -759,7 +732,6 @@ fn the_model_rejects_bars_and_orders_it_cannot_simulate() {
 /// of 98.90 passes the limit strictly and fills it at 98.80 as maker. A model that rested in the
 /// trigger bar would fill at bar 1 instead.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_stop_limit_that_gaps_beyond_its_limit_does_not_fill_in_its_trigger_bar() {
     let bars = [
         bar("10:00", ["99.6", "99.8", "99.4", "99.5", "9000"]),
@@ -783,7 +755,6 @@ fn a_stop_limit_that_gaps_beyond_its_limit_does_not_fill_in_its_trigger_bar() {
 /// remainder is a market order (item 10), so bar 2, capped at 10% of 9000 = 900, fills the last 300
 /// at its open: 101.50 × 0.9997 = 101.50 − 0.03045 = 101.46955.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder() {
     let bars = [
         bar("10:00", ["100", "100.2", "99.8", "100", "5000"]),
@@ -815,7 +786,6 @@ fn a_partial_oco_fill_cancels_the_other_leg_and_leaves_a_market_remainder() {
 /// at its limit, 101.00, as maker, not at 101.20 × 0.9997 = 101.16964, the better price a marketable
 /// limit would have taken. Bar 1's cap is 10% of bar 0's 5000 = 500.
 #[test]
-#[ignore = "pending E4-1"]
 fn an_ocos_take_profit_is_never_marketable_on_arrival() {
     let bars = [
         bar("10:00", ["100", "100.2", "99.8", "100", "5000"]),
@@ -842,7 +812,6 @@ fn an_ocos_take_profit_is_never_marketable_on_arrival() {
 /// 99.00 × 0.9997 = 98.9703. Bar 2 opens at 99.50, above the stop, and the remaining 200 fill there
 /// as a market order: 99.50 × 0.9997 = 99.50 − 0.02985 = 99.47015.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_triggered_stops_remainder_is_a_market_order() {
     let bars = [
         bar("10:00", ["99.6", "99.8", "99.4", "99.5", "5000"]),
@@ -864,7 +833,6 @@ fn a_triggered_stops_remainder_is_a_market_order() {
 /// 99.50 × 0.9997 = 99.47015; the session is the only thing stopping it. The fill instead comes on the
 /// regular session's first bar, capped the same way: 99.20 × 0.9997 = 99.20 − 0.02976 = 99.17024.
 #[test]
-#[ignore = "pending E4-1"]
 fn a_market_order_waits_for_the_regular_session() {
     let bars = [
         in_session(
@@ -885,7 +853,6 @@ fn a_market_order_waits_for_the_regular_session() {
 /// limit at 99.50 strictly — the session is the only reason there is no fill, and `extended_hours`
 /// does not reach it.
 #[test]
-#[ignore = "pending E4-1"]
 fn an_overnight_bar_never_fills() {
     let bars = [in_session(
         Session::Overnight,

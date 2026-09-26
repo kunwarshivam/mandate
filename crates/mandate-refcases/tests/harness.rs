@@ -171,7 +171,6 @@ fn failure(fixture: Json, case: &str, wanted: &str) {
 }
 
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_10_and_rc_19_pass_and_a_wrong_fill_or_decision_time_fails() {
     assert_eq!(run(edited("RC-10", |_| {}), "RC-10"), Ok(()));
     assert_eq!(run(edited("RC-19", |_| {}), "RC-19"), Ok(()));
@@ -214,7 +213,6 @@ fn rc_10_and_rc_19_pass_and_a_wrong_fill_or_decision_time_fails() {
 }
 
 #[test]
-#[ignore = "pending E4-1"]
 fn rc_12_passes_and_its_session_labels_median_and_canceled_leg_are_read() {
     assert_eq!(run(edited("RC-12", |_| {}), "RC-12"), Ok(()));
 

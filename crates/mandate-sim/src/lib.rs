@@ -60,10 +60,6 @@ pub enum SimError {
     DayOrderOnAContinuousInstrument,
     #[error("an order rests from bar {0}, which the bars do not contain")]
     RestingBarOutOfRange(usize),
-    /// The stub [`simulate`] of this story's tests PR returns this, so every pending test fails on
-    /// it (DEC-77, DEC-83); the implementation PR replaces the stub and removes the variant.
-    #[error("the backtest fill model is not implemented yet")]
-    Unsimulated,
     #[error(transparent)]
     Num(#[from] NumError),
     #[error(transparent)]
@@ -85,12 +81,16 @@ impl SimError {
             Self::OcoOnAFractionalInstrument => "oco_on_a_fractional_instrument",
             Self::DayOrderOnAContinuousInstrument => "day_order_on_a_continuous_instrument",
             Self::RestingBarOutOfRange(_) => "resting_bar_out_of_range",
-            Self::Unsimulated => "unsimulated",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }
     }
 }
+
+/// Nanoseconds in a millisecond, the unit spec §6.4 configures latencies in.
+const NANOS_PER_MILLI: u64 = 1_000_000;
+/// Nanoseconds in a second, the unit [`UtcNanos`] splits an instant into.
+const NANOS_PER_SECOND: u64 = 1_000_000_000;
 
 /// A non-negative duration in nanoseconds. Spec §6.4 configures latencies in milliseconds; the
 /// type keeps the unit explicit so a millisecond figure can never be added to an instant as if it
@@ -103,12 +103,35 @@ impl Nanos {
 
     /// `millis` milliseconds; `overflow` beyond what a duration in nanoseconds can hold.
     pub fn from_millis(millis: u64) -> Result<Self, SimError> {
-        let _ = millis;
-        Err(SimError::Num(NumError::Overflow))
+        millis
+            .checked_mul(NANOS_PER_MILLI)
+            .map(Self)
+            .ok_or(SimError::Num(NumError::Overflow))
     }
 
     pub fn nanos(self) -> u64 {
         self.0
+    }
+
+    /// `at` moved on by this duration: the instant an order becomes eligible (spec §6.4 rule 1).
+    /// `out_of_range` beyond the instants [`UtcNanos`] holds.
+    fn after(self, at: UtcNanos) -> Result<UtcNanos, SimError> {
+        let total = u64::from(at.nanos())
+            .checked_add(self.0)
+            .ok_or(NumError::Overflow)?;
+        let whole_seconds = total
+            .checked_div(NANOS_PER_SECOND)
+            .and_then(|seconds| i64::try_from(seconds).ok())
+            .ok_or(NumError::Overflow)?;
+        let rest = total
+            .checked_rem(NANOS_PER_SECOND)
+            .and_then(|nanos| u32::try_from(nanos).ok())
+            .ok_or(NumError::Overflow)?;
+        let secs = at
+            .secs()
+            .checked_add(whole_seconds)
+            .ok_or(NumError::Overflow)?;
+        Ok(UtcNanos::from_parts(secs, rest)?)
     }
 }
 
