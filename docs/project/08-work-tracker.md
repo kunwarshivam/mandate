@@ -68,6 +68,7 @@ issues are the record; this table is the summary
 | #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
 | E5-2 artifact store | `cursor` | #59 | Tests PR #66 open, first review's findings fixed; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be`; implementation `cursor/e5-2-artifact-impl-b0be` after the tests PR merges |
+| `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Review passed; gate runs every pending test (DEC-110, reserved in #83) | `cursor/xtask-pending-fail-7e3b` (#81) |
 
 ## Waiting on the founder
 
@@ -122,6 +123,8 @@ them in the decision log.
 - A cloud routine is created with every account connector attached, including a live brokerage MCP;
   clear them before the first run.
 - Running pending property tests writes `*.proptest-regressions`; ignored from now on.
+- A tests PR (#66) carried a pending test that already passed on its stubs. The `fast` check now
+  runs every pending test and fails if one passes (`cargo xtask ci pending`, DEC-110).
 
 ## Next, in order
 

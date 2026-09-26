@@ -17,6 +17,8 @@
 8. Deliver the DEC-77 sequence: tests PR (API stubs, pending markers), then implementation PR
    (test files change only by deleting `#[ignore = "pending <story>"]` lines), then status PR
    (`status.toml` only). Check each commit range with `cargo xtask check` and
-   `MANDATE_BASE_REF=<parent> cargo xtask ci spec-guard` before opening anything.
+   `MANDATE_BASE_REF=<parent> cargo xtask ci spec-guard` before opening anything. Every pending test
+   must fail on the stubs: the `fast` check runs every test marked pending in the workspace
+   (`cargo xtask ci pending`, DEC-110) and names any that passes or does not run.
 9. Ship each PR with `playbooks/ship.md`, from `.github/pull_request_template.md`, one at a time
    against `main`. Report per `SKILL.md`.
