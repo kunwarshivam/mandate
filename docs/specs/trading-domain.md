@@ -2,13 +2,17 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.8 (founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions)); requires a decision-log entry and founder approval to change (safety-critical) |
+| **Status** | **Approved** v0.9 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.9:** a reducing fill's removed basis is limited to the basis held, so a position's cost
+  basis always has the sign of its quantity (§2.1, §8.1, I2,
+  [DEC-86](../project/04-decision-log.md#decisions)). Refines DEC-27 only when the basis has digits
+  below the 12th decimal place; every reference case is unchanged.
 - **v0.8:** discretionary exits are allowed in the close window as marketable limit orders within the
   collar and participation caps; openings stay blocked and MOC/LOC orders stay banned (§9.6,
   [DEC-70](../project/04-decision-log.md#decisions); OD-10 resolved).
@@ -85,7 +89,7 @@
 |---|---|
 | Price | ≤ 9 decimal places |
 | Quantity | ≤ 9 decimal places; per-instrument increment |
-| Cost-basis reduction | `round(B × part ÷ whole, 12, half_even)` (§8.1) |
+| Cost-basis reduction | `round(B × part ÷ whole, 12, half_even)`, limited to the basis held (§8.1) |
 | Adjusted marks after splits | `round(mark × old ÷ new, 12, half_even)` (§8.5) |
 | Order quantity | Truncate to the quantity increment, except a sell closing the full position (§5.3) |
 | Notional amount | Truncate to 0.01; minimum 1.00 USD |
@@ -588,9 +592,21 @@ A = B ÷ Q is derived, never stored.** For a fill of signed quantity q at price 
 | Case | New Q | New B | Realized P&L (gross) |
 |---|---|---|---|
 | Opening or increasing | Q + q | B + q·p | 0 |
-| Reducing (\|q\| < \|Q\|) | Q + q | B − R, R = round(B·\|q\|/\|Q\|, 12, half_even) | −(q·p) − R |
+| Reducing (\|q\| < \|Q\|) | Q + q | B − R, R the removed basis (below) | −(q·p) − R |
 | Closing (\|q\| = \|Q\|) | 0 | 0 | −(q·p) − B |
 | Crossing zero | Not allowed as one order (§5.3); fills that cross (backtests, other brokers) are split into close and open | | |
+
+A position's cost basis has the sign of its quantity: B ≥ 0 for a long, B ≤ 0 for a short, and
+B = 0 when flat; an open position may have zero basis
+([DEC-86](../project/04-decision-log.md#decisions)). **Reducing:** let
+U = B − round(B × |q| ÷ |Q|, 12, half_even). If U is on the position's side of zero or zero
+(U ≥ 0 for a long, U ≤ 0 for a short), the new basis is U and R = B − U. Otherwise the rounded
+removal exceeds the basis held (|B − U| > |B|): the removal is limited to it, R = B, and the
+position keeps zero basis. This is possible only when B has nonzero digits below the 12th decimal
+place (B = q × p is exact to 18 places): if B is a multiple of 10⁻¹², then |B × |q| ÷ |Q|| < |B|,
+and rounding to 12 places cannot pass B. The condition is on the rounded removal, not the exact
+one: B = 0.000000000000527 reduced by 19 of 20 rounds the removal to 0.000000000001, so the new
+basis is 0, not −0.000000000000473.
 
 Fees are period expenses; **net realized = gross realized − fees.** Tax lots are recorded
 separately (first-in first-out, fees included in lot basis); the broker's Form 1099-B is
@@ -654,7 +670,9 @@ Evaluated after every event; exact unless stated.
 
 - **I1 Conservation.** With no deposits or withdrawals: Δequity = Δrealized + Δunrealized + Δincome
   − Δfees (fees include accruals and the rounding difference when charged), except as bounded in I3.
-- **I2 Reducing fills.** Removed basis = round(B × |q| ÷ |Q|, 12, half_even).
+- **I2 Reducing fills.** With U = B − round(B × |q| ÷ |Q|, 12, half_even), the new basis is U when
+  U is on the position's side of zero or zero, and 0 otherwise (removal limited to the basis held,
+  §8.1); removed basis = B − new basis.
 - **I3 Splits.** Q', B', and realized are exact per §8.5. |ΔMV + f × mark'| ≤ |Q'| × 5 × 10⁻¹³
   (mark rounding only, where f is the residual removed and mark' the adjusted mark); exact when
   mark × old ÷ new terminates within 12 places.
