@@ -68,6 +68,12 @@ layer = 6
 safety_critical = false
 pure = false
 
+[crates.mandate-journal-pg]
+layer = 6
+safety_critical = true
+pure = false
+allowed_external = ["sqlx", "thiserror"]
+
 [crates.mandate-cli]
 layer = 7
 safety_critical = false

@@ -26,6 +26,7 @@ secrecy = "0.10.3"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 serde_json_canonicalizer = "0.3.2"
+sqlx = { version = "0.9.0", default-features = false, features = ["postgres", "runtime-tokio", "migrate", "tls-rustls-ring-native-roots"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = "2.0.21"
 tokio = { version = "~1.53.1", default-features = false }
