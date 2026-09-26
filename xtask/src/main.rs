@@ -4,6 +4,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -260,8 +261,8 @@ struct Finding {
     rule_id: String,
 }
 
-/// Cases for the `.gitleaks.toml` exceptions (DEC-89): a one-line file, and the rule that must
-/// report it, or `None` where an exception must allow it. An exception allows its text only in the
+/// Cases for the `.gitleaks.toml` exceptions (DEC-89): a line appended to a file, and the rule that
+/// must report it, or `None` where an exception must allow it. An exception allows its text only in the
 /// files it names, and every other rule still applies there. The values are assembled at run time
 /// so that this source matches no rule.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
@@ -271,16 +272,30 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     );
     let json = format!("{{\"bars\":[],\"next_page_token\":\"{page}\"}}");
     let query = format!("/v2/stocks/bars?symbols=SPY&page_token={page}");
+    let http = "crates/mandate-marketdata/tests/http.rs";
     let fixture = |name| format!("crates/mandate-marketdata/tests/fixtures/alpaca/planted/{name}");
     let key_id = format!("PK{}", "PLANTEDKEYID000000");
+    let sentinel = format!("const KEY: &str = \"PK{}\";", "SENTINELKEYID00000");
     let generic = Some("generic-api-key");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
-        (fixture("page-2.json"), key_id, Some("alpaca-key-id")),
+        (
+            fixture("page-2.json"),
+            key_id.clone(),
+            Some("alpaca-key-id"),
+        ),
         (fixture("notes.json"), json.clone(), generic),
         ("stray.json".to_owned(), json, generic),
         ("stray.txt".to_owned(), query, generic),
+        (http.to_owned(), sentinel.clone(), None),
+        (
+            http.replace("http.rs", "wire.rs"),
+            sentinel.clone(),
+            Some("alpaca-key-id"),
+        ),
+        ("stray.rs".to_owned(), sentinel, Some("alpaca-key-id")),
+        (http.to_owned(), key_id, Some("alpaca-key-id")),
     ]
 }
 
@@ -289,12 +304,18 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
 fn gitleaks_exceptions() -> Result<()> {
     let dir = env::temp_dir().join(format!("mandate-gitleaks-{}", std::process::id()));
     let report_path = dir.with_extension("json");
-    let mut expected = BTreeSet::new();
+    let mut expected = BTreeMap::new();
     for (path, line, rule) in gitleaks_plants() {
         let file = dir.join(&path);
         fs::create_dir_all(file.parent().context("planted file has no parent")?)?;
-        fs::write(&file, format!("{line}\n"))?;
-        expected.extend(rule.map(|rule| (path, rule.to_owned())));
+        let mut out = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&file)?;
+        writeln!(out, "{line}")?;
+        if let Some(rule) = rule {
+            *expected.entry((path, rule.to_owned())).or_insert(0) += 1;
+        }
     }
     let config = repo_root()?.join(".gitleaks.toml");
     eprintln!("    $ (in a temporary directory) gitleaks dir --config .gitleaks.toml .");
@@ -322,18 +343,26 @@ fn gitleaks_exceptions() -> Result<()> {
     }
     fs::remove_file(&report_path)?;
     let findings: Vec<Finding> = serde_json::from_str(&report_text?)?;
-    let found: BTreeSet<(String, String)> =
-        findings.into_iter().map(|f| (f.file, f.rule_id)).collect();
-    let mut problems: Vec<String> = (expected.difference(&found))
-        .map(|(file, rule)| format!("{file}: not reported by {rule}"))
+    let mut found = BTreeMap::new();
+    for f in findings {
+        *found.entry((f.file, f.rule_id)).or_insert(0) += 1;
+    }
+    let keys: BTreeSet<_> = expected.keys().chain(found.keys()).collect();
+    let problems: Vec<String> = keys
+        .into_iter()
+        .filter_map(|key @ (file, rule)| {
+            let (want, got) = (
+                expected.get(key).unwrap_or(&0),
+                found.get(key).unwrap_or(&0),
+            );
+            (want != got)
+                .then(|| format!("{file}: {rule} reported {got} finding(s), expected {want}"))
+        })
         .collect();
-    problems.extend(
-        (found.difference(&expected)).map(|(file, rule)| format!("{file}: reported by {rule}")),
-    );
     report(problems, "gitleaks-exceptions")?;
     eprintln!(
         "    gitleaks-exceptions: {} planted findings reported",
-        expected.len()
+        expected.values().sum::<usize>()
     );
     Ok(())
 }

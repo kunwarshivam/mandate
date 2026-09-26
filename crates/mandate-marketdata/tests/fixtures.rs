@@ -5,8 +5,7 @@ mod common;
 
 use std::fs;
 
-const KEY_ID_VAR: &str = "MANDATE_ALPACA_PAPER_KEY_ID";
-const SECRET_VAR: &str = "MANDATE_ALPACA_PAPER_SECRET";
+use mandate_marketdata::http::{KEY_ID_VAR, SECRET_VAR};
 
 fn looks_like_key_id(word: &str) -> bool {
     word.len() == 20
