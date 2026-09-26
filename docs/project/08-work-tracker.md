@@ -85,7 +85,7 @@ issues are the record; this table is the summary
 | E5-4 journal verification and artifact commands | `claude-code` | #104 | Merged ([#108](https://github.com/kunwarshivam/mandate/pull/108)) after two review rounds; DEC-115 recorded; claim closed | `agent/e5-4-verify-cli` (#108) |
 | CI short path for documentation-only changes (DEC-112) | `claude-code` | — | Merged (#100) at the founder's request; a docs PR now costs under two runner minutes | `.github/scripts/` |
 | `mandate-marketdata`: proactive rate limiting in the Alpaca client (E2-1 follow-up) | `cursor` | #115 | Claimed 2026-09-26 19:20Z by a `cursor` session while the founder had Cursor paused; the coordinator has not launched it and leaves it for the founder to confirm or close | — |
-| `inspect` data-quality reporting (M1 rehearsal follow-up to E2-2 and E2-4) | `cursor` | #116 | PR open, waiting on the merge coordinator's review: the IEX early-close evening closed from 17:00, records while the venue is closed, zero-volume and single-trade-spread warnings, inconsistent bars as problems, closed-day counts, the restatement note, and the live test behind `live-alpaca` | `cursor/inspect-quality-39ba` |
+| `inspect` data-quality reporting (M1 rehearsal follow-up to E2-2 and E2-4) | `cursor` | #116 | PR #119 open, waiting on the merge coordinator's review: the IEX early-close evening closed from 17:00, records while the venue is closed, zero-volume and single-trade-spread warnings, inconsistent bars as problems, closed-day counts, the restatement note, and the live test behind `live-alpaca` | `cursor/inspect-quality-39ba` |
 
 ## Waiting on the founder
 
