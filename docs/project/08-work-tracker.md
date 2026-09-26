@@ -37,7 +37,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E2-2 Inspect | Merged | [#64](https://github.com/kunwarshivam/mandate/pull/64) | `cursor`: coverage, exact statistics, gaps, duplicates, untrusted partitions |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
 | E4-1 Simulated execution | Brief PR open | [#61](https://github.com/kunwarshivam/mandate/pull/61) | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19). [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106 |
-| E5-2 Artifact store | Implementation PR open | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), [#66](https://github.com/kunwarshivam/mandate/pull/66) (tests, merged), implementation PR | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107): write-once, hard-linked into place, re-hashed on every read; zero missed mutants; no reference cases, so no status PR |
+| E5-2 Artifact store | Implementation PR open | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), [#66](https://github.com/kunwarshivam/mandate/pull/66) (tests, merged), [#84](https://github.com/kunwarshivam/mandate/pull/84) (implementation) | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107): write-once, hard-linked into place, re-hashed on every read; zero missed mutants; no reference cases, so no status PR |
 
 ## Reference cases
 
@@ -67,7 +67,7 @@ issues are the record; this table is the summary
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
 | #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
-| E5-2 artifact store | `cursor` | #59 | Tests merged (#66); implementation PR open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be` (#66), `cursor/e5-2-artifact-impl-b0be` |
+| E5-2 artifact store | `cursor` | #59 | Tests merged (#66); implementation PR #84 open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be` (#66), `cursor/e5-2-artifact-impl-b0be` (#84) |
 
 ## Waiting on the founder
 
