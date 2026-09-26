@@ -197,6 +197,7 @@ pub fn render(inspection: &Inspection) -> String {
                 Values::Trades { low, high, size } => {
                     format!("trades: low {low}, high {high}, size {size}")
                 }
+                Values::Quotes { .. } => "quotes: not summarized yet".to_owned(),
             });
             if let (Some(adjusted), ActionsReport::Applied { as_of, .. }) =
                 (&stats.adjusted, &inspection.corporate_actions)

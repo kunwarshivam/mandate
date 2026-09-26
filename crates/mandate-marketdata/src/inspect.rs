@@ -129,6 +129,26 @@ pub enum ActionsReport {
     },
 }
 
+/// The lowest and highest price of one quoted side of a quote, over the rows that quote it
+/// (DEC-116).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extent {
+    pub low: DecStr,
+    pub high: DecStr,
+    pub rows: u64,
+}
+
+/// The ask minus the bid over the rows quoting both sides, keeping its sign: a crossed quote's
+/// spread is negative, so `narrowest` may be below zero (DEC-116). No mean is reported, because
+/// the quotient of two exact decimals is not one; `total` and `rows` give it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spread {
+    pub narrowest: DecStr,
+    pub widest: DecStr,
+    pub total: DecStr,
+    pub rows: u64,
+}
+
 /// Exact extremes and totals of the decimal columns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Values {
@@ -142,6 +162,24 @@ pub enum Values {
         low: DecStr,
         high: DecStr,
         size: DecStr,
+    },
+    /// A side whose price is zero holds no order, so it is left out of `bid`, `ask`, and `spread`,
+    /// and counted instead (DEC-116); [`Stats::rows`] still counts every stored row.
+    Quotes {
+        /// `None` when no row quotes a bid.
+        bid: Option<Extent>,
+        /// `None` when no row quotes an ask.
+        ask: Option<Extent>,
+        /// `None` when no row quotes both sides.
+        spread: Option<Spread>,
+        /// Rows quoting both sides at the same price.
+        locked: u64,
+        /// Rows quoting both sides with the bid above the ask.
+        crossed: u64,
+        /// Rows quoting exactly one side.
+        one_sided: u64,
+        /// Rows quoting neither side.
+        unquoted: u64,
     },
 }
 
