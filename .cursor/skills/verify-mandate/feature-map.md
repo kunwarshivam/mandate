@@ -185,6 +185,16 @@ every workspace crate and reference-case suite has an entry and that every path 
   paper credentials, `MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test
   live`.
 
+## Concurrent dataset writes
+
+- **Spec:** DEC-89 (compare-before-write, never replace a stored partition);
+  `docs/project/tasks/marketdata-write-safety.md`.
+- **Code:** `Store::put_day` and its write helpers in `crates/mandate-marketdata/src/dataset.rs`
+  (advisory lock on the dataset directory, unique temporary names, hard-link publish).
+- **Tests:** `crates/mandate-marketdata/tests/concurrent_writes.rs` (threads and processes, leftover
+  temporary files).
+- **Run:** `cargo nextest run -p mandate-marketdata --test concurrent_writes`.
+
 ## Dataset inspection
 
 - **Spec:** backlog E2-2; trading domain spec §4.2; DEC-89; `docs/project/tasks/E2-2-inspect.md`.

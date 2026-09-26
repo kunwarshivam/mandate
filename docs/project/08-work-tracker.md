@@ -69,6 +69,7 @@ issues are the record; this table is the summary
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
 | E5-2 artifact store | `cursor` | #59 | Tests PR #66 open, first review's findings fixed; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be`; implementation `cursor/e5-2-artifact-impl-b0be` after the tests PR merges |
 | `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Review passed; gate runs every pending test (DEC-110, reserved in #83) | `cursor/xtask-pending-fail-7e3b` (#81) |
+| `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` |
 
 ## Waiting on the founder
 
@@ -91,7 +92,7 @@ them in the decision log.
 | A crypto fee rate above 10000 bps makes a crypto buy an error rather than a credit; decide whether to reject such configurations at load | Next accounting story |
 | Fee reservations for buying power | E6-6 |
 | The accounting fold copies the account on every input; measure before long backtests | E4-2 |
-| Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | Before any parallel download |
+| ~~Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names~~ **Resolved (claim #86):** each write holds an advisory lock on the dataset directory, uses a temporary name no other writer uses, and publishes a partition by hard link ([brief](tasks/marketdata-write-safety.md)) | `cursor` |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
 | `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-4 (a shared `mandate-time` change; E2-2 reads stored nanoseconds and did not need it) |
