@@ -85,13 +85,13 @@ Every caller of either parser, and whether anything relied on fractions being re
 - **Crates out of scope:** `mandate-marketdata` (claim #86), `mandate-journal` source (tests only),
   `mandate-refcases`, `mandate-canon`, `xtask`.
 - **New dependencies allowed:** none.
-- **Safety-critical:** yes. Tests PR: the tests above, 13 of them pending. Implementation PR:
+- **Safety-critical:** yes. Tests PR: the tests above, 12 of them pending. Implementation PR:
   `parse_rfc3339` and two private helpers; test files only lose the pending markers.
 - **Size budget:** 400 non-generated lines per PR (ES-13).
 
 ## Stubs in the tests PR
 
-No new API, so no stub: the stub is today's `parse_rfc3339`, which rejects every fraction. The 13
+No new API, so no stub: the stub is today's `parse_rfc3339`, which rejects every fraction. The 12
 pending tests all fail on it (`cargo xtask ci pending`), and all at that one guard, so the planted
 bugs below carry the per-test evidence. The six non-pending tests pass on it and must keep passing.
 
