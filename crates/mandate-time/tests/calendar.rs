@@ -350,15 +350,17 @@ fn calendar_errors() {
     }
 }
 
+/// Fractional seconds of one to nine digits are RFC 3339 and parse (`rfc3339.rs`, claim #91); an
+/// empty or ten-digit fraction is not.
 #[test]
 fn rfc3339_rejects_other_forms() {
     for text in [
         "2026-09-21T10:00:00",
-        "2026-09-21T10:00:00.5Z",
+        "2026-09-21T10:00:00.Z",
         "2026-09-21T10:00:00z",
         "2026-09-21 10:00:00Z",
         "2026-09-21T10:00:00-0400",
-        "2026-09-21T10:00:00.000000000Z",
+        "2026-09-21T10:00:00.0000000000Z",
     ] {
         assert_eq!(
             UtcNanos::parse_rfc3339(text),
