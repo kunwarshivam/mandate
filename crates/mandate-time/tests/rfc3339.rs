@@ -112,7 +112,6 @@ fn whole_second_forms_parse_as_before() {
 
 /// One to nine digits give the instant their place values name, after `Z` or an offset.
 #[test]
-#[ignore = "pending E2-1"]
 fn fractions_of_one_to_nine_digits_parse_exactly() {
     let expected: [u32; 9] = [
         100_000_000,
@@ -149,7 +148,6 @@ fn fractions_of_one_to_nine_digits_parse_exactly() {
 /// Trailing zeros change nothing: every spelling of an instant parses to one value, whose text is
 /// the canonical nine-digit form (journal spec §4.7).
 #[test]
-#[ignore = "pending E2-1"]
 fn trailing_zeros_name_the_same_instant() {
     let half = [
         "2026-09-21T13:00:00.5Z",
@@ -181,7 +179,6 @@ fn trailing_zeros_name_the_same_instant() {
 
 /// A shorter fraction is not a smaller one: `.1` is later than `.09`, and `.9` than `.123456789`.
 #[test]
-#[ignore = "pending E2-1"]
 fn shorter_fractions_are_not_smaller() {
     let ordered = [
         "2026-09-21T13:00:00Z",
@@ -201,7 +198,6 @@ fn shorter_fractions_are_not_smaller() {
 
 /// An offset moves the whole seconds and keeps the fraction, across a day boundary too.
 #[test]
-#[ignore = "pending E2-1"]
 fn offsets_keep_the_fraction() {
     for (text, canonical) in [
         (
@@ -232,7 +228,6 @@ fn offsets_keep_the_fraction() {
 /// The range is the instant's, 1970-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z, whatever
 /// the fraction or the offset.
 #[test]
-#[ignore = "pending E2-1"]
 fn range_limits_hold_with_fractions() {
     for (text, secs, nanos) in [
         ("9999-12-31T23:59:59.999999999Z", MAX_SECS, 999_999_999),
@@ -257,7 +252,6 @@ fn range_limits_hold_with_fractions() {
 /// A fraction does not rescue an impossible date, time of day, or offset: no leap seconds, no
 /// 24:00, no offset of 24 hours or 60 minutes.
 #[test]
-#[ignore = "pending E2-1"]
 fn invalid_dates_with_fractions_are_invalid_dates() {
     for text in [
         "2026-02-29T00:00:00.5Z",
@@ -343,7 +337,6 @@ fn the_canonical_parser_still_takes_exactly_nine_digits() {
 /// `mandate-marketdata`'s own fixtures (`tests/timestamp.rs` as of `c8efb09`) give the same
 /// results, except that `+00:00`, which that parser rejects, is an offset here.
 #[test]
-#[ignore = "pending E2-1"]
 fn marketdata_fixtures_parse_the_same() {
     for (raw, canonical) in [
         ("2026-09-24T00:00:00Z", "2026-09-24T00:00:00.000000000Z"),
@@ -421,7 +414,6 @@ fn near_utc_form() -> impl Strategy<Value = String> {
 proptest! {
     /// Generated UTC timestamps with zero to nine digits parse to the oracle's instant.
     #[test]
-    #[ignore = "pending E2-1"]
     fn generated_utc_fractions_parse_to_the_oracle_instant(
         secs in 0i64..=MAX_SECS, digits in "[0-9]{0,9}"
     ) {
@@ -432,7 +424,6 @@ proptest! {
     /// With any offset from -23:59 to +23:59, the instant is the local time minus the offset and
     /// the nanoseconds are the fraction's.
     #[test]
-    #[ignore = "pending E2-1"]
     fn generated_offsets_keep_the_fraction(
         secs in 0i64..=MAX_SECS, digits in "[0-9]{1,9}", minutes in -1_439i64..=1_439
     ) {
@@ -446,7 +437,6 @@ proptest! {
 
     /// The canonical text of every instant is also RFC 3339, and reads back to the same instant.
     #[test]
-    #[ignore = "pending E2-1"]
     fn canonical_text_round_trips(secs in 0i64..=MAX_SECS, nanos in 0u32..1_000_000_000) {
         let t = at(secs, nanos);
         prop_assert_eq!(rfc(&t.to_string()), Ok(t));
@@ -455,7 +445,6 @@ proptest! {
     /// Parsed instants order as their (seconds, place-value nanoseconds) do; neighbouring seconds
     /// make ties on the second common.
     #[test]
-    #[ignore = "pending E2-1"]
     fn order_follows_the_oracle(
         base in 0i64..=MAX_SECS - 2,
         da in 0i64..=2, fa in "[0-9]{0,9}",
@@ -474,7 +463,6 @@ proptest! {
     /// Differential: on inputs without an offset, this parser and `mandate-marketdata`'s accept the
     /// same strings and give the same instants.
     #[test]
-    #[ignore = "pending E2-1"]
     fn agrees_with_the_marketdata_parser_without_offsets(raw in near_utc_form()) {
         prop_assert_eq!(rfc(&raw).ok(), marketdata_parse_rfc3339_utc(&raw), "{:?}", raw);
     }
