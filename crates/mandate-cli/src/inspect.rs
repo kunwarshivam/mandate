@@ -1,4 +1,5 @@
-//! `mandate inspect`: report each dataset's coverage, raw and split-adjusted statistics, corporate
+//! `mandate inspect`: report each dataset's coverage, raw and split-adjusted statistics (for a
+//! quotes dataset, each quoted side, the signed spread, and the classes of every row), corporate
 //! actions, gaps with their missing slots by class, duplicates, and problems as text, in the
 //! order the directories are given, and a total.
 
@@ -10,7 +11,7 @@ use clap::Args;
 use mandate_marketdata::dataset::partition_name;
 use mandate_marketdata::download::describe;
 use mandate_marketdata::inspect::{
-    ActionsReport, ClassifiedGap, GapClass, Inspection, Problem, Values, inspect,
+    ActionsReport, ClassifiedGap, Extent, GapClass, Inspection, Problem, Spread, Values, inspect,
 };
 use mandate_marketdata::model::{DayRange, Kind};
 
@@ -158,6 +159,28 @@ fn gaps(gaps: &[ClassifiedGap], lines: &mut Vec<String>) {
     }
 }
 
+/// One quoted side of a quotes dataset, or that no row quotes it (DEC-116).
+fn side(name: &str, extent: Option<&Extent>) -> String {
+    match extent {
+        Some(extent) => format!(
+            "  {name}: low {}, high {} over {} rows",
+            extent.low, extent.high, extent.rows
+        ),
+        None => format!("  {name}: no row quotes it"),
+    }
+}
+
+/// The spread summary, which keeps its sign, so a crossed quote makes `narrowest` negative.
+fn spread_line(spread: Option<&Spread>) -> String {
+    match spread {
+        Some(spread) => format!(
+            "  spread: narrowest {}, widest {}, total {} over {} rows",
+            spread.narrowest, spread.widest, spread.total, spread.rows
+        ),
+        None => "  spread: no row quotes both sides".to_owned(),
+    }
+}
+
 /// The text report of one dataset.
 pub fn render(inspection: &Inspection) -> String {
     let mut lines = vec![describe(&inspection.dataset)];
@@ -185,19 +208,37 @@ pub fn render(inspection: &Inspection) -> String {
                 "rows: {}, first {}, last {}",
                 stats.rows, stats.first, stats.last
             ));
-            lines.push(match &stats.values {
+            match &stats.values {
                 Values::Bars {
                     low,
                     high,
                     volume,
                     trade_count,
-                } => format!(
+                } => lines.push(format!(
                     "bars: low {low}, high {high}, volume {volume}, trade count {trade_count}"
-                ),
+                )),
                 Values::Trades { low, high, size } => {
-                    format!("trades: low {low}, high {high}, size {size}")
+                    lines.push(format!("trades: low {low}, high {high}, size {size}"));
                 }
-            });
+                Values::Quotes {
+                    bid,
+                    ask,
+                    spread,
+                    locked,
+                    crossed,
+                    one_sided,
+                    unquoted,
+                } => {
+                    let two_sided = spread.as_ref().map_or(0, |s| s.rows);
+                    lines.push(format!(
+                        "quotes: {two_sided} two-sided ({locked} locked, {crossed} crossed), \
+                         {one_sided} one-sided, {unquoted} with neither side quoted"
+                    ));
+                    lines.push(side("bid", bid.as_ref()));
+                    lines.push(side("ask", ask.as_ref()));
+                    lines.push(spread_line(spread.as_ref()));
+                }
+            }
             if let (Some(adjusted), ActionsReport::Applied { as_of, .. }) =
                 (&stats.adjusted, &inspection.corporate_actions)
             {

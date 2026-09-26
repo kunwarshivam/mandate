@@ -1,5 +1,5 @@
-//! `mandate download`: argument validation, the download plan, and a replayed run (backlog E2-1).
-//! No test here opens a connection.
+//! `mandate download`: argument validation, the download plan, and replayed runs of bars and of
+//! quotes (backlog E2-1, E2-3). No test here opens a connection.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -266,11 +266,15 @@ impl Pause for NoPause {
 }
 
 fn recorded(name: &str) -> Vec<u8> {
+    recorded_page(name, 1)
+}
+
+fn recorded_page(name: &str, page: u32) -> Vec<u8> {
     fs::read(
         workspace()
             .join("crates/mandate-marketdata/tests/fixtures/alpaca")
             .join(name)
-            .join("page-1.json"),
+            .join(format!("page-{page}.json")),
     )
     .unwrap()
 }
@@ -350,4 +354,102 @@ async fn a_run_reports_each_partition_and_a_rerun_reports_no_change() {
         report.lines().take(3).all(|l| l.ends_with(" unchanged")),
         "{report}"
     );
+}
+
+#[test]
+fn quotes_are_their_own_kind_and_take_no_timeframe() {
+    let quotes: Vec<&str> = with(&["--feed", "sip"])
+        .into_iter()
+        .map(|a| if a == "trades" { "quotes" } else { a })
+        .collect();
+    let p = plan(&quotes).unwrap();
+    assert!(p.datasets.iter().all(|d| d.kind() == Kind::Quotes));
+    assert_eq!(
+        p.datasets[0].relative_dir(),
+        ["alpaca", "sip", "quotes", "SPY"]
+            .iter()
+            .collect::<PathBuf>()
+    );
+    let timed: Vec<&str> = quotes
+        .iter()
+        .chain(&["--timeframe", "1Min"])
+        .copied()
+        .collect();
+    assert!(err(&timed).contains("--timeframe"));
+    let crypto = [
+        "--symbols",
+        "BTC/USD",
+        "--asset-class",
+        "crypto",
+        "--kind",
+        "quotes",
+        "--start",
+        "2026-09-24",
+        "--end",
+        "2026-09-24",
+        "--out",
+        "data",
+    ];
+    let p = plan(&crypto).unwrap();
+    assert_eq!(p.datasets[0].feed(), Feed::CryptoUs);
+    assert_eq!(p.datasets[0].kind(), Kind::Quotes);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_quotes_run_follows_every_page_and_stores_them_under_the_quotes_directory() {
+    let scratch = Scratch::new("quotes-run");
+    let out = scratch.0.to_str().unwrap().to_owned();
+    let args = [
+        "--symbols",
+        "CPHC",
+        "--asset-class",
+        "us-equity",
+        "--kind",
+        "quotes",
+        "--feed",
+        "sip",
+        "--start",
+        "2026-09-24",
+        "--end",
+        "2026-09-24",
+        "--out",
+        &out,
+    ];
+    let p = plan(&args).unwrap();
+    let bodies = || {
+        let mut bodies: Vec<Vec<u8>> = (1..=3)
+            .map(|n| recorded_page("stock-quotes-sip-cphc-2026-09-24-paged", n))
+            .collect();
+        bodies.push(br#"{"corporate_actions":{},"next_page_token":null}"#.to_vec());
+        bodies
+    };
+
+    let mut report = Vec::new();
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let first = download::run(&p, &client, &mut report).await.unwrap();
+    assert_eq!(
+        (first.datasets, first.days, first.rows, first.written),
+        (1, 1, 147, 1)
+    );
+    let report = String::from_utf8(report).unwrap();
+    let lines: Vec<&str> = report.lines().collect();
+    assert_eq!(lines.len(), 3, "{report}");
+    assert!(
+        lines[0].starts_with("CPHC quotes (sip) 2026-09-24 147 rows "),
+        "{report}"
+    );
+    assert!(lines[0].ends_with(" written"), "{report}");
+    assert!(
+        scratch
+            .0
+            .join("alpaca/sip/quotes/CPHC/2026-09-24.parquet")
+            .exists(),
+        "{report}"
+    );
+
+    let mut report = Vec::new();
+    let client = Client::new(Replay(Arc::new(Mutex::new(bodies()))), NoPause);
+    let second = download::run(&p, &client, &mut report).await.unwrap();
+    assert_eq!((second.written, second.unchanged), (0, 1));
+    assert_eq!(second.bytes, first.bytes);
 }

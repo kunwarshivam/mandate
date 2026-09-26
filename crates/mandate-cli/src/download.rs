@@ -16,11 +16,12 @@ use mandate_marketdata::model::{AssetClass, DatasetId, DayRange, Feed, Kind, Sym
 use mandate_time::Date;
 use serde::Deserialize;
 
-/// Bars or trades.
+/// Bars, trades, or top-of-book quotes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum KindArg {
     Bars,
     Trades,
+    Quotes,
 }
 
 #[derive(Debug, Args)]
@@ -122,8 +123,11 @@ fn kind(args: &DownloadArgs) -> anyhow::Result<Kind> {
     match (args.kind, args.timeframe) {
         (KindArg::Bars, Some(timeframe)) => Ok(Kind::Bars(timeframe)),
         (KindArg::Bars, None) => bail!("--kind bars needs --timeframe (e.g. 1Min)"),
-        (KindArg::Trades, Some(_)) => bail!("--timeframe applies only to --kind bars"),
+        (KindArg::Trades | KindArg::Quotes, Some(_)) => {
+            bail!("--timeframe applies only to --kind bars")
+        }
         (KindArg::Trades, None) => Ok(Kind::Trades),
+        (KindArg::Quotes, None) => Ok(Kind::Quotes),
     }
 }
 

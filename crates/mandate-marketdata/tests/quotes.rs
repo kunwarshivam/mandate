@@ -1,11 +1,13 @@
 //! Top-of-book quotes (backlog E2-3): recorded Alpaca quote pages parse with every number exact,
 //! pages are followed and retried like bars and trades, the feed of the dataset picks the
-//! request, locked, crossed, and one-sided quotes are kept as sent, and Parquet partitions hold
-//! every value exactly and are never rewritten.
+//! request, locked, crossed, and one-sided quotes are kept as sent, Parquet partitions hold
+//! every value exactly and are never rewritten, and `inspect` summarizes a stored quotes dataset
+//! with exact sides, spreads, and counts (DEC-116).
 
 mod common;
 
 use std::fs::{self, File};
+use std::path::PathBuf;
 use std::time::Duration;
 
 use arrow_schema::{DataType, TimeUnit};
@@ -13,13 +15,15 @@ use common::{
     FakeTransport, RecordingPause, Scratch, dataset, day, ok, scenario, shy_iex_trades, status,
 };
 use mandate_canon::DecStr;
+use mandate_marketdata::actions::{RecordedActions, write_actions};
 use mandate_marketdata::alpaca::{self, WireError};
 use mandate_marketdata::client::{Client, FetchError, TransportError};
 use mandate_marketdata::dataset::{self, DatasetError, Status, Store};
 use mandate_marketdata::http::is_market_data_path;
-use mandate_marketdata::inspect::{self, InspectError};
+use mandate_marketdata::inspect::{self, ActionsReport, Extent, Spread, Values};
 use mandate_marketdata::model::{
-    AssetClass, DatasetId, Feed, Kind, ModelError, Quote, Records, Symbol,
+    AssetClass, CorporateActions, DatasetId, DayRange, Feed, Kind, ModelError, Quote, Records,
+    Split, Symbol, split_ratio,
 };
 use mandate_time::UtcNanos;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -673,32 +677,315 @@ fn a_partition_of_another_kind_is_not_read_as_quotes() {
     ));
 }
 
-#[test]
-fn inspect_covers_stored_quote_days_but_does_not_summarize_quotes_yet() {
-    let scratch = Scratch::new("quotes-inspect");
+/// Scale-9 units of an exact decimal, counted out by this test rather than by
+/// `mandate_marketdata::number`, so the statistics have an oracle of their own.
+fn units(value: &DecStr) -> i128 {
+    let text = value.as_str();
+    let (int, frac) = text.split_once('.').unwrap_or((text, ""));
+    assert!(frac.len() <= 9, "{text}");
+    format!("{int}{frac:0<9}").parse().unwrap()
+}
+
+/// The inverse of [`units`].
+fn decimal(units: i128) -> DecStr {
+    let digits = format!("{:010}", units.unsigned_abs());
+    let (int, frac) = digits.split_at(digits.len() - 9);
+    let sign = if units < 0 { "-" } else { "" };
+    DecStr::parse(&format!("{sign}{int}.{frac}")).unwrap()
+}
+
+/// What `inspect` must report for `quotes`, accumulated here side by side rather than read back
+/// from the implementation: a side counts only where its price is not zero, and a spread only
+/// where both sides are quoted, keeping its sign (DEC-116).
+fn expected_values(quotes: &[Quote]) -> Values {
+    let mut bids: Vec<i128> = Vec::new();
+    let mut asks: Vec<i128> = Vec::new();
+    let mut spreads: Vec<i128> = Vec::new();
+    let (mut locked, mut crossed, mut one_sided, mut unquoted) = (0, 0, 0, 0);
+    for quote in quotes {
+        let (bid, ask) = (units(&quote.bid_price), units(&quote.ask_price));
+        if bid != 0 {
+            bids.push(bid);
+        }
+        if ask != 0 {
+            asks.push(ask);
+        }
+        match (bid != 0, ask != 0) {
+            (true, true) => {
+                spreads.push(ask - bid);
+                locked += u64::from(bid == ask);
+                crossed += u64::from(bid > ask);
+            }
+            (true, false) | (false, true) => one_sided += 1,
+            (false, false) => unquoted += 1,
+        }
+    }
+    let extent = |side: &[i128]| {
+        Some(Extent {
+            low: decimal(*side.iter().min()?),
+            high: decimal(*side.iter().max()?),
+            rows: u64::try_from(side.len()).unwrap(),
+        })
+    };
+    let spread = (|| {
+        Some(Spread {
+            narrowest: decimal(*spreads.iter().min()?),
+            widest: decimal(*spreads.iter().max()?),
+            total: decimal(spreads.iter().sum()),
+            rows: u64::try_from(spreads.len()).unwrap(),
+        })
+    })();
+    Values::Quotes {
+        bid: extent(&bids),
+        ask: extent(&asks),
+        spread,
+        locked,
+        crossed,
+        one_sided,
+        unquoted,
+    }
+}
+
+fn stored_quotes(scratch: &Scratch, id: &DatasetId, days: &[(&str, Vec<Quote>)]) -> PathBuf {
     let store = Store::new(scratch.path());
+    for (date, quotes) in days {
+        store
+            .put_day(id, day(date), &Records::Quotes(quotes.clone()))
+            .unwrap();
+    }
+    store.dataset_dir(id)
+}
+
+#[test]
+fn inspect_summarizes_stored_quotes_with_exact_sides_spreads_and_counts() {
+    let scratch = Scratch::new("quotes-statistics");
     let id = cphc(Feed::Sip);
-    store
-        .put_day(&id, day("2026-09-19"), &Records::empty(Kind::Quotes))
-        .unwrap();
-    let dir = store.dataset_dir(&id);
+    let quotes = recorded(SIP_PAGED, &id, "2026-09-24");
+    let dir = stored_quotes(
+        &scratch,
+        &id,
+        &[("2026-09-19", Vec::new()), ("2026-09-24", quotes.clone())],
+    );
+    let inspection = inspect::inspect(&dir).unwrap();
+    assert_eq!(inspection.dataset, id);
+    assert_eq!(inspection.coverage.listed, 2);
+    assert_eq!(
+        inspection.coverage.empty,
+        vec![DayRange::new(day("2026-09-19"), day("2026-09-19")).unwrap()]
+    );
+    assert!(inspection.gaps.is_empty(), "quotes have no bar grid");
+    assert!(inspection.problems.is_empty());
+    let stats = inspection.stats.unwrap();
+    assert_eq!(stats.rows, 147);
+    assert_eq!(stats.first, at("2026-09-24T08:00:00.045789138Z"));
+    assert_eq!(stats.last, at("2026-09-24T20:04:36.745710686Z"));
+    assert_eq!(stats.adjusted, None, "no corporate actions are recorded");
+    assert_eq!(stats.values, expected_values(&quotes));
+    assert_eq!(
+        stats.values,
+        Values::Quotes {
+            bid: Some(Extent {
+                low: dec("9.6"),
+                high: dec("15.6"),
+                rows: 147
+            }),
+            ask: Some(Extent {
+                low: dec("15.61"),
+                high: dec("63.12"),
+                rows: 146
+            }),
+            spread: Some(Spread {
+                narrowest: dec("0.11"),
+                widest: dec("50.32"),
+                total: dec("731.75"),
+                rows: 146
+            }),
+            locked: 0,
+            crossed: 0,
+            one_sided: 1,
+            unquoted: 0,
+        },
+        "the one-sided quote's zero ask is counted, never quoted"
+    );
+}
+
+#[test]
+fn a_crossed_spread_is_negative_and_locked_and_one_sided_rows_are_counted() {
+    let scratch = Scratch::new("quotes-classes");
+    let id = cphc(Feed::Iex);
+    let sent = [
+        stock_quote("2026-09-24T14:00:00Z", "12.5", "12.51"),
+        stock_quote("2026-09-24T14:00:01Z", "12.51", "12.51"),
+        stock_quote("2026-09-24T14:00:02Z", "12.52", "12.51"),
+        stock_quote("2026-09-24T14:00:03Z", "11.9", "0"),
+        stock_quote("2026-09-24T14:00:04Z", "0", "13.4"),
+        stock_quote("2026-09-24T14:00:05Z", "0", "0"),
+    ];
+    let quotes = parse(&id, "2026-09-24", &cphc_page(&sent, None)).unwrap();
+    let dir = stored_quotes(&scratch, &id, &[("2026-09-24", quotes.clone())]);
+    let stats = inspect::inspect(&dir).unwrap().stats.unwrap();
+    assert_eq!(stats.rows, 6);
+    assert_eq!(stats.values, expected_values(&quotes));
+    assert_eq!(
+        stats.values,
+        Values::Quotes {
+            bid: Some(Extent {
+                low: dec("11.9"),
+                high: dec("12.52"),
+                rows: 4
+            }),
+            ask: Some(Extent {
+                low: dec("12.51"),
+                high: dec("13.4"),
+                rows: 4
+            }),
+            spread: Some(Spread {
+                narrowest: dec("-0.01"),
+                widest: dec("0.01"),
+                total: dec("0"),
+                rows: 3
+            }),
+            locked: 1,
+            crossed: 1,
+            one_sided: 2,
+            unquoted: 1,
+        },
+        "ask minus bid keeps its sign, so the crossed row is the narrowest spread"
+    );
+}
+
+#[test]
+fn every_stored_quote_row_falls_in_exactly_one_class() {
+    let scratch = Scratch::new("quotes-classes-cover");
+    for (n, (id, quotes)) in every_recording().into_iter().enumerate() {
+        let store = Store::new(scratch.path().join(n.to_string()));
+        store
+            .put_day(&id, day("2026-09-24"), &Records::Quotes(quotes.clone()))
+            .unwrap();
+        let stats = inspect::inspect(&store.dataset_dir(&id))
+            .unwrap()
+            .stats
+            .unwrap();
+        assert_eq!(stats.rows, u64::try_from(quotes.len()).unwrap());
+        let Values::Quotes {
+            bid,
+            ask,
+            spread,
+            locked,
+            crossed,
+            one_sided,
+            unquoted,
+        } = &stats.values
+        else {
+            panic!("quote statistics expected, got {:?}", stats.values);
+        };
+        let two_sided = spread.as_ref().map_or(0, |s| s.rows);
+        assert_eq!(
+            two_sided + one_sided + unquoted,
+            stats.rows,
+            "{id:?}: every row is two-sided, one-sided, or unquoted"
+        );
+        assert!(locked + crossed <= two_sided, "{id:?}");
+        for side in [bid, ask] {
+            let side = side.as_ref().unwrap();
+            assert!(side.rows >= two_sided && side.rows <= stats.rows, "{id:?}");
+            assert!(
+                units(&side.low) > 0 && units(&side.low) <= units(&side.high),
+                "{id:?}"
+            );
+        }
+        assert_eq!(stats.values, expected_values(&quotes), "{id:?}");
+    }
+}
+
+#[test]
+fn quotes_sharing_a_time_and_both_exchange_codes_are_one_duplicate() {
+    let scratch = Scratch::new("quotes-duplicates");
+    let id = cphc(Feed::Sip);
+    let repeated = stock_quote("2026-09-24T14:00:00Z", "12.5", "12.51");
+    let same_time_other_exchange = repeated.replace(r#""bx":"P""#, r#""bx":"K""#);
+    assert_ne!(same_time_other_exchange, repeated);
+    let sent = [
+        repeated.clone(),
+        repeated,
+        same_time_other_exchange,
+        stock_quote("2026-09-24T14:00:01Z", "12.5", "12.51"),
+    ];
+    let quotes = parse(&id, "2026-09-24", &cphc_page(&sent, None)).unwrap();
+    let dir = stored_quotes(&scratch, &id, &[("2026-09-24", quotes)]);
+    let duplicates = inspect::inspect(&dir).unwrap().duplicates;
+    assert_eq!(duplicates.len(), 1);
+    assert_eq!(duplicates[0].time, at("2026-09-24T14:00:00.000000000Z"));
+    assert_eq!(duplicates[0].count, 2);
+    assert_eq!(duplicates[0].trade_id, None);
+    assert!(duplicates[0].identical);
+}
+
+#[test]
+fn a_quotes_dataset_of_empty_days_has_coverage_and_no_statistics() {
+    let scratch = Scratch::new("quotes-empty");
+    let id = cphc(Feed::Sip);
+    let dir = stored_quotes(&scratch, &id, &[("2026-09-19", Vec::new())]);
     let inspection = inspect::inspect(&dir).unwrap();
     assert_eq!(inspection.dataset, id);
     assert_eq!(inspection.coverage.listed, 1);
     assert_eq!(inspection.stats, None);
+    assert_eq!(inspection.duplicates, Vec::new());
+    assert_eq!(inspection.problems, Vec::new());
+}
 
-    let quotes = recorded(SIP_PAGED, &id, "2026-09-24");
-    store
-        .put_day(&id, day("2026-09-24"), &Records::Quotes(quotes))
-        .unwrap();
-    let err = inspect::inspect(&dir).unwrap_err();
-    assert!(
-        matches!(err, InspectError::Unsupported(Kind::Quotes)),
-        "{err}"
+#[test]
+fn split_adjusted_quote_prices_are_the_quoted_sides_of_both_days() {
+    let scratch = Scratch::new("quotes-adjusted");
+    let id = cphc(Feed::Sip);
+    let before = parse(
+        &id,
+        "2026-09-23",
+        &cphc_page(
+            &[
+                stock_quote("2026-09-23T14:00:00Z", "4", "0"),
+                stock_quote("2026-09-23T14:00:01Z", "0", "400"),
+            ],
+            None,
+        ),
+    )
+    .unwrap();
+    let on_the_day = recorded(SIP_PAGED, &id, "2026-09-24");
+    let dir = stored_quotes(
+        &scratch,
+        &id,
+        &[("2026-09-23", before), ("2026-09-24", on_the_day)],
     );
-    assert_eq!(err.code(), "unsupported");
+    let split = Split {
+        id: "cphc-split".to_owned(),
+        ex_date: day("2026-09-24"),
+        ratio: split_ratio(4, 1).unwrap(),
+    };
+    write_actions(
+        &dir,
+        &RecordedActions {
+            range: DayRange::new(day("2026-09-23"), day("2026-09-24")).unwrap(),
+            actions: CorporateActions {
+                symbol: Symbol::parse("CPHC").unwrap(),
+                splits: vec![split],
+                cash_dividends: Vec::new(),
+                other: Vec::new(),
+            },
+        },
+    )
+    .unwrap();
+    let inspection = inspect::inspect(&dir).unwrap();
+    assert!(matches!(
+        inspection.corporate_actions,
+        ActionsReport::Applied {
+            as_of: on,
+            ..
+        } if on == day("2026-09-24")
+    ));
+    let adjusted = inspection.stats.unwrap().adjusted.unwrap();
     assert_eq!(
-        err.to_string(),
-        "inspect does not summarize stored quotes yet"
+        (adjusted.low, adjusted.high),
+        (dec("1"), dec("100")),
+        "the day before the split divides by four, the day of it does not, and each quoted side counts"
     );
 }
