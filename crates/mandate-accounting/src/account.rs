@@ -549,15 +549,15 @@ impl Account {
         instrument: &InstrumentId,
         ex_date: Date,
     ) -> Result<Record, AccountingError> {
-        let key = self
+        let (key, owed) = self
             .receivables
-            .keys()
-            .find(|(i, ex, kind)| {
+            .iter()
+            .find(|((i, ex, kind), _)| {
                 i == instrument && *ex == ex_date && matches!(kind, ReceivableKind::Dividend { .. })
             })
-            .cloned()
+            .map(|(key, owed)| (key.clone(), *owed))
             .ok_or_else(|| AccountingError::NoDividendDue(instrument.clone()))?;
-        self.settle_receivable(&key)
+        self.settle_receivable(&key, owed)
             .map(|amount| Record::DividendPaid { amount })
     }
 
@@ -575,16 +575,17 @@ impl Account {
             })
             .map(|(key, _)| key.clone())
             .ok_or_else(|| AccountingError::CashInLieuMismatch(instrument.clone()))?;
-        self.settle_receivable(&key)
+        self.settle_receivable(&key, amount)
             .map(|amount| Record::CashInLieuPosted { amount })
     }
 
     fn settle_receivable(
         &mut self,
         key: &(InstrumentId, Date, ReceivableKind),
+        amount: Usd,
     ) -> Result<Usd, AccountingError> {
-        let amount = self.receivables.remove(key).unwrap_or(Usd::ZERO);
         self.settled = self.settled.checked_add(amount)?;
+        self.receivables.remove(key);
         Ok(amount)
     }
 
