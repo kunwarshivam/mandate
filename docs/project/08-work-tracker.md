@@ -74,6 +74,7 @@ issues are the record; this table is the summary
 | `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Merged (#81; DEC-110 reserved in #83); claim closed | `cursor/xtask-pending-fail-7e3b` (#81) |
 | Cursor allocation: next stories | `cursor` | #87 | Merged (#88); E5-4 and the M1 exit run's keys await the founder | `cursor/allocation-next` (#88) |
 | `mandate-marketdata` safe concurrent dataset writes | `cursor` | #86 | Claimed | — |
+| E2-3 top-of-book quotes | `cursor` | #94 | Slice 1 (model, client, storage) open for review (#95); the CLI integration PR follows | `cursor/e2-3-quotes-v2-a075` (#95); `cursor/e2-3-quotes-a075` superseded |
 
 ## Waiting on the founder
 
