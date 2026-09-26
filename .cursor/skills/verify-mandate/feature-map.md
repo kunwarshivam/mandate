@@ -140,9 +140,10 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
   command), 5.1 (append and fencing), 5.2 (write before acting, crash recovery), 8 (replay and
   `fold_version`), 9 (the agent-stream catalogue); `docs/HLD.md` section 5; ADR-0001 ES-06, ES-20,
   ES-21, ES-24.
-- **Code:** `mandate-runtime` (new; `fold`, `handle`, `resume`, the mode lattice, the kill-switch
-  routing, approvals, and the `IntentSink`, `TimerSource`, `IdGen`, `GateDryRun`, and `OrderPlan`
-  ports), over `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
+- **Code:** `mandate-runtime` (new; `fold` and `handle`, with recovery as `Input::Started`, the mode
+  lattice, the kill-switch routing, approvals, the pure `IdGen`, `GateDryRun`, and `OrderPlan` ports,
+  and the shell-driven `IntentSink` and `TimerSource`), over `mandate-journal`'s drafts and append
+  protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
 - **Tests:** the hand cases of the brief (the kill-switch order and scope, recovery, approvals,
   version application, error codes) and property tests against three independent oracles: a shadow
