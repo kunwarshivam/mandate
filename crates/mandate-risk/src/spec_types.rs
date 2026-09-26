@@ -87,7 +87,12 @@ pub struct RiskSnapshot {
     pub inherited_loss: Usd,
     pub latched: BTreeSet<LimitKey>,
     pub active_rungs: BTreeSet<u8>,
-    /// How long each active rung has been active, for §5.5's `breach_confirm_s` trim guard.
+    /// The product of the active `scale_sizes` rungs' factors. **Folded by stream F**, not computed
+    /// here: it is risk state, and F's `Snapshot` already carries it, so computing it in two crates
+    /// would let them disagree (the coordinator's ruling on #136 review round 1).
+    pub size_factor: Fraction,
+    /// How long each active rung has been active, for §5.5's `breach_confirm_s` trim guard. This
+    /// crate owns it only while F does not fold it; see the brief's Dependencies.
     pub rung_active_for_s: BTreeMap<u8, u32>,
     pub agent_mode: AgentMode,
 }

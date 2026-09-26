@@ -99,20 +99,51 @@ pub fn two_stock_swing_limits() -> RiskLimits {
         drawdown_ladder: vec![
             Rung {
                 index: 0,
-                at: fraction("0.06"),
+                at: fraction("0.03"),
                 action: RungAction::ScaleSizes,
                 factor: Some(fraction("0.5")),
                 scale_action: Some(ScaleAction::LimitBuys),
             },
             Rung {
                 index: 1,
-                at: fraction("0.08"),
+                at: fraction("0.06"),
                 action: RungAction::ExitsOnly,
                 factor: None,
-                scale_action: None,
+                scale_action: Some(ScaleAction::LimitBuys),
+            },
+            Rung {
+                index: 2,
+                at: fraction("0.08"),
+                action: RungAction::FlattenAndPause,
+                factor: None,
+                scale_action: Some(ScaleAction::LimitBuys),
             },
         ],
     }
+}
+
+/// A ladder whose two `scale_sizes` factors are 0.5 and 0.4: their product is 0.2 and their sum is
+/// 0.9, so a test over it tells multiplication from addition (planted bug 38).
+#[must_use]
+pub fn two_scaling_rungs() -> RiskLimits {
+    let mut limits = two_stock_swing_limits();
+    limits.drawdown_ladder = vec![
+        Rung {
+            index: 0,
+            at: fraction("0.03"),
+            action: RungAction::ScaleSizes,
+            factor: Some(fraction("0.5")),
+            scale_action: Some(ScaleAction::LimitBuys),
+        },
+        Rung {
+            index: 1,
+            at: fraction("0.06"),
+            action: RungAction::ScaleSizes,
+            factor: Some(fraction("0.4")),
+            scale_action: Some(ScaleAction::LimitBuys),
+        },
+    ];
+    limits
 }
 
 #[must_use]
@@ -130,6 +161,7 @@ pub fn healthy_risk(equity: &str) -> RiskSnapshot {
         inherited_loss: Usd::ZERO,
         latched: BTreeSet::new(),
         active_rungs: BTreeSet::new(),
+        size_factor: Fraction::ONE,
         rung_active_for_s: BTreeMap::new(),
         agent_mode: AgentMode::Normal,
     }

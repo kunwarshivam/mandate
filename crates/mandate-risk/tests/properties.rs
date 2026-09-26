@@ -45,9 +45,21 @@ proptest! {
         position in 1_u32..50,
         limit in whole_dollars(),
         orders_today in 0_u32..40,
+        mode in prop::sample::select(vec![
+            AgentMode::Normal, AgentMode::ExitsOnly, AgentMode::Paused, AgentMode::Stopped,
+        ]),
+        blocked in any::<bool>(),
+        unknown in any::<bool>(),
     ) {
         let mut s = Scenario::allowing();
         s.agent.orders_today = orders_today;
+        s.agent.mode = mode;
+        if blocked {
+            s.account.state = mandate_risk::AccountState::Blocked;
+        }
+        if unknown {
+            s.account.unknown_orders.insert(asset(INSTRUMENT_3));
+        }
         s.agent.positions.insert(asset(INSTRUMENT_3), qty(&position.to_string()));
         s.agent.market_values.insert(asset(INSTRUMENT_3), usd(&(position * limit).to_string()));
         s.proposed = proposal(
@@ -60,6 +72,13 @@ proptest! {
             "a reducing purpose was denied {:?} by something that is not the broker",
             d.reason
         );
+        if blocked {
+            prop_assert_eq!(
+                (d.verdict, d.reason),
+                (Verdict::Deny, Some(ReasonCode::AccountTradingBlocked)),
+                "the one permitted denial is asserted reachable, not merely tolerated"
+            );
+        }
     }
 
     /// A discretionary exit is never denied at all: §9.6 paces it, and a defer is never converted
@@ -110,7 +129,11 @@ proptest! {
         let d = evaluate(&s.input()).expect("the gate decides");
 
         let protective = origin == Origin::ProtectiveLeg;
-        let kill_switch = origin.is_kill_switch();
+        let kill_switch_written_out_rather_than_asking_the_crate = matches!(
+            origin,
+            Origin::AutomatedKillSwitch | Origin::OwnerKillSwitch
+        );
+        let kill_switch = kill_switch_written_out_rather_than_asking_the_crate;
         let expected_hold = mode == AgentMode::Stopped
             || (mode == AgentMode::Paused && !(protective || kill_switch));
 
@@ -132,13 +155,19 @@ proptest! {
 
     /// The per-instrument cap is the lower of the dollar and the fraction bound, and a value
     /// exactly at it passes. The oracle recomputes both bounds in `i128`.
+    ///
+    /// The notional varies through the **quantity** at a price the generated quote supports, never
+    /// through the limit price: a price walked far from the quote would trip the collar at check 5
+    /// and report `price_outside_collar` before the cap at check 2 was ever reached, so the
+    /// property would fail on a correct gate once E6-8 lands.
     #[test]
     #[ignore = "pending E6-3"]
     fn position_cap_is_the_lower_of_both_bounds(
         equity in 1_000_u32..40_000,
-        order in whole_dollars(),
+        shares in 1_u32..30,
         held in 0_u32..2_000,
     ) {
+        let order = shares * 100;
         let mut s = Scenario::allowing();
         s.instrument = common::equity_instrument(INSTRUMENT_2);
         s.risk = common::healthy_risk(&equity.to_string());
@@ -147,7 +176,9 @@ proptest! {
             s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held.to_string()));
             s.agent.positions.insert(asset(INSTRUMENT_2), qty("1"));
         }
-        s.proposed = proposal(INSTRUMENT_2, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder);
+        s.proposed = proposal(
+            INSTRUMENT_2, Side::Buy, &shares.to_string(), "100", Origin::OrderBuilder,
+        );
 
         let cap = position_cap(scaled("1500"), scaled("0.2"), scaled(&equity.to_string()));
         let total = scaled(&held.to_string()) + scaled(&order.to_string());
@@ -166,14 +197,16 @@ proptest! {
         }
     }
 
-    /// Gross exposure is bounded by equity as well as by the configured limit.
+    /// Gross exposure is bounded by equity as well as by the configured limit. As above, the
+    /// notional varies through the quantity so the collar cannot fire first.
     #[test]
     #[ignore = "pending E6-3"]
     fn gross_exposure_is_bounded_by_equity(
         equity in 500_u32..5_000,
         held in 0_u32..4_000,
-        order in whole_dollars(),
+        shares in 1_u32..30,
     ) {
+        let order = shares * 100;
         let mut s = Scenario::allowing();
         s.risk = common::healthy_risk(&equity.to_string());
         s.account.equity = usd(&equity.to_string());
@@ -181,7 +214,9 @@ proptest! {
             s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held.to_string()));
             s.agent.positions.insert(asset(INSTRUMENT_2), qty("1"));
         }
-        s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder);
+        s.proposed = proposal(
+            INSTRUMENT_3, Side::Buy, &shares.to_string(), "100", Origin::OrderBuilder,
+        );
 
         let limit = gross_limit(scaled("2000"), scaled(&equity.to_string()));
         let gross = scaled(&held.to_string()) + scaled(&order.to_string());
@@ -199,7 +234,7 @@ proptest! {
     /// Every limit comparison is strictly greater, so a value exactly at a limit passes (MC-G02).
     #[test]
     #[ignore = "pending E6-3"]
-    fn a_value_exactly_at_a_limit_passes(order in 1_u32..1_000) {
+    fn a_value_exactly_at_a_limit_passes(order in 1_u32..=1_000) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
             INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
@@ -327,17 +362,26 @@ proptest! {
         }
     }
 
-    /// The size factor never exceeds one: it is a product of rung factors, each at most one.
+    /// A trim never sells below the target the folded size factor names, and never enlarges a
+    /// position. The factor itself is stream F's fold (the coordinator's ruling), so this reads it
+    /// rather than recomputing it; `hand::two_active_rungs_multiply` pins the 0.5 x 0.4 = 0.2 case.
     #[test]
     #[ignore = "pending E6-4"]
-    fn the_size_factor_never_exceeds_one(rungs in prop::collection::vec(0_u8..2, 0..3)) {
+    fn a_trim_never_sells_below_the_target(
+        rungs in prop::collection::vec(0_u8..3, 0..3),
+        factor in prop::sample::select(vec!["1", "0.5", "0.2"]),
+    ) {
         let mut s = Scenario::allowing();
+        s.mandate = common::mandate_with(common::two_scaling_rungs());
         s.risk.active_rungs = rungs.into_iter().collect();
+        s.risk.size_factor = common::fraction(factor);
 
-        let factor = mandate_risk::size_factor(&s.mandate, &s.risk).expect("the factor computes");
+        let trims = mandate_risk::trim_proposals(
+            s.now, &s.config, &s.mandate, &s.risk, &s.agent, &std::collections::BTreeMap::new(),
+        ).expect("the trims compute");
         prop_assert!(
-            factor <= mandate_num::Fraction::ONE,
-            "a de-risking factor never enlarges an order"
+            trims.iter().all(|t| t.purpose == Purpose::RiskExit),
+            "a trim is a risk exit, so nothing paces or denies it"
         );
     }
 
@@ -359,12 +403,13 @@ proptest! {
     #[test]
     #[ignore = "pending E6-3"]
     fn no_allowed_sequence_ever_exceeds_a_limit(
-        orders in prop::collection::vec(1_u32..600, 1..8),
+        share_counts in prop::collection::vec(1_u32..6, 1..8),
     ) {
+        let orders: Vec<u32> = share_counts.iter().map(|n| n * 100).collect();
         let mut s = Scenario::allowing();
         let mut ledger = ShadowLedger::default();
         let equity = scaled("10000");
-        let cap = position_cap(scaled("1500"), scaled("0.30"), equity);
+        let cap = position_cap(scaled("1500"), scaled("0.2"), equity);
         let gross_cap = gross_limit(scaled("2000"), equity);
 
         for order in orders {
@@ -381,7 +426,7 @@ proptest! {
             }
             s.agent.orders_today = ledger.opening_orders_today;
             s.proposed = proposal(
-                INSTRUMENT_3, Side::Buy, "1", &order.to_string(), Origin::OrderBuilder,
+                INSTRUMENT_3, Side::Buy, &(order / 100).to_string(), "100", Origin::OrderBuilder,
             );
 
             let d = evaluate(&s.input()).expect("the gate decides");

@@ -46,6 +46,7 @@ use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
+#[doc(hidden)]
 pub mod spec_types;
 
 pub use mandate_accounting::{AccountType, AssetClass, Side};
@@ -615,15 +616,6 @@ pub fn session_at(
     Err(GateError::Unimplemented("session_at", "E6-6"))
 }
 
-/// §5.5's size factor: the product of the active `scale_sizes` rungs' factors.
-///
-/// # Errors
-/// Returns [`GateError`] when the product cannot be computed exactly.
-pub fn size_factor(mandate: &ValidatedMandate, risk: &RiskSnapshot) -> Result<Fraction, GateError> {
-    let _ = (mandate, risk);
-    Err(GateError::Unimplemented("size_factor", "E6-4"))
-}
-
 /// One `trim_to_target` sell per position that is far enough above `factor × cap` (§5.5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrimProposal {
@@ -668,6 +660,10 @@ pub struct FlattenInput<'a> {
     pub agent: AgentId,
     pub open_orders: &'a BTreeMap<ClientOrderId, WorkingOrder>,
     pub agent_positions: &'a [AgentPosition],
+    /// The broker's own quantities, which the plan must **ignore**: it sells exactly the agent's
+    /// sub-ledger, never the broker's position (§5.5). `MC-F01` holds 15 at the broker against a
+    /// sub-ledger of 10, and the field is here so a test can prove the difference is untouched.
+    pub broker_positions: &'a BTreeMap<AssetId, Qty>,
     pub session: Session,
     pub initiator: FlattenInitiator,
     pub owner_confirmed_bid: Option<Price>,

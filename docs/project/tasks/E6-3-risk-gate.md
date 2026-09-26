@@ -466,10 +466,11 @@ every exit (`RC-15` step 4). The fuzz property is scoped to MI-1's own words acc
 E6-4 in this crate is what the order path *does* with the ladder; stream F folds the ladder's state
 from the account stream. Three pure functions read that state and nothing else:
 
-1. **`size_factor(mandate, risk)`** — the product of the active `scale_sizes` rungs' factors
-   (mandate §5.5), an exact product of `Fraction`s with no intermediate rounding, `Fraction::ONE`
-   when no rung is active. `scale_action: limit_buys` multiplies the order-builder target by it
-   (stream H applies it; this crate only computes it, so the two cannot disagree).
+1. **The size factor** — the product of the active `scale_sizes` rungs' factors (mandate §5.5) —
+   is **read from the risk snapshot, not computed here**: it is folded risk state, stream F's
+   `Snapshot` carries it, and one number folded in two crates is one number two crates can disagree
+   about (the coordinator's ruling on the #136 review; see Dependencies). `scale_action:
+   limit_buys` multiplies the order-builder target by it, which stream H applies.
 2. **`trim_proposals(...)`** — for `scale_action: trim_to_target`, one `TrimProposal` per position
    where MV − factor × cap ≥ `rebalance_band` × cap, selling down to factor × cap as a `RiskExit`,
    the quantity **rounded up** to the increment, at most once per evaluation, only once the rung has
@@ -836,6 +837,12 @@ each `Proposed (founder)`.
   implementation PR after F's tests PR merges deletes the module and takes F's types; it is
   `#[doc(hidden)]` and named in the PR body so the deletion is not forgotten. If F's tests PR merges
   first, the module is never written.
+- **`size_factor` is stream F's, not this crate's** (the coordinator's ruling on the #136 review,
+  amending interpretation 1's reading of E6-4). It is folded risk state and F's `Snapshot` already
+  carries it, so computing it here as well would let two crates disagree about the same number.
+  `RiskSnapshot` therefore **reads** `size_factor`, and this crate keeps only `rung_active_for_s`,
+  which §5.5's `breach_confirm_s` trim guard needs and which F does not fold; if F takes that too,
+  the field goes and `trim_proposals` reads it from the snapshot like the rest.
 - **Stream H (`mandate-builder`)** consumes `size_factor` and proposes the orders MI-9 asserts the
   gate never denies. The dependency runs H → G (layer 5 depends on layer 4), so nothing here waits
   on H. It also consumes the **gate dry run**: `ref.py`'s `builder` calls `gate` on its own proposal
