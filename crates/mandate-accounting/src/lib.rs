@@ -136,12 +136,14 @@ impl Reservations {
 
     /// `negative` when `total` is below zero.
     pub fn new(total: Usd) -> Result<Self, AccountingError> {
-        let _ = total;
-        Err(AccountingError::Num(NumError::Negative))
+        if total.is_negative() {
+            return Err(AccountingError::Num(NumError::Negative));
+        }
+        Ok(Self(total))
     }
 
     pub fn total(self) -> Usd {
-        self.0.negated()
+        self.0
     }
 }
 
