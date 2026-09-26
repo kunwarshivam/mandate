@@ -1,6 +1,8 @@
 # Per-PR checks (ADR-0001 ES-12, DEC-75, DEC-76). Two required checks, `fast` and `full`, so the
 # setup cost is paid twice rather than once per check. Each is one `cargo xtask ci <job>`; run
 # `cargo xtask check` locally for the same set. main itself is covered by the nightly workflow.
+# A documentation-only change takes the short path in both jobs (DEC-112): no toolchain, just
+# typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`).
 name: ci
 
 on:
@@ -34,17 +36,32 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh "$MANDATE_BASE_REF" | tee -a "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only == 'true'
+        with:
+          tool: typos@1.50.2
+      - name: Documentation-only checks (typos, spec guard, trailers)
+        if: steps.change.outputs.docs_only == 'true'
+        run: .github/scripts/docs-checks.sh "$MANDATE_BASE_REF"
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-nextest@0.9.146,typos@1.50.2
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci fast
+        if: steps.change.outputs.docs_only != 'true'
 
   full:
     runs-on: ubuntu-24.04
@@ -52,19 +69,6 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-    # The Postgres journal tests run here, not in `fast` (DEC-109): the supported version, ES-08.
-    services:
-      postgres:
-        image: postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
-        env:
-          POSTGRES_PASSWORD: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
     env:
       MANDATE_BASE_REF: ${{ github.event.pull_request.base.sha }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
@@ -74,24 +78,48 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Classify the change (DEC-112)
+        id: change
+        run: .github/scripts/docs-only.sh "$MANDATE_BASE_REF" | tee -a "$GITHUB_OUTPUT"
+      - name: Documentation-only change
+        if: steps.change.outputs.docs_only == 'true'
+        run: echo "docs-only change; the fast job ran the documentation checks (DEC-112)"
+      # The Postgres journal tests run here, not in `fast` (DEC-109): the supported version, ES-08.
+      - name: Start PostgreSQL 18 (digest-pinned)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          docker run -d --name postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 \
+            postgres:18.6@sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e496e5ea167f298f2da9722
+          for _ in $(seq 1 30); do
+            docker exec postgres pg_isready -U postgres && exit 0
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2; exit 1
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        if: steps.change.outputs.docs_only != 'true'
         with:
           version: "0.12.19"
           enable-cache: true
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
+        if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-deny@0.20.2,cargo-nextest@0.9.146
       - name: Install gitleaks (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL -o gitleaks.tgz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  gitleaks.tgz" | sha256sum --check
           tar xzf gitleaks.tgz gitleaks && sudo install gitleaks /usr/local/bin/ && rm gitleaks gitleaks.tgz
       - name: Install cargo-mutants (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
         run: |
           curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
           echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
           tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        if: steps.change.outputs.docs_only != 'true'
       - run: cargo xtask ci full
+        if: steps.change.outputs.docs_only != 'true'
