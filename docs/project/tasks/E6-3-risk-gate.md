@@ -841,16 +841,19 @@ each `Proposed (founder)`.
   `spec_types.rs`** (the coordinator's ruling on the #136 review round 2). Stream F's #140 confirms
   the shapes match: `WorkingUniverse` is `mandate-domain`'s exactly, F's `Snapshot` carries the same
   field names, and `mandate-domain` also owns `Purpose`, `Side`, `AgentMode` and `AssetClass`, which
-  this crate currently takes from `mandate-accounting`. Two differences are settled before either
-  implementation lands: F's `size_factor` is a `Ratio` where this crate's snapshot field is a
-  `Fraction`, and F's `AssetId::parse` is a strict uuid where this crate's `AssetId::new` takes any
-  non-empty string. The question is posted on #140; whichever F takes, this crate follows.
+  this crate currently takes from `mandate-accounting`. The two differences are **settled**: F's
+  `size_factor` is a `Ratio` and F folds `active_rungs` as a `BTreeMap<u8, u64>` of rung to active
+  seconds, both of which `spec_types.rs` now mirrors, so the implementation PR only deletes the
+  module rather than converting anything; F's `AssetId::parse` is a strict uuid, which this crate
+  takes over its interim non-empty-string `new`. A map rather than a set beside a second map is the
+  better shape anyway: it cannot hold a rung that is active with no duration, or a duration for a
+  rung that is not.
 - **`size_factor` is stream F's, not this crate's** (the coordinator's ruling on the #136 review,
   amending interpretation 1's reading of E6-4). It is folded risk state and F's `Snapshot` already
   carries it, so computing it here as well would let two crates disagree about the same number.
-  `RiskSnapshot` therefore **reads** `size_factor`, and this crate keeps only `rung_active_for_s`,
-  which §5.5's `breach_confirm_s` trim guard needs and which F does not fold; if F takes that too,
-  the field goes and `trim_proposals` reads it from the snapshot like the rest.
+  `RiskSnapshot` therefore **reads** `size_factor`, and reads each rung's active seconds from F's
+  `active_rungs` map — which §5.5's `breach_confirm_s` trim guard needs — rather than keeping a
+  second field of its own.
 - **Stream H (`mandate-builder`)** consumes `size_factor` and proposes the orders MI-9 asserts the
   gate never denies. The dependency runs H → G (layer 5 depends on layer 4), so nothing here waits
   on H. It also consumes the **gate dry run**: `ref.py`'s `builder` calls `gate` on its own proposal

@@ -546,9 +546,8 @@ fn a_flatten_sells_the_sub_ledger_not_the_brokers_position() {
 fn two_active_rungs_multiply() {
     let mut s = Scenario::allowing();
     s.mandate = mandate_with(common::two_scaling_rungs());
-    s.risk.active_rungs = [0_u8, 1].into_iter().collect();
-    s.risk.size_factor = fraction("0.2");
-    s.risk.rung_active_for_s = [(0_u8, 120_u32), (1, 120)].into_iter().collect();
+    s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
+    s.risk.size_factor = common::ratio("0.2");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
     s.agent
         .market_values
@@ -586,9 +585,8 @@ fn two_active_rungs_multiply() {
 fn a_trim_rounds_up_to_the_increment() {
     let mut s = Scenario::allowing();
     s.mandate = mandate_with(common::two_scaling_rungs());
-    s.risk.active_rungs = [0_u8].into_iter().collect();
-    s.risk.size_factor = fraction("0.5");
-    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio("0.5");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
     s.agent
         .market_values
@@ -619,9 +617,8 @@ fn a_trim_waits_for_the_regular_session() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
     s.mandate = mandate_with(common::two_scaling_rungs());
-    s.risk.active_rungs = [0_u8].into_iter().collect();
-    s.risk.size_factor = fraction("0.5");
-    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio("0.5");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
     s.agent
         .market_values
@@ -655,9 +652,8 @@ fn no_trim_while_holding() {
         false,
         false,
     );
-    s.risk.active_rungs = [0_u8].into_iter().collect();
-    s.risk.size_factor = fraction("0.5");
-    s.risk.rung_active_for_s = [(0_u8, 120_u32)].into_iter().collect();
+    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+    s.risk.size_factor = common::ratio("0.5");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
     s.agent
         .market_values

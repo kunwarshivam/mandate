@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_num::{Fraction, Usd};
+use mandate_num::{Fraction, Ratio, Usd};
 
 /// The schema's `$defs/uuid` id, which every mandate rule and every reference case names.
 /// `mandate_accounting::InstrumentId` stays the wider broker-facing id (DEC-128 item 21).
@@ -86,14 +86,16 @@ pub struct RiskSnapshot {
     pub capital_base: Usd,
     pub inherited_loss: Usd,
     pub latched: BTreeSet<LimitKey>,
-    pub active_rungs: BTreeSet<u8>,
+    /// Each active rung and how long it has been active, in whole seconds, which §5.5's
+    /// `breach_confirm_s` trim guard needs. **Stream F's shape**: a map, not a set beside a second
+    /// map, so there is no way to hold a rung that is active with no duration or the reverse (the
+    /// coordinator's ruling on #136 review round 2).
+    pub active_rungs: BTreeMap<u8, u64>,
     /// The product of the active `scale_sizes` rungs' factors. **Folded by stream F**, not computed
     /// here: it is risk state, and F's `Snapshot` already carries it, so computing it in two crates
-    /// would let them disagree (the coordinator's ruling on #136 review round 1).
-    pub size_factor: Fraction,
-    /// How long each active rung has been active, for §5.5's `breach_confirm_s` trim guard. This
-    /// crate owns it only while F does not fold it; see the brief's Dependencies.
-    pub rung_active_for_s: BTreeMap<u8, u32>,
+    /// would let them disagree. `Ratio` is F's type, taken so the implementation PR that deletes
+    /// this module needs no conversion.
+    pub size_factor: Ratio,
     pub agent_mode: AgentMode,
 }
 

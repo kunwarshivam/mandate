@@ -373,8 +373,8 @@ proptest! {
     ) {
         let mut s = Scenario::allowing();
         s.mandate = common::mandate_with(common::two_scaling_rungs());
-        s.risk.active_rungs = rungs.into_iter().collect();
-        s.risk.size_factor = common::fraction(factor);
+        s.risk.active_rungs = rungs.into_iter().map(|r| (r, 120_u64)).collect();
+        s.risk.size_factor = common::ratio(factor);
 
         let trims = mandate_risk::trim_proposals(
             s.now, &s.config, &s.mandate, &s.risk, &s.agent, &std::collections::BTreeMap::new(),

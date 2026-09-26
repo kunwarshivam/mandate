@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_num::{Fraction, Price, Qty, Usd};
+use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
 use mandate_risk::{
     AccountSnapshot, AccountState, AccountType, AgentId, AgentMode, AgentSnapshot, AssetClass,
@@ -51,6 +51,11 @@ pub fn qty(text: &str) -> Qty {
 #[must_use]
 pub fn fraction(text: &str) -> Fraction {
     Fraction::parse(text).unwrap_or_else(|e| panic!("a test fraction parses: {e}"))
+}
+
+#[must_use]
+pub fn ratio(text: &str) -> Ratio {
+    Ratio::parse(text).unwrap_or_else(|e| panic!("a test ratio parses: {e}"))
 }
 
 #[must_use]
@@ -160,9 +165,8 @@ pub fn healthy_risk(equity: &str) -> RiskSnapshot {
         capital_base: usd(equity),
         inherited_loss: Usd::ZERO,
         latched: BTreeSet::new(),
-        active_rungs: BTreeSet::new(),
-        size_factor: Fraction::ONE,
-        rung_active_for_s: BTreeMap::new(),
+        active_rungs: BTreeMap::new(),
+        size_factor: ratio("1"),
         agent_mode: AgentMode::Normal,
     }
 }
