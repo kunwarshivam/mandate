@@ -21,7 +21,6 @@ const ABC_SHA256: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff
 type Store = BTreeMap<Digest, Vec<u8>>;
 
 #[test]
-#[ignore = "pending E5-2"]
 fn the_address_is_sha256_of_the_stored_bytes() {
     assert_eq!(
         ArtifactRef::of(b"").to_string(),
@@ -44,7 +43,6 @@ fn the_address_is_sha256_of_the_stored_bytes() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn references_parse_only_in_the_artifact_refs_form() {
     let text = format!("sha256:{ABC_SHA256}");
     let parsed = ArtifactRef::parse(&text).expect("canonical reference");
@@ -68,7 +66,6 @@ fn references_parse_only_in_the_artifact_refs_form() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn error_codes_are_stable() {
     assert_eq!(ArtifactError::Missing.code(), "artifact_missing");
     assert_eq!(ArtifactError::Corrupt.code(), "artifact_mismatch");
@@ -76,7 +73,6 @@ fn error_codes_are_stable() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn an_absent_reference_is_missing() {
     let store = Store::new();
     let reference = ArtifactRef::of(b"never stored");
@@ -88,7 +84,6 @@ fn an_absent_reference_is_missing() {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn put_never_overwrites_a_corrupt_object() {
     let mut store = Store::new();
     let reference = store.put_artifact(b"thesis").expect("stored");
@@ -120,7 +115,6 @@ impl ArtifactSource for SelfChecking {
 }
 
 #[test]
-#[ignore = "pending E5-2"]
 fn verification_reads_artifacts_through_the_store() {
     let content = b"model response".to_vec();
     let reference = ArtifactRef::of(&content);
@@ -159,7 +153,6 @@ fn verification_reads_artifacts_through_the_store() {
 
 proptest! {
     #[test]
-    #[ignore = "pending E5-2"]
     fn put_then_get_returns_the_bytes(bytes in vec(any::<u8>(), 0..512)) {
         let mut store = Store::new();
         let reference = store.put_artifact(&bytes).expect("stored");
@@ -171,7 +164,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-2"]
     fn the_same_bytes_get_the_same_address_once(
         a in vec(any::<u8>(), 0..64),
         b in vec(any::<u8>(), 0..64),
@@ -185,7 +177,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E5-2"]
     fn one_flipped_bit_is_detected_on_read(
         bytes in vec(any::<u8>(), 1..256),
         index in any::<prop::sample::Index>(),
