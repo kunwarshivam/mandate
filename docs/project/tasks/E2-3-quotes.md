@@ -1,7 +1,9 @@
-# Task: E2-3 Top-of-book quotes (first slice: model, client, storage)
+# Task: E2-3 Top-of-book quotes
 
 Agent task brief ([ADR-0001](../../adr/0001-engineering-setup.md) ES-15). One task implements one
-story; this story ships in two PRs, and this brief covers the first.
+story; this story ships in two PRs. Everything down to "Definition of done" is the first slice
+(model, client, storage; #95); ["Second slice"](#second-slice-the-cli-and-the-rfc-3339-retirement)
+at the end is the second (#107).
 
 ## Story
 
@@ -151,3 +153,82 @@ refused.
 - [x] Docs updated: this brief, the feature map, the work tracker.
 - [x] `cargo xtask check` is green (summary in the PR).
 - [x] The PR description is complete.
+
+## Second slice: the CLI and the RFC 3339 retirement
+
+The slice the first one listed under "Not done here", plus one piece of debt it could then pay off
+(PR #107, claim #106). Crates: `mandate-marketdata` and `mandate-cli`, neither safety-critical, so
+tests and code ship in one PR with the tests as its first commit; all ten new tests failed on the
+API stubs.
+
+### Scope
+
+- `mandate download --kind quotes`: the `KindArg` value, its validation (no `--timeframe`), and the
+  existing plan, client, store, and corporate-actions path unchanged.
+- `mandate inspect` for a quotes dataset: the statistics, duplicates by quote key, and the report
+  lines. `InspectError::Unsupported`, interpretation 7's placeholder, is removed.
+- `timestamp::parse_rfc3339_utc` routed through `mandate_time::UtcNanos::parse_rfc3339`, which
+  [#98](https://github.com/kunwarshivam/mandate/pull/98) gave the fractional seconds this crate's
+  own parser existed for. The day-start helper and the Parquet `i64` range check stay; the
+  duplicated parser is deleted.
+- **New dependencies:** none. **Safety-critical:** no.
+
+### Interpretations (the second slice)
+
+9. **Quoted sides only (DEC-116).** Alpaca sends a zero price, a zero size, and a blank exchange
+   for the side holding no order, so a zero is an absent order and not a price of zero. It is left
+   out of the bid and ask extremes, out of the spread statistics, and out of the split-adjusted
+   prices, and counted instead. `inspect` reports each side's lowest and highest price with the
+   rows quoting it, and the classes of every row: two-sided (of which locked and crossed),
+   one-sided, and unquoted, which cover every row exactly once. Interpretation 2 is unchanged:
+   storage still keeps every quote as sent, and only the summary judges.
+10. **The spread keeps its sign (DEC-116).** It is the ask minus the bid over two-sided rows, so a
+    crossed quote's spread is negative and the narrowest spread may be below zero. The summary
+    gives the narrowest, the widest, and the total with its row count, never a mean, because the
+    quotient of two exact decimals is not one (ES-23); no size is totalled, because the top of the
+    book is a standing offer, not traded volume.
+11. **A quote's key** is its time and its two exchange codes, as a trade's is its time, ID,
+    exchange, and tape (E2-2 interpretation 5). Crypto quotes carry no exchange, so their key is
+    the time alone.
+12. **Offsets stay refused.** `UtcNanos::parse_rfc3339` also accepts `±HH:MM`;
+    `parse_rfc3339_utc` keeps requiring the `Z`, because a market-data record outside UTC is a
+    change of vendor contract, not a timestamp to convert. That is the one behaviour the retired
+    parser had that `mandate-time` does not, and it has its own test.
+
+### Invariants touched (the second slice)
+
+| Clause | Test |
+|---|---|
+| `--kind quotes` is its own kind, takes no timeframe, and serves stocks and crypto | CLI `quotes_are_their_own_kind_and_take_no_timeframe` |
+| A quotes run follows every page and stores the day under `<out>/alpaca/<feed>/quotes/<symbol>`; a rerun changes nothing | CLI `a_quotes_run_follows_every_page_and_stores_them_under_the_quotes_directory` |
+| Coverage, rows, first and last time, and exact bid and ask extremes | `inspect_summarizes_stored_quotes_with_exact_sides_spreads_and_counts` |
+| A crossed quote is the narrowest spread; locked and one-sided rows are counted | `a_crossed_spread_is_negative_and_locked_and_one_sided_rows_are_counted` |
+| Every row is two-sided, one-sided, or unquoted, exactly once, and no extreme comes from a zero side | `every_stored_quote_row_falls_in_exactly_one_class` |
+| Quotes sharing a time and both exchange codes are one duplicate | `quotes_sharing_a_time_and_both_exchange_codes_are_one_duplicate` |
+| A quotes dataset of empty days has coverage and no statistics | `a_quotes_dataset_of_empty_days_has_coverage_and_no_statistics` |
+| Split-adjusted quote prices come from the quoted sides of every day | `split_adjusted_quote_prices_are_the_quoted_sides_of_both_days` |
+| The report's line order and wording, including a side no row quotes | CLI `the_quotes_report_gives_each_side_the_spread_and_the_counts`, `a_quotes_report_says_which_side_no_row_quotes` |
+| The vendor parse is `UtcNanos::parse_rfc3339` and nothing of this crate's own | `the_vendor_parser_delegates_to_mandate_time_and_keeps_no_parser_of_its_own` |
+| The two agree on every timestamp of every recorded fixture | `the_vendor_parser_agrees_with_utc_nanos_parse_rfc3339_on_every_recorded_timestamp` |
+| A zone offset stays refused here although `mandate-time` accepts it | `an_offset_is_refused_here_although_mandate_time_accepts_it` |
+
+The statistics tests have an oracle of their own: a second accumulator in `tests/quotes.rs` that
+counts scale-9 units without calling `mandate_marketdata::number`, run against the literal numbers
+of the recorded CPHC day as well.
+
+### Evidence (the second slice)
+
+- Tests first: the ten tests above failed on the API stubs (commit "E2-3 tests"), then passed.
+- Planted bugs, each planted alone, run, and reverted: bid and ask swapped in the statistics; a
+  crossed quote's spread made absolute; a quotes download planned as `bars-1Min`; the old parser
+  restored; quote duplicates keyed on the time alone; a side priced zero counted as quoted. Each
+  was caught by the tests named in PR #107.
+- `cargo xtask check` green apart from
+  `concurrent_writes::a_temporary_file_that_cannot_be_created_is_an_error_not_a_retry`, which fails
+  on `main` too in a sandbox running as root and says so itself.
+
+### Still not done after this slice
+
+- A live check of quotes in `tests/live.rs`, and a quotes download in the M1 exit run: both need
+  market-data credentials and network, which the sandbox has neither of.
+- Quote sizes are not summarized (DEC-116).

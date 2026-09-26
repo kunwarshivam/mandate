@@ -162,6 +162,25 @@ every workspace crate and reference-case suite has an entry and that every path 
   Planted bugs per test: the task brief.
 - **Run:** `cargo nextest run -p mandate-journal -p mandate-artifacts-fs`.
 
+## Journal verification and artifact commands
+
+- **Spec:** `docs/specs/journal.md` §6.2 (the segment format the command reads), §6.3, §10, §11,
+  §12; backlog E5-4; DEC-115; `docs/project/tasks/E5-4-verification-cli.md`.
+- **Code:** `crates/mandate-cli/src/journal.rs` (`mandate journal verify`: reads a segment file back
+  into stored rows, runs `verify_events` then `verify_anchor`, reports the first failure with its
+  spec check code and a non-zero exit), `crates/mandate-cli/src/artifact.rs` (`mandate artifact put`
+  and `get` over `FsArtifactStore`, the get re-hashed through `get_artifact`). The checks themselves
+  are `mandate-journal`'s and `mandate-artifacts-fs`', unchanged by this story.
+- **Tests:** `crates/mandate-cli/tests/journal_verify.rs` (every tamper vector an export can
+  express, replayed through the command against `fixtures/refcases/journal.json`, with the two it
+  cannot asserted as inexpressible; the exact report; malformed lines, trusted starts, anchors,
+  mixed streams, artifacts present, absent, and altered), `crates/mandate-cli/tests/artifact.rs`
+  (the FIPS 180-2 addresses a put prints, the round trip, the re-hash on read, reference forms).
+  Planted bugs per test: the task brief.
+- **Reference cases:** `journal::tamper::*` and `journal::export_line_seq_1` in
+  `fixtures/refcases/journal.json`, read directly rather than through `mandate-refcases`.
+- **Run:** `cargo nextest run -p mandate-cli --test journal_verify --test artifact`.
+
 ## Reference-case harness
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
@@ -231,18 +250,23 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 ## Top-of-book quotes
 
-- **Spec:** backlog E2-3; trading domain spec §2.1, §4.1, §4.2; DEC-89;
+- **Spec:** backlog E2-3; trading domain spec §2.1, §4.1, §4.2, §8.2; DEC-89, DEC-116;
   `docs/project/tasks/E2-3-quotes.md`.
 - **Code:** `Quote`, `Kind::Quotes`, and `Records::Quotes` in
   `crates/mandate-marketdata/src/model.rs`; the quotes request and page parsing in
   `crates/mandate-marketdata/src/alpaca.rs`; the quote columns in
   `crates/mandate-marketdata/src/dataset/partition.rs` and their scales in
-  `crates/mandate-marketdata/src/dataset.rs`. Paging, retries, and storage are the shared paths in
+  `crates/mandate-marketdata/src/dataset.rs`; the statistics (`Values::Quotes`, `Extent`, `Spread`,
+  and `QuoteTotals`) in `crates/mandate-marketdata/src/inspect.rs`; `KindArg::Quotes` in
+  `crates/mandate-cli/src/download.rs` and the report lines in
+  `crates/mandate-cli/src/inspect.rs`. Paging, retries, and storage are the shared paths in
   `crates/mandate-marketdata/src/client.rs` and `Store::put_day`.
 - **Tests:** `crates/mandate-marketdata/tests/quotes.rs` against the recorded
   `stock-quotes-*` and `crypto-quotes-*` scenarios in
-  `crates/mandate-marketdata/tests/fixtures/alpaca/`.
-- **Run:** `cargo nextest run -p mandate-marketdata --test quotes`.
+  `crates/mandate-marketdata/tests/fixtures/alpaca/`, and the quotes tests of
+  `crates/mandate-cli/tests/download.rs` and `crates/mandate-cli/tests/inspect.rs`.
+- **Run:** `cargo nextest run -p mandate-marketdata --test quotes`,
+  `cargo nextest run -p mandate-cli`.
 ## Market sessions and corporate actions in market data
 
 - **Spec:** backlog E2-4; trading domain spec §1 principle 2, §2.2, §4.2, §4.3, §4.5, §8.5; DEC-82,

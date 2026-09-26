@@ -1,6 +1,6 @@
 //! `mandate inspect`: the text report, the problem count behind the exit status, and argument
 //! parsing (backlog E2-2), with gaps classified by market session and raw and split-adjusted
-//! prices (E2-4).
+//! prices (E2-4), and each side, the spread, and the classes of a quotes dataset (E2-3, DEC-116).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,8 +12,8 @@ use mandate_cli::{Cli, Command};
 use mandate_marketdata::actions::RecordedActions;
 use mandate_marketdata::dataset::Store;
 use mandate_marketdata::inspect::{
-    ActionsReport, AdjustedPrices, ClassifiedGap, Coverage, Duplicate, Gap, GapClass, Inspection,
-    Problem, Stats, Stretch, Values,
+    ActionsReport, AdjustedPrices, ClassifiedGap, Coverage, Duplicate, Extent, Gap, GapClass,
+    Inspection, Problem, Spread, Stats, Stretch, Values,
 };
 use mandate_marketdata::model::{
     AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Feed, Kind, OtherAction,
@@ -466,7 +466,7 @@ fn parse(args: &[&str]) -> Result<InspectArgs, clap::Error> {
     let argv = ["mandate", "inspect"].iter().chain(args).copied();
     Cli::try_parse_from(argv).map(|cli| match cli.command {
         Command::Inspect(args) => args,
-        Command::Download(_) => panic!("`inspect` parsed as `download`"),
+        other => panic!("`inspect` parsed as {other:?}"),
     })
 }
 
@@ -527,5 +527,139 @@ fn inspect_takes_one_or_more_dataset_directories() {
     assert_eq!(
         parse(&["a", "b/c"]).unwrap().datasets,
         [PathBuf::from("a"), PathBuf::from("b/c")]
+    );
+}
+
+fn cphc_quotes() -> DatasetId {
+    id(AssetClass::UsEquity, Feed::Sip, Kind::Quotes, "CPHC")
+}
+
+fn quote_inspection(values: Values, corporate_actions: ActionsReport) -> Inspection {
+    Inspection {
+        dataset: cphc_quotes(),
+        coverage: Coverage {
+            span: Some(range("2026-09-23", "2026-09-24")),
+            listed: 2,
+            empty: vec![range("2026-09-23", "2026-09-23")],
+            missing: vec![],
+        },
+        stats: Some(Stats {
+            rows: 4,
+            first: time("2026-09-24T14:00:00.000000000Z"),
+            last: time("2026-09-24T14:00:03.000000000Z"),
+            values,
+            adjusted: match corporate_actions {
+                ActionsReport::Applied { .. } => Some(AdjustedPrices {
+                    low: dec("2.975"),
+                    high: dec("3.35"),
+                }),
+                _ => None,
+            },
+        }),
+        corporate_actions,
+        gaps: vec![],
+        duplicates: vec![],
+        problems: vec![],
+    }
+}
+
+#[test]
+fn the_quotes_report_gives_each_side_the_spread_and_the_counts() {
+    let found = quote_inspection(
+        Values::Quotes {
+            bid: Some(Extent {
+                low: dec("11.9"),
+                high: dec("12.52"),
+                rows: 4,
+            }),
+            ask: Some(Extent {
+                low: dec("12.51"),
+                high: dec("13.4"),
+                rows: 3,
+            }),
+            spread: Some(Spread {
+                narrowest: dec("-0.01"),
+                widest: dec("0.01"),
+                total: dec("0"),
+                rows: 3,
+            }),
+            locked: 1,
+            crossed: 1,
+            one_sided: 1,
+            unquoted: 0,
+        },
+        ActionsReport::NotRecorded,
+    );
+    assert_eq!(
+        inspect::render(&found),
+        "\
+CPHC quotes (sip)
+coverage: 2026-09-23 to 2026-09-24, 2 days listed
+  empty: 2026-09-23
+rows: 4, first 2026-09-24T14:00:00.000000000Z, last 2026-09-24T14:00:03.000000000Z
+quotes: 3 two-sided (1 locked, 1 crossed), 1 one-sided, 0 with neither side quoted
+  bid: low 11.9, high 12.52 over 4 rows
+  ask: low 12.51, high 13.4 over 3 rows
+  spread: narrowest -0.01, widest 0.01, total 0 over 3 rows
+corporate actions: not recorded with this dataset; no split-adjusted prices
+gaps: not applicable to quotes
+duplicates: 0
+problems: 0
+"
+    );
+}
+
+#[test]
+fn a_quotes_report_says_which_side_no_row_quotes() {
+    let actions = ActionsReport::Applied {
+        recorded: RecordedActions {
+            range: range("2026-09-23", "2026-09-24"),
+            actions: CorporateActions {
+                symbol: Symbol::parse("CPHC").unwrap(),
+                splits: vec![Split {
+                    id: "cphc-split".to_owned(),
+                    ex_date: day("2026-09-24"),
+                    ratio: split_ratio(4, 1).unwrap(),
+                }],
+                cash_dividends: vec![],
+                other: vec![],
+            },
+        },
+        as_of: day("2026-09-24"),
+    };
+    let found = quote_inspection(
+        Values::Quotes {
+            bid: None,
+            ask: Some(Extent {
+                low: dec("11.9"),
+                high: dec("13.4"),
+                rows: 3,
+            }),
+            spread: None,
+            locked: 0,
+            crossed: 0,
+            one_sided: 3,
+            unquoted: 1,
+        },
+        actions,
+    );
+    assert_eq!(
+        inspect::render(&found),
+        "\
+CPHC quotes (sip)
+coverage: 2026-09-23 to 2026-09-24, 2 days listed
+  empty: 2026-09-23
+rows: 4, first 2026-09-24T14:00:00.000000000Z, last 2026-09-24T14:00:03.000000000Z
+quotes: 0 two-sided (0 locked, 0 crossed), 3 one-sided, 1 with neither side quoted
+  bid: no row quotes it
+  ask: low 11.9, high 13.4 over 3 rows
+  spread: no row quotes both sides
+split-adjusted as of 2026-09-24: low 2.975, high 3.35
+corporate actions: recorded for 2026-09-23 to 2026-09-24, applied as of 2026-09-24
+  split 4:1, ex-date 2026-09-24 (cphc-split): applied
+gaps: not applicable to quotes
+duplicates: 0
+problems: 0
+"
     );
 }
