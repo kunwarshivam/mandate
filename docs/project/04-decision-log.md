@@ -185,7 +185,7 @@ reservation keeps its row and its number is never reused.
 | DEC-116 | `claude-code` | stream B | E2-3 CLI slice and the retirement of the market-data RFC 3339 workaround | In [#107](https://github.com/kunwarshivam/mandate/pull/107) |
 | DEC-117 to DEC-126 | `claude-code` | stream D, claim #103 | Track C: one decision per answered question in [09-mandate-rewrite-questions.md](09-mandate-rewrite-questions.md), proposed to the founder, then the spec rewrite | In #109 |
 | DEC-127 | `claude-code` | [#110](https://github.com/kunwarshivam/mandate/issues/110) | E4-2 baseline backtest and metrics interpretations | In [#112](https://github.com/kunwarshivam/mandate/pull/112) |
-| DEC-128 | `claude-code` | stream F, claim [#124](https://github.com/kunwarshivam/mandate/issues/124) | `mandate-spec` and `mandate-domain`: interpretations for the mandate document, validation, policy, change classification, and risk state as code, and the Rust harness for the mandate reference cases | In #125 |
+| DEC-128 | `claude-code` | stream F, claim [#124](https://github.com/kunwarshivam/mandate/issues/124) | `mandate-spec` and `mandate-domain`: interpretations for the mandate document, validation, policy, change classification, and risk state as code, and the Rust harness for the mandate reference cases | In #129 |
 | DEC-129 | `claude-code` | stream G | `mandate-risk`: the gate, forced flatten, US account rules, eligibility floor, restrictions, and conduct controls | Reserved |
 | DEC-130 | `claude-code` | stream H | `mandate-builder`: autonomy classification and the order builder | Reserved |
 | DEC-131 | `claude-code` | stream I | E6-1 and E6-5: the agent runtime skeleton and kill switches, on the DEC-17 recommendation | Reserved |
