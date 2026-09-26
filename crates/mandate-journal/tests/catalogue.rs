@@ -220,7 +220,7 @@ fn registered_schemas_accept_their_payloads() {
                 "FillApplied",
                 &[FEE, CAL, SET, INS],
                 r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy",
-            "qty_gross":"10","price":"150.000","trade_date":"2026-09-21",
+            "qty_gross":"10","price":"150.000","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z",
             "fees":[{"kind":"cat","amount":"0.00010","asset":"USD","status":"accrued"}]}"#,
             ),
         ),
@@ -234,7 +234,7 @@ fn registered_schemas_accept_their_payloads() {
         "FillApplied",
         &[FEE, CAL, SET, INS],
         r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy",
-        "qty_gross":"10","price":"150","trade_date":"2026-02-30","fees":[]}"#,
+        "qty_gross":"10","price":"150","trade_date":"2026-02-30","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
     );
     let e = Draft::parse(&bad_date).unwrap_err();
     assert_eq!(
@@ -292,4 +292,55 @@ fn artifact_refs_cover_references_nested_in_arrays() {
     assert!(Draft::parse(&gate(&format!("[\"{digest}\"]"))).is_ok());
     let e = Draft::parse(&gate("[]")).unwrap_err();
     assert_eq!(e.reason, InvalidReason::ArtifactRefs);
+}
+
+/// Mandate spec §5.2 risk inputs, other than the copied `ClockAdvanced`, which is the clock itself.
+const RISK_INPUTS: &[&str] = &[
+    "MarkUpdated",
+    "FillApplied",
+    "LateFillApplied",
+    "FeesCharged",
+    "CorporateActionApplied",
+    "CashInLieuPosted",
+    "CompensatingEvent",
+    "MandateVersionApplied",
+    "RiskDayStarted",
+    "OwnerAcknowledged",
+];
+
+/// A valid payload for every registered risk input; registering another one without adding it here
+/// fails `every_registered_risk_input_requires_risk_clock`.
+const RISK_INPUT_PAYLOADS: &[(&str, &[&str], &str)] = &[
+    (
+        "MarkUpdated",
+        &[],
+        r#"{"instrument_id":"i","price":"1","source":"quote","feed":"iex","risk_clock":"2026-09-21T14:00:01.000000000Z"}"#,
+    ),
+    (
+        "FillApplied",
+        &[FEE, CAL, SET, INS],
+        r#"{"fill_id":"f","client_order_id":"c-1","instrument_id":"i","side":"buy","qty_gross":"1",
+        "price":"1","trade_date":"2026-09-21","risk_clock":"2026-09-21T14:00:01.000000000Z","fees":[]}"#,
+    ),
+];
+
+#[test]
+fn every_registered_risk_input_requires_risk_clock() {
+    for event_type in REGISTERED.iter().filter(|t| RISK_INPUTS.contains(t)) {
+        let (_, refs, payload) = RISK_INPUT_PAYLOADS
+            .iter()
+            .find(|(t, _, _)| t == event_type)
+            .unwrap_or_else(|| panic!("add a valid {event_type} payload to RISK_INPUT_PAYLOADS"));
+        let draft = with_payload(event_type, refs, payload);
+        assert!(
+            Draft::parse(&draft).is_ok(),
+            "{event_type} payload is valid"
+        );
+        let e = Draft::parse(&edit(&draft, "payload.risk_clock", None)).unwrap_err();
+        assert_eq!(
+            (e.reason, e.path.as_str()),
+            (InvalidReason::Schema, "payload.risk_clock"),
+            "{event_type} requires risk_clock (DEC-81)"
+        );
+    }
 }
