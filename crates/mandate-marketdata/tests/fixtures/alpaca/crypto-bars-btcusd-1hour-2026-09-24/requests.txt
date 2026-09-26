@@ -1,0 +1,1 @@
+/v1beta3/crypto/us/bars?symbols=BTC%2FUSD&timeframe=1Hour&start=2026-09-24T00:00:00Z&end=2026-09-25T00:00:00Z&limit=10000&sort=asc
