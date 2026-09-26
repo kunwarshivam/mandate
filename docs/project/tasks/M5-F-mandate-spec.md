@@ -270,16 +270,28 @@ pub struct Pointer(String);
   wider journal grammar (§4.6): `DecStr::parse` returns `Ok("0.02")` for MC-S04's `0.020`, also
   accepts `007.50`, `1e3`, and `.5`, allows 29 integer digits where the schema allows 28, and knows
   nothing of the narrower `fraction`, `open_fraction`, `unit_positive`, and `positive_decimal`
-  grammars. So `SchemaDec::parse` checks the raw text against the field's own `$def` pattern
-  **first** and only then wraps it. Every schema grammar is canonical by construction — no leading
-  zeros beyond a bare `0`, a fractional part ending in a non-zero digit, no exponent, `-0` excluded
-  — so text that passes it is already `DecStr`'s normal form, `DecStr::parse` on it is the identity,
-  and `canonical_bytes` round-trips. A property test asserts that identity over generated values
-  rather than assuming it. Each rule converts the fields it computes with, and a value outside the
-  target type is a typed error naming the path, never a rounded number (interpretation 4).
-- **`SchemaDec` orders by decimal value** (`Ord`, total and exact: sign, then integer-part length,
-  then the text, which the canonical grammar makes sufficient). That is all V-012, V-013, and V-014
-  need, so no arithmetic type and no change to `mandate-canon` is involved.
+  grammars. So `SchemaDec::parse` checks the raw text against the field's whole `$def` **first** and
+  only then wraps it — the pattern *and*, for `decimal`, the `not: {const: "-0"}` beside it, which is
+  load-bearing: the `decimal` pattern alone matches `-0`, and `DecStr::parse("-0")` returns `"0"`
+  because all-zero digits normalise before the sign is applied. Checking the whole `$def` makes every
+  schema grammar canonical — no leading zeros beyond a bare `0`, a fractional part ending in a
+  non-zero digit, no exponent, and no `-0` — so text that passes it is already `DecStr`'s normal form,
+  `DecStr::parse` on it is the identity, and `canonical_bytes` round-trips. A property test asserts
+  that identity over generated values rather than assuming it, and planted bug 21 is an
+  implementation that checks the pattern and drops the `-0` exclusion. Each rule converts the fields
+  it computes with, and a value outside the target type is a typed error naming the path, never a
+  rounded number (interpretation 4).
+- **`decimal` is the only signed grammar, and the only one with that exclusion.** It is referenced
+  exactly once, by `behavior.signal_models[].params[].value`, whose schema is an `anyOf` of
+  `decimal`, a boolean, and a string of at most 200 characters, so a parameter value is a `SchemaDec`
+  only on the decimal branch. Every other decimal in the document uses `positive_decimal`,
+  `fraction`, `open_fraction`, or `unit_positive`, all unsigned.
+- **`SchemaDec` orders by decimal value** (`Ord`, total and exact): compare signs first, then, for
+  two values of the same sign, the integer-part length and then the text, which the canonical grammar
+  makes sufficient — **reversed for two negatives**, where longer and lexically greater text means
+  smaller. Only the `decimal` grammar can be negative, so only `params[].value` reaches that branch;
+  V-012, V-013, and V-014 compare unsigned fields. That is all they need, so no arithmetic type and
+  no change to `mandate-canon` is involved.
 - **`canonical_bytes` round-trips.** `Mandate::parse(v)` then `canonical_bytes` reproduces the bytes
   `mandate-canon`'s writer produces for `v`, so the version hash cannot drift from the document the
   owner confirmed. `mandate::version_vector` checks the bytes and the digest against the fixture.
@@ -448,9 +460,14 @@ evaluates as `ask` when `auto_allowed` becomes false"). `PolicyOverlay` is the s
 H, and J consume: H asks `auto_allowed` before returning `auto`, G asks `effective` for the ceiling
 of each limit it enforces, and J asks `effective` for `max_instruments`,
 `research_cost_cap_usd_per_day`, `research_interval_s`, `max_revisions_per_lineage`,
-`research_agent_allowed`, `admission_auto_allowed`, and `stagger_window_s`, which are §8.5's checks
-4 to 7 and 16 to 17. A lowered `max_instruments` therefore **refuses further admissions and removes
-nothing**: §8.5 check 17 refuses a thesis when the universe is already at the ceiling, and a refusal
+`research_agent_allowed`, `admission_auto_allowed`, and `stagger_window_s`. Those bear on §8.5
+checks 4 (`research_disabled`), 6 (`admission_denied`), 7 (`cost_cap_reached`), 16
+(`lineage_retired`, through `max_revisions_per_lineage`), and 17 (`universe_full`, through
+`max_instruments`), plus §8.4's proposal interval and stagger window, which are timing rather than
+admission checks. Check 5 (`universe_pinned`) is not among them: it reads `universe.pinned`, an
+envelope field, and is MI-20 rather than a policy key. A lowered `max_instruments` therefore
+**refuses further admissions and removes nothing**: §8.5 check 17 refuses a thesis when the universe
+is already at the ceiling, and a refusal
 admits nothing and changes the universe only in the one `lineage_retired` case (§8.6 item 4), so
 MI-19 still holds and an over-ceiling universe drains by expiry, never by a forced removal. Keeping
 the overlay next to the check means one definition of "stricter", tested once.
@@ -602,10 +619,13 @@ pub struct GoalInputs {
     pub ask: Price,
 }
 
+pub enum OnComplete { HoldProtected, DisarmLadder, Release }
+pub enum ThenAction { Applied(OnComplete), DiscretionaryExitAllThenRetire }
+
 pub enum GoalStatus {
     Running,
     ConfirmedInRiskState,
-    Done { reason: GoalReason, then: OnCompleteApplied, stop_reason: StopReason },
+    Done { reason: GoalReason, then: ThenAction, stop_reason: StopReason },
 }
 
 pub fn goal_status(m: &ValidatedMandate, inputs: &GoalInputs) -> Result<GoalStatus, SpecError>;
@@ -614,9 +634,41 @@ pub fn goal_status(m: &ValidatedMandate, inputs: &GoalInputs) -> Result<GoalStat
 `profit_stop` returns `ConfirmedInRiskState` rather than a completion: §3.1 confirms it by breach
 time in the risk state, and returning `Running` here would invite a caller to decide it twice.
 
-### The condition language
+### Autonomy and the condition language
 
 ```rust
+pub struct Autonomy {
+    pub rules: Vec<Rule>,
+    pub default: AutonomyDecision,
+    pub admission: AutonomyDecision,
+    pub approval: Approval,
+}
+
+pub struct Rule { pub id: RuleId, pub when: Condition, pub then: AutonomyDecision }
+
+pub struct Approval {
+    pub timeout_s: u32,
+    pub on_timeout: OnTimeout,
+    pub approvers: Vec<ApproverRef>,
+    pub two_approver_above_usd: Option<SchemaDec>,
+}
+
+pub enum ConditionField {
+    Purpose, OrderUsd, CombinedScore, Instrument, AssetClass, Session,
+    FirstTradeInInstrument, NewInstrument, ThesisConfidence, Drawdown,
+    DailyPnlFraction, PositionUsdAfter, GrossUsdAfter, BoughtTodayUsd,
+    PositionPnlFraction, UnusualInput,
+}
+
+pub enum Operator { Eq, Ne, Gt, Gte, Lt, Lte, In, NotIn }
+
+pub enum ConditionValue {
+    Enum(String),
+    Decimal(SchemaDec),
+    Bool(bool),
+    List(Vec<String>),
+}
+
 pub enum Condition {
     All(Vec<Condition>),
     Any(Vec<Condition>),
@@ -636,6 +688,10 @@ pub trait Facts {
     fn bool_field(&self, field: ConditionField) -> Option<bool>;
 }
 ```
+
+`Rule` is `autonomy.rules[]`, which is why the V-code enum is `Violation` (above) and not `Rule`:
+stream H reads `Autonomy`, `Rule`, `AutonomyDecision`, and the condition types by these names, so they
+are declared here rather than left implicit.
 
 §6.3 is the document's own language, so the tree, its type rules, and `matches` live here, in
 `mandate-spec`, and **nowhere else**. §6.2's evaluation order — the gate dry run, the built-in AUTO
@@ -726,15 +782,18 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
    rather than rejects and implements the wider journal grammar of §4.6: `DecStr::parse("0.020")`
    returns `Ok("0.02")`, so MC-S04 would be accepted; it also takes `007.50`, `1e3`, and `.5`,
    allows 29 integer digits where the schema allows 28, and does not know the narrower `fraction`,
-   `open_fraction`, `unit_positive`, and `positive_decimal` grammars at all. Text is still the
+   `open_fraction`, `unit_positive`, and `positive_decimal` grammars at all. The check is against the
+   whole `$def`, not the pattern alone: `decimal` carries `not: {const: "-0"}` beside its pattern,
+   which the pattern itself matches and `DecStr` would normalise to `0`. Text is still the
    storage, because the schema's grammars allow up to 28 integer and 28 fractional digits, which
    `Price` (9 places), `Usd` (28 places of scale but a 96-bit significand), and `Ratio` (24 places)
    cannot hold; keeping it as text is what puts the Rust parse in agreement with `jsonschema` on
    every MC-S case and on fuzzed mandates (ES-22) and keeps the canonical bytes, and therefore the
-   version hash, byte-identical to what the owner confirmed. Because every schema grammar is
-   canonical by construction, `DecStr::parse` on a `SchemaDec` is the identity, which a property
-   test asserts. V-012, V-013, and V-014 need only ordering, so `SchemaDec` implements `Ord` by
-   decimal value and `mandate-canon` is not touched at all.
+   version hash, byte-identical to what the owner confirmed. Because the whole `$def` makes every
+   grammar canonical, `DecStr::parse` on a `SchemaDec` is the identity, which a property test asserts
+   and planted bug 21 attacks. V-012, V-013, and V-014 need only ordering, so `SchemaDec` implements
+   `Ord` by decimal value — reversed between two negatives, which only `params[].value` can be — and
+   `mandate-canon` is not touched at all.
 4. **Out of arithmetic range is a typed error, never a rounded number.** A rule that must compute
    with a field converts it, and a value the target type cannot hold exactly returns
    `SpecError::OutOfRange { path }` with code `out_of_range`. It is not a V-code: the mandate is
@@ -988,7 +1047,8 @@ nothing catches means the test set is incomplete, not that the bug is harmless.
 | 18 | Changed paths are computed element by element inside an array, so a ladder change reports `/risk/drawdown_ladder/2/at` | `change::one_test_per_row`, MC-C01 |
 | 19 | The parse accepts a decimal sent as a JSON number | `schema::one_test_per_s_case`, MC-S06, MC-S16 |
 | 20 | The parse wraps a decimal in `DecStr` **without** first checking the field's `$def` pattern, so `DecStr`'s normalisation silently accepts `0.020` (as `0.02`), `007.50`, `1e3`, and `.5` | `schema::one_test_per_s_case`, `properties::a_schema_dec_is_its_own_dec_str_normal_form`, MC-S04 |
-| 21 | The parse uses the `decimal` grammar for every field instead of the narrower one the schema declares, so `max_drawdown` of `8` or a negative fraction passes | `schema::one_test_per_s_case`, MC-S03, MC-S13, MC-S14 |
+| 21 | `SchemaDec::parse` checks the `decimal` pattern but drops the `not: {const: "-0"}` beside it, so `-0` is accepted, `DecStr` normalises it to `0`, and the round trip breaks | `properties::a_schema_dec_is_its_own_dec_str_normal_form`, `schema::a_minus_zero_parameter_value_is_rejected` |
+| 21b | The parse uses the `decimal` grammar for every field instead of the narrower one the schema declares, so `max_drawdown` of `8` or a negative fraction passes | `schema::one_test_per_s_case`, MC-S03, MC-S13, MC-S14 |
 | 22 | The parse bounds the integer part at `DecStr`'s 29 digits rather than the schema's 28 | `properties::the_parse_agrees_with_the_schemas_pattern_grammar` |
 | 23 | 29 fractional digits are accepted | `schema::one_test_per_s_case`, MC-S17 |
 | 24 | The parse ignores unknown members instead of rejecting them | `schema::one_test_per_s_case`, MC-S05 |
