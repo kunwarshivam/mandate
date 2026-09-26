@@ -276,7 +276,8 @@ the paths arrive with the tests PR, which updates this entry.
   (cost-basis reduction, risk marks); `docs/specs/journal.md` §4 (the canonical form the version
   hashes) and §9; ADR-0001 ES-02, ES-04, ES-09, ES-21, ES-22.
 - **Code:** `mandate-spec` (new; the mandate document parsed from canonical JSON with its decimals
-  kept as `mandate_canon::DecStr`, the V-rules and warnings, the policy hierarchy and its runtime
+  kept as `SchemaDec`, the text checked against the field's whole schema `$def` before it is wrapped,
+  the V-rules and warnings, the policy hierarchy and its runtime
   overlay, the risk-state fold, risk days, goals, the condition language, and change classification)
   and `mandate-domain` (new; the vocabulary `mandate-risk`, `mandate-builder`, and the research
   agent share), with the exact arithmetic in `mandate-num` as ES-04 requires.
