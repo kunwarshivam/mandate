@@ -355,6 +355,21 @@ impl Bps {
     }
 }
 
+/// A non-negative USD cap on a fee (FINRA TAF), at full precision. A negative cap cannot be
+/// represented, so a capped fee can never turn into a credit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct FeeCap(Decimal);
+
+impl FeeCap {
+    pub fn parse(_text: &str) -> Result<Self, NumError> {
+        Err(NumError::Overflow)
+    }
+
+    pub fn to_usd(self) -> Usd {
+        Usd::ZERO
+    }
+}
+
 trait NegExact {
     fn neg_exact(self) -> Self;
 }

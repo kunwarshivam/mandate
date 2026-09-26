@@ -11,7 +11,7 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use common::{d, id, usd};
+use common::{d, equity, fee_cap, id, no_fees, usd};
 use mandate_accounting::{
     Account, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily,
     Input, Liquidity, Position, Record, Side, TafCapBasis,
@@ -43,7 +43,7 @@ fn config(taf_cap_cents: i128, per_order: bool) -> Config {
         equities: EquityFees {
             sec_rate: FeeRate::parse("0.0000278").unwrap(),
             taf_per_share: FeePerShare::parse("0.000166").unwrap(),
-            taf_cap: usd(&cents_text(taf_cap_cents)),
+            taf_cap: fee_cap(&cents_text(taf_cap_cents)),
             taf_cap_basis: if per_order {
                 TafCapBasis::PerOrder
             } else {
@@ -336,7 +336,23 @@ fn price(cents: u32) -> Price {
     .unwrap()
 }
 
-/// Drives the library and the oracle through a scenario, comparing them after every event.
+/// The fill that trades half of the position held at this point in the run (to the quantity grid,
+/// at least one unit) at its current mark, reducing it; on a flat instrument, a one-unit buy.
+fn halved(oracle: &Oracle, instrument: usize) -> Event {
+    let held = oracle.positions.get(&instrument).map_or(0, |(q, _)| *q);
+    let grid = if instrument == 2 { 1_000 } else { 1_000_000 };
+    let half = held.abs() / 2 / grid;
+    let cents = oracle.mark_or(instrument, 10_000);
+    Event::Fill {
+        instrument,
+        buy: held < 0,
+        qty: u32::try_from(half.max(1)).unwrap_or(u32::MAX),
+        cents: u32::try_from(cents).unwrap(),
+        maker: false,
+        order: 0,
+    }
+}
+
 /// Drives the library through a scenario; with `check_oracle`, compares every reported value with
 /// the oracle after every event. Invariant properties run without it so each stands on its own.
 fn run(scenario: &Scenario, check_oracle: bool) -> Result<Vec<Step>, TestCaseError> {
@@ -358,23 +374,6 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Vec<Step>, TestCaseErr
     if check_oracle {
         compare(&account, &oracle)?;
     }
-    let mut events = events.clone();
-    for (event, _) in &mut events {
-        if let Event::Halve { instrument } = *event {
-            let held = oracle.positions.get(&instrument).map_or(0, |(q, _)| *q);
-            let grid = if instrument == 2 { 1_000 } else { 1_000_000 };
-            let half = held.abs() / 2 / grid;
-            let cents = oracle.mark_or(instrument, 10_000);
-            *event = Event::Fill {
-                instrument,
-                buy: held < 0,
-                qty: u32::try_from(half.max(1)).unwrap_or(u32::MAX),
-                cents: u32::try_from(cents).unwrap(),
-                maker: false,
-                order: 0,
-            };
-        }
-    }
     let mut steps = Vec::new();
     let mut secs = LOCAL_BASE + 13 * 3_600;
     let mut last_fill: Option<Input> = None;
@@ -385,7 +384,11 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Vec<Step>, TestCaseErr
         let local_day = local_secs.div_euclid(86_400);
         let utc_day = (secs - UTC_BASE).div_euclid(86_400);
         let mut inputs = Vec::new();
-        match event {
+        let event = match event {
+            Event::Halve { instrument } => halved(&oracle, *instrument),
+            other => other.clone(),
+        };
+        match &event {
             Event::Fill {
                 instrument,
                 buy,
@@ -554,7 +557,7 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Vec<Step>, TestCaseErr
                     });
                 }
             }
-            Event::Halve { .. } => unreachable!("replaced before the run"),
+            Event::Halve { .. } => unreachable!("resolved against the oracle before the match"),
             Event::Duplicate => {
                 if let Some(input) = &last_fill {
                     inputs.push(input.clone());
@@ -787,5 +790,120 @@ proptest! {
                 _ => {}
             }
         }
+    }
+}
+
+/// Reads money text in units of 10⁻¹⁸, the exact scale of a 10⁻⁹ quantity times a 10⁻⁹ price.
+fn atto<T: ToString>(value: T) -> i128 {
+    units(&value.to_string(), 18)
+}
+
+proptest! {
+    /// Through partial reductions of any size and price, including bases below the 12-place grid
+    /// of the removed basis, a position's basis stays on its side of zero and never moves past
+    /// what it held; closing the rest realizes exactly the cash received less the cash paid over
+    /// the round trip (DEC-86). Quantities and prices are in 10⁻⁹ and money in 10⁻¹⁸, so the
+    /// oracle's sums are exact.
+    #[test]
+    #[ignore = "pending E3-1"]
+    fn reductions_keep_the_basis_on_the_position_side_and_a_close_realizes_cash_flow(
+        short in any::<bool>(),
+        opened in 2i128..=1_000,
+        opening_price in 1i128..=100_000,
+        reductions in vec((1i128..=1_000, 1i128..=100_000), 1..8),
+    ) {
+        let config = no_fees();
+        let (open, close) = if short { (Side::Sell, Side::Buy) } else { (Side::Buy, Side::Sell) };
+        let fill = |n: usize, side, qty: i128, nanos: i128| {
+            equity(&format!("f{n}"), "AAA", side, &qty_text(qty), &qty_text(nanos), "2026-09-21T10:00:00-04:00")
+        };
+        let signed = |magnitude: i128| if short { -magnitude } else { magnitude };
+        let mut account = common::step(&Account::opening(usd("1"), []), &fill(0, open, opened, opening_price), &config);
+        let mut held = opened;
+        let mut cash = signed(-opened * opening_price);
+        for (n, (qty, nanos)) in reductions.into_iter().enumerate() {
+            let traded = qty % held;
+            if traded == 0 {
+                continue;
+            }
+            let before = atto(account.position(&id("AAA")).basis());
+            account = common::step(&account, &fill(n + 1, close, traded, nanos), &config);
+            held -= traded;
+            cash += signed(traded * nanos);
+            let after = account.position(&id("AAA"));
+            prop_assert_eq!(units(&after.qty().to_string(), 9), signed(held));
+            let basis = atto(after.basis());
+            prop_assert!(signed(basis) >= 0 && signed(basis) <= signed(before), "basis {} after {}", basis, before);
+        }
+        account = common::step(&account, &fill(99, close, held, opening_price), &config);
+        cash += signed(held * opening_price);
+        let p = account.position(&id("AAA"));
+        prop_assert_eq!((p.qty().to_string(), p.basis().to_string()), ("0".to_owned(), "0".to_owned()));
+        prop_assert_eq!(atto(account.realized_gross()), cash);
+    }
+}
+
+/// Canonical decimal text for a signed amount in units of 10⁻¹⁸.
+fn atto_text(value: i128) -> String {
+    let sign = if value < 0 { "-" } else { "" };
+    let magnitude = value.abs();
+    let int = magnitude / 1_000_000_000_000_000_000;
+    let frac = format!("{:018}", magnitude % 1_000_000_000_000_000_000);
+    let frac = frac.trim_end_matches('0');
+    if frac.is_empty() {
+        format!("{sign}{int}")
+    } else {
+        format!("{sign}{int}.{frac}")
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(2048))]
+
+    /// DEC-86 stated exactly. Let U = B − round(B × part ÷ whole, 12, half_even), the reduced basis
+    /// without the limit. The reduced basis is U whenever U is on the position's side of zero or
+    /// zero. Otherwise the rounded removal exceeds the basis held, which needs B to have digits
+    /// below the 12th place, and the reduced basis is 0. Realized P&L is the proceeds less the
+    /// basis actually removed. The oracle is exact: basis in 10⁻¹⁸ (so removals are multiples of
+    /// 10⁶), quantities and prices in 10⁻⁹. Half the bases are below 2 × 10⁻¹², where the limit
+    /// can bind, and a sixth are on the 12-place grid, where it never does.
+    #[test]
+    #[ignore = "pending E3-1"]
+    fn a_reduction_matches_the_rounded_formula_unless_the_removal_exceeds_the_basis_held(
+        short in any::<bool>(),
+        whole in 2i128..=1_000,
+        part_pick in any::<u32>(),
+        basis_atto in prop_oneof![
+            3 => 0i128..=2_000_000,
+            1 => 0i128..=100_000_000,
+            1 => 0i128..=10_000_000_000_000_000_000_000,
+            1 => (0i128..=10_000_000_000).prop_map(|grid| grid * 1_000_000),
+        ],
+        nanos in 1i128..=1_000_000,
+    ) {
+        let part = 1 + i128::from(part_pick) % (whole - 1);
+        let signed = |magnitude: i128| if short { -magnitude } else { magnitude };
+        let basis = signed(basis_atto);
+        let removal = floor_round(basis * part, whole * 1_000_000, true) * 1_000_000;
+        let uncapped = basis - removal;
+        let expected = if signed(uncapped) >= 0 { uncapped } else { 0 };
+        if expected != uncapped {
+            prop_assert_ne!(basis_atto % 1_000_000, 0, "the limit bound on a basis on the 12-place grid");
+        }
+        let qty = |magnitude: i128| if short { format!("-{}", qty_text(magnitude)) } else { qty_text(magnitude) };
+        let held = Position::new(
+            SignedQty::parse(&qty(whole)).unwrap(),
+            CostBasis::parse(&atto_text(basis)).unwrap(),
+        )
+        .unwrap();
+        let side = if short { Side::Buy } else { Side::Sell };
+        let fill = equity("f1", "AAA", side, &qty_text(part), &qty_text(nanos), "2026-09-21T10:00:00-04:00");
+        let applied = Account::opening(usd("0"), [(id("AAA"), held)]).apply(&fill, &no_fees());
+        prop_assert!(applied.is_ok(), "{:?}", applied);
+        let account = applied.unwrap().account;
+        let after = account.position(&id("AAA"));
+        prop_assert_eq!(after.qty().to_string(), qty(whole - part));
+        prop_assert_eq!(atto(after.basis()), expected, "B {} part {} whole {}", basis, part, whole);
+        prop_assert_eq!(atto(account.realized_gross()), signed(part * nanos) - (basis - expected));
     }
 }

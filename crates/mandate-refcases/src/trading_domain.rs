@@ -17,7 +17,9 @@ use mandate_accounting::{
     Input, InstrumentId, Liquidity, Position, Record, Side, TafCapBasis,
 };
 use mandate_canon::DecStr;
-use mandate_num::{Bps, CostBasis, FeePerShare, FeeRate, Price, Qty, Rounding, SignedQty, Usd};
+use mandate_num::{
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, Rounding, SignedQty, Usd,
+};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 use serde_json::{Map, json};
 
@@ -518,7 +520,7 @@ fn config(fixture: &Json, case: &Json) -> Result<Config, String> {
                 FeePerShare::parse(dec_at(eq, "taf_per_share")?.as_str()),
                 "taf_per_share",
             )?,
-            taf_cap: num(Usd::parse(dec_at(eq, "taf_cap")?.as_str()), "taf_cap")?,
+            taf_cap: num(FeeCap::parse(dec_at(eq, "taf_cap")?.as_str()), "taf_cap")?,
             taf_cap_basis,
             cat_per_share: num(
                 FeePerShare::parse(dec_at(eq, "cat_per_share")?.as_str()),
