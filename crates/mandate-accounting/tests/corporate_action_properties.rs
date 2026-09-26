@@ -996,7 +996,6 @@ fn split_of(input: &Input) -> Option<&Split> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E3-2"]
     fn every_reported_value_matches_the_oracle_after_every_event(s in scenario()) {
         run(&s, true)?;
     }
@@ -1004,7 +1003,6 @@ proptest! {
     /// I1 with income: Δequity = Δrealized + Δunrealized + Δincome − Δfees, exactly, for every
     /// event including splits, dividends, payments, and postings.
     #[test]
-    #[ignore = "pending E3-2"]
     fn i1_conservation_with_income_holds_for_every_event(s in scenario()) {
         for step in run(&s, false)?.steps {
             let (b, a) = (&step.before, &step.after);
@@ -1023,7 +1021,6 @@ proptest! {
     /// 12 places. Multiplied through by `old`, in 10⁻²¹ USD: old × ΔMV + r × mark' =
     /// Q × (new × mark' − old × mark), with r = Q × new − Q' × old.
     #[test]
-    #[ignore = "pending E3-2"]
     fn i3_a_split_moves_market_value_only_by_the_mark_rounding(s in scenario()) {
         for step in run(&s, false)?.steps {
             let (Some(split), Ok(Record::Split { before, after, .. })) = (split_of(&step.input), &step.result) else { continue };
@@ -1047,7 +1044,6 @@ proptest! {
     /// keeps the sign of Q'; realized changes by cash in lieu − R, and cash in lieu is
     /// round(f × price, 2, half_even) (DEC-93).
     #[test]
-    #[ignore = "pending E3-2"]
     fn a_split_removes_the_residuals_basis_and_never_more_than_the_basis_held(s in scenario()) {
         for step in run(&s, false)?.steps {
             let (Some(split), Ok(Record::Split { before, after, residual_basis, cash_in_lieu, realized_gross })) = (split_of(&step.input), &step.result) else { continue };
@@ -1082,7 +1078,6 @@ proptest! {
     /// split, whether it came from a mark or a fill and whether a position is held; marks of other
     /// instruments are untouched.
     #[test]
-    #[ignore = "pending E3-2"]
     fn every_stored_mark_is_replaced_by_the_adjusted_mark(s in scenario()) {
         for step in run(&s, false)?.steps {
             let (Some(split), Ok(_)) = (split_of(&step.input), &step.result) else { continue };
@@ -1099,7 +1094,6 @@ proptest! {
     /// I5 with splits: Q is the fold of received fill quantities, split truncations, and residual
     /// removals; each split's Q' is Q × new ÷ old truncated toward zero to the share increment.
     #[test]
-    #[ignore = "pending E3-2"]
     fn i5_quantity_is_the_fold_of_fills_and_split_truncations(s in scenario()) {
         let run = run(&s, false)?;
         let mut folded: BTreeMap<String, i128> = run
@@ -1135,7 +1129,6 @@ proptest! {
     /// §8.5: a dividend's entitlement is the position after every fill traded before the ex-date
     /// and none traded on or after it; the amount is round(Q × d, 2, half_even).
     #[test]
-    #[ignore = "pending E3-2"]
     fn a_dividend_is_entitled_on_the_position_after_fills_traded_before_the_ex_date(s in scenario()) {
         let run = run(&s, false)?;
         for (n, step) in run.steps.iter().enumerate() {
@@ -1157,7 +1150,6 @@ proptest! {
     /// amount into settled cash and leaves equity unchanged, and once the clock has passed every
     /// pay date and every cash in lieu is posted, nothing is outstanding.
     #[test]
-    #[ignore = "pending E3-2"]
     fn receivables_become_settled_cash_exactly_once(s in scenario()) {
         let run = run(&s, false)?;
         let (mut recorded, mut paid) = (0i128, 0i128);
@@ -1194,7 +1186,6 @@ proptest! {
     /// I6: folding the round-tripped inputs from the same opening gives the same account and the
     /// same result after every event.
     #[test]
-    #[ignore = "pending E3-2"]
     fn i6_folding_round_tripped_inputs_is_identical(s in scenario()) {
         let run = run(&s, false)?;
         let config: Config = no_fees();

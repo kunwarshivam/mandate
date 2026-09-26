@@ -472,7 +472,6 @@ fn positive(bound: i64, max_scale: u32) -> impl Strategy<Value = (i128, u32)> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E3-2"]
     fn mark_prices_are_positive_with_at_most_twelve_places(v in decimal(i64::MAX, 12), extra in 1u32..=10) {
         let canonical = text(v.0, v.1);
         match v.0.signum() {
@@ -487,7 +486,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-2"]
     fn a_price_is_the_same_mark_and_values_at_a_mark_are_exact(p in positive(i64::MAX, 9), m in positive(1_000_000_000_000, 12), q in decimal(1_000_000_000_000, 9)) {
         let price = Price::parse(&text(p.0, p.1)).unwrap();
         prop_assert_eq!(MarkPrice::from(price).to_string(), text(p.0, p.1));
@@ -497,7 +495,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-2"]
     fn a_split_truncates_q_times_new_over_old_toward_zero_to_the_increment(
         q in decimal(1_000_000_000_000_000, 9),
         new in 1u64..=1_000,
@@ -513,7 +510,6 @@ proptest! {
     /// R = round(B × (Q·new − Q'·old) ÷ (Q·new), scale, mode), with B at up to 18 places (a fill's
     /// q × p) and the oracle's numerator and divisor in integers.
     #[test]
-    #[ignore = "pending E3-2"]
     fn the_residual_basis_is_one_rounding_of_the_exact_fraction(
         b in decimal(100_000_000, 18),
         q in decimal(100_000_000, 9),
@@ -537,7 +533,6 @@ proptest! {
     /// Cash in lieu = round(f × price, scale, mode) with f = (Q·new − Q'·old) ÷ old: one rounding
     /// of the exact product, signed like Q.
     #[test]
-    #[ignore = "pending E3-2"]
     fn cash_in_lieu_is_one_rounding_of_the_residual_times_the_price(
         q in decimal(1_000_000_000_000_000, 9),
         p in positive(1_000_000_000_000, 9),
@@ -560,7 +555,6 @@ proptest! {
     /// Each adjustment is round(mark × old ÷ new, scale, mode) of the stored mark, so a second split
     /// rounds the already adjusted mark once more, never the original; a result of zero is an error.
     #[test]
-    #[ignore = "pending E3-2"]
     fn adjusted_marks_are_one_rounding_of_mark_times_old_over_new(
         m in positive(1_000_000_000_000, 12),
         splits in proptest::collection::vec((1u64..=1_000, 1u64..=1_000), 1..4),
@@ -588,7 +582,6 @@ proptest! {
 }
 
 #[test]
-#[ignore = "pending E3-2"]
 fn split_ratios_are_positive_integers() {
     assert_eq!(SplitRatio::new(0, 1), Err(NumError::NotPositive));
     assert_eq!(SplitRatio::new(1, 0), Err(NumError::NotPositive));
@@ -600,7 +593,6 @@ fn split_ratios_are_positive_integers() {
 }
 
 #[test]
-#[ignore = "pending E3-2"]
 fn split_results_that_do_not_fit_are_errors() {
     let q = |s: &str| SignedQty::parse(s).unwrap();
     let m = |s: &str| MarkPrice::parse(s).unwrap();
@@ -641,7 +633,6 @@ fn split_results_that_do_not_fit_are_errors() {
 /// 999.99999999999. One billionth of a share, 1:10 fractional, truncates to 0: the formula's
 /// residual is round(B, 12), so 5.27 × 10⁻¹⁶ rounds to 0 and 5.27 × 10⁻¹³ to 10⁻¹².
 #[test]
-#[ignore = "pending E3-2"]
 fn hand_calculated_split_values_from_the_reference_cases() {
     let q = |s: &str| SignedQty::parse(s).unwrap();
     let b = |s: &str| CostBasis::parse(s).unwrap();
