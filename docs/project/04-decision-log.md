@@ -164,5 +164,5 @@ reservation keeps its row and its number is never reused.
 | R-26, R-27 | `cursor` | #54 | Direction follow-ups: correlated flow, contaminated backtests | Reserved |
 | DEC-111, E17-9, R-28 | `claude-code` | — | Thesis revision loop: decision, story, and risk (coordinator docs PR at the founder's request) | Merged (#99) |
 | DEC-112 | `claude-code` | — | CI short path for documentation-only changes | In this PR |
-| DEC-114 | `claude-code` | #105 | E4-1 implementation readings: strictly crossed prices, and a triggered stop's remainder as a market order | In the E4-1 implementation PR |
+| DEC-114 | `claude-code` | #105 | E4-1 implementation readings: strictly crossed prices, and rule 6's session condition enforced by the v1 order policy | In #111 |
 | Compliance question 35 | `cursor` | #54 | Direction follow-ups: describing an agent that brings its own ideas | Reserved |
