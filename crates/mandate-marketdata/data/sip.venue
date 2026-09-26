@@ -1,0 +1,31 @@
+# SIP venue hours: when the consolidated tape (the CTA/CQ and UTP securities information
+# processors) carries US-equity trades, read by `mandate_marketdata::venue::VenueHours` (trading
+# domain spec §1 principle 2, §4.2, §4.3; E2-4 brief interpretation 6).
+#
+# Records, one per line; `#` starts a comment line, and blank lines are ignored:
+#   valid <first date> <last date>
+#       The dates these hours hold for. Every minute of any other date is unclassified.
+#   hours <open> <regular open> <regular close> <close>
+#       The venue's hours on a full trading day, America/New_York wall-clock times. Trading days,
+#       closures, and early closes are the exchange calendar's
+#       (`crates/mandate-time/data/us-equities.calendar`): on an early-close day the venue is open
+#       until the calendar's after-hours session ends. The overnight session is always closed.
+#   unpublished_after_early_close <until>
+#       The venue does not publish when it closes on an early-close day, so every minute from the
+#       calendar's regular close to <until> is unclassified. SIP has no such record.
+#
+# Sources (retrieved 2026-09-26):
+# - SEC Release No. 34-105779 (CTA and CQ Plans) and No. 34-105780 (UTP Plan), 2026
+#   (https://www.sec.gov/files/rules/sro/nms/2026/34-105779.pdf,
+#   https://www.sec.gov/files/rules/sro/nms/2026/34-105780.pdf): "the current hours of operation
+#   of the Processor are 4:00 a.m. to 8:00 p.m. ET Monday through Friday, excluding holidays."
+# - The same releases, the SIPs' announcement of their approval (PR Newswire, 2026-07-07), and
+#   UTP Vendor Alert #2026-20 (https://www.nasdaqtrader.com/TraderNews.aspx?id=UTP2026-20): from
+#   Sunday 2026-12-06 the processors run from 9:00 p.m. ET Sunday to 8:00 p.m. ET Friday, with a
+#   pause from 8:00 to 9:00 p.m. ET Monday to Thursday. These hours therefore end on 2026-12-05;
+#   the extended schedule is not recorded here yet.
+# - NYSE, "Holidays & Trading Hours" (https://www.nyse.com/markets/hours-calendars): NYSE Arca's
+#   early session opens at 4:00 a.m., the core session runs 9:30 a.m. to 4:00 p.m., and the late
+#   session closes at 8:00 p.m., or at 5:00 p.m. on early-close days.
+valid 2018-01-01 2026-12-05
+hours 04:00 09:30 16:00 20:00

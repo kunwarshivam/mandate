@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, day 2 evening: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast` |
+| **Last updated** | 2026-09-26, day 2 evening: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -28,7 +28,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 |---|---|---|---|
 | E1-1, E1-2 Foundations | Merged | before the PR flow | Workspace, CI, xtask, conventions, templates |
 | E5-1 Journal core | Merged | [#1](https://github.com/kunwarshivam/mandate/pull/1), [#7](https://github.com/kunwarshivam/mandate/pull/7), [#8](https://github.com/kunwarshivam/mandate/pull/8), [#10](https://github.com/kunwarshivam/mandate/pull/10) | Canonical JSON, decimals, timestamps, append protocol, verification, anchoring; 46 journal cases passing. #2 to #6 merged into stacked branches; #2 to #5 were re-landed as #7, and #6 as #8 |
-| E5-3 Postgres journal | Tests PR merged | tests [#82](https://github.com/kunwarshivam/mandate/pull/82); DEC-109 reservation [#79](https://github.com/kunwarshivam/mandate/pull/79); implementation PR next | New `mandate-journal-pg` (sqlx, no query macros; DEC-109); the append suite shared with `MemoryJournal`; Postgres 18 in `full`, 17 nightly; no reference cases move |
+| E5-3 Postgres journal | Implementation PR open | tests [#82](https://github.com/kunwarshivam/mandate/pull/82) merged; implementation [#92](https://github.com/kunwarshivam/mandate/pull/92); DEC-109 reservation [#79](https://github.com/kunwarshivam/mandate/pull/79) | New `mandate-journal-pg` (sqlx, no query macros; DEC-109); the append suite shared with `MemoryJournal`; Postgres 18 in `full`, 17 nightly; no reference cases move |
 | `risk_clock` (DEC-81) | Merged | [#12](https://github.com/kunwarshivam/mandate/pull/12), [#13](https://github.com/kunwarshivam/mandate/pull/13), [#14](https://github.com/kunwarshivam/mandate/pull/14) | Required on every risk input; journal vectors version 3 |
 | E3-1 Accounting | Merged | [#16](https://github.com/kunwarshivam/mandate/pull/16), [#18](https://github.com/kunwarshivam/mandate/pull/18), [#19](https://github.com/kunwarshivam/mandate/pull/19), [#21](https://github.com/kunwarshivam/mandate/pull/21), [#23](https://github.com/kunwarshivam/mandate/pull/23), [#24](https://github.com/kunwarshivam/mandate/pull/24), [#25](https://github.com/kunwarshivam/mandate/pull/25), [#26](https://github.com/kunwarshivam/mandate/pull/26), spec [#28](https://github.com/kunwarshivam/mandate/pull/28) | `mandate-num`, trading calendars, `mandate-accounting`. Review caught three defects before merge (basis sign, negative fee cap, cap lowered mid-order); #20 and #22 were superseded |
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
@@ -40,6 +40,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E5-2 Artifact store | Merged | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), [#66](https://github.com/kunwarshivam/mandate/pull/66) (tests), [#84](https://github.com/kunwarshivam/mandate/pull/84) (implementation) | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107): write-once, hard-linked into place, re-hashed on every read; zero missed mutants; no reference cases, so no status PR |
 | E2-4 Sessions and corporate actions | PRs 1 to 3 merged | [#71](https://github.com/kunwarshivam/mandate/pull/71) (tests), [#85](https://github.com/kunwarshivam/mandate/pull/85) (implementation), [#74](https://github.com/kunwarshivam/mandate/pull/74) (corporate actions) | `cursor`: the NYSE calendar 2018 to 2028 as data, four sessions per trading day, `session_at`, DST through the bundled tzdb; corporate actions adjusted through `mandate_num::SplitRatio::mark` and fetched by ex-date. PR 4 (gap classification in `inspect`) remains |
 | E2-3 Top-of-book quotes (Should) | Slice 1 in review | [#95](https://github.com/kunwarshivam/mandate/pull/95) | `cursor`: `Quote`, `Kind::Quotes`, the Alpaca stock (`sip`, `iex`) and crypto quotes client, `Decimal128(38, 9)` partitions; locked, crossed, and one-sided quotes kept as sent. `inspect` refuses to summarize quotes until the CLI PR (`download --kind quotes`, quote statistics) |
+| E2-4 Sessions and corporate actions | PRs 1 to 3 merged; PR 4 in review | [#71](https://github.com/kunwarshivam/mandate/pull/71) (tests), [#85](https://github.com/kunwarshivam/mandate/pull/85) (implementation), [#74](https://github.com/kunwarshivam/mandate/pull/74) (corporate actions), [#96](https://github.com/kunwarshivam/mandate/pull/96) (`inspect` wiring) | `cursor`: the NYSE calendar 2018 to 2028 as data, four sessions per trading day, `session_at`, DST through the bundled tzdb; corporate actions adjusted through `mandate_num::SplitRatio::mark` and fetched by ex-date. #96: each missing bar slot classed as session closure, no trade, true gap, or unclassified by SIP and IEX venue hours checked in as data; `download` stores the corporate actions with the dataset; raw and split-adjusted prices in the report |
 
 ## Reference cases
 
@@ -63,10 +64,10 @@ issues are the record; this table is the summary
 | E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation, #80 follow-up tests); claim closed | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl`, `agent/e3-3-followup-tests` |
 | E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Tests PR merged (#75) after three review rounds; the task brief and DEC-106 merged in #61; implementation and status PRs follow (DEC-77) | `agent/e4-1-sim-tests-2` (#75); the stood-down `agent/e4-1-sim-tests`, `-impl`, and `-status` branches await the founder's deletion |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
-| E5-3 Postgres journal | `cursor` | #77 | Tests PR merged (#82) with DEC-109 recorded; the implementation PR opens next (built on `cursor/e5-3-pg-impl-e15e`); #78 (xtask `postgres` part, CI services, `install.sh`) closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` |
+| E5-3 Postgres journal | `cursor` | #77 | Tests PR merged (#82) with DEC-109 recorded; implementation PR open (#92); #78 (xtask `postgres` part, CI services, `install.sh`) closed | `cursor/e5-3-pg-tests-e15e` (#82); implementation `cursor/e5-3-pg-impl-e15e` (#92) |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS and rebased; the founder's confirmation of DEC-99 to DEC-103 pending | `cursor/direction-follow-ups-v2` (#57) |
-| E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Tests (#71), sessions implementation (#85) and corporate actions (#74) merged; PR 4 remains | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74) |
+| E2-4 market sessions and corporate actions | `cursor` | #68 (shared-crate claim #69 closed) | Tests (#71), sessions implementation (#85) and corporate actions (#74) merged; PR 4 (#96) in review, and the claim closes when it merges | `cursor/e2-4-session-tests-ab3f` (#71), `cursor/e2-4-session-impl-ab3f` (#85), `cursor/e2-4-corporate-actions-ab3f` (#74), `cursor/e2-4-inspect-sessions-ab3f` (#96) |
 | E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
 | #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | Merged (#73) | `cursor/install-followup` (#73) |
@@ -75,11 +76,15 @@ issues are the record; this table is the summary
 | Cursor allocation: next stories | `cursor` | #87 | Merged (#88); E5-4 and the M1 exit run's keys await the founder | `cursor/allocation-next` (#88) |
 | `mandate-marketdata` safe concurrent dataset writes | `cursor` | #86 | Claimed | — |
 | E2-3 top-of-book quotes | `cursor` | #94 | Slice 1 (model, client, storage) open for review (#95); the CLI integration PR follows | `cursor/e2-3-quotes-v2-a075` (#95); `cursor/e2-3-quotes-a075` superseded |
+| `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` (#90) |
 
 ## Waiting on the founder
 
-- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
-  before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
+- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 35)
+  now, during Phase 0 (DEC-102). Nothing trades live until this is answered.
+- **Design questions**: answer the [design questions](09-mandate-rewrite-questions.md) (universe
+  size, thesis lifetime, research weight and cost cap, the DEC-99 evaluation, the DEC-100 values, the
+  Robinhood paper stage, retail `auto`, how theses are shown) before the mandate spec rewrite starts.
 - **Robinhood**: open an agentic account yourself, on a desktop, from your own Robinhood login
   (OD-12: self-serve, no beta request). Agents never connect to it (rule 8); the connector story
   will use a paper or test path Robinhood has not yet published, so ask Robinhood support whether one
@@ -105,7 +110,7 @@ them in the decision log.
 | A crypto fee rate above 10000 bps makes a crypto buy an error rather than a credit; decide whether to reject such configurations at load | Next accounting story |
 | Fee reservations for buying power | E6-6 |
 | The accounting fold copies the account on every input; measure before long backtests | E4-2 |
-| Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | #86 (`cursor`), before any parallel download |
+| ~~Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names~~ **Resolved (claim #86, PR #90):** each write holds an advisory lock on the dataset directory, uses a temporary name no other writer uses, and publishes a partition by hard link ([brief](tasks/marketdata-write-safety.md)) | `cursor` |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
 | `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | A `cursor` claim of its own on the shared `mandate-time` crate, after #85 (allocation #88) |
@@ -162,7 +167,11 @@ them in the decision log.
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe).
+   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the team's
+   internal paper workspaces with the research basket as the fixed test data universe, every
+   admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation (E17-8). The
+   full E17-3, for users' agents under their own envelopes, follows only after that evaluation
+   passes.
 
 E4-1, E2-4, and E5-3 touch different crates and can run in parallel; reviews and merges run one at a
 time.

@@ -51,7 +51,7 @@ flowchart TD
 
 | WP | Deliverable | Depends on | Exit criteria |
 |---|---|---|---|
-| M5 Agent runtime + risk | Perception, memory, quant signal models, order builder, autonomy policy, risk gate (including US market rules), drawdown ladder, kill switch; mandate schema v0 | M3, M4 | Agent never exceeds limits or breaks US account rules in simulation fuzzing |
+| M5 Agent runtime + risk | Perception, memory, quant signal models, order builder, autonomy policy, risk gate (including US market rules), drawdown ladder, kill switch; mandate schema v0; the research agent's thin slice in the team's internal paper workspaces, with the research basket as its fixed test data universe, every admission `ask`, and scorecards ([DEC-103](04-decision-log.md#decisions), [DEC-99](04-decision-log.md#decisions)) | M3, M4 | Agent never exceeds limits or breaks US account rules in simulation fuzzing |
 | M6 Alpaca connector | Paper connector (API keys for the founder's own account in Phase 1; OAuth arrives in M8); idempotent order intents; reconciliation; crash recovery | M5 | Fault injection at every step: zero duplicates, full reconciliation |
 | M7 Escalation v0 | Approval requests, deadlines, safe defaults, drift re-validation; email and one chat channel; CLI control | M6 | Continuous Alpaca paper soak with forced restarts and escalations passes |
 
@@ -72,5 +72,5 @@ flowchart TD
 |---|---|---|
 | Tier 1 specs | Trading domain (v0.8), journal (v0.2), and mandate (v0.5) specs with their reference cases approved | Founder: **passed 2026-09-25** (DEC-71) |
 | Phase 0 exit | M1–M4 exit criteria met | Founder |
-| Phase 1 exit | M5–M7 exit criteria met; Alpaca paper soak report reviewed | Founder |
+| Phase 1 exit | M5–M7 exit criteria met; Alpaca paper soak report reviewed; research-agent theses beat the pre-registered baselines on forward paper over the pre-registered window and metric ([DEC-99](04-decision-log.md#decisions)) | Founder |
 | Phase 2 exit | PRD release criteria; design partners onboarded | Founder, counsel (terms) |
