@@ -36,6 +36,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E17-0 Research spike | Merged | [#44](https://github.com/kunwarshivam/mandate/pull/44), [#47](https://github.com/kunwarshivam/mandate/pull/47) | `python/research_spike`: Alpaca news and bars, Claude Sonnet 5 via OpenRouter, fixed sizing under caps, hash-chained JSONL journal, scorer versus SPY. Dry runs only; live paper runs await the founder's go |
 | E2-2 Inspect | Merged | [#64](https://github.com/kunwarshivam/mandate/pull/64) | `cursor`: coverage, exact statistics, gaps, duplicates, untrusted partitions |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
+| E4-1 Simulated execution | Brief PR open | [#61](https://github.com/kunwarshivam/mandate/pull/61) | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19). [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106 |
 | E2-2 Inspect | PR open | claim [#56](https://github.com/kunwarshivam/mandate/issues/56) | `mandate inspect`: coverage, exact statistics, gaps with exact timestamps, duplicates, untrusted partitions. Gaps stay unclassified until E2-4 |
 
 ## Reference cases
@@ -57,8 +58,9 @@ issues are the record; this table is the summary
 
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
-| E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation); follow-up tests PR pending | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl` |
+| E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation); follow-up tests PR open | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl`, `agent/e3-3-followup-tests` |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
+| E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Brief PR open (task brief, DEC-106); tests, implementation, and status PRs follow | #61 (brief); built and pushed: `agent/e4-1-sim-tests`, `agent/e4-1-sim-impl`, `agent/e4-1-sim-status` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS; rebase and the founder's confirmation pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |

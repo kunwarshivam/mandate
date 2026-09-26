@@ -50,11 +50,12 @@ story. This story closes milestone M2.
 
   **Oracles.** `settlement_properties.rs` keeps an `i128` cash ledger (money at 10⁻¹², quantities
   at 10⁻⁹, prices in cents) with its own SEC, TAF (capped), CAT, and crypto fee arithmetic, its
-  own trade-day (20:00 cutoff, weekdays) and settlement-day (T+1, weekdays, the 2026-10-12 bank
-  holiday) counting, its own per-bucket ceilings, and its own buying power. The generated scenario
-  mixes equity and crypto fills, charges of chosen buckets, and clock advances over up to 33 days,
-  in a cash or a margin account, with a random reservation total; the same inputs are folded into a
-  twin account of the other type. In `gated` scenarios the generator approves each buy with the
+  own trade-day (20:00 cutoff, weekdays) and settlement-day (T+1, weekdays, and the holidays the
+  follow-up tests PR below reads off the `us_2026` calendar fixture) counting, its own per-bucket
+  ceilings, and its own buying power. The generated scenario mixes equity and crypto fills, charges
+  of chosen buckets, and clock advances over up to 33 days, in a cash or a margin account, with a
+  reservation total the follow-up PR draws against the settled balance; the same inputs are folded
+  into a twin account of the other type. In `gated` scenarios the generator approves each buy with the
   oracle's buying power and caps sells at the position, so the sequence is one the gate would have
   allowed. Hand-calculated tests in `settlement.rs` show the arithmetic in each doc comment. The
   harness test edits the founder's fixture in memory (RC-08 and RC-18 without their `propose_order`
@@ -161,19 +162,26 @@ the executor opens the fold with the observed type. Buying power is a derived va
 Also not here: paper-mode simulated fees in accrued fees (§10, E4-2); uncleared deposits (§7.2:
 funding is no fold input yet); journaling the fold's records (the executor story).
 
-## Follow-ups (review minors from the tests PR, #53)
+## Follow-up tests PR
 
-Minors, so the freeze rule keeps them out of this change (AGENTS.md "Getting it right the first
-time"). The first three touch test files, which a DEC-77 implementation PR may not edit beyond
-deleting its pending markers, so they wait for the next tests PR that changes these files; the
-fourth belongs to the spec-only change DEC-104 already plans.
+The review minors the tests PR (#53, with its post-merge amendment) and the claim issue (#48) left
+on the test files, which a DEC-77 implementation PR may not touch beyond deleting its pending
+markers. They are taken on `agent/e3-3-followup-tests`, a tests-only change: the fold, the specs,
+the schemas, the reference cases, and `status.toml` are untouched, and every test that passed
+before passes after (`cargo nextest run -p mandate-accounting -p mandate-refcases`: 134 run, 134
+passed, 32 skipped). Each item's planted bug was seeded in a throwaway copy, run, and reverted.
 
-| Follow-up | Where | Owner |
+| Item | What changed | Planted bug, and what caught it |
 |---|---|---|
-| Derive the oracle's holidays from the `us_2026` calendar fixture instead of hardcoding `BANK_HOLIDAY` | `settlement_properties.rs` | the next tests PR touching this file |
-| Give the two differential assertions an oracle value of their own, so they compare against a computed figure rather than the two folds against each other | `settlement_properties::margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds`, `reservations_reduce_buying_power_one_for_one_and_are_never_negative` | the next tests PR touching this file |
-| An unknown broker profile reaches the `unknown account type` arm and so calls a valid `cash` account unknown; the message should name the profile instead | `trading_domain::account_type` | the next tests PR touching the harness |
-| §7.2 writes the accrued-fee term as `round(accrued, 2, ceiling)`, which DEC-104 item 2's per-bucket rounding contradicts | `docs/specs/trading-domain.md` §7.2 | the DEC-104 spec-only change, with the §8.3 and I4 wording |
+| The charging property compared the fold with itself: `before` and `remaining` both came from the account and the oracle only enumerated buckets (amendment, major) | `charging_every_open_bucket_leaves_exactly_the_buying_power_in_cash` compares `before` with the oracle's buying power, and settled and total cash after the charges with the oracle's post-charge figures | `charge` and the buying-power fee term both round half-even instead of ceiling: the property as #53 wrote it passes, the strengthened one fails on "buying power before the charges" |
+| The bank-holiday settlement branch was reached in about 0.3% of scenarios, and reservations up to 1,000 USD against up to 200,000 USD of settled cash left "a buy never spends the reservations" near-vacuous (amendment, minors) | Three scenarios in five now start in the days before 2026-10-12 with gaps short enough to keep the run inside the window; reservations are drawn against the settled balance; and `the_gated_generator_reaches_the_settlement_holiday_and_the_reservation_bound` counts four generator branches over 4000 deterministic scenarios (reached today: 367, 60, 672, 659 of 4000) | The window of #53 (every scenario from the base day) reaches a holiday-delayed settlement in 5 of 4000 scenarios, against the 120 the guard demands; the reservation draw of #53 reaches a buy the reservations alone denied in 57 of 4000, against 220 |
+| The oracle hardcoded `BANK_HOLIDAY = 21` for 2026-10-12 (#53 review) | The oracle reads the trading and settlement holidays of the generated window off the `us_2026` calendar fixture the fold is configured with, keeping its own weekday arithmetic, and fails rather than guessing past the window | The fixture's settlement holiday moved to 2026-10-13: the oracle of #53 fails `buying_power_matches_the_oracle_after_every_event` on the unsettled buckets while the derived oracle passes. With the fixture unchanged, a `settlement_date` that settles on a Federal Reserve holiday fails the same property |
+| Two differential assertions compared the two folds against each other (#53 review) | `margin_and_cash_buying_power_differ_by_exactly_the_unsettled_proceeds` and `reservations_reduce_buying_power_one_for_one_and_are_never_negative` compare each side with the oracle's buying power for that account type and reservation total first | `charges_due` returns zero, so both folds lose the pending-charge term together: both properties pass as #53 wrote them and fail here, on "cash buying power" and "the scenario's reservations" |
+| An unknown broker profile reached the `unknown account type` arm and so called a valid `cash` account unknown (#53 review) | `trading_domain` parses `broker_profile` once into a two-variant type before any account is read, so the arm cannot be reached with an unknown profile, and the message names the profile and the types each profile accepts | The profile left unparsed, which is the state #53 would reach with a third profile: RC-08's valid `cash` account is reported as ``unknown account type `cash` `` and the new harness test fails |
+
+Not taken here: `*.proptest-regressions` needs nothing, since #72 put it in `.gitignore`; and §7.2's
+`round(accrued, 2, ceiling)` wording, which DEC-104 item 2's per-bucket rounding contradicts, stays
+with the spec-only change DEC-104 already plans (with the §8.3 and I4 wording).
 
 ## Commands
 
