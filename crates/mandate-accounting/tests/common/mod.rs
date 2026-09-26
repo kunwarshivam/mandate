@@ -6,7 +6,7 @@ use mandate_accounting::{
     Account, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily, Input, InstrumentId,
     Liquidity, Side, TafCapBasis,
 };
-use mandate_num::{Bps, FeePerShare, FeeRate, Price, Qty, Usd};
+use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, Usd};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 pub fn d(s: &str) -> Date {
@@ -19,6 +19,10 @@ pub fn at(s: &str) -> UtcNanos {
 
 pub fn usd(s: &str) -> Usd {
     Usd::parse(s).unwrap()
+}
+
+pub fn fee_cap(s: &str) -> FeeCap {
+    FeeCap::parse(s).unwrap()
 }
 
 pub fn id(s: &str) -> InstrumentId {
@@ -42,7 +46,7 @@ pub fn test_default() -> Config {
         equities: EquityFees {
             sec_rate: FeeRate::parse("0.00003").unwrap(),
             taf_per_share: FeePerShare::parse("0.0002").unwrap(),
-            taf_cap: usd("9.79"),
+            taf_cap: fee_cap("9.79"),
             taf_cap_basis: TafCapBasis::PerExecution,
             cat_per_share: FeePerShare::parse("0.00001").unwrap(),
         },

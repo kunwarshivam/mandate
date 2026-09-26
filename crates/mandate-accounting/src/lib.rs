@@ -23,7 +23,7 @@ mod account;
 
 pub use account::{Account, Applied, Position, Record};
 
-use mandate_num::{Bps, FeePerShare, FeeRate, NumError, Price, Qty, Usd};
+use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, NumError, Price, Qty, Usd};
 use mandate_time::{Date, TimeError, TradingCalendar, UtcNanos};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -36,7 +36,9 @@ pub enum AccountingError {
     MissingLiquidity,
     #[error("no mark or fill price for {0}")]
     NoMark(InstrumentId),
-    #[error("a flat position must have zero cost basis")]
+    #[error(
+        "the cost basis sign must follow the quantity sign, and a flat position has zero basis"
+    )]
     InvalidPosition,
     #[error("the instrument ID is empty")]
     EmptyInstrumentId,
@@ -110,7 +112,7 @@ pub enum TafCapBasis {
 pub struct EquityFees {
     pub sec_rate: FeeRate,
     pub taf_per_share: FeePerShare,
-    pub taf_cap: Usd,
+    pub taf_cap: FeeCap,
     pub taf_cap_basis: TafCapBasis,
     pub cat_per_share: FeePerShare,
 }

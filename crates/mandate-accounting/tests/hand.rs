@@ -3,7 +3,9 @@
 
 mod common;
 
-use common::{Fill, at, charge, d, equity, id, mark, no_fees, step, test_default, text, usd};
+use common::{
+    Fill, at, charge, d, equity, fee_cap, id, mark, no_fees, step, test_default, text, usd,
+};
 use mandate_accounting::{
     Account, AccountingError, AssetClass, FeeFamily, FeeKind, Input, Liquidity, Position, Record,
     Side, TafCapBasis,
@@ -431,7 +433,7 @@ fn rc_07_crypto_fees_in_the_received_asset() {
 #[ignore = "pending E3-1"]
 fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
     let mut config = test_default();
-    config.equities.taf_cap = usd("0.015");
+    config.equities.taf_cap = fee_cap("0.015");
     let fill = |fill_id, order, side, qty, price, time| {
         Fill {
             fill_id,
@@ -872,4 +874,163 @@ fn positions_list_open_instruments_and_errors_name_the_unmarked_one() {
     let error = a.unrealized().unwrap_err();
     assert_eq!(error, AccountingError::NoMark(id("AAA")));
     assert_eq!(error.to_string(), "no mark or fill price for AAA");
+}
+
+fn build(qty: &str, basis: &str) -> Result<Position, AccountingError> {
+    Position::new(
+        SignedQty::parse(qty).unwrap(),
+        CostBasis::parse(basis).unwrap(),
+    )
+}
+
+/// A position's basis has the sign of its quantity: a long has paid (B ≥ 0), a short has received
+/// (B ≤ 0), and a flat position holds none (DEC-86). A long of 1 with basis −100 would realize
+/// 100 − (−100) = 200 on a close at 100, so it cannot be built; neither can a short with a positive
+/// basis, a flat position with any basis, or a long whose basis is below zero by 10⁻¹⁸. A zero
+/// basis on an open position is allowed: a reduction can leave one (see
+/// `a_reduction_never_removes_more_basis_than_the_position_holds`).
+#[test]
+#[ignore = "pending E3-1"]
+fn positions_whose_basis_opposes_the_quantity_are_rejected() {
+    for (qty, basis) in [
+        ("1", "-100"),
+        ("-1", "100"),
+        ("0", "1"),
+        ("0", "-1"),
+        ("0.000000001", "-0.000000000000000001"),
+    ] {
+        assert_eq!(
+            build(qty, basis),
+            Err(AccountingError::InvalidPosition),
+            "{qty} {basis}"
+        );
+    }
+    for (qty, basis) in [
+        ("1", "100"),
+        ("-1", "-100"),
+        ("1", "0"),
+        ("-1", "0"),
+        ("0", "0"),
+    ] {
+        let p = build(qty, basis).unwrap();
+        assert_eq!((text(p.qty()), text(p.basis())), (qty.into(), basis.into()));
+    }
+}
+
+/// A reduction never removes more basis than the position holds (DEC-86). Buying 0.00000001 at
+/// 0.00009 gives B = 0.0000000000009, below the 12-place grid of the removed basis. Selling
+/// 0.000000009 (nine tenths) rounds the removal to round(0.00000000000081, 12, half_even) =
+/// 0.000000000001, more than B, so the removal is limited to B: Q 0.000000001, B 0, realized
+/// 0.00000000000081 − 0.0000000000009 = −0.00000000000009. Closing the rest at 0.00009 realizes
+/// 0.00000000000009 − 0, so the round trip at one price realizes 0 in total. The short mirror
+/// (sell, then buy back) has every basis and P&L negated.
+#[test]
+#[ignore = "pending E3-1"]
+fn a_reduction_never_removes_more_basis_than_the_position_holds() {
+    let config = no_fees();
+    for (open, close, opened, left, realized) in [
+        (
+            Side::Buy,
+            Side::Sell,
+            ("0.00000001", "0.0000000000009"),
+            "0.000000001",
+            "-0.00000000000009",
+        ),
+        (
+            Side::Sell,
+            Side::Buy,
+            ("-0.00000001", "-0.0000000000009"),
+            "-0.000000001",
+            "0.00000000000009",
+        ),
+    ] {
+        let fill = |fill_id, side, qty, time| equity(fill_id, "XYZ", side, qty, "0.00009", time);
+        let a = Account::opening(usd("1"), []);
+        let a = step(
+            &a,
+            &fill("f1", open, "0.00000001", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), (opened.0.into(), opened.1.into()));
+        let a = step(
+            &a,
+            &fill("f2", close, "0.000000009", "2026-09-21T10:01:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), (left.into(), "0".into()));
+        assert_eq!(text(a.realized_gross()), realized);
+        let a = step(
+            &a,
+            &fill("f3", close, "0.000000001", "2026-09-21T10:02:00-04:00"),
+            &config,
+        );
+        assert_eq!(position(&a, "XYZ"), ("0".into(), "0".into()));
+        assert_eq!(text(a.realized_gross()), "0");
+    }
+}
+
+/// The limit on the removed basis binds only when the rounded removal exceeds the basis held, and
+/// then the position ends with zero basis (DEC-86). Each case reduces by selling (or, for the
+/// short, buying back) at 1 with no fees; realized = proceeds − removed.
+///
+/// - Q 20, B 0.000000000000527, sell 19: the exact remaining basis is 0.00000000000002635 (on the
+///   long side), but round(0.00000000000050065, 12, half_even) = 0.000000000001 exceeds B, so the
+///   removal is B: Q 1, B 0, realized 19 − 0.000000000000527 = 18.999999999999473. The short
+///   mirror (Q −20, B −0.000000000000527, buy 19) ends at B 0 with realized −18.999999999999473.
+/// - Q 20, B 0.000000000527 (on the 12-place grid), sell 19: removal round(0.00000000050065, 12)
+///   = 0.000000000501, B 0.000000000026, realized 19 − 0.000000000501 = 18.999999999499.
+/// - Q 2, B 1.0000000000005 (digits below the 12th place), sell 1: removal
+///   round(0.50000000000025, 12) = 0.5 does not exceed B, so the rounded formula stands:
+///   B 0.5000000000005, realized 0.5.
+#[test]
+#[ignore = "pending E3-1"]
+fn the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held() {
+    let config = no_fees();
+    for (qty, basis, side, traded, left, realized) in [
+        (
+            "20",
+            "0.000000000000527",
+            Side::Sell,
+            "19",
+            ("1", "0"),
+            "18.999999999999473",
+        ),
+        (
+            "-20",
+            "-0.000000000000527",
+            Side::Buy,
+            "19",
+            ("-1", "0"),
+            "-18.999999999999473",
+        ),
+        (
+            "20",
+            "0.000000000527",
+            Side::Sell,
+            "19",
+            ("1", "0.000000000026"),
+            "18.999999999499",
+        ),
+        (
+            "2",
+            "1.0000000000005",
+            Side::Sell,
+            "1",
+            ("1", "0.5000000000005"),
+            "0.5",
+        ),
+    ] {
+        let a = Account::opening(usd("0"), [(id("XYZ"), build(qty, basis).unwrap())]);
+        let a = step(
+            &a,
+            &equity("f1", "XYZ", side, traded, "1", "2026-09-21T10:00:00-04:00"),
+            &config,
+        );
+        assert_eq!(
+            position(&a, "XYZ"),
+            (left.0.into(), left.1.into()),
+            "{qty} {basis}"
+        );
+        assert_eq!(text(a.realized_gross()), realized, "{qty} {basis}");
+    }
 }
