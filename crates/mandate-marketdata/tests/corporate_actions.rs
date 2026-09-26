@@ -568,6 +568,23 @@ fn splits_compound_point_in_time_and_other_actions_never_adjust() {
         "only the reverse split adjusts; the spin-offs are kept, not applied"
     );
     assert_eq!(ge.other.len(), 3);
+    let none = CorporateActions::none(symbol("GE"));
+    assert!(none.is_empty());
+    let only_splits = CorporateActions {
+        splits: ge.splits.clone(),
+        ..none.clone()
+    };
+    let only_dividends = CorporateActions {
+        cash_dividends: ge.cash_dividends.clone(),
+        ..none.clone()
+    };
+    let only_other = CorporateActions {
+        other: ge.other.clone(),
+        ..none
+    };
+    for actions in [only_splits, only_dividends, only_other] {
+        assert!(!actions.is_empty(), "{actions:?}");
+    }
     let order_free = with_splits(vec![split("2024-06-10", 10, 1), split("2021-07-20", 4, 1)]);
     assert_eq!(
         order_free.split_ratio_after(at("2021-07-16T19:00:00Z"), day("2024-12-31")),

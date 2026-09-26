@@ -136,13 +136,10 @@ fn divide_half_even(numerator: i128, denominator: i128) -> Option<i128> {
     let remainder = numerator.checked_rem(denominator)?.unsigned_abs();
     let rest = denominator.unsigned_abs().checked_sub(remainder)?;
     let away = remainder > rest || (remainder == rest && quotient % 2 != 0);
-    if !away {
-        return Some(quotient);
-    }
-    if numerator < 0 {
-        quotient.checked_sub(1)
+    if away {
+        quotient.checked_add(numerator.signum())
     } else {
-        quotient.checked_add(1)
+        Some(quotient)
     }
 }
 
