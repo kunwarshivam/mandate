@@ -66,7 +66,9 @@ fn the_data_host_is_the_only_alpaca_host_in_the_source() {
     assert_eq!(DATA_HOST, "https://data.alpaca.markets");
     let crates = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
     let mut sources = Vec::new();
-    rust_sources(&crates.join("mandate-marketdata/src"), &mut sources);
+    for krate in ["mandate-marketdata/src", "mandate-cli/src"] {
+        rust_sources(&crates.join(krate), &mut sources);
+    }
     assert!(sources.len() > 5, "the scan must see the crate sources");
     let domain = concat!("alpaca", ".markets");
     let mut hosts = 0;

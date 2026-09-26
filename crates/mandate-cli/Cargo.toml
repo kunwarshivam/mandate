@@ -1,0 +1,23 @@
+[package]
+name = "mandate-cli"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The `mandate` command line: `download` fetches Alpaca historical data into Parquet (backlog E2-1)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mandate"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+mandate-marketdata.workspace = true
+mandate-time.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
+toml.workspace = true
