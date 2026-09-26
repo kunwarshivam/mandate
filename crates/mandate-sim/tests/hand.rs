@@ -859,14 +859,19 @@ fn a_triggered_stops_remainder_is_a_market_order() {
 }
 
 /// Spec §4.3 and §5.2: the extended sessions take limit orders alone, so a market order waits for the
-/// regular session. The pre-market bar's open would have filled it at 99.47015; instead it fills on
-/// the regular session's first bar, whose 20-session median of 9000 caps it at 900:
-/// 99.20 × 0.9997 = 99.20 − 0.02976 = 99.17024.
+/// regular session. The pre-market bar opens its own session in the data, so its cap is 10% of the
+/// 9000 median = 900 and a model that let a market order trade pre-market would fill there, at
+/// 99.50 × 0.9997 = 99.47015; the session is the only thing stopping it. The fill instead comes on the
+/// regular session's first bar, capped the same way: 99.20 × 0.9997 = 99.20 − 0.02976 = 99.17024.
 #[test]
 #[ignore = "pending E4-1"]
 fn a_market_order_waits_for_the_regular_session() {
     let bars = [
-        pre_market("09:00", ["99.5", "99.6", "98", "99.3", "2000"]),
+        in_session(
+            Session::PreMarket,
+            "2026-09-21T09:00:00-04:00",
+            bar("09:00", ["99.5", "99.6", "98", "99.3", "2000"]),
+        ),
         auction("09:30", ["99.2", "99.5", "99.1", "99.4", "9000"]),
     ];
     assert_eq!(

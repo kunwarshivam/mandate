@@ -70,9 +70,12 @@
 //!     [`the_model_rejects_bars_and_orders_it_cannot_simulate`].
 //! 25. A quantity off the instrument's increment is accepted [the same test].
 //! 26. The extended sessions are open to every order, not only those marked for them
-//!     [`an_exit_marked_for_extended_hours_fills_after_hours`,
+//!     [`a_market_order_waits_for_the_regular_session`,
+//!     `an_exit_marked_for_extended_hours_fills_after_hours`,
 //!     `a_day_orders_remainder_is_canceled_after_its_last_eligible_session`, oracle, eight more
-//!     properties].
+//!     properties]. The first of those tests could not catch it until the independent re-review
+//!     pointed out that its pre-market bar began before the data, which capped that bar at 0 under
+//!     item 4 and let both readings fill on the regular bar; the bar now opens its own session.
 //! 27. The overnight session trades, against DEC-30 [`an_overnight_bar_never_fills`, oracle, eight
 //!     more properties].
 //! 28. The auction exception never applies [RC-12,
@@ -368,12 +371,13 @@ impl Scenario {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// A leg's state between bars. A stop stays `Fresh` until it triggers, which is why there is no
+/// separate waiting state and no `(waiting, limit)` pair to rule out.
 enum Phase {
     Fresh,
     Marketable,
     Resting(i128),
     Working,
-    Waiting,
     Gone,
 }
 
@@ -477,8 +481,7 @@ fn leg_action(
             }
         }
         (Phase::Resting(limit), _) => resting_fill(limit),
-        (Phase::Fresh | Phase::Waiting, GKind::Stop(stop)) => {
-            *phase = Phase::Waiting;
+        (Phase::Fresh, GKind::Stop(stop)) => {
             if !stop_allowed {
                 return None;
             }
@@ -492,8 +495,7 @@ fn leg_action(
                 None
             }
         }
-        (Phase::Fresh | Phase::Waiting, GKind::StopLimit { stop, limit }) => {
-            *phase = Phase::Waiting;
+        (Phase::Fresh, GKind::StopLimit { stop, limit }) => {
             if !stop_allowed || !(stop_passed(stop) || stop_touched(stop)) {
                 return None;
             }
@@ -518,7 +520,6 @@ fn leg_action(
             ))
         }
         (Phase::Working, _) => Some((slipped(bar.open, slippage, buy), TAKER)),
-        (Phase::Waiting, GKind::Limit(_) | GKind::Oco { .. }) => None,
     }
 }
 
@@ -958,7 +959,7 @@ fn scenario() -> impl Strategy<Value = Scenario> {
                 median,
             )| {
                 let mut bars = Vec::new();
-                let mut seen_regular = false;
+                let mut seen_regular: Vec<u8> = Vec::new();
                 let coverage = included.iter().position(|keep| *keep);
                 for (slot, keep) in included.iter().enumerate() {
                     if !keep {
@@ -972,9 +973,11 @@ fn scenario() -> impl Strategy<Value = Scenario> {
                     let covered = coverage.is_some_and(|first| {
                         secs(session_start) >= secs(SLOTS.get(first).map_or(REGULAR_OPEN, |s| s.1))
                     });
-                    let auction = session == REGULAR && day == 0 && !seen_regular && covered;
-                    if session == REGULAR && day == 0 {
-                        seen_regular = true;
+                    let first_regular_of_the_day =
+                        session == REGULAR && !seen_regular.contains(&day);
+                    let auction = first_regular_of_the_day && covered;
+                    if first_regular_of_the_day {
+                        seen_regular.push(day);
                     }
                     bars.push(GBar {
                         slot,
