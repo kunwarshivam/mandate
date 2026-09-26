@@ -84,6 +84,7 @@ issues are the record; this table is the summary
 | Thesis revision loop: DEC-111, E17-9, R-28 | `claude-code` | — | Merged (#99); the story waits on E17-8 | docs only |
 | E5-4 journal verification and artifact commands | `claude-code` | #104 | PR #108 open with green checks, waiting on the merge coordinator's independent review; DEC-115 reserved | `agent/e5-4-verify-cli` (#108) |
 | CI short path for documentation-only changes (DEC-112) | `claude-code` | — | Merged (#100) at the founder's request; a docs PR now costs under two runner minutes | `.github/scripts/` |
+| `mandate-marketdata`: proactive rate limiting (E2-1 follow-up) | `cursor` | [#115](https://github.com/kunwarshivam/mandate/issues/115) | One PR (tests first, then implementation), open with green checks for the merge coordinator's review; the claim closes when it merges | `cursor/marketdata-rate-limit` |
 
 ## Waiting on the founder
 
@@ -124,6 +125,7 @@ them in the decision log.
 | GitHub Actions minutes: 90 percent of the month's 3,000 used by 2026-09-26; DEC-112 makes docs PRs cheap, and the ruleset's up-to-date rule still re-runs every open PR after each merge | Founder: decide whether to relax the up-to-date rule |
 | Postgres in the agent environment: `.cursor/install.sh` installs PostgreSQL 18 only where apt.postgresql.org is reachable, and `MANDATE_PG_URL` must be exported by hand (`environment.json` cannot set it) | E5-3 (CI has it: a service container in `full` and nightly) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
+| ~~The market-data client's rate limiting is reactive: about 200 requests, then 429s and a 1 to 32 s ladder whose six attempts span 63 s against a 60 s window~~ **Resolved (claim #115):** the client paces to the `X-Ratelimit-*` headers, a 429 waits for the next window with a three-window budget, and a token bucket is the floor without headers; a live 1,540-page download went from 376 refused requests to none ([brief](tasks/marketdata-rate-limit.md)) | `cursor` |
 
 ## Lessons encoded today
 
