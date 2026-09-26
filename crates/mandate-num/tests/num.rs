@@ -3,7 +3,8 @@
 //! independent of the library's 256-bit sign-and-magnitude arithmetic.
 
 use mandate_num::{
-    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, NumError, Price, Qty, Rounding, SignedQty, Usd,
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, MarkPrice, NumError, Price, Qty, Rounding,
+    ShareIncrement, SignedQty, SplitRatio, Usd,
 };
 use proptest::prelude::*;
 
@@ -424,4 +425,314 @@ fn error_codes_are_stable() {
     for (error, code) in all {
         assert_eq!(error.code(), code);
     }
+}
+
+fn ratio(new: u64, old: u64) -> SplitRatio {
+    SplitRatio::new(new, old).unwrap()
+}
+
+/// `n ÷ d` (d > 0) truncated toward zero, starting from the floor.
+fn toward_zero(n: i128, d: i128) -> i128 {
+    let q = n.div_euclid(d);
+    if n < 0 && n.rem_euclid(d) != 0 {
+        q + 1
+    } else {
+        q
+    }
+}
+
+fn increments() -> impl Strategy<Value = ShareIncrement> {
+    prop_oneof![
+        Just(ShareIncrement::Fractional),
+        Just(ShareIncrement::Whole)
+    ]
+}
+
+/// Q' in units of 10⁻⁹: Q × new ÷ old truncated toward zero to the increment (spec §8.5).
+fn split_units(q: i128, new: u64, old: u64, increment: ShareIncrement) -> i128 {
+    let (new, old) = (i128::from(new), i128::from(old));
+    match increment {
+        ShareIncrement::Fractional => toward_zero(q * new, old),
+        ShareIncrement::Whole => toward_zero(q * new, old * pow10(9)) * pow10(9),
+    }
+}
+
+/// `n ÷ d` rounded to an integer for a divisor of either sign.
+fn signed_div_round(n: i128, d: i128, mode: Rounding) -> i128 {
+    if d < 0 {
+        div_round(-n, -d, mode)
+    } else {
+        div_round(n, d, mode)
+    }
+}
+
+fn positive(bound: i64, max_scale: u32) -> impl Strategy<Value = (i128, u32)> {
+    (1..=bound, 0..=max_scale).prop_map(|(m, s)| (i128::from(m), s))
+}
+
+proptest! {
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn mark_prices_are_positive_with_at_most_twelve_places(v in decimal(i64::MAX, 12), extra in 1u32..=10) {
+        let canonical = text(v.0, v.1);
+        match v.0.signum() {
+            1 => prop_assert_eq!(MarkPrice::parse(&canonical).unwrap().to_string(), canonical.as_str()),
+            _ => prop_assert_eq!(MarkPrice::parse(&canonical), Err(NumError::NotPositive)),
+        }
+        let too_precise = text(v.0.abs() * 10 + 1, 12 + extra);
+        prop_assert_eq!(MarkPrice::parse(&too_precise), Err(NumError::TooPrecise));
+        let (int, frac) = canonical.split_once('.').unwrap_or((&canonical, ""));
+        let trailing_zero = if frac.is_empty() { format!("{int}.0") } else { format!("{canonical}0") };
+        prop_assert_eq!(MarkPrice::parse(&trailing_zero), Err(NumError::NotCanonical));
+    }
+
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn a_price_is_the_same_mark_and_values_at_a_mark_are_exact(p in positive(i64::MAX, 9), m in positive(1_000_000_000_000, 12), q in decimal(1_000_000_000_000, 9)) {
+        let price = Price::parse(&text(p.0, p.1)).unwrap();
+        prop_assert_eq!(MarkPrice::from(price).to_string(), text(p.0, p.1));
+        prop_assert_eq!(MarkPrice::from(price), MarkPrice::parse(&text(p.0, p.1)).unwrap());
+        let mark = MarkPrice::parse(&text(m.0, m.1)).unwrap();
+        prop_assert_eq!(signed(q).value_at_mark(mark).unwrap().to_string(), text(q.0 * m.0, q.1 + m.1));
+    }
+
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn a_split_truncates_q_times_new_over_old_toward_zero_to_the_increment(
+        q in decimal(1_000_000_000_000_000, 9),
+        new in 1u64..=1_000,
+        old in 1u64..=1_000,
+        increment in increments(),
+    ) {
+        let split = ratio(new, old).split(signed(q), increment).unwrap();
+        prop_assert_eq!(split.before(), signed(q));
+        let expected = split_units(scaled(q, 9), new, old, increment);
+        prop_assert_eq!(split.after().to_string(), text(expected, 9));
+    }
+
+    /// R = round(B × (Q·new − Q'·old) ÷ (Q·new), scale, mode), with B at up to 18 places (a fill's
+    /// q × p) and the oracle's numerator and divisor in integers.
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn the_residual_basis_is_one_rounding_of_the_exact_fraction(
+        b in decimal(100_000_000, 18),
+        q in decimal(100_000_000, 9),
+        new in 1u64..=100,
+        old in 1u64..=100,
+        increment in increments(),
+        scale in 0u32..=12,
+        mode in modes(),
+    ) {
+        prop_assume!(q.0 != 0);
+        let q_units = scaled(q, 9);
+        let after = split_units(q_units, new, old, increment);
+        let numerator = q_units * i128::from(new) - after * i128::from(old);
+        let basis = CostBasis::parse(&text(b.0, b.1)).unwrap();
+        let split = ratio(new, old).split(signed(q), increment).unwrap();
+        let removed = split.residual_basis(basis, scale, mode).unwrap();
+        let expected = signed_div_round(scaled(b, 18) * numerator, q_units * i128::from(new) * pow10(18 - scale), mode);
+        prop_assert_eq!(removed.to_string(), text(expected, scale));
+    }
+
+    /// Cash in lieu = round(f × price, scale, mode) with f = (Q·new − Q'·old) ÷ old: one rounding
+    /// of the exact product, signed like Q.
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn cash_in_lieu_is_one_rounding_of_the_residual_times_the_price(
+        q in decimal(1_000_000_000_000_000, 9),
+        p in positive(1_000_000_000_000, 9),
+        new in 1u64..=100,
+        old in 1u64..=100,
+        increment in increments(),
+        scale in 0u32..=12,
+        mode in modes(),
+    ) {
+        let q_units = scaled(q, 9);
+        let after = split_units(q_units, new, old, increment);
+        let numerator = q_units * i128::from(new) - after * i128::from(old);
+        let price = Price::parse(&text(p.0, p.1)).unwrap();
+        let split = ratio(new, old).split(signed(q), increment).unwrap();
+        let cash = split.cash_in_lieu(price, scale, mode).unwrap();
+        let expected = div_round(numerator * scaled(p, 9), i128::from(old) * pow10(18 - scale), mode);
+        prop_assert_eq!(cash.to_string(), text(expected, scale));
+    }
+
+    /// Each adjustment is round(mark × old ÷ new, scale, mode) of the stored mark, so a second split
+    /// rounds the already adjusted mark once more, never the original; a result of zero is an error.
+    #[test]
+    #[ignore = "pending E3-2"]
+    fn adjusted_marks_are_one_rounding_of_mark_times_old_over_new(
+        m in positive(1_000_000_000_000, 12),
+        splits in proptest::collection::vec((1u64..=1_000, 1u64..=1_000), 1..4),
+        scale in 0u32..=12,
+        mode in modes(),
+    ) {
+        let mut mark = MarkPrice::parse(&text(m.0, m.1)).unwrap();
+        let mut units = scaled(m, 12);
+        for (new, old) in splits {
+            let rounded = div_round(units * i128::from(old), i128::from(new) * pow10(12 - scale), mode);
+            let adjusted = ratio(new, old).mark(mark, scale, mode);
+            if rounded == 0 {
+                prop_assert_eq!(adjusted, Err(NumError::NotPositive));
+                break;
+            }
+            if !fits(rounded, scale) {
+                prop_assert_eq!(adjusted, Err(NumError::Overflow));
+                break;
+            }
+            mark = adjusted.unwrap();
+            units = rounded * pow10(12 - scale);
+            prop_assert_eq!(mark.to_string(), text(rounded, scale));
+        }
+    }
+}
+
+#[test]
+#[ignore = "pending E3-2"]
+fn split_ratios_are_positive_integers() {
+    assert_eq!(SplitRatio::new(0, 1), Err(NumError::NotPositive));
+    assert_eq!(SplitRatio::new(1, 0), Err(NumError::NotPositive));
+    assert_eq!(SplitRatio::new(0, 0), Err(NumError::NotPositive));
+    let r = ratio(4, 1);
+    assert_eq!((r.new_shares(), r.old_shares()), (4, 1));
+    let r = ratio(1, 10);
+    assert_eq!((r.new_shares(), r.old_shares()), (1, 10));
+}
+
+#[test]
+#[ignore = "pending E3-2"]
+fn split_results_that_do_not_fit_are_errors() {
+    let q = |s: &str| SignedQty::parse(s).unwrap();
+    let m = |s: &str| MarkPrice::parse(s).unwrap();
+    let flat = ratio(1, 10).split(q("0"), ShareIncrement::Whole).unwrap();
+    assert_eq!(flat.after(), SignedQty::ZERO);
+    assert_eq!(
+        flat.residual_basis(CostBasis::ZERO, 12, Rounding::HalfEven),
+        Err(NumError::DivisionByZero)
+    );
+    assert_eq!(
+        ratio(u64::MAX, 1).split(
+            q("79228162514264337593.543950335"),
+            ShareIncrement::Fractional
+        ),
+        Err(NumError::Overflow)
+    );
+    assert_eq!(
+        ratio(3, 1).mark(m("0.000000000001"), 12, Rounding::HalfEven),
+        Err(NumError::NotPositive),
+        "0.000000000000333… rounds to zero, which is not a mark"
+    );
+    assert_eq!(
+        ratio(2, 1).mark(m("0.000000000001"), 12, Rounding::HalfEven),
+        Err(NumError::NotPositive),
+        "0.0000000000005 ties to the even neighbour, zero"
+    );
+    assert_eq!(
+        ratio(1, 3).mark(m("0.000000000001"), 13, Rounding::HalfEven),
+        Err(NumError::TooPrecise),
+        "a mark holds at most 12 places"
+    );
+}
+
+/// RC-04: 10 × 4 ÷ 1 = 40, mark 400 × 1 ÷ 4 = 100. RC-05: 25 × 1 ÷ 10 = 2.5, whole shares 2,
+/// residual basis 50 × (25 − 20) ÷ 25 = 10, cash in lieu 0.5 × 19 = 9.50, mark 2 × 10 = 20.
+/// RC-23: 10 × 1 ÷ 3 = 3.333…, Q' 3.333333333, residual 100 × (10 − 9.999999999) ÷ 10 =
+/// 0.00000001, mark 30 × 3 = 90; forward 3:1, mark 100 ÷ 3 = 33.333333333333, and 30 of them are
+/// 999.99999999999. One billionth of a share, 1:10 fractional, truncates to 0: the formula's
+/// residual is round(B, 12), so 5.27 × 10⁻¹⁶ rounds to 0 and 5.27 × 10⁻¹³ to 10⁻¹².
+#[test]
+#[ignore = "pending E3-2"]
+fn hand_calculated_split_values_from_the_reference_cases() {
+    let q = |s: &str| SignedQty::parse(s).unwrap();
+    let b = |s: &str| CostBasis::parse(s).unwrap();
+    let m = |s: &str| MarkPrice::parse(s).unwrap();
+    let p = |s: &str| Price::parse(s).unwrap();
+    let even = Rounding::HalfEven;
+
+    let rc_04 = ratio(4, 1)
+        .split(q("10"), ShareIncrement::Fractional)
+        .unwrap();
+    assert_eq!(rc_04.after().to_string(), "40");
+    assert_eq!(
+        rc_04
+            .residual_basis(b("4000"), 12, even)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(
+        ratio(4, 1).mark(m("400"), 12, even).unwrap().to_string(),
+        "100"
+    );
+
+    let rc_05 = ratio(1, 10).split(q("25"), ShareIncrement::Whole).unwrap();
+    assert_eq!(rc_05.after().to_string(), "2");
+    assert_eq!(
+        rc_05.residual_basis(b("50"), 12, even).unwrap().to_string(),
+        "10"
+    );
+    assert_eq!(
+        rc_05.cash_in_lieu(p("19"), 2, even).unwrap().to_string(),
+        "9.5"
+    );
+    assert_eq!(
+        ratio(1, 10).mark(m("2"), 12, even).unwrap().to_string(),
+        "20"
+    );
+    let short = ratio(1, 10).split(q("-25"), ShareIncrement::Whole).unwrap();
+    assert_eq!(short.after().to_string(), "-2");
+    assert_eq!(
+        short
+            .residual_basis(b("-50"), 12, even)
+            .unwrap()
+            .to_string(),
+        "-10"
+    );
+    assert_eq!(
+        short.cash_in_lieu(p("19"), 2, even).unwrap().to_string(),
+        "-9.5"
+    );
+
+    let rc_23 = ratio(1, 3)
+        .split(q("10"), ShareIncrement::Fractional)
+        .unwrap();
+    assert_eq!(rc_23.after().to_string(), "3.333333333");
+    assert_eq!(
+        rc_23
+            .residual_basis(b("100"), 12, even)
+            .unwrap()
+            .to_string(),
+        "0.00000001"
+    );
+    assert_eq!(
+        rc_23.cash_in_lieu(p("19"), 2, even).unwrap().to_string(),
+        "0"
+    );
+    assert_eq!(
+        ratio(1, 3).mark(m("30"), 12, even).unwrap().to_string(),
+        "90"
+    );
+    let forward = ratio(3, 1).mark(m("100"), 12, even).unwrap();
+    assert_eq!(forward.to_string(), "33.333333333333");
+    assert_eq!(
+        q("30").value_at_mark(forward).unwrap().to_string(),
+        "999.99999999999"
+    );
+
+    let dust = ratio(1, 10)
+        .split(q("0.000000001"), ShareIncrement::Fractional)
+        .unwrap();
+    assert_eq!(dust.after(), SignedQty::ZERO);
+    assert_eq!(
+        dust.residual_basis(b("0.000000000000000527"), 12, even)
+            .unwrap()
+            .to_string(),
+        "0"
+    );
+    assert_eq!(
+        dust.residual_basis(b("0.000000000000527"), 12, even)
+            .unwrap()
+            .to_string(),
+        "0.000000000001"
+    );
 }

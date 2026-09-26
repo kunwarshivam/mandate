@@ -3,10 +3,13 @@
 #![allow(dead_code, reason = "each test binary uses a different subset")]
 
 use mandate_accounting::{
-    Account, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily, Input, InstrumentId,
-    Liquidity, Side, TafCapBasis,
+    Account, AssetClass, CashDividend, Config, CorporateAction, CryptoFees, EquityFees, Execution,
+    FeeFamily, Input, InstrumentId, Liquidity, Position, Side, Split, TafCapBasis,
 };
-use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, Usd};
+use mandate_num::{
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, ShareIncrement, SignedQty,
+    SplitRatio, Usd,
+};
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 
 pub fn d(s: &str) -> Date {
@@ -127,6 +130,148 @@ pub fn charge(family: FeeFamily, day: &str) -> Input {
     Input::FeesCharged {
         family,
         day: d(day),
+    }
+}
+
+pub fn ratio(new: u64, old: u64) -> SplitRatio {
+    SplitRatio::new(new, old).unwrap()
+}
+
+pub fn split_of(
+    instrument: &str,
+    ex_date: &str,
+    (new, old): (u64, u64),
+    increment: ShareIncrement,
+    cash_in_lieu_price: Option<&str>,
+) -> Split {
+    Split {
+        instrument: id(instrument),
+        ex_date: d(ex_date),
+        ratio: ratio(new, old),
+        increment,
+        cash_in_lieu_price: cash_in_lieu_price.map(|p| Price::parse(p).unwrap()),
+    }
+}
+
+pub fn split(
+    instrument: &str,
+    ex_date: &str,
+    new_old: (u64, u64),
+    increment: ShareIncrement,
+    cash_in_lieu_price: Option<&str>,
+) -> Input {
+    Input::CorporateAction(CorporateAction::Split(split_of(
+        instrument,
+        ex_date,
+        new_old,
+        increment,
+        cash_in_lieu_price,
+    )))
+}
+
+pub fn dividend(instrument: &str, ex_date: &str, pay_date: &str, per_share: &str) -> Input {
+    Input::CorporateAction(CorporateAction::CashDividend(
+        CashDividend::new(
+            id(instrument),
+            d(ex_date),
+            d(pay_date),
+            Price::parse(per_share).unwrap(),
+        )
+        .unwrap(),
+    ))
+}
+
+pub fn dividend_paid(instrument: &str, ex_date: &str) -> Input {
+    Input::DividendPaid {
+        instrument: id(instrument),
+        ex_date: d(ex_date),
+    }
+}
+
+pub fn cash_in_lieu_posted(instrument: &str, amount: &str) -> Input {
+    Input::CashInLieuPosted {
+        instrument: id(instrument),
+        amount: usd(amount),
+    }
+}
+
+/// An account with `settled` cash and one position.
+pub fn holding(settled: &str, instrument: &str, qty: &str, basis: &str) -> Account {
+    Account::opening(
+        usd(settled),
+        [(
+            id(instrument),
+            Position::new(
+                SignedQty::parse(qty).unwrap(),
+                CostBasis::parse(basis).unwrap(),
+            )
+            .unwrap(),
+        )],
+    )
+}
+
+/// Rebuilds an input from the text of every field, as a journal round trip would.
+pub fn round_trip(input: &Input) -> Input {
+    match input {
+        Input::Fill(e) => Input::Fill(Execution {
+            fill_id: e.fill_id.clone(),
+            client_order_id: e.client_order_id.clone(),
+            instrument: id(e.instrument.as_str()),
+            asset_class: e.asset_class,
+            side: e.side,
+            qty_gross: Qty::parse(&e.qty_gross.to_string()).unwrap(),
+            price: Price::parse(&e.price.to_string()).unwrap(),
+            liquidity: e.liquidity,
+            executed_at: UtcNanos::parse(&e.executed_at.to_string()).unwrap(),
+        }),
+        Input::Mark { instrument, price } => Input::Mark {
+            instrument: id(instrument.as_str()),
+            price: Price::parse(&price.to_string()).unwrap(),
+        },
+        Input::FeesCharged { family, day } => Input::FeesCharged {
+            family: *family,
+            day: d(&day.to_string()),
+        },
+        Input::SettlementPosted { date } => Input::SettlementPosted {
+            date: d(&date.to_string()),
+        },
+        Input::CorporateAction(CorporateAction::Split(s)) => {
+            Input::CorporateAction(CorporateAction::Split(Split {
+                instrument: id(s.instrument.as_str()),
+                ex_date: d(&s.ex_date.to_string()),
+                ratio: SplitRatio::new(
+                    s.ratio.new_shares().to_string().parse().unwrap(),
+                    s.ratio.old_shares().to_string().parse().unwrap(),
+                )
+                .unwrap(),
+                increment: s.increment,
+                cash_in_lieu_price: s
+                    .cash_in_lieu_price
+                    .map(|p| Price::parse(&p.to_string()).unwrap()),
+            }))
+        }
+        Input::CorporateAction(CorporateAction::CashDividend(c)) => {
+            Input::CorporateAction(CorporateAction::CashDividend(
+                CashDividend::new(
+                    id(c.instrument().as_str()),
+                    d(&c.ex_date().to_string()),
+                    d(&c.pay_date().to_string()),
+                    Price::parse(&c.per_share().to_string()).unwrap(),
+                )
+                .unwrap(),
+            ))
+        }
+        Input::DividendPaid {
+            instrument,
+            ex_date,
+        } => Input::DividendPaid {
+            instrument: id(instrument.as_str()),
+            ex_date: d(&ex_date.to_string()),
+        },
+        Input::CashInLieuPosted { instrument, amount } => Input::CashInLieuPosted {
+            instrument: id(instrument.as_str()),
+            amount: usd(&amount.to_string()),
+        },
     }
 }
 

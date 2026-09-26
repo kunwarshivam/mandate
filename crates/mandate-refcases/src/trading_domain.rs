@@ -4,7 +4,9 @@
 //! (`trading_domain::RC-03::gate_rejects_zero_crossing_order`).
 //!
 //! E3-1 interprets `fill`, `mark`, `fees_charged`, and `advance_clock` (settlement) steps and the
-//! accounting expectation keys. A case that uses anything owned by a later story fails with
+//! accounting expectation keys; E3-2 adds `corporate_action_applied` (splits and cash dividends),
+//! `broker_cash_posting` (cash in lieu), dividend payment on `advance_clock`, and the `receivables`
+//! and `income` expectations (DEC-96). A case that uses anything owned by a later story fails with
 //! "not interpreted until <story>" for each such item; anything the vocabulary does not know fails
 //! as unknown. Every key of every interpreted expectation is checked.
 
@@ -13,12 +15,14 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mandate_accounting::{
-    Account, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily,
-    Input, InstrumentId, Liquidity, Position, Record, Side, TafCapBasis,
+    Account, AccountingError, AssetClass, CashDividend, Config, CorporateAction, CryptoFees,
+    EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Record, Side,
+    Split, TafCapBasis,
 };
 use mandate_canon::DecStr;
 use mandate_num::{
-    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, Rounding, SignedQty, Usd,
+    Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Price, Qty, Rounding, ShareIncrement, SignedQty,
+    SplitRatio, Usd,
 };
 use mandate_time::{Date, TradingCalendar, UtcNanos};
 use serde_json::{Map, json};
@@ -36,9 +40,7 @@ const AVG_COST_SCALE: u32 = 12;
 const PENDING_EVENTS: &[(&str, &str)] = &[
     ("propose_order", "E6-3"),
     ("broker_order_update", "E7-2"),
-    ("corporate_action_prepare", "E3-2"),
-    ("corporate_action_applied", "E3-2"),
-    ("broker_cash_posting", "E3-2"),
+    ("corporate_action_prepare", "E7-4"),
     ("reconciliation", "E7-3"),
     ("broker_position_update", "E7-3"),
     ("broker_account_update", "E6-9"),
@@ -60,8 +62,6 @@ const PENDING_EXPECT: &[(&str, &str)] = &[
     ("canceled_legs", "E4-1"),
     ("reconciliation", "E7-3"),
     ("protective_sell_qty", "E7-4"),
-    ("income", "E3-2"),
-    ("receivables", "E3-2"),
 ];
 
 /// Case-level keys of backtest cases.
@@ -317,13 +317,6 @@ fn pending(case: &Json) -> BTreeSet<String> {
                 note(format!("expectation `{key}`"), story);
             }
         }
-        if expect
-            .get("conservation")
-            .and_then(|c| c.get("income"))
-            .is_some()
-        {
-            note("expectation `conservation.income`".to_owned(), "E3-2");
-        }
     }
     out
 }
@@ -356,15 +349,22 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let config = config(fixture, case)?;
     let instruments = instruments(case)?;
     let mut account = initial(case, &instruments)?;
-    let baseline = Baseline::of(&account);
+    let mut baseline = Baseline::of(&account);
     for (n, step) in list_at(case, "steps")?.iter().enumerate() {
         let label = format!("step {}", n.saturating_add(1));
         let record = run_step(&mut account, step, n, &instruments, &config)
             .map_err(|e| format!("{label}: {e}"))?;
         if let Some(expect) = step.get("expect") {
-            check(&account, record.as_ref(), &baseline, &instruments, expect)
-                .map_err(|e| format!("{label}: {e}"))?;
+            check(
+                &account,
+                record.as_ref(),
+                baseline.as_ref(),
+                &instruments,
+                expect,
+            )
+            .map_err(|e| format!("{label}: {e}"))?;
         }
+        baseline = baseline.or_else(|| Baseline::of(&account));
     }
     Ok(())
 }
@@ -568,7 +568,8 @@ fn calendar(fixture: &Json, name: &str) -> Result<TradingCalendar, String> {
     .map_err(|e| format!("calendar `{name}`: {e}"))
 }
 
-type Instruments = Vec<(String, InstrumentId, AssetClass)>;
+/// Name, ID, asset class, and `fractionable` when the snapshot gives it.
+type Instruments = Vec<(String, InstrumentId, AssetClass, Option<bool>)>;
 
 fn instruments(case: &Json) -> Result<Instruments, String> {
     let listed = at(case, "instruments")?
@@ -595,7 +596,14 @@ fn instruments(case: &Json) -> Result<Instruments, String> {
                 other => return Err(format!("{what}: unknown asset_class `{other}`")),
             };
             let id = InstrumentId::new(name).map_err(|e| format!("{what}: {e}"))?;
-            Ok((name.clone(), id, class))
+            let fractionable = match fields_of.get("fractionable") {
+                None => None,
+                Some(f) => Some(
+                    f.as_bool()
+                        .ok_or_else(|| format!("{what}: `fractionable` is not a boolean"))?,
+                ),
+            };
+            Ok((name.clone(), id, class, fractionable))
         })
         .collect()
 }
@@ -603,10 +611,10 @@ fn instruments(case: &Json) -> Result<Instruments, String> {
 fn instrument<'a>(
     instruments: &'a Instruments,
     name: &str,
-) -> Result<&'a (String, InstrumentId, AssetClass), String> {
+) -> Result<&'a (String, InstrumentId, AssetClass, Option<bool>), String> {
     instruments
         .iter()
-        .find(|(n, _, _)| n == name)
+        .find(|(n, _, _, _)| n == name)
         .ok_or_else(|| format!("unknown instrument `{name}`"))
 }
 
@@ -629,7 +637,7 @@ fn initial(case: &Json, instruments: &Instruments) -> Result<Account, String> {
         .flatten()
     {
         fields(p, "initial position", &["instrument", "qty", "cost_basis"])?;
-        let (_, id, _) = instrument(instruments, str_at(p, "instrument")?)?;
+        let (_, id, _, _) = instrument(instruments, str_at(p, "instrument")?)?;
         let qty = num(SignedQty::parse(dec_at(p, "qty")?.as_str()), "qty")?;
         let basis = num(
             CostBasis::parse(dec_at(p, "cost_basis")?.as_str()),
@@ -669,7 +677,7 @@ fn run_step(
             if let Some(source) = d.get("source") {
                 return Err(format!("unknown fill source {source}"));
             }
-            let (_, id, class) = instrument(instruments, str_at(data, "instrument")?)?;
+            let (_, id, class, _) = instrument(instruments, str_at(data, "instrument")?)?;
             let side = match str_at(data, "side")? {
                 "buy" => Side::Buy,
                 "sell" => Side::Sell,
@@ -708,7 +716,7 @@ fn run_step(
                 ["quote", "trade", "official_close", "bar_close"].contains(&source),
                 || format!("unknown mark source `{source}`"),
             )?;
-            let (_, id, _) = instrument(instruments, str_at(data, "instrument")?)?;
+            let (_, id, _, _) = instrument(instruments, str_at(data, "instrument")?)?;
             vec![Input::Mark {
                 instrument: id.clone(),
                 price: num(Price::parse(dec_at(data, "price")?.as_str()), "price")?,
@@ -728,10 +736,27 @@ fn run_step(
         }
         "advance_clock" => {
             fields(data, "advance_clock data", &["note"])?;
-            acct(account.settlements_due(when))?
-                .into_iter()
-                .map(|date| Input::SettlementPosted { date })
-                .collect()
+            acct(account.due(when))?
+        }
+        "corporate_action_applied" => {
+            vec![Input::CorporateAction(corporate_action(data, instruments)?)]
+        }
+        "broker_cash_posting" => {
+            fields(
+                data,
+                "broker_cash_posting data",
+                &["type", "instrument", "amount"],
+            )?;
+            expect_eq(
+                "broker_cash_posting type",
+                str_at(data, "type")?,
+                "cash_in_lieu",
+            )?;
+            let (_, id, _, _) = instrument(instruments, str_at(data, "instrument")?)?;
+            vec![Input::CashInLieuPosted {
+                instrument: id.clone(),
+                amount: num(Usd::parse(dec_at(data, "amount")?.as_str()), "amount")?,
+            }]
         }
         other => return Err(format!("unknown event `{other}`")),
     };
@@ -744,22 +769,101 @@ fn run_step(
     Ok(record)
 }
 
-/// Values at the start of the case, for the cumulative `conservation` expectation.
+/// Values at the first state of the case where every one is defined (the start, or after the
+/// first mark of a position opened without one), for the cumulative `conservation` expectation.
 struct Baseline {
-    equity: Result<Usd, AccountingError>,
+    equity: Usd,
     realized: Usd,
-    unrealized: Result<Usd, AccountingError>,
-    fees: Result<Usd, AccountingError>,
+    unrealized: Usd,
+    income: Usd,
+    fees: Usd,
 }
 
 impl Baseline {
-    fn of(account: &Account) -> Self {
-        Self {
-            equity: account.equity(),
+    fn of(account: &Account) -> Option<Self> {
+        Some(Self {
+            equity: account.equity().ok()?,
             realized: account.realized_gross(),
-            unrealized: account.unrealized(),
-            fees: account.fees_total(),
+            unrealized: account.unrealized().ok()?,
+            income: account.income(),
+            fees: account.fees_total().ok()?,
+        })
+    }
+}
+
+/// A `corporate_action_applied` step: a split (to whole shares unless the instrument snapshot is
+/// `fractionable`, which a split requires) or a cash dividend (spec §8.5).
+fn corporate_action(data: &Json, instruments: &Instruments) -> Result<CorporateAction, String> {
+    let (name, id, _, fractionable) = instrument(instruments, str_at(data, "instrument")?)?;
+    let ex_date = date(at(data, "ex_date")?, "ex_date")?;
+    match str_at(data, "type")? {
+        "split" => {
+            fields(
+                data,
+                "split data",
+                &[
+                    "instrument",
+                    "type",
+                    "ratio",
+                    "ex_date",
+                    "cash_in_lieu_price_per_new_share",
+                ],
+            )?;
+            let ratio = at(data, "ratio")?;
+            fields(ratio, "split ratio", &["new", "old"])?;
+            let ratio = num(
+                SplitRatio::new(u64_at(ratio, "new")?, u64_at(ratio, "old")?),
+                "ratio",
+            )?;
+            let increment = match fractionable {
+                Some(true) => ShareIncrement::Fractional,
+                Some(false) => ShareIncrement::Whole,
+                None => {
+                    return Err(format!(
+                        "a split needs `fractionable` on instrument `{name}`"
+                    ));
+                }
+            };
+            let cash_in_lieu_price = match data.get("cash_in_lieu_price_per_new_share") {
+                None => None,
+                Some(p) => Some(num(
+                    Price::parse(dec(p, "cash_in_lieu_price_per_new_share")?.as_str()),
+                    "cash_in_lieu_price_per_new_share",
+                )?),
+            };
+            Ok(CorporateAction::Split(Split {
+                instrument: id.clone(),
+                ex_date,
+                ratio,
+                increment,
+                cash_in_lieu_price,
+            }))
         }
+        "cash_dividend" => {
+            fields(
+                data,
+                "cash_dividend data",
+                &[
+                    "instrument",
+                    "type",
+                    "amount_per_share",
+                    "ex_date",
+                    "pay_date",
+                ],
+            )?;
+            let per_share = num(
+                Price::parse(dec_at(data, "amount_per_share")?.as_str()),
+                "amount_per_share",
+            )?;
+            let pay_date = date(at(data, "pay_date")?, "pay_date")?;
+            Ok(CorporateAction::CashDividend(acct(CashDividend::new(
+                id.clone(),
+                ex_date,
+                pay_date,
+                per_share,
+            ))?))
+        }
+        other => Err(format!("unknown corporate action type `{other}`")),
     }
 }
 
@@ -771,21 +875,14 @@ fn check_dec(what: &str, actual: impl Display, expected: &Json) -> Result<(), St
     })
 }
 
-fn delta(
-    what: &str,
-    now: Result<Usd, AccountingError>,
-    then: &Result<Usd, AccountingError>,
-) -> Result<Usd, String> {
-    let then = then
-        .clone()
-        .map_err(|e| format!("{what} at the start: {e}"))?;
+fn delta(what: &str, now: Result<Usd, AccountingError>, then: Usd) -> Result<Usd, String> {
     num(acct(now)?.checked_sub(then), what)
 }
 
 fn check(
     account: &Account,
     record: Option<&Record>,
-    baseline: &Baseline,
+    baseline: Option<&Baseline>,
     instruments: &Instruments,
     expect: &Json,
 ) -> Result<(), String> {
@@ -804,6 +901,8 @@ fn check(
             "conservation",
             "trade_date",
             "settles_on",
+            "receivables",
+            "income",
         ],
     )?;
     for (key, expected) in expect {
@@ -813,7 +912,7 @@ fn check(
                 for (name, e) in listed {
                     let what = format!("positions.{name}");
                     let p = fields(e, &what, &["qty", "cost_basis", "avg_cost"])?;
-                    let (_, id, _) = instrument(instruments, name)?;
+                    let (_, id, _, _) = instrument(instruments, name)?;
                     let position = account.position(id);
                     for (field, value) in p {
                         let what = format!("{what}.{field}");
@@ -851,17 +950,23 @@ fn check(
             "realized_pnl_net" => check_dec(key, acct(account.realized_net())?, expected)?,
             "unrealized_pnl" => check_dec(key, acct(account.unrealized())?, expected)?,
             "equity" => check_dec(key, acct(account.equity())?, expected)?,
+            "receivables" => check_dec(key, acct(account.net_receivables())?, expected)?,
+            "income" => check_dec(key, account.income(), expected)?,
             "marks" => {
                 let listed = expected.as_object().ok_or("`marks` is not an object")?;
                 for (name, value) in listed {
-                    let (_, id, _) = instrument(instruments, name)?;
+                    let (_, id, _, _) = instrument(instruments, name)?;
                     let mark = account
                         .mark(id)
                         .ok_or_else(|| format!("marks.{name}: no mark"))?;
                     check_dec(&format!("marks.{name}"), mark, value)?;
                 }
             }
-            "conservation" => check_conservation(account, baseline, expected)?,
+            "conservation" => {
+                let baseline =
+                    baseline.ok_or("`conservation` before every value it compares is defined")?;
+                check_conservation(account, baseline, expected)?
+            }
             "trade_date" | "settles_on" => {
                 let Some(Record::Fill {
                     trade_date,
@@ -935,23 +1040,28 @@ fn check_conservation(
     let c = fields(
         expected,
         "conservation",
-        &["delta_equity", "realized_gross", "unrealized", "fees"],
+        &[
+            "delta_equity",
+            "realized_gross",
+            "unrealized",
+            "income",
+            "fees",
+        ],
     )?;
-    let delta_equity = delta("equity", account.equity(), &baseline.equity)?;
-    let realized = num(
-        account.realized_gross().checked_sub(baseline.realized),
-        "realized",
-    )?;
-    let unrealized = delta("unrealized", account.unrealized(), &baseline.unrealized)?;
-    let fees = delta("fees", account.fees_total(), &baseline.fees)?;
+    let delta_equity = delta("equity", account.equity(), baseline.equity)?;
+    let realized = delta("realized", Ok(account.realized_gross()), baseline.realized)?;
+    let unrealized = delta("unrealized", account.unrealized(), baseline.unrealized)?;
+    let income = delta("income", Ok(account.income()), baseline.income)?;
+    let fees = delta("fees", account.fees_total(), baseline.fees)?;
     let identity = num(
         realized
             .checked_add(unrealized)
+            .and_then(|v| v.checked_add(income))
             .and_then(|v| v.checked_sub(fees)),
         "identity",
     )?;
     expect_eq(
-        "conservation identity (Δequity = realized + unrealized − fees)",
+        "conservation identity (Δequity = realized + unrealized + income − fees)",
         delta_equity,
         identity,
     )?;
@@ -960,6 +1070,7 @@ fn check_conservation(
             "delta_equity" => delta_equity,
             "realized_gross" => realized,
             "unrealized" => unrealized,
+            "income" => income,
             _ => fees,
         };
         check_dec(&format!("conservation.{field}"), actual, value)?;
