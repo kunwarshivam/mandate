@@ -258,6 +258,25 @@ clock, does no I/O, and keeps no state between calls.
 - Journal events: none. The sim is a pure function with no state; E4-2 records the run
   (`BacktestRunRecorded`, journal spec §12).
 
+## Follow-ups
+
+Minors from the independent review of the tests PR (#75) that this story does not take; that
+review's other minors are fixed above. Neither can change a fill, and each widens the generator or
+the sequencing rather than the model, which the freeze rule leaves to the backlog.
+
+- **Generator coverage.** Generated scenarios use the `fixed` slippage model on a whole-share US
+  equity, with latencies of whole minutes, and mark only the first trading day's 09:30 bar as an
+  auction bar. What they therefore never produce is covered by hand tests instead — `Session::Continuous`
+  bars and a fractional instrument by `hand::a_crypto_stop_triggers_on_a_continuous_bar`, the `sqrt`
+  model by `hand::sqrt_impact_takes_the_root_of_the_filled_share_of_reference_volume` and
+  `mandate-num`'s hand-computed roots — or not at all: a second trading day's auction bar, and a
+  sub-minute latency, which against minute bars can only move eligibility on by one bar. Widening the
+  generator belongs with the implementation PR, where a counter-example can be debugged against real
+  logic instead of a stub.
+- **Size.** The tests PR is large for one sitting. The `mandate-refcases` interpretations could have
+  been sequenced as their own PR after the crate merged; the next story that touches the harness
+  splits that way.
+
 ## Commands
 
 ```bash
