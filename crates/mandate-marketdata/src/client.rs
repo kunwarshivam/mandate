@@ -279,7 +279,8 @@ fn append(
     match (records, page) {
         (Records::Bars(all), Records::Bars(more)) => all.extend(more),
         (Records::Trades(all), Records::Trades(more)) => all.extend(more),
-        (Records::Bars(_), Records::Trades(_)) | (Records::Trades(_), Records::Bars(_)) => {}
+        (Records::Quotes(all), Records::Quotes(more)) => all.extend(more),
+        (Records::Bars(_) | Records::Trades(_) | Records::Quotes(_), _) => {}
     }
     Ok(())
 }

@@ -1,0 +1,1 @@
+/v1beta3/crypto/us/quotes?symbols=BTC%2FUSD&start=2026-09-24T00:00:00Z&end=2026-09-25T00:00:00Z&limit=20&sort=asc
