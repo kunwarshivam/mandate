@@ -112,9 +112,7 @@ pub struct Occurrences {
 impl Occurrences {
     fn add(&mut self, at: UtcNanos) {
         self.count = self.count.saturating_add(1);
-        if let Err(index) = self.first.binary_search(&at)
-            && index < EXAMPLES
-        {
+        if let Err(index) = self.first.binary_search(&at) {
             self.first.insert(index, at);
             self.first.truncate(EXAMPLES);
         }
