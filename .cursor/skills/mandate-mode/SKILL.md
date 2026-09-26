@@ -36,7 +36,9 @@ code (the spec guard enforces it).
 
 ## Start every task
 
-1. Match the task to a playbook and open a todo list whose first items are its steps.
+1. Check the open claims (`gh issue list --label claim --state open`; `playbooks/coordination.md`)
+   and claim your story. Then match the task to a playbook and open a todo list whose first items
+   are its steps.
 2. Read the documents the task touches (AGENTS.md "Sources of truth").
 3. Name the data shapes before writing logic.
 
@@ -46,6 +48,7 @@ code (the spec guard enforces it).
 | Change a spec, schema, reference case, or the reference implementation | [`playbooks/spec-change.md`](playbooks/spec-change.md) |
 | The founder or a review corrects something an agent should never repeat | [`playbooks/correction.md`](playbooks/correction.md) |
 | Ship any PR: independent review, then merge | [`playbooks/ship.md`](playbooks/ship.md) |
+| Another coordinating session (Cursor cloud agents, Claude Code) is building at the same time | [`playbooks/coordination.md`](playbooks/coordination.md): claim first, split by crate, reserve IDs |
 | How does X work, why is Y built this way | the `how` and `why` skills |
 | A defect | the `tdd` skill: reproduce with a failing test, then fix the root cause |
 | A small diff you do not fully trust | the `blast-radius` skill |
