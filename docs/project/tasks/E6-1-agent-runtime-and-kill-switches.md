@@ -89,7 +89,7 @@ Each row gets a named test whose oracle computes the answer its own way.
 | ES-06, ES-21 the core is a pure state machine: `handle` is the only producer of effects and reads nothing but its arguments | `properties::two_runs_of_the_same_inputs_give_equal_effects`, and the crate's lint header |
 | Journal §8, ES-21 state is a fold of events: folding the drafts a run journaled reproduces the run's state | `properties::folding_the_journaled_drafts_reproduces_the_live_state`, `hand::the_golden_journal_folds_to_the_committed_state` |
 | Journal §5.2 a replay emits nothing: `fold` is effect-free and total over the catalogue | `properties::a_replay_of_any_run_emits_no_draft_and_no_intent`, `hand::a_restart_mid_run_journals_nothing_new` |
-| Journal §5.2, AGENTS.md rule 5 journal before acting: every `Effect::Intent` is preceded in the same list by the `Effect::Journal` that records it | `properties::every_intent_effect_follows_the_draft_that_records_it`, `hand::a_proposal_journals_before_it_reaches_the_sink` |
+| Journal §5.2, AGENTS.md rule 5 journal before acting: every `Effect::Intent` is preceded in the same list by the `Effect::Journal` that records it, **or, for `Input::Started` alone, by a draft the fold saw committed before the call** | `properties::every_intent_effect_follows_the_draft_that_records_it`, `hand::a_proposal_journals_before_it_reaches_the_sink`, `hand::a_started_handoff_names_a_draft_the_fold_already_saw`, `properties::no_input_but_started_hands_an_intent_whose_draft_is_absent_from_the_list` |
 | Journal §5.2 a crash between the append and the handoff re-hands the same intent and never re-journals it | `hand::a_restart_after_an_intent_committed_re_hands_it_without_re_journaling`, `properties::started_re_journals_nothing_but_the_startup_hold` |
 | Review finding 2 a restart re-hands only what the folded mode permits, and drops an opening intent outside `normal` | `hand::a_restart_under_stopped_re_hands_no_opening_intent`, `hand::a_restart_under_exits_only_still_re_hands_an_exit`, `properties::no_re_handed_intent_is_one_the_mode_forbids` |
 | Review finding 5 the startup hold is journaled before anything is re-handed, and lifts only on a reconciliation at or after the last submission | `hand::started_journals_the_startup_hold_before_its_first_handoff`, `hand::an_earlier_reconciliation_does_not_lift_the_startup_hold` |
@@ -376,10 +376,14 @@ from one `handle` call:
    agent effect (`paused` or `exits_only`) reaches the runtime as a copied `AgentModeApplied`, and
    the runtime treats it as a mode change, not a flatten.
 
-   A `RiskLimit` flatten's restriction belongs to the account stream, so the runtime never lifts it:
-   it lifts by owner acknowledgment once flat (mandate §5.8), journaled on the control stream, copied
-   to the account stream, and copied to the agent stream as another `AgentModeChanged`. `stopped` is
-   terminal and lifts for no one (interpretation 12).
+   A `RiskLimit` flatten's restriction belongs to the account stream, so **the runtime never lifts
+   it**, whichever limit latched, and each lifts differently: `drawdown_flatten` by owner
+   acknowledgment once flat (§5.8); `daily_loss` automatically once a new risk day has started,
+   `daily_breach_min_s` has passed, and the owner has acknowledged a `flatten_and_pause` (§5.4);
+   `lifetime_floor` only when a version raising `max_loss_from_allocation` applies with equity
+   strictly above the new floor, never by acknowledgment at all (§5.7). Each lift reaches the runtime
+   the same way: journaled by its owner, then copied to the agent stream as another
+   `AgentModeChanged`. `stopped` is terminal and lifts for no one (interpretation 12).
 
    The `AgentModeChanged` draft is the first effect in the list; nothing else can precede it.
 2. **`OwnerExitRequested`**, for an `Owner` initiator only: the scope or instrument, the bid and bid
@@ -404,11 +408,25 @@ by a `GateDecided` denial, an `OrderAbandoned`, or a terminal order state. A kil
 retract an outstanding intent, because the runtime cannot: whatever reached the executor is covered
 by the flatten plan's cancel list, and the executor's own binding gate denies an opening intent under
 the mode the account stream now carries. What the runtime does control is that it never hands such an
-intent again: **`Input::Started` re-hands only what the folded mode permits** — exits, protective
-intents, and an unfinished flatten — so an opening intent outstanding at a restart under
-`exits_only` or stricter is dropped, not re-sent (review finding 2). The agent-stream catalogue has
-no event for an intent the runtime abandons, so the record is the intent's own draft plus the mode
-change that precedes the drop; adding one would be a journal-spec change (Decisions needed 7).
+intent again: **`Input::Started` re-hands only what the folded mode permits**, which is the mode
+table's own permission set rather than one flat list:
+
+| Folded mode | Re-handed |
+|---|---|
+| `normal` | Every outstanding intent |
+| `exits_only` | Exits, protective intents, and an unfinished flatten |
+| `paused` | The re-placement of protection before it expires, and an unfinished flatten; a discretionary exit is held, which rule 13 allows only `paused`, `stopped`, an `Unknown` order in the instrument, or the broker to do |
+| `stopped` | An unfinished flatten, and nothing else. The flatten survives because the kill switch is always available and `stopped` is the mode a kill switch sets, so a `stopped` agent that could not finish its own flatten could never be flattened at all |
+
+So an opening intent outstanding at a restart under `exits_only` or stricter is dropped, not re-sent
+(review finding 2). The agent-stream catalogue has no event for an intent the runtime abandons, so
+the record is the intent's own draft plus the mode change that precedes the drop; adding one would be
+a journal-spec change (Decisions needed 7).
+
+**`Started` also re-arms the timers**, from the deadlines the fold carries: approval deadlines, lift
+delays, thesis horizons, and the protection re-placement a `paused` agent still owes. A timer is a
+hint about *when* to look, never the deadline itself (the deadline is folded state), so a lost timer
+costs a late evaluation and `Started` is what restores the schedule after a crash.
 
 | Scope | What it reaches |
 |---|---|
@@ -544,7 +562,14 @@ the founder, because it edits founder-owned files.
    `Effect::Intent` follows the `Effect::Journal` that records it, and the shell runs the list in
    order, stopping at the first append that is neither `Committed` nor `AlreadyCommitted` and
    discarding the rest. The property is asserted on the list, not on the shell, so it cannot be lost
-   to a future shell.
+   to a future shell. **`Input::Started` is the one exception, and it is stated rather than
+   implicit:** its handoffs re-send intents whose `IntentProposed` committed in an earlier run, which
+   is the whole point of re-handing rather than re-proposing, so for `Started` alone the rule reads
+   "preceded by the draft that records it, **or** by a draft the fold saw committed before the call".
+   Every other input obeys the unqualified form. An earlier draft of this brief asserted the
+   unqualified rule over all inputs, which correct recovery would have failed — so the tests PR would
+   have had to weaken the property quietly, which is worse than having no property (review round 2,
+   finding 1).
 8. **A tick that changes nothing emits nothing.** The core evaluates every tick, and durations are
    sums of whole seconds over the intervals between inputs, each credited by the state at the
    interval's start (mandate §5.2), so inserting ticks never changes a journaled draft (MI-13). The
@@ -608,12 +633,17 @@ the founder, because it edits founder-owned files.
     broker-driven restriction is account state (trading §7.3) that arrives as a copied
     `AgentModeApplied`. A `RiskLimit` flatten's restriction lifts only through the account stream by
     owner acknowledgment (mandate §5.8); the runtime never lifts one, and `stopped` lifts for no one.
-22. **`Input::Started` re-hands only what the folded mode permits**: exits, protective intents, and an
-    unfinished flatten. An opening intent still outstanding at a restart under `exits_only` or stricter
-    is dropped rather than re-sent, because whatever already reached the executor is covered by the
-    flatten plan's cancel list and by the executor's binding gate. An intent is outstanding until the
-    account stream carries a terminal outcome for its id: an `IntentReceived` then a `GateDecided`
-    denial, an `OrderAbandoned`, or a terminal order state.
+22. **`Input::Started` re-hands only what the folded mode permits**, per mode rather than as one
+    list: every outstanding intent in `normal`; exits, protective intents, and an unfinished flatten in
+    `exits_only`; protection re-placement and an unfinished flatten in `paused`, a discretionary exit
+    being held as rule 13 permits `paused` to; and in `stopped` an unfinished flatten alone, which
+    survives because the kill switch is always available and `stopped` is the mode a kill switch sets.
+    An opening intent still outstanding at a restart under `exits_only` or stricter is dropped rather
+    than re-sent, because whatever already reached the executor is covered by the flatten plan's cancel
+    list and by the executor's binding gate. An intent is outstanding until the account stream carries a
+    terminal outcome for its id: an `IntentReceived` then a `GateDecided` denial, an `OrderAbandoned`, or
+    a terminal order state. `Started` also re-arms every timer from the deadlines the fold carries; a
+    timer is a hint about when to look and never the deadline itself.
 23. **Entering `exits_only` or stricter cancels every pending approval**, whatever put the runtime
     there: a copied `AgentModeApplied`, an owner `Pause`, or a kill switch. Mandate §5.9 requires the
     cancellation; the agent stream has a single writer, so the runtime is what journals
@@ -634,7 +664,7 @@ caught means the test is wrong, not the bug.
 | Planted bug | Must be caught by |
 |---|---|
 | A kill switch leaves a pending approval, so a response arriving afterwards proposes an order while the agent is `stopped` | `hand::an_approval_that_arrives_after_a_kill_switch_proposes_nothing`, `hand::a_kill_switch_cancels_every_pending_approval` |
-| A restart re-journals `IntentProposed` for an intent whose append already committed, so the executor receives two intents for one decision | `hand::a_restart_after_an_intent_committed_re_hands_it_without_re_journaling`, `properties::resume_emits_only_handoffs_and_timers`, `properties::a_replay_of_any_run_emits_no_draft_and_no_intent` |
+| A restart re-journals `IntentProposed` for an intent whose append already committed, so the executor receives two intents for one decision | `hand::a_restart_after_an_intent_committed_re_hands_it_without_re_journaling`, `properties::started_re_journals_nothing_but_the_startup_hold`, `properties::a_replay_of_any_run_emits_no_draft_and_no_intent` |
 | The mode lattice orders `paused` below `exits_only`, so a paused agent proposes an opening order: a mode change that adds risk | `properties::the_effective_mode_is_the_maximum_of_the_restriction_lattice`, `properties::no_opening_intent_is_proposed_outside_normal` |
 | A restriction that lifts clears the whole set rather than its own entry, restoring `normal` while a latched restriction is still active | `hand::a_restriction_that_lifts_while_another_is_active_does_not_restore_normal` |
 | The kill switch journals `KillSwitchActivated` before applying the mode, so a decision in the same list runs while the agent is still `normal` | `hand::an_owner_kill_switch_applies_stopped_before_anything_else`, `properties::the_mode_draft_precedes_every_other_effect_of_a_kill_switch` |
@@ -720,7 +750,8 @@ proceeds on the conservative reading of each (AGENTS.md rule 9).
   output stops at `IntentSink`.
 - **No escalation service.** The core creates, cancels, times out, and applies approvals; delivery
   channels, quiet hours, step-up evidence, two-approver routing, and the durable-wait engine are M7
-  and DEC-16. Phase 1 re-arms journaled deadlines from the fold (ES-20's first option).
+  and DEC-16. Phase 1 re-arms journaled deadlines from the fold, `Input::Started` being the input that
+  does it after a restart (ES-20's first option).
 - **No risk gate, no order builder, no autonomy rules, no mandate validation, and no research
   agent** in this crate: streams F, G, H, and J own them and arrive behind the ports.
 - **No flatten plan.** Family `MC-F01` to `MC-F04` is stream G's; this story asserts what the runtime
