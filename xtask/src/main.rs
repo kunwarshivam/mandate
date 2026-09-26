@@ -193,7 +193,10 @@ fn ci(job: &str) -> Result<()> {
                 None => sh("gitleaks", &["dir", "--no-banner", "--redact", "."]),
             }
         }
-        "spec-guard" => spec_guard(),
+        "spec-guard" => {
+            commit_trailers()?;
+            spec_guard()
+        }
         "mutants" => mutants(),
         "fast" => {
             for part in FAST_JOB {
@@ -850,6 +853,31 @@ fn base_ref() -> Option<String> {
     let head = output("git", &["rev-parse", "HEAD"]).ok()?;
     let merge_base = merge_base.trim().to_string();
     (merge_base != head.trim()).then_some(merge_base)
+}
+
+/// Commits a change adds carry no `Co-authored-by` trailer: Cursor's agent hook fills it with the
+/// founder's email, which must not enter the history.
+fn commit_trailers() -> Result<()> {
+    let Some(base) = base_ref() else {
+        return Ok(());
+    };
+    let log = output(
+        "git",
+        &[
+            "log",
+            "--format=%h %(trailers:key=Co-authored-by,valueonly,separator=%x2C)",
+            &format!("{base}..HEAD"),
+        ],
+    )?;
+    let problems: Vec<String> = log
+        .lines()
+        .filter_map(|line| line.split_once(' '))
+        .filter(|(_, trailer)| !trailer.trim().is_empty())
+        .map(|(sha, _)| {
+            format!("commit {sha} has a Co-authored-by trailer; remove it (.cursor/install.sh disables the hook that adds it)")
+        })
+        .collect();
+    report(problems, "commit-trailers")
 }
 
 fn spec_guard() -> Result<()> {

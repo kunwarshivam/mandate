@@ -59,6 +59,12 @@ if [ "$(uv --version 2>/dev/null | awk '{print $2}')" != "$UV_VERSION" ]; then
 fi
 uv python install "$PYTHON_VERSION"
 
+# Cursor's agent hooks add the invoking user's email as a Co-authored-by trailer on agent commits.
+# The founder does not want that address in the history, and CI rejects the trailer (spec guard).
+for hook in "$HOME"/.cursor/agent-hooks/*/commit-msg.cursor.co-author; do
+  [ -e "$hook" ] && chmod -x "$hook"
+done
+
 # Warm state derived from the checkout: locked dependencies, the xtask binary, and the reference
 # implementation's pinned environment.
 cargo fetch --locked
