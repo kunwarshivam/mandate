@@ -670,7 +670,6 @@ fn a_connection_lost_during_commit_is_ambiguous_and_atomic() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn an_error_while_appending_is_unavailable_and_not_retried() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
