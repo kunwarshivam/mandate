@@ -138,6 +138,11 @@ impl Store {
         day: Date,
         records: &Records,
     ) -> Result<Outcome, DatasetError> {
+        let encoded = if records.is_empty() {
+            None
+        } else {
+            Some(encode(dataset, records)?)
+        };
         let dir = self.dataset_dir(dataset);
         fs::create_dir_all(&dir).map_err(io_error(&dir))?;
         let _writer = lock(&dir)?;
@@ -161,31 +166,33 @@ impl Store {
         let listed = manifest.days.get(&day).copied();
         let on_disk = fs_read_optional(&partition)?;
         let mut wrote = false;
-        let entry = if records.is_empty() {
-            if on_disk.is_some() || listed.is_some_and(|e| e.rows > 0) {
-                return Err(conflict());
-            }
-            DayEntry { rows, file: None }
-        } else {
-            let bytes = encode(dataset, records)?;
-            let file = (
-                u64::try_from(bytes.len()).map_err(|_| conflict())?,
-                Digest::of(&bytes),
-            );
-            let entry = DayEntry {
-                rows,
-                file: Some(file),
-            };
-            match on_disk {
-                Some(existing) if existing == bytes => {}
-                Some(_) => return Err(conflict()),
-                None if listed.is_some_and(|e| e != entry) => return Err(conflict()),
-                None => {
-                    write_new(&dir, &partition, &bytes)?;
-                    wrote = true;
+        let entry = match encoded {
+            None => {
+                if on_disk.is_some() || listed.is_some_and(|e| e.rows > 0) {
+                    return Err(conflict());
                 }
+                DayEntry { rows, file: None }
             }
-            entry
+            Some(bytes) => {
+                let file = (
+                    u64::try_from(bytes.len()).map_err(|_| conflict())?,
+                    Digest::of(&bytes),
+                );
+                let entry = DayEntry {
+                    rows,
+                    file: Some(file),
+                };
+                match on_disk {
+                    Some(existing) if existing == bytes => {}
+                    Some(_) => return Err(conflict()),
+                    None if listed.is_some_and(|e| e != entry) => return Err(conflict()),
+                    None => {
+                        write_new(&dir, &partition, &bytes)?;
+                        wrote = true;
+                    }
+                }
+                entry
+            }
         };
         if listed.is_some_and(|e| e != entry) {
             return Err(conflict());

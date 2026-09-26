@@ -192,6 +192,23 @@ fn is_conflict(outcome: &Result<Outcome, DatasetError>) -> bool {
 }
 
 #[test]
+fn a_day_that_cannot_be_encoded_creates_nothing() {
+    let (id, _, revision) = spy_day_and_revision();
+    let Records::Bars(mut bars) = revision else {
+        panic!("bars expected")
+    };
+    bars[3].vwap = DecStr::parse("764.0000000000000000001").unwrap();
+    let scratch = Scratch::new("unencodable");
+    let store = Store::new(scratch.path());
+    let outcome = store.put_day(&id, day("2026-09-24"), &Records::Bars(bars));
+    assert!(
+        matches!(outcome, Err(DatasetError::Number { .. })),
+        "{outcome:?}"
+    );
+    assert_eq!(fs::read_dir(scratch.path()).unwrap().count(), 0);
+}
+
+#[test]
 fn a_partition_the_manifest_does_not_list_is_never_overwritten_or_adopted() {
     let (id, original, revision) = spy_day_and_revision();
     let scratch = Scratch::new("unlisted-partition");
