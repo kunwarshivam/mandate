@@ -13,8 +13,8 @@ use mandate_canon::DecStr;
 use mandate_time::{Date, TimeError, UtcNanos};
 
 pub use corporate_action::{
-    ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction, Split,
-    adjust_price, adjust_quantity, compose, split_ratio,
+    ADJUSTED_PRICE_SCALE, AdjustmentError, CashDividend, CorporateActions, OtherAction,
+    PriceAdjuster, Split, adjust_price, adjust_quantity, compose, split_ratio,
 };
 pub use mandate_num::SplitRatio;
 

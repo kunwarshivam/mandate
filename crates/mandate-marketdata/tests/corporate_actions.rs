@@ -903,6 +903,43 @@ fn splits_compound_point_in_time_and_other_actions_never_adjust() {
 }
 
 #[test]
+fn a_price_adjuster_adjusts_a_price_as_adjust_bar_does_and_keeps_unadjusted_prices_as_stored() {
+    let nvda = nvda();
+    let adjuster = nvda.price_adjuster(day("2024-06-10")).unwrap();
+    assert_eq!(
+        adjuster.adjust(&dec("745"), at("2021-07-16T19:00:00Z")),
+        Ok(dec("18.625"))
+    );
+    assert_eq!(
+        adjuster.adjust(&dec("180"), at("2024-06-09T23:59:59Z")),
+        Ok(dec("18"))
+    );
+    assert_eq!(
+        adjuster.adjust(&dec("120.5"), at("2024-06-10T00:00:00Z")),
+        Ok(dec("120.5"))
+    );
+    let precise = dec("0.123456789012345678");
+    assert_eq!(
+        adjuster.adjust(&precise, at("2024-06-10T13:30:00Z")),
+        Ok(precise.clone()),
+        "no split applies, so the price keeps its 18 places"
+    );
+    assert!(matches!(
+        adjuster.adjust(&precise, at("2024-06-07T13:30:00Z")),
+        Err(AdjustmentError::Price {
+            source: NumError::TooPrecise,
+            ..
+        })
+    ));
+    let before_both = nvda.price_adjuster(day("2021-07-19")).unwrap();
+    assert_eq!(
+        before_both.adjust(&dec("745"), at("2021-07-16T19:00:00Z")),
+        Ok(dec("745")),
+        "neither split is known yet"
+    );
+}
+
+#[test]
 fn the_recorded_corporate_action_fixtures_are_listed_in_the_recording_script() {
     let script = std::fs::read_to_string(fixtures_dir().join("record.sh")).unwrap();
     for name in [
@@ -982,5 +1019,24 @@ proptest! {
         prop_assert_eq!(adjusted.start, b.start);
         prop_assert_eq!(adjusted.trade_count, b.trade_count);
         prop_assert_eq!(adjusted.volume, forward);
+    }
+
+    /// A price adjuster built once for `as_of` adjusts every price exactly as [`adjust_bar`]
+    /// adjusts a bar's close at the same instant.
+    #[test]
+    fn a_price_adjuster_agrees_with_adjust_bar(
+        secs in at("2021-01-01T00:00:00Z").secs()..at("2025-01-01T00:00:00Z").secs(),
+        as_of_days in 0_i64..1_461,
+        price_units in 1_i64..=10_000_000_000,
+    ) {
+        let nvda = nvda();
+        let as_of = UtcNanos::from_parts(at("2021-01-01T12:00:00Z").secs() + as_of_days * 86_400, 0)
+            .unwrap()
+            .date();
+        let price = from_units(i128::from(price_units), 4).unwrap();
+        let observed = UtcNanos::from_parts(secs, 0).unwrap();
+        let b = Bar { start: observed, ..bar("2021-01-01T00:00:00Z", price.as_str(), "1") };
+        let expected = nvda.adjust_bar(&b, as_of, 18).unwrap().close;
+        prop_assert_eq!(nvda.price_adjuster(as_of).unwrap().adjust(&price, observed).unwrap(), expected);
     }
 }
