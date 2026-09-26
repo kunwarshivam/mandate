@@ -1032,6 +1032,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
+ "mandate-canon",
  "mandate-marketdata",
  "mandate-time",
  "serde",

@@ -4,7 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread;
 
 use mandate_artifacts_fs::FsArtifactStore;
@@ -96,6 +96,7 @@ fn an_absent_reference_is_missing() {
 #[test]
 fn an_unreadable_object_is_unavailable_not_missing() {
     let (_, mut store) = open("unreadable");
+    let readable = store.put_artifact(b"readable").unwrap();
     let reference = ArtifactRef::of(b"blocked");
     fs::create_dir_all(store.object_path(&reference)).unwrap();
     assert_eq!(
@@ -103,8 +104,18 @@ fn an_unreadable_object_is_unavailable_not_missing() {
         Err(ArtifactError::Unavailable)
     );
     assert_eq!(
+        get_artifact(&store, &reference),
+        Err(ArtifactError::Unavailable),
+        "the checked read passes Unavailable through, not Missing or Corrupt"
+    );
+    assert_eq!(
         store.put_artifact(b"blocked"),
         Err(ArtifactError::Unavailable)
+    );
+    assert_eq!(
+        get_artifact(&store, &readable),
+        Ok(b"readable".to_vec()),
+        "one unreadable object leaves the others readable"
     );
 }
 
@@ -175,6 +186,92 @@ fn concurrent_puts_of_the_same_bytes_all_succeed_with_one_object() {
     let store = FsArtifactStore::open(&dir).unwrap();
     assert_eq!(files(&dir), vec![store.object_path(&expected)]);
     assert_eq!(get_artifact(&store, &expected), Ok(bytes));
+}
+
+#[test]
+fn readers_see_a_whole_object_or_none_while_it_is_written() {
+    let dir = fresh_dir("atomic");
+    let reader = FsArtifactStore::open(&dir).unwrap();
+    let contents: Vec<Vec<u8>> = (0u8..32).map(|n| vec![n; 2 * 1024 * 1024]).collect();
+    let references: Vec<ArtifactRef> = contents.iter().map(|c| ArtifactRef::of(c)).collect();
+    let done = AtomicBool::new(false);
+    let (puts, seen, reads) = thread::scope(|scope| {
+        let writer = scope.spawn(|| {
+            let puts = FsArtifactStore::open(&dir).map(|mut writer| {
+                contents
+                    .iter()
+                    .map(|content| writer.put_artifact(content))
+                    .collect::<Vec<_>>()
+            });
+            done.store(true, Ordering::SeqCst);
+            puts
+        });
+        let mut pending: Vec<_> = references.iter().zip(&contents).collect();
+        let mut seen = Vec::new();
+        let mut reads = 0u64;
+        while !done.load(Ordering::SeqCst) && !pending.is_empty() {
+            pending.retain(|(reference, content)| {
+                reads += 1;
+                match get_artifact(&reader, reference) {
+                    Ok(bytes) => {
+                        assert_eq!(&&bytes, content);
+                        false
+                    }
+                    Err(ArtifactError::Missing) => true,
+                    Err(other) => {
+                        seen.push(other);
+                        false
+                    }
+                }
+            });
+        }
+        (writer.join().unwrap(), seen, reads)
+    });
+    assert_eq!(puts, Ok(references.iter().copied().map(Ok).collect()));
+    assert_eq!(seen, vec![], "a partial object was visible ({reads} reads)");
+    for (reference, content) in references.iter().zip(&contents) {
+        assert_eq!(get_artifact(&reader, reference).as_ref(), Ok(content));
+    }
+}
+
+#[test]
+fn a_crashed_write_leaves_no_object() {
+    let (dir, mut store) = open("crash");
+    let content = b"prompt and retrieved context".to_vec();
+    let reference = ArtifactRef::of(&content);
+    let hex = reference.digest().to_hex();
+    let torn = [
+        &content[..9],
+        b" and bytes a torn write left behind".as_slice(),
+    ]
+    .concat();
+    let leftovers: Vec<PathBuf> = [
+        hex.clone(),
+        format!("{hex}.partial"),
+        format!("{hex}.tmp"),
+        format!("{hex}.{}.0", std::process::id()),
+    ]
+    .iter()
+    .map(|name| dir.join("tmp").join(name))
+    .collect();
+    for path in &leftovers {
+        fs::write(path, &torn).unwrap();
+    }
+    assert_eq!(
+        get_artifact(&store, &reference),
+        Err(ArtifactError::Missing),
+        "a write that never finished is not an object"
+    );
+    assert_eq!(store.put_artifact(&content), Ok(reference));
+    assert_eq!(get_artifact(&store, &reference), Ok(content));
+    for path in &leftovers {
+        assert_eq!(fs::read(path).unwrap(), torn, "leftovers are never reused");
+    }
+    let objects: Vec<PathBuf> = files(&dir)
+        .into_iter()
+        .filter(|p| !leftovers.contains(p))
+        .collect();
+    assert_eq!(objects, vec![store.object_path(&reference)]);
 }
 
 #[test]
@@ -249,7 +346,6 @@ proptest! {
     }
 
     #[test]
-
     fn the_same_bytes_get_the_same_address_once(
         a in vec(any::<u8>(), 0..64),
         b in vec(any::<u8>(), 0..64),
@@ -263,7 +359,6 @@ proptest! {
     }
 
     #[test]
-
     fn one_flipped_bit_on_disk_is_detected_on_read(
         bytes in vec(any::<u8>(), 1..256),
         index in any::<prop::sample::Index>(),

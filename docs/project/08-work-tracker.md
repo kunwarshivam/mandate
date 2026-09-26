@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, direction change: autonomous ideation and retail from the start (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-26, day 2: M2 closed (E3-3), research spike merged, coordination playbook and cloud builders in use |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -16,10 +16,10 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 |---|---|---|---|
 | Tier 1 specs | Approved (DEC-71); amended since | Journal spec v0.3 (DEC-81), trading domain spec v0.10 (DEC-86, DEC-92 to DEC-94) | — |
 | M0 Foundations | Done | E1-1, E1-2; CI as two required checks (DEC-76); agent workflow (DEC-78 to DEC-80) | — |
-| M1 Market data | In progress | E2-1 download | E2-4, E2-2; E2-3 (Should) later |
-| M2 Accounting | In progress | E3-1, E3-2 | E3-3 closes the milestone |
-| M3 Simulated execution and backtest | Not started | — | E4-1, E4-2 after M2 |
-| M4 Journal | In progress | E5-1 | E5-2, E5-3 |
+| M1 Market data | In progress | E2-1 download, E2-2 inspect (#64) | E2-4 sessions and corporate actions (`cursor`); E2-3 (Should) later |
+| M2 Accounting | Done | E3-1, E3-2, E3-3 (#53, #67) | RC-08 and RC-18 pass when E6-3 interprets `propose_order`; a follow-up tests PR carries the #53 review minors |
+| M3 Simulated execution and backtest | In progress | E4-1 brief (#61) | E4-1 tests PR (cloud builder), then implementation and status; E4-2 |
+| M4 Journal | In progress | E5-1 | E5-2 tests PR (#66, `cursor`, in review), E5-3 |
 | M5 onward | Not started | — | Before M5: the mandate spec rewrite for DEC-97 and DEC-98 (spec-change PRs). M5 starts with DEC-17 (messaging), per ADR-0001 ES-20, and adds E17 (research agent) |
 
 ## Stories
@@ -32,6 +32,9 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E3-1 Accounting | Merged | [#16](https://github.com/kunwarshivam/mandate/pull/16), [#18](https://github.com/kunwarshivam/mandate/pull/18), [#19](https://github.com/kunwarshivam/mandate/pull/19), [#21](https://github.com/kunwarshivam/mandate/pull/21), [#23](https://github.com/kunwarshivam/mandate/pull/23), [#24](https://github.com/kunwarshivam/mandate/pull/24), [#25](https://github.com/kunwarshivam/mandate/pull/25), [#26](https://github.com/kunwarshivam/mandate/pull/26), spec [#28](https://github.com/kunwarshivam/mandate/pull/28) | `mandate-num`, trading calendars, `mandate-accounting`. Review caught three defects before merge (basis sign, negative fee cap, cap lowered mid-order); #20 and #22 were superseded |
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
 | E17-0 Research spike | PR open | [#44](https://github.com/kunwarshivam/mandate/pull/44) (code and docs), tests in a second PR | `python/research_spike/`: LLM theses over news and prices, fixed sizing, paper orders, hash-chained JSON Lines journal, score report. Two-to-three-week timebox; exits with a decision-log entry |
+| E3-3 Cash-account settlement | Merged | [#53](https://github.com/kunwarshivam/mandate/pull/53), [#67](https://github.com/kunwarshivam/mandate/pull/67) | Account type, buying power per §7.2 (per-bucket ceiling, DEC-104), reservations, harness `buying_power`; no status PR (DEC-105). The tests PR took three review rounds including the interrogate pass; the implementation's diff mutation gate was vacuous, so seven hand-seeded bugs stand as evidence |
+| E17-0 Research spike | Merged | [#44](https://github.com/kunwarshivam/mandate/pull/44), [#47](https://github.com/kunwarshivam/mandate/pull/47) | `python/research_spike`: Alpaca news and bars, Claude Sonnet 5 via OpenRouter, fixed sizing under caps, hash-chained JSONL journal, scorer versus SPY. Dry runs only; live paper runs await the founder's go |
+| E2-2 Inspect | Merged | [#64](https://github.com/kunwarshivam/mandate/pull/64) | `cursor`: coverage, exact statistics, gaps, duplicates, untrusted partitions |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
 | E5-2 Artifact store | Implementation PR open | [#60](https://github.com/kunwarshivam/mandate/pull/60) (DEC-107 reservation), [#66](https://github.com/kunwarshivam/mandate/pull/66) (tests), implementation PR | Pure core in `mandate-journal`, filesystem backend in the new `mandate-artifacts-fs` (DEC-107): write-once, hard-linked into place, re-hashed on every read; zero missed mutants; no reference cases, so no status PR |
 
@@ -54,11 +57,14 @@ issues are the record; this table is the summary
 
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
-| E3-3 cash-account settlement | `claude-code` | #48 | Tests PR open, under review; decisions renumbered to DEC-104 and DEC-105 after #52 | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
+| E3-3 cash-account settlement | `claude-code` | #48 | Merged (#53 tests, #67 implementation); follow-up tests PR pending | `agent/e3-3-settlement-tests-2`, `agent/e3-3-settlement-impl` |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
-| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
-| E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS; rebase and the founder's confirmation pending | `cursor/direction-follow-ups-v2` (#57) |
+| E2-4 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| E2-2 dataset inspect | `cursor` | #56 | Merged (#64) | `cursor/e2-2-inspect-2749` (#64) |
+| #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
+| `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
 | E5-2 artifact store | `cursor` | #59 | Implementation PR open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be` (#66), `cursor/e5-2-artifact-impl-b0be` |
 
 ## Waiting on the founder
@@ -85,7 +91,7 @@ them in the decision log.
 | Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names | Before any parallel download |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |
-| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-2 or E2-4 |
+| `UtcNanos` parses RFC 3339 only without fractional seconds; Alpaca sends up to nine | E2-4 (a shared `mandate-time` change; E2-2 reads stored nanoseconds and did not need it) |
 | Postgres is not installed in the agent environment or CI | E5-3 (add it to `.cursor/install.sh` and a CI service first) |
 | Branches are named `cursor/...` because the agent environment requires it; ADR-0001 ES-13 says `agent/...` | Amend ES-13 at the next ADR touch |
 
@@ -102,15 +108,28 @@ them in the decision log.
   URL only for single commands, never with `-u`.
 - Merge squash commits with an explicit `commit_message`; GitHub's default copies trailers.
 
+## Lessons encoded on day 2
+
+- Two coordinating sessions minted the same DEC numbers within an hour; the Reserved identifiers
+  table and claim issues (coordination playbook) now precede any new identifier.
+- The ruleset requires branches to be current with `main`, so merges are serial: bring a branch up to
+  date, wait for CI, merge, next. Merge `main` into a branch (never force-push) when the update
+  conflicts.
+- A diff mutation gate can pass while testing nothing (every mutant unviable); the implementation PR
+  then hand-seeds bugs and says so.
+- A cloud routine is created with every account connector attached, including a live brokerage MCP;
+  clear them before the first run.
+- Running pending property tests writes `*.proptest-regressions`; ignored from now on.
+
 ## Next, in order
 
-1. **E3-3** cash-account settlement (RC-08): closes M2.
+1. **E4-1** tests, implementation, and status PRs (cloud builders), then **E4-2**.
 2. **E2-4** market sessions and corporate actions in the data, then **E2-2** `inspect` (gaps versus
    session closures, duplicates, statistics): closes M1. E2-4 first, because `inspect` needs the
    session model. Resolve the RFC 3339 fractional-seconds gap here.
-3. **E4-1, E4-2** simulated execution and the baseline backtest (RC-10, RC-12, RC-19): the critical
-   path to M5.
-4. **E5-2** artifact store, then **E5-3** the Postgres journal (environment work first).
+3. **E5-2** (tests PR #66 in review), then **E5-3** the Postgres journal (environment work first).
+4. **E3-3 follow-up tests PR** for the #53 review minors, and the spec-only change for DEC-104
+   items 2 and 5 once the founder decides item 5.
 5. **Before M5:** the mandate spec, schemas, reference implementation, and the 215 cases rewritten for
    DEC-97 and DEC-98 as spec-change PRs ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)):
    the envelope fields and the universe as runtime state, the research agent
