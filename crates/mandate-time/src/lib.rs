@@ -64,6 +64,9 @@ const SECS_PER_DAY: i64 = 86_400;
 /// 9999-12-31T23:59:59Z.
 const MAX_SECS: i64 = 253_402_300_799;
 const MAX_NANOS: u32 = 999_999_999;
+const NANO_DIGITS: usize = 9;
+/// `YYYY-MM-DDTHH:MM:SS`.
+const SECONDS_LEN: usize = 19;
 
 /// A calendar date, 1970-01-01 to 9999-12-31.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -255,40 +258,73 @@ impl UtcNanos {
         Self::from_parts(secs, field(s, 20, 29)?)
     }
 
-    /// Parses exactly `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS±HH:MM` (RFC 3339 without
-    /// fractional seconds), the form reference-case steps use for `at`.
+    /// Parses RFC 3339 with an upper-case `T`: `YYYY-MM-DDTHH:MM:SS[.f]Z` or
+    /// `YYYY-MM-DDTHH:MM:SS[.f]±HH:MM`, where `.f` is one to nine digits. Vendors send this form
+    /// and reference-case steps use it for `at`. Missing digits are trailing zeros; an empty
+    /// fraction, ten or more digits, and a comma separator are syntax errors. The canonical form,
+    /// which the journal requires, is [`UtcNanos::parse`]'s.
     pub fn parse_rfc3339(s: &str) -> Result<Self, TimeError> {
-        let offset_secs: i64 = if matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:ddZ") {
-            0
-        } else if matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:dd+dd:dd")
-            || matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:dd-dd:dd")
-        {
-            let (oh, om): (i64, i64) = (field(s, 20, 22)?, field(s, 23, 25)?);
-            if oh > 23 || om > 59 {
-                return Err(TimeError::InvalidDate);
-            }
-            let magnitude = oh
-                .checked_mul(3_600)
-                .and_then(|h| h.checked_add(om.checked_mul(60)?))
-                .ok_or(TimeError::OutOfRange)?;
-            if s.as_bytes().get(19) == Some(&b'-') {
-                magnitude.checked_neg().ok_or(TimeError::OutOfRange)?
-            } else {
-                magnitude
-            }
-        } else {
+        let (seconds, rest) = s.split_at_checked(SECONDS_LEN).ok_or(TimeError::Syntax)?;
+        if !matches_template(seconds.as_bytes(), b"dddd-dd-ddTdd:dd:dd") {
             return Err(TimeError::Syntax);
+        }
+        let (nanos, zone) = match rest.strip_prefix('.') {
+            Some(fraction) => {
+                let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+                if !(1..=NANO_DIGITS).contains(&digits) {
+                    return Err(TimeError::Syntax);
+                }
+                let (digits, zone) = fraction.split_at_checked(digits).ok_or(TimeError::Syntax)?;
+                (fraction_nanos(digits)?, zone)
+            }
+            None => (0, rest),
         };
-        let local = s
-            .get(0..19)
-            .map(|prefix| format!("{prefix}.000000000Z"))
-            .ok_or(TimeError::Syntax)?;
-        let local = Self::parse(&local)?;
+        let offset_secs = offset_secs(zone)?;
+        let local = Self::parse(&format!("{seconds}.000000000Z"))?;
         let secs = local
             .secs
             .checked_sub(offset_secs)
             .ok_or(TimeError::OutOfRange)?;
-        Self::from_parts(secs, 0)
+        Self::from_parts(secs, nanos)
+    }
+}
+
+/// One to nine fraction digits as nanoseconds, the missing places read as zeros.
+fn fraction_nanos(digits: &str) -> Result<u32, TimeError> {
+    digits
+        .bytes()
+        .chain(core::iter::repeat(b'0'))
+        .take(NANO_DIGITS)
+        .try_fold(0u32, |nanos, digit| {
+            nanos
+                .checked_mul(10)?
+                .checked_add(u32::from(digit.checked_sub(b'0')?))
+        })
+        .ok_or(TimeError::Syntax)
+}
+
+/// `Z`, or `±HH:MM` as seconds east of UTC.
+fn offset_secs(zone: &str) -> Result<i64, TimeError> {
+    if zone == "Z" {
+        return Ok(0);
+    }
+    if !matches_template(zone.as_bytes(), b"+dd:dd")
+        && !matches_template(zone.as_bytes(), b"-dd:dd")
+    {
+        return Err(TimeError::Syntax);
+    }
+    let (oh, om): (i64, i64) = (field(zone, 1, 3)?, field(zone, 4, 6)?);
+    if oh > 23 || om > 59 {
+        return Err(TimeError::InvalidDate);
+    }
+    let magnitude = oh
+        .checked_mul(3_600)
+        .and_then(|h| h.checked_add(om.checked_mul(60)?))
+        .ok_or(TimeError::OutOfRange)?;
+    if zone.starts_with('-') {
+        magnitude.checked_neg().ok_or(TimeError::OutOfRange)
+    } else {
+        Ok(magnitude)
     }
 }
 
