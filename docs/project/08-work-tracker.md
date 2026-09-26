@@ -45,6 +45,19 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 | Trading domain | `schema_version`, RC-01, RC-02, RC-03, RC-05, RC-06 and its `short_position_generic_broker` variant, RC-13, RC-23 and its `forward_3_for_1_non_terminating_mark` variant | RC-08 (E3-3); RC-10, RC-12, RC-19 (E4-1); RC-04 and RC-06 `protective_orders_kept_through_dividend` (E7-2 to E7-4, E6-9); RC-07, RC-11 (E7-3, E7-5, E6-9; their accounting parts are covered by hand tests); the gate, executor, and agent cases (E6-3, E6-5 to E6-9, E7-2 to E7-5). Each pending case names its owner when run |
 | Mandate (215) | Not harnessed yet | Harnessed by the E6 and E10 stories |
 
+## Claims
+
+Who holds what, across coordinating sessions (Claude Code and Cursor cloud agents). The claim
+issues are the record; this table is the summary
+([coordination playbook](../../.cursor/skills/mandate-mode/playbooks/coordination.md)).
+
+| Story | Coordinator | Stage | Branches and PRs |
+|---|---|---|---|
+| E3-3 cash-account settlement | `claude-code` | Tests PR open, under review | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
+| E17-0 research spike | `claude-code` | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
+| Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | Not started; after the spike's first findings | spec-change PRs |
+| E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | Allocated, not yet claimed | — |
+
 ## Waiting on the founder
 
 - **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
