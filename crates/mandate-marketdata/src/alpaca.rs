@@ -1,6 +1,6 @@
-//! Alpaca's historical-data endpoints: the request path for one page of one UTC day, the
-//! corporate-actions request for one symbol, and their response pages, parsed with every number
-//! read as raw text (ADR-0001 ES-23).
+//! Alpaca's historical-data endpoints: the request path for one page of one UTC day of bars,
+//! trades, or quotes, the corporate-actions request for one symbol, and their response pages,
+//! parsed with every number read as raw text (ADR-0001 ES-23).
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -13,12 +13,12 @@ use serde_json::value::RawValue;
 
 use crate::model::{
     AdjustmentError, AssetClass, Bar, CashDividend, CorporateActions, DatasetId, DayRange, Kind,
-    OtherAction, Records, Split, Symbol, Trade, split_ratio,
+    OtherAction, Quote, Records, Split, Symbol, Trade, split_ratio,
 };
 use crate::number::{NumberError, decimal_from_json, unsigned_from_json};
 use crate::timestamp::{TimestampError, day_start, parse_rfc3339_utc};
 
-/// Largest page Alpaca serves for bars and trades.
+/// Largest page Alpaca serves for bars, trades, and quotes.
 pub const MAX_PAGE_LIMIT: u32 = 10_000;
 /// Largest page Alpaca serves for corporate actions.
 pub const MAX_CORPORATE_ACTIONS_LIMIT: u32 = 1_000;
@@ -106,6 +106,8 @@ pub fn page_path(
         (AssetClass::UsEquity, Kind::Trades) => "/v2/stocks/trades",
         (AssetClass::Crypto, Kind::Bars(_)) => "/v1beta3/crypto/us/bars",
         (AssetClass::Crypto, Kind::Trades) => "/v1beta3/crypto/us/trades",
+        (AssetClass::UsEquity, Kind::Quotes) => "/v2/stocks/quotes",
+        (AssetClass::Crypto, Kind::Quotes) => "/v1beta3/crypto/us/quotes",
     };
     let mut path = format!(
         "{endpoint}?symbols={}",
@@ -121,7 +123,7 @@ pub fn page_path(
         (AssetClass::UsEquity, Kind::Bars(_)) => {
             path.push_str(&format!("&feed={}&adjustment=raw", dataset.feed()));
         }
-        (AssetClass::UsEquity, Kind::Trades) => {
+        (AssetClass::UsEquity, Kind::Trades | Kind::Quotes) => {
             path.push_str(&format!("&feed={}", dataset.feed()));
         }
         (AssetClass::Crypto, _) => {}
@@ -140,6 +142,7 @@ pub fn parse_page(dataset: &DatasetId, day: Date, body: &[u8]) -> Result<Page, W
     let (member, raw_map) = match dataset.kind() {
         Kind::Bars(_) => ("bars", envelope.bars),
         Kind::Trades => ("trades", envelope.trades),
+        Kind::Quotes => ("quotes", envelope.quotes),
     };
     let raw_map = raw_map.ok_or(WireError::MissingMember(member))?;
     let raw_token = envelope
@@ -170,6 +173,7 @@ pub fn parse_page(dataset: &DatasetId, day: Date, body: &[u8]) -> Result<Page, W
         Some(raw) => match dataset.kind() {
             Kind::Bars(_) => Records::Bars(bars(raw, &window)?),
             Kind::Trades => Records::Trades(trades(raw, &window)?),
+            Kind::Quotes => Records::Quotes(quotes(raw, &window)?),
         },
     };
     Ok(Page {
@@ -383,6 +387,8 @@ struct Envelope<'a> {
     #[serde(borrow, default, deserialize_with = "present")]
     trades: Option<&'a RawValue>,
     #[serde(borrow, default, deserialize_with = "present")]
+    quotes: Option<&'a RawValue>,
+    #[serde(borrow, default, deserialize_with = "present")]
     next_page_token: Option<&'a RawValue>,
 }
 
@@ -487,6 +493,23 @@ struct WireTrade<'a> {
     tks: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct WireQuote<'a> {
+    t: String,
+    #[serde(borrow)]
+    bp: &'a RawValue,
+    #[serde(borrow)]
+    bs: &'a RawValue,
+    #[serde(borrow)]
+    ap: &'a RawValue,
+    #[serde(borrow, rename = "as")]
+    ask_size: &'a RawValue,
+    bx: Option<String>,
+    ax: Option<String>,
+    c: Option<Vec<String>>,
+    z: Option<String>,
+}
+
 fn bars(raw: &RawValue, window: &Window) -> Result<Vec<Bar>, WireError> {
     let wire: Vec<WireBar<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
     let mut out = Vec::with_capacity(wire.len());
@@ -526,6 +549,29 @@ fn trades(raw: &RawValue, window: &Window) -> Result<Vec<Trade>, WireError> {
         };
         if in_day {
             out.push(trade);
+        }
+    }
+    Ok(out)
+}
+
+fn quotes(raw: &RawValue, window: &Window) -> Result<Vec<Quote>, WireError> {
+    let wire: Vec<WireQuote<'_>> = serde_json::from_str(raw.get()).map_err(json)?;
+    let mut out = Vec::with_capacity(wire.len());
+    for w in wire {
+        let (time, in_day) = window.place(&w.t)?;
+        let quote = Quote {
+            time,
+            bid_price: amount("bp", w.bp)?,
+            bid_size: amount("bs", w.bs)?,
+            ask_price: amount("ap", w.ap)?,
+            ask_size: amount("as", w.ask_size)?,
+            bid_exchange: w.bx,
+            ask_exchange: w.ax,
+            conditions: w.c,
+            tape: w.z,
+        };
+        if in_day {
+            out.push(quote);
         }
     }
     Ok(out)

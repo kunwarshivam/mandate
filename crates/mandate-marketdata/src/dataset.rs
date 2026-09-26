@@ -28,9 +28,9 @@ pub use partition::{encode, read, schema};
 pub const FORMAT: &str = "mandate-marketdata/1";
 /// File name of the manifest in a dataset directory.
 pub const MANIFEST: &str = "manifest.json";
-/// Scale of trade prices (trading domain spec §2.1: at most 9 decimal places).
+/// Scale of trade and quote prices (trading domain spec §2.1: at most 9 decimal places).
 pub const PRICE_SCALE: u8 = 9;
-/// Scale of trade sizes (trading domain spec §2.1: at most 9 decimal places).
+/// Scale of trade and quote sizes (trading domain spec §2.1: at most 9 decimal places).
 pub const SIZE_SCALE: u8 = 9;
 /// Scale of every bar column: bars are vendor aggregates that the spec does not bound, and
 /// BTC/USD bars arrive with ten fractional digits in prices and VWAP (DEC-89).
@@ -87,6 +87,12 @@ pub fn decimal_scales(kind: Kind) -> &'static [(&'static str, u8)] {
             ("vwap", BAR_SCALE),
         ],
         Kind::Trades => &[("price", PRICE_SCALE), ("size", SIZE_SCALE)],
+        Kind::Quotes => &[
+            ("bid_price", PRICE_SCALE),
+            ("bid_size", SIZE_SCALE),
+            ("ask_price", PRICE_SCALE),
+            ("ask_size", SIZE_SCALE),
+        ],
     }
 }
 
@@ -300,6 +306,7 @@ fn dataset_value(dataset: &DatasetId) -> Result<Value, String> {
     let (kind, timeframe) = match dataset.kind() {
         Kind::Bars(timeframe) => ("bars", Some(timeframe.to_string())),
         Kind::Trades => ("trades", None),
+        Kind::Quotes => ("quotes", None),
     };
     let mut members = vec![
         ("asset_class", text(dataset.asset_class().as_str())),
@@ -327,6 +334,7 @@ fn dataset_from_value(value: &Value) -> Result<DatasetId, String> {
     let kind = match field("kind")? {
         "bars" => Kind::Bars(field("timeframe")?.parse().map_err(model)?),
         "trades" => Kind::Trades,
+        "quotes" => Kind::Quotes,
         other => return Err(format!("unknown kind `{other}`")),
     };
     let symbol = Symbol::parse(field("symbol")?).map_err(model)?;
