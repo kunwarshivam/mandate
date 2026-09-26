@@ -1,0 +1,18 @@
+[package]
+name = "mandate-marketdata"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "Alpaca historical market data: the data-host client, exact vendor-number parsing, and idempotent Parquet datasets (backlog E2-1, ADR-0001 ES-23)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-canon.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
