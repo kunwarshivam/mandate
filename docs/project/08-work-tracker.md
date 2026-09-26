@@ -84,7 +84,7 @@ issues are the record; this table is the summary
 | Thesis revision loop: DEC-111, E17-9, R-28 | `claude-code` | — | Merged (#99); the story waits on E17-8 | docs only |
 | E5-4 journal verification and artifact commands | `claude-code` | #104 | Merged ([#108](https://github.com/kunwarshivam/mandate/pull/108)) after two review rounds; DEC-115 recorded; claim closed | `agent/e5-4-verify-cli` (#108) |
 | CI short path for documentation-only changes (DEC-112) | `claude-code` | — | Merged (#100) at the founder's request; a docs PR now costs under two runner minutes | `.github/scripts/` |
-| `mandate-marketdata`: proactive rate limiting in the Alpaca client (E2-1 follow-up) | `cursor` | #115 | Claimed 2026-09-26 19:20Z by a `cursor` session while the founder had Cursor paused; the coordinator has not launched it and leaves it for the founder to confirm or close | — |
+| `mandate-marketdata`: proactive rate limiting in the Alpaca client (E2-1 follow-up) | `cursor` | [#115](https://github.com/kunwarshivam/mandate/issues/115) | Claimed 2026-09-26 19:20Z; the founder asked at 20:00Z to finish it (claim comment). One PR, tests first: [#121](https://github.com/kunwarshivam/mandate/pull/121) open for the merge coordinator's review; the claim closes when it merges | `cursor/marketdata-rate-limit` (#121) |
 | `inspect` data-quality reporting (M1 rehearsal follow-up to E2-2 and E2-4) | `cursor` | #116 | PR #119 open, waiting on the merge coordinator's review: the IEX early-close evening closed from 17:00, records while the venue is closed, zero-volume and single-trade-spread warnings, inconsistent bars as problems, closed-day counts, the restatement note, and the live test behind `live-alpaca` | `cursor/inspect-quality-39ba` |
 
 ## Waiting on the founder
@@ -131,6 +131,7 @@ them in the decision log.
 | `mandate journal verify`: an unreadable export or anchor path is reported through anyhow context with no `Refusal` code (an I/O failure, exit non-zero); scripts that key on the first word need one there too | Next `mandate-cli` touch |
 | `mandate inspect` on a quotes dataset with corporate actions applied and no row quoting any side prints no split-adjusted line and no reason | Next `mandate-cli` touch |
 | The mandate reference cases (298, spec v0.6) have no Rust harness yet: the mandate crates that would read `mandate.yaml` do not exist; DEC-117 to DEC-126 stay Proposed (founder) until confirmed | The story that creates `mandate-spec` |
+| ~~The market-data client's rate limiting is reactive: about 200 requests, then 429s and a 1 to 32 s ladder whose six attempts span 63 s against a 60 s window~~ **Resolved (claim #115):** the client paces to the `X-Ratelimit-*` headers, a 429 waits for the next window with a three-window budget, and a token bucket is the floor without headers; a live 1,540-page download went from 376 refused requests to none ([brief](tasks/marketdata-rate-limit.md)) | `cursor` |
 
 ## Lessons encoded today
 

@@ -16,5 +16,6 @@ pub mod http;
 pub mod inspect;
 pub mod model;
 pub mod number;
+mod rate;
 pub mod timestamp;
 pub mod venue;
