@@ -54,11 +54,12 @@ issues are the record; this table is the summary
 
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
-| E3-3 cash-account settlement | `claude-code` | #48 | Tests PR open, under review; decisions renumbered to DEC-104 and DEC-105 after #52 | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
+| E3-3 cash-account settlement | `claude-code` | #48 | implementation PR open | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
 | E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
+| #55 `install.sh` without `astral.sh` | `cursor` | #63 | PR open, ready for review | `cursor/install-no-astral` (#65) |
 | E5-2 artifact store | `cursor` | #59 | Tests PR open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be`; implementation `cursor/e5-2-artifact-impl-b0be` after the tests PR merges |
 
 ## Waiting on the founder
