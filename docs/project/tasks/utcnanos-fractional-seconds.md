@@ -109,16 +109,16 @@ zero missed.
 | P3 | fraction read as an integer (`.5` is 5 ns) | `fractions_of_one_to_nine_digits_parse_exactly`, `trailing_zeros_name_the_same_instant`, `shorter_fractions_are_not_smaller`, `offsets_keep_the_fraction`, `range_limits_hold_with_fractions`, `marketdata_fixtures_parse_the_same`, and four properties: `generated_utc_fractions_parse_to_the_oracle_instant`, `generated_offsets_keep_the_fraction`, `order_follows_the_oracle`, `agrees_with_the_marketdata_parser_without_offsets` |
 | P4 | comma accepted as the separator | `malformed_fractions_are_syntax_errors`, `agrees_with_the_marketdata_parser_without_offsets` |
 | P5 | fraction dropped when an offset is given | `fractions_of_one_to_nine_digits_parse_exactly`, `trailing_zeros_name_the_same_instant`, `offsets_keep_the_fraction`, `range_limits_hold_with_fractions`, `generated_offsets_keep_the_fraction` |
-| P6 | offset added instead of subtracted | `whole_second_forms_parse_as_before`, `offsets_keep_the_fraction`, `generated_offsets_keep_the_fraction`, and three more |
-| P7 | instant built without the range check | `range_limits_hold_with_fractions`, `whole_second_forms_parse_as_before` |
-| P8 | offset hour 24 accepted | `invalid_dates_with_fractions_are_invalid_dates`, `whole_second_forms_parse_as_before` |
+| P6 | offset added instead of subtracted | `whole_second_forms_parse_as_before`, `offsets_keep_the_fraction`, `generated_offsets_keep_the_fraction`, `calendar::rfc3339_offsets_are_subtracted`, and six more |
+| P7 | instant built without the range check | `range_limits_hold_with_fractions`, `whole_second_forms_parse_as_before`, `calendar::rfc3339_rejects_other_forms` |
+| P8 | offset hour 24 accepted | `invalid_dates_with_fractions_are_invalid_dates`, `whole_second_forms_parse_as_before`, `calendar::rfc3339_rejects_other_forms` |
 | P9 | canonical `parse` falls back to RFC 3339 | `the_canonical_parser_still_takes_exactly_nine_digits`, `time::rejects_malformed_timestamps`, `timestamp_forms::risk_clock_rejects_every_non_canonical_rfc3339_spelling`, `timestamp_forms::event_time_rejects_every_non_canonical_rfc3339_spelling`, `append::draft_rejections` |
 | P10 | journal `risk_clock` read with `parse_rfc3339` | `timestamp_forms::risk_clock_rejects_every_non_canonical_rfc3339_spelling` |
 | P11 | journal `risk_clock` loses the whole-second check | `timestamp_forms::risk_clock_rejects_a_fraction_at_every_place`, `append::risk_clock_is_a_whole_second_and_marks_require_it`, `catalogue::registered_schemas_accept_their_payloads` |
 | P12 | journal `Timestamp` read with `parse_rfc3339` | `timestamp_forms::event_time_rejects_every_non_canonical_rfc3339_spelling`, `append::draft_rejections` |
 | P13 | only three digits kept (milliseconds) | `fractions_of_one_to_nine_digits_parse_exactly`, `canonical_text_round_trips`, `shorter_fractions_are_not_smaller`, `marketdata_fixtures_parse_the_same`, and five more |
 | P14 | nine digits rejected (at most eight) | `canonical_text_round_trips`, `invalid_dates_with_fractions_are_invalid_dates`, `order_follows_the_oracle`, and nine more |
-| P15 | offset sign ignored (always east) | `whole_second_forms_parse_as_before`, `offsets_keep_the_fraction`, `generated_offsets_keep_the_fraction`, and three more |
+| P15 | offset sign ignored (always east) | `whole_second_forms_parse_as_before`, `offsets_keep_the_fraction`, `generated_offsets_keep_the_fraction`, `calendar::rfc3339_offsets_are_subtracted`, and five more |
 
 ## Commands
 
