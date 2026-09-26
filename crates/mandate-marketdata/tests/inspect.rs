@@ -219,6 +219,14 @@ fn a_gap_across_the_equity_overnight_session_is_a_session_closure() {
     );
 }
 
+#[test]
+fn gap_classes_have_stable_names() {
+    assert_eq!(
+        [SessionClosure, NoTrade, TrueGap, Unclassified].map(GapClass::as_str),
+        ["session closure", "no trade", "true gap", "unclassified"]
+    );
+}
+
 fn iex_hourly() -> DatasetId {
     dataset(AssetClass::UsEquity, Feed::Iex, one_hour(), "SPY")
 }

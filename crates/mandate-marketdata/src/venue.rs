@@ -5,7 +5,7 @@
 
 use mandate_time::{
     CalendarDataError, Date, ExchangeCalendar, NewYorkTime, TimeError, UtcNanos,
-    new_york_date_and_hour, new_york_instant, new_york_midnight,
+    new_york_date_and_hour, new_york_instant,
 };
 
 use crate::model::Feed;
@@ -69,7 +69,7 @@ impl VenueHours {
     /// Parses the format described in the header of `data/sip.venue`.
     pub fn parse(text: &str) -> Result<Self, VenueError> {
         let mut range = None;
-        let mut hours = None;
+        let mut hours: Option<[NewYorkTime; 4]> = None;
         let mut until = None;
         let records = text
             .split('\n')
@@ -93,9 +93,14 @@ impl VenueHours {
                     increasing(line, &times, |a, b| a < b)?;
                     hours = Some(times);
                 }
-                (["unpublished_after_early_close", at], Some(_), Some(times), None) => {
+                (
+                    ["unpublished_after_early_close", at],
+                    Some(_),
+                    Some([_, _, regular_close, _]),
+                    None,
+                ) => {
                     let at = time(line, at)?;
-                    increasing(line, &[times[2], at], |a, b| a < b)?;
+                    increasing(line, &[regular_close, at], |a, b| a < b)?;
                     until = Some(at);
                 }
                 _ => return Err(VenueError::Syntax { line }),
@@ -229,17 +234,14 @@ impl Venue {
         }
     }
 
-    /// The venue's state through the New York day `date`: `base`, except over `periods`.
+    /// The venue's state through the New York day `date`: `base`, except over its periods.
     fn day(&self, date: Date) -> Result<Day, TimeError> {
-        let from = new_york_midnight(date)?;
-        let to = new_york_midnight(date.next()?)?;
         let (base, periods) = match &self.schedule {
             Schedule::Continuous => (VenueState::Open, Vec::new()),
             Schedule::Exchange { calendar, hours } => hours.periods(calendar, date)?,
         };
         Ok(Day {
-            from,
-            to,
+            date,
             base,
             periods,
         })
@@ -289,17 +291,12 @@ type Period = (UtcNanos, UtcNanos, VenueState);
 
 #[derive(Debug)]
 struct Day {
-    from: UtcNanos,
-    to: UtcNanos,
+    date: Date,
     base: VenueState,
     periods: Vec<Period>,
 }
 
 impl Day {
-    fn contains(&self, at: UtcNanos) -> bool {
-        self.from <= at && at < self.to
-    }
-
     fn state_at(&self, at: UtcNanos) -> VenueState {
         self.periods
             .iter()
@@ -317,13 +314,13 @@ pub struct States<'a> {
 
 impl States<'_> {
     pub fn at(&mut self, at: UtcNanos) -> Result<VenueState, TimeError> {
-        let day = match self.day.take() {
-            Some(day) if day.contains(at) => day,
-            _ => {
-                let (date, _) = new_york_date_and_hour(at)?;
-                self.venue.day(date)?
-            }
-        };
+        let (date, _) = new_york_date_and_hour(at)?;
+        if let Some(day) = &self.day
+            && day.date == date
+        {
+            return Ok(day.state_at(at));
+        }
+        let day = self.venue.day(date)?;
         let state = day.state_at(at);
         self.day = Some(day);
         Ok(state)
@@ -343,7 +340,10 @@ fn increasing<T: Copy>(
     values: &[T],
     ordered: impl Fn(T, T) -> bool,
 ) -> Result<(), VenueError> {
-    if values.windows(2).all(|pair| ordered(pair[0], pair[1])) {
+    if values
+        .windows(2)
+        .all(|pair| matches!(pair, [a, b] if ordered(*a, *b)))
+    {
         Ok(())
     } else {
         Err(VenueError::Order { line })
