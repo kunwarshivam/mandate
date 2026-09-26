@@ -4,7 +4,7 @@
 
 use mandate_num::{
     Adverse, Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice, NumError, Price,
-    Qty, Rounding, ShareIncrement, SignedQty, SplitRatio, Usd,
+    Qty, Ratio, Rounding, ShareIncrement, SignedQty, SplitRatio, TickRule, Usd,
 };
 use proptest::prelude::*;
 
@@ -986,5 +986,399 @@ proptest! {
         if high >= reference_qty {
             prop_assert!(at_high >= coefficient);
         }
+    }
+}
+
+/// The greatest integer whose square is at or below `value`, for the root oracles below.
+fn isqrt(value: i128) -> i128 {
+    assert!(value >= 0, "no root of a negative value");
+    if value < 2 {
+        return value;
+    }
+    let mut guess = 1i128 << ((128 - value.leading_zeros()) / 2 + 1);
+    loop {
+        let next = (guess + value / guess) / 2;
+        if next >= guess {
+            break;
+        }
+        guess = next;
+    }
+    while guess * guess > value {
+        guess -= 1;
+    }
+    while (guess + 1) * (guess + 1) <= value {
+        guess += 1;
+    }
+    guess
+}
+
+/// A ratio at up to 12 fractional digits, which is the scale every reported figure is rounded to.
+fn ratios(bound: i64) -> impl Strategy<Value = (i128, u32)> {
+    decimal(bound, 12)
+}
+
+fn ratio_of(v: (i128, u32)) -> Ratio {
+    Ratio::parse(&text(v.0, v.1)).unwrap()
+}
+
+/// A ratio takes at most 24 fractional digits, holds its canonical text, and rejects a 25th place
+/// (ES-04, DEC-127 item 14).
+#[test]
+fn ratios_round_once_and_reject_twenty_five_places() {
+    assert_eq!(Ratio::parse("0.1").unwrap().to_string(), "0.1");
+    assert_eq!(
+        Ratio::parse("-0.019801980198").unwrap().to_string(),
+        "-0.019801980198"
+    );
+    assert_eq!(
+        Ratio::parse("0.00212460490073004860242")
+            .unwrap()
+            .to_string(),
+        "0.00212460490073004860242"
+    );
+    assert_eq!(
+        Ratio::parse("28.93510288368").unwrap().to_string(),
+        "28.93510288368"
+    );
+    assert_eq!(
+        Ratio::parse("0.10").map(|_| ()),
+        Err(NumError::NotCanonical)
+    );
+    assert_eq!(
+        Ratio::parse("0.0000000000000000000000001").map(|_| ()),
+        Err(NumError::TooPrecise)
+    );
+    assert!(Ratio::parse("-0.5").unwrap().is_negative());
+    assert!(!Ratio::ZERO.is_negative());
+    assert_eq!(Ratio::parse("0.25").unwrap().negated().to_string(), "-0.25");
+}
+
+/// Reg NMS Rule 612 (spec §2.1): a buy limit rounds **down** to the tick and a sell limit **up**, on
+/// a penny grid at or above 1.00 USD and a hundredth of a penny below it. A crypto increment rounds
+/// the same way.
+#[test]
+#[ignore = "pending E4-2"]
+fn a_limit_price_sits_on_the_reg_nms_tick_against_the_order() {
+    let equity = TickRule::RegNmsEquity;
+    let buy = |text: &str| {
+        Price::parse(text)
+            .unwrap()
+            .on_tick(equity, Adverse::Up)
+            .unwrap()
+            .to_string()
+    };
+    let sell = |text: &str| {
+        Price::parse(text)
+            .unwrap()
+            .on_tick(equity, Adverse::Down)
+            .unwrap()
+            .to_string()
+    };
+
+    assert_eq!(
+        buy("104.26"),
+        "104.26",
+        "a price already on the grid is unchanged"
+    );
+    assert_eq!(buy("104.53015"), "104.53", "a buy limit rounds down");
+    assert_eq!(sell("104.53015"), "104.54", "a sell limit rounds up");
+    assert_eq!(
+        buy("0.50125"),
+        "0.5012",
+        "below a dollar the tick is 0.0001"
+    );
+    assert_eq!(sell("0.50125"), "0.5013");
+    assert_eq!(buy("1.00"), "1", "the boundary belongs to the coarser tick");
+    assert_eq!(sell("0.99999"), "1");
+
+    let crypto = TickRule::Increment(Price::parse("0.05").unwrap());
+    assert_eq!(
+        Price::parse("104.53")
+            .unwrap()
+            .on_tick(crypto, Adverse::Up)
+            .unwrap()
+            .to_string(),
+        "104.5"
+    );
+    assert_eq!(
+        Price::parse("104.53")
+            .unwrap()
+            .on_tick(crypto, Adverse::Down)
+            .unwrap()
+            .to_string(),
+        "104.55"
+    );
+}
+
+/// The hand-calculated figures of the E4-2 brief's fixture, recomputed here from the same
+/// definitions: the variance of the main series, its ceiling root, the squared Sharpe, its
+/// minus-infinity root, and the annualized pair.
+#[test]
+#[ignore = "pending E4-2"]
+fn hand_calculated_backtest_statistics() {
+    let returns = [
+        Ratio::parse("0.01").unwrap(),
+        Ratio::parse("-0.019801980198").unwrap(),
+        Ratio::parse("0.040404040404").unwrap(),
+    ];
+    let sum = Ratio::sum(&returns).unwrap();
+    let squares = Ratio::sum_of_squares(&returns).unwrap();
+    assert_eq!(sum.to_string(), "0.030602060206");
+    assert_eq!(squares.to_string(), "0.00212460490073004860242");
+    assert_eq!(Ratio::mean(&returns).unwrap().to_string(), "0.010200686735");
+
+    let variance = Ratio::sample_variance(sum, squares, 3).unwrap();
+    assert_eq!(variance.to_string(), "0.000906221436");
+    assert_eq!(
+        variance.root_ceiling().unwrap().to_string(),
+        "0.030103512022"
+    );
+
+    let mean = Ratio::mean(&returns).unwrap();
+    let squared = Ratio::squared_quotient(mean, variance).unwrap();
+    assert_eq!(squared.to_string(), "0.11482183684");
+    assert_eq!(squared.root_floor().unwrap().to_string(), "0.338853710087");
+
+    assert_eq!(
+        variance.times_int(252).unwrap().to_string(),
+        "0.228367801872"
+    );
+    assert_eq!(
+        variance
+            .times_int(252)
+            .unwrap()
+            .root_ceiling()
+            .unwrap()
+            .to_string(),
+        "0.477878438384"
+    );
+    assert_eq!(
+        squared.times_int(252).unwrap().to_string(),
+        "28.93510288368"
+    );
+    assert_eq!(
+        squared
+            .times_int(252)
+            .unwrap()
+            .root_floor()
+            .unwrap()
+            .to_string(),
+        "5.379135886337"
+    );
+}
+
+/// A falling series' figures, where the Sharpe is negative and its magnitude comes from the ceiling
+/// root: the brief's second degenerate series.
+#[test]
+#[ignore = "pending E4-2"]
+fn hand_calculated_statistics_of_a_falling_series() {
+    let returns = [
+        Ratio::parse("-0.01").unwrap(),
+        Ratio::parse("-0.010101010101").unwrap(),
+    ];
+    let sum = Ratio::sum(&returns).unwrap();
+    let squares = Ratio::sum_of_squares(&returns).unwrap();
+    let variance = Ratio::sample_variance(sum, squares, 2).unwrap();
+    let mean = Ratio::mean(&returns).unwrap();
+
+    assert_eq!(mean.to_string(), "-0.01005050505");
+    assert_eq!(variance.to_string(), "0.000000005102");
+    assert_eq!(
+        variance.root_ceiling().unwrap().to_string(),
+        "0.000071428286"
+    );
+    let squared = Ratio::squared_quotient(mean, variance).unwrap();
+    assert_eq!(squared.to_string(), "19798.638134079871");
+    assert_eq!(
+        squared.root_ceiling().unwrap().to_string(),
+        "140.70763353166"
+    );
+    assert_eq!(
+        squared.times_int(252).unwrap().to_string(),
+        "4989256.809788127492"
+    );
+    assert_eq!(
+        squared
+            .times_int(252)
+            .unwrap()
+            .root_ceiling()
+            .unwrap()
+            .to_string(),
+        "2233.66443535911"
+    );
+}
+
+/// A zero denominator is an error, not an infinity, and a root of a negative value is rejected.
+#[test]
+#[ignore = "pending E4-2"]
+fn statistics_that_have_no_value_are_errors() {
+    let zero = Ratio::ZERO;
+    let one = Ratio::parse("1").unwrap();
+    assert_eq!(
+        Ratio::squared_quotient(one, zero).map(|_| ()),
+        Err(NumError::DivisionByZero)
+    );
+    assert_eq!(
+        Ratio::sample_variance(zero, zero, 1).map(|_| ()),
+        Err(NumError::DivisionByZero)
+    );
+    assert_eq!(Ratio::mean(&[]).map(|_| ()), Err(NumError::DivisionByZero));
+    assert_eq!(
+        Ratio::parse("-0.25").unwrap().root_ceiling().map(|_| ()),
+        Err(NumError::Negative)
+    );
+    assert_eq!(
+        Ratio::parse("-0.25").unwrap().root_floor().map(|_| ()),
+        Err(NumError::Negative)
+    );
+    assert_eq!(
+        Usd::parse("100")
+            .unwrap()
+            .ratio_to(Usd::ZERO, 12, Rounding::HalfEven)
+            .map(|_| ()),
+        Err(NumError::DivisionByZero)
+    );
+}
+
+proptest! {
+    /// A return is one rounding of the exact quotient, at the scale and mode the caller names, with
+    /// the sign of the numerator (DEC-127 item 4).
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn a_return_is_one_rounding_of_the_exact_quotient(
+        numerator in decimal(1_000_000, 2),
+        denominator in positive(1_000_000, 2),
+        mode in modes(),
+    ) {
+        let (n, d) = (usd(numerator), usd(denominator));
+        let expected = div_round(
+            scaled(numerator, 2) * pow10(12),
+            scaled(denominator, 2),
+            mode,
+        );
+        let got = n.ratio_to(d, 12, mode).unwrap();
+        prop_assert_eq!(at_scale(&got.to_string(), 12), Some(expected));
+    }
+
+    /// Shares bought with an amount of money are truncated to the increment and never cost more than
+    /// the money available.
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn shares_at_a_price_truncate_to_the_increment(
+        cash in unsigned(1_000_000, 2),
+        price in positive(100_000, 2),
+        increment in increments(),
+    ) {
+        let (money, unit) = (usd(cash), Price::parse(&text(price.0, price.1)).unwrap());
+        let exact = scaled(cash, 2) * pow10(9) / scaled(price, 2);
+        let expected = match increment {
+            ShareIncrement::Fractional => exact,
+            ShareIncrement::Whole => exact / pow10(9) * pow10(9),
+        };
+        let shares = money.shares_at(unit, increment).unwrap();
+        prop_assert_eq!(at_scale(&shares.to_string(), 9), Some(expected));
+        let cost = shares.notional(unit).unwrap();
+        prop_assert!(cost <= money, "the truncation never overspends");
+    }
+
+    /// The sample variance is one rounding of `(n Σr² − (Σr)²) ÷ (n(n − 1))` and is never negative,
+    /// whatever the series (DEC-127 item 5).
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn a_sample_variance_matches_the_integer_oracle_and_is_never_negative(
+        values in proptest::collection::vec(ratios(1_000_000), 2..8),
+    ) {
+        let returns: Vec<Ratio> = values.iter().copied().map(ratio_of).collect();
+        let units: Vec<i128> = values.iter().map(|v| scaled(*v, 12)).collect();
+        let count = i128::try_from(units.len()).unwrap();
+        let sum: i128 = units.iter().sum();
+        let squares: i128 = units.iter().map(|u| u * u).sum();
+        let numerator = count * squares - sum * sum;
+        prop_assert!(numerator >= 0, "Cauchy-Schwarz keeps the numerator non-negative");
+        let expected = div_round(numerator, count * (count - 1) * pow10(12), Rounding::HalfEven);
+
+        let reported_sum = Ratio::sum(&returns).unwrap();
+        let reported_squares = Ratio::sum_of_squares(&returns).unwrap();
+        prop_assert_eq!(at_scale(&reported_sum.to_string(), 12), Some(sum));
+        prop_assert_eq!(at_scale(&reported_squares.to_string(), 24), Some(squares));
+        let variance = Ratio::sample_variance(
+            reported_sum,
+            reported_squares,
+            u32::try_from(units.len()).unwrap(),
+        )
+        .unwrap();
+        prop_assert_eq!(at_scale(&variance.to_string(), 12), Some(expected));
+        prop_assert!(variance >= Ratio::ZERO);
+    }
+
+    /// The volatility is the least 12-place value whose square reaches the variance, so it never
+    /// understates dispersion (DEC-127 item 6).
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn a_volatility_root_is_the_least_twelve_place_value_whose_square_reaches_the_variance(
+        variance in unsigned(1_000_000, 12),
+    ) {
+        let value = ratio_of(variance);
+        let units = scaled(variance, 12);
+        let scaled_up = units * pow10(12);
+        let floor = isqrt(scaled_up);
+        let expected = if floor * floor == scaled_up { floor } else { floor + 1 };
+        let root = value.root_ceiling().unwrap();
+        prop_assert_eq!(at_scale(&root.to_string(), 12), Some(expected));
+        prop_assert!(expected * expected >= scaled_up);
+        if expected > 0 {
+            prop_assert!((expected - 1) * (expected - 1) < scaled_up);
+        }
+    }
+
+    /// A Sharpe's magnitude never exceeds the root of its squared figure: the floor root squares to at
+    /// most the value, and one place more would exceed it (DEC-127 item 7).
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn a_sharpe_root_never_exceeds_the_squared_value(squared in unsigned(1_000_000, 12)) {
+        let value = ratio_of(squared);
+        let units = scaled(squared, 12);
+        let scaled_up = units * pow10(12);
+        let expected = isqrt(scaled_up);
+        let root = value.root_floor().unwrap();
+        prop_assert_eq!(at_scale(&root.to_string(), 12), Some(expected));
+        prop_assert!(expected * expected <= scaled_up);
+        prop_assert!((expected + 1) * (expected + 1) > scaled_up);
+        let ceiling = value.root_ceiling().unwrap();
+        prop_assert!(root <= ceiling, "the floor root never exceeds the ceiling root");
+    }
+
+    /// Annualizing multiplies by an integer exactly, so the product divided back gives the period
+    /// figure and no rounding enters (DEC-127 items 6 and 7).
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn an_annualized_variance_is_the_period_value_times_the_period_count(
+        variance in unsigned(1_000_000, 12),
+        periods in 1u32..=365,
+    ) {
+        let value = ratio_of(variance);
+        let expected = scaled(variance, 12) * i128::from(periods);
+        let annual = value.times_int(periods).unwrap();
+        prop_assert_eq!(at_scale(&annual.to_string(), 12), Some(expected));
+        prop_assert!(annual >= value, "a non-negative figure never shrinks");
+    }
+
+    /// Adding and subtracting ratios is exact or an error, which is what the excess return needs.
+    #[test]
+    #[ignore = "pending E4-2"]
+    fn adding_and_subtracting_ratios_is_exact(
+        a in ratios(1_000_000),
+        b in ratios(1_000_000),
+    ) {
+        exact_or_overflow(
+            ratio_of(a).checked_add(ratio_of(b)).map(|v| v.to_string()),
+            scaled(a, 12) + scaled(b, 12),
+            12,
+        )?;
+        exact_or_overflow(
+            ratio_of(a).checked_sub(ratio_of(b)).map(|v| v.to_string()),
+            scaled(a, 12) - scaled(b, 12),
+            12,
+        )?;
     }
 }

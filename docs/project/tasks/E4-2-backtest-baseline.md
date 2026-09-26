@@ -112,7 +112,7 @@ story. This story closes the M3 loop that E4-1 opened: bars in, a signal, an ord
   | §7.2 an entry sizes from `cash_total`, so unsettled sale proceeds are available in a margin account | `hand::an_entry_the_day_after_an_exit_sizes_from_unsettled_proceeds` |
   | An absent figure is `Null` with `absent` saying why | `hand::one_period_leaves_the_dispersion_fields_absent`, `hand::a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance` |
   | A run that only rises has no drawdown, reported at peak and trough period 0 | `hand::a_run_that_only_rises_has_no_drawdown` |
-  | ES-04 the new arithmetic is exact or an error, one rounding per formula | `num::ratios_round_once_and_reject_thirteen_places`, `num::shares_at_a_price_truncate_to_the_increment` |
+  | ES-04 the new arithmetic is exact or an error, one rounding per formula | `num::ratios_round_once_and_reject_twenty_five_places`, `num::shares_at_a_price_truncate_to_the_increment` |
 
   **Oracles.** `crates/mandate-backtest/tests/properties.rs` holds a second ledger and a second
   statistics implementation, neither sharing code with the crate: the ledger keeps cash, position,
@@ -582,8 +582,11 @@ Three rules hold across the table:
     divides nothing itself), under a shared-crate claim: `Ratio` (signed, at most 24 places so an
     exact sum of squares fits, with every reported rounding at 12; ES-04 already names the type),
     `Usd::ratio_to`, `Usd::shares_at` (truncate(cash ÷ price, increment)),
-    `Ratio::{checked_add, checked_sub, negated, times_int, squared_quotient, mean, sample_variance,
-    root_floor, root_ceiling}`, and `Price::on_tick(TickRule, Adverse)` with §2.1's Reg NMS table
+    `Ratio::{checked_add, checked_sub, negated, is_negative, times_int, sum, sum_of_squares, mean,
+    sample_variance, squared_quotient, root_floor, root_ceiling}` — `sum` and `sum_of_squares` are
+    the report's two exact sums, and `sample_variance` takes those sums and the period count, so the
+    figure is computed from what the report shows — and `Price::on_tick(TickRule, Adverse)` with
+    §2.1's Reg NMS table
     (0.01 at or above 1.00 USD, 0.0001 below) and a broker `Increment` for crypto. Each has an
     integer oracle in `crates/mandate-num/tests/num.rs`.
 15. **The report is self-checking.** Every derived figure is computed from figures the report itself
