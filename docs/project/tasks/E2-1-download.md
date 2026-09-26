@@ -42,7 +42,7 @@ story.
   | AGENTS.md rule 7: credentials never reach logs, fixtures, or errors | `http::credentials_are_redacted_in_debug_output`, `http::missing_credentials_name_the_variable_not_a_value`, `fixtures::recorded_fixtures_contain_no_credentials` |
   | Secret-scan exceptions apply only in their own files: page tokens in the recorded fixture pages, the sentinel key ID in `tests/http.rs` (DEC-89) | `cargo xtask ci supply-chain` (`gitleaks-exceptions`: planted cases in a temporary directory) |
   | ES-23 only the paper and data hosts are compiled in | `http::the_data_host_is_the_only_alpaca_host_in_the_source`, `http::only_market_data_paths_are_requested` |
-  | ES-19 CI never calls Alpaca | `live::paper_data_smoke` runs only with `MANDATE_LIVE_ALPACA_DATA=1` |
+  | ES-19 CI never calls Alpaca | `live::paper_data_smoke` is built only with the `live-alpaca` feature ([inspect-quality](inspect-quality.md) finding E; it first ran only with `MANDATE_LIVE_ALPACA_DATA=1` and passed when skipped) |
 
 - **Crates in scope:** `mandate-marketdata` (layer 6, adapter) and `mandate-cli` (layer 7, binary
   `mandate`). Neither is safety-critical under ES-02, so there is no tests-first PR pair and no
@@ -120,7 +120,7 @@ story.
 ```bash
 cargo xtask check
 cargo nextest run -p mandate-marketdata -p mandate-cli
-MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test live
+cargo nextest run -p mandate-marketdata --features live-alpaca --test live
 cargo run -p mandate-cli -- download --basket config/research-basket.toml --asset-class us-equity \
   --kind bars --timeframe 1Min --feed sip --start 2026-09-21 --end 2026-09-25 --out data
 ```

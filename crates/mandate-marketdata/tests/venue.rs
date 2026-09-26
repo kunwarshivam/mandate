@@ -1,6 +1,7 @@
 //! Each feed's venue hours (E2-4 brief interpretation 6): SIP and IEX open and close by the
-//! exchange calendar and their own checked-in hours, IEX after an early close is unclassified,
-//! crypto never closes, and anything outside the recorded dates is unclassified.
+//! exchange calendar and their own checked-in hours, IEX after an early close is unclassified
+//! until the calendar's after-hours session and IEX's own hours end, crypto never closes, and
+//! anything outside the recorded dates is unclassified.
 
 use mandate_marketdata::model::Feed;
 use mandate_marketdata::venue::{Venue, VenueError, VenueHours, VenueState};
@@ -95,7 +96,7 @@ fn weekends_and_closures_are_closed_for_both_feeds() {
 }
 
 #[test]
-fn on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_20_00() {
+fn on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_17_00() {
     let sip = sip();
     for (at, expected) in [
         ("2026-11-27T09:00", Open),
@@ -113,11 +114,57 @@ fn on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_2
         ("2026-11-27T13:00", Open),
         ("2026-11-27T17:59", Open),
         ("2026-11-27T18:00", Unclassified),
-        ("2026-11-27T22:00", Unclassified),
-        ("2026-11-28T00:59", Unclassified),
+        ("2026-11-27T21:59", Unclassified),
+        ("2026-11-27T22:00", Closed),
+        ("2026-11-28T00:59", Closed),
         ("2026-11-28T01:00", Closed),
     ] {
         assert_eq!(state(&iex, at), expected, "iex {at}");
+    }
+}
+
+#[test]
+fn iex_is_closed_from_17_00_to_20_00_after_the_2024_11_29_early_close() {
+    let iex = iex();
+    for (at, expected) in [
+        ("2024-11-29T17:59", Open),
+        ("2024-11-29T18:00", Unclassified),
+        ("2024-11-29T21:59", Unclassified),
+        ("2024-11-29T22:00", Closed),
+        ("2024-11-30T00:59", Closed),
+    ] {
+        assert_eq!(state(&iex, at), expected, "{at}");
+    }
+}
+
+#[test]
+fn an_unpublished_early_close_ends_at_the_earliest_of_its_record_the_venue_close_and_after_hours() {
+    let calendar = || ExchangeCalendar::us_equities().unwrap();
+    let hours =
+        |text: &str| VenueHours::parse(&format!("valid 2026-01-01 2026-12-31\n{text}")).unwrap();
+    for (label, hours, last_unclassified) in [
+        (
+            "the record",
+            hours("hours 08:00 09:30 16:00 17:00\nunpublished_after_early_close 16:45\n"),
+            "2026-11-27T21:44",
+        ),
+        (
+            "the venue close",
+            hours("hours 08:00 09:30 16:00 16:30\nunpublished_after_early_close 20:00\n"),
+            "2026-11-27T21:29",
+        ),
+        (
+            "the calendar's after-hours end",
+            hours("hours 08:00 09:30 16:00 19:00\nunpublished_after_early_close 20:00\n"),
+            "2026-11-27T21:59",
+        ),
+    ] {
+        let venue = Venue::exchange(calendar(), hours);
+        let last = time(last_unclassified);
+        let after = UtcNanos::from_parts(last.secs() + 60, 0).unwrap();
+        assert_eq!(state(&venue, "2026-11-27T18:00"), Unclassified, "{label}");
+        assert_eq!(venue.state_at(last).unwrap(), Unclassified, "{label}");
+        assert_eq!(venue.state_at(after).unwrap(), Closed, "{label}");
     }
 }
 
@@ -213,7 +260,9 @@ fn a_venue_is_open_only_while_both_the_calendar_and_its_own_hours_are() {
         ("2026-09-24T21:00", Closed),
         ("2026-09-25T15:59", Open),
         ("2026-09-25T16:00", Unclassified),
-        ("2026-09-25T23:59", Unclassified),
+        ("2026-09-25T17:59", Unclassified),
+        ("2026-09-25T18:00", Closed),
+        ("2026-09-25T23:59", Closed),
         ("2026-09-26T00:00", Closed),
     ] {
         assert_eq!(state(&narrow, at), expected, "narrow {at}");
@@ -442,7 +491,7 @@ fn expected(feed: Feed, at: UtcNanos) -> VenueState {
     match feed {
         Feed::Sip if within(4, if early { 17 } else { 20 }) => Open,
         Feed::Iex if within(8, if early { 13 } else { 17 }) => Open,
-        Feed::Iex if early && within(13, 20) => Unclassified,
+        Feed::Iex if early && within(13, 17) => Unclassified,
         _ => Closed,
     }
 }

@@ -247,8 +247,8 @@ the paths arrive with the tests PR, which updates this entry.
 - **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in
   `crates/mandate-marketdata/tests/fixtures/alpaca/`; `crates/mandate-cli/tests/download.rs`.
 - **Run:** `cargo nextest run -p mandate-marketdata -p mandate-cli`; against the data host with the
-  paper credentials, `MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test
-  live`.
+  paper credentials, `cargo nextest run -p mandate-marketdata --features live-alpaca --test live`
+  (without the feature the live test is not built).
 
 ## Concurrent dataset writes
 
@@ -262,13 +262,17 @@ the paths arrive with the tests PR, which updates this entry.
 
 ## Dataset inspection
 
-- **Spec:** backlog E2-2; trading domain spec §4.2; DEC-89; `docs/project/tasks/E2-2-inspect.md`.
-- **Code:** `crates/mandate-marketdata/src/inspect.rs` (coverage, exact statistics, gaps between
-  bars, duplicates, untrusted partitions), `read_manifest` in
-  `crates/mandate-marketdata/src/dataset.rs`; `crates/mandate-cli/src/inspect.rs`
+- **Spec:** backlog E2-2; trading domain spec §4.1, §4.2; DEC-89;
+  `docs/project/tasks/E2-2-inspect.md`; the data-quality warnings of
+  `docs/project/tasks/inspect-quality.md`.
+- **Code:** `crates/mandate-marketdata/src/inspect.rs` (coverage with closed-day counts, exact
+  statistics, gaps between bars, duplicates, the `Quality` warnings, untrusted partitions),
+  `read_manifest` in `crates/mandate-marketdata/src/dataset.rs`; `crates/mandate-cli/src/inspect.rs`
   (`mandate inspect`, the text report).
 - **Tests:** `crates/mandate-marketdata/tests/inspect.rs` (hand-built datasets through the real
-  store; a slot-grid oracle for gaps), `crates/mandate-cli/tests/inspect.rs` (the exact report).
+  store; a slot-grid oracle for gaps), `crates/mandate-marketdata/tests/inspect_quality.rs`
+  (warnings and inconsistent bars over Alpaca records from the M1 rehearsal),
+  `crates/mandate-cli/tests/inspect.rs` (the exact report).
 - **Run:** `cargo nextest run -p mandate-marketdata -p mandate-cli inspect`.
 
 ## Top-of-book quotes
