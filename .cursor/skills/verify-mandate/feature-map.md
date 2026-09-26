@@ -160,6 +160,17 @@ every workspace crate and reference-case suite has an entry and that every path 
   paper credentials, `MANDATE_LIVE_ALPACA_DATA=1 cargo nextest run -p mandate-marketdata --test
   live`.
 
+## Dataset inspection
+
+- **Spec:** backlog E2-2; trading domain spec §4.2; DEC-89; `docs/project/tasks/E2-2-inspect.md`.
+- **Code:** `crates/mandate-marketdata/src/inspect.rs` (coverage, exact statistics, gaps between
+  bars, duplicates, untrusted partitions), `read_manifest` in
+  `crates/mandate-marketdata/src/dataset.rs`; `crates/mandate-cli/src/inspect.rs`
+  (`mandate inspect`, the text report).
+- **Tests:** `crates/mandate-marketdata/tests/inspect.rs` (hand-built datasets through the real
+  store; a slot-grid oracle for gaps), `crates/mandate-cli/tests/inspect.rs` (the exact report).
+- **Run:** `cargo nextest run -p mandate-marketdata -p mandate-cli inspect`.
+
 ## Research-agent spike (E17-0)
 
 - **Spec:** ADR-0002; mandate spec §8.1 to §8.3 (the thesis shape and the sizing idea);
