@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mandate-mark-reversed.svg">
-    <img src="assets/brand/mandate-mark.svg" alt="Mandate" width="88">
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/mandate-lockup-reversed.svg">
+    <img src="assets/brand/mandate-lockup.svg" alt="Mandate" width="520">
   </picture>
 </p>
 
