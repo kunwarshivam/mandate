@@ -143,6 +143,15 @@ fn verification_reads_artifacts_through_the_store() {
         verify_events(rows, TrustedStart::GENESIS, &SelfChecking),
         failed(EventCheck::ArtifactMismatch)
     );
+    assert_eq!(
+        get_artifact(&Unreachable, &reference),
+        Err(ArtifactError::Unavailable),
+        "the checked read passes the source's error through"
+    );
+    assert_eq!(
+        get_artifact(&SelfChecking, &reference),
+        Err(ArtifactError::Corrupt)
+    );
     let mut store = Store::new();
     assert_eq!(store.put_artifact(&content), Ok(reference));
     assert!(verify_events(rows, TrustedStart::GENESIS, &store).is_ok());
@@ -162,7 +171,6 @@ proptest! {
     }
 
     #[test]
-
     #[ignore = "pending E5-2"]
     fn the_same_bytes_get_the_same_address_once(
         a in vec(any::<u8>(), 0..64),
@@ -177,7 +185,6 @@ proptest! {
     }
 
     #[test]
-
     #[ignore = "pending E5-2"]
     fn one_flipped_bit_is_detected_on_read(
         bytes in vec(any::<u8>(), 1..256),
