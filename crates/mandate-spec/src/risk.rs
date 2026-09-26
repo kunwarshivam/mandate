@@ -137,7 +137,15 @@ pub struct Snapshot {
     pub inherited_loss: Usd,
     pub size_factor: Ratio,
     pub latched: BTreeSet<LimitKey>,
-    pub active_rungs: BTreeSet<u8>,
+    /// The active `scale_sizes` rungs, each with how long it has been active, in the session seconds
+    /// §5.5 counts (regular-session for an equity, all time for crypto).
+    ///
+    /// A key present means the rung is active; the value is what §5.5's `trim_to_target` guard needs,
+    /// since a trim waits until the rung has been active for `breach_confirm_s`. **This crate folds
+    /// it** rather than leaving the gate to accumulate a duration of its own: the risk state is the
+    /// only thing that steps the risk clock, and a second timekeeper could disagree with it about
+    /// when a rung became active (the coordinator's ruling on #136).
+    pub active_rungs: BTreeMap<u8, u64>,
     pub restrictions: BTreeSet<Restriction>,
     pub agent_mode: AgentMode,
     pub instrument_restrictions: BTreeSet<InstrumentRestriction>,
@@ -506,9 +514,13 @@ pub fn hard_wait_s(breach_confirm_s: u32) -> u32 {
 }
 
 /// The size factor: the product of the active `scale_sizes` rungs' factors (§5.5).
+///
+/// Only the keys of `active` matter here; the durations beside them are §5.5's trim guard, which is
+/// the gate's. The factor lives on [`Snapshot`] because it is folded risk state, and `mandate-risk`
+/// reads it there rather than recomputing it (the coordinator's ruling on #136).
 pub fn size_factor(
     ladder: &[crate::document::LadderRung],
-    active: &BTreeSet<u8>,
+    active: &BTreeMap<u8, u64>,
 ) -> Result<Ratio, SpecError> {
     let _ = (ladder, active);
     Err(SpecError::Unimplemented)

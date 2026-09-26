@@ -516,3 +516,28 @@ fn the_reachable_accessors_return_what_they_were_given() {
         "an overlay folded from nothing constrains nothing"
     );
 }
+
+/// The shape the gate's §5.5 trim guard reads, and why it is a map rather than a set.
+///
+/// The coordinator's ruling on #136 gives `size_factor` to this crate's [`Snapshot`] because it is
+/// folded risk state. The duration beside each active rung is the other half of that: a trim waits
+/// until the rung has been active for `breach_confirm_s`, and the risk state is the only thing that
+/// steps the risk clock, so it folds the duration too.
+#[test]
+fn an_active_rung_carries_how_long_it_has_been_active() {
+    let active: BTreeMap<u8, u64> = BTreeMap::from([(0, 0), (2, 600)]);
+    assert!(active.contains_key(&0), "presence means the rung is active");
+    assert!(!active.contains_key(&1), "and absence means it is not");
+    assert_eq!(
+        active.get(&0).copied(),
+        Some(0),
+        "a rung that has just become active has accumulated nothing, which is not the same as \
+         being inactive"
+    );
+    assert_eq!(active.get(&2).copied(), Some(600));
+    assert_eq!(
+        active.keys().copied().collect::<Vec<u8>>(),
+        vec![0, 2],
+        "rungs come out in ladder order, so a size factor is one product in one order (ES-21)"
+    );
+}
