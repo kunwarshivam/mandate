@@ -266,7 +266,7 @@ struct Finding {
 /// so that this source matches no rule.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
-        "U1BZfDIwMjYtMDktMjRUMTQ6MDA6MDBa",
+        "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
         "fFBMQU5URUR8MTIzNDU2Nzg5MA=="
     );
     let json = format!("{{\"bars\":[],\"next_page_token\":\"{page}\"}}");
