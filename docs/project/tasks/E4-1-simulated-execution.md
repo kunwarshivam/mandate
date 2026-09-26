@@ -28,9 +28,9 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
   `trading_domain::RC-12`, `trading_domain::RC-19`. They are pending today on the case-level keys
   `bars`, `orders`, and `isolation`, which `crates/mandate-refcases/src/trading_domain.rs` already
   assigns to E4-1. Every other case keeps its state.
-- **Fixture check before any code:** each of the 14 expected fills in the three cases was
+- **Fixture check before any code:** each of the 15 expected fills in the three cases (RC-10: 5, RC-12: 7, RC-19: 3) was
   recomputed by hand from §6.4 with `test_default` (s = half-spread 1 bps + impact 2 bps = 3 bps,
-  volume cap 10% of the previous bar, zero latency). All 14 match. For example, RC-10
+  volume cap 10% of the previous bar, zero latency). All 15 match. For example, RC-10
   `volume_cap`: bar 1 caps at 10% × 5000 = 500 at min(100.60, 100.00 × 1.0003) = 100.03; bar 2
   caps at 800 and fills the remaining 500 at min(100.60, 100.40 × 1.0003) = 100.43012. RC-12
   `stop_gap_through`: open 98.50 ≤ 99.00, so the fill is 98.50 × 0.9997 = 98.47045.
@@ -190,9 +190,10 @@ clock, does no I/O, and keeps no state between calls.
      depend on liquidity, and crypto has no auction.
 6. **Liquidity.** Market fills, stop fills, stop-limit fills at trigger, and marketable-limit fills
    are taker. Resting-limit fills are maker, including a stop-limit resting as a limit (§6.4.7).
-7. **Stop-limit that rests.** When the trigger bar opens beyond L, the order rests as a limit at L
-   from that same bar, as rule 5 rests a limit "from the first eligible bar". The order triggered at
-   the open, so any later print through L in that bar came after the trigger.
+7. **Stop-limit that rests.** When the trigger bar opens beyond L, rule 7 says "no fill": nothing
+   fills in that bar, even if it later prints through L, and the order rests as a limit at L from
+   the next bar. This is the literal reading and the conservative one; no reference case
+   distinguishes it from resting in the trigger bar itself.
 8. **OCO with a volume cap.** The first fill of either leg, partial or full, cancels the other leg,
    as the broker does. A take-profit remainder keeps resting at its limit; a stop remainder is a
    market order (item 10).
