@@ -1411,7 +1411,6 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "mandate-risk"
 version = "0.0.0"
 dependencies = [
@@ -1420,7 +1419,10 @@ dependencies = [
  "mandate-time",
  "proptest",
  "serde_json",
-=======
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-runtime"
 version = "0.0.0"
 dependencies = [
@@ -1430,7 +1432,6 @@ dependencies = [
  "mandate-num",
  "mandate-time",
  "proptest",
->>>>>>> origin/main
  "thiserror",
 ]
 
