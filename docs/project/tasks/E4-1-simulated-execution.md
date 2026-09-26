@@ -15,7 +15,8 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
   §5.1 and §5.2 (which order types and sessions v1 uses), §6.1 (fill record), §14 (RC-10, RC-12,
   RC-19); HLD §6.A step 4 (a backtest is required before an agent trades live) and "Agent
   lifecycle" (Draft → Backtest → Paper).
-- **Decisions that apply:** DEC-29 and DEC-37 (v1 order policy), DEC-35 (data profiles), DEC-72
+- **Decisions that apply:** DEC-29 and DEC-37 (v1 order policy), DEC-30 (no orders in the
+  overnight session), DEC-35 (data profiles), DEC-72
   (ADR-0001), DEC-77 (tests PR, implementation PR, status PR), DEC-79, DEC-80 (no plain comments),
   DEC-83 (tests PRs hold stubs only), DEC-85 (harness interpretations fail loudly until owned),
   DEC-97 (backtests are the evidence an owner sees before go-live), and DEC-106 (recorded by this
@@ -38,14 +39,17 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
 
   | Clause | Planned test |
   |---|---|
-  | §6.4.1 nothing fills before the first bar starting at or after decision + latency (+ approval latency), and never on the bar that produced the decision | `properties::no_fill_before_eligibility` |
+  | §6.4.1 nothing fills before the first bar starting at or after decision + latency (+ approval latency), and never on the bar that produced the decision (a bar starting before `decided_at`; a bar starting exactly at it is eligible, as RC-10's `market_sell_exit` shows) | `properties::no_fill_before_eligibility` |
   | §6.4.3 per bar and instrument, Σ fills over the account's orders ≤ truncate(fraction × reference volume, increment), allocated in submission order; 0 when the reference is unavailable | `properties::fills_never_exceed_the_shared_volume_cap` |
   | Σ fills of an order ≤ its quantity; every fill is positive and a multiple of the increment | `properties::orders_never_overfill` |
+  | §6.4.4 a market order fills at the slipped open of its first tradable bar | `hand::rc_10_market_sell_fills_at_the_slipped_open_of_the_first_eligible_bar`, `hand::a_market_order_waits_for_the_regular_session`; the oracle property |
   | §6.4.5 a touch is not a fill (resting limit, extreme equal to the limit) | `properties::a_touch_is_never_a_fill` |
   | §6.4.5 a buy limit never fills above its limit and a sell limit never below it | `properties::limit_prices_are_never_violated` |
   | Slippage and rounding never flatter a fill: a buy never pays less, and a sell never receives more, than the slippage-free price (DEC-106) | `properties::slippage_and_rounding_are_adverse` |
   | §6.4.2, §6.4.6 fills only in sessions the order may trade in; equity stops trigger only in the regular session | `properties::fills_respect_sessions` |
   | §6.4.2 a day order has no fill after its last eligible session ends | `properties::day_orders_expire_at_session_end` |
+  | §6.4.7 a triggered stop-limit fills at max(L, min(open, S) × (1 − s)) for a sell (symmetric for a buy), and rests as a limit when the bar opens beyond L | `hand::a_triggered_stop_limit_fills_at_the_better_of_limit_and_slipped_trigger_price`, `hand::rc_12_a_stop_limit_that_gaps_below_its_limit_rests_as_a_limit`; the oracle property |
+  | §6.4.9 fill prices are not tick-rounded (only the 9-place adverse rounding of DEC-106 item 2 applies) | `hand::fill_prices_round_against_the_order` (100.030000002), `hand::rc_10_the_volume_cap_is_ten_percent_of_the_previous_bar` (100.43012); `properties::slippage_and_rounding_are_adverse` |
   | §6.4.8 at most one OCO leg fills; the first fill of either leg cancels the other (DEC-106) | `properties::oco_fills_at_most_one_leg` |
   | Replay: the same inputs give identical fills | `properties::identical_inputs_give_identical_fills` |
 
@@ -54,7 +58,10 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
   different loop structure (order-major rather than bar-major). It will be shown to fail on planted
   bugs before it is trusted: a fill at the touch, the decision bar filling, the cap not shared
   across orders, sell slippage with the sign reversed, a stop triggering pre-market, and both OCO
-  legs filling. Hand tests in `hand.rs` reproduce each case of RC-10, RC-12, and RC-19, with the
+  legs filling, the remaining quantity never decreasing (`orders_never_overfill`), and day orders
+  never expiring (`day_orders_expire_at_session_end`). `identical_inputs_give_identical_fills` has
+  no plantable bug in a pure function with ordered collections; it guards against a future clock
+  read, random source, or unordered map. Hand tests in `hand.rs` reproduce each case of RC-10, RC-12, and RC-19, with the
   arithmetic in each doc comment.
 
 - **Crates in scope:** new `mandate-sim` (layer 6 per `xtask/layers.toml`'s plan; `pure = true`;
@@ -187,9 +194,11 @@ clock, does no I/O, and keeps no state between calls.
    from that same bar, as rule 5 rests a limit "from the first eligible bar". The order triggered at
    the open, so any later print through L in that bar came after the trigger.
 8. **OCO with a volume cap.** The first fill of either leg, partial or full, cancels the other leg,
-   as the broker does. The filled leg's remainder continues under its own rule on later bars.
-9. **Sessions.** An order trades in the regular session, plus the extended sessions when
-   `extended_hours` is set (limit orders only, §5.2). Equity stops and stop-limits trigger only on
+   as the broker does. A take-profit remainder keeps resting at its limit; a stop remainder is a
+   market order (item 10).
+9. **Sessions.** An order trades in the regular session, plus pre-market and after-hours when
+   `extended_hours` is set (limit orders only, §5.2). Nothing fills in the overnight session
+   (DEC-30). Equity stops and stop-limits trigger only on
    regular-session bars (§6.4.6). Crypto bars are `Continuous`. A day order's remainder is canceled
    after the last bar of its last eligible session.
 10. **Lifecycles.** A trigger or a change of phase happens on the bar that causes it, even when
@@ -218,7 +227,7 @@ clock, does no I/O, and keeps no state between calls.
 ```bash
 cargo xtask check
 cargo nextest run -p mandate-sim
-cargo test -p mandate-refcases -- --include-ignored trading_domain::RC-1
+cargo nextest run -p mandate-refcases --run-ignored all -E 'test(=trading_domain::RC-10) | test(=trading_domain::RC-12) | test(=trading_domain::RC-19)'
 cargo mutants -p mandate-sim
 ```
 

@@ -33,7 +33,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
 | E17-0 Research spike | PR open | [#44](https://github.com/kunwarshivam/mandate/pull/44) (code and docs), tests in a second PR | `python/research_spike/`: LLM theses over news and prices, fixed sizing, paper orders, hash-chained JSON Lines journal, score report. Two-to-three-week timebox; exits with a decision-log entry |
 | E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
-| E4-1 Simulated execution | Brief PR open | branch `agent/e4-1-brief` | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19). [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106 |
+| E4-1 Simulated execution | Brief PR open | [#61](https://github.com/kunwarshivam/mandate/pull/61) | New `mandate-sim`: the §6.4 fill model as a pure function (RC-10, RC-12, RC-19). [Task brief](tasks/E4-1-simulated-execution.md); interpretations in DEC-106 |
 
 ## Reference cases
 
@@ -59,7 +59,7 @@ issues are the record; this table is the summary
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
 | E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
-| E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Brief PR open (task brief, DEC-106); tests, implementation, and status PRs follow | `agent/e4-1-brief`; next `agent/e4-1-sim-tests`, `agent/e4-1-sim-impl`, `agent/e4-1-sim-status` |
+| E4-1 simulated execution (backtest fill model) | `claude-code` | #58 | Brief PR open (task brief, DEC-106); tests, implementation, and status PRs follow | #61 (brief); built and pushed: `agent/e4-1-sim-tests`, `agent/e4-1-sim-impl`, `agent/e4-1-sim-status` |
 
 ## Waiting on the founder
 
