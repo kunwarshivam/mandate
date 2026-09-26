@@ -71,7 +71,7 @@ issues are the record; this table is the summary
 | `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
 | E5-2 artifact store | `cursor` | #59 | Tests merged (#66); implementation PR #84 open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be` (#66), `cursor/e5-2-artifact-impl-b0be` (#84) |
 | `xtask`: pending tests must fail on stubs (shared crate) | `cursor` | #76 | Review passed; gate runs every pending test (DEC-110, reserved in #83) | `cursor/xtask-pending-fail-7e3b` (#81) |
-| `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` |
+| `mandate-marketdata`: safe concurrent dataset writes (E2-1 follow-up) | `cursor` | #86 | PR open, ready for review | `cursor/marketdata-write-safety` (#90) |
 
 ## Waiting on the founder
 
