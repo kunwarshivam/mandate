@@ -17,7 +17,7 @@ usage: cargo xtask <command>
 commands:
   check                 run every per-PR job locally
   ci <job>              run one CI job: fast | full | nightly, or one part: lint | test | spec-guard |
-                        refcases | reference | supply-chain | mutants
+                        refcases | reference | supply-chain | postgres | mutants
   layers                check crate layering and safety-critical policy (xtask/layers.toml)
   markers               check for debt markers and #[ignore] without a pending story
   feature-map           check the verification skill's feature map against the workspace
@@ -27,16 +27,28 @@ commands:
 
 /// The two required checks (DEC-76), so each pays the setup cost once.
 const FAST_JOB: [&str; 3] = ["lint", "test", "spec-guard"];
-const FULL_JOB: [&str; 4] = ["refcases", "reference", "supply-chain", "mutants"];
-const PR_JOBS: [&str; 7] = [
+const FULL_JOB: [&str; 5] = [
+    "refcases",
+    "reference",
+    "supply-chain",
+    "postgres",
+    "mutants",
+];
+const PR_JOBS: [&str; 8] = [
     "lint",
     "test",
     "refcases",
     "reference",
     "supply-chain",
     "spec-guard",
+    "postgres",
     "mutants",
 ];
+
+/// The database the Postgres journal tests use, and the switch that makes its absence a failure
+/// rather than a skip (DEC-109). CI's `full` and nightly jobs set both.
+const PG_URL: &str = "MANDATE_PG_URL";
+const PG_REQUIRED: &str = "MANDATE_PG_REQUIRED";
 
 /// Lint header every safety-critical crate's `src/lib.rs` must carry (ADR-0001 ES-09, ES-21).
 const REQUIRED_HEADER: &str = "#![deny(
@@ -199,6 +211,7 @@ fn ci(job: &str) -> Result<()> {
             commit_trailers()?;
             spec_guard()
         }
+        "postgres" => postgres(),
         "mutants" => mutants(),
         "fast" => {
             for part in FAST_JOB {
@@ -224,6 +237,38 @@ fn ci(job: &str) -> Result<()> {
         }
         other => bail!("unknown CI job: {other}"),
     }
+}
+
+/// The Postgres journal tests against a real database (ADR-0001 ES-08). `test` runs them too, but
+/// they skip there unless `MANDATE_PG_URL` is set; here they must run.
+fn postgres() -> Result<()> {
+    if env::var_os(PG_URL).is_none() {
+        if env::var_os(PG_REQUIRED).is_some() {
+            bail!("{PG_REQUIRED} is set but {PG_URL} is not");
+        }
+        eprintln!(
+            "    postgres: {PG_URL} is unset; skipping (see crates/mandate-journal-pg/README.md)"
+        );
+        return Ok(());
+    }
+    let args = [
+        "nextest",
+        "run",
+        "--package",
+        "mandate-journal-pg",
+        "--locked",
+        "--no-tests=pass",
+    ];
+    eprintln!("    $ {PG_REQUIRED}=1 cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .env(PG_REQUIRED, "1")
+        .status()
+        .context("starting `cargo nextest`")?;
+    if !status.success() {
+        bail!("the Postgres journal tests failed with {status}");
+    }
+    Ok(())
 }
 
 fn sh(program: &str, args: &[&str]) -> Result<()> {

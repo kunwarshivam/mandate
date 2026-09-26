@@ -81,6 +81,30 @@ if ! grep -qs '^[[:space:]]*python-install-mirror[[:space:]]*=' "$uv_config"; th
 fi
 uv python install "$PYTHON_VERSION"
 
+# PostgreSQL for the Postgres journal tests (ADR-0001 ES-08, crates/mandate-journal-pg/README.md).
+# Best effort: apt.postgresql.org is not reachable from every session, and without a database those
+# tests skip. CI runs them against its own service container either way.
+PG_MAJOR=18
+SUDO=""
+[ "$(id -u)" -eq 0 ] || SUDO="sudo -n"
+as_postgres() {
+  if [ -z "$SUDO" ]; then runuser -u postgres -- "$@"; else $SUDO -u postgres "$@"; fi
+}
+install_postgres() {
+  $SUDO apt-get install -y -qq postgresql-common &&
+    $SUDO /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y &&
+    $SUDO apt-get install -y -qq "postgresql-$PG_MAJOR"
+}
+if [ ! -x "/usr/lib/postgresql/$PG_MAJOR/bin/postgres" ] && ! install_postgres; then
+  echo "warning: PostgreSQL $PG_MAJOR not installed; the Postgres journal tests will skip" >&2
+fi
+if [ -x "/usr/lib/postgresql/$PG_MAJOR/bin/postgres" ]; then
+  $SUDO pg_ctlcluster "$PG_MAJOR" main start 2>/dev/null || true
+  as_postgres psql -qc "ALTER USER postgres PASSWORD 'postgres'" ||
+    echo "warning: could not set the local postgres password (see the journal README)" >&2
+  echo "Postgres journal tests: export MANDATE_PG_URL=postgres://postgres:postgres@localhost:5432/postgres"
+fi
+
 # Cursor's agent hooks add the invoking user's email as a Co-authored-by trailer on agent commits.
 # The founder does not want that address in the history, and CI rejects the trailer (spec guard).
 for hook in "$HOME"/.cursor/agent-hooks/*/commit-msg.cursor.co-author; do
