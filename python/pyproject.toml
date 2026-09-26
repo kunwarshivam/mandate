@@ -2,14 +2,16 @@
 # not part of this workspace; it runs in its own pinned environment.
 
 [tool.uv.workspace]
-members = ["mandate_tools"]
+members = ["mandate_tools", "research_spike"]
 
 [tool.uv.sources]
 mandate-tools = { workspace = true }
+research-spike = { workspace = true }
 
 [dependency-groups]
 dev = [
     "mandate-tools",
+    "research-spike",
     "pytest==9.1.1",
     "ruff==0.16.9",
 ]
@@ -22,8 +24,8 @@ target-version = "py314"
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["mandate_tools"]
+known-first-party = ["mandate_tools", "research_spike"]
 
 [tool.pytest.ini_options]
-testpaths = ["mandate_tools/tests"]
+testpaths = ["mandate_tools/tests", "research_spike/tests"]
 addopts = "--strict-markers"

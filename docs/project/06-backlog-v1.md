@@ -235,6 +235,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 Design: [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) ([DEC-97](04-decision-log.md#decisions)).
 The mandate spec, schemas, reference implementation, and cases are rewritten first in spec-change PRs.
 
+- **E17-0 (Must, now)** research spike: an LLM loop over news and prices, paper-traded on the
+  research basket with fixed sizing, to de-risk E17-2 before it is product code
+  ([task brief](tasks/RS-1-research-spike.md); `python/research_spike/`).
+  *Accepted when:* a report with hit rate, expectancy versus SPY, and cost per thesis after two to
+  three weeks of paper trading.
 - **E17-1 (Must)** As an owner, I want the mandate split into envelope fields I confirm and a working
   universe the platform produces at runtime, so that I set the risk and the agent brings the ideas.
   *Accepted when:* the rewritten mandate spec's cases pass; the compiler may propose envelope values,
