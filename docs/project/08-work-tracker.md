@@ -64,7 +64,8 @@ issues are the record; this table is the summary
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR #57 reviewed PASS; rebase and the founder's confirmation pending | `cursor/direction-follow-ups-v2` (#57) |
 | E2-4 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
 | E2-2 dataset inspect | `cursor` | #56 | One PR (not safety-critical), open with CI green, awaiting review | `cursor/e2-2-inspect-2749` |
-| #55 `install.sh` without `astral.sh` | `cursor` | #63 | PR open, ready for review | `cursor/install-no-astral` (#65) |
+| #55 `install.sh` without `astral.sh` | `cursor` | #63 | Merged (#65) | `cursor/install-no-astral` (#65) |
+| `install.sh` follow-ups from the #65 review | `cursor` | #70 | PR open, ready for review | `cursor/install-followup` (#73) |
 | E5-2 artifact store | `cursor` | #59 | Tests PR open; DEC-107 reserved (#60) | `cursor/e5-2-artifact-tests-b0be`; implementation `cursor/e5-2-artifact-impl-b0be` after the tests PR merges |
 
 ## Waiting on the founder
