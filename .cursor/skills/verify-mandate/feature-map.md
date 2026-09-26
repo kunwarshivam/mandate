@@ -124,7 +124,8 @@ every workspace crate and reference-case suite has an entry and that every path 
   paths, page parsing), `crates/mandate-marketdata/src/client.rs` (pagination, retries, backoff),
   `crates/mandate-marketdata/src/http.rs` (the market-data host only, credentials),
   `crates/mandate-marketdata/src/dataset.rs` and
-  `crates/mandate-marketdata/src/dataset/partition.rs` (Parquet partitions).
+  `crates/mandate-marketdata/src/dataset/partition.rs` (Parquet partitions, manifest,
+  compare-before-write), `crates/mandate-marketdata/src/download.rs` (one dataset over a day range).
 - **Tests:** `crates/mandate-marketdata/tests/` against recorded responses in
   `crates/mandate-marketdata/tests/fixtures/alpaca/`.
 - **Run:** `cargo nextest run -p mandate-marketdata`; against the data host with the paper
