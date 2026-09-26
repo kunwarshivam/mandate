@@ -51,7 +51,16 @@ pub enum AccountingError {
 impl AccountingError {
     /// Stable reason code (ADR-0001 ES-09).
     pub fn code(&self) -> &'static str {
-        ""
+        match self {
+            Self::DuplicateFill(_) => "duplicate_fill",
+            Self::ZeroQuantity => "zero_quantity",
+            Self::MissingLiquidity => "missing_liquidity",
+            Self::NoMark(_) => "no_mark",
+            Self::InvalidPosition => "invalid_position",
+            Self::EmptyInstrumentId => "empty_instrument_id",
+            Self::Num(e) => e.code(),
+            Self::Time(e) => e.code(),
+        }
     }
 }
 
@@ -60,18 +69,22 @@ impl AccountingError {
 pub struct InstrumentId(String);
 
 impl InstrumentId {
-    pub fn new(_id: &str) -> Result<Self, AccountingError> {
-        Err(AccountingError::EmptyInstrumentId)
+    pub fn new(id: &str) -> Result<Self, AccountingError> {
+        if id.is_empty() {
+            Err(AccountingError::EmptyInstrumentId)
+        } else {
+            Ok(Self(id.to_owned()))
+        }
     }
 
     pub fn as_str(&self) -> &str {
-        ""
+        &self.0
     }
 }
 
 impl core::fmt::Display for InstrumentId {
-    fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        Ok(())
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -101,6 +114,9 @@ pub enum FeeFamily {
     Crypto,
 }
 
+/// How the TAF cap in force for a fill applies (DEC-87). `PerExecution` caps the fill's TAF.
+/// `PerOrder` caps it at max(0, cap − TAF already charged on the fill's client order, in either
+/// mode); a fill without a client order ID is its own order. Charged TAF is never refunded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TafCapBasis {
     PerExecution,
