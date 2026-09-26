@@ -141,3 +141,4 @@ reservation keeps its row and its number is never reused.
 |---|---|---|---|---|
 | DEC-99 to DEC-103 | `cursor` | — | Direction follow-ups (#52) | Reserved |
 | DEC-104, DEC-105 | `claude-code` | #48 | E3-3 fold and harness decisions (#46; renumbered from DEC-99 and DEC-100) | In #46 |
+| DEC-107 | `cursor` | #59 | E5-2: the filesystem artifact backend's own crate (ES-02 crate list) | Reserved |
