@@ -135,7 +135,7 @@ historical endpoints with keys you supply in the environment.
 | M2 Accounting | Done: verified against the hand-calculated reference cases including splits, dividends, partial fills, settlement |
 | M3 Simulated execution and backtest | Fill model done (RC-10, RC-12, RC-19 passing); the backtest loop and metrics report have their tests merged, implementation in progress |
 | M4 Journal | Done except the cold store and segment manifests: hash chain, verification, Postgres hot store, artifact store, the verification command |
-| M5 Agent runtime and risk (Phase 1) | Started: five streams (the mandate document as code with its case harness, the risk gate, the order builder, the runtime skeleton, the research-agent thin slice) run as brief, tests, and implementation pull requests; the first briefs are in review and the mandate spec v0.6 with its 298 cases is the contract |
+| M5 Agent runtime and risk (Phase 1) | Started: five streams (the mandate document as code with its case harness, the risk gate, the order builder, the runtime skeleton, the research-agent thin slice) run as brief, tests, and implementation pull requests; the runtime and order-builder briefs are merged (#126, #128) and the risk-gate and mandate-document briefs are in review (#127, #129); the mandate spec v0.6 with its 298 cases is the contract |
 
 The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision
 with its PR numbers. Phase 1 ends when an agent trades an Alpaca paper account unattended through a
