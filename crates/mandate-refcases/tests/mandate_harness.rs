@@ -241,8 +241,9 @@ fn every_owned_expectation_member_is_read() {
             "{id}: the failure must name the expectation it did not read, got: {failure}"
         );
     }
-    assert!(
-        top_level >= 170 && in_steps >= 50,
-        "both sweeps must have been exercised, got {top_level} top-level and {in_steps} in steps"
+    assert_eq!(
+        (top_level, in_steps),
+        (178, 111),
+        "both sweeps must have been exercised over every expectation the owned cases carry"
     );
 }
