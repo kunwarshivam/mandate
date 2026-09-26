@@ -11,8 +11,8 @@ entry in `xtask/layers.toml`.
 | Name | Ecosystem | Used by | Purpose | Alternatives considered | License | Approved |
 |---|---|---|---|---|---|---|
 | `anyhow` | cargo | xtask | Error context in tooling (binaries only, ES-09) | Plain `Box<dyn Error>` | MIT OR Apache-2.0 | DEC-72 |
-| `serde` | cargo | xtask | Deserializing `cargo metadata` and TOML policy files | Hand parsing | MIT OR Apache-2.0 | DEC-72 |
-| `serde_json` | cargo | xtask; mandate-refcases; mandate-canon (dev) | Reading `cargo metadata` output and the reference-case fixtures, and feeding the differential canonicalizer test; never on the hashing path (ES-07) | `json` crate | MIT OR Apache-2.0 | DEC-72 |
+| `serde` | cargo | xtask; mandate-marketdata | Deserializing `cargo metadata`, TOML policy files, and Alpaca response envelopes | Hand parsing | MIT OR Apache-2.0 | DEC-72 |
+| `serde_json` | cargo | xtask; mandate-refcases; mandate-marketdata; mandate-canon (dev) | Reading `cargo metadata` output and the reference-case fixtures, and feeding the differential canonicalizer test; in `mandate-marketdata`, Alpaca responses with every number read as raw text through the `raw_value` feature (ES-23). Never on the hashing path (ES-07); `arbitrary_precision` stays banned | `json` crate | MIT OR Apache-2.0 | DEC-72 |
 | `toml` | cargo | xtask; mandate-refcases | Reading `xtask/layers.toml`, `pyproject.toml`, and `crates/mandate-refcases/status.toml` | `toml_edit` | MIT OR Apache-2.0 | DEC-72 |
 | `sha2` | cargo | mandate-canon | SHA-256 for event hashes, anchors, and artifact references (ES-07); `default-features = false` | `ring`, `aws-lc-rs` (C and assembly, larger surface) | MIT OR Apache-2.0 | DEC-72 |
 | `rust_decimal` | cargo | mandate-num | Storage of typed decimal values behind private-field newtypes (ES-04); `default-features = false`; its arithmetic and `FromStr` are never used for results | `bigdecimal` (heap-allocated, unbounded), `fixed` (binary fractions) | MIT | DEC-72 |

@@ -1,0 +1,1 @@
+/v2/stocks/bars?symbols=SPY&timeframe=1Hour&start=2026-09-24T00:00:00Z&end=2026-09-25T00:00:00Z&limit=10000&feed=sip&adjustment=raw&sort=asc

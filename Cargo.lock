@@ -429,6 +429,8 @@ dependencies = [
  "mandate-canon",
  "mandate-time",
  "proptest",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

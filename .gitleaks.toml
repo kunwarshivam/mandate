@@ -14,3 +14,11 @@ id = "alpaca-secret"
 description = "Alpaca API secret assigned to a variable"
 regex = '''(?i)alpaca[a-z_]*secret[a-z_]*\s*[:=]\s*['"]?[A-Za-z0-9/+]{30,}'''
 keywords = ["alpaca"]
+
+# Alpaca pagination tokens in recorded fixtures are base64 of `SYMBOL|...|timestamp`, not
+# credentials; the tests replay them to check pagination (E2-1, DEC-89).
+[[allowlists]]
+description = "Alpaca page tokens"
+targetRules = ["generic-api-key"]
+regexTarget = "match"
+regexes = ['''^(?:next_page_token":"[A-Za-z0-9+/=]+"|page_token=[A-Za-z0-9+/%=]+)$''']
