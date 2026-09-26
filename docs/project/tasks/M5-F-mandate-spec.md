@@ -643,14 +643,17 @@ purposes, first match wins, the default, and the `autonomy.admission` ceiling �
 is every implementation of `Facts`. This split is why the A-family cases are H's while V-017, V-018,
 and V-023 are this stream's.
 
-Stream H's brief (#128) currently defines its own `Condition`, `Field`, `Op`, and `Value`, its own
-`matches` oracle, and the `ConditionTooDeep`, `ConditionTypeMismatch`, and `ReservedField` errors.
-Those are the same §6.3 rule in a second safety-critical crate, which is the very argument this brief
-uses to leave family F with stream G, so they go: `mandate-spec` owns the tree, `Condition::matches`,
-and those three error variants (they are V-017, V-023, and V-018, which only `validate` can report),
-and H's tests PR deletes its copy and imports them. H keeps its own `Facts` implementation and its own
-oracle *for §6.2*, which is a different rule. F's tests PR lands the types first, so H has something
-to import (DEC-128 item 21).
+Stream H's brief ([#128](https://github.com/kunwarshivam/mandate/pull/128), merged) defines its own
+`Condition`, `Field`, `Op`, and `Value`, its own `matches` oracle, and the `ConditionTooDeep`,
+`ConditionTypeMismatch`, and `ReservedField` errors. Those are the same §6.3 rule in a second
+safety-critical crate, which is the very argument this brief uses to leave family F with stream G, so
+they go: `mandate-spec` owns the tree, `Condition::matches`, and those three error variants (they are
+V-017, V-023, and V-018, which only `validate` can report). H's own brief already sets the mechanism
+— its item 5 and its Dependencies section say that types this brief places in `mandate-domain` or
+`mandate-spec` are taken from there **in H's implementation PR**, "which changes no signature in this
+brief" — so H's tests PR keeps its narrow views and does not block on F, and its implementation PR
+imports these and deletes the copy. H keeps its own `Facts` implementation and its own oracle *for
+§6.2*, which is a different rule (DEC-128 item 21).
 
 ## The case-loading design
 
@@ -842,8 +845,9 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     mandate, a thesis, or a reference case, while `mandate_accounting::InstrumentId` stays the wider
     broker-facing id (`AssetId -> InstrumentId` total, the reverse fallible and needed only at a
     connector); (c) the §6.3 condition tree, `Condition::matches`, and the `ConditionTooDeep`,
-    `ConditionTypeMismatch`, and `ReservedField` errors are `mandate-spec`'s alone, and stream H's
-    tests PR deletes its copy and imports them, keeping only its own `Facts` and its §6.2 oracle;
+    `ConditionTypeMismatch`, and `ReservedField` errors are `mandate-spec`'s alone, and stream H
+    imports them in its **implementation** PR, the sequencing H's own merged brief sets (its item 5
+    and Dependencies), keeping only its own `Facts` and its §6.2 oracle;
     (d) the risk snapshot's field is `day_start_equity`, the name every `risk_state` case uses, not
     `day_open_equity`; (e) the V-code enum is `Violation`, leaving `Rule` for `autonomy.rules[]`,
     which H reads by that name. F's tests PR lands all of these first so the other streams have
