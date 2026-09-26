@@ -72,7 +72,7 @@ fn objects_live_at_sha256_shard_hex_and_are_read_only() {
     let (dir, mut store) = open("layout");
     let reference = store.put_artifact(b"abc").unwrap();
     assert_eq!(reference.to_string(), format!("sha256:{ABC_SHA256}"));
-    let expected = dir.join("sha256").join("ba").join(ABC_SHA256);
+    let expected = dir.join("sha256").join(&ABC_SHA256[..2]).join(ABC_SHA256);
     assert_eq!(store.object_path(&reference), expected);
     assert_eq!(fs::read(&expected).unwrap(), b"abc");
     assert!(fs::metadata(&expected).unwrap().permissions().readonly());
@@ -200,7 +200,7 @@ fn verification_reads_artifacts_from_disk() {
     );
     assert_eq!(store.put_artifact(&content), Ok(reference));
     assert!(verify_events(journal.rows(&stream), TrustedStart::GENESIS, &store).is_ok());
-    tamper(&store, &reference, b"model respons3");
+    tamper(&store, &reference, b"tampered response");
     assert_eq!(
         verify_events(journal.rows(&stream), TrustedStart::GENESIS, &store),
         failed(EventCheck::ArtifactMismatch)
