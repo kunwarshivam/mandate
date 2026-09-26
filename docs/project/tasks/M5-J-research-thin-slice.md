@@ -80,10 +80,12 @@ implements one story's worth at a time.
   monitoring, the operator per-thesis halt, staggered execution), DEC-101 (the vetted allowlist,
   corroboration, the drift detector, injection fixtures), DEC-102 (counsel now), DEC-103 (the thin
   slice), DEC-110 (every pending test fails on the stubs), DEC-111 (the revision loop and the
-  lineage cap), DEC-117 to DEC-126 (`Proposed (founder)`; the items this brief depends on are listed
-  below), DEC-128 (stream F's types), DEC-129 (stream G's gate), DEC-130 (stream H's builder and
-  autonomy), DEC-131 (stream I's runtime), and DEC-132 (this brief's interpretations).
-- **Proposed decisions this brief depends on.** A founder veto of any of these reopens this brief:
+  lineage cap), DEC-117 to DEC-126 (**Accepted (founder, 2026-09-26)**; the items this brief depends
+  on are listed below), DEC-128 (stream F's types), DEC-129 (stream G's gate), DEC-130 (stream H's
+  builder and autonomy), DEC-131 (stream I's runtime), and DEC-132 (this brief's interpretations).
+- **The rewrite answers this brief depends on.** The founder confirmed DEC-117 to DEC-126 on
+  2026-09-26 ([#133](https://github.com/kunwarshivam/mandate/pull/133)), after the spec PR #109
+  merged, so each is settled rather than provisional:
   **DEC-117** (`max_instruments`, the platform ceiling of 20 and the default of 5; check 17),
   **DEC-118** (thesis lifetime: `expires_at = as_of + horizon_s`, no automatic renewal, expiry makes
   the instrument removed; checks 2 and `thesis_expired`), **DEC-120** (the cost cap as an envelope
@@ -805,8 +807,6 @@ Stop and write a DEC proposal instead of continuing if any of these happen:
 - a test would have to be weakened, skipped, or deleted;
 - a reference case seems wrong (propose the fix to the founder; never edit the fixture);
 - anything would deviate from an accepted decision;
-- the founder vetoes DEC-117, DEC-118, DEC-120, DEC-121, DEC-123, or DEC-126, which reopens this
-  brief;
 - stream F's or stream H's merged brief changes a type this brief reads.
 
 ## Definition of done
