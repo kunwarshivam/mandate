@@ -770,8 +770,9 @@ fn inspect_summarizes_stored_quotes_with_exact_sides_spreads_and_counts() {
     assert_eq!(inspection.dataset, id);
     assert_eq!(inspection.coverage.listed, 2);
     assert_eq!(
-        inspection.coverage.empty,
-        vec![DayRange::new(day("2026-09-19"), day("2026-09-19")).unwrap()]
+        (inspection.coverage.empty, inspection.coverage.closed),
+        (Vec::<DayRange>::new(), 1),
+        "Saturday 2026-09-19 is listed without quotes while SIP is closed"
     );
     assert!(inspection.gaps.is_empty(), "quotes have no bar grid");
     assert!(inspection.problems.is_empty());

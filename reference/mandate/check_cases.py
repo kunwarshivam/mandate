@@ -33,7 +33,8 @@ for c in d["cases"]:
             req(cid, e["violations"][0]["limit_level"] == "workspace", "nearest level")
 
 # policy specifics
-req("MC-P05", {v["key"] for v in C["MC-P05"]["expect"]["violations"]} == {"auto_allowed", "signal_model_types"}, "retail violations")
+req("MC-P05", {v["key"] for v in C["MC-P05"]["expect"]["violations"]} == {"research_agent_allowed"}, "retail refuses the research agent")
+req("MC-P14", {v["key"] for v in C["MC-P14"]["expect"]["violations"]} == set(), "retail now allows auto and llm (DEC-98)")
 req("MC-P04", C["MC-P04"]["expect"]["violations"][0]["level"] == "workspace", "workspace itself invalid")
 # semantic specifics
 exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006", "MC-V09": "V-007", "MC-V10": "V-007",
@@ -42,13 +43,18 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V24": "V-017", "MC-V25": "V-018", "MC-V26": "V-020", "MC-V27": "V-020", "MC-V29": "V-020", "MC-V30": "V-020",
        "MC-V31": "V-022", "MC-V33": "V-023", "MC-V34": "V-023", "MC-V35": "V-023", "MC-V36": "V-023", "MC-V37": "V-023",
        "MC-V38": "V-023", "MC-V39": "V-024", "MC-V41": "V-030", "MC-V43": "V-031", "MC-V44": "V-032",
-       "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033"}
+       "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033",
+       "MC-V53": "V-034", "MC-V54": "V-034", "MC-V55": "V-035", "MC-V56": "V-036", "MC-V57": "V-036",
+       "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-039", "MC-V62": "V-038", "MC-V63": "V-020",
+       "MC-V64": "V-022", "MC-V67": "V-020"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")
 req("MC-V13", "W-003" in C["MC-V13"]["expect"]["warnings"], "W-003")
 req("MC-V46", "W-001" in C["MC-V46"]["expect"]["warnings"], "W-001")
 req("MC-V47", "W-005" in C["MC-V47"]["expect"]["warnings"], "W-005")
 req("MC-V48", len(C["MC-V48"]["expect"]["violations"]) >= 3, "multiple")
+req("MC-V60", C["MC-V60"]["expect"]["violations"] == ["V-003", "V-036"], "accumulate admits nothing, two ways")
+req("MC-V65", "W-006" in C["MC-V65"]["expect"]["warnings"], "W-006")
 
 # risk state
 s = steps("MC-R01")
@@ -81,6 +87,13 @@ s = steps("MC-R11")
 req("MC-R11", s[1]["restrictions"] == [] and s[1]["drawdown"] == s[0]["drawdown"] and s[2]["drawdown"] == s[0]["drawdown"], "no trip, DD preserved")
 s = steps("MC-R12")
 req("MC-R12", s[2].get("error") == "increase_blocked_while_latched" and s[3].get("error") == "equity_below_exposure", "rejections")
+s = steps("MC-R24")
+req("MC-R24", s[1]["instrument_restrictions"] == ["removed_instrument"] and s[3]["instrument_restrictions"] == [],
+    "removal restricts the instrument, re-admission clears it")
+req("MC-R24", all(any(j["type"] == "InstrumentRestrictionChanged" and j["restriction"] == "removed_instrument"
+                      and j["reason"] == x["reason"] for j in x["expect"]["journal"])
+                  for x in C["MC-R24"]["steps"] if x["event"] == "universe_changed"),
+    "the restriction event names removed_instrument with the universe reason, not stale_mark")
 s = steps("MC-R13")
 req("MC-R13", s[2]["agent_equity"] == s[1]["agent_equity"] and s[2]["instrument_restrictions"] == [] and
     s[3]["instrument_restrictions"] == ["stale_mark"] and s[4]["instrument_restrictions"] == [] and s[5]["instrument_restrictions"] == ["stale_mark"],
@@ -110,11 +123,13 @@ req("MC-R23", any(j["type"] == "AgentStopped" and float(j["loss_carry_usd"]) > 8
 # gate
 for cid, reason in {"MC-G01": "concentration_limit", "MC-G03": "max_order_size", "MC-G04": "gross_exposure_limit",
                     "MC-G05": "concentration_limit", "MC-G06": "gross_exposure_limit", "MC-G07": "max_orders_per_day",
-                    "MC-G11": "reentry_cooldown", "MC-G12": "reentry_cooldown"}.items():
+                    "MC-G11": "reentry_cooldown", "MC-G12": "reentry_cooldown",
+                    "MC-G14": "not_in_working_universe"}.items():
     req(cid, C[cid]["expect"]["reason"] == reason, reason)
 req("MC-G05", C["MC-G05"]["expect"]["computed"]["cap"] == "1425", "fraction cap binds")
 req("MC-G06", C["MC-G06"]["expect"]["computed"]["gross_limit"] == "9500", "E caps gross")
-for cid in ("MC-G02", "MC-G08", "MC-G09", "MC-G10", "MC-G13"):
+req("MC-G16", C["MC-G16"]["expect"]["reason"] == "not_in_working_universe", "an empty universe denies")
+for cid in ("MC-G02", "MC-G08", "MC-G09", "MC-G10", "MC-G13", "MC-G15"):
     req(cid, C[cid]["expect"]["verdict"] == "allow", "allow")
 
 # builder
@@ -153,9 +168,13 @@ req("MC-B28", B["MC-B28"]["qty"] != "0.01" and "goal" in B["MC-B28"]["clipped_by
 req("MC-B29", B["MC-B29"]["reason"] == "discretionary_exits_disabled", "no sells")
 # autonomy
 for cid, dec in {"MC-A01": "auto", "MC-A02": "auto", "MC-A03": "auto", "MC-A04": "auto", "MC-A05": "ask", "MC-A06": "ask",
-                 "MC-A07": "auto", "MC-A08": "auto", "MC-A09": "ask", "MC-A10": "ask", "MC-A11": "ask"}.items():
+                 "MC-A07": "auto", "MC-A08": "auto", "MC-A09": "ask", "MC-A10": "ask", "MC-A11": "ask",
+                 "MC-A12": "ask", "MC-A13": "auto", "MC-A14": "deny", "MC-A15": "deny", "MC-A16": "ask"}.items():
     req(cid, C[cid]["expect"]["decision"] == dec, dec)
 req("MC-A10", C["MC-A10"]["expect"]["approvers_required"] == 2, "two approvers")
+req("MC-A12", C["MC-A12"]["expect"]["by"] == "admission_ceiling", "the ceiling, not the rule, decided")
+req("MC-A13", C["MC-A13"]["expect"]["by"].startswith("rule:"), "the rule decides once the owner allows auto")
+req("MC-A15", C["MC-A15"]["expect"]["by"] == "rule:no_new", "the ceiling never loosens a deny rule")
 # flatten
 F = {cid: C[cid]["expect"] for cid in ("MC-F01", "MC-F02", "MC-F03", "MC-F04")}
 for cid, f in F.items():
@@ -168,10 +187,83 @@ req("MC-F04", len(F["MC-F04"]["deferred_sells"]) == 1, "owner unconfirmed waits"
 req("MC-L05", not C["MC-L05"]["expect"]["done"], "not done")
 for cid in ("MC-L01", "MC-L02", "MC-L03", "MC-L04"):
     req(cid, C[cid]["expect"]["done"] and C[cid]["expect"]["then"] == "hold_protected", "done, on_complete")
+# research agent: admission (§8.5), lineage (§8.6), expiry (DEC-118), stagger (DEC-100)
+ADM = {cid: C[cid]["expect"] for cid in C if C[cid]["kind"] == "admission"}
+adm_reason = {"MC-N25": "leveraged_etp_not_enabled",
+              "MC-N02": "universe_full", "MC-N03": "not_allowed_asset_class", "MC-N04": "eligibility_floor",
+              "MC-N05": "instrument_group_claimed", "MC-N06": "no_corroboration", "MC-N07": "source_not_allowlisted",
+              "MC-N08": "research_disabled", "MC-N09": "cost_cap_reached", "MC-N10": "operator_halt",
+              "MC-N11": "not_in_data_universe", "MC-N12": "direction_not_allowed", "MC-N13": "horizon_mismatch",
+              "MC-N15": "admission_denied", "MC-N16": "leveraged_etp_not_enabled"}
+for cid, reason in adm_reason.items():
+    req(cid, ADM[cid]["admitted"] is False and ADM[cid]["reason"] == reason, f"refused with {reason}")
+    req(cid, not any(j["type"] == "UniverseChanged" for j in ADM[cid]["journal"]), "a refusal changes no universe")
+    req(cid, ADM[cid]["first_order_autonomy"] is None, "a refusal proposes no order")
+for cid in ("MC-N12", "MC-N13", "MC-N19"):
+    e = ADM.get(cid) or C[cid]["expect"]["steps"][0]
+    req(cid, e.get("ignored", e.get("reason") == "revision_without_predecessor"), "a malformed thesis is ignored")
+req("MC-N26", ADM["MC-N26"]["admitted"] and ADM["MC-N26"]["reason"] is None,
+    "a leveraged ETP with the opt-in and the accepted disclosure is admitted")
+req("MC-N01", ADM["MC-N01"]["admitted"] and ADM["MC-N01"]["change"] == "admitted"
+    and ADM["MC-N01"]["universe_size_after"] == 1
+    and any(j["type"] == "UniverseChanged" and j["change"] == "admitted" for j in ADM["MC-N01"]["journal"]), "admitted")
+req("MC-N01", ADM["MC-N01"]["first_order_autonomy"]["decision"] == "ask", "the platform default for admissions is ask")
+req("MC-N02", ADM["MC-N02"]["universe_size_after"] == 5, "a full universe is unchanged")
+req("MC-N14", ADM["MC-N14"]["change"] == "renewed" and ADM["MC-N14"]["universe_size_after"] == 1
+    and not any(j["type"] == "UniverseChanged" for j in ADM["MC-N14"]["journal"]), "a renewal adds no entry")
+for cid in ADM:
+    kinds = {j["type"] for j in ADM[cid]["journal"]}
+    req(cid, ("ThesisRevised" in kinds) == (C[cid]["input"]["thesis"]["revision"] > 0), "revision journals ThesisRevised")
+
+L17 = C["MC-N17"]["expect"]["steps"]
+req("MC-N17", [s["admitted"] for s in L17] == [True, True, True, True, False], "cap 3 admits three revisions")
+req("MC-N17", L17[-1]["reason"] == "lineage_retired" and C["MC-N17"]["expect"]["lineages"]["th-20"]["retired"],
+    "the fourth revision retires the lineage")
+req("MC-N18", all(not s["score_carried_forward"] for s in C["MC-N18"]["expect"]["steps"]), "no score carried forward")
+req("MC-N19", C["MC-N19"]["expect"]["steps"][0]["reason"] == "revision_without_predecessor", "lineage needs a predecessor")
+L24 = C["MC-N24"]["expect"]
+req("MC-N24", L24["steps"][-1]["reason"] == "lineage_retired" and L24["steps"][-1]["lineage_retired"],
+    "the over-cap revision retires the lineage")
+req("MC-N24", L24["working_universe"] == [] and L24["steps"][-1]["universe_size_after"] == 0
+    and any(j["type"] == "UniverseChanged" and j["reason"] == "lineage_retired" for j in L24["steps"][-1]["journal"]),
+    "retirement removes the instrument the lineage held, journalled from the fold")
+
+req("MC-N20", C["MC-N20"]["expect"]["journal"][0]["reason"] == "thesis_expired"
+    and C["MC-N20"]["expect"]["working_universe"] == [], "the horizon removes the instrument")
+req("MC-N21", C["MC-N21"]["expect"]["journal"][0]["reason"] == "thesis_invalidated", "invalidation removes at once")
+N27 = C["MC-N27"]["expect"]["steps"][-1]
+req("MC-N27", N27["reason"] == "direction_not_allowed" and not N27["lineage_retired"]
+    and not any(j["type"] == "UniverseChanged" for j in N27["journal"]),
+    "an earlier check's refusal retires nothing and removes nothing")
+req("MC-N27", C["MC-N27"]["expect"]["working_universe"] != [], "the instrument stays")
+N28 = C["MC-N28"]["expect"]
+req("MC-N28", N28["steps"][-1]["reason"] == "lineage_retired" and N28["steps"][-1]["lineage_retired"]
+    and not any(j["type"] == "UniverseChanged" for j in N28["steps"][-1]["journal"])
+    and len(N28["working_universe"]) == 1,
+    "retirement leaves an instrument another lineage holds")
+req("MC-N28", list(N28["lineage_instruments"]) == ["th-80"], "the holder moved to the renewing lineage")
+req("MC-C48", C["MC-C48"]["expect"]["classification"] == "risk_increasing",
+    "pinning a no-agent mandate is increasing (round-1 finding 4)")
+req("MC-N22", len(C["MC-N22"]["expect"]["removed"]) == 1 and len(C["MC-N22"]["expect"]["working_universe"]) == 1,
+    "only the retired lineage is removed")
+req("MC-N22", "lineages" in C["MC-N22"]["input"] and not any("lineage_retired" in e for e in C["MC-N22"]["input"]["entries"]),
+    "retirement is read from the lineage state, never a per-entry flag")
+for cid in ("MC-N20", "MC-N21", "MC-N22"):
+    e = C[cid]["expect"]
+    req(cid, all(v == "removed_instrument" for v in e["instrument_restrictions"].values()),
+        "removal restricts only that instrument")
+
+S23 = C["MC-N23"]["expect"]
+req("MC-N23", all(0 <= o < S23["window_s"] for o in S23["offsets"]), "offsets inside the window")
+req("MC-N23", S23["offsets"][0] != S23["offsets"][1] and S23["offsets"][0] != S23["offsets"][2],
+    "different workspaces and theses stagger differently")
+
 # change
 inc = {"MC-C01", "MC-C02", "MC-C04", "MC-C08", "MC-C10", "MC-C12", "MC-C14", "MC-C15", "MC-C17", "MC-C18", "MC-C19", "MC-C20",
-       "MC-C21", "MC-C22", "MC-C24", "MC-C25", "MC-C26", "MC-C29", "MC-C30", "MC-C31", "MC-C33", "MC-C35"}
-red = {"MC-C03", "MC-C05", "MC-C06", "MC-C11", "MC-C13", "MC-C16", "MC-C27", "MC-C28", "MC-C32"}
+       "MC-C21", "MC-C22", "MC-C24", "MC-C25", "MC-C26", "MC-C29", "MC-C30", "MC-C31", "MC-C33", "MC-C35",
+       "MC-C37", "MC-C38", "MC-C40", "MC-C42", "MC-C43", "MC-C47"}
+red = {"MC-C03", "MC-C05", "MC-C06", "MC-C11", "MC-C13", "MC-C16", "MC-C27", "MC-C28", "MC-C32",
+       "MC-C36", "MC-C39", "MC-C41", "MC-C44", "MC-C45", "MC-C46"}
 neu = {"MC-C07", "MC-C09", "MC-C23"}
 for cid in inc:
     req(cid, C[cid]["expect"]["classification"] == "risk_increasing", "increasing")

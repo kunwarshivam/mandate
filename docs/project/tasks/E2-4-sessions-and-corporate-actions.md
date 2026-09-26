@@ -141,8 +141,11 @@ time-zone database for its own date, so daylight saving is never hard-coded.
    16:00, post-market 16:00 to 17:00; IEX Rule 11.110(a) and IEX's published trading hours).
    Neither feed carries the overnight session, so its slots are session closures for both. On an
    early-close day IEX publishes the 13:00 regular close but not when its post-market ends, so IEX
-   slots after 13:00 on those days, up to the next overnight session at 20:00, are reported as
-   unclassified, never as no trade or a session closure. Crypto trades continuously and has no
+   slots from 13:00 on those days are reported as unclassified, never as no trade, until the
+   calendar's after-hours session ends at 17:00, which is also IEX's own full-day close; from
+   17:00 IEX is closed, by the rule of the next paragraph. PR 4 first left them unclassified up to
+   the overnight session at 20:00; the M1 rehearsal found the contradiction and
+   [inspect-quality](inspect-quality.md) corrected it. Crypto trades continuously and has no
    closures.
 
    A venue is open while the calendar has a pre-market, regular, or after-hours session *and* its
@@ -171,7 +174,7 @@ time-zone database for its own date, so daylight saving is never hard-coded.
 |---|---|
 | §4.2 session closures, no trade, true gaps (interpretation 4) | `iex_gaps_split_into_no_trade_closures_true_gaps_and_the_unclassified_early_close_evening`, `the_open_hours_of_a_day_whose_partition_cannot_be_trusted_are_true_gaps`, `a_gap_across_the_equity_overnight_session_is_a_session_closure`, `stretches_are_the_runs_of_missing_slots_each_classed_by_the_venue_and_the_fetch` (property), in `crates/mandate-marketdata/tests/inspect.rs` |
 | Daily bars classed by trading day, calendar edges unclassified | `a_skipped_day_is_a_closure_when_the_market_is_closed_and_a_true_gap_when_it_was_not_fetched` |
-| Venue hours (interpretation 6) | `sip_and_iex_agree_with_the_published_2026_schedule_at_every_minute` (property), `on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_20_00`, `minutes_outside_the_recorded_dates_are_unclassified`, `a_venue_is_open_only_while_both_the_calendar_and_its_own_hours_are`, and the parser tests in `tests/venue.rs` |
+| Venue hours (interpretation 6) | `sip_and_iex_agree_with_the_published_2026_schedule_at_every_minute` (property), `on_an_early_close_sip_closes_at_17_00_and_iex_is_unclassified_from_13_00_to_17_00`, `minutes_outside_the_recorded_dates_are_unclassified`, `a_venue_is_open_only_while_both_the_calendar_and_its_own_hours_are`, and the parser tests in `tests/venue.rs` |
 | §4.5 raw and split-adjusted prices, point in time | `a_stock_dataset_reports_raw_and_split_adjusted_prices_as_of_its_last_day`, `a_split_after_the_last_day_is_not_yet_known_and_adjusts_nothing`, `trades_before_the_split_takes_effect_are_adjusted_and_the_overnight_session_into_the_ex_date_is_not`, `a_price_adjuster_agrees_with_adjust_bar` (property) |
 | Stored actions (interpretation 7) | `each_stock_download_records_the_actions_of_every_day_stored_so_far`, `a_failed_actions_fetch_keeps_the_stored_days_and_a_rerun_records_the_actions`, `actions_that_do_not_cover_the_span_give_no_adjusted_prices`, `tests/actions.rs` |
 | The report | `crates/mandate-cli/tests/inspect.rs` (`BARS_REPORT`, `each_gap_lists_its_missing_slots_by_class_with_a_total_per_class`, `every_problem_and_trade_duplicate_has_a_line`), `crates/mandate-cli/tests/download.rs` |

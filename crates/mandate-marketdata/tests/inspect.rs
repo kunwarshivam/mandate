@@ -137,6 +137,7 @@ fn a_clean_dataset_has_no_gaps_duplicates_or_problems() {
             span: Some(range("2026-09-21", "2026-09-22")),
             listed: 2,
             empty: vec![],
+            closed: 0,
             missing: vec![],
         }
     );
@@ -286,17 +287,22 @@ fn iex_gaps_split_into_no_trade_closures_true_gaps_and_the_unclassified_early_cl
                 at("2026-11-27", 17),
                 at("2026-11-30", 13),
                 vec![
-                    stretch(Unclassified, at("2026-11-27", 18), at("2026-11-28", 0), 7),
+                    stretch(Unclassified, at("2026-11-27", 18), at("2026-11-27", 21), 4),
                     stretch(
                         SessionClosure,
-                        at("2026-11-28", 1),
+                        at("2026-11-27", 22),
                         at("2026-11-30", 12),
-                        60
+                        63
                     ),
                 ],
             ),
         ],
         "Wednesday was never fetched, Thanksgiving is closed, Friday closes early, and Sunday was never fetched but is closed"
+    );
+    assert_eq!(
+        (found.coverage.empty, found.coverage.closed),
+        (vec![], 2),
+        "Thanksgiving and Saturday are listed without records while IEX is closed"
     );
 }
 
@@ -652,17 +658,18 @@ fn an_empty_dataset_lists_its_empty_days_and_has_no_statistics() {
         &scratch,
         &id,
         vec![
-            ("2026-09-26", Records::empty(Kind::Trades)),
-            ("2026-09-27", Records::empty(Kind::Trades)),
+            ("2026-09-24", Records::empty(Kind::Trades)),
+            ("2026-09-25", Records::empty(Kind::Trades)),
         ],
     );
     let found = inspect(&dir).unwrap();
     assert_eq!(
         found.coverage,
         Coverage {
-            span: Some(range("2026-09-26", "2026-09-27")),
+            span: Some(range("2026-09-24", "2026-09-25")),
             listed: 2,
-            empty: vec![range("2026-09-26", "2026-09-27")],
+            empty: vec![range("2026-09-24", "2026-09-25")],
+            closed: 0,
             missing: vec![],
         }
     );
@@ -711,6 +718,7 @@ fn days_never_fetched_inside_the_span_are_missing_runs() {
                 range("2026-09-24", "2026-09-24"),
                 range("2026-09-28", "2026-09-28")
             ],
+            closed: 0,
             missing: vec![
                 range("2026-09-22", "2026-09-23"),
                 range("2026-09-26", "2026-09-27")

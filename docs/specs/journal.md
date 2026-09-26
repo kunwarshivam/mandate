@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.3 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.4 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3) |
@@ -12,6 +12,13 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.4 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-111](../project/04-decision-log.md#decisions)):**
+  `ThesisProposed` and `ThesisRevised` join the agent stream and `UniverseChanged` the account
+  stream, where it is a risk input carrying `risk_clock` ([mandate spec §2.3, §8.4 to
+  §8.6](mandate.md#23-the-working-universe-at-runtime-dec-97)); `PlatformOperatorAction` gains the
+  research-agent halt of [DEC-100](../project/04-decision-log.md#decisions); `ModelOutputRecorded`
+  carries the thesis direction and lineage. Test vectors are unchanged (version 3): the new events
+  have no vector until the Rust harness exists.
 - **v0.3 ([DEC-81](../project/04-decision-log.md#decisions)):** `risk_clock` is required on every
   account-stream risk input, named by reference to the mandate spec §5.2 list; `OwnerAcknowledged`
   is copied into the account stream as a risk input; test vectors version 3 (the `FillApplied`
@@ -54,6 +61,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   cross-stream displays sort by `recorded_at` for readability only.
 - **Cross-stream facts are copied by the owner** into the consuming stream with a `causation_id`:
   the executor writes `AgentModeApplied` (from the agent stream's `AgentModeChanged`),
+  `UniverseChanged` (from the agent stream's `ThesisProposed` or `ThesisRevised`, or from a
+  `MandateVersionApplied` that changed a pinned universe; mandate spec §2.3),
   `TradingDayStarted`, `ClockAdvanced` (the risk clock, mandate spec §5.2: copied only when a tick
   emits an event or crosses midnight), and time-driven events
   (from the scheduler) into the account stream, and derives `RiskDayStarted` there from the copied
@@ -287,7 +296,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ConductBreachDetected` | rule | control, agent, instrument, measured value |
 | `AgentModeApplied`, `TradingDayStarted`, `KillSwitchActivated` | — | gating facts, copied or originated (with `causation_id`); kill-switch scope, initiator, orders canceled, sells planned or deferred |
 | `OwnerAcknowledged` | — | copied from the control stream (with `causation_id`); a risk input |
-| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N; reset evidence; released positions; stale-mark changes; goal completion |
+| `MandateVersionApplied`, `RiskDayStarted`, `RiskLimitTriggered`, `RiskLimitLifted`, `HighWaterMarkReset`, `PositionReleased`, `InstrumentRestrictionChanged`, `GoalCompleted` | man | agent risk state ([mandate spec §5.10](mandate.md#510-journal-events)): version result, classification, and allocation change; day-start equity; limit, action, E, H, drawdown, E₀, capital base C, inherited loss L, net contributed N; reset evidence; released positions; stale-mark and removed-instrument changes with the reason; goal completion |
+| `UniverseChanged` | man | The working universe changed ([mandate spec §2.3, §8.5](mandate.md#23-the-working-universe-at-runtime-dec-97)); a risk input, so it carries `risk_clock`: agent, instrument, change (`admitted`, `removed`), reason (`thesis_admitted`, `thesis_expired`, `thesis_invalidated`, `lineage_retired`, `eligibility_lost`, `operator_halt`, `version_applied`), thesis and lineage ids, working-universe size after |
 
 **Agent stream** (owner: agent runtime)
 
@@ -296,7 +306,8 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `StreamOpened` | — | stream type, subject, environment |
 | `ObservationRecorded` | — | source, instrument, data (artifact) |
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
-| `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, conviction, confidence, horizon, thesis (artifact); `ignored` reason if not used |
+| `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
+| `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks |
 | `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID) |
 | `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut`, `ApprovalCanceled` | man | content shown (artifact), bound quantity, limit price, and mandate version, cancel reason, channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result |
@@ -307,15 +318,15 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 
 | Event type | Required refs | Key payload fields |
 |---|---|---|
-| `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-45-dec-51): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
-| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-45-dec-51)) |
+| `MandateVersionCreated`, `MandateConfirmed` | — | per [mandate spec §10](mandate.md#10-records-dec-51-dec-97): source text (artifact), compiled fields, provenance per path with quoted spans, template, policy-set hashes, validation results and warnings, classification, diff; version hash, confirmed paths, rendered confirmation (artifact) and UI build, warnings acknowledged, step-up evidence, confirming user (opaque) |
+| `AgentDeployed`, `DeploymentRejected`, `AgentStopped` | man | agent, mandate version, reason (`goal_complete`, `profit_stop_reached`, `end_date`, owner stop), net dollar loss added to the connection's loss carry; for `AgentDeployed`: the rendered go-live screen (artifact), backtest and paper-run IDs shown, performance legend and disclosure versions shown, approving users, step-up evidence ([mandate spec §10](mandate.md#10-records-dec-51-dec-97)) |
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
 | `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
-| `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason), operator (opaque), approval |
+| `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
 | `AnchorComputed`, `VerificationRun`, `IntegrityIncidentRecorded` | — | leaves, root, timestamp token (artifact); scope and result; last good hash and anchor |
 | `SegmentExported`, `SegmentEvicted`, `RetentionExtended`, `LegalHoldChanged` | — | manifest hash, range, retain-until, hold |
 | `KeyRotated`, `KeyRevoked`, `RecordsAccessed`, `ExportCreated`, `PersonalDataErased` | — | key version; accessor (opaque), scope; export manifest; subject reference |

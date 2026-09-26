@@ -1,7 +1,8 @@
 //! `mandate inspect`: report each dataset's coverage, raw and split-adjusted statistics (for a
 //! quotes dataset, each quoted side, the signed spread, and the classes of every row), corporate
-//! actions, gaps with their missing slots by class, duplicates, and problems as text, in the
-//! order the directories are given, and a total.
+//! actions, gaps with their missing slots by class, duplicates, data-quality warnings, and
+//! problems as text, in the order the directories are given, and a total. Only problems count
+//! toward the exit status.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -11,9 +12,10 @@ use clap::Args;
 use mandate_marketdata::dataset::partition_name;
 use mandate_marketdata::download::describe;
 use mandate_marketdata::inspect::{
-    ActionsReport, ClassifiedGap, Extent, GapClass, Inspection, Problem, Spread, Values, inspect,
+    ActionsReport, ClassifiedGap, Extent, GapClass, Inspection, Occurrences, Problem, Spread,
+    Values, inspect,
 };
-use mandate_marketdata::model::{DayRange, Kind};
+use mandate_marketdata::model::{AssetClass, DayRange, Kind};
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
@@ -56,6 +58,40 @@ fn problem(problem: &Problem) -> String {
             format!("{}: {records} records outside {day}", partition_name(*day))
         }
         Problem::Unlisted { file } => format!("{file}: not in the manifest"),
+        Problem::InconsistentBars { day, bars } => format!(
+            "{}: {bars} bars with an open or close outside their low to high",
+            partition_name(*day)
+        ),
+    }
+}
+
+/// A warning's count, then its first times, one per line, and how many more there are.
+fn occurrences(name: &str, found: &Occurrences, lines: &mut Vec<String>) {
+    lines.push(format!("{name}: {}", found.count));
+    lines.extend(found.first.iter().map(|at| format!("  {at}")));
+    let shown = u64::try_from(found.first.len()).unwrap_or(u64::MAX);
+    if found.count > shown {
+        lines.push(format!("  and {} more", found.count - shown));
+    }
+}
+
+fn quality(inspection: &Inspection, lines: &mut Vec<String>) {
+    let quality = &inspection.quality;
+    occurrences(
+        "records while the venue is closed",
+        &quality.closed_period,
+        lines,
+    );
+    match inspection.dataset.kind() {
+        Kind::Bars(_) => {
+            occurrences("bars with zero volume", &quality.zero_volume, lines);
+            occurrences(
+                "bars of one trade whose prices differ",
+                &quality.single_trade_spread,
+                lines,
+            );
+        }
+        Kind::Trades | Kind::Quotes => {}
     }
 }
 
@@ -196,6 +232,12 @@ pub fn render(inspection: &Inspection) -> String {
             if !coverage.empty.is_empty() {
                 lines.push(format!("  empty: {}", runs(&coverage.empty)));
             }
+            if coverage.closed > 0 {
+                lines.push(format!(
+                    "  empty while the venue is closed: {} days",
+                    coverage.closed
+                ));
+            }
             if !coverage.missing.is_empty() {
                 lines.push(format!("  missing: {}", runs(&coverage.missing)));
             }
@@ -219,6 +261,13 @@ pub fn render(inspection: &Inspection) -> String {
                 )),
                 Values::Trades { low, high, size } => {
                     lines.push(format!("trades: low {low}, high {high}, size {size}"));
+                    match inspection.dataset.asset_class() {
+                        AssetClass::UsEquity => lines.push(
+                            "  size counts every stored trade: an official open or close reported again under another condition counts each time"
+                                .to_owned(),
+                        ),
+                        AssetClass::Crypto => {}
+                    }
                 }
                 Values::Quotes {
                     bid,
@@ -270,6 +319,7 @@ pub fn render(inspection: &Inspection) -> String {
         };
         format!("  {}{trade} x{} {same}", d.time, d.count)
     }));
+    quality(inspection, &mut lines);
     lines.push(format!("problems: {}", inspection.problems.len()));
     lines.extend(
         inspection

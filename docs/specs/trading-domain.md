@@ -75,13 +75,22 @@
    orders may be held only by agent mode `paused` or `stopped` (state integrity), by an `Unknown`
    order in the same instrument, or by the broker. **The kill switch is always available** and
    does not depend on model state (§5.5).
-5. **Mandate does not choose instruments, strategy, sizing, or limits**
-   ([DEC-38](../project/04-decision-log.md#decisions)). These come from user-confirmed mandate
-   fields; signal models are tools the user selects, and the user selects the sizing method. The
-   compiler only extracts values the user stated; unstated judgment fields stay blank until the
-   user enters them ([mandate spec §7](mandate.md#7-compiler-dec-45)). Templates set structure,
-   never values. There is no calibration in v1. Approval requests show the agent's proposal and the
-   mandate rule it follows, not platform-authored alternatives.
+5. **The owner sets the envelope; the platform brings the ideas**
+   ([DEC-97](../project/04-decision-log.md#decisions),
+   [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), superseding
+   [DEC-38](../project/04-decision-log.md#decisions)). Every **envelope field** — capital, goal,
+   limits, autonomy rules, signal models and their weights, sizing, protection, cadence, allowed
+   asset classes, `universe.max_instruments` — is confirmed by the owner. The compiler and templates
+   may **propose** a value, shown as proposed and inactive until confirmed
+   ([mandate spec §7](mandate.md#7-compiler-and-platform-proposals-dec-97)); the owner's own pinned
+   universe is never proposed. The **working universe and its theses** come from the research agent
+   at runtime, inside the envelope and through the ordered admission checks
+   ([mandate spec §8.5](mandate.md#85-admission-and-removal-dec-97-dec-101-dec-103)); the owner may
+   pin the universe instead (bring-your-own-strategy). The user selects the sizing method and there
+   is no calibration in v1. Approval requests show the agent's proposal, the rule it follows, and,
+   for an admission, the full thesis with its sources
+   ([DEC-126](../project/04-decision-log.md#decisions)); never persuasive alternatives or profit
+   estimates.
 
 ## 2. Conventions
 
@@ -702,7 +711,9 @@ Checks run in this order; the **first failing check's reason code** is reported.
 including allows, is journaled with the checks evaluated.
 
 1. Account status (§7.3) → agent mode (§7.4)
-2. Eligibility floor (§3.2, in list order), concentration (§3.3, including the mandate
+2. Working universe ([mandate spec §2.3](mandate.md#23-the-working-universe-at-runtime-dec-97):
+   the pinned universe, or the instruments the research agent admitted and that are not removed),
+   eligibility floor (§3.2, in list order), concentration (§3.3, including the mandate
    per-instrument position limit), mandate order size, then re-entry cooldown
    ([mandate spec §5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown))
 3. Session, auction window, and halt (§4.3, §4.4)
