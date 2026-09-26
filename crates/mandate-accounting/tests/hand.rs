@@ -32,7 +32,6 @@ fn unsettled(account: &Account) -> Vec<(String, String)> {
 /// total 9139.97, equity 10069.97. Settlement at 00:00 ET 2026-09-22 moves 640: settled 9139.97;
 /// net realized 40 − 0.03 = 39.97; Δequity 69.97 = 40 + 30 − 0.03.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_01_buy_partial_sell_accrual_charge_settlement() {
     let config = test_default();
     let start = Account::opening(usd("10000"), []);
@@ -112,7 +111,6 @@ fn rc_01_buy_partial_sell_accrual_charge_settlement() {
 /// twice, then SEC 600 × 0.00003 = 0.018, TAF 0.001, CAT 0.00005: accrued 0.01925. Charge
 /// ceil(0.01925, 2) = 0.02; cash total 100000 − 2100 + 600 − 0.02 = 98499.98.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_02_averaging_in_and_reducing_keeps_average_cost() {
     let config = test_default();
     let a = Account::opening(usd("100000"), []);
@@ -164,7 +162,6 @@ fn rc_02_averaging_in_and_reducing_keeps_average_cost() {
 /// RC-03 (accounting). Buy 5 at 50, sell 5 at 55: realized 275 − 250 = 25, flat. Sell 3 at 55
 /// opens a short: Q −3, B −165. Buy 3 at 52 closes: realized −(3 × 52) − (−165) = 9, total 34.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_03_flip_through_flat() {
     let config = no_fees();
     let a = Account::opening(usd("100000"), []);
@@ -227,7 +224,6 @@ fn rc_03_flip_through_flat() {
 /// (realized 275 − 250 = 25) and opens −3 at 55 (B −165). Cash: 100000 − 250 settled, and
 /// 8 × 55 = 440 unsettled.
 #[test]
-#[ignore = "pending E3-1"]
 fn crossing_fill_is_split_into_close_and_open() {
     let config = no_fees();
     let a = Account::opening(usd("100000"), []);
@@ -296,7 +292,6 @@ fn crossing_fill_is_split_into_close_and_open() {
 /// 1 removes round(−100 × 1 ÷ 3, 12) = −33.333333333333, leaving −66.666666666667; realized
 /// −(1 × 30) − (−33.333333333333) = 3.333333333333.
 #[test]
-#[ignore = "pending E3-1"]
 fn reducing_a_short_rounds_the_removed_basis_once() {
     let config = no_fees();
     let short = Position::new(
@@ -345,7 +340,6 @@ fn reducing_a_short_rounds_the_removed_basis_once() {
 /// 77.31 = 100845.19. Charge (crypto, 2026-09-21): settled 100845.19; Δequity 845.19 = 997.5 −
 /// 152.31.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_07_crypto_fees_in_the_received_asset() {
     let config = test_default();
     let crypto = |fill_id, side, qty, price, time| {
@@ -430,7 +424,6 @@ fn rc_07_crypto_fees_in_the_received_asset() {
 /// the same order has TAF room 0.015 − 0.008 = 0.007 (SEC 0.15, CAT 0.001) for 0.2294; sell 100 on
 /// a new order pays the full capped 0.015 for 0.3954.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
     let mut config = test_default();
     config.equities.taf_cap = fee_cap("0.015");
@@ -564,7 +557,6 @@ fn rc_13_partial_fills_with_the_taf_cap_per_execution() {
 /// RC-11's dates: an evening sale belongs to the next trading day and settles T+1 on the settlement
 /// calendar, skipping the 2026-10-12 and 2026-11-11 bank holidays.
 #[test]
-#[ignore = "pending E3-1"]
 fn rc_11_trade_and_settlement_dates() {
     let config = no_fees();
     let long = Position::new(
@@ -623,7 +615,6 @@ fn rc_11_trade_and_settlement_dates() {
 /// 0.00499995 → 0; 3.34 × 15 bps = 0.00501 → 0.01. The fills are at 03:30 UTC on 2026-09-22, so
 /// they accrue to that UTC day, not to the New York date.
 #[test]
-#[ignore = "pending E3-1"]
 fn crypto_maker_rates_and_cent_rounding() {
     let config = test_default();
     let crypto = |fill_id, side, qty, price| {
@@ -660,7 +651,6 @@ fn crypto_maker_rates_and_cent_rounding() {
 }
 
 #[test]
-#[ignore = "pending E3-1"]
 fn rejected_inputs_leave_the_account_unchanged() {
     let config = test_default();
     let a = Account::opening(usd("100"), []);
@@ -755,7 +745,6 @@ fn rejected_inputs_leave_the_account_unchanged() {
 /// A later mark is not replaced by a fill price; the fill price is the mark only until the first
 /// `MarkUpdated` (spec §8.2).
 #[test]
-#[ignore = "pending E3-1"]
 fn fill_prices_mark_only_until_a_mark_arrives() {
     let config = no_fees();
     let a = Account::opening(usd("1000"), []);
@@ -807,7 +796,6 @@ fn fill_prices_mark_only_until_a_mark_arrives() {
 /// round(0.5000000000005, 12, half_even) = 0.5 (not 0.500000000001), leaving B 0.500000000001;
 /// realized 1 × 1 − 0.5 = 0.5.
 #[test]
-#[ignore = "pending E3-1"]
 fn reduction_ties_round_to_even() {
     let config = no_fees();
     let long = Position::new(
@@ -836,7 +824,6 @@ fn reduction_ties_round_to_even() {
 /// sell 1 BBB, with AAA held from the opening. AAA has no mark and no fill, so unrealized P&L is
 /// an error that names it.
 #[test]
-#[ignore = "pending E3-1"]
 fn positions_list_open_instruments_and_errors_name_the_unmarked_one() {
     let config = no_fees();
     let held = Position::new(
@@ -890,7 +877,6 @@ fn build(qty: &str, basis: &str) -> Result<Position, AccountingError> {
 /// basis on an open position is allowed: a reduction can leave one (see
 /// `a_reduction_never_removes_more_basis_than_the_position_holds`).
 #[test]
-#[ignore = "pending E3-1"]
 fn positions_whose_basis_opposes_the_quantity_are_rejected() {
     for (qty, basis) in [
         ("1", "-100"),
@@ -925,7 +911,6 @@ fn positions_whose_basis_opposes_the_quantity_are_rejected() {
 /// 0.00000000000009 − 0, so the round trip at one price realizes 0 in total. The short mirror
 /// (sell, then buy back) has every basis and P&L negated.
 #[test]
-#[ignore = "pending E3-1"]
 fn a_reduction_never_removes_more_basis_than_the_position_holds() {
     let config = no_fees();
     for (open, close, opened, left, realized) in [
@@ -983,7 +968,6 @@ fn a_reduction_never_removes_more_basis_than_the_position_holds() {
 ///   round(0.50000000000025, 12) = 0.5 does not exceed B, so the rounded formula stands:
 ///   B 0.5000000000005, realized 0.5.
 #[test]
-#[ignore = "pending E3-1"]
 fn the_basis_limit_binds_only_when_the_rounded_removal_exceeds_the_basis_held() {
     let config = no_fees();
     for (qty, basis, side, traded, left, realized) in [
@@ -1080,7 +1064,6 @@ fn capped(cap: &str, basis: TafCapBasis) -> mandate_accounting::Config {
 /// charges 0 (0.468); the cap rises to 0.025, leaving room 0.01 (0.629). The order's TAF totals
 /// 0.025, the highest cap in force.
 #[test]
-#[ignore = "pending E3-1"]
 fn per_order_taf_is_never_negative_when_the_cap_falls_within_an_order() {
     let held = build("400", "19600").unwrap();
     let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);
@@ -1112,7 +1095,6 @@ fn per_order_taf_is_never_negative_when_the_cap_falls_within_an_order() {
 /// accrues 0.00103 and its charge is ceil(0.00103, 2) = 0.01, a debit. (With a negative TAF of
 /// −0.015 the day would accrue −0.01397 and the charge would credit 0.01.)
 #[test]
-#[ignore = "pending E3-1"]
 fn a_daily_charge_is_never_a_credit_when_the_cap_falls() {
     let held = build("200", "100").unwrap();
     let a = Account::opening(usd("100"), [(id("XYZ"), held)]);
@@ -1147,7 +1129,6 @@ fn a_daily_charge_is_never_a_credit_when_the_cap_falls() {
 /// switches to per order with cap 0.015: room max(0, 0.015 − 0.015) = 0, TAF 0. Cap 0.02 per
 /// order: room 0.005, TAF 0.005. The order's TAF totals 0.02, the highest cap in force.
 #[test]
-#[ignore = "pending E3-1"]
 fn per_order_taf_room_counts_executions_charged_per_execution() {
     let held = build("300", "14700").unwrap();
     let mut a = Account::opening(usd("0"), [(id("XYZ"), held)]);

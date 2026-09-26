@@ -361,12 +361,12 @@ impl Bps {
 pub struct FeeCap(Decimal);
 
 impl FeeCap {
-    pub fn parse(_text: &str) -> Result<Self, NumError> {
-        Err(NumError::Overflow)
+    pub fn parse(text: &str) -> Result<Self, NumError> {
+        parse(text, FULL_SCALE).and_then(non_negative).map(Self)
     }
 
     pub fn to_usd(self) -> Usd {
-        Usd::ZERO
+        Usd(self.0)
     }
 }
 
