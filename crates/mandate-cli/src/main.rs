@@ -1,9 +1,9 @@
 use std::io;
 use std::time::SystemTime;
 
-use anyhow::Context;
+use anyhow::{Context, bail};
 use clap::Parser;
-use mandate_cli::{Cli, Command, download};
+use mandate_cli::{Cli, Command, download, inspect};
 use mandate_marketdata::client::{Client, TokioPause};
 use mandate_marketdata::http::{AlpacaDataHttp, Credentials};
 use mandate_time::{Date, UtcNanos};
@@ -28,6 +28,13 @@ async fn main() -> anyhow::Result<()> {
             let http = AlpacaDataHttp::new(Credentials::from_env()?)?;
             let client = Client::new(http, TokioPause);
             download::run(&plan, &client, &mut io::stdout().lock()).await?;
+            Ok(())
+        }
+        Command::Inspect(args) => {
+            let problems = inspect::run(&args, &mut io::stdout().lock())?;
+            if problems > 0 {
+                bail!("{problems} problems found");
+            }
             Ok(())
         }
     }
