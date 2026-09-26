@@ -180,6 +180,49 @@ and DEC-131; the paths arrive with the tests PR, which updates this entry.
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
 - **Run:** `cargo nextest run -p mandate-runtime`.
+
+## Idempotent executor and broker connector
+
+Planned by [the E7-2, E7-3 and E7-4 task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)
+and DEC-133; the paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/specs/trading-domain.md` section 5.1 to 5.7 (the v1 order policy, the Alpaca
+  capability matrix, the constraints before submission, protective exits and the tranche model, the
+  kill switch, exit pricing, and the order lifecycle with the broker status mapping), 6.1 (the fill
+  record), 7.1 to 7.4 (the account ledger, buying power, account restrictions, agent modes), 9.1 (the
+  binding gate the executor runs), 9.6 and 9.7 (conduct controls and rate limits), 10 (paper mode and
+  the shadow ledger), 11 (reconciliation), 12 (the account-stream events);
+  `docs/specs/journal.md` section 2 (the account stream's single writer, copied facts, `intent_id`),
+  5.1 (append, idempotency, fencing), 5.2 (write before acting, recovery by `client_order_id`), 8
+  (replay and `fold_version`), 9 (the account-stream catalogue); `docs/HLD.md` section 5 ("Durability")
+  and 6.D (crash recovery); ADR-0001 ES-02, ES-06, ES-09, ES-19, ES-20, ES-21, ES-23, ES-24; backlog
+  E7-2, E7-3, E7-4.
+- **Code:** `mandate-executor` (new; `fold` and `handle` over the account stream, the intent protocol,
+  `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
+  reservations, the protective sequences and the exit ladder, reconciliation, the `BrokerRequest` enum
+  whose account-wide variants need an `AccountWideScope`, the `BrokerConnector` trait, and the
+  `IntentSink` implementation stream I's runtime hands intents to) and `mandate-alpaca` (new; the paper
+  trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
+  credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
+  reject mappings). It calls `mandate-risk` directly as the binding gate and reads
+  `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
+  connector is not here.
+- **Tests:** the hand cases of the brief (the submission chain, the `Unknown` lookup discipline, the
+  status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
+  codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
+  against four independent oracles: a broker-side submission counter inside the fake connector, a
+  shadow order book rebuilt from the drafts' canonical bytes, an `i128` shadow position ledger, and a
+  protection accountant that finds every unprotected interval. Alpaca fixtures follow
+  `mandate-marketdata`'s recorded-scenario shape and are hand-built until the founder records real
+  ones. Planted bugs per test: the task brief.
+- **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
+  `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
+  `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
+  move in a status PR after the implementation, turning `trading_domain::RC-14` and its four variants,
+  `RC-04`, `RC-06`'s `protective_orders_kept_through_dividend`, `RC-07`, `RC-11`, `RC-20`, `RC-21` and
+  `RC-24` green.
+- **Run:** `cargo nextest run -p mandate-executor -p mandate-alpaca`.
+
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
