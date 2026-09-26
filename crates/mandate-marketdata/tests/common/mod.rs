@@ -1,5 +1,5 @@
-//! Shared test support: recorded Alpaca responses, a scripted transport, and a pause that only
-//! records.
+//! Shared test support: recorded Alpaca responses, a scripted transport, a pause that only
+//! records, and scratch directories.
 
 #![allow(
     dead_code,
@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -146,4 +147,34 @@ pub fn btc_1hour() -> DatasetId {
 
 pub fn btc_trades() -> DatasetId {
     dataset(AssetClass::Crypto, Feed::CryptoUs, Kind::Trades, "BTC/USD")
+}
+
+/// A fresh directory under the system temp dir, removed when dropped.
+pub struct Scratch(PathBuf);
+
+static SCRATCH: AtomicUsize = AtomicUsize::new(0);
+
+impl Scratch {
+    pub fn new(label: &str) -> Self {
+        let n = SCRATCH.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "mandate-marketdata-{label}-{}-{n}",
+            std::process::id()
+        ));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
+        fs::create_dir_all(&dir).unwrap();
+        Self(dir)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
