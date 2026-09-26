@@ -43,7 +43,9 @@ byte 560"), missing-file errors from the shared name, and a reused leftover.
    exactly as a later run would. The directory is locked, not a lock file in it, because the
    directory is never replaced and a lock file would be one more entry in every dataset (the
    E2-1 test that a run leaves two partitions and a manifest would see it). Datasets lock
-   independently, so parallel downloads of different symbols do not wait on each other.
+   independently, so parallel downloads of different symbols do not wait on each other. Records
+   are encoded before the directory is created and locked, so a day that cannot be encoded
+   creates nothing and encoding never holds the lock.
 2. **Unique temporary names.** Each file is written to `<file>.<pid>.<n>.partial`, where `n` counts
    within the process, created with `create_new`; a taken name (a running writer's or a crashed
    one's) is skipped for the next `n`. A leftover is never opened, so it is never reused or
@@ -72,6 +74,7 @@ bytes and manifest listing from `dataset::encode` and `Digest::of`, not from the
 | Leftovers at the old `.partial` name and at the first 1024 names this process would use, longer than the real content: the write succeeds, publishes the real bytes, leaves every leftover byte-for-byte as it was, and `inspect` finds no problem | `a_crashed_writes_leftovers_are_neither_reused_nor_published` |
 | A temporary file that cannot be created (a read-only dataset directory) is an I/O error, not an endless retry | `a_temporary_file_that_cannot_be_created_is_an_error_not_a_retry` (needs a non-root user, as CI's runner is) |
 | Compare-before-write idempotency | the E2-1 tests in `tests/download.rs`, unchanged and passing, and the re-run check in the first test above |
+| A day whose records cannot be encoded creates nothing, not even the dataset directory the lock needs | `a_day_that_cannot_be_encoded_creates_nothing` (`tests/dataset.rs`) |
 | A partition on disk that the manifest does not list is neither overwritten nor adopted, with records or without | `a_partition_the_manifest_does_not_list_is_never_overwritten_or_adopted` (`tests/dataset.rs`) |
 | A listed partition that was deleted is restored only by the same records; other records, or none, are a conflict that writes nothing | `a_listed_partition_that_was_deleted_is_restored_only_with_the_same_records` (`tests/dataset.rs`) |
 
@@ -98,20 +101,23 @@ Each bug was planted in `crates/mandate-marketdata/src/dataset.rs`, the crate's 
 | P8: lock guard dropped at once (`let _ = lock(..)`) | one partition, different data, different days, processes |
 | P9: partition renamed into place, lock kept | not caught: under the lock no store writer can create the partition between the check and the publish, so rename and hard link behave the same; the link only guards against writers that bypass the lock |
 | P10: directory not flushed after the link or rename | not caught: the flush makes the new name survive power loss, which a test cannot observe without crashing the machine |
+| P11: dataset directory created before the records are encoded | `a_day_that_cannot_be_encoded_creates_nothing` |
 
 ## Mutation testing
 
 `mandate-marketdata` is not safety-critical, so CI's diff gate skips it; these runs were made by
 hand with cargo-mutants 27.1.0 and nextest, each job building in its own copy.
 
-- On the diff (`cargo mutants --in-diff <diff of src/> -p mandate-marketdata`): 9 mutants, 6
-  caught, 2 unviable (`lock` and `put_day` returning `Default`; the lock is covered by planted
-  bugs P1, P7, and P8), 1 timeout (the `AlreadyExists` guard forced to `true` retries forever on a
-  read-only directory, which is how the test catches it), 0 missed.
+- On the diff (`cargo mutants --in-diff <diff of src/> -p mandate-marketdata`): 19 mutants, 14
+  caught, 2 timeouts (the `AlreadyExists` guard forced to `true`, or inverted, retries forever on a
+  read-only directory, which is how the test catches it), 2 unviable (`lock` and `put_day`
+  returning `Default`; the lock is covered by planted bugs P1, P7, and P8), 1 missed, justified
+  below (`replace > with <` on line 171, which is in the diff only because it moved into a
+  `match` arm).
 - On every mutant of `put_day` and the write helpers (`--file src/dataset.rs --re
   '...put_day|lock|temporary|write_new|replace|sync...'`): 21 mutants, 15 caught, 2 timeouts, 2
   unviable, 2 missed, both justified:
-  - `replace > with < in Store::put_day` (line 165, E2-1 code): equivalent. For a day without
+  - `replace > with < in Store::put_day` (line 171, E2-1 code): equivalent. For a day without
     records, a listed entry with rows above 0 is refused a few lines later anyway, because it
     differs from the empty entry, and nothing is written in between.
   - `replace sync -> Result<(), DatasetError> with Ok(())`: the directory flush only matters after
