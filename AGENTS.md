@@ -167,7 +167,8 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   downloads only from `github.com` (release assets redirect to
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
   `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
-  behind restrictive egress proxies.
+  behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
+  (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency
