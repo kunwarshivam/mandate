@@ -12,9 +12,16 @@
 //! [journal spec §4.7](../../../docs/specs/journal.md#4-canonical-serialization):
 //! `YYYY-MM-DDTHH:MM:SS.nnnnnnnnnZ` (years 1970–9999, seconds 00–59, leap seconds smeared) and
 //! `YYYY-MM-DD`. Core code never reads a clock (ADR-0001 ES-05): values arrive as inputs.
+//!
+//! Trading calendars, equity trade dates, and America/New_York conversions live in [`calendar`];
+//! this is the only crate that touches the time-zone database (ADR-0001 ES-05).
+
+mod calendar;
 
 use core::fmt;
 use core::str::FromStr;
+
+pub use calendar::{TradingCalendar, new_york_date_and_hour, new_york_midnight};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum TimeError {
@@ -24,6 +31,12 @@ pub enum TimeError {
     InvalidDate,
     #[error("outside 1970-01-01T00:00:00Z to 9999-12-31T23:59:59.999999999Z")]
     OutOfRange,
+    #[error("the date is outside the calendar's validity range")]
+    OutsideCalendar,
+    #[error("the calendar's range is inverted or lists a holiday outside it")]
+    InvalidCalendar,
+    #[error("the time-zone database has no America/New_York")]
+    TimeZone,
 }
 
 impl TimeError {
@@ -33,6 +46,7 @@ impl TimeError {
             Self::Syntax => "syntax",
             Self::InvalidDate => "invalid_date",
             Self::OutOfRange => "out_of_range",
+            Self::OutsideCalendar | Self::InvalidCalendar | Self::TimeZone => "",
         }
     }
 }
@@ -81,6 +95,16 @@ impl Date {
             return Err(TimeError::Syntax);
         }
         Self::new(field(s, 0, 4)?, field(s, 5, 7)?, field(s, 8, 10)?)
+    }
+
+    /// The following calendar date.
+    pub fn next(self) -> Result<Self, TimeError> {
+        Err(TimeError::OutOfRange)
+    }
+
+    /// Saturday or Sunday; 1970-01-01 was a Thursday.
+    pub fn is_weekend(self) -> bool {
+        false
     }
 
     fn days_since_epoch(self) -> Option<i64> {
@@ -216,6 +240,12 @@ impl UtcNanos {
             .and_then(|s| s.checked_add(sec))
             .ok_or(TimeError::OutOfRange)?;
         Self::from_parts(secs, field(s, 20, 29)?)
+    }
+
+    /// Parses exactly `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS±HH:MM` (RFC 3339 without
+    /// fractional seconds), the form reference-case steps use for `at`.
+    pub fn parse_rfc3339(_s: &str) -> Result<Self, TimeError> {
+        Err(TimeError::Syntax)
     }
 }
 

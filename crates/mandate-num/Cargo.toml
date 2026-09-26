@@ -1,16 +1,17 @@
 [package]
-name = "mandate-time"
+name = "mandate-num"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
-description = "UTC nanosecond timestamps and dates in the journal's text form (ADR-0001 ES-05, journal spec §4.7)"
+description = "Fixed-point money, price, and quantity types with exact-or-error arithmetic (ADR-0001 ES-04)"
 
 [lints]
 workspace = true
 
 [dependencies]
-jiff.workspace = true
+ruint.workspace = true
+rust_decimal.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

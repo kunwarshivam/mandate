@@ -818,7 +818,10 @@ fn mutants() -> Result<()> {
 }
 
 /// `src/` of every safety-critical product crate. The reference-case harness (a tool crate) is
-/// excluded: its checks are proven by bugs seeded in the code it tests, not by mutating it.
+/// excluded: its checks are proven by bugs seeded in the code it tests, not by mutating it. So is a
+/// crate with `#[ignore = "pending <story>"]` tests: in a tests PR its code is stubs that no live
+/// test runs, and the implementation PR, which deletes those markers and replaces every stub body,
+/// passes the mutation gate instead (ADR-0001 ES-15, DEC-83).
 fn mutated_source_dirs() -> Result<Vec<String>> {
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
@@ -835,10 +838,40 @@ fn mutated_source_dirs() -> Result<Vec<String>> {
                 .context("manifest without a directory")?
                 .strip_prefix(&root)
                 .context("crate outside the repository")?;
-            dirs.push(format!("{}/src/", dir.display()));
+            let dir = dir.display().to_string();
+            if has_pending_tests(&dir)? {
+                eprintln!(
+                    "    mutants: skipping `{}`: it has pending tests, so its implementation PR runs the gate",
+                    pkg.name
+                );
+            } else {
+                dirs.push(format!("{dir}/src/"));
+            }
         }
     }
     Ok(dirs)
+}
+
+fn has_pending_tests(dir: &str) -> Result<bool> {
+    let files = output(
+        "git",
+        &[
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            dir,
+        ],
+    )?;
+    for file in files.lines().filter(|f| f.ends_with(".rs")) {
+        if let Ok(text) = fs::read_to_string(file)
+            && text.lines().any(is_pending_marker)
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The commit a change is compared against. An all-zero `MANDATE_BASE_REF` is what a forge sends

@@ -29,6 +29,23 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Tests:** `crates/mandate-time/tests/time.rs` (naive day-count oracle).
 - **Run:** `cargo nextest run -p mandate-time`.
 
+## Typed decimals
+
+- **Spec:** `docs/specs/trading-domain.md` §2.1; ADR-0001 ES-04.
+- **Code:** `mandate-num`: `crates/mandate-num/src/lib.rs` (private-field newtypes `Qty`,
+  `SignedQty`, `Price`, `Usd`, `CostBasis`, `FeeRate`, `FeePerShare`, `Bps`; canonical text in,
+  exact-or-error operations on 256-bit intermediates, one rounding per formula).
+- **Tests:** `crates/mandate-num/tests/num.rs` (i128 oracle for every operation and rounding mode).
+- **Run:** `cargo nextest run -p mandate-num`.
+
+## Trading calendars and trade dates
+
+- **Spec:** `docs/specs/trading-domain.md` §6.2, §6.3; ADR-0001 ES-05.
+- **Code:** `crates/mandate-time/src/calendar.rs` (`TradingCalendar`, equity trade date with the
+  20:00 New York cutoff, settlement date, New York midnight through jiff's bundled tzdb).
+- **Tests:** `crates/mandate-time/tests/calendar.rs` (naive DST-rule and day-count oracle).
+- **Run:** `cargo nextest run -p mandate-time calendar`.
+
 ## Journal drafts and the event catalogue
 
 - **Spec:** `docs/specs/journal.md` §2, §3, §9.

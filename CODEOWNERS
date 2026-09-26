@@ -22,6 +22,7 @@
 /.cargo/                    @kunwarshivam
 
 # Safety-critical crates (ADR-0001 ES-02)
+/crates/mandate-num/        @kunwarshivam
 /crates/mandate-canon/      @kunwarshivam
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-journal/    @kunwarshivam
