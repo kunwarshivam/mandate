@@ -187,6 +187,31 @@ after each code merge.
 | E | E4-2 task brief and interpretations (docs only), then the DEC-77 tests PR for the baseline backtest and metrics in a new layer-7 `mandate-backtest` crate, plus the `mandate-num` metric arithmetic under shared-crate claim #114, then the implementation PR | #75, #111, #113 (all merged) | DEC-127 | brief merged: [#112](https://github.com/kunwarshivam/mandate/pull/112); tests PR next (builder E, `agent/e4-2-tests`) |
 | Founder | Alpaca market-data keys in the Cursor environment (M1 exit run); paper and OpenRouter keys and egress in the cloud environment, then go for spike paper runs; counsel; branch cleanup; key rotation | | | waiting |
 
+## Work graph, M5 (2026-09-26 night, Phase 1 starts)
+
+Phase 0 is down to E4-2 (tests PR #118 in review) and the M1 exit run (founder keys). Phase 1 starts
+now so that the agent trades a paper account as early as the plan allows: M5 (agent runtime and
+risk) is the largest block, so its stories run as parallel streams, each in the DEC-77 shape (a
+docs-only **brief PR** with interpretations first, then the **tests PR** with pending stubs, then
+the **implementation PR**), reviewed on a different model and merged through the one queue. The
+briefs run in parallel now; tests and implementation follow per stream as each brief merges. The
+mandate spec v0.6 (#109) and its 298 reference cases are the contract; DEC-117 to DEC-126 stay
+`Proposed (founder)` and a veto reopens the affected brief.
+
+| Stream | Work | Depends on | Reserved IDs | State |
+|---|---|---|---|---|
+| F | `mandate-spec` (new, layer 3): the mandate document as typed data, schema and semantic validation (case families S and V), policy resolution (P), change classification (C), risk state and limits, risk days, agent flatten, and goals (R, T, L, F, and the goal cases); the Rust harness that reads `docs/specs/reference-cases/mandate.yaml` for those families; `mandate-domain` (layer 1) created for the types shared with accounting and market data (`AssetClass`, instrument ids) if the brief needs it | #109 (merged) | DEC-128 | brief builder to launch |
+| G | `mandate-risk` (new, layer 4, pure): the gate over the working universe (family G), forced flatten (F), US account rules (E6-6), the eligibility floor (E6-7, RC-16), restrictions and halts (E6-9, RC-15), and the conduct controls of trading-domain spec §9.6 (E6-8); E6-3 and E6-4 acceptance | F's types (the brief may start from the spec; the tests PR waits for F's tests PR) | DEC-129 | brief builder to launch |
+| H | `mandate-builder` (new, layer 5): autonomy classification (families A and B, E6-2) and the order builder of mandate spec §8 (combined score, sizing, clipping) | F's types, as for G | DEC-130 | brief builder to launch |
+| I | E6-1 and E6-5: the agent runtime skeleton (one process per agent deployment, in-process `IntentSink` and `TimerSource` per ADR-0001 ES-20, journal-driven state, kill switches per agent, connection, and workspace) and the DEC-17 recommendation the runtime is built on | DEC-17 (proposed below, founder veto before the tests PR) | DEC-131 | brief builder to launch |
+| J | E17 thin slice (DEC-103): the research-agent contract of mandate spec §8 as code shape (thesis, corroboration, admission through the eligibility floor, `max_instruments`, and the autonomy rules; family N: admission, lineage, expiry, stagger), the fixed research-basket universe, every admission `ask`, paper only, scorecards on (E15-3); the spike's lessons folded in | F and H briefs (the tests PR waits for their tests PRs) | DEC-132 | brief builder to launch after F and H briefs merge |
+| E (continues) | E4-2 tests PR #118 in its fix round, then the implementation PR; closes Phase 0 with the M1 exit run | #112 (merged) | DEC-127 | tests PR in review |
+| Founder | Confirm or veto DEC-117 to DEC-126 and the DEC-17 recommendation; market-data keys for the M1 exit run; paper and OpenRouter keys and egress for the spike paper runs; counsel; branch cleanup; key rotation | | | waiting |
+
+After M5: M6 (the Alpaca paper connector, idempotent intents, reconciliation, crash recovery) and
+M7 (escalation v0) run the same way, and the Phase 1 exit is an agent trading an Alpaca paper
+account unattended through a soak.
+
 ## Next, in order
 
 1. **E4-2** tests PR (stream E, builder running: the `mandate-backtest` crate skeleton with the
