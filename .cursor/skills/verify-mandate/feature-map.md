@@ -47,6 +47,19 @@ every workspace crate and reference-case suite has an entry and that every path 
 - **Tests:** `crates/mandate-time/tests/calendar.rs` (naive DST-rule and day-count oracle).
 - **Run:** `cargo nextest run -p mandate-time calendar`.
 
+## Accounting
+
+- **Spec:** `docs/specs/trading-domain.md` §6, §8 (invariants I1 to I7 in §8.6), §12 (the journal
+  events that feed the fold); task brief `docs/project/tasks/E3-1-accounting.md`.
+- **Code:** `mandate-accounting`: `crates/mandate-accounting/src/lib.rs` (inputs, fee
+  configuration, errors), `crates/mandate-accounting/src/account.rs` (the pure fold: positions,
+  cash buckets, fee accrual and charges, realized and unrealized P&L, equity).
+- **Tests:** `crates/mandate-accounting/tests/hand.rs` (hand-calculated cases, partial fills, flips),
+  `crates/mandate-accounting/tests/properties.rs` (one property per invariant against an i128
+  ledger oracle).
+- **Reference cases:** `trading_domain::*` in `fixtures/refcases/trading-domain.json`.
+- **Run:** `cargo nextest run -p mandate-accounting`.
+
 ## Journal drafts and the event catalogue
 
 - **Spec:** `docs/specs/journal.md` §2, §3, §9.
@@ -81,11 +94,13 @@ every workspace crate and reference-case suite has an entry and that every path 
 
 - **Spec:** ADR-0001 ES-11; DEC-77 (pending and passing cases).
 - **Code:** `mandate-refcases`: `crates/mandate-refcases/src/journal.rs` (one interpretation per
-  prose case), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/status.toml`
+  prose case), `crates/mandate-refcases/src/trading_domain.rs` (fills, marks, fee charges, and
+  settlement; every other step type and expectation key fails as "not interpreted until" its
+  owning story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/status.toml`
   (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
-  `fixtures/refcases/trading-domain.json` and `fixtures/refcases/mandate.json` (not yet harnessed;
-  their stories add them).
+  `fixtures/refcases/trading-domain.json` (accounting cases from E3-1; the rest pending their
+  stories), `fixtures/refcases/mandate.json` (not yet harnessed; its story adds it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
   `cargo test -p mandate-refcases -- --include-ignored`.
 
