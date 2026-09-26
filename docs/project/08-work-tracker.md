@@ -53,7 +53,7 @@ issues are the record; this table is the summary
 
 | Story | Coordinator | Claim | Stage | Branches and PRs |
 |---|---|---|---|---|
-| E3-3 cash-account settlement | `claude-code` | #48 | Tests PR open, under review; decisions renumbered to DEC-104 and DEC-105 after #52 | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
+| E3-3 cash-account settlement | `claude-code` | #48 | implementation PR open | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
 | Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
