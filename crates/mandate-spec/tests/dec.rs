@@ -315,12 +315,44 @@ proptest! {
         );
     }
 
-    /// Order is total: exactly one of the three relations holds, and it is antisymmetric.
+    /// Order is total, antisymmetric, and **consistent with equality**, across grammars as well as
+    /// within one.
+    ///
+    /// The last part is what review round 1 found broken: equality was derived over `(text, grammar)`
+    /// while the order compared values, so `0.5` as a `fraction` and `0.5` as an `open_fraction`
+    /// compared `Equal` and yet were not equal — enough to put both in a `BTreeSet`, keep both through
+    /// a `dedup`, and make `max` arbitrary. A policy value compared against a mandate field is exactly
+    /// that pair.
     #[test]
     fn ordering_is_total_and_antisymmetric(a in small_decimal(), b in small_decimal()) {
         let (x, y) = (dec(&a), dec(&b));
         prop_assert_eq!(x.cmp(&y), y.cmp(&x).reverse());
         prop_assert_eq!(x == y, a == b);
+        prop_assert_eq!(x.cmp(&y).is_eq(), x == y, "Ord and Eq must agree");
+    }
+
+    /// The same value read under two different grammars is one value, in every way a collection can
+    /// ask.
+    #[test]
+    fn two_grammars_over_one_value_are_one_value(digits in "0\\.[1-9]") {
+        let as_fraction = SchemaDec::parse(&digits, DecGrammar::Fraction);
+        let as_open = SchemaDec::parse(&digits, DecGrammar::OpenFraction);
+        if let (Ok(a), Ok(b)) = (as_fraction, as_open) {
+            prop_assert_eq!(a.cmp(&b), core::cmp::Ordering::Equal);
+            prop_assert_eq!(&a, &b, "equality is by value, so it agrees with the order");
+            prop_assert_eq!(
+                std::collections::BTreeSet::from([a.clone(), b.clone()]).len(),
+                1,
+                "a set holds one of them"
+            );
+            let texts = std::collections::BTreeSet::from([format!("{a}"), format!("{b}")]);
+            prop_assert_eq!(texts.len(), 1, "and they display the same text");
+            prop_assert_ne!(
+                a.grammar(),
+                b.grammar(),
+                "while the grammar each was admitted under is still remembered"
+            );
+        }
     }
 }
 

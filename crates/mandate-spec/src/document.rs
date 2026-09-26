@@ -108,10 +108,11 @@ impl Mandate {
     }
 
     /// The value at a pointer, for provenance (§2.1), policy reporting (§4.3), and classification
-    /// (§9.2). `None` when the pointer names nothing.
-    pub fn at(&self, path: &Pointer) -> Option<Value> {
+    /// (§9.2). `Ok(None)` when the pointer names nothing, which is a different answer from "this is
+    /// not implemented" — hence the `Result`, so the stub cannot pass for "the field is absent".
+    pub fn at(&self, path: &Pointer) -> Result<Option<Value>, ParseError> {
         let _ = path;
-        None
+        Err(ParseError::Unimplemented)
     }
 }
 

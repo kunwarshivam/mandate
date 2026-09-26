@@ -315,6 +315,7 @@ fn every_error_variant_has_its_own_stable_code() {
         (ParseError::OutOfBounds { path: path() }, "out_of_bounds"),
         (
             ParseError::OffGrammar {
+                path: path(),
                 grammar: DecGrammar::Fraction,
             },
             "off_grammar",
@@ -449,7 +450,7 @@ fn a_goals_end_date_is_the_one_it_was_given() {
 /// files; `dec.rs` is the one fully real module, and it was run through the gate by hand at zero.
 #[test]
 fn the_reachable_accessors_return_what_they_were_given() {
-    use mandate_spec::policy::{LevelName, PolicyOverlay};
+    use mandate_spec::policy::LevelName;
     use mandate_spec::risk::{Confirmation, InstrumentRestriction, Rejection};
 
     for (level, text) in [
@@ -510,34 +511,5 @@ fn the_reachable_accessors_return_what_they_were_given() {
         map.entries().keys().next(),
         Some(&Pointer::new("/name")),
         "the entry that was put in is the entry that comes out"
-    );
-    assert!(
-        PolicyOverlay::default().tightest().is_empty(),
-        "an overlay folded from nothing constrains nothing"
-    );
-}
-
-/// The shape the gate's §5.5 trim guard reads, and why it is a map rather than a set.
-///
-/// The coordinator's ruling on #136 gives `size_factor` to this crate's [`Snapshot`] because it is
-/// folded risk state. The duration beside each active rung is the other half of that: a trim waits
-/// until the rung has been active for `breach_confirm_s`, and the risk state is the only thing that
-/// steps the risk clock, so it folds the duration too.
-#[test]
-fn an_active_rung_carries_how_long_it_has_been_active() {
-    let active: BTreeMap<u8, u64> = BTreeMap::from([(0, 0), (2, 600)]);
-    assert!(active.contains_key(&0), "presence means the rung is active");
-    assert!(!active.contains_key(&1), "and absence means it is not");
-    assert_eq!(
-        active.get(&0).copied(),
-        Some(0),
-        "a rung that has just become active has accumulated nothing, which is not the same as \
-         being inactive"
-    );
-    assert_eq!(active.get(&2).copied(), Some(600));
-    assert_eq!(
-        active.keys().copied().collect::<Vec<u8>>(),
-        vec![0, 2],
-        "rungs come out in ladder order, so a size factor is one product in one order (ES-21)"
     );
 }

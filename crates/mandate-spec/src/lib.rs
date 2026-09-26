@@ -38,7 +38,7 @@ pub mod policy;
 pub mod risk;
 pub mod validate;
 
-pub use dec::{DecGrammar, SchemaDec};
+pub use dec::{DecGrammar, GrammarMismatch, SchemaDec};
 pub use document::{Mandate, MandateVersion, Pointer};
 pub use validate::{ValidatedMandate, ValidationContext, ValidationReport, Violation, Warning};
 
@@ -67,8 +67,8 @@ pub enum ParseError {
     OffPattern { path: Pointer },
     #[error("`{path}` is outside the bounds the schema gives it")]
     OutOfBounds { path: Pointer },
-    #[error("a decimal is not in the `{grammar}` grammar the schema declares for its field", grammar = grammar.as_str())]
-    OffGrammar { grammar: DecGrammar },
+    #[error("`{path}` is not in the `{grammar}` grammar the schema declares for it", grammar = grammar.as_str())]
+    OffGrammar { path: Pointer, grammar: DecGrammar },
     #[error("conditions nest deeper than the schema allows")]
     TooDeep { path: Pointer },
     /// The stubs of this story's tests PR return this, so every pending test fails on them

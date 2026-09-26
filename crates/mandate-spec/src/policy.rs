@@ -242,20 +242,33 @@ pub struct PolicyResult {
 /// `max_instruments`, `research_cost_cap_usd_per_day`, `research_interval_s`,
 /// `max_revisions_per_lineage`, `research_agent_allowed`, `admission_auto_allowed`, and
 /// `stagger_window_s` — §8.5's checks 4, 6, 7, 16, and 17 and §8.4's timing (DEC-128 item 9).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// No [`Default`]: only [`check`] folds an overlay, so a caller cannot hold one that constrains
+/// nothing and believe it means "no ceiling anywhere". An overlay that was never folded is not an
+/// empty overlay, it is an unknown one, and the type does not let you make it.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PolicyOverlay {
     tightest: BTreeMap<PolicyKey, PolicyValue>,
 }
 
 impl PolicyOverlay {
     /// The value that governs: the stricter of the mandate's and every ancestor's.
-    pub fn effective(&self, key: PolicyKey, mandate_value: &PolicyValue) -> PolicyValue {
+    ///
+    /// Fallible, so the stub cannot answer "no ceiling": a gate that read an absent ceiling from an
+    /// unimplemented overlay would enforce nothing, which is the one way this type could fail open.
+    pub fn effective(
+        &self,
+        key: PolicyKey,
+        mandate_value: &PolicyValue,
+    ) -> Result<PolicyValue, SpecError> {
         let _ = (key, mandate_value);
-        PolicyValue::Absent
+        Err(SpecError::Unimplemented)
     }
 
     /// False when any ancestor forbids `auto`, in which case §4.3 makes every `auto` evaluate as
     /// `ask` — a tightening the order path applies without a new mandate version.
+    ///
+    /// Infallible and fail-closed: the stub's `false` narrows every `auto` to `ask`, which is the safe
+    /// direction, so this one does not need to be a `Result`.
     pub fn auto_allowed(&self) -> bool {
         false
     }

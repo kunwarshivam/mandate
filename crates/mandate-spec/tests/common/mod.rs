@@ -29,7 +29,7 @@ pub fn obj(members: Vec<(&str, Value)>) -> Value {
     Value::Object(
         members
             .into_iter()
-            .filter_map(|(k, v)| Key::new(k).ok().map(|key| (key, v)))
+            .map(|(k, v)| (Key::new(k).expect("a canonical key"), v))
             .collect(),
     )
 }

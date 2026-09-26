@@ -65,6 +65,9 @@ fn a_missing_required_member_names_itself() {
         "/behavior/signal_models/0/max_output_age_s",
         "/autonomy/admission",
         "/universe/max_instruments",
+        "/goal/type",
+        "/goal/on_complete",
+        "/behavior/signal_models/0/admits_instruments",
     ] {
         let document = with(path, None);
         assert_eq!(code_of(&document), "missing_member", "removing {path}");
@@ -143,6 +146,7 @@ fn an_integer_outside_its_bounds_names_itself() {
         ("/universe/max_instruments", 21),
         ("/universe/max_instruments", 0),
         ("/autonomy/approval/timeout_s", 29),
+        ("/behavior/signal_models/0/max_output_age_s", 59),
     ] {
         let document = with(path, Some(i(value)));
         assert_eq!(code_of(&document), "out_of_bounds", "{path} = {value}");
@@ -262,4 +266,74 @@ fn two_documents_that_differ_only_in_order_hash_the_same() {
     let a = parse(&base()).expect("the base parses");
     let b = parse(&base()).expect("the base parses again");
     assert_eq!(a.version().ok(), b.version().ok());
+}
+
+/// The rest of the MC-S rejections that turn on a grammar, an `if`/`then`, an item count, or a
+/// research object, each by the code and (where it has one) the pointer an author reads.
+///
+/// Added in review round 1: nine cases had a `schema_valid: false` in the fixture and no test here
+/// saying *why*, and "why" is the whole reason these tests exist beside the harness.
+#[test]
+#[ignore = "pending E10-1"]
+fn the_remaining_schema_rejections_name_their_reason() {
+    assert_eq!(
+        code_of(&with("/behavior/signal_models/0/weight", Some(s("0")))),
+        "off_grammar",
+        "MC-S12: a weight of zero is not in `unit_positive`, so the model would count for nothing"
+    );
+    assert_eq!(
+        code_of(&with("/universe/asset_classes", Some(arr(vec![])))),
+        "out_of_bounds",
+        "MC-S26: an empty asset_classes admits nothing and the schema needs one"
+    );
+}
+
+/// MC-S15: `protection` carries an `if enabled then stop_distance` conditional, so enabling protection
+/// without a stop is a schema rejection rather than a V-rule.
+#[test]
+#[ignore = "pending E10-1"]
+fn protection_enabled_needs_a_stop_distance() {
+    let document = with("/protection/stop_distance", Some(Value::Null));
+    assert_eq!(code_of(&document), "off_grammar");
+    assert_eq!(
+        pointer_of(&document),
+        "no pointer: off_grammar",
+        "the grammar error carries the pointer, which this helper reports separately"
+    );
+}
+
+/// MC-S27, MC-S30, MC-S31: the research object's own required members and integer bounds.
+///
+/// The builder's base has `research: null` (no admitting model), so each row sets a research object
+/// first and then breaks one thing in it.
+#[test]
+#[ignore = "pending E10-1"]
+fn the_research_object_has_its_own_required_members_and_bounds() {
+    let research = |interval: u64, revisions: u64, with_cap: bool| {
+        let mut members = vec![("interval_s", i(interval))];
+        if with_cap {
+            members.push(("cost_cap_usd_per_day", s("5")));
+        }
+        members.push(("max_revisions_per_lineage", i(revisions)));
+        obj(members)
+    };
+    let missing_cap = with("/behavior/research", Some(research(900, 3, false)));
+    assert_eq!(code_of(&missing_cap), "missing_member", "MC-S27");
+    assert_eq!(
+        pointer_of(&missing_cap),
+        "/behavior/research/cost_cap_usd_per_day"
+    );
+    let too_many = with("/behavior/research", Some(research(900, 11, true)));
+    assert_eq!(code_of(&too_many), "out_of_bounds", "MC-S30: the cap is 10");
+    assert_eq!(
+        pointer_of(&too_many),
+        "/behavior/research/max_revisions_per_lineage"
+    );
+    let too_fast = with("/behavior/research", Some(research(60, 3, true)));
+    assert_eq!(
+        code_of(&too_fast),
+        "out_of_bounds",
+        "MC-S31: 300 s is the floor"
+    );
+    assert_eq!(pointer_of(&too_fast), "/behavior/research/interval_s");
 }

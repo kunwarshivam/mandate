@@ -6,8 +6,6 @@ use core::cmp::Ordering;
 use mandate_canon::DecStr;
 use mandate_num::{NumError, Ratio, Usd};
 
-use crate::ParseError;
-
 /// The schema's bound on either side of the point: `[0-9]{0,27}` after a first digit.
 const MAX_PART_DIGITS: usize = 28;
 
@@ -66,11 +64,32 @@ impl DecGrammar {
 /// which [`Usd`] (28 places of scale over a 96-bit significand), [`Ratio`] (24 places), and `Price`
 /// (9) cannot all hold. A rule converts what it computes with, and a value its target type cannot
 /// hold exactly is an error naming the path, never a rounded number (DEC-128 item 4).
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct SchemaDec {
     text: String,
     grammar: DecGrammar,
 }
+
+/// Equality is **by value**, so it agrees with [`Ord`].
+///
+/// The grammar is a witness of which field's `$def` admitted the text, not part of what the number
+/// *is*: two fields may hold the same value, and `0.5` read as a `fraction` and `0.5` read as an
+/// `open_fraction` are the same decimal. Deriving equality over `(text, grammar)` while ordering by
+/// value alone would break [`Ord`]'s contract — `cmp` would say `Equal` where `==` said false, so a
+/// `BTreeSet` would hold both, `dedup` would keep both, and `max` could pick either. A policy value
+/// compared against a mandate field is exactly that cross-grammar case.
+///
+/// There is deliberately **no `Hash`**. ES-21 forbids `HashMap` and `HashSet` in this workspace
+/// because their iteration order breaks replay, so a hash of a document value has no caller that is
+/// allowed to exist — and an impl kept only to satisfy a derive is one more thing that has to agree
+/// with `Eq` and that nothing would notice going wrong.
+impl PartialEq for SchemaDec {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for SchemaDec {}
 
 /// A decimal split into the parts the grammars constrain.
 struct Parts<'a> {
@@ -79,12 +98,23 @@ struct Parts<'a> {
     fraction: Option<&'a [u8]>,
 }
 
+/// Text that is not in the grammar its field declares.
+///
+/// Path-less on purpose: [`SchemaDec`] does not know which field it is being parsed for. The document
+/// parser adds the pointer, producing [`ParseError::OffGrammar`], so a rejection still names the field
+/// an author has to fix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("not in the `{grammar}` grammar", grammar = self.grammar.as_str())]
+pub struct GrammarMismatch {
+    pub grammar: DecGrammar,
+}
+
 impl SchemaDec {
-    /// The text if it is in `grammar`, else [`ParseError::OffGrammar`].
-    pub fn parse(text: &str, grammar: DecGrammar) -> Result<Self, ParseError> {
-        let parts = split(text.as_bytes()).ok_or(ParseError::OffGrammar { grammar })?;
+    /// The text if it is in `grammar`, else [`GrammarMismatch`].
+    pub fn parse(text: &str, grammar: DecGrammar) -> Result<Self, GrammarMismatch> {
+        let parts = split(text.as_bytes()).ok_or(GrammarMismatch { grammar })?;
         if !allowed(&parts, grammar) {
-            return Err(ParseError::OffGrammar { grammar });
+            return Err(GrammarMismatch { grammar });
         }
         Ok(Self {
             text: text.to_owned(),
@@ -112,8 +142,8 @@ impl SchemaDec {
 
     /// The same digits as a journal decimal, and the same text: the identity, because the grammar is
     /// canonical. Asserted as a property rather than assumed.
-    pub fn to_dec_str(&self) -> Result<DecStr, ParseError> {
-        DecStr::parse(&self.text).map_err(|_| ParseError::OffGrammar {
+    pub fn to_dec_str(&self) -> Result<DecStr, GrammarMismatch> {
+        DecStr::parse(&self.text).map_err(|_| GrammarMismatch {
             grammar: self.grammar,
         })
     }
