@@ -16,6 +16,7 @@
 | **Strategy field** | The working universe and the theses behind it, produced by the research agent at runtime within the envelope, journaled, and outside the hashed mandate document |
 | **Research agent** | The LLM-driven runtime component that turns market data, news, filings, and memory into theses and admits instruments into the working universe through the eligibility floor and the autonomy rules ([ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)) |
 | **Thesis** | A research-agent output naming one instrument, direction, horizon, evidence, and invalidation conditions, with conviction and confidence; journaled as `ThesisProposed` |
+| **Thesis revision** | A thesis the research agent re-proposes after its predecessor failed on forward paper, naming the failure it addresses; journaled as `ThesisRevised` with its lineage, scored from zero, capped per lineage by `max_revisions_per_lineage` ([DEC-111](../project/04-decision-log.md#decisions)) |
 | **Risk exit / discretionary exit / owner exit** | An exit from the risk engine (limits, automated flatten, trim, stop watchdog), exempt from all controls; an owner's close or kill switch, paced only by participation caps; an exit from the order builder or goal, paced by conduct controls but never denied |
 | **Lifetime loss floor** | Equity level (contributed capital × (1 − `max_loss_from_allocation`)) at which an agent flattens and pauses permanently unless the owner loosens the mandate |
 | **Autonomy policy** | Rules that classify each proposed action as AUTO, ASK, or DENY |

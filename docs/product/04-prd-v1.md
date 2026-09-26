@@ -106,6 +106,7 @@ instructions for creating a trading-only key; rejections are journaled without s
 | FR-3.7 | Signal-model library: momentum, mean reversion, trend (quant); funding/carry when perpetuals arrive; LLM research; one fast decision model. Parameters have no defaults; documentation describes methodology only ([DEC-52](../project/04-decision-log.md#decisions)) | P0 quant and LLM research (the research agent, DEC-97), P1 fast model |
 | FR-3.8 | Templates for common mandate structures; a template may propose envelope values, shown as proposed | P1 |
 | FR-3.9 | Research agent: originates theses (instrument, direction, horizon, evidence, invalidation) from market data, news, filings, and the agent's memory; admits instruments into the working universe through the eligibility floor, `max_instruments`, and the autonomy rules; every thesis and admission journaled; bring-your-own-strategy mode pins the universe ([DEC-97](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)) | P0 |
+| FR-3.10 | Thesis revision: a thesis that fails on forward paper may be revised by the research agent; a revision is journaled as `ThesisRevised` with its lineage, scored from zero on forward paper only, passes every admission rule, cannot loosen the envelope, and is capped per lineage ([DEC-111](../project/04-decision-log.md#decisions)) | P1 |
 
 **Acceptance criteria (FR-3.1, FR-3.4):** for a set of reference descriptions, the compiled
 mandate contains every value the description states, each with its quoted source; proposed envelope

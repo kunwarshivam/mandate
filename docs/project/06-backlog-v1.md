@@ -302,6 +302,14 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
   no user's results are aggregated; every thesis is scored after its horizon against buy-and-hold of
   the eligible basket and a broad index ETF, net of the cost model; the report states pass or fail
   against the threshold and is reproducible from the journal.
+- **E17-9 (Should)** As an owner, I want the research agent to revise a thesis that failed on
+  forward paper, with its autopsy recorded, so that the platform improves its ideas without hiding
+  its failures ([DEC-111](04-decision-log.md#decisions)). *Accepted when:* a revision is journaled
+  as `ThesisRevised` linked to its predecessor and names the failure it addresses; it starts with an
+  empty scorecard and is scored only by the E17-8 evaluator; it passes the eligibility floor,
+  corroboration, and the autonomy rules like a new thesis and cannot loosen any envelope field; past
+  `max_revisions_per_lineage` the lineage is retired and the owner is told. Depends on E17-8 and
+  on one completed DEC-99 evaluation on the DEC-103 thin slice.
 
 ### E16 Kraken Derivatives US connector (Phase 3)
 
