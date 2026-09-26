@@ -104,9 +104,11 @@ pub enum ReasonCode {
 }
 
 impl ReasonCode {
-    /// Every variant, so a caller that needs the whole set cannot hand-list a stale subset. A new
-    /// variant that is not added here fails the exhaustiveness check in `ReasonCode::as_str`'s
-    /// match and the length assertion below it.
+    /// Every variant, so a caller that needs the whole set cannot hand-list a stale subset — the
+    /// mistake that would have made `MC-G07` unpassable. A new variant that is not added here is
+    /// caught twice: `as_str`'s match is exhaustive, and
+    /// `hand::every_reason_code_is_registered_in_the_case_file` asserts this array's length equals
+    /// the variant count.
     pub const ALL: [Self; 38] = [
         Self::AccountTradingBlocked,
         Self::AccountRestricted,
@@ -300,9 +302,6 @@ impl Origin {
     }
 }
 
-/// Which pass of §5.3 this is: the first gate decision excludes the agent's own protective and
-/// resting opening orders from rules 4 to 6, because the executor cancels them first; the re-run
-/// immediately before submission applies every rule in full.
 /// A side, orderable so it can key a set. `mandate_accounting::Side` is the same two values but
 /// is not `Ord`, and ES-21 forbids a `HashSet`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -320,6 +319,9 @@ impl From<Side> for RestingSide {
     }
 }
 
+/// Which pass of §5.3 this is: the first gate decision excludes the agent's own protective and
+/// resting opening orders from rules 4 to 6, because the executor cancels them first; the re-run
+/// immediately before submission applies every rule in full.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GatePass {
     First,

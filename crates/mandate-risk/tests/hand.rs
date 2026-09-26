@@ -714,9 +714,11 @@ fn an_increase_in_the_closing_ten_minutes_is_close_window() {
     );
 }
 
-/// The opening auction denies a market order, which is what `auction_window` is for: an *opening*
-/// order at 09:29 is already denied by the session rule, so the code has to be reachable through a
-/// market order or not at all (DEC-129 item 18).
+/// The opening auction denies a market order, which is what `auction_window` is for.
+///
+/// DEC-129 item 18 narrows `auction_window` to the opening auction and to market orders in either
+/// window, so this is the code's only reachable path: an *opening* order at 09:29 is in pre-market
+/// and check 3's session rule denies it first, and the closing ten minutes report `close_window`.
 #[test]
 #[ignore = "pending E6-6"]
 fn the_opening_auction_denies_a_market_order() {
@@ -740,8 +742,9 @@ fn the_opening_auction_denies_a_market_order() {
     let d = evaluate(&s.input()).expect("the gate decides");
     assert_eq!(
         (d.verdict, d.reason),
-        (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
-        "exits in an auction window use limit orders, never market orders (spec 4.3)"
+        (Verdict::Deny, Some(ReasonCode::AuctionWindow)),
+        "exits in an auction window use limit orders, never market orders (spec 4.3), and DEC-129 \
+         item 18 puts that denial at check 3 under auction_window"
     );
 }
 
@@ -1137,37 +1140,59 @@ fn a_halted_instrument_denies_an_opening() {
     );
 }
 
-/// §4.4: a dropped status feed is a presumed halt, so no market order.
+/// §4.4: a dropped status feed is a **presumed** halt, which bars market orders but not openings.
+///
+/// A real halt and a presumed one are different denials, so they carry different codes (DEC-129
+/// item 24): a halted instrument takes no new opening order at all and reports `instrument_halted`
+/// at check 3, while a presumed halt leaves openings alone and refuses only market orders, which is
+/// check 4's `market_order_not_allowed`. This test pins both halves.
 #[test]
 #[ignore = "pending E6-9"]
 fn a_dropped_status_feed_is_a_presumed_halt() {
     let mut s = Scenario::allowing();
     s.instrument.status_feed_current = false;
+    let opening = evaluate(&s.input()).expect("the gate decides");
+    assert_ne!(
+        opening.reason,
+        Some(ReasonCode::InstrumentHalted),
+        "a presumed halt is not a halt: a limit opening is not denied by it"
+    );
+
     s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
     s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
     s.proposed.kind = mandate_risk::ProposedKind::Market;
-
-    let d = evaluate(&s.input()).expect("the gate decides");
+    let market = evaluate(&s.input()).expect("the gate decides");
     assert_eq!(
-        (d.verdict, d.reason),
+        (market.verdict, market.reason),
         (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
         "a presumed halt takes marketable limits, never market orders"
     );
 }
 
-/// §3.2 item 5's threshold is `≥`, so a volume exactly at it is the liquid tier.
+/// §9.6's tier threshold is `≥ 50 M`, so a volume exactly at it is the **liquid** tier.
+///
+/// The two tiers only differ between their bounds. Against the fixture's ask of 100.05 the liquid
+/// bound is 100.05 × 1.01 = 101.0505 and the illiquid bound is 100.05 × 1.02 = 102.051, so a limit
+/// of 101.5 is aggressive for a liquid instrument and passive enough for an illiquid one. A limit
+/// below both — 101, say — is allowed either way and would tell the tiers apart not at all.
 #[test]
 #[ignore = "pending E6-8"]
 fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
-    let mut s = Scenario::allowing();
-    s.instrument.median_dollar_volume_20d = Some(usd("50000000"));
-    s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "101", Origin::OrderBuilder);
+    let mut liquid = Scenario::allowing();
+    liquid.instrument.median_dollar_volume_20d = Some(usd("50000000"));
+    liquid.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "101.5", Origin::OrderBuilder);
+    let at_threshold = evaluate(&liquid.input()).expect("the gate decides");
 
-    let d = evaluate(&s.input()).expect("the gate decides");
+    let mut illiquid = Scenario::allowing();
+    illiquid.instrument.median_dollar_volume_20d = Some(usd("49999999"));
+    illiquid.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "101.5", Origin::OrderBuilder);
+    let below_threshold = evaluate(&illiquid.input()).expect("the gate decides");
+
     assert_eq!(
-        d.reason,
-        Some(ReasonCode::PriceOutsideCollar),
-        "at exactly 50 M the tier is liquid, so x is 1 percent and 101 is above ask x 1.01"
+        (at_threshold.reason, below_threshold.reason),
+        (Some(ReasonCode::PriceOutsideCollar), None),
+        "at exactly 50 M the tier is liquid and x is 1 percent, so 101.5 is above 101.0505; one \
+         dollar below the threshold x is 2 percent and 101.5 is within 102.051"
     );
 }
 
@@ -1432,13 +1457,24 @@ fn a_sliced_exit_reports_what_it_applied() {
 /// `not_in_working_universe` is the code mandate spec §5.3 gives the working-universe check and
 /// `MC-G14` and `MC-G16` expect, but the trading-domain `reason_codes` registry does not carry it:
 /// that registry has `not_in_universe` for the same condition, which `RC-16` step 7 expects. The
-/// two suites cannot both be satisfied, which is DEC-129 item 24, proposed to the founder. This
+/// two suites cannot both be satisfied, which is DEC-129 item 25, proposed to the founder. This
 /// test pins the gap rather than papering over it: the exception is named, and **any other**
 /// unregistered code fails, so the day a new one is minted this test says so.
 #[test]
 fn every_reason_code_is_registered_in_the_case_file() {
-    /// DEC-129 item 24, `Proposed (founder)`. Removing this entry is what closes that decision.
+    /// DEC-129 item 25, `Proposed (founder)`. Removing this entry is what closes that decision.
     const KNOWN_UNREGISTERED: [&str; 1] = ["not_in_working_universe"];
+
+    assert_eq!(
+        ReasonCode::ALL.len(),
+        ReasonCode::ALL
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<BTreeSet<_>>()
+            .len(),
+        "ReasonCode::ALL lists every variant exactly once; a duplicate or a missing entry here is \
+         how a subset goes stale"
+    );
 
     let registry = include_str!("../../../docs/specs/reference-cases/trading-domain.yaml");
     let scoped_to_the_reason_codes_block = "counting every YAML list item in the file would let an \

@@ -362,27 +362,62 @@ proptest! {
         }
     }
 
-    /// A trim never sells below the target the folded size factor names, and never enlarges a
-    /// position. The factor itself is stream F's fold (the coordinator's ruling), so this reads it
-    /// rather than recomputing it; `hand::two_active_rungs_multiply` pins the 0.5 x 0.4 = 0.2 case.
+    /// A trim never sells below its target, and one appears exactly when the position is above it.
+    ///
+    /// Both halves matter: asserting only "no trim oversells" passes on a gate that proposes no
+    /// trim at all, which is what an `Ok(Vec::new())` stub does. So the property also asserts the
+    /// trim **exists** whenever the position exceeds `size_factor × cap` by the rebalance band, and
+    /// compares its quantity against a target the property computes itself.
     #[test]
     #[ignore = "pending E6-4"]
     fn a_trim_never_sells_below_the_target(
-        rungs in prop::collection::vec(0_u8..3, 0..3),
+        held_dollars in 100_u32..3_000,
         factor in prop::sample::select(vec!["1", "0.5", "0.2"]),
     ) {
         let mut s = Scenario::allowing();
         s.mandate = common::mandate_with(common::two_scaling_rungs());
-        s.risk.active_rungs = rungs.into_iter().map(|r| (r, 120_u64)).collect();
+        s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
         s.risk.size_factor = common::ratio(factor);
+        s.agent.positions.insert(
+            asset(INSTRUMENT_2), qty(&(held_dollars / 100).max(1).to_string()),
+        );
+        s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held_dollars.to_string()));
+        let mut instruments = std::collections::BTreeMap::new();
+        instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
 
         let trims = mandate_risk::trim_proposals(
-            s.now, &s.config, &s.mandate, &s.risk, &s.agent, &std::collections::BTreeMap::new(),
+            s.now, &s.config, &s.mandate, &s.risk, &s.agent, &instruments,
         ).expect("the trims compute");
-        prop_assert!(
-            trims.iter().all(|t| t.purpose == Purpose::RiskExit),
-            "a trim is a risk exit, so nothing paces or denies it"
-        );
+
+        let cap_is_min_of_1500_and_point_two_times_10000 = 1_500_u32;
+        let target_dollars = match factor {
+            "1" => cap_is_min_of_1500_and_point_two_times_10000,
+            "0.5" => cap_is_min_of_1500_and_point_two_times_10000 / 2,
+            _ => cap_is_min_of_1500_and_point_two_times_10000 / 5,
+        };
+        let band_dollars = target_dollars / 20;
+        let over = held_dollars.saturating_sub(target_dollars);
+
+        if over >= band_dollars && over > 0 {
+            let trim = trims.first().expect(
+                "a position above its target by the rebalance band is trimmed, not left alone",
+            );
+            let sold_dollars = trim.qty.to_string().parse::<u32>().unwrap_or(0) * 100;
+            prop_assert!(
+                sold_dollars >= over,
+                "selling {} of a {} position leaves it above the target {}",
+                sold_dollars, held_dollars, target_dollars
+            );
+            prop_assert!(
+                sold_dollars <= held_dollars,
+                "a trim never sells more than the position"
+            );
+        } else {
+            prop_assert!(
+                trims.is_empty(),
+                "a position at or below its target is not trimmed"
+            );
+        }
     }
 
     /// MI-8: identical inputs give identical decisions, check list included.

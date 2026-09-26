@@ -88,6 +88,21 @@ fn patched_risk(c: &Value) -> Value {
     risk
 }
 
+/// The base's own `sizing.rebalance_band`, not a constant typed here: the value belongs to the
+/// fixture, and a hardcoded copy silently keeps its old reading when the founder changes the base.
+fn sizing_rebalance_band(risk: &Value) -> mandate_num::Fraction {
+    let f = fixture();
+    let from_base = f
+        .as_object()
+        .and_then(|_| risk.get("__base_name"))
+        .and_then(Value::as_str)
+        .and_then(|b| f.pointer(&format!("/bases/{b}/mandate/sizing/rebalance_band")))
+        .and_then(Value::as_str);
+    fraction(from_base.unwrap_or_else(|| {
+        panic!("the base states sizing.rebalance_band; this harness does not invent one")
+    }))
+}
+
 fn limits_from(risk: &Value) -> RiskLimits {
     let ladder = risk
         .get("drawdown_ladder")
@@ -129,7 +144,7 @@ fn limits_from(risk: &Value) -> RiskLimits {
                 .unwrap_or_else(|| panic!("reentry_cooldown_s is a number")),
         )
         .unwrap_or(u32::MAX),
-        rebalance_band: fraction("0.05"),
+        rebalance_band: sizing_rebalance_band(risk),
         drawdown_ladder: ladder,
     }
 }
@@ -489,6 +504,26 @@ fn run_flatten(id: &str) {
         "{id}: the sells and the deferred sells"
     );
 
+    for (got, want) in plan.deferred_sells.iter().zip(
+        expect
+            .get("deferred_sells")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten(),
+    ) {
+        assert_eq!(
+            (got.instrument.as_str(), got.qty),
+            (s(want, "instrument").as_str(), qty(&s(want, "qty"))),
+            "{id}: a deferred sell is the agent's sub-ledger quantity"
+        );
+        assert_eq!(
+            s(want, "until"),
+            "regular_session_open",
+            "{id}: the only deferral this harness interprets is to the regular-session open; \
+             anything else is not interpreted until the story that adds it"
+        );
+    }
+
     for (got, want) in plan.sells.iter().zip(
         expect
             .get("sells")
@@ -515,6 +550,21 @@ fn run_flatten(id: &str) {
             want.get("floor_price").and_then(Value::as_str).map(price),
             "{id}: the owner's floor price"
         );
+        if let Some(remainder) = want.get("remainder").and_then(Value::as_str) {
+            assert_eq!(
+                remainder, "rests_at_floor_then_waits_for_open",
+                "{id}: the only remainder this harness interprets"
+            );
+            assert!(
+                got.rests_at_floor_then_waits_for_open,
+                "{id}: the case states the remainder rests at the floor and waits for the open"
+            );
+        } else {
+            assert!(
+                !got.rests_at_floor_then_waits_for_open,
+                "{id}: no remainder is stated, so none is planned"
+            );
+        }
     }
 
     for (instrument, broker_qty) in &broker {

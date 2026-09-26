@@ -337,11 +337,12 @@ do not need the failing input.
 ES-04 keeps exact arithmetic in `mandate-num`, so the gate adds, under claim #123:
 `Usd::times_fraction` (exact, no rounding: `max_position_fraction × E` and the collar's
 `ask × (1 + x)` share one rule, that a product of two exact decimals is exact or an error),
-`Usd::abs` and a signed `Usd::from_signed` for `Σ |MV|`, `Price::collar_bound(Fraction, Side,
-Aggressive)` (one rounding, to the instrument's price increment, **against** the order so a bound
-never admits a price the exact comparison would refuse), and `Qty::times_fraction` for the
-participation caps (truncated to the increment, like `Qty::portion`). Nothing here rounds a limit
-in the order's favour.
+`Usd::abs` for `Σ |MV|`, built on the already-tested `is_negative` and `negated` so it adds no
+comparison of its own, and `Price::collar_bound(Fraction, Adverse)` (one rounding, at the 9 places a
+price holds, each bound rounded so the constraint gets **stricter** — a buy's ceiling truncates down
+and a sell's floor rounds up — so a bound never admits a price the exact comparison would refuse).
+`Qty::times_fraction` for the participation caps (truncated to the increment, like `Qty::portion`)
+arrives with E6-8's implementation PR. Nothing here rounds a limit in the order's favour.
 
 ## The evaluation order
 
@@ -776,7 +777,14 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     through contradicts rule 9 and risks doubling a position whose true size is unknown. So the
     fuzz's `Hold` codes are `agent_paused`, `agent_stopped`, and `unknown_order_in_flight`, while
     `account_trading_blocked` stays the only denial a reducing purpose may carry.
-23. **A `removed_instrument` restriction is the working-universe check, not a separate one.** An
+23. **A real halt and a presumed halt are different denials, under different codes.** §4.4 says a
+    halted or paused instrument takes "no new opening orders", while a stale quote or dropped status
+    feed is "treated as a presumed halt: no market orders; exits use marketable limit orders". The
+    two effects differ, so the codes do: a halt is `instrument_halted` at check 3 and bars the
+    opening outright; a presumed halt leaves openings alone and refuses only market orders, which is
+    check 4's `market_order_not_allowed`. Collapsing them onto one code would either bar openings a
+    presumed halt permits or permit market orders a halt does not.
+24. **A `removed_instrument` restriction is the working-universe check, not a separate one.** An
     instrument becomes `removed_instrument` exactly when it leaves the working universe (mandate
     §2.3's state machine and §5.9), so the same fold produces both and check 2 reports it as
     `not_in_working_universe`, which is registered. That matters because `removed_instrument`
@@ -789,7 +797,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 ## Decisions needed
 
 None can be taken by an agent: each would change a founder-owned file
-([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 24, 25, and 26,
+([AGENTS.md](../../../AGENTS.md) rule 9, ES-22). The three below are DEC-129 items 25, 26, and 27,
 each `Proposed (founder)`.
 
 1. **Two reason codes for one condition: `not_in_universe` and `not_in_working_universe`.**
@@ -889,7 +897,7 @@ missing test, and the tests PR does not merge with one.
 | 4 | Gross exposure omits the proposed order | `MC-G04`, `MC-G06`, the fuzz oracle |
 | 5 | Gross exposure caps at `max_gross_exposure_usd` without also capping at E | `MC-G06`, `properties::gross_exposure_is_bounded_by_equity` |
 | 6 | The re-entry cooldown checks only the proposed instrument, not its group | `MC-G12`, `properties::cooldown_covers_the_whole_group` |
-| 7 | An exit is run through the mandate limits instead of returning early | `MC-G08`, `MC-G09`, `MC-G10`, `MC-G15`, `properties::mi1_reduction_is_never_denied` |
+| 7 | An exit is run through the mandate limits instead of returning early | `MC-G08`, `MC-G09`, `MC-G10`, `MC-G15`, `properties::mi1_reduction_is_never_denied_by_a_limit` |
 | 8 | An absent working universe is treated as "everything allowed" | `hand::an_absent_working_universe_is_an_error`, `properties::mi1_reduction_is_never_denied_by_a_limit` cannot catch it, which is why the hand test exists |
 | 9 | An empty working universe is treated as absent (an error) rather than as denying | `MC-G16` |
 | 10 | The eligibility floor runs its items out of §3.2 order, so `below_price_floor` is reported where `ineligible_exchange` should be | `RC-16` steps 2 and 3, `hand::the_floor_reports_the_first_failing_item` |
