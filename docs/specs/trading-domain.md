@@ -2,13 +2,20 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.9 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.10 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.10:** corporate-action rules found while implementing E3-2
+  ([DEC-92 to DEC-94](../project/04-decision-log.md#decisions)). A split that leaves no share
+  removes the whole basis (DEC-92); otherwise the residual formula is unchanged and never removes
+  more than the basis held. Cash in lieu is `round(f × p, 2, half_even)`, and a broker posting
+  settles an outstanding cash in lieu of exactly that amount (DEC-93) (§2.1, §8.3, §8.5). I3's
+  market-value bound is |Q_raw| × 5 × 10⁻¹³, not |Q'| × 5 × 10⁻¹³ (DEC-94, §8.6). Every
+  reference case is unchanged.
 - **v0.9:** a reducing fill's removed basis is limited to the basis held, so a position's cost
   basis always has the sign of its quantity (§2.1, §8.1, I2,
   [DEC-86](../project/04-decision-log.md#decisions)). Refines DEC-27 only when the basis has digits
@@ -91,6 +98,8 @@
 | Quantity | ≤ 9 decimal places; per-instrument increment |
 | Cost-basis reduction | `round(B × part ÷ whole, 12, half_even)`, limited to the basis held (§8.1) |
 | Adjusted marks after splits | `round(mark × old ÷ new, 12, half_even)` (§8.5) |
+| Split residual basis | `round(B × (Q·new − Q'·old) ÷ (Q·new), 12, half_even)`; the whole basis when Q' = 0 (§8.5) |
+| Cash in lieu | `round(f × p, 2, half_even)`, signed like Q (§8.5) |
 | Order quantity | Truncate to the quantity increment, except a sell closing the full position (§5.3) |
 | Notional amount | Truncate to 0.01; minimum 1.00 USD |
 | Buy limit / stop price | Round down to the tick of the rounded price |
@@ -639,7 +648,7 @@ authoritative.
 | `SettlementPosted` (00:00 ET on the settlement date) | Unsettled[date] → settled |
 | Dividend ex-date | Receivable (long) or payable (short); income |
 | `DividendPaid` (00:00 ET on the pay date) | Receivable/payable → settled |
-| `CashInLieuPosted` (broker activity) | Receivable → settled |
+| `CashInLieuPosted` (broker activity) | The outstanding cash in lieu of exactly the posted amount, earliest ex-date first → settled; no such amount is an error, and a differing broker amount is a reconciliation difference (§11) |
 
 **No-debit rule** ([DEC-34](../project/04-decision-log.md#decisions)): in margin accounts, settled +
 Σ unsettled − accrued fees ≥ 0 (settled cash alone may go negative). In cash accounts, settled ≥ 0.
@@ -656,7 +665,7 @@ before the ex-date**.
 
 | Action | Treatment |
 |---|---|
-| **Split** (integer ratio new:old) | Q_raw = Q × new ÷ old; B and realized unchanged. Fractionable: Q' = truncate(Q_raw, 9). Non-fractionable: Q' = whole shares. Residual f = Q_raw − Q' (either case) is removed: R = round(B × (Q·new − Q'·old) ÷ (Q·new), 12, half_even) (a single division of terminating inputs, equal to B × f ÷ Q_raw), B' = B − R, cash in lieu = f × broker price per post-split share (0 if none posted), realized += cash in lieu − R. **Every stored mark is replaced by round(mark × old ÷ new, 12, half_even)** (source unchanged). Cash in lieu is a receivable until `CashInLieuPosted` |
+| **Split** (integer ratio new:old) | Q_raw = Q × new ÷ old; B and realized unchanged. Fractionable: Q' = truncate(Q_raw, 9). Non-fractionable: Q' = whole shares. Residual f = Q_raw − Q' (either case) is removed: R = round(B × (Q·new − Q'·old) ÷ (Q·new), 12, half_even) (a single division of terminating inputs, equal to B × f ÷ Q_raw), or R = B when Q' = 0 ([DEC-92](../project/04-decision-log.md#decisions); while a share remains, \|R\| ≤ \|B\| and B' keeps the sign of Q'), B' = B − R, cash in lieu = round(f × p, 2, half_even) with p the broker price per post-split share (0 if none posted; negative for a short, [DEC-93](../project/04-decision-log.md#decisions)), realized += cash in lieu − R. **Every stored mark is replaced by round(mark × old ÷ new, 12, half_even)** (source unchanged). Nonzero cash in lieu is a receivable (payable for a short) until `CashInLieuPosted` of exactly that amount (§8.3) |
 | **Cash dividend** (d per share) | Entitlement = position after all fills with **trade date before the ex-date**; receivable (payable for shorts) = round(Q × d, 2, half_even); **income on the ex-date**; `DividendPaid` on the pay date |
 | Orders | **Splits:** at preparation, cancel the agent's open orders in the instrument (protective included) and require confirmation; an unconfirmed cancel at 20:00 alerts the owner, and a pre-split protective leg still live at 09:25 pauses the agent. Bracket and OCO legs are never adjusted by Alpaca, so they must be canceled. **Cash dividends:** cancel only non-protective orders; protective legs stay (an unadjusted sell stop is conservative by the dividend amount). Broker-initiated `replaced` orders are linked and re-checked |
 | Pending action state | Between application and the broker's posting of the action (split activity or updated position), reconciliation treats the expected difference as `pending_corporate_action`, not a mismatch |
@@ -673,9 +682,10 @@ Evaluated after every event; exact unless stated.
 - **I2 Reducing fills.** With U = B − round(B × |q| ÷ |Q|, 12, half_even), the new basis is U when
   U is on the position's side of zero or zero, and 0 otherwise (removal limited to the basis held,
   §8.1); removed basis = B − new basis.
-- **I3 Splits.** Q', B', and realized are exact per §8.5. |ΔMV + f × mark'| ≤ |Q'| × 5 × 10⁻¹³
-  (mark rounding only, where f is the residual removed and mark' the adjusted mark); exact when
-  mark × old ÷ new terminates within 12 places.
+- **I3 Splits.** Q', B', and realized are exact per §8.5. |ΔMV + f × mark'| ≤ |Q_raw| × 5 × 10⁻¹³
+  (mark rounding only, where f is the residual removed and mark' the adjusted mark: ΔMV + f × mark'
+  = Q_raw × (mark' − mark × old ÷ new)); exact when mark × old ÷ new terminates within 12 places
+  ([DEC-94](../project/04-decision-log.md#decisions)).
 - **I4 Cash.** Total cash = settled + Σ unsettled. After `SettlementPosted` for date D, no unsettled
   bucket is dated ≤ D. No-debit rule per §8.3 holds after every order the gate approved.
 - **I5 Quantity.** Q = the fold, in `seq` order, of signed received fill quantities (gross minus
