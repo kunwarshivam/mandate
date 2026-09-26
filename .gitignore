@@ -15,3 +15,6 @@ __pycache__/
 
 # Claude Code local state (subagent worktrees); never part of the repository
 .claude/
+
+# proptest writes failure seeds next to the test that produced them; never committed
+*.proptest-regressions
