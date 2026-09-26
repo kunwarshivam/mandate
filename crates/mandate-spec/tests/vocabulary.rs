@@ -538,3 +538,53 @@ fn a_hard_breach_waits_the_shorter_of_the_confirm_window_and_ten_seconds() {
     );
     assert_eq!(Confirmation::default().accumulated_s(), 0);
 }
+
+/// A completed goal's three spellings: the reason `GoalCompleted` carries, the `then` beside it, and
+/// the reason `AgentStopped` carries (§3.1, §5.10).
+///
+/// Live, and a total map over each enum, so DEC-128 item 22's fourth admitted case covers it: a wrong
+/// spelling here is a journal event no replay could read back, and the reference cases compare these
+/// as text.
+#[test]
+fn a_completed_goal_writes_the_three_spellings_section_five_ten_gives_it() {
+    use mandate_spec::document::OnComplete;
+    use mandate_spec::risk::{GoalReason, StopReason, ThenAction};
+
+    for (reason, text) in [
+        (GoalReason::ProfitStopReached, "profit_stop_reached"),
+        (GoalReason::TargetQty, "target_qty"),
+        (GoalReason::MaxSpend, "max_spend"),
+        (GoalReason::EndDate, "end_date"),
+    ] {
+        assert_eq!(reason.as_str(), text, "§5.10 names this goal reason");
+    }
+    for (reason, text) in [
+        (StopReason::OwnerStop, "owner_stop"),
+        (StopReason::ProfitStopReached, "profit_stop_reached"),
+        (StopReason::EndDate, "end_date"),
+        (StopReason::GoalComplete, "goal_complete"),
+    ] {
+        assert_eq!(reason.as_str(), text, "§5.10 names this stop reason");
+    }
+    for on_complete in [
+        OnComplete::HoldProtected,
+        OnComplete::DisarmLadder,
+        OnComplete::Release,
+    ] {
+        assert_eq!(
+            ThenAction::Applied(on_complete).as_str(),
+            on_complete.as_str(),
+            "an applied on_complete writes that value and invents no second spelling"
+        );
+    }
+    assert_eq!(
+        ThenAction::DiscretionaryExitAllThenRetire.as_str(),
+        "discretionary_exit_all_then_retire",
+        "a profit_stop has no on_complete to write, so §3.1's outcome is the then (MC-R22)"
+    );
+    assert_eq!(
+        GoalReason::ProfitStopReached.as_str(),
+        StopReason::ProfitStopReached.as_str(),
+        "§3.1 gives a profit_stop one spelling in both roles"
+    );
+}
