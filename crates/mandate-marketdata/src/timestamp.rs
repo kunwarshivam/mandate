@@ -1,12 +1,11 @@
 //! Vendor timestamps and the start of a UTC day (the day after is [`Date::next`]). Alpaca writes
-//! RFC 3339 in UTC with zero to nine fractional digits; they become [`UtcNanos`] exactly.
-//! `UtcNanos::parse_rfc3339` takes no fractional seconds, so it cannot read them. Parquet stores
-//! nanoseconds since the epoch in an `i64`, so conversion checks the range (DEC-89).
+//! RFC 3339 in UTC with zero to nine fractional digits, which
+//! [`UtcNanos::parse_rfc3339`] reads exactly since #98, so this module only narrows it to UTC.
+//! Parquet stores nanoseconds since the epoch in an `i64`, so conversion checks the range
+//! (DEC-89).
 
 use mandate_time::{Date, TimeError, UtcNanos};
 
-const NANO_DIGITS: usize = 9;
-const SECONDS_LEN: usize = "YYYY-MM-DDTHH:MM:SS".len();
 const NANOS_PER_SEC: i64 = 1_000_000_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -30,22 +29,14 @@ impl TimestampError {
     }
 }
 
-/// Parses `YYYY-MM-DDTHH:MM:SS[.f]Z` with one to nine fractional digits.
+/// Parses `YYYY-MM-DDTHH:MM:SS[.f]Z` with one to nine fractional digits: the UTC form Alpaca
+/// sends. A zone offset, which [`UtcNanos::parse_rfc3339`] accepts, is refused here, because a
+/// market-data record outside UTC is a change of vendor contract, not a timestamp to convert.
 pub fn parse_rfc3339_utc(raw: &str) -> Result<UtcNanos, TimestampError> {
-    let body = raw.strip_suffix('Z').ok_or(TimestampError::Syntax)?;
-    let (seconds, fraction) = match body.split_once('.') {
-        Some((seconds, fraction)) => (seconds, fraction),
-        None => (body, ""),
-    };
-    let fraction_ok = !body.contains('.')
-        || (!fraction.is_empty()
-            && fraction.len() <= NANO_DIGITS
-            && fraction.bytes().all(|b| b.is_ascii_digit()));
-    if seconds.len() != SECONDS_LEN || !fraction_ok {
+    if !raw.ends_with('Z') {
         return Err(TimestampError::Syntax);
     }
-    let canonical = format!("{seconds}.{fraction:0<NANO_DIGITS$}Z");
-    UtcNanos::parse(&canonical).map_err(TimestampError::Time)
+    UtcNanos::parse_rfc3339(raw).map_err(TimestampError::Time)
 }
 
 /// Midnight UTC at the start of `day`.
