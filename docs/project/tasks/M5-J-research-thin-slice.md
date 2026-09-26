@@ -695,10 +695,14 @@ requiring every pending test to fail on the stubs).
     `WorkingUniverse` belong to `mandate-domain` or `mandate-spec` (DEC-128 item 21's mechanism).
     Neither crate exists on `main` yet, so the tests PR carries them as narrow views in a temporary
     `crates/mandate-research/src/spec_types.rs`, field for field the same as stream G's module of the
-    same name, and the first implementation PR after stream F's tests PR merges **deletes it**. Stream
-    F's brief names the reason enum `RemovalReason`, which cannot carry `thesis_admitted`; one
-    `UniverseChangeReason` covering the seven reasons of journal spec §9's `UniverseChanged` row is
-    what both streams need ("Decisions needed" item 4).
+    same name, and the first implementation PR after stream F's tests PR merges **deletes it**.
+
+    On the reason enum, this brief was **wrong when it was written**: it said stream F's
+    `RemovalReason` could not carry `thesis_admitted`, reading F's brief rather than F's code. F has
+    since shipped `mandate_spec::risk::RemovalReason` with **all seven** reasons of journal spec §9's
+    `UniverseChanged` row, `ThesisAdmitted` included, so there is no variant to add and this crate's
+    `UniverseChangeReason` is that enum under another name. The implementation PR takes F's as it
+    stands; whether it is worth renaming is the coordinator's call ("Decisions needed" item 4).
 
     **`ModelVersion` and `ContentHash` are the exception.** Stream H's brief names both, and stream H
     is a sibling at layer 5 that this crate may not depend on, so they are declared here. `ModelId` is
@@ -763,17 +767,25 @@ requiring every pending test to fail on the stubs).
     that remain missed are all on stub bodies, on `as_str` and `code` accessors, and on narrow-view
     constructors — everything only a pending test reaches, and a pending test does not run under
     mutants. The implementation PR's `--in-diff` gate covers them when the stubs become logic.
-24. **The swap PR asks for one DEC-77 exception, scoped to constructor and builder lines.** Stream F's
-    real types differ from the narrow views in ways no signature in this brief captures: `AssetId::parse`
-    against `AssetId::new`, `GroupId::new -> Self` against `-> Result`, `SchemaDec::parse(text, grammar)`
-    against `from_checked_text`, `cost_cap_usd_per_day` as a `SchemaDec` rather than a `Usd`,
-    `ValidatedMandate::new(Mandate, &ValidationContext, &[PolicyLevel])` against
-    `from_validated_envelope`, and a `PolicyOverlay` whose fields F keeps private where the tests build
-    one with a struct literal. So the PR that deletes `spec_types.rs` must also edit
-    `tests/common/mod.rs` and the construction lines of `admission.rs`, `properties.rs` and
-    `refcases.rs`. DEC-77 otherwise lets an implementation PR change test files only by deleting pending
-    markers, so that PR states the exception, keeps it to those lines, and changes no assertion — which
-    a reviewer can check, because every assertion is a separate line from the builder that feeds it.
+24. **The swap PR asks for one DEC-77 exception, scoped to constructor and builder lines.** Verified
+    first-hand against what stream F shipped in
+    [#140](https://github.com/kunwarshivam/mandate/pull/140), not predicted:
+
+    | This crate's narrow view | What F shipped | Consequence for the swap |
+    |---|---|---|
+    | `AssetId::new(&str) -> Result<_, SpecTypeError>` | `AssetId::parse(&str) -> Result<_, DomainError>` (`mandate-domain`) | a rename and a different error type at every fixture builder |
+    | `GroupId::new(&str) -> Result<_, SpecTypeError>` | `GroupId::new(&str) -> Self` (`mandate-spec::validate`) | the builders drop an `.expect` |
+    | `SchemaDec::from_checked_text(&str) -> Self` | `SchemaDec::parse(&str, DecGrammar) -> Result<_, GrammarMismatch>` | each fixture decimal names its grammar |
+    | `ResearchEnvelope::cost_cap_usd_per_day: Usd` | `cost_cap_usd_per_day: SchemaDec` (`document.rs`) | check 7 converts through `to_usd` before comparing, so the comparison stays exact |
+    | `ValidatedMandate::from_validated_envelope(MandateEnvelope)` | `ValidatedMandate::new(Mandate, &ValidationContext, &[PolicyLevel])` | every scenario builds a real document instead of an envelope struct |
+    | `PolicyOverlay` with public fields and six infallible typed accessors | `PolicyOverlay { tightest: BTreeMap<PolicyKey, PolicyValue> }` — private — with a **fallible** `effective`, plus `auto_allowed` and `narrow(decision)` | the tests stop using struct literals, and the six accessors become fallible. `checks` already returns `Result`, so no signature in this brief changes; F's doc gives the reason the fallibility matters — an overlay that answered "no ceiling" from a stub would enforce nothing |
+    | `AssetClass { UsEquity, Crypto }` | `AssetClass { Crypto, UsEquity }` | a different `Ord`, which this crate only membership-tests, so no output moves |
+
+    So the PR that deletes `spec_types.rs` also edits `tests/common/mod.rs` and the construction lines
+    of `admission.rs`, `properties.rs`, `refcases.rs` and `rules.rs`. DEC-77 otherwise lets an
+    implementation PR change test files only by deleting pending markers, so that PR states the
+    exception, keeps it to those lines, and changes no assertion — which a reviewer can check, because
+    every assertion is a separate line from the builder that feeds it.
 
 ## The case-loading design
 
@@ -859,13 +871,15 @@ coordinator (items 4, 5, 6).
    the seventeenth by an invariant. **Recommendation:** leave the spec as it is; if the founder
    prefers coverage by reason, a new case with an unvalidated pinned mandate carrying an admitting
    model would do it, which is a fixture change only the founder can make. `Proposed (founder)`.
-4. **One universe change reason across streams F and J.** Stream F's merged brief names the risk
-   state's reason enum `RemovalReason`, which cannot carry `thesis_admitted`; journal spec §9's
-   `UniverseChanged` row lists seven reasons including it. **Recommendation:** the coordinator relays
-   a one-line note to stream F's tests PR to name the shared enum `UniverseChangeReason` with all
-   seven variants in `mandate-domain`; this stream's tests PR then takes whichever name is on `main`
-   and its implementation PR keeps one definition (interpretation 15). A coordinator item, not a
-   founder one.
+4. **One universe change reason across streams F and J — the variant gap is closed; only the name
+   differs.** The brief raised this when both sides were briefs. Stream F has now shipped
+   `mandate_spec::risk::RemovalReason`, and it carries **all seven** reasons of journal spec §9's
+   `UniverseChanged` row, `ThesisAdmitted` included, so nothing is missing and this crate's
+   `UniverseChangeReason` is that enum under another name. **Recommendation:** J's implementation PR
+   takes F's `RemovalReason` as it stands and deletes its own copy with the rest of `spec_types.rs`; a
+   rename to `UniverseChangeReason` would be tidier, since six of the seven are removals and one is
+   not, but it is F's type and touches F's risk state, so it is the coordinator's call and not a
+   blocker either way. A coordinator item.
 5. **The family-N harness needs two crates.** The three cases that state `first_order_autonomy`
    (MC-N01, MC-N14, MC-N26) need `mandate-research` for the admission and `mandate-builder` for
    `classify`, so the harness PR lands after both streams' tests PRs and touches
