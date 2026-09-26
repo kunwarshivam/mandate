@@ -6,18 +6,20 @@
 //! E3-1 interprets `fill`, `mark`, `fees_charged`, and `advance_clock` (settlement) steps and the
 //! accounting expectation keys; E3-2 adds `corporate_action_applied` (splits and cash dividends),
 //! `broker_cash_posting` (cash in lieu), dividend payment on `advance_clock`, and the `receivables`
-//! and `income` expectations (DEC-96). A case that uses anything owned by a later story fails with
-//! "not interpreted until <story>" for each such item; anything the vocabulary does not know fails
-//! as unknown. Every key of every interpreted expectation is checked.
+//! and `income` expectations (DEC-96); E3-3 adds the account type (`initial.account.type`) and the
+//! `buying_power` expectation, the fold's model buying power with no reservations (DEC-100). A
+//! case that uses anything owned by a later story fails with "not interpreted until <story>" for
+//! each such item; anything the vocabulary does not know fails as unknown. Every key of every
+//! interpreted expectation is checked.
 
 use core::fmt::Display;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mandate_accounting::{
-    Account, AccountingError, AssetClass, CashDividend, Config, CorporateAction, CryptoFees,
-    EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Record, Side,
-    Split, TafCapBasis,
+    Account, AccountType, AccountingError, AssetClass, CashDividend, Config, CorporateAction,
+    CryptoFees, EquityFees, Execution, FeeFamily, Input, InstrumentId, Liquidity, Position, Record,
+    Reservations, Side, Split, TafCapBasis,
 };
 use mandate_canon::DecStr;
 use mandate_num::{
@@ -56,7 +58,6 @@ const PENDING_EXPECT: &[(&str, &str)] = &[
     ("orders", "E7-2"),
     ("actions", "E7-4"),
     ("agent_mode", "E6-9"),
-    ("buying_power", "E6-6"),
     ("day_trade_count", "E6-6"),
     ("fills", "E4-1"),
     ("canceled_legs", "E4-1"),
@@ -290,9 +291,6 @@ fn pending(case: &Json) -> BTreeSet<String> {
             note(format!("initial account `{key}`"), story);
         }
     }
-    if account.get("type").and_then(Json::as_str) == Some("cash") {
-        note("cash-account settlement rules".to_owned(), "E3-3");
-    }
     let steps = case.get("steps").and_then(Json::as_array);
     for step in steps.into_iter().flatten() {
         let event = step.get("event").and_then(Json::as_str).unwrap_or("");
@@ -348,7 +346,7 @@ fn run_case(fixture: &Json, case: &Json) -> Result<(), String> {
     })?;
     let config = config(fixture, case)?;
     let instruments = instruments(case)?;
-    let mut account = initial(case, &instruments)?;
+    let mut account = initial(case, profile, &instruments)?;
     let mut baseline = Baseline::of(&account);
     for (n, step) in list_at(case, "steps")?.iter().enumerate() {
         let label = format!("step {}", n.saturating_add(1));
@@ -618,14 +616,24 @@ fn instrument<'a>(
         .ok_or_else(|| format!("unknown instrument `{name}`"))
 }
 
-fn initial(case: &Json, instruments: &Instruments) -> Result<Account, String> {
+/// The account type (spec §7.2): the alpaca profile defaults to margin and has no cash accounts;
+/// a generic broker's case must say which it is (DEC-100).
+fn account_type(account: &Json, profile: &str) -> Result<AccountType, String> {
+    match (profile, account.get("type").map(Json::as_str)) {
+        ("alpaca", None) | (_, Some(Some("margin"))) => Ok(AccountType::Margin),
+        ("generic", Some(Some("cash"))) => Ok(AccountType::Cash),
+        ("alpaca", Some(Some("cash"))) => Err("an alpaca account is never a cash account".into()),
+        (_, None) => Err(format!("a {profile} account needs `initial.account.type`")),
+        (_, Some(other)) => Err(format!("unknown account type {other:?}")),
+    }
+}
+
+fn initial(case: &Json, profile: &str, instruments: &Instruments) -> Result<Account, String> {
     let initial = at(case, "initial")?;
     fields(initial, "initial", &["account", "positions"])?;
     let account = at(initial, "account")?;
     fields(account, "initial account", &["cash", "type"])?;
-    if let Some(kind) = account.get("type") {
-        expect_eq("initial account type", kind.as_str(), Some("margin"))?;
-    }
+    let account_type = account_type(account, profile)?;
     let cash = at(account, "cash")?;
     fields(cash, "initial cash", &["settled"])?;
     let settled = num(Usd::parse(dec_at(cash, "settled")?.as_str()), "settled")?;
@@ -645,7 +653,7 @@ fn initial(case: &Json, instruments: &Instruments) -> Result<Account, String> {
         )?;
         positions.push((id.clone(), acct(Position::new(qty, basis))?));
     }
-    Ok(Account::opening(settled, positions))
+    Ok(Account::opening(account_type, settled, positions))
 }
 
 fn run_step(
@@ -903,6 +911,7 @@ fn check(
             "settles_on",
             "receivables",
             "income",
+            "buying_power",
         ],
     )?;
     for (key, expected) in expect {
@@ -952,6 +961,11 @@ fn check(
             "equity" => check_dec(key, acct(account.equity())?, expected)?,
             "receivables" => check_dec(key, acct(account.net_receivables())?, expected)?,
             "income" => check_dec(key, account.income(), expected)?,
+            "buying_power" => check_dec(
+                key,
+                acct(account.buying_power(Reservations::NONE))?,
+                expected,
+            )?,
             "marks" => {
                 let listed = expected.as_object().ok_or("`marks` is not an object")?;
                 for (name, value) in listed {

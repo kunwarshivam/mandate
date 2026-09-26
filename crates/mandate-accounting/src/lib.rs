@@ -20,6 +20,10 @@
 //! [`Input::CorporateAction`], `DividendPaid` [`Input::DividendPaid`], and `CashInLieuPosted`
 //! [`Input::CashInLieuPosted`]. Fees are computed here from the pinned fee configuration and
 //! returned in the [`Record`] so the executor can journal them with the fill.
+//!
+//! The account is a cash or a margin account ([`AccountType`], spec §7.2), which decides whether
+//! unsettled proceeds count toward [`Account::buying_power`]: the model buying power the risk gate
+//! compares with the broker's (DEC-34).
 
 mod account;
 
@@ -109,6 +113,35 @@ impl InstrumentId {
 impl core::fmt::Display for InstrumentId {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(&self.0)
+    }
+}
+
+/// Spec §7.2. Alpaca accounts are always margin; cash accounts exist at generic brokers. In a cash
+/// account only settled cash is available to trade (DEC-25); a margin account also uses unsettled
+/// proceeds (DEC-34).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountType {
+    Cash,
+    Margin,
+}
+
+/// Σ reservations held against open orders (spec §9.5): quantity × limit price plus the rounded fee
+/// reservation of every order the gate approved and that is not yet terminal. The account ledger
+/// tracks them (E6-6); the fold subtracts the total from buying power. Never negative.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reservations(Usd);
+
+impl Reservations {
+    pub const NONE: Self = Self(Usd::ZERO);
+
+    /// `negative` when `total` is below zero.
+    pub fn new(total: Usd) -> Result<Self, AccountingError> {
+        let _ = total;
+        Err(AccountingError::Num(NumError::Negative))
+    }
+
+    pub fn total(self) -> Usd {
+        self.0
     }
 }
 

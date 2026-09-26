@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 
 use common::{d, equity, fee_cap, id, no_fees, round_trip, usd};
 use mandate_accounting::{
-    Account, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution, FeeFamily,
-    FeeKind, Input, Liquidity, Position, Record, Side, TafCapBasis,
+    Account, AccountType, AccountingError, AssetClass, Config, CryptoFees, EquityFees, Execution,
+    FeeFamily, FeeKind, Input, Liquidity, Position, Record, Side, TafCapBasis,
 };
 use mandate_num::{Bps, CostBasis, FeePerShare, FeeRate, Price, Qty, SignedQty};
 use mandate_time::{Date, UtcNanos};
@@ -203,7 +203,7 @@ fn opening_account(o: Opening, config: &Config) -> Account {
         CostBasis::parse(&money_text(b)).unwrap(),
     )
     .unwrap();
-    Account::opening(usd("100000"), [(id("AAA"), position)])
+    Account::opening(AccountType::Margin, usd("100000"), [(id("AAA"), position)])
         .apply(
             &Input::Mark {
                 instrument: id("AAA"),
@@ -781,7 +781,7 @@ proptest! {
             equity(&format!("f{n}"), "AAA", side, &qty_text(qty), &qty_text(nanos), "2026-09-21T10:00:00-04:00")
         };
         let signed = |magnitude: i128| if short { -magnitude } else { magnitude };
-        let mut account = common::step(&Account::opening(usd("1"), []), &fill(0, open, opened, opening_price), &config);
+        let mut account = common::step(&Account::opening(AccountType::Margin, usd("1"), []), &fill(0, open, opened, opening_price), &config);
         let mut held = opened;
         let mut cash = signed(-opened * opening_price);
         for (n, (qty, nanos)) in reductions.into_iter().enumerate() {
@@ -860,7 +860,7 @@ proptest! {
         .unwrap();
         let side = if short { Side::Buy } else { Side::Sell };
         let fill = equity("f1", "AAA", side, &qty_text(part), &qty_text(nanos), "2026-09-21T10:00:00-04:00");
-        let applied = Account::opening(usd("0"), [(id("AAA"), held)]).apply(&fill, &no_fees());
+        let applied = Account::opening(AccountType::Margin, usd("0"), [(id("AAA"), held)]).apply(&fill, &no_fees());
         prop_assert!(applied.is_ok(), "{:?}", applied);
         let account = applied.unwrap().account;
         let after = account.position(&id("AAA"));
@@ -932,7 +932,7 @@ proptest! {
     /// 10⁻¹².
     #[test]
     fn fees_are_never_credits_under_per_fill_fee_configurations(events in vec(fee_event(), 1..40)) {
-        let mut account = Account::opening(usd("100000"), []);
+        let mut account = Account::opening(AccountType::Margin, usd("100000"), []);
         let mut charged_by_order: BTreeMap<u8, i128> = BTreeMap::new();
         let mut observed: BTreeMap<u8, (i128, i128, bool)> = BTreeMap::new();
         for (n, event) in events.iter().enumerate() {
