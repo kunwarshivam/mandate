@@ -2,12 +2,16 @@
 //! `<YYYY-MM-DD>.parquet` per UTC day with data and a canonical-JSON `manifest.json` that records
 //! the dataset, each decimal column's scale, and every fetched day, including empty ones. Writes
 //! compare bytes first: identical content is left untouched, and different content for a stored
-//! day is a conflict that changes nothing.
+//! day is a conflict that changes nothing. Writers of one dataset may run at once, in threads or
+//! processes: they take turns on an advisory lock of the dataset directory
+//! ([`Store::put_day`]).
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use std::process;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_time::Date;
@@ -122,6 +126,12 @@ impl Store {
     /// day is already stored with the same bytes; a stored day whose content differs, a stored
     /// partition for a day that is now empty, and a manifest of another dataset are errors that
     /// change nothing.
+    ///
+    /// Safe to call from several threads and processes at once: each call holds an exclusive
+    /// advisory lock on the dataset directory from reading the manifest to writing it, so no
+    /// manifest entry is lost and the first writer of a day decides its content. Files are
+    /// written under names no other writer uses, and a partition is published by a hard link,
+    /// which never replaces an existing file.
     pub fn put_day(
         &self,
         dataset: &DatasetId,
@@ -129,6 +139,8 @@ impl Store {
         records: &Records,
     ) -> Result<Outcome, DatasetError> {
         let dir = self.dataset_dir(dataset);
+        fs::create_dir_all(&dir).map_err(io_error(&dir))?;
+        let _writer = lock(&dir)?;
         let manifest_path = dir.join(MANIFEST);
         let stored = fs_read_optional(&manifest_path)?;
         let mut manifest = match &stored {
@@ -169,7 +181,7 @@ impl Store {
                 Some(_) => return Err(conflict()),
                 None if listed.is_some_and(|e| e != entry) => return Err(conflict()),
                 None => {
-                    write_atomically(&dir, &partition, &bytes)?;
+                    write_new(&dir, &partition, &bytes)?;
                     wrote = true;
                 }
             }
@@ -186,7 +198,7 @@ impl Store {
                 reason,
             })?;
         if stored.as_deref() != Some(rendered.as_slice()) {
-            write_atomically(&dir, &manifest_path, &rendered)?;
+            replace(&dir, &manifest_path, &rendered)?;
             wrote = true;
         }
         Ok(Outcome {
@@ -404,18 +416,60 @@ fn fs_read_optional(path: &Path) -> Result<Option<Vec<u8>>, DatasetError> {
     }
 }
 
-/// Writes `bytes` to `path` through a synced temporary file in `dir` and a rename, so a crash
-/// leaves either the old file or the new one.
-fn write_atomically(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), DatasetError> {
-    fs::create_dir_all(dir).map_err(io_error(dir))?;
-    let mut partial = path.as_os_str().to_owned();
-    partial.push(".partial");
-    let partial = PathBuf::from(partial);
-    let mut file = File::create(&partial).map_err(io_error(&partial))?;
-    file.write_all(bytes).map_err(io_error(&partial))?;
-    file.sync_all().map_err(io_error(&partial))?;
-    drop(file);
+/// Takes an exclusive advisory lock on the dataset directory, released when the returned handle
+/// is dropped. The directory is locked rather than a file in it because it is never replaced
+/// and adds no entry that a listing of the dataset would show.
+fn lock(dir: &Path) -> Result<File, DatasetError> {
+    let handle = File::open(dir).map_err(io_error(dir))?;
+    handle.lock().map_err(io_error(dir))?;
+    Ok(handle)
+}
+
+/// Numbers temporary files within this process; with the process ID it makes each name one
+/// that no other writer, running or crashed, is using.
+static TEMPORARY: AtomicU64 = AtomicU64::new(0);
+
+/// Writes `bytes` to a new file next to `path`, named `<file>.<pid>.<n>.partial`, and flushes it
+/// to disk. The file is created only if the name is free, so a leftover of a crashed write is
+/// skipped rather than reused, and the name never ends in `.parquet`.
+fn temporary(path: &Path, bytes: &[u8]) -> Result<PathBuf, DatasetError> {
+    loop {
+        let n = TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        let mut name = path.as_os_str().to_owned();
+        name.push(format!(".{}.{n}.partial", process::id()));
+        let partial = PathBuf::from(name);
+        let mut file = match File::create_new(&partial) {
+            Ok(file) => file,
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(io_error(&partial)(e)),
+        };
+        file.write_all(bytes).map_err(io_error(&partial))?;
+        file.sync_all().map_err(io_error(&partial))?;
+        return Ok(partial);
+    }
+}
+
+/// Publishes `bytes` at `path`, which must not exist: a hard link from a flushed temporary file
+/// fails rather than replace a file, so readers see the whole partition or none, and a crash
+/// leaves at most a temporary file. A temporary file that cannot be removed after the link is
+/// left behind; it is never read.
+fn write_new(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), DatasetError> {
+    let partial = temporary(path, bytes)?;
+    fs::hard_link(&partial, path).map_err(io_error(path))?;
+    let _ = fs::remove_file(&partial);
+    sync(dir)
+}
+
+/// Replaces `path` with `bytes` by renaming a flushed temporary file over it, so readers and a
+/// crash see either the old file or the new one.
+fn replace(dir: &Path, path: &Path, bytes: &[u8]) -> Result<(), DatasetError> {
+    let partial = temporary(path, bytes)?;
     fs::rename(&partial, path).map_err(io_error(path))?;
+    sync(dir)
+}
+
+/// Flushes `dir`, making a link or rename in it durable (POSIX directory `fsync`).
+fn sync(dir: &Path) -> Result<(), DatasetError> {
     File::open(dir)
         .and_then(|d| d.sync_all())
         .map_err(io_error(dir))
