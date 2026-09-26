@@ -1,13 +1,16 @@
 //! The `mandate` command line. `download` fetches Alpaca historical bars and trades into Parquet
 //! datasets (backlog E2-1); `inspect` reports what a stored dataset covers and whether to trust
-//! it (E2-2).
+//! it (E2-2); `journal verify` runs journal spec §11 over an exported journal and its artifact
+//! store, and `artifact put` and `get` supply and fetch those artifacts (E5-4).
 
 use clap::{Parser, Subcommand};
 
+pub mod artifact;
 pub mod download;
 pub mod inspect;
+pub mod journal;
 
-/// Mandate research tools.
+/// Mandate research and audit tools.
 #[derive(Debug, Parser)]
 #[command(name = "mandate", version)]
 pub struct Cli {
@@ -23,4 +26,11 @@ pub enum Command {
     /// Report each dataset's coverage, statistics, gaps between bars, duplicates, and partitions
     /// that cannot be trusted. Exits with an error when any partition has a problem.
     Inspect(inspect::InspectArgs),
+    /// Check an exported journal: the hash chain, the artifacts its events reference, and an
+    /// anchor when one is given.
+    #[command(subcommand)]
+    Journal(journal::JournalCommand),
+    /// Put bytes into a content-addressed artifact store, or fetch them back re-hashed.
+    #[command(subcommand)]
+    Artifact(artifact::ArtifactCommand),
 }
