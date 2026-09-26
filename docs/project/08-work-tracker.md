@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, day 2 close: E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-26, day 2 close (work graph added; Cursor paused, everything on `claude-code`): E2-4 and E5-3 complete, E2-3 slice 1, safe dataset writes, fractional seconds, DEC-111 (thesis revision loop), DEC-112 (CI short path for docs); earlier that day: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -156,6 +156,24 @@ them in the decision log.
   per-test evidence, and a tests PR without one does not merge.
 - A PR whose test cannot fail on the wrong model (a bar capped at zero by DEC-106 item 4) passes
   every gate; only a reviewer asking "what would the wrong model do here" catches it.
+
+## Work graph (2026-09-26 evening, `claude-code` runs everything)
+
+The founder paused the Cursor sessions and asked the coordinating session to run the remaining
+work with parallel cloud builders under the same review rule (DEC-79). Streams run in parallel when
+they touch different crates; each ends at a PR the coordinator reviews (a reviewer on a different
+model from the builder) and merges through the one queue. The ruleset's up-to-date rule is off
+while the Actions budget is spent (DEC-113); the coordinator runs `cargo xtask check` on `main`
+after each code merge.
+
+| Stream | Work | Depends on | Reserved IDs | State |
+|---|---|---|---|---|
+| A | E4-1 implementation PR (`mandate-sim`, `mandate-num`; test files only lose `pending E4-1` markers), then the status PR moving RC-10, RC-12, RC-19 to passing | #75 (merged) | DEC-114 | builder launched |
+| B | E2-3 CLI slice (`download --kind quotes`, quote statistics in `inspect`) and retiring `mandate-marketdata`'s own RFC 3339 parser for `UtcNanos::parse_rfc3339` | #95, #98 (merged) | DEC-116 | builder launched |
+| C | E5-4: `mandate-cli journal verify` over an exported stream and its artifact store, and artifact put and fetch | E5-1 to E5-3 (merged); the founder's confirmation of E5-4 taken from the delegation | DEC-115 | builder launched |
+| D | Track C: answer the rewrite questions as decisions proposed to the founder, then the mandate spec, schemas, reference implementation, and cases for DEC-97 to DEC-103 and DEC-111 (spec-change PR, no code) | nothing; the founder can veto any proposed answer before the spec PR merges | DEC-117 to DEC-126 | PR #109 open, ready for the coordinator |
+| E | E4-2 task brief and interpretations, then the baseline backtest and metrics | A's implementation API | DEC-127 | after A opens |
+| Founder | Alpaca market-data keys in the Cursor environment (M1 exit run); paper and OpenRouter keys and egress in the cloud environment, then go for spike paper runs; counsel; branch cleanup; key rotation | | | waiting |
 
 ## Next, in order
 
