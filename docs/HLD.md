@@ -670,8 +670,8 @@ Speed tiers:
 
 1. **Retail regulation (decided, [DEC-98](project/04-decision-log.md#decisions)).** Retail is in
    scope from the start, with the platform originating ideas, so the working assumption is that
-   Mandate may be an investment adviser. Counsel is engaged before the Phase 1 exit and no user
-   trades live until counsel signs off.
+   Mandate may be an investment adviser. Counsel is engaged during Phase 0
+   ([DEC-102](project/04-decision-log.md#decisions)) and no user trades live until counsel signs off.
 2. **NautilusTrader licensing.** It is LGPL-3.0. Distributing it inside on-prem software,
    particularly statically linked Rust, carries relinking obligations. Decide whether to use
    its connectors or write our own.

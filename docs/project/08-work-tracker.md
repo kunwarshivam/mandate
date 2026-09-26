@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, direction change: autonomous ideation and retail from the start (DEC-97, DEC-98, ADR-0002) |
+| **Last updated** | 2026-09-26, direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -56,13 +56,16 @@ issues are the record; this table is the summary
 | E3-3 cash-account settlement | `claude-code` | #48 | Tests PR open, under review; decisions renumbered to DEC-104 and DEC-105 after #52 | `agent/e3-3-settlement-tests` (#46); implementation and status PRs follow |
 | E17-0 research spike | `claude-code` | #49 | Merged (#44, #47); paper runs pending the founder's go | `python/research_spike/` |
 | Track C: mandate spec rewrite for DEC-97 and DEC-98 | `claude-code` | #50 | Not started; after the founder answers the rewrite questions and the spike's first findings | spec-change PRs |
-| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | none (opened before this playbook) | PR open, reviewed and merged by the merge coordinator | `agent/direction-follow-ups` (#52) |
+| Direction follow-ups (DEC-99 to DEC-103, rewrite questions) | `cursor` | #54 | PR open, under review; the #52 review findings are not yet addressed | `cursor/direction-follow-ups-v2` (supersedes `agent/direction-follow-ups`, #52) |
 | E2-4, E2-2 market data; E5-2, E5-3 journal | `cursor` | to open | Allocated, not yet claimed | — |
 
 ## Waiting on the founder
 
-- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
-  before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
+- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 35)
+  now, during Phase 0 (DEC-102). Nothing trades live until this is answered.
+- **Design questions**: answer the [design questions](09-mandate-rewrite-questions.md) (universe
+  size, thesis lifetime, research weight and cost cap, the DEC-99 evaluation, the DEC-100 values, the
+  Robinhood paper stage, retail `auto`, how theses are shown) before the mandate spec rewrite starts.
 - **Robinhood**: open an agentic account yourself, on a desktop, from your own Robinhood login
   (OD-12: self-serve, no beta request). Agents never connect to it (rule 8); the connector story
   will use a paper or test path Robinhood has not yet published, so ask Robinhood support whether one
@@ -115,7 +118,9 @@ them in the decision log.
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe).
+   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the research
+   basket, every admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation
+   (E17-8). The full E17-3 follows only after that evaluation passes.
 
 E3-3, E2-4, and E5-2 touch different crates and can run in parallel; reviews run one at a time.
 

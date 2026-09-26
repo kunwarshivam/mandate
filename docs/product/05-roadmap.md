@@ -42,6 +42,9 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 - Research agent: LLM ideation from market data, news, filings, and memory into theses; universe
   admission through the eligibility floor and the autonomy rules; bring-your-own-strategy mode
   ([DEC-97](../project/04-decision-log.md#decisions), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)).
+  The first slice runs over the research basket with every admission `ask`, paper only, and
+  scorecards on; dynamic admission follows once the forward-paper evaluation passes
+  ([DEC-103](../project/04-decision-log.md#decisions)).
 - Risk gate, drawdown ladder, kill switch.
 - Alpaca connector (paper), reconciliation, idempotent order intents, crash recovery.
 - US market rules in the risk gate: day-trading regime (legacy or intraday margin), settlement, short-sale rules,
@@ -52,7 +55,9 @@ correct accounting (verified against hand-calculated cases) and a complete journ
 **Exit criteria:** an agent trades an Alpaca paper account unattended, on theses it generated,
 through a continuous soak,
 survives forced restarts with no duplicate orders, and escalates and applies defaults
-correctly.
+correctly. The research agent's theses beat the pre-registered baselines on forward paper trading,
+net of modeled costs, over a pre-registered evaluation window and metric
+([DEC-99](../project/04-decision-log.md#decisions)).
 
 ## Next
 
