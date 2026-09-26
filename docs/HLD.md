@@ -302,7 +302,7 @@ be restricted to local models only.
 Market data ingestion and factual classification of public events (filing type, entity tagging)
 are computed once and fanned out to subscribed workspaces. It emits no directional views: any
 directional output is a signal model the user selects and pins
-([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52);
+([mandate spec §8.1](specs/mandate.md#81-signal-model-contract-dec-52-dec-97);
 [DEC-62](project/04-decision-log.md#decisions)). This is the main cost lever for the managed
 offering. Hybrid and on-prem deployments can subscribe to it or run their own.
 

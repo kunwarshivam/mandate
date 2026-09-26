@@ -287,7 +287,7 @@ def semantic(m, ctx):
         elif pv["source"] not in OWNER_SOURCES or not pv["confirmed"]:
             errs.add("V-020")
         if pv["source"] == "platform_proposed" and covered(path, NEVER_PROPOSED):
-            errs.add("V-040")
+            errs.add("V-038")
     autos = ["/autonomy/default"] if m["autonomy"]["default"] == "auto" else []
     autos += ["/autonomy/admission"] if m["autonomy"]["admission"] == "auto" else []
     autos += [f"/autonomy/rules/{i}" for i, x in enumerate(m["autonomy"]["rules"]) if x["then"] == "auto"]
@@ -317,7 +317,7 @@ def semantic(m, ctx):
     if u["max_instruments"] < len(inst):
         errs.add("V-035")
     if any(i["asset_class"] not in u["asset_classes"] for i in inst):
-        errs.add("V-041")
+        errs.add("V-039")
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
         errs.add("V-032")
@@ -1173,9 +1173,9 @@ def admit(m, inp):
                                    "reason": "thesis_admitted", "thesis_id": th["thesis_id"],
                                    "universe_size_after": len(out["working_universe"])})
     out["universe_size_after"] = len(out["working_universe"])
-    out["first_order_autonomy"] = autonomy(m, dict(inp.get("admission_action", {}),
-                                                   purpose="open", new_instrument=True,
-                                                   thesis_confidence=th["confidence"])) if reason is None else None
+    action = inp.get("admission_action")
+    out["first_order_autonomy"] = None if reason is not None or action is None else \
+        autonomy(m, dict(action, purpose="open", new_instrument=True, thesis_confidence=th["confidence"]))
     return out
 
 def lineage_fold(m, inp):

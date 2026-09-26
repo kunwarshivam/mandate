@@ -45,7 +45,7 @@ exp = {"MC-V03": "V-002", "MC-V05": "V-003", "MC-V06": "V-005", "MC-V08": "V-006
        "MC-V38": "V-023", "MC-V39": "V-024", "MC-V41": "V-030", "MC-V43": "V-031", "MC-V44": "V-032",
        "MC-V49": "V-020", "MC-V50": "V-020", "MC-V51": "V-033",
        "MC-V53": "V-034", "MC-V54": "V-034", "MC-V55": "V-035", "MC-V56": "V-036", "MC-V57": "V-036",
-       "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-041", "MC-V62": "V-040", "MC-V63": "V-020",
+       "MC-V58": "V-036", "MC-V59": "V-037", "MC-V61": "V-039", "MC-V62": "V-038", "MC-V63": "V-020",
        "MC-V64": "V-022", "MC-V67": "V-020"}
 for cid, code in exp.items():
     req(cid, C[cid]["expect"]["violations"] == [code], f"expected exactly {code}")

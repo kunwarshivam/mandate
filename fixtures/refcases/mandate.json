@@ -3311,7 +3311,7 @@
   {
    "id": "MC-V28",
    "kind": "semantic",
-   "title": "Platform defaults on listed non-judgment fields (single-user workspace)",
+   "title": "Platform defaults on listed non-envelope fields (single-user workspace)",
    "base": "btc_accumulator",
    "patch": [],
    "context": {
@@ -4309,7 +4309,7 @@
    "context": {},
    "expect": {
     "violations": [
-     "V-041"
+     "V-039"
     ],
     "warnings": [],
     "worst_case": {
@@ -4336,7 +4336,7 @@
    },
    "expect": {
     "violations": [
-     "V-040"
+     "V-038"
     ],
     "warnings": [],
     "worst_case": {

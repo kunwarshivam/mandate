@@ -61,6 +61,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   cross-stream displays sort by `recorded_at` for readability only.
 - **Cross-stream facts are copied by the owner** into the consuming stream with a `causation_id`:
   the executor writes `AgentModeApplied` (from the agent stream's `AgentModeChanged`),
+  `UniverseChanged` (from the agent stream's `ThesisProposed` or `ThesisRevised`, or from a
+  `MandateVersionApplied` that changed a pinned universe; mandate spec §2.3),
   `TradingDayStarted`, `ClockAdvanced` (the risk clock, mandate spec §5.2: copied only when a tick
   emits an event or crosses midnight), and time-driven events
   (from the scheduler) into the account stream, and derives `RiskDayStarted` there from the copied

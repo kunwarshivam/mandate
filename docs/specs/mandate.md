@@ -30,7 +30,7 @@ builder, versioning, change classification, and the records kept.
   bring-your-own-strategy becomes the `universe.pinned` mode; the research agent, admission, the
   thesis lifetime, and revision lineages are specified (§8.4 to §8.6); provenance gains
   `platform_proposed` (§2.1, §7); `autonomy.admission`, `new_instrument`, and `thesis_confidence`
-  join the autonomy language (§6); V-003, V-008, V-020, and V-022 are restated and V-034 to V-041
+  join the autonomy language (§6); V-003, V-008, V-020, and V-022 are restated and V-034 to V-039
   and W-006 added (§4.1, §4.2); the retail profile is replaced and an internal research profile
   added (§4.3); `ThesisProposed`, `ThesisRevised`, and `UniverseChanged` join the records (§5.10,
   §10, journal spec §9); 291 reference cases (§11).
@@ -44,7 +44,7 @@ builder, versioning, change classification, and the records kept.
    envelope field — everything in this document — is confirmed by the owner. The compiler and
    templates may **propose** values (provenance `platform_proposed`, shown as proposed); nothing
    proposed is active until the owner confirms it (§7). Pinned instruments are never proposed
-   (V-040). The working universe and its theses are produced at runtime inside the envelope and
+   (V-038). The working universe and its theses are produced at runtime inside the envelope and
    never widen it (MI-16).
 3. **Reducing risk never needs approval and is never denied** (DEC-05, DEC-48). Discretionary exits
    are paced by market-conduct controls.
@@ -116,7 +116,7 @@ document:
 | `user_stated` | Extracted by the compiler from the user's words; the quoted source span is recorded |
 | `user_entered` | Entered by the user in the form or YAML editor |
 | `template_structure` | Present because a template included the field or rule |
-| `platform_proposed` | Proposed by the compiler or a template (DEC-97). Shown as proposed, inactive until confirmed, and never allowed on `universe.pinned_instruments`, `environment`, or `connection_id` (V-040), nor for any `auto` (V-022) |
+| `platform_proposed` | Proposed by the compiler or a template (DEC-97). Shown as proposed, inactive until confirmed, and never allowed on `universe.pinned_instruments`, `environment`, or `connection_id` (V-038), nor for any `auto` (V-022) |
 | `platform_default` | Filled by the platform; allowed only for the fields and values in §7 |
 
 Each field also has `confirmed`. `MandateConfirmed` binds the version hash to the list of confirmed
@@ -187,7 +187,7 @@ decimal strings; the schema gives each field's bounds.
 | `universe.pinned` | Bring-your-own-strategy: the owner pins the universe and the research agent admits nothing (§2.3) |
 | `universe.pinned_instruments[]` | The pinned universe (1–50 when pinned, empty otherwise), sorted by `asset_id` (V-034) |
 | `universe.max_instruments` | Ceiling on the working universe, 1 to 20 (DEC-117: the platform proposes 5). Never below the pinned count (V-035) |
-| `universe.asset_classes[]` | Asset classes an admission may use, sorted and non-empty. Every pinned instrument is in one of them (V-041) |
+| `universe.asset_classes[]` | Asset classes an admission may use, sorted and non-empty. Every pinned instrument is in one of them (V-039) |
 | `universe.leveraged_etps_enabled`, `leveraged_etp_disclosure_version` | Opt-in for complex ETPs (trading spec §3.2) and the accepted disclosure version |
 | `behavior.description` | The user's description of the strategy; given to LLM signal models and the research agent |
 | `behavior.signal_models[]` | Selected signal models: id, version, content hash, parameters, fixed weight, `max_output_age_s`, `admits_instruments` |
@@ -221,7 +221,7 @@ it. `null` means no end.
   which the agent stops, never as progress toward a goal.
 - **Goal spend** is the sum of the agent's buy fills in the goal instrument, including fees; sales
   never reduce it.
-- **`on_complete`** (chosen at confirmation, a judgment field):
+- **`on_complete`** (chosen at confirmation, an envelope field):
 
 | Value | Effect |
 |---|---|
@@ -287,8 +287,8 @@ and is recorded in `MandateConfirmed`.
 | V-035 | `universe.max_instruments ≥` the number of pinned instruments |
 | V-036 | At most one signal model has `admits_instruments: true`; if one does, its id has the `llm.` prefix; `behavior.research` is non-null exactly when one does |
 | V-037 | `universe.pinned` true requires that no signal model admits instruments: pinning the universe turns the research agent off (§2.3) |
-| V-040 | `universe.pinned_instruments`, `environment`, and `connection_id` are never `platform_proposed`: bring-your-own-strategy means the owner's own universe, and the research agent is the path for platform ideas (§7) |
-| V-041 | Every pinned instrument's `asset_class` is in `universe.asset_classes` |
+| V-038 | `universe.pinned_instruments`, `environment`, and `connection_id` are never `platform_proposed`: bring-your-own-strategy means the owner's own universe, and the research agent is the path for platform ideas (§7) |
+| V-039 | Every pinned instrument's `asset_class` is in `universe.asset_classes` |
 
 ### 4.2 Warnings and the confirmation screen
 
@@ -424,7 +424,7 @@ exits, and the kill switch are never denied by them (MI-1).
 
 | Limit | Definition | Gate check (trading spec §9.1) | Reason code |
 |---|---|---|---|
-| Working universe | The instrument is in the working universe (§2.3): the pinned universe when `universe.pinned`, otherwise the instruments admitted by §8.5 and not removed | 3 | `not_in_working_universe` |
+| Working universe | The instrument is in the working universe (§2.3): the pinned universe when `universe.pinned`, otherwise the instruments admitted by §8.5 and not removed | 2 | `not_in_working_universe` |
 | Per-instrument position | MV(instrument) + max cost of working opening orders in it + the proposed order ≤ min(`max_position_usd`, `max_position_fraction` × E) | 2 | `concentration_limit` |
 | Order size | Limit price × quantity ≤ `max_order_usd` | 2 | `max_order_size` |
 | Re-entry cooldown | No opening order in an **instrument group** until `reentry_cooldown_s` after the agent's last exit fill in any instrument of the group | 2 | `reentry_cooldown` |
@@ -673,7 +673,7 @@ example, `thesis_confidence lt 0.6 → ask`).
   may always enter a different value (`user_entered`). Templates may now carry proposed values, also
   shown as proposed.
 - **Never proposed:** `autonomy.admission: auto`, `autonomy.default: auto`, or any rule with
-  `then: auto` (V-022); `universe.pinned_instruments`, `environment`, and `connection_id` (V-040).
+  `then: auto` (V-022); `universe.pinned_instruments`, `environment`, and `connection_id` (V-038).
   The platform proposes ideas through the research agent (§8.4), never by filling in the owner's own
   universe.
 - **What the platform proposes by default,** when the user has not stated it:
@@ -889,8 +889,10 @@ success it replaces that instrument's current thesis without a second entry.
   `admitted: false` and the reason) and no order is proposed. A **full universe never displaces an
   active instrument**: the thesis is refused, so an agent cannot churn its book by admitting and
   removing to reset the re-entry cooldown (§5.3).
-- **On success** `UniverseChanged` (admitted) is journaled in the account stream and the thesis
-  becomes that instrument's research-agent output for §8.3. The **first order** in the instrument is
+- **On success** the executor writes `UniverseChanged` (admitted) into the account stream, with a
+  `causation_id` pointing at the agent stream's `ThesisProposed` or `ThesisRevised`, so each stream
+  stays a self-contained fold (journal spec §1, §2). The thesis then becomes that instrument's
+  research-agent output for §8.3. The **first order** in the instrument is
   then decided by the autonomy rules with `new_instrument: true` and the admission ceiling (§6.2):
   admission does not itself authorize a trade.
 - **Removal** is §8.6 for thesis reasons, §2.2 for a version change, the eligibility floor for
@@ -998,7 +1000,7 @@ the fuzz catches seeded bugs.
 | Family | IDs | Covers |
 |---|---|---|
 | Schema | MC-S01 to MC-S31 | Structural rejects, including `on_complete`, the 300 s confirmation cap, per-model output age, `max_instruments` bounds, the research object, `autonomy.admission` |
-| Semantic | MC-V01 to MC-V67 | Every V-rule and warning, the closed platform-default list, loss carry, the field split (V-034 to V-037, V-040, V-041), `platform_proposed` provenance |
+| Semantic | MC-V01 to MC-V67 | Every V-rule and warning, the closed platform-default list, loss carry, the field split (V-034 to V-037, V-038, V-039), `platform_proposed` provenance |
 | Policy | MC-P01 to MC-P22 | Nearest-level reporting, each key kind, the retail profile (DEC-98), the internal research profile (DEC-103), paper-only environments, the research keys, platform maximums |
 | Risk state | MC-R01 to MC-R24 | Ladder, time-in-breach confirmation, two-quote hard triggers and flash prints, clock ticks, rollover (confirmed and discarded), renewal, reset and stepwise lifts, the floor with carry and its loosening, allocation scaling and rejections, staleness, `on_complete`, `profit_stop`, dollar loss carry, a universe change as a risk input |
 | Risk day | MC-T01 to MC-T05 | Daylight-saving boundaries |

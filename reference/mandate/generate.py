@@ -115,7 +115,7 @@ SEM = [
     ("MC-V26", "Judgment field from a platform default", "btc_accumulator", [], {"provenance": {"/risk/max_daily_loss": PU("platform_default")}}),
     ("MC-V27", "Judgment field stated by the user but not confirmed", "btc_accumulator", [],
      {"provenance": {"/risk/max_order_usd": PU("user_stated", False)}}),
-    ("MC-V28", "Platform defaults on listed non-judgment fields (single-user workspace)", "btc_accumulator", [],
+    ("MC-V28", "Platform defaults on listed non-envelope fields (single-user workspace)", "btc_accumulator", [],
      {"provenance": {"/notifications/channels": PU("platform_default"), "/autonomy/default": PU("platform_default"),
                      "/autonomy/approval/approvers": PU("platform_default")}}),
     ("MC-V29", "Platform-default approvers in a multi-user workspace", "btc_accumulator", [],

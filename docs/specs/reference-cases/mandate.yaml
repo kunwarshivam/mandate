@@ -1607,7 +1607,7 @@ cases:
       lifetime_floor_loss_usd: '1000'}
 - id: MC-V28
   kind: semantic
-  title: Platform defaults on listed non-judgment fields (single-user workspace)
+  title: Platform defaults on listed non-envelope fields (single-user workspace)
   base: btc_accumulator
   patch: []
   context:
@@ -2053,7 +2053,7 @@ cases:
   - {op: replace, path: /protection/crypto_stop_limit_offset, value: '0.005'}
   context: {}
   expect:
-    violations: [V-041]
+    violations: [V-039]
     warnings: []
     worst_case: {one_position_at_stop_usd: '82.5', daily_loss_budget_usd: '200', flatten_trigger_loss_usd: '800',
       lifetime_floor_loss_usd: '1000'}
@@ -2066,7 +2066,7 @@ cases:
     provenance:
       /universe/pinned_instruments: {source: platform_proposed, confirmed: true}
   expect:
-    violations: [V-040]
+    violations: [V-038]
     warnings: []
     worst_case: {one_position_at_stop_usd: '75', daily_loss_budget_usd: '200', flatten_trigger_loss_usd: '800',
       lifetime_floor_loss_usd: '1000'}
