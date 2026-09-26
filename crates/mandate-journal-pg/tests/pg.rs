@@ -114,7 +114,6 @@ fn sealed(draft: &[u8], seq: u64, prev_hash: Digest) -> StoredEvent {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn migrations_are_embedded_in_order_with_no_down_migrations() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../migrations");
     let mut files: Vec<String> = std::fs::read_dir(dir)
@@ -152,7 +151,6 @@ fn migrations_are_embedded_in_order_with_no_down_migrations() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn applied_migrations_are_checked_and_never_rerun() {
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
@@ -203,7 +201,6 @@ fn applied_migrations_are_checked_and_never_rerun() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn the_application_role_can_only_insert_and_select_events() {
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
@@ -237,7 +234,6 @@ fn the_application_role_can_only_insert_and_select_events() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn triggers_reject_changes_even_from_the_owner_and_superusers() {
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
@@ -265,7 +261,6 @@ fn triggers_reject_changes_even_from_the_owner_and_superusers() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn the_database_rejects_bad_rows_forks_gaps_and_head_rollbacks() {
     let Some(db) = TestDb::new() else { return };
     db.block_on(async {
@@ -389,7 +384,6 @@ fn the_database_rejects_bad_rows_forks_gaps_and_head_rollbacks() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn concurrent_appenders_never_fork_or_reuse_a_seq() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -477,7 +471,6 @@ fn concurrent_appenders_never_fork_or_reuse_a_seq() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn concurrent_owners_get_distinct_epochs() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -495,7 +488,6 @@ fn concurrent_owners_get_distinct_epochs() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn racing_retries_and_shared_event_ids_commit_once() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -601,7 +593,6 @@ fn remove_commit_fault(db: &TestDb) {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn a_failed_commit_leaves_no_partial_event() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -628,7 +619,6 @@ fn a_failed_commit_leaves_no_partial_event() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn a_connection_lost_during_commit_is_ambiguous_and_atomic() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -680,7 +670,6 @@ fn a_connection_lost_during_commit_is_ambiguous_and_atomic() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn an_error_while_appending_is_unavailable_and_not_retried() {
     let Some(db) = TestDb::new() else { return };
     let journal = db.journal();
@@ -758,7 +747,6 @@ fn read_failure<T: std::fmt::Debug>(result: Result<T, PgError>) -> IntegrityErro
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn stored_bytes_are_reverified_on_read() {
     let price = |p: &str| format!(r#""price":"{p}""#);
     {
@@ -887,7 +875,6 @@ async fn opened_with_artifact_marks(journal: &PgJournal) -> StreamId {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn reads_pass_over_artifact_checks_and_verify_every_other_check() {
     let rewrite = |seq: u64| {
         format!(
@@ -1022,7 +1009,6 @@ fn tamper_sql(name: &str) -> (&'static str, Vec<String>) {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn tamper_vectors_are_caught_when_the_stored_rows_are_read() {
     let fx = fixture();
     let anchor = Anchor {
@@ -1082,7 +1068,6 @@ fn tamper_vectors_are_caught_when_the_stored_rows_are_read() {
 }
 
 #[test]
-#[ignore = "pending E5-3"]
 fn an_unreachable_database_is_unavailable_and_changes_nothing() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
