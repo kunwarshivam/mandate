@@ -255,13 +255,15 @@ fn ceiling_sqrt(value: U256) -> Result<U256, NumError> {
 
 /// `floor(sqrt(value))` by Newton's method on integers. The first guess, 2^ceil(bits ÷ 2), is at or
 /// above the root, and each step stays at or above it while falling strictly until it reaches it, so
-/// the loop ends there. Integers throughout: no float reaches a price (ADR-0001 ES-04), and a
-/// backtest that uses the root replays bit for bit (ES-21).
+/// the loop ends there and ends at the root. Zero alone is returned without iterating, because it is
+/// the one value whose root is below one and so the one guess the steps could fall to and then
+/// divide by. Integers throughout: no float reaches a price (ADR-0001 ES-04), and a backtest that
+/// uses the root replays bit for bit (ES-21).
 fn floor_sqrt(value: U256) -> Result<U256, NumError> {
-    let two = U256::from(2u8);
-    if value < two {
-        return Ok(value);
+    if value.is_zero() {
+        return Ok(U256::ZERO);
     }
+    let two = U256::from(2u8);
     let halved_bits = value
         .bit_len()
         .checked_add(1)

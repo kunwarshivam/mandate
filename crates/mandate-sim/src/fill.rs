@@ -74,7 +74,6 @@ pub fn simulate(
         coverage_start,
         first_bar_volumes,
     )?;
-    let run = Run { config, instrument };
     let mut working = orders
         .iter()
         .map(|order| Working::arriving(order, bars, config))
@@ -86,7 +85,7 @@ pub fn simulate(
             let Some(room) = rooms.get_mut(index) else {
                 continue;
             };
-            let step = order.on_bar(OrderRef::new(position), index, bar, &run, room)?;
+            let step = order.on_bar(OrderRef::new(position), index, bar, config, room)?;
             fills.extend(step.fill);
             canceled_legs.extend(step.canceled);
         }
@@ -374,9 +373,16 @@ struct Leg {
     phase: Phase,
 }
 
-/// What `phase` does on this bar, and the phase it leaves behind: a trigger or a change of phase
+/// What `leg` does on this bar, and the phase it leaves behind: a trigger or a change of phase
 /// happens on the bar that causes it, even when the cap lets nothing fill there (DEC-106 item 10).
-fn leg_action(leg: &mut Leg, seen: &Seen<'_>, stops_may_trigger: bool) -> Option<Action> {
+///
+/// Spec §6.4 rule 6 holds an equity stop to the regular session, and DEC-106 item 9 lets a
+/// continuously traded instrument's stop trigger on any of its bars. Neither needs a test here: the
+/// caller only reaches this on a bar the order may trade (rule 2), and only a limit order may carry
+/// `extended_hours` (spec §5.2, DEC-108 item 7), so a stop order's tradable bars are exactly its
+/// triggerable ones — the regular session for an equity, the continuous session for crypto
+/// (DEC-114 item 2).
+fn leg_action(leg: &mut Leg, seen: &Seen<'_>) -> Option<Action> {
     match leg.phase {
         Phase::Working => Some(Action::taker(Basis::Slipped(seen.bar.open))),
         Phase::Marketable(limit) => {
@@ -391,13 +397,13 @@ fn leg_action(leg: &mut Leg, seen: &Seen<'_>, stops_may_trigger: bool) -> Option
             }
         }
         Phase::Resting(level) => resting_action(seen, level),
-        Phase::Fresh => arriving_action(leg, seen, stops_may_trigger),
+        Phase::Fresh => arriving_action(leg, seen),
     }
 }
 
 /// What a leg does on the first bar it meets: a limit takes spec §6.4 rule 5's
 /// marketable-on-arrival test, and a stop or a stop-limit triggers or waits (rules 4, 6, and 7).
-fn arriving_action(leg: &mut Leg, seen: &Seen<'_>, stops_may_trigger: bool) -> Option<Action> {
+fn arriving_action(leg: &mut Leg, seen: &Seen<'_>) -> Option<Action> {
     match leg.kind {
         LegKind::Market => {
             leg.phase = Phase::Working;
@@ -409,10 +415,10 @@ fn arriving_action(leg: &mut Leg, seen: &Seen<'_>, stops_may_trigger: bool) -> O
             } else {
                 Phase::Resting(limit)
             };
-            leg_action(leg, seen, stops_may_trigger)
+            leg_action(leg, seen)
         }
         LegKind::Stop { stop } => {
-            if !stops_may_trigger || !seen.stop_reached(stop) {
+            if !seen.stop_reached(stop) {
                 return None;
             }
             leg.phase = Phase::Working;
@@ -424,7 +430,7 @@ fn arriving_action(leg: &mut Leg, seen: &Seen<'_>, stops_may_trigger: bool) -> O
             Some(Action::taker(Basis::Slipped(triggered)))
         }
         LegKind::StopLimit { stop, limit } => {
-            if !stops_may_trigger || !seen.stop_reached(stop) {
+            if !seen.stop_reached(stop) {
                 return None;
             }
             leg.phase = Phase::Resting(limit);
@@ -514,21 +520,6 @@ fn tradable(order: &SimOrder, bar: &SimBar) -> bool {
         Session::PreMarket | Session::AfterHours => order.extended_hours,
         Session::Overnight => false,
     }
-}
-
-/// Spec §6.4 rule 6: an equity stop triggers only on a regular-session bar; a continuously traded
-/// instrument has no session to wait for (DEC-106 item 9).
-fn stops_may_trigger(instrument: &Instrument, bar: &SimBar) -> bool {
-    match instrument.asset_class {
-        AssetClass::UsEquity => bar.session == Session::Regular,
-        AssetClass::Crypto => true,
-    }
-}
-
-/// What the whole walk holds fixed: the backtest configuration and the instrument (spec §6.4).
-struct Run<'r> {
-    config: &'r SimConfig,
-    instrument: &'r Instrument,
 }
 
 /// What one order did on one bar: at most one fill (spec §6.4 rule 3 caps a bar), and the OCO leg
@@ -634,7 +625,7 @@ impl<'o> Working<'o> {
         reference: OrderRef,
         index: usize,
         bar: &SimBar,
-        run: &Run<'_>,
+        config: &SimConfig,
         room: &mut Room,
     ) -> Result<Step, SimError> {
         let nothing = Step {
@@ -648,11 +639,10 @@ impl<'o> Working<'o> {
             bar,
             side: self.order.side,
         };
-        let triggering = stops_may_trigger(run.instrument, bar);
         let candidates: Vec<(Option<OcoLeg>, Action)> = self
             .legs
             .iter_mut()
-            .filter_map(|leg| leg_action(leg, &seen, triggering).map(|a| (leg.reports_as, a)))
+            .filter_map(|leg| leg_action(leg, &seen).map(|a| (leg.reports_as, a)))
             .collect();
         let Some((leg, action)) = self.choose(&candidates, &seen) else {
             return Ok(nothing);
@@ -665,7 +655,7 @@ impl<'o> Working<'o> {
         self.remaining = self.remaining.checked_sub(filled)?;
         let price = action
             .basis
-            .priced(&seen, slippage_of(run.config, filled, room.reference)?)?;
+            .priced(&seen, slippage_of(config, filled, room.reference)?)?;
         Ok(Step {
             fill: Some(SimFill {
                 order: reference,
