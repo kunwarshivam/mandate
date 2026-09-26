@@ -36,8 +36,9 @@ clipped proposal and an AUTO / ASK / DENY classification out. It proposes; the r
   only), DEC-85 (an uninterpreted input fails loudly), DEC-89 (exact decimals only), DEC-97 (the
   owner sets the envelope; signal models, weights, thresholds and cadence are envelope fields),
   DEC-110 (every pending test fails on the stubs), DEC-112 (this brief's PR is documentation only),
-  DEC-117 to DEC-126 (the spec v0.6 rewrite this brief reads, `Proposed (founder)`; a veto reopens
-  this brief), and DEC-130 (this story's interpretations, below).
+  DEC-117 to DEC-126 (the spec v0.6 rewrite this brief reads, confirmed by the founder on
+  2026-09-26 in #133, so nothing here is waiting on a veto), and DEC-130 (this story's
+  interpretations, below).
 
 ## Scope
 
