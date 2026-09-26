@@ -284,3 +284,99 @@ fn every_code_the_enum_names_is_one_the_spec_defines() {
         );
     }
 }
+
+/// Every `Warning` names its own code and displays as it, and so does a `Violation`.
+///
+/// Live for the same reason as the test above, and added because review round 1's mutation run found
+/// `Warning::code` and both `Display` impls unpinned: a mutant that made either write nothing
+/// survived, which would have left every journalled warning blank.
+#[test]
+fn every_warning_names_its_code_and_a_code_displays_as_itself() {
+    for (warning, code) in [
+        (Warning::W001, "W-001"),
+        (Warning::W002, "W-002"),
+        (Warning::W003, "W-003"),
+        (Warning::W005, "W-005"),
+        (Warning::W006, "W-006"),
+    ] {
+        assert_eq!(warning.code(), code, "§4.2 gives this warning its code");
+        assert_eq!(format!("{warning}"), code, "a warning displays as its code");
+    }
+    assert_eq!(format!("{}", Violation::V001), "V-001");
+    assert_eq!(format!("{}", Violation::V039), "V-039");
+}
+
+/// The §7 closed list, path by path and value by value.
+///
+/// The list is the rule, not an implementation detail: V-020 reads this and nothing wider, so a path
+/// added here silently widens what the platform may choose for an owner. Asserting the whole map,
+/// rather than a few members, is what makes an addition fail.
+#[test]
+fn the_platform_defaultable_list_is_exactly_the_nine_paths_section_seven_states() {
+    let expected: BTreeMap<&str, Option<&str>> = BTreeMap::from([
+        ("/name", None),
+        ("/notifications", None),
+        ("/autonomy/approval/on_timeout", Some("skip")),
+        ("/autonomy/approval/approvers", None),
+        ("/autonomy/default", Some("ask")),
+        ("/autonomy/admission", Some("ask")),
+        ("/universe/leveraged_etps_enabled", Some("false")),
+        ("/universe/leveraged_etp_disclosure_version", Some("null")),
+        ("/environment", Some("paper")),
+    ]);
+    assert_eq!(
+        platform_defaultable(),
+        expected,
+        "a path added or a value changed here widens V-020"
+    );
+    let both: BTreeMap<&str, Option<&str>> = platform_defaultable()
+        .into_iter()
+        .filter(|(path, _)| NEVER_PROPOSED.contains(path))
+        .collect();
+    assert_eq!(
+        both,
+        BTreeMap::from([("/environment", Some("paper"))]),
+        "of V-038's never-proposed paths only /environment has a default, and it is paper"
+    );
+}
+
+/// A class is allowed exactly when the universe lists it (V-039), and a report is valid exactly when
+/// it carries no violation.
+#[test]
+fn class_membership_and_report_validity_are_the_predicates_they_claim_to_be() {
+    use mandate_domain::AssetClass;
+    use mandate_spec::validate::{ValidationReport, WorstCase, class_allowed};
+
+    let equities = BTreeSet::from([AssetClass::UsEquity]);
+    assert!(class_allowed(AssetClass::UsEquity, &equities));
+    assert!(!class_allowed(AssetClass::Crypto, &equities));
+    assert!(!class_allowed(AssetClass::UsEquity, &BTreeSet::new()));
+
+    let worst_case = WorstCase {
+        one_position_at_stop_usd: None,
+        daily_loss_budget_usd: usd("500"),
+        flatten_trigger_loss_usd: usd("2000"),
+        lifetime_floor_loss_usd: usd("5000"),
+    };
+    let clean = ValidationReport {
+        violations: BTreeSet::new(),
+        warnings: BTreeSet::from([Warning::W002]),
+        worst_case: worst_case.clone(),
+    };
+    assert!(clean.is_valid(), "a warning never invalidates a report");
+    let broken = ValidationReport {
+        violations: BTreeSet::from([Violation::V001]),
+        warnings: BTreeSet::new(),
+        worst_case,
+    };
+    assert!(!broken.is_valid(), "one violation invalidates a report");
+}
+
+/// A group id keeps the text it was given, which is what V-035's comparison reads.
+#[test]
+fn a_group_id_is_the_text_it_was_given() {
+    use mandate_spec::validate::GroupId;
+
+    assert_eq!(GroupId::new("earnings-week").as_str(), "earnings-week");
+    assert_ne!(GroupId::new("a"), GroupId::new("b"));
+}
