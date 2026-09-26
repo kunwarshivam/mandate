@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product, with external counsel |
-| **Status** | Draft v0.5 (aligned with trading domain spec v0.6 and mandate spec v0.3) |
+| **Status** | Draft v0.6 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions): the platform originates ideas and serves retail from the start; posture under counsel review) |
 
 > This document records product positions and open questions. It is not legal advice.
 > Every position below must be confirmed by securities and data-protection counsel before
@@ -11,32 +11,35 @@
 
 ## Regulatory posture
 
-Mandate is a **software platform**. Users define their agents' mandates and connect their own
-accounts. The platform:
+Mandate is an **autonomous trading agent platform**. Users connect their own accounts and set the
+envelope (capital, loss limits, autonomy rules, allowed asset classes); the platform's research agent
+originates ideas and the agent trades on them within that envelope
+([DEC-97](../project/04-decision-log.md#decisions),
+[ADR-0002](../adr/0002-autonomous-ideation-and-retail.md)). The platform:
 
 - does **not** hold customer funds, or any permission that can move them (withdrawals or
   transfers);
-- does **not** recommend trades, provide personalized advice, or sell signals;
 - does **not** charge per trade or on assets or profits;
-- does **not** route orders for compensation per transaction.
+- does **not** route orders for compensation per transaction;
+- **does** generate personalized, instrument-specific trading decisions and execute them in users'
+  accounts, including retail accounts ([DEC-98](../project/04-decision-log.md#decisions)).
 
 ### Why this matters
 
-In the US, a business that, for compensation, advises others on buying or selling securities
-may need to register as an investment adviser; auto-trading in a client's account is commonly
-treated as advice or discretion. Businesses that effect securities transactions for others,
-especially for per-transaction compensation, may need broker-dealer registration. The product
-positions above are designed to keep Mandate on the tooling side of those lines, but the
-"agent acts in the user's account" pattern is a gray area that counsel must review, especially
-for retail users.
+The last point is the shape of investment advice and discretion under the Advisers Act and state
+law. The software-only position of drafts v0.1 to v0.5 is withdrawn. **Working assumption:** Mandate
+may need to register as an investment adviser, or adopt a structure counsel approves, before any
+live trading; counsel engagement moves from M13 to before the Phase 1 exit. The broker-dealer,
+money-transmission, and BitLicense positions below are unchanged. Until counsel signs off, every
+user trades paper only.
 
 ## Product requirements derived from this posture
 
 | Requirement | Where enforced |
 |---|---|
-| Users author and approve every mandate; the compiler's output is always shown for confirmation | Mandate authoring (PRD 6.3) |
-| Templates are starting points users must review, not recommendations; they never ship with platform-chosen instruments or values ([DEC-38](../project/04-decision-log.md#decisions)) | Mandate authoring |
-| No platform-generated "you should trade X" suggestions | Product policy |
+| Users confirm every envelope field; values the compiler or a template proposes are shown as proposed ([DEC-97](../project/04-decision-log.md#decisions)) | Mandate authoring (PRD 6.3) |
+| Every thesis the research agent acts on is journaled with its evidence, invalidation, model identity, and authorship, and the order it led to traces to a confirmed mandate version | Journal (PRD 6.7), research agent (ADR-0002) |
+| Theses and results are never marketed as expected returns | Product and marketing policy |
 | Trading-only OAuth scopes; reject API keys that can withdraw or transfer | Connections (PRD FR-2.2) |
 | Enforce US market rules (day-trading regime, buying power and settlement, sessions, halts; no short sales) | Risk gate (PRD FR-5.10) |
 | No per-trade or outcome-based pricing | [Pricing](07-pricing-and-packaging.md) |
@@ -44,13 +47,15 @@ for retail users.
 | Complete records of decisions, approvals, and configuration changes | Journal (PRD 6.7) |
 | Risk disclosures accepted before going live | Go-live flow |
 
-## Retail gating
+## Retail
 
-Retail managed accounts are out of scope until counsel confirms the model. Expected
-additional requirements for retail include platform policy ceilings (the retail profile:
-`auto_allowed: false`, quant models only, no leveraged ETPs, protection required, a lower lifetime
-loss limit; [DEC-61](../project/04-decision-log.md#decisions), pending counsel), clearer
-disclosures, education, and jurisdiction checks. Ceilings are shown as limits, never pre-filled.
+Retail is in scope from the start ([DEC-98](../project/04-decision-log.md#decisions)): retail
+workspaces are the default, through Alpaca and Robinhood Agentic Trading. The retail profile
+(`auto_allowed: true`, LLM models allowed, protection required, no leveraged ETPs, a lifetime-loss
+ceiling and an approval-timeout minimum set with counsel) applies as platform policy. **Live retail
+trading waits for counsel** (questions 31 to 34), disclosures, education, and jurisdiction checks;
+until then retail users trade paper. Ceilings are shown as limits; proposed values are marked as
+proposed.
 
 ## United States
 
@@ -64,7 +69,7 @@ Questions for counsel, by regulator:
 | CFTC / NFA: commodity trading advisor | Crypto perpetuals (Kraken Derivatives US), later CME futures | Does automated trading software acting on user-defined mandates fall within the commodity trading advisor definition, and do any exemptions apply? |
 | State money transmission | All | Confirm no-custody design avoids money-transmitter licensing |
 | New York (BitLicense) | Crypto spot | Confirm software without custody is outside "virtual currency business activity" |
-| Broker and venue terms | Alpaca, Kraken | Confirm third-party platform use; Alpaca OAuth app requirements; Kraken API terms for platforms acting for users |
+| Broker and venue terms | Alpaca, Robinhood, Kraken | Confirm third-party platform use; Alpaca OAuth app requirements; Robinhood Agentic Trading terms for a platform acting for many customers (question 32); Kraken API terms for platforms acting for users |
 
 ### US market rules the product must enforce
 
@@ -91,6 +96,11 @@ precisely:
 
 - **Alpaca:** users open and verify accounts with Alpaca, which performs KYC; Mandate connects
   through OAuth and never performs KYC for trading accounts.
+- **Robinhood Agentic Trading:** the customer opens and funds a dedicated agentic trading account at
+  Robinhood, which performs KYC, and connects Mandate over MCP (equities, and crypto since
+  2026-08-17; options are out of scope for Mandate); Robinhood states that it does not
+  supervise connected agents and that the customer is responsible for reviewing activity
+  ([DEC-98](../project/04-decision-log.md#decisions), [OD-12](../project/04-decision-log.md#open-decisions)).
 - **Kraken Derivatives US:** eligibility (identity verification, futures eligibility check, some
   state restrictions) is determined by Kraken; Mandate surfaces eligibility errors clearly.
 - **Non-US venues** that exclude US persons (for example, Binance, Bybit, OKX, Hyperliquid) are
@@ -102,15 +112,12 @@ precisely:
 From the risk and compliance review of the trading domain spec
 ([DEC-33](../project/04-decision-log.md#decisions)):
 
-- **Mandate does not choose instruments, strategy, sizing, or limits**
-  ([DEC-38](../project/04-decision-log.md#decisions)). Every order traces to a user-confirmed
-  mandate version.
-- **The user sets every judgment field** ([DEC-45](../project/04-decision-log.md#decisions)):
-  instruments, goal, allocation, signal models and their parameters and weights, the sizing
-  method, protection, all risk limits, and every `auto`. The compiler only extracts values the
-  user stated, with the quoted text; unstated judgment fields stay blank until the user enters
-  them. Platform defaults exist only for non-judgment fields (for example, `ask` as the autonomy
-  default). Templates set structure, never values.
+- **Superseded by DEC-97:** the research agent chooses instruments and strategy at runtime, within
+  the user's envelope. Every order still traces to a confirmed mandate version and a journaled thesis
+  with evidence and authorship.
+- **Superseded by DEC-97:** the user sets and confirms every envelope field (capital, goal, limits,
+  autonomy rules, asset classes, `max_instruments`); the compiler and templates may propose values
+  for them, shown as proposed, and never activate one without confirmation.
 - **Sizing is a method the user selects** and confirms in plain language; model weights are fixed
   by the user; **there is no calibration in v1**
   ([DEC-47](../project/04-decision-log.md#decisions)). Any future calibration will be a
@@ -127,9 +134,8 @@ From the risk and compliance review of the trading domain spec
   target ([DEC-46](../project/04-decision-log.md#decisions)).
 - LLM model output is limited to observations, evidence, and invalidation conditions (no
   imperatives, price targets, or profit claims); it is collapsed behind "View model output" on
-  approval screens and never appears in notifications. Agent memory does not feed models in v1, and
-  the shared data plane carries no directional views
-  ([DEC-62](../project/04-decision-log.md#decisions)).
+  approval screens and never appears in notifications. The research agent's own outputs may be directional and name new instruments ([DEC-97](../project/04-decision-log.md#decisions));
+  the agent's memory feeds it, and the shared data plane still carries no directional views.
 - Acceptable use (to draft): users may not supply data feeds containing material nonpublic
   information.
 
@@ -221,9 +227,10 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
     sizing method cure that?
 22. Do platform-model scores used in user-written ASK/AUTO rules, or any future calibration, amount
     to platform discretion?
-23. Do required judgment fields left blank for the user (rather than filled with platform values)
-    adequately avoid the platform "choosing limits"? Is quoted-span extraction by the compiler
-    acceptable?
+23. When the compiler or a template proposes envelope values (limits, allocation, autonomy rules)
+    that the user confirms ([DEC-97](../project/04-decision-log.md#decisions)), is the platform
+    "choosing limits"? What does the confirmation screen need to show for the user's confirmation
+    to carry the decision?
 24. What evidence (rendered text, version, authentication, timestamp) makes mandate confirmations
     and disclosure acceptances enforceable under E-SIGN and UETA, and adequate in a dispute?
 25. Should leveraged and inverse ETPs be prohibited, or limited by holding period, for retail users
@@ -242,6 +249,20 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 30. Would an optional, separately priced shared feed of platform-computed classifications of public
     events be a signal service, or qualify as impersonal publishing? What must it exclude to stay
     data?
+31. With the research agent originating instrument-specific theses that agents execute in users'
+    accounts, retail included ([DEC-97](../project/04-decision-log.md#decisions),
+    [DEC-98](../project/04-decision-log.md#decisions)), is Mandate an investment adviser under the
+    Advisers Act and state law? If so, what registration, Form ADV content, disclosures, and
+    compliance program are required before live trading, and is there a structure that avoids it?
+32. Do Robinhood's Agentic Trading terms (the customer is responsible; Robinhood does not control,
+    supervise, or audit connected agents) shift or share any adviser or suitability obligation to
+    Mandate, and does connecting through MCP to a dedicated, customer-funded account change the
+    discretion analysis?
+33. With `auto` execution and LLM-originated ideas allowed for retail, what ceilings, disclosures,
+    suitability-like checks, and cooling-off periods are required, and what must the retail profile's
+    values be?
+34. Does the bring-your-own-strategy mode (the research agent disabled) carry a different posture
+    from the ideation mode, and should the terms distinguish them?
 
 ## Data protection
 
@@ -261,7 +282,7 @@ against adviser customers' obligations (Advisers Act Rule 204-2) and the platfor
 
 | Risk | Control |
 |---|---|
-| Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; unusual inputs trigger escalation |
+| Prompt injection through news or social content causing trades | LLMs produce outputs only; the order builder and risk gate are deterministic; mandate limits cap impact; the research agent admits instruments only through the eligibility floor, `max_instruments`, and the autonomy rules (ADR-0002); the input-drift detector is required in Phase 1 |
 | Model errors or hallucinated instruments | Typed outputs from decision models; instrument validation against the mandate universe |
 | Overconfident models | Self-reported confidence is labeled uncalibrated; combined-score thresholds in the user's autonomy rules; a missing model counts as fully bearish for buys and as zero for exits; scorecards for the user's review |
 | Model provider changes | The content hash pins the underlying model identity; the gateway never substitutes a model; withdrawals are journaled `PlatformOperatorAction` events and outputs then count as missing ([DEC-67](../project/04-decision-log.md#decisions)) |
