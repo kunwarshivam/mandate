@@ -282,7 +282,6 @@ fn oracle_session(secs: i64) -> Option<Session> {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn the_checked_in_calendar_covers_2018_to_2028() {
     let calendar = us();
     assert_eq!(calendar.valid_from(), date("2018-01-01"));
@@ -290,7 +289,6 @@ fn the_checked_in_calendar_covers_2018_to_2028() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn every_weekday_from_2018_to_2028_trades_exactly_when_nyse_published_it_open() {
     let calendar = us();
     let mut closed = BTreeSet::new();
@@ -327,7 +325,6 @@ fn every_weekday_from_2018_to_2028_trades_exactly_when_nyse_published_it_open() 
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn a_full_day_has_four_sessions_at_the_published_hours() {
     let sessions = us().sessions(date("2026-09-24")).unwrap();
     let got: Vec<(Session, UtcNanos, UtcNanos)> = sessions
@@ -362,7 +359,6 @@ fn a_full_day_has_four_sessions_at_the_published_hours() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn early_closes_end_the_regular_session_at_13_00_and_after_hours_at_17_00() {
     let calendar = us();
     let winter = calendar.sessions(date("2026-11-27")).unwrap();
@@ -378,7 +374,6 @@ fn early_closes_end_the_regular_session_at_13_00_and_after_hours_at_17_00() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn holidays_and_unscheduled_closures_have_no_session() {
     let calendar = us();
     for closed in [
@@ -395,7 +390,6 @@ fn holidays_and_unscheduled_closures_have_no_session() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn daylight_saving_changes_move_sessions_in_utc_but_not_in_new_york() {
     let calendar = us();
     let friday = calendar.sessions(date("2026-03-06")).unwrap();
@@ -426,7 +420,6 @@ fn daylight_saving_changes_move_sessions_in_utc_but_not_in_new_york() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn new_york_instants_reject_times_a_daylight_saving_change_skips_or_repeats() {
     let spring = date("2026-03-08");
     let fall = date("2026-11-01");
@@ -469,7 +462,6 @@ fn new_york_instants_reject_times_a_daylight_saving_change_skips_or_repeats() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn session_at_names_the_session_holding_an_instant_at_each_boundary() {
     let calendar = us();
     let cases = [
@@ -501,7 +493,6 @@ fn session_at_names_the_session_holding_an_instant_at_each_boundary() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn the_evening_after_an_early_close_is_closed_until_the_next_overnight_session() {
     let calendar = parse("early_close 2026-09-24 13:00 17:00 test\n").unwrap();
     let cases = [
@@ -516,7 +507,6 @@ fn the_evening_after_an_early_close_is_closed_until_the_next_overnight_session()
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn every_date_outside_the_validity_range_is_an_error() {
     let calendar = us();
     for outside in ["2017-12-29", "2017-12-31", "2029-01-01", "2029-01-02"] {
@@ -577,7 +567,6 @@ fn session_names_are_stable() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn new_york_times_are_hh_mm_within_a_day() {
     assert_eq!(
         NewYorkTime::new(23, 59).map(|t| (t.hour(), t.minute())),
@@ -601,7 +590,6 @@ fn new_york_times_are_hh_mm_within_a_day() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn a_calendar_needs_only_its_header_and_skips_comments_and_blank_lines() {
     let text = format!("# a comment\n\n{HEADER}# another\n\nclosed 2026-01-02 test\n");
     let calendar = ExchangeCalendar::parse(&text).unwrap();
@@ -618,7 +606,6 @@ fn a_calendar_needs_only_its_header_and_skips_comments_and_blank_lines() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn malformed_records_are_syntax_errors_on_their_line() {
     let cases = [
         "bogus 1",
@@ -661,7 +648,6 @@ fn malformed_records_are_syntax_errors_on_their_line() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn bad_dates_and_times_are_value_errors_with_their_cause() {
     let value = |line, source| Err(CalendarDataError::Value { line, source });
     assert_eq!(
@@ -711,7 +697,6 @@ fn bad_dates_and_times_are_value_errors_with_their_cause() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn valid_comes_first_and_hours_second_each_exactly_once() {
     let header = |line| Err(CalendarDataError::Header { line });
     assert_eq!(
@@ -749,7 +734,6 @@ fn valid_comes_first_and_hours_second_each_exactly_once() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn the_range_and_the_session_hours_must_increase() {
     assert_eq!(
         ExchangeCalendar::parse("valid 2026-12-31 2026-01-01\n"),
@@ -776,7 +760,6 @@ fn the_range_and_the_session_hours_must_increase() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn listed_dates_are_weekdays_inside_the_range_in_increasing_order() {
     assert_eq!(
         parse("closed 2025-12-31 test\n"),
@@ -814,7 +797,6 @@ fn listed_dates_are_weekdays_inside_the_range_in_increasing_order() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn an_early_close_ends_inside_the_usual_sessions() {
     let early = |line| Err(CalendarDataError::EarlyClose { line });
     for (regular, after) in [
@@ -843,7 +825,6 @@ fn an_early_close_ends_inside_the_usual_sessions() {
 }
 
 #[test]
-#[ignore = "pending E2-4"]
 fn line_numbers_count_comments_and_blank_lines() {
     let text = format!("# header\n{HEADER}\n# note\nclosed 2026-01-03 saturday\n");
     assert_eq!(
@@ -901,7 +882,6 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(2_000))]
 
     #[test]
-    #[ignore = "pending E2-4"]
     fn session_at_agrees_with_the_published_schedule_at_every_instant(
         secs in in_range_secs(),
         nanos in 0u32..1_000_000_000,
@@ -912,7 +892,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E2-4"]
     fn a_trading_days_sessions_tile_from_the_previous_evening_to_its_after_hours_close(
         days in days_of("2018-01-01")..=days_of("2028-12-31"),
     ) {
