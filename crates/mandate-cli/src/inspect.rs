@@ -110,7 +110,7 @@ pub fn render(inspection: &Inspection) -> String {
                 inspection
                     .gaps
                     .iter()
-                    .map(|g| format!("  {} to {}", g.previous, g.next)),
+                    .map(|g| format!("  {} to {}", g.gap.previous, g.gap.next)),
             );
         }
     }

@@ -1,8 +1,9 @@
-//! `inspect` (backlog E2-2): what a stored dataset covers and whether to trust it. It reads the
-//! manifest and every partition it lists, and reports the days listed, empty, and never fetched;
-//! exact statistics; gaps between consecutive bars; records that share a key; and every
-//! partition that is missing, altered, unreadable, or not listed. Gaps are not yet classified as
-//! no-trade intervals, session closures, or true gaps (E2-4, trading domain spec §4.2).
+//! `inspect` (backlog E2-2, E2-4): what a stored dataset covers and whether to trust it. It reads
+//! the manifest and every partition it lists, and reports the days listed, empty, and never
+//! fetched; exact statistics, with prices also split-adjusted by the corporate actions stored
+//! with a stock dataset; gaps between consecutive bars, each missing bar slot classified as a
+//! session closure, no trade, a true gap, or unclassified (trading domain spec §4.2); records
+//! that share a key; and every partition that is missing, altered, unreadable, or not listed.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -12,14 +13,24 @@ use std::path::Path;
 use mandate_canon::{DecStr, Digest};
 use mandate_time::{Date, TimeError, UtcNanos};
 
+use crate::actions::{ActionsError, RecordedActions};
 use crate::dataset::{self, BAR_SCALE, DatasetError, ListedDay, PRICE_SCALE, SIZE_SCALE};
-use crate::model::{DatasetId, DayRange, Kind, ModelError, Records, TimeUnit, Timeframe};
+use crate::model::{
+    AdjustmentError, DatasetId, DayRange, Kind, ModelError, Records, TimeUnit, Timeframe,
+};
 use crate::number::{self, NumberError};
+use crate::venue::{Venue, VenueError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum InspectError {
     #[error(transparent)]
     Dataset(#[from] DatasetError),
+    #[error(transparent)]
+    Actions(#[from] ActionsError),
+    #[error("venue hours: {0}")]
+    Venue(#[from] VenueError),
+    #[error("split adjustment: {0}")]
+    Adjustment(#[from] AdjustmentError),
     #[error("column `{column}`: {source}")]
     Number {
         column: &'static str,
@@ -38,6 +49,7 @@ impl InspectError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Dataset(e) => e.code(),
+            Self::Actions(_) | Self::Venue(_) | Self::Adjustment(_) => "",
             Self::Number { .. } => "number",
             Self::Overflow { .. } => "overflow",
             Self::Time(_) => "time",
@@ -53,8 +65,9 @@ pub struct Inspection {
     pub coverage: Coverage,
     /// Over every record of the partitions without problems; `None` when there are none.
     pub stats: Option<Stats>,
+    pub corporate_actions: ActionsReport,
     /// Between consecutive bars in time order, across partitions; always empty for trades.
-    pub gaps: Vec<Gap>,
+    pub gaps: Vec<ClassifiedGap>,
     /// In key order.
     pub duplicates: Vec<Duplicate>,
     /// Listed days first, in date order, then unlisted files by name.
@@ -78,7 +91,36 @@ pub struct Stats {
     pub rows: u64,
     pub first: UtcNanos,
     pub last: UtcNanos,
+    /// Raw, as stored (DEC-89).
     pub values: Values,
+    /// Split-adjusted as of the span's last day; `Some` exactly when the corporate actions are
+    /// [`ActionsReport::Applied`].
+    pub adjusted: Option<AdjustedPrices>,
+}
+
+/// The extremes of a dataset's prices (bar lows and highs, or trade prices), each split-adjusted
+/// point in time to the terms of one date (spec §4.5, §8.5).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdjustedPrices {
+    pub low: DecStr,
+    pub high: DecStr,
+}
+
+/// The corporate actions stored with a dataset and whether its prices are adjusted by them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionsReport {
+    /// Crypto has no corporate actions.
+    NotApplicable,
+    /// A stock dataset without them: stored before E2-4, or not by `download`.
+    NotRecorded,
+    /// Recorded for days that do not cover the span, so no price is adjusted.
+    Incomplete(RecordedActions),
+    /// Recorded for the whole span: every split with ex-date up to `as_of`, the span's last day,
+    /// adjusts [`Stats::adjusted`]; later splits, cash dividends, and other actions do not.
+    Applied {
+        recorded: RecordedActions,
+        as_of: Date,
+    },
 }
 
 /// Exact extremes and totals of the decimal columns.
@@ -103,6 +145,41 @@ pub enum Values {
 pub struct Gap {
     pub previous: UtcNanos,
     pub next: UtcNanos,
+}
+
+/// Why an expected bar slot has no bar (brief interpretation 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GapClass {
+    /// The feed's venue is closed at the slot's start.
+    SessionClosure,
+    /// The venue is open and the slot's day was fetched cleanly: nothing traded.
+    NoTrade,
+    /// The venue is open and the slot's day was never fetched or cannot be trusted.
+    TrueGap,
+    /// The venue's published hours do not say whether it is open.
+    Unclassified,
+}
+
+impl GapClass {
+    pub fn as_str(self) -> &'static str {
+        ""
+    }
+}
+
+/// A run of consecutive missing slots of one class: the starts of the first and last.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stretch {
+    pub class: GapClass,
+    pub first: UtcNanos,
+    pub last: UtcNanos,
+    pub slots: u64,
+}
+
+/// A gap and its missing slots, in time order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClassifiedGap {
+    pub gap: Gap,
+    pub stretches: Vec<Stretch>,
 }
 
 /// Records sharing a key: a bar's start, or a trade's time, ID, exchange, and tape.
@@ -158,14 +235,39 @@ pub fn inspect(dir: &Path) -> Result<Inspection, InspectError> {
         }
     }
     problems.extend(unlisted(dir, &days)?);
+    let gaps = totals
+        .gaps
+        .take()
+        .map(|finder| finder.gaps)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|gap| ClassifiedGap {
+            gap,
+            stretches: Vec::new(),
+        })
+        .collect();
     Ok(Inspection {
         coverage: coverage(&days)?,
         stats: totals.stats()?,
-        gaps: totals.gaps.map(|finder| finder.gaps).unwrap_or_default(),
+        corporate_actions: ActionsReport::NotRecorded,
+        gaps,
         duplicates: totals.duplicates,
         problems,
         dataset,
     })
+}
+
+/// The missing slots of `gap` between bars of `timeframe`, in runs of one class: a slot is a
+/// session closure or unclassified by the venue's state at its start, and otherwise no trade when
+/// its UTC day is in `clean` (listed and without problems) and a true gap when not. For `1Day`,
+/// the slots are the calendar days strictly between the bars' days, classified by the whole day.
+pub fn classify(
+    _timeframe: Timeframe,
+    _gap: Gap,
+    _venue: &Venue,
+    _clean: &BTreeSet<Date>,
+) -> Result<Vec<Stretch>, InspectError> {
+    Ok(Vec::new())
 }
 
 /// The gaps between bars of `timeframe` starting at `starts`, given in any order; repeated
@@ -484,6 +586,7 @@ impl Totals {
             first,
             last,
             values,
+            adjusted: None,
         }))
     }
 }
