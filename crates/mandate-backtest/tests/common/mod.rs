@@ -110,10 +110,17 @@ pub fn pre_market(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
 
 /// An overnight bar of `day` (20:00 to 04:00 ET, spec §4.3): nothing fills there (DEC-30), but its
 /// mark and any fee charge its instant reaches still land.
+///
+/// Its trade date is **not** its calendar day: spec §2.2 gives a fill between 20:00 and 23:59:59 ET
+/// the next trading day, which is what `TradingCalendar::equity_trade_date` returns and what DEC-127
+/// item 20 makes the loop check, so the builder takes the date from the calendar rather than from the
+/// clock.
 pub fn overnight(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    let start = at(&et(day, clock));
     SimBar {
         session: Session::Overnight,
         session_start: at(&et(day, "20:00")),
+        trade_date: us_2026().equity_trade_date(start).unwrap(),
         ..bar(day, clock, ohlcv)
     }
 }

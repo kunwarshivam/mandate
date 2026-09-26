@@ -369,7 +369,7 @@ fn the_total_return_is_net_of_accrued_and_charged_fees() {
     let charged_run = run(&charged, &seven_days()).unwrap();
 
     assert_eq!(free_run.report.strategy.fees_total, Usd::ZERO);
-    assert_eq!(charged_run.report.strategy.fees_total, usd("1.585055967"));
+    assert_eq!(charged_run.report.strategy.fees_total, usd("1.585045967"));
     assert!(
         charged_run.report.strategy.total_return < free_run.report.strategy.total_return,
         "fees are inside the return"
@@ -380,7 +380,7 @@ fn the_total_return_is_net_of_accrued_and_charged_fees() {
             .report
             .strategy
             .ending_equity
-            .checked_sub(usd("1.585055967"))
+            .checked_sub(usd("1.585045967"))
             .unwrap(),
         "the whole difference is the fees"
     );
@@ -1023,7 +1023,8 @@ fn crypto_fees_are_charged_at_midnight_utc() {
 /// Nothing is swept at the end of a run: [`seven_days`] has no bar past 20:00 ET on any trade date,
 /// so every accrual stays accrued, exactly as the fold would hold it. The entry accrues CAT
 /// 0.00001 × 479 = 0.00479, and the exit of 479 shares at 102.9691, which is 49,322.1989, accrues SEC
-/// 0.00003 × 49322.1989 = 1.479665967, TAF 0.0002 × 479 = 0.0958, and CAT 0.00479: 1.585055967 in all.
+/// 0.00003 × 49322.1989 = 1.479665967, TAF 0.0002 × 479 = 0.0958, and CAT 0.00479, which with the
+/// entry's 0.00479 is 1.585045967 in all.
 #[test]
 #[ignore = "pending E4-2"]
 fn an_accrual_the_bars_never_reach_stays_accrued() {
@@ -1031,7 +1032,7 @@ fn an_accrual_the_bars_never_reach_stays_accrued() {
     let run = run(&config, &seven_days()).unwrap();
 
     assert_eq!(run.report.strategy.fees_charged, Usd::ZERO);
-    assert_eq!(run.report.strategy.fees_accrued, usd("1.585055967"));
+    assert_eq!(run.report.strategy.fees_accrued, usd("1.585045967"));
     assert_eq!(
         run.report.strategy.fees_total,
         run.report

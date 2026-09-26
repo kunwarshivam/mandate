@@ -686,8 +686,10 @@ proptest! {
         }
     }
 
-    /// The strategy never reads a later close: changing the last trade date's bars leaves every order
-    /// decided before it, and every fill before it, exactly as they were.
+    /// The strategy never reads a later close: raising the **closes** of the last trade date by 500 basis
+    /// points leaves every order decided before that date, and every fill before it, exactly as they
+    /// were. A loop that handed the signal a later close would decide differently on the earlier
+    /// periods, which is the bug this discriminates.
     #[test]
     #[ignore = "pending E4-2"]
     fn the_signal_never_reads_a_later_close(bars in generated_bars()) {
@@ -699,7 +701,12 @@ proptest! {
         let cut = bars.iter().position(|b| b.trade_date == last_date).expect("its first bar");
         let mut changed = bars.clone();
         for bar in changed.iter_mut().skip(cut) {
-            bar.high = bar.high.slipped(mandate_num::Bps::parse("500").unwrap(), mandate_num::Adverse::Up).unwrap();
+            let raised = bar
+                .close
+                .slipped(mandate_num::Bps::parse("500").unwrap(), mandate_num::Adverse::Up)
+                .unwrap();
+            bar.close = raised;
+            bar.high = bar.high.max(raised);
         }
         let other = run(&config, &changed).expect("a generated run folds");
 
