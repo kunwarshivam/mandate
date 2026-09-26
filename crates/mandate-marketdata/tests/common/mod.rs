@@ -47,6 +47,9 @@ pub fn ok(body: &[u8]) -> Result<Response, TransportError> {
     })
 }
 
+/// A corporate-actions page with no action, as Alpaca answers for a symbol without any.
+pub const NO_ACTIONS: &[u8] = br#"{"corporate_actions":{},"next_page_token":null}"#;
+
 pub fn status(code: u16) -> Result<Response, TransportError> {
     Ok(Response {
         status: code,

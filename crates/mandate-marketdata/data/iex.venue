@@ -1,0 +1,20 @@
+# IEX venue hours: when the Investors Exchange trades, read by
+# `mandate_marketdata::venue::VenueHours` (trading domain spec §1 principle 2, §4.2, §4.3; E2-4
+# brief interpretation 6). The record format is described in `sip.venue`.
+#
+# Sources (retrieved 2026-09-26):
+# - IEX, "Trading Hours and Holidays" (https://www.iex.io/resources/trading/trading-hours-holidays):
+#   the Pre-Market Session runs 8:00 a.m. to 9:30 a.m., the Regular Market Session 9:30 a.m. to
+#   4:00 p.m., and the Post-Market Session 4:00 p.m. to 5:00 p.m. ET; on the listed early-close
+#   days "Market closes at 1:00 p.m. ET", and the page does not say when the Post-Market Session
+#   ends on those days.
+# - IEX Rule 11.110(a), as quoted in SEC Release No. 34-105959 (2026,
+#   https://www.sec.gov/files/rules/sro/iex/2026/34-105959.pdf): the same three sessions.
+# - The validity range is the exchange calendar's. These are the hours the rule states today;
+#   IEX has published no change to them within the range.
+#
+# IEX does not trade overnight. On an early-close day its hours after the 1:00 p.m. regular close
+# are unpublished, so they stay unclassified until the overnight session would begin at 8:00 p.m.
+valid 2018-01-01 2028-12-31
+hours 08:00 09:30 16:00 17:00
+unpublished_after_early_close 20:00
