@@ -13,7 +13,8 @@
 //! checked read; this crate keeps the filesystem I/O out of it (ADR-0001 ES-02).
 //!
 //! Layout, part of the on-disk format: `<root>/sha256/<first two hex>/<64 hex>` holds the object
-//! whose SHA-256 is that hex, read-only once written; `<root>/tmp/` holds writes in progress.
+//! whose SHA-256 is that hex, read-only once written; `<root>/tmp/` holds writes in progress,
+//! named `{hex}.{pid}.{n}` (see `FsArtifactStore::write_temp`). Nothing reads a temporary file.
 //!
 //! A put writes a temporary file, flushes it to disk, and hard-links it into place, which fails
 //! rather than replace an existing object. Readers therefore see a whole object or none, a crash
@@ -30,7 +31,7 @@ use mandate_journal::{ArtifactError, ArtifactRef, ArtifactSource, ArtifactStore,
 const OBJECTS_DIR: &str = "sha256";
 const TEMP_DIR: &str = "tmp";
 
-/// Distinguishes the temporary files of one process; the process ID distinguishes processes.
+/// The `{n}` of the next temporary name in this process (see [`FsArtifactStore::write_temp`]).
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 /// Temporary names tried per put before it is `Unavailable`.
 const TEMP_NAME_ATTEMPTS: u32 = 64;
@@ -59,8 +60,12 @@ impl FsArtifactStore {
     }
 
     /// Writes `bytes` to a new temporary file, flushed to disk and read-only, and returns its path.
-    /// A name that is taken, such as one a crashed process with the same ID left behind, is
-    /// skipped for the next one.
+    ///
+    /// The file is `<root>/tmp/{hex}.{pid}.{n}`: `{hex}` is the 64-hex SHA-256 of `bytes`, `{pid}`
+    /// the writing process's ID, and `{n}` that process's count of temporary names tried, from 0
+    /// (so a process's first put is `{hex}.{pid}.0`). A name that is taken, such as one a crashed
+    /// process with the same ID left behind, is never opened: the next `{n}` is tried, up to
+    /// [`TEMP_NAME_ATTEMPTS`] names per put.
     fn write_temp(&self, reference: &ArtifactRef, bytes: &[u8]) -> Result<PathBuf, ArtifactError> {
         let (path, mut file) = (0..TEMP_NAME_ATTEMPTS)
             .find_map(|_| {
