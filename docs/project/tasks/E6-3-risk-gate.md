@@ -547,9 +547,9 @@ order outside limits". The fuzz is a `proptest` suite in `crates/mandate-risk/te
   power** — the property matches on the reason code, so a deny carrying `account_trading_blocked`
   (the broker arm of MI-1's own list, `RC-15`'s `status_not_active`) is the one permitted denial and
   is asserted to be reachable, not merely tolerated. Assert further that a `Hold` carries only
-  `agent_paused`, `agent_stopped`, or `unknown_order_in_flight`, follows the mode rule above
-  exactly, and that a
-  `DiscretionaryExit` is never denied at all. Generators must produce a `paused` mode, a `stopped`
+  `agent_paused`, `agent_stopped`, or `unknown_order_in_flight`; that the two `agent_*` holds follow
+  the mode rule above exactly (the mode rule has no `Unknown`-order arm, which is interpretation
+  22's, at check 4); and that a `DiscretionaryExit` is never denied at all. Generators must produce a `paused` mode, a `stopped`
   mode, an `Unknown` order, and a blocked account, so no arm of the property passes vacuously.
 - **MI-8.** Every generated input is evaluated twice, and the two `Decision`s compared field by
   field, including the check list's order.
@@ -569,7 +569,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | §9.1 purpose is assigned by the gate, never taken from the proposer | `hand::purpose_is_assigned_from_origin_side_and_position` (one case per row of the purpose table), `properties::a_buy_is_never_an_exit` |
 | §9.1 verdicts are allow, deny, or defer, and a defer is never converted to a deny | `properties::a_discretionary_exit_is_never_denied`, `RC-25` steps 5, 7, 8 |
 | MI-1 risk reduction is never denied by a mandate limit, conduct control, session rule, or instrument restriction | `fuzz::mi1_reduction_is_never_denied_by_a_limit`, `MC-G08`, `MC-G09`, `MC-G10`, `MC-G15`, `RC-09B` step 4, `RC-15` step 4, `RC-16` step 8, `RC-25` steps 4 and 6 |
-| MI-1 an exit is held only by `paused`, `stopped`, an `Unknown` order, or the broker | `properties::a_hold_follows_the_mode_rule_exactly`, `hand::a_kill_switch_order_is_exempt_from_paused`, `hand::a_protective_order_is_never_held_by_a_mode`, `hand::an_unknown_order_holds_every_order_in_its_instrument`, `RC-15::status_not_active` (the broker arm) |
+| MI-1 an exit is held only by `paused`, `stopped`, an `Unknown` order, or the broker | `properties::a_hold_follows_the_mode_rule_exactly`, `hand::a_kill_switch_order_is_exempt_from_paused`, `hand::a_protective_order_is_never_held_by_a_mode`, `hand::an_unknown_order_denies_an_opening_and_holds_a_reduction`, `RC-15::status_not_active` (the broker arm) |
 | MI-6 a stricter mode never turns a deny into an allow | `properties::a_stricter_mode_is_never_more_permissive` |
 | MI-8 identical inputs give identical decisions | `fuzz::mi8_identical_inputs_give_identical_decisions` |
 | MI-15, MI-19, MI-20 nothing opens outside the working universe, and a removed instrument is exits-only in that instrument | `MC-G14`, `MC-G15`, `MC-G16`, `properties::an_opening_needs_the_working_universe`, `hand::a_removed_instrument_restricts_only_itself` |
@@ -622,6 +622,16 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
    its order changes no verdict, only which code is reported when two checks fail at once. Where the
    two disagree, **§9.1 wins**, and the fuzz oracle compares verdicts with `order_decision` and
    reason codes with §9.1. No reference case exercises the disagreement.
+   **Where `order_decision` is not the oracle at all.** It models neither §5.3 rule 9 nor an
+   `Unknown` order: it takes no such input, and for a reducing purpose it falls through to `gate`,
+   whose first line returns `allow` for anything in `REDUCING`. So on an input with an `Unknown`
+   order in the instrument it answers `allow` where interpretation 22 requires `Hold`, and the
+   generator does produce such inputs. For those inputs the oracle is **§5.3 rule 9 and MI-1
+   directly** — deny `Open` and `Increase`, hold every reduction, code `unknown_order_in_flight` —
+   not `order_decision`, and the fuzz selects the oracle on whether the generated state has an
+   `Unknown` order in the proposed instrument. The same bound applies to any other §9.1 check
+   `order_decision` does not model; it is the oracle for the mode, session, close-window, and
+   instrument-restriction arms it does.
 3. **An absent working universe is an error.** `ref.py`'s `gate` indexes `st["working_universe"]`,
    so an absent universe raises rather than allowing. The Rust makes that unrepresentable where it
    can — `WorkingUniverse` has no `Default` and no constructor that guesses — and where a caller
