@@ -63,7 +63,9 @@ code (the spec guard enforces it).
 
 Give each subagent file pointers and this skill, not pasted context. Review its diff yourself and
 write your own summary; do not pass on what it said. Anything touching GitHub goes through a cloud
-agent that holds the token, which it never prints or persists.
+agent that holds the token, which it never prints or persists. Cloud agents cannot launch
+subagents: a delegated story agent builds and opens PRs, and the coordinating session runs the
+independent reviews (`playbooks/ship.md` step 3).
 
 ## Reporting
 

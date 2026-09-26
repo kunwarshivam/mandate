@@ -7,8 +7,11 @@ decides.
    never reaches `main`. When work is sequenced (tests, implementation, status), open the next PR
    only after the previous one has merged, from the updated `main`.
 2. Wait until both required checks (`fast`, `full`) are green on the PR's final head.
-3. Spawn a review agent on a different model from the author's, in a fresh cloud agent. Give it
-   the PR number, the story or DEC, and this checklist; it must not have written the change:
+3. Get an independent review from an agent on a different model from the author's, in a fresh
+   cloud agent. Cloud agents cannot launch other agents, so a delegated agent stops here with the
+   PR open and CI green and reports it; the coordinating session launches the reviewer, which
+   also merges on PASS and opens the next sequenced PR. Give the reviewer the PR number, the story
+   or DEC, and this checklist; it must not have written the change:
    - check out the PR head and run `cargo xtask check`;
    - read the diff against the story's acceptance criteria, the specs it cites, and `AGENTS.md`;
    - for safety-critical crates, confirm zero missed mutants in the `full` log and run the
