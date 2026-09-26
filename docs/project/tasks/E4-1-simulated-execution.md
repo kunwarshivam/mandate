@@ -76,14 +76,14 @@ story. This story opens milestone M3; E4-2 (baseline backtest and metrics) build
 
 ## Data shapes
 
-The caller's view, written before any logic. Names are the tests PR's stubs.
+The caller's view, written before any logic. These are the tests PR's stubs, in `mandate-sim`.
 
 ```rust
 pub struct SimConfig {
-    pub decision_latency: Nanos,
-    pub approval_latency: Nanos,
+    pub decision_latency_ms: u64,
+    pub approval_latency_ms: u64,
     pub slippage: Slippage,
-    pub volume_cap_fraction: Fraction,
+    pub volume_cap: Fraction,
 }
 pub enum Slippage {
     Fixed { half_spread_bps: Bps, impact_bps: Bps },
@@ -98,14 +98,14 @@ pub struct SimBar {
     pub session_start: UtcNanos,
     pub auction: bool,
 }
+pub struct SimInstrument { pub asset_class: AssetClass, pub increment: ShareIncrement }
 pub struct SimOrder {
-    pub id: OrderRef,
     pub side: Side,
     pub qty: Qty,
     pub kind: OrderKind,
     pub tif: TimeInForce,
     pub extended_hours: bool,
-    pub eligible_from: Eligibility,
+    pub eligibility: Eligibility,
 }
 pub enum OrderKind {
     Market,
@@ -114,16 +114,18 @@ pub enum OrderKind {
     StopLimit { stop: Price, limit: Price },
     Oco { take_profit: Price, stop: Price },
 }
-pub enum Eligibility { DecidedAt { at: UtcNanos, approval_required: bool }, RestingBefore }
+pub enum Eligibility { DecidedAt { at: UtcNanos, approval_required: bool }, RestingFromBar(usize) }
 pub struct SimFill {
-    pub order: OrderRef, pub leg: Option<OcoLeg>, pub bar: usize,
+    pub order: usize, pub leg: Option<OcoLeg>, pub bar: usize,
     pub qty: Qty, pub price: Price, pub liquidity: Option<Liquidity>,
 }
-pub struct Instrument { pub asset_class: AssetClass, pub increment: QtyIncrement }
+pub struct SimOutcome { pub fills: Vec<SimFill>, pub orders: Vec<OrderState> }
+pub struct OrderState { pub end: OrderEnd, pub canceled_leg: Option<OcoLeg> }
+pub enum OrderEnd { Filled { bar: usize }, Expired, Open }
 
 pub fn simulate(
     config: &SimConfig,
-    instrument: &Instrument,
+    instrument: &SimInstrument,
     bars: &[SimBar],
     coverage_start: UtcNanos,
     first_bar_volumes: &dyn FirstBarVolumes,
@@ -131,8 +133,19 @@ pub fn simulate(
 ) -> Result<SimOutcome, SimError>;
 ```
 
-`SimOutcome` lists fills in bar order, then submission order, plus each order's end state
-(`Filled`, `Canceled { at_bar }` for an expired day order or a canceled OCO leg, `Open`).
+An order is identified by its index in `orders`, which is also its submission order. `SimOutcome`
+lists fills in bar order, then submission order, and each order's end: `Filled`, `Expired` (a day
+order past its last eligible session), or `Open`, plus the canceled OCO leg if any. `SimError` is
+`InvalidBar { bar }` (out of order, or a high or low that does not bound the open and close),
+`InvalidOrder { order }` (outside the v1 policy of §5.1 and §5.2: zero or off-increment quantity, a
+non-limit with `extended_hours`, an OCO whose legs are on the wrong sides or on a fractional
+instrument, a crypto day order), or a numeric or time error.
+
+The price and cap arithmetic lives in `mandate-num`, whose exact arithmetic is crate-private
+(ES-04), as additions only, under shared-crate claim #62: `Fraction`, `Qty::checked_add`,
+`Qty::portion` (truncate(fraction × qty, increment)), `Price::slipped(Bps, Adverse)` (rounded
+adversely at 9 places), `Bps::checked_add`, and `Bps::sqrt_impact`.
+
 `FirstBarVolumes` supplies the §6.4.3 median for a session's first bar: the E4-2 runner computes
 it from the dataset, and the harness reads `first_bar_reference_volume`. The sim itself reads no
 clock, does no I/O, and keeps no state between calls.
@@ -179,7 +192,12 @@ clock, does no I/O, and keeps no state between calls.
    `extended_hours` is set (limit orders only, §5.2). Equity stops and stop-limits trigger only on
    regular-session bars (§6.4.6). Crypto bars are `Continuous`. A day order's remainder is canceled
    after the last bar of its last eligible session.
-10. **Harness (DEC-85 style).** `resting_since_bar: n` makes an order eligible from bar n as already
+10. **Lifecycles.** A trigger or a change of phase happens on the bar that causes it, even when
+    the cap lets nothing fill there: a stop that triggers becomes a market order; a limit whose
+    open is beyond its price starts resting. A triggered stop's remainder, and an OCO's remainder
+    after its stop leg fills, is a market order, filled at later regular-session opens with
+    slippage. An OCO leg is canceled only by a fill of the other leg.
+11. **Harness (DEC-85 style).** `resting_since_bar: n` makes an order eligible from bar n as already
     resting (never marketable on arrival). `resting_since: previous_trading_day` does the same from
     bar 0. `isolation: per_order` runs each order alone against a fresh cap. Liquidity is compared
     only where the case states it. Everything else stays "not interpreted until <story>".
