@@ -16,8 +16,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{d, id, no_fees, round_trip, usd};
 use mandate_accounting::{
-    Account, AccountingError, AssetClass, CashDividend, Config, CorporateAction, Execution, Input,
-    Position, Receivable, ReceivableKind, Record, Side, Split,
+    Account, AccountType, AccountingError, AssetClass, CashDividend, Config, CorporateAction,
+    Execution, Input, Position, Receivable, ReceivableKind, Record, Side, Split,
 };
 use mandate_num::{CostBasis, Price, Qty, ShareIncrement, SignedQty, SplitRatio, Usd};
 use mandate_time::{Date, UtcNanos};
@@ -678,7 +678,7 @@ fn run(scenario: &Scenario, check_oracle: bool) -> Result<Run, TestCaseError> {
         }
     }
     let opening = marks.iter().fold(
-        Account::opening(usd(&decimal(SETTLED, 21)), positions),
+        Account::opening(AccountType::Margin, usd(&decimal(SETTLED, 21)), positions),
         |account, mark| account.apply(mark, &config).unwrap().account,
     );
     let mut account = opening.clone();
