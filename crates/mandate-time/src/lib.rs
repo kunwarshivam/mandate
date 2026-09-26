@@ -46,7 +46,9 @@ impl TimeError {
             Self::Syntax => "syntax",
             Self::InvalidDate => "invalid_date",
             Self::OutOfRange => "out_of_range",
-            Self::OutsideCalendar | Self::InvalidCalendar | Self::TimeZone => "",
+            Self::OutsideCalendar => "outside_calendar",
+            Self::InvalidCalendar => "invalid_calendar",
+            Self::TimeZone => "time_zone",
         }
     }
 }
@@ -99,12 +101,18 @@ impl Date {
 
     /// The following calendar date.
     pub fn next(self) -> Result<Self, TimeError> {
-        Err(TimeError::OutOfRange)
+        self.days_since_epoch()
+            .and_then(|d| d.checked_add(1))
+            .and_then(Self::from_days_since_epoch)
+            .ok_or(TimeError::OutOfRange)
     }
 
     /// Saturday or Sunday; 1970-01-01 was a Thursday.
     pub fn is_weekend(self) -> bool {
-        false
+        self.days_since_epoch()
+            .and_then(|d| d.checked_add(3))
+            .map(|d| d.rem_euclid(7))
+            .is_some_and(|weekday| weekday >= 5)
     }
 
     fn days_since_epoch(self) -> Option<i64> {
@@ -244,8 +252,38 @@ impl UtcNanos {
 
     /// Parses exactly `YYYY-MM-DDTHH:MM:SSZ` or `YYYY-MM-DDTHH:MM:SS±HH:MM` (RFC 3339 without
     /// fractional seconds), the form reference-case steps use for `at`.
-    pub fn parse_rfc3339(_s: &str) -> Result<Self, TimeError> {
-        Err(TimeError::Syntax)
+    pub fn parse_rfc3339(s: &str) -> Result<Self, TimeError> {
+        let offset_secs: i64 = if matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:ddZ") {
+            0
+        } else if matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:dd+dd:dd")
+            || matches_template(s.as_bytes(), b"dddd-dd-ddTdd:dd:dd-dd:dd")
+        {
+            let (oh, om): (i64, i64) = (field(s, 20, 22)?, field(s, 23, 25)?);
+            if oh > 23 || om > 59 {
+                return Err(TimeError::InvalidDate);
+            }
+            let magnitude = oh
+                .checked_mul(3_600)
+                .and_then(|h| h.checked_add(om.checked_mul(60)?))
+                .ok_or(TimeError::OutOfRange)?;
+            if s.as_bytes().get(19) == Some(&b'-') {
+                magnitude.checked_neg().ok_or(TimeError::OutOfRange)?
+            } else {
+                magnitude
+            }
+        } else {
+            return Err(TimeError::Syntax);
+        };
+        let local = s
+            .get(0..19)
+            .map(|prefix| format!("{prefix}.000000000Z"))
+            .ok_or(TimeError::Syntax)?;
+        let local = Self::parse(&local)?;
+        let secs = local
+            .secs
+            .checked_sub(offset_secs)
+            .ok_or(TimeError::OutOfRange)?;
+        Self::from_parts(secs, 0)
     }
 }
 
