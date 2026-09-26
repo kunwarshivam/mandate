@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, day 2 evening: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast` |
+| **Last updated** | 2026-09-26, day 2 evening: E2-4 sessions and corporate actions merged, E4-1 tests merged, E5-2 complete, E5-3 tests merged, the pending-tests gate in `fast`; direction follow-ups: evidence loop, correlated-flow controls, input hardening, counsel now, and the Phase 1 thin slice (DEC-99 to DEC-103), after the direction change (DEC-97, DEC-98, ADR-0002) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -76,8 +76,11 @@ issues are the record; this table is the summary
 
 ## Waiting on the founder
 
-- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 34)
-  before the Phase 1 exit (DEC-98). Nothing trades live until this is answered.
+- **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 35)
+  now, during Phase 0 (DEC-102). Nothing trades live until this is answered.
+- **Design questions**: answer the [design questions](09-mandate-rewrite-questions.md) (universe
+  size, thesis lifetime, research weight and cost cap, the DEC-99 evaluation, the DEC-100 values, the
+  Robinhood paper stage, retail `auto`, how theses are shown) before the mandate spec rewrite starts.
 - **Robinhood**: open an agentic account yourself, on a desktop, from your own Robinhood login
   (OD-12: self-serve, no beta request). Agents never connect to it (rule 8); the connector story
   will use a paper or test path Robinhood has not yet published, so ask Robinhood support whether one
@@ -160,7 +163,11 @@ them in the decision log.
    contract, `ThesisProposed` and `UniverseChanged`, the retail profile, and V-020, V-022, and MI-12
    restated for envelope fields.
 6. **M5** starts with decision DEC-17 (messaging) and the rewritten mandate reference cases, and adds
-   E17 (research agent and dynamic universe).
+   E17 (research agent and dynamic universe), starting with the DEC-103 thin slice: the team's
+   internal paper workspaces with the research basket as the fixed test data universe, every
+   admission `ask`, paper only, scorecards on (E15-3), and the forward-paper evaluation (E17-8). The
+   full E17-3, for users' agents under their own envelopes, follows only after that evaluation
+   passes.
 
 E4-1, E2-4, and E5-3 touch different crates and can run in parallel; reviews and merges run one at a
 time.
