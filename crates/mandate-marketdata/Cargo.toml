@@ -9,6 +9,15 @@ description = "Alpaca historical market data: the data-host client, exact vendor
 [lints]
 workspace = true
 
+[features]
+# Builds `tests/live.rs`, which calls the Alpaca market-data host with the paper credentials. CI
+# never enables it (ADR-0001 ES-19), so a run without it has no live test to report as passed.
+live-alpaca = []
+
+[[test]]
+name = "live"
+required-features = ["live-alpaca"]
+
 [dependencies]
 arrow-array.workspace = true
 arrow-schema.workspace = true
