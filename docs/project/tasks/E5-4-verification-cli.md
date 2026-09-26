@@ -40,7 +40,7 @@ story. Fill every section; write "none" rather than deleting one.
   package, so `docs/dependencies.md` gains no row (the `serde_json` row's "Used by" is extended).
 - **Safety-critical:** no. `mandate-cli` is a shell crate (layer 7), so the DEC-77 two-PR flow does
   not apply: tests and code ship in one PR, the tests as its first commit against stubs.
-- **Size budget:** about 430 lines of source and 1,200 of tests.
+- **Size budget:** about 490 lines of source and 1,400 of tests.
 
 ## Data shapes
 
@@ -61,6 +61,10 @@ pub struct Span { stream_id: String, first_seq: u64, last_seq: u64, last_hash: D
 impl Outcome { fn code(&self) -> Option<&'static str>; fn failed(&self) -> bool }
 
 pub fn verify(args: &VerifyArgs, report: &mut impl Write) -> anyhow::Result<Outcome>;
+
+/// Why an input was refused before any check of §11 could run; the code is the message's first word.
+pub enum Refusal { TrustedStart, ArtifactStore, Anchor, AnchorStream, ExportStreams, ExportStreamId }
+impl Refusal { pub fn code(self) -> &'static str }
 
 pub enum ArtifactCommand { Put(PutArgs), Get(GetArgs) }
 pub struct PutArgs { pub file: PathBuf, pub store: PathBuf }
@@ -106,6 +110,9 @@ artifact's bytes to standard output and nothing else.
 | §11 per-range `anchor_head_mismatch` | `a_tail_truncated_after_an_anchor_passes_every_per_event_check_and_fails_the_anchor` (vector `tail_truncated_after_anchor`), `a_chain_rewritten_from_seq_3_passes_every_per_event_check_and_fails_the_anchor` (vector `chain_rewritten_from_seq_3`) |
 | §11 per-range `anchor_root_mismatch` | `an_anchor_whose_root_does_not_match_its_leaves_is_anchor_root_mismatch` |
 | §10 the anchor's leaves and root as `AnchorComputed` records them | `an_untampered_export_passes_the_anchor_it_is_covered_by`, `an_anchor_file_that_is_not_one_is_refused_before_anything_verifies` |
+| §11 an anchor is never reported as checked when it cannot cover the export | `an_empty_export_with_an_anchor_is_anchor_head_mismatch`, `an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused`, `an_anchor_covering_more_streams_than_the_export_still_checks_its_own` |
+| ES-09 every input refusal names a stable code first | `every_refusal_reports_its_stable_code_first` |
+| The report's line count and a failure's `seq` agree | `the_reported_line_count_agrees_with_the_seq_a_failure_names` |
 | Every vector case is covered or its inexpressibility is stated | `every_tamper_case_of_the_vectors_is_covered_by_a_test` |
 | Replay: identical inputs give identical output | `identical_inputs_give_identical_output` |
 | Exit status: any failure is non-zero | `Outcome::failed` asserted in `assert_tamper` and in every failure test |
@@ -170,6 +177,22 @@ artifact's bytes to standard output and nothing else.
    per-range vocabulary for it (`segment_manifest_mismatch`) belongs to the deferred manifest work.
 9. **Range checks run after the per-event checks, in spec order.** An anchor is checked only once
    every per-event check has passed, which is what the vectors' `per_event: pass` expects.
+10. **An anchor never vouches for an export it cannot cover.** Both halves of this were false passes
+   the independent review of #108 found, each resolving a gap the wrong way:
+   - An export holding **no event** holds no anchored head, so with `--anchor` the result is
+     `anchor_head_mismatch`, never `verified, no events`. Otherwise a wholly truncated segment
+     passes the very anchor that covers its head — `tail_truncated_after_anchor` taken to its limit.
+   - An anchor that **names no leaf for the export's stream** is refused
+     (`anchor_covers_another_stream`). `verify_anchor` rightly skips the head check when it is asked
+     about a stream the anchor says nothing about; the command would otherwise print `verified` with
+     `anchor: <path>` in the report, as though the anchor had been checked. An anchor covering more
+     streams than the export is fine, and its own leaf is still checked.
+11. **Every input refusal carries a stable code first.** `Refusal::code` gives
+   `trusted_start_invalid`, `artifact_store_unusable`, `anchor_invalid`,
+   `anchor_covers_another_stream`, `export_mixes_streams`, and `export_stream_id_invalid`, as
+   `ArtifactError::code` already did for check 6, so a script reads the same word an auditor does
+   (ADR-0001 ES-09). The codes are asserted verbatim, because changing one changes what auditors'
+   scripts see.
 
 ## Planted bugs (each removed after the named test caught it)
 
@@ -185,15 +208,26 @@ artifact's bytes to standard output and nothing else.
 | F8 | Skip the stream-consistency check, so a spliced foreign event is accepted | `journal_verify::an_export_that_mixes_streams_is_refused` |
 | F9 | Miss a failure on the last event: the checks stop at the first prefix that fails | `journal_verify::an_event_whose_artifact_is_not_stored_is_artifact_missing` and the two other artifact cases |
 
+The independent review of #108 found four more. Each was reproduced on the pre-fix code after the
+fix landed, so the test is shown to fail on the defect it names:
+
+| # | Defect the review found | Caught by |
+|---|---|---|
+| R1 | An empty export with `--anchor` returns `Verified(None)` before `verify_anchor` runs, so a wholly truncated segment passes its anchor | `an_empty_export_with_an_anchor_is_anchor_head_mismatch` |
+| R2 | An anchor naming no leaf for the export's stream is reported as `verified` with the anchor path, as though it had been checked | `an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused`, `every_refusal_reports_its_stable_code_first` |
+| R3 | The report's line count skips empty lines, so a blank final line reports `lines: 5` and `seq 6` | `the_reported_line_count_agrees_with_the_seq_a_failure_names` |
+| R4 | An input refusal without its stable code | `every_refusal_reports_its_stable_code_first`, `an_anchor_that_names_no_leaf_for_the_exports_stream_is_refused` |
+
 ## What the tests cannot catch
 
 - **`column_mismatch` from a real column.** An export has no stored columns, so the check can only
   fire on a body that cannot supply one. The column cases against real rows are
   `mandate-journal-pg`'s (E5-3) and `mandate-refcases`'.
-- **The anchor's inclusion proof and timestamp token.** The command checks that the anchored head
-  is present with the anchored hash and that the root matches its leaves; it does not check an
-  inclusion proof against a published root, or an RFC 3161 token. A forged anchor file therefore
-  passes, which is why the anchor must come from outside the export.
+- **The anchor's inclusion proof and timestamp token.** The command checks that the anchor names the
+  export's stream, that the anchored head is present with the anchored hash, and that the root
+  matches its leaves; it does not check an inclusion proof against a published root, or an RFC 3161
+  token. A forged anchor file therefore passes, which is why the anchor must come from outside the
+  export.
 - **Very large exports.** The whole file and all its rows are held in memory. Segments are bounded
   by the exporter, which this story does not build.
 
@@ -248,7 +282,8 @@ interpretations.
       the tamper vectors are replayed through the command against the same fixture file.)
 - [x] Tests came first: one commit of tests against stubs, 40 of 46 failing; the 6 that passed are
       argument parsing and assertions about the vector file's shape, which do not call the commands.
-      Nine planted bugs, each caught by the named test above.
+      Nine planted bugs and the review's four defects, each caught by the named test above; 67 tests
+      pass in `mandate-cli`.
 - [x] New state changes emit journal events (none: the commands only read).
 - [x] Docs updated: this brief, DEC-115 and its Reserved identifiers row, the feature map, the work
       tracker's E5-4 rows, and the `serde_json` row's "Used by" in `docs/dependencies.md`.
