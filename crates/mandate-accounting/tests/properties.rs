@@ -667,13 +667,11 @@ fn round_trip(input: &Input) -> Input {
 
 proptest! {
     #[test]
-    #[ignore = "pending E3-1"]
     fn every_reported_value_matches_the_oracle_after_every_event(s in scenario()) {
         run(&s, true)?;
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn i1_conservation_holds_for_every_event(s in scenario()) {
         for step in run(&s, false)? {
             let (b, a) = (&step.before, &step.after);
@@ -686,7 +684,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn i2_reducing_fills_remove_one_rounding_of_the_proportional_basis(s in scenario()) {
         for step in run(&s, false)? {
             let (Input::Fill(e), Ok(Record::Fill { received, .. })) = (&step.input, &step.result) else { continue };
@@ -702,7 +699,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn i4_cash_totals_and_settlement_leave_no_due_bucket(s in scenario()) {
         for step in run(&s, false)? {
             let a = &step.after;
@@ -717,7 +713,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn i5_quantity_is_the_fold_of_signed_received_quantities(s in scenario()) {
         let mut folded: BTreeMap<String, i128> = BTreeMap::from([("AAA".to_owned(), opening_units(s.opening).0)]);
         for step in run(&s, false)? {
@@ -736,7 +731,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn i6_folding_is_deterministic_across_a_text_round_trip(s in scenario()) {
         let steps = run(&s, false)?;
         let config = config(s.taf_cap_cents, s.per_order);
@@ -756,7 +750,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn duplicate_fills_are_never_applied_twice(s in scenario()) {
         for step in run(&s, false)? {
             if step.duplicate {
@@ -767,7 +760,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E3-1"]
     fn asset_fees_are_never_accrued_and_charges_round_up_by_less_than_a_cent(s in scenario()) {
         for step in run(&s, false)? {
             let (b, a) = (&step.before, &step.after);
