@@ -843,41 +843,180 @@ fn run_stagger(id: &str) {
     );
 }
 
-macro_rules! refcase {
-    ($name:ident, $id:literal, $run:ident, $story:literal) => {
-        #[test]
-        #[ignore = $story]
-        fn $name() {
-            $run($id);
-        }
-    };
+/// [`MC-N02`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n02() {
+    run_admission("MC-N02");
 }
 
-refcase!(mc_n02, "MC-N02", run_admission, "pending E17-3");
-refcase!(mc_n03, "MC-N03", run_admission, "pending E17-3");
-refcase!(mc_n04, "MC-N04", run_admission, "pending E17-3");
-refcase!(mc_n05, "MC-N05", run_admission, "pending E17-3");
-refcase!(mc_n06, "MC-N06", run_admission, "pending E17-7");
-refcase!(mc_n07, "MC-N07", run_admission, "pending E17-7");
-refcase!(mc_n08, "MC-N08", run_admission, "pending E17-3");
-refcase!(mc_n09, "MC-N09", run_admission, "pending E17-3");
-refcase!(mc_n10, "MC-N10", run_admission, "pending E17-3");
-refcase!(mc_n11, "MC-N11", run_admission, "pending E17-3");
-refcase!(mc_n12, "MC-N12", run_admission, "pending E17-3");
-refcase!(mc_n13, "MC-N13", run_admission, "pending E17-3");
-refcase!(mc_n15, "MC-N15", run_admission, "pending E17-3");
-refcase!(mc_n16, "MC-N16", run_admission, "pending E17-3");
-refcase!(mc_n25, "MC-N25", run_admission, "pending E17-3");
-refcase!(mc_n17, "MC-N17", run_lineage, "pending E17-9");
-refcase!(mc_n18, "MC-N18", run_lineage, "pending E17-9");
-refcase!(mc_n19, "MC-N19", run_lineage, "pending E17-9");
-refcase!(mc_n24, "MC-N24", run_lineage, "pending E17-9");
-refcase!(mc_n27, "MC-N27", run_lineage, "pending E17-9");
-refcase!(mc_n28, "MC-N28", run_lineage, "pending E17-9");
-refcase!(mc_n20, "MC-N20", run_thesis_expiry, "pending E17-3");
-refcase!(mc_n21, "MC-N21", run_thesis_expiry, "pending E17-3");
-refcase!(mc_n22, "MC-N22", run_thesis_expiry, "pending E17-9");
-refcase!(mc_n23, "MC-N23", run_stagger, "pending E17-3");
+/// [`MC-N03`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n03() {
+    run_admission("MC-N03");
+}
+
+/// [`MC-N04`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n04() {
+    run_admission("MC-N04");
+}
+
+/// [`MC-N05`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n05() {
+    run_admission("MC-N05");
+}
+
+/// [`MC-N06`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-7"]
+fn mc_n06() {
+    run_admission("MC-N06");
+}
+
+/// [`MC-N07`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-7"]
+fn mc_n07() {
+    run_admission("MC-N07");
+}
+
+/// [`MC-N08`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n08() {
+    run_admission("MC-N08");
+}
+
+/// [`MC-N09`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n09() {
+    run_admission("MC-N09");
+}
+
+/// [`MC-N10`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n10() {
+    run_admission("MC-N10");
+}
+
+/// [`MC-N11`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n11() {
+    run_admission("MC-N11");
+}
+
+/// [`MC-N12`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n12() {
+    run_admission("MC-N12");
+}
+
+/// [`MC-N13`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n13() {
+    run_admission("MC-N13");
+}
+
+/// [`MC-N15`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n15() {
+    run_admission("MC-N15");
+}
+
+/// [`MC-N16`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n16() {
+    run_admission("MC-N16");
+}
+
+/// [`MC-N25`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n25() {
+    run_admission("MC-N25");
+}
+
+/// [`MC-N17`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n17() {
+    run_lineage("MC-N17");
+}
+
+/// [`MC-N18`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n18() {
+    run_lineage("MC-N18");
+}
+
+/// [`MC-N19`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n19() {
+    run_lineage("MC-N19");
+}
+
+/// [`MC-N24`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n24() {
+    run_lineage("MC-N24");
+}
+
+/// [`MC-N27`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n27() {
+    run_lineage("MC-N27");
+}
+
+/// [`MC-N28`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n28() {
+    run_lineage("MC-N28");
+}
+
+/// [`MC-N20`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n20() {
+    run_thesis_expiry("MC-N20");
+}
+
+/// [`MC-N21`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n21() {
+    run_thesis_expiry("MC-N21");
+}
+
+/// [`MC-N22`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-9"]
+fn mc_n22() {
+    run_thesis_expiry("MC-N22");
+}
+
+/// [`MC-N23`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
+#[test]
+#[ignore = "pending E17-3"]
+fn mc_n23() {
+    run_stagger("MC-N23");
+}
 
 /// The three cases this file defers, and why. If the fixture ever stops stating
 /// `first_order_autonomy` for one of them — or starts stating it for another — this fails rather than

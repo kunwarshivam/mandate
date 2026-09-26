@@ -46,6 +46,12 @@ safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
 
+[crates.mandate-domain]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-journal]
 layer = 2
 safety_critical = true
@@ -54,6 +60,12 @@ allowed_external = ["thiserror"]
 
 [crates.mandate-accounting]
 layer = 2
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-spec]
+layer = 3
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
