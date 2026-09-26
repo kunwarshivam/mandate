@@ -15,9 +15,9 @@ entry in `xtask/layers.toml`.
 | `serde_json` | cargo | xtask; mandate-refcases; mandate-canon (dev) | Reading `cargo metadata` output and the reference-case fixtures, and feeding the differential canonicalizer test; never on the hashing path (ES-07) | `json` crate | MIT OR Apache-2.0 | DEC-72 |
 | `toml` | cargo | xtask; mandate-refcases | Reading `xtask/layers.toml`, `pyproject.toml`, and `crates/mandate-refcases/status.toml` | `toml_edit` | MIT OR Apache-2.0 | DEC-72 |
 | `sha2` | cargo | mandate-canon | SHA-256 for event hashes, anchors, and artifact references (ES-07); `default-features = false` | `ring`, `aws-lc-rs` (C and assembly, larger surface) | MIT OR Apache-2.0 | DEC-72 |
-| `thiserror` | cargo | mandate-canon, mandate-time, mandate-journal | Error enums with a stable `code()` per variant (ES-09) | Hand-written `Display` and `Error` impls | MIT OR Apache-2.0 | DEC-72 |
+| `thiserror` | cargo | mandate-canon, mandate-time, mandate-journal, mandate-marketdata | Error enums with a stable `code()` per variant (ES-09) | Hand-written `Display` and `Error` impls | MIT OR Apache-2.0 | DEC-72 |
 | `libtest-mimic` | cargo | mandate-refcases | One named test per reference case, with pending cases ignored (ES-11) | `datatest-stable` (file-per-case only) | MIT OR Apache-2.0 | DEC-72 |
-| `proptest` | cargo | mandate-canon, mandate-time, mandate-journal (dev) | Property tests for every invariant, 256 cases per PR (ES-11) | `quickcheck` (weaker shrinking) | MIT OR Apache-2.0 | DEC-72 |
+| `proptest` | cargo | mandate-canon, mandate-time, mandate-journal, mandate-marketdata (dev) | Property tests for every invariant, 256 cases per PR (ES-11) | `quickcheck` (weaker shrinking) | MIT OR Apache-2.0 | DEC-72 |
 | `serde_json_canonicalizer` | cargo | mandate-canon (dev) | An independent RFC 8785 implementation, used only as the differential oracle for the canonicalizer (ES-07) | `serde_jcs` (unmaintained) | MIT | DEC-72 |
 | `pyyaml` | python | mandate-tools | Loading reference-case YAML exactly as the reference implementation does (ES-11) | ruamel.yaml (YAML 1.2 typing differs) | MIT | DEC-72 |
 | `pytest` | python | python workspace (dev) | Test runner | unittest | MIT | DEC-72 |

@@ -320,6 +320,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-marketdata"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-refcases"
 version = "0.0.0"
 dependencies = [

@@ -80,6 +80,16 @@ every workspace crate and reference-case suite has an entry and that every path 
   `reference/mandate/check_cases.py`, `reference/mandate/mutants.py`.
 - **Run:** `cargo xtask refcases`, `cargo xtask ci reference`.
 
+## Historical market data download
+
+- **Spec:** backlog E2-1; ADR-0001 ES-19, ES-23; DEC-82, DEC-83, DEC-84;
+  `docs/project/tasks/E2-1-download.md`.
+- **Code:** `mandate-marketdata`: `crates/mandate-marketdata/src/number.rs` (raw JSON number text to
+  `DecStr` and `Decimal128` units, exact or rejected), `crates/mandate-marketdata/src/timestamp.rs`
+  (vendor timestamps, UTC days).
+- **Tests:** `crates/mandate-marketdata/tests/`.
+- **Run:** `cargo nextest run -p mandate-marketdata`.
+
 ## Repository automation
 
 - **Code:** `xtask`: `xtask/src/main.rs` (every CI job), `xtask/layers.toml` (crate layers and

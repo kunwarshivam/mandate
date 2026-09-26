@@ -50,3 +50,8 @@ layer = "tool"
 safety_critical = true
 pure = false
 allowed_external = ["libtest-mimic", "serde_json", "toml"]
+
+[crates.mandate-marketdata]
+layer = 6
+safety_critical = false
+pure = false

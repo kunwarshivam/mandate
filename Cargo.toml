@@ -6,6 +6,7 @@ members = ["xtask", "crates/*"]
 [workspace.dependencies]
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
+mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 libtest-mimic = "0.8.2"
 proptest = "1.11.0"
