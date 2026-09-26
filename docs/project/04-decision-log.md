@@ -171,5 +171,5 @@ reservation keeps its row and its number is never reused.
 | DEC-115 | `claude-code` | stream C | E5-4 verification CLI interpretations | Reserved |
 | DEC-116 | `claude-code` | stream B | E2-3 CLI slice and the retirement of the market-data RFC 3339 workaround | In [#107](https://github.com/kunwarshivam/mandate/pull/107) |
 | DEC-117 to DEC-126 | `claude-code` | stream D | Track C: one decision per answered question in [09-mandate-rewrite-questions.md](09-mandate-rewrite-questions.md), proposed to the founder, then the spec rewrite | Reserved |
-| DEC-127 | `claude-code` | [#110](https://github.com/kunwarshivam/mandate/issues/110) | E4-2 baseline backtest and metrics interpretations | In this PR |
+| DEC-127 | `claude-code` | [#110](https://github.com/kunwarshivam/mandate/issues/110) | E4-2 baseline backtest and metrics interpretations | In [#112](https://github.com/kunwarshivam/mandate/pull/112) |
 | Compliance question 35 | `cursor` | #54 | Direction follow-ups: describing an agent that brings its own ideas | Reserved |
