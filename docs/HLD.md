@@ -610,6 +610,17 @@ flowchart TD
 switch for the managed service. Hybrid and on-prem customers control their own; the managed
 global switch cannot reach into customer deployments.
 
+**Correlated research-agent flow** ([DEC-100](project/04-decision-log.md#decisions)): each
+workspace's risk gate decides from that workspace's own state only. Two operator controls run in
+the workspace deployment, outside the trade path and never in the global control plane. An
+aggregate-flow monitor sums research-agent exposure per instrument over the workspaces of its
+deployment (a managed cell or a customer site) and alerts the operator; it writes to no workspace.
+An operator per-thesis halt stops research-agent admissions and openings in a named instrument,
+optionally for one research-agent version, in every workspace of the deployment, while exits and
+protection continue; it only removes permissions and is journaled in each workspace. As with the
+global switch, the managed halt cannot reach into customer deployments, whose operators run their
+own monitor and halt from the same installer.
+
 ---
 
 ## 9. Intelligence layer
@@ -670,8 +681,8 @@ Speed tiers:
 
 1. **Retail regulation (decided, [DEC-98](project/04-decision-log.md#decisions)).** Retail is in
    scope from the start, with the platform originating ideas, so the working assumption is that
-   Mandate may be an investment adviser. Counsel is engaged before the Phase 1 exit and no user
-   trades live until counsel signs off.
+   Mandate may be an investment adviser. Counsel is engaged during Phase 0
+   ([DEC-102](project/04-decision-log.md#decisions)) and no user trades live until counsel signs off.
 2. **NautilusTrader licensing.** It is LGPL-3.0. Distributing it inside on-prem software,
    particularly statically linked Rust, carries relinking obligations. Decide whether to use
    its connectors or write our own.

@@ -53,3 +53,4 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | [Roles and RACI](project/05-raci.md) | Roles to fill and responsibilities |
 | [Backlog: v1](project/06-backlog-v1.md) | Epics and user stories with acceptance criteria |
 | [Quality and release plan](project/07-quality-and-release.md) | Definitions of ready and done, test strategy, release gates, incidents |
+| [Design questions before the mandate spec rewrite](project/09-mandate-rewrite-questions.md) | Choices the founder makes before the rewrite for DEC-97 to DEC-103, with options and recommendations |
