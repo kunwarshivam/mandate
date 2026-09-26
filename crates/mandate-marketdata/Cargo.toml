@@ -10,8 +10,11 @@ description = "Alpaca historical market data: the data-host client, exact vendor
 workspace = true
 
 [dependencies]
+arrow-array.workspace = true
+arrow-schema.workspace = true
 mandate-canon.workspace = true
 mandate-time.workspace = true
+parquet.workspace = true
 reqwest.workspace = true
 rustls.workspace = true
 secrecy.workspace = true
