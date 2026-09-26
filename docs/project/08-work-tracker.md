@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | The coordinating agent session; the founder reviews |
 | **Status** | Living document. Updated at the end of every working session |
-| **Last updated** | 2026-09-26, end of day 1 of engineering |
+| **Last updated** | 2026-09-26, end of day 1 of engineering (DEC-94 accepted) |
 
 Where the project stands, what is waiting on whom, and what comes next. Plans live in
 [02-milestones-and-wbs.md](02-milestones-and-wbs.md) and [06-backlog-v1.md](06-backlog-v1.md);
@@ -14,7 +14,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 
 | Milestone | State | Done | Next |
 |---|---|---|---|
-| Tier 1 specs | Approved (DEC-71); amended since | Journal spec v0.3 (DEC-81), trading domain spec v0.9 (DEC-86) | Trading domain v0.10 waits on DEC-94 (below) |
+| Tier 1 specs | Approved (DEC-71); amended since | Journal spec v0.3 (DEC-81), trading domain spec v0.10 (DEC-86, DEC-92 to DEC-94) | — |
 | M0 Foundations | Done | E1-1, E1-2; CI as two required checks (DEC-76); agent workflow (DEC-78 to DEC-80) | — |
 | M1 Market data | In progress | E2-1 download | E2-4, E2-2; E2-3 (Should) later |
 | M2 Accounting | In progress | E3-1, E3-2 | E3-3 closes the milestone |
@@ -31,7 +31,7 @@ decisions in [04-decision-log.md](04-decision-log.md). This file only tracks pro
 | `risk_clock` (DEC-81) | Merged | [#12](https://github.com/kunwarshivam/mandate/pull/12), [#13](https://github.com/kunwarshivam/mandate/pull/13), [#14](https://github.com/kunwarshivam/mandate/pull/14) | Required on every risk input; journal vectors version 3 |
 | E3-1 Accounting | Merged | [#16](https://github.com/kunwarshivam/mandate/pull/16), [#18](https://github.com/kunwarshivam/mandate/pull/18), [#19](https://github.com/kunwarshivam/mandate/pull/19), [#21](https://github.com/kunwarshivam/mandate/pull/21), [#23](https://github.com/kunwarshivam/mandate/pull/23), [#24](https://github.com/kunwarshivam/mandate/pull/24), [#25](https://github.com/kunwarshivam/mandate/pull/25), [#26](https://github.com/kunwarshivam/mandate/pull/26), spec [#28](https://github.com/kunwarshivam/mandate/pull/28) | `mandate-num`, trading calendars, `mandate-accounting`. Review caught three defects before merge (basis sign, negative fee cap, cap lowered mid-order); #20 and #22 were superseded |
 | E2-1 Download | Merged | [#29](https://github.com/kunwarshivam/mandate/pull/29) to [#35](https://github.com/kunwarshivam/mandate/pull/35), [#37](https://github.com/kunwarshivam/mandate/pull/37) | `mandate-marketdata`, `mandate download`; exact Parquet; idempotent (verified live twice). Research basket in DEC-90 |
-| E3-2 Corporate actions | Merged (spec text pending) | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec branch `cursor/e3-2-spec-cf6b` (trading domain v0.10) waits on DEC-94 |
+| E3-2 Corporate actions | Merged | [#36](https://github.com/kunwarshivam/mandate/pull/36), [#38](https://github.com/kunwarshivam/mandate/pull/38), [#39](https://github.com/kunwarshivam/mandate/pull/39) | Splits, cash in lieu, dividends long and short, 12-place adjusted marks. Spec text: trading domain v0.10 (#41) |
 
 ## Reference cases
 
@@ -46,10 +46,6 @@ the passing ones and `cargo test -p mandate-refcases -- --include-ignored` shows
 
 ## Waiting on the founder
 
-- **DEC-94** (proposed): the trading spec's I3 tolerance for splits is unattainable with 12-place
-  marks; the attainable bound is looser by less than 5 × 10⁻¹³ per share. The code and tests use the
-  attainable bound; the spec text (branch `cursor/e3-2-spec-cf6b`, which also carries DEC-92 and
-  DEC-93's text) merges only after you confirm. DEC-79 reserves loosening a safety invariant for you.
 - **GitHub Support**: purge `refs/pull/1/head` to `refs/pull/14/head`, which still hold commits with
   the old work email after the history rewrite.
 
