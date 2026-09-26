@@ -649,6 +649,9 @@ UNPIN = [rep("/universe/pinned", False), rep("/universe/pinned_instruments", [])
          rep("/universe/max_instruments", 5), rep("/behavior/research", RESEARCH),
          rep("/behavior/signal_models/0/admits_instruments", True)]
 derived("research_equity_pinned", "research_equity", PIN, "bring-your-own-strategy: the universe is pinned to XYZ")
+derived("research_equity_no_agent", "research_equity",
+        [rep("/behavior/research", None), rep("/behavior/signal_models/0/admits_instruments", False)],
+        "unpinned with no research agent: the working universe stays empty")
 derived("research_equity_two_classes", "research_equity",
         [rep("/universe/asset_classes", ["crypto", "us_equity"]), rep("/protection/crypto_stop_limit_offset", "0.005")],
         "adds crypto to the allowed asset classes")
@@ -714,6 +717,11 @@ CH = [
     ("MC-C45", "Lengthen the research interval", "research_equity", [rep("/behavior/research/interval_s", 7200)]),
     ("MC-C46", "Make the admission ceiling stricter (ask to deny)", "research_equity", [rep("/autonomy/admission", "deny")]),
     ("MC-C47", "Loosen the admission ceiling (ask to auto)", "research_equity", [rep("/autonomy/admission", "auto")]),
+    ("MC-C48", "Pin a mandate that had no research agent (it gains instruments it could not trade)",
+     "research_equity_no_agent",
+     [rep("/universe/pinned", True),
+      rep("/universe/pinned_instruments", [{"asset_id": XYZ, "symbol": "XYZ", "asset_class": "us_equity"}]),
+      rep("/universe/max_instruments", 1)]),
 ]
 for cid, title, base, patch in CH:
     old = MB[base]
@@ -800,6 +808,12 @@ LIN = [
     ("MC-N24", "Retiring a lineage removes the instrument it holds (DEC-111)", "research_equity_cap_one",
      [thesis("th-50"), thesis("th-51", rev=1, lineage="th-50", pred="th-50"),
       thesis("th-52", rev=2, lineage="th-50", pred="th-51")]),
+    ("MC-N27", "An over-cap revision an earlier check refuses retires nothing", "research_equity_cap_one",
+     [thesis("th-60"), thesis("th-61", rev=1, lineage="th-60", pred="th-60"),
+      thesis("th-62", rev=2, lineage="th-60", pred="th-61", direction="short")]),
+    ("MC-N28", "Retirement never removes an instrument another lineage now holds", "research_equity_cap_one",
+     [thesis("th-70"), thesis("th-71", rev=1, lineage="th-70", pred="th-70"),
+      thesis("th-80"), thesis("th-72", rev=2, lineage="th-70", pred="th-71")]),
 ]
 derived("research_equity_cap_one", "research_equity", [rep("/behavior/research/max_revisions_per_lineage", 1)],
         "max_revisions_per_lineage 1")

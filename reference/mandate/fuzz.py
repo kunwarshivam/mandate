@@ -238,16 +238,19 @@ def fuzz_gate_universe(n):
               "last_exit_fill_at": {}}
         prop = {"instrument": rng.choice([base.XYZ, base.QRS]), "purpose": rng.choice(["open", "increase"]),
                 "qty": str(rng.randint(1, 5)), "limit_price": "100"}
+        raised = False
         try:
             g = gate(m, st, prop)
         except KeyError:
-            continue
-        check(g["verdict"] == "deny" and g["reason"] == "not_in_working_universe",
-              "MI-15 an absent working universe never allows an opening", (st, prop, g))
-        st_empty = dict(st, working_universe=[])
-        g2 = gate(m, st_empty, prop)
+            raised = True
+        check(raised or (g["verdict"] == "deny" and g["reason"] == "not_in_working_universe"),
+              "MI-15 an absent working universe never allows an opening", (st, prop))
+        g2 = gate(m, dict(st, working_universe=[]), prop)
         check(g2["verdict"] == "deny" and g2["reason"] == "not_in_working_universe",
               "MI-15 an empty working universe denies every opening", (prop, g2))
+        g3 = gate(m, dict(st, working_universe=[prop["instrument"]]), prop)
+        check(g3["reason"] != "not_in_working_universe",
+              "MI-15 an instrument in the working universe passes the check", (prop, g3))
 
 def rand_outputs(m, inst):
     outs = []
@@ -500,13 +503,23 @@ def fuzz_lineage(n):
         if m["universe"]["pinned"]:
             continue
         cap = m["behavior"]["research"]["max_revisions_per_lineage"]
-        theses, lin = [], "lin-0"
-        for i in range(rng.randint(2, 8)):
-            theses.append(rand_thesis(i, lin, i))
-            theses[-1].update(direction="long", evidence_sources=SRC_OK, leveraged_etp=False,
-                              corroboration={"kind": "independent_source"},
-                              predecessor_thesis_id=f"th-{i - 1}" if i > 0 else None,
-                              expires_at=fmt(T(TH_NOW) + timedelta(seconds=theses[-1]["horizon_s"])))
+        # Two lineages over overlapping instruments, so one can take over what the other holds.
+        theses, revs = [], {"lin-0": -1, "lin-1": -1}
+        pool = [base.ABC, base.XYZ]
+        for i in range(rng.randint(3, 10)):
+            lin = rng.choice(["lin-0", "lin-1"])
+            revs[lin] += 1
+            th = rand_thesis(i, lin, revs[lin])
+            th.update(direction="long", evidence_sources=SRC_OK, leveraged_etp=False,
+                      instrument_id=rng.choice(pool), asset_class="us_equity",
+                      corroboration={"kind": "independent_source"},
+                      predecessor_thesis_id=f"{lin}-{revs[lin] - 1}" if revs[lin] > 0 else None,
+                      expires_at=fmt(T(TH_NOW) + timedelta(seconds=th["horizon_s"])))
+            if rng.random() < 0.3:
+                # An over-cap revision that an earlier §8.5 check refuses must retire nothing, so the
+                # fold has to follow the journaled reason rather than the revision number.
+                th["direction"] = "short"
+            theses.append(th)
         inp = {"theses": theses, "working_universe": [], "eligibility_failures": [],
                "allowlisted_sources": SRC_OK, "instrument_groups": {}, "claimed_by_other_agents": [],
                "halted_instruments": [], "data_universe": None, "research_spend_usd_today": "0",
@@ -518,17 +531,33 @@ def fuzz_lineage(n):
                                     "gross_usd_after": "300", "bought_today_usd": "300",
                                     "position_pnl_fraction": "0", "unusual_input": False}}
         r = lineage_fold(m, inp)
-        admitted = [s for s in r["steps"] if s["admitted"]]
-        check(all(t_["revision"] <= cap for t_, s in zip(theses, r["steps"]) if s["admitted"]),
-              "MI-18 no revision past the cap is admitted", (cap, [s["reason"] for s in r["steps"]]))
-        if r["lineages"].get("lin-0", {}).get("retired"):
-            held = r["lineage_instruments"].get("lin-0")
-            check(held is None or held not in r["working_universe"],
-                  "MI-19 a retired lineage holds no instrument in the working universe", (held, r["working_universe"]))
-            first = next(i for i, s in enumerate(r["steps"]) if s["lineage_retired"])
-            check(all(not s["admitted"] for s in r["steps"][first:]),
-                  "MI-18 a retired lineage admits nothing more", [s["reason"] for s in r["steps"][first:]])
-        check(len(admitted) <= cap + 1, "MI-18 a lineage admits at most cap + 1 theses", (cap, len(admitted)))
+        # Independent holder model: the last lineage whose thesis for an instrument was admitted.
+        holder, retired, admitted_rev = {}, set(), {}
+        for th, s in zip(theses, r["steps"]):
+            lin, inst = th["lineage_id"], th["instrument_id"]
+            removed = [j for j in s["journal"] if j["type"] == "UniverseChanged" and j["change"] == "removed"]
+            check(not removed or s["reason"] == "lineage_retired",
+                  "MI-19 a refusal removes only when its journaled reason is lineage_retired", (s["reason"], removed))
+            for j in removed:
+                check(holder.get(j["instrument"]) == lin,
+                      "MI-19 retirement removes only what the retiring lineage still holds",
+                      (lin, j["instrument"], dict(holder)))
+            if s["admitted"]:
+                check(th["revision"] <= cap, "MI-18 no revision past the cap is admitted", (cap, th["revision"]))
+                check(lin not in retired, "MI-18 a retired lineage admits nothing more", (lin, s["reason"]))
+                holder[inst] = lin
+                admitted_rev[lin] = max(admitted_rev.get(lin, 0), th["revision"])
+            if s["reason"] == "lineage_retired":
+                retired.add(lin)
+                if holder.get(th["instrument_id"]) == lin:
+                    holder.pop(th["instrument_id"], None)
+        check(all(v <= cap for v in admitted_rev.values()),
+              "MI-18 no lineage exceeds max_revisions_per_lineage", (cap, admitted_rev))
+        for lin in retired:
+            held = r["lineage_instruments"].get(lin)
+            check(held is None or held not in r["working_universe"] or holder.get(held) not in (None, lin),
+                  "MI-19 a retired lineage holds no instrument in the working universe",
+                  (lin, held, r["working_universe"], dict(holder)))
 
 def fuzz_expiry(n):
     """MI-19 and DEC-118: exactly the invalidated, retired, and expired entries are removed."""

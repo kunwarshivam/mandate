@@ -1188,6 +1188,10 @@ def lineage_fold(m, inp):
     Retiring a lineage removes its instrument at once (reason `lineage_retired`): the platform has
     failed on the idea `max_revisions_per_lineage` times and no renewal can be admitted, so leaving
     the position open would leave it with no path back. Removal is exits-only, so it adds no risk.
+
+    Retirement follows the journaled refusal reason, never the revision number alone, so a thesis an
+    earlier §8.5 check refused retires nothing. A lineage holds an instrument only until another
+    lineage's thesis for it is admitted, so retirement never removes what another lineage holds.
     """
     res = m["behavior"]["research"]
     cap = res["max_revisions_per_lineage"] if res is not None else 0
@@ -1199,7 +1203,7 @@ def lineage_fold(m, inp):
         universe = r["working_universe"]
         journal = list(r["journal"])
         st = lineages.setdefault(th["lineage_id"], {"revisions": 0, "admitted": 0, "retired": False})
-        if th["revision"] > cap and not st["retired"]:
+        if r["reason"] == "lineage_retired" and not st["retired"]:
             st["retired"] = True
             held = holders.get(th["lineage_id"])
             if held in universe:
@@ -1210,6 +1214,8 @@ def lineage_fold(m, inp):
         elif r["admitted"]:
             st["revisions"] = max(st["revisions"], th["revision"])
             st["admitted"] += 1
+            for lid in [k for k, v in holders.items() if v == th["instrument_id"] and k != th["lineage_id"]]:
+                del holders[lid]
             holders[th["lineage_id"]] = th["instrument_id"]
         steps.append({"thesis_id": th["thesis_id"], "admitted": r["admitted"], "reason": r["reason"],
                       "score_carried_forward": False, "lineage_revisions": st["revisions"],

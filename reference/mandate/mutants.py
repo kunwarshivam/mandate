@@ -44,6 +44,12 @@ MUTANTS = {
                                               '                universe = [i for i in universe if i != held]\n',
                                               '            if False:\n'
                                               '                universe = [i for i in universe if i != held]\n'),
+    "retirement follows the revision number, not the refusal reason": (
+        '        if r["reason"] == "lineage_retired" and not st["retired"]:',
+        '        if th["revision"] > cap and not st["retired"]:'),
+    "retirement removes what another lineage holds": (
+        '            for lid in [k for k, v in holders.items() if v == th["instrument_id"] and k != th["lineage_id"]]:\n'
+        '                del holders[lid]\n', ""),
     "admission ignores the leveraged-ETP disclosure": (
         '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
         '        u["leveraged_etps_enabled"])'),

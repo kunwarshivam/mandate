@@ -231,6 +231,19 @@ req("MC-N24", L24["working_universe"] == [] and L24["steps"][-1]["universe_size_
 req("MC-N20", C["MC-N20"]["expect"]["journal"][0]["reason"] == "thesis_expired"
     and C["MC-N20"]["expect"]["working_universe"] == [], "the horizon removes the instrument")
 req("MC-N21", C["MC-N21"]["expect"]["journal"][0]["reason"] == "thesis_invalidated", "invalidation removes at once")
+N27 = C["MC-N27"]["expect"]["steps"][-1]
+req("MC-N27", N27["reason"] == "direction_not_allowed" and not N27["lineage_retired"]
+    and not any(j["type"] == "UniverseChanged" for j in N27["journal"]),
+    "an earlier check's refusal retires nothing and removes nothing")
+req("MC-N27", C["MC-N27"]["expect"]["working_universe"] != [], "the instrument stays")
+N28 = C["MC-N28"]["expect"]
+req("MC-N28", N28["steps"][-1]["reason"] == "lineage_retired" and N28["steps"][-1]["lineage_retired"]
+    and not any(j["type"] == "UniverseChanged" for j in N28["steps"][-1]["journal"])
+    and len(N28["working_universe"]) == 1,
+    "retirement leaves an instrument another lineage holds")
+req("MC-N28", list(N28["lineage_instruments"]) == ["th-80"], "the holder moved to the renewing lineage")
+req("MC-C48", C["MC-C48"]["expect"]["classification"] == "risk_increasing",
+    "pinning a no-agent mandate is increasing (round-1 finding 4)")
 req("MC-N22", len(C["MC-N22"]["expect"]["removed"]) == 1 and len(C["MC-N22"]["expect"]["working_universe"]) == 1,
     "only the retired lineage is removed")
 req("MC-N22", "lineages" in C["MC-N22"]["input"] and not any("lineage_retired" in e for e in C["MC-N22"]["input"]["entries"]),

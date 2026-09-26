@@ -940,7 +940,11 @@ predecessor.
    working universe would leave it with no path back; removal is exits-only, so it adds no risk
    (MI-19, and the safe-default rule of `AGENTS.md` rule 3). This is the one case where a refusal
    changes the working universe: the refusal admits nothing, and the retirement it triggers removes.
-   Retirement is read from the lineage state the events fold to, never asserted per instrument.
+   Retirement is read from the lineage state the events fold to, never asserted per instrument, and it
+   follows the **journaled refusal reason**: a thesis an earlier check refused (§8.5 checks 1 to 15)
+   retires nothing, whatever its revision number, because that thesis never reached the cap. A
+   lineage holds an instrument only until another lineage's thesis for it is admitted, so retirement
+   never removes an instrument another lineage now holds.
 5. **Not before the evaluator.** No revision loop ships before the forward-paper evaluator exists
    (E17-8) and the DEC-99 evaluation has run once on the DEC-103 thin slice.
 
@@ -1002,7 +1006,7 @@ supersession and the closing (or release) of every position opened under it (tra
 ## 11. Reference cases
 
 [reference-cases/mandate.yaml](reference-cases/mandate.yaml) holds the base mandates, the
-canonical-form hash vector, a signal-model registry, and 295 cases that implementations must
+canonical-form hash vector, a signal-model registry, and 298 cases that implementations must
 reproduce exactly. A case patches a base mandate with an RFC 6902 JSON Patch. They are produced by
 the reference implementation in [reference/mandate](../../reference/mandate/ref.py):
 `generate.py` writes the file, `check_cases.py` checks every case against the claim in its title,
@@ -1022,10 +1026,10 @@ the fuzz catches seeded bugs.
 | Agent flatten | MC-F01 to MC-F04 | Shared account, session deferral, owner kill switch with a floor price, and without confirmation |
 | Goal | MC-L01 to MC-L05 | `accumulate` completion, `on_complete`, end date (`profit_stop` is in the risk-state family) |
 | Admission | MC-N01 to MC-N16, MC-N25, MC-N26 | Every §8.5 check in order: asset class, eligibility, group claim, corroboration, the allowlist, `max_instruments`, the pinned mode, the cost cap, the operator halt, the thin slice, ignored outputs, renewal, the admission ceiling, and leveraged ETPs with and without the accepted disclosure |
-| Lineage | MC-N17 to MC-N19, MC-N24 | The revision cap and retirement, the instrument retirement removes, no score carried forward, a revision without a predecessor |
+| Lineage | MC-N17 to MC-N19, MC-N24, MC-N27, MC-N28 | The revision cap and retirement, the instrument retirement removes, that an earlier check's refusal retires nothing, that retirement leaves what another lineage holds, no score carried forward, a revision without a predecessor |
 | Thesis expiry | MC-N20 to MC-N22 | The horizon, invalidation before it, a retired lineage |
 | Stagger | MC-N23 | The deterministic per-workspace offset inside the window |
-| Change | MC-C01 to MC-C47 | Every classification row, including rule addition, removal, and reordering, the pinning switch, the research fields, and the admission ceiling |
+| Change | MC-C01 to MC-C48 | Every classification row, including rule addition, removal, and reordering, the pinning switch, pinning a mandate that had no research agent, the research fields, and the admission ceiling |
 
 ## 12. Open questions
 
