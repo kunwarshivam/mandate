@@ -61,7 +61,11 @@ fn risk_clock_rejects_a_fraction_at_every_place() {
 #[test]
 fn event_time_rejects_every_non_canonical_rfc3339_spelling() {
     for text in NOT_CANONICAL {
-        let draft = edit(&mark_draft(1, "1"), "event_time", Some(&format!("\"{text}\"")));
+        let draft = edit(
+            &mark_draft(1, "1"),
+            "event_time",
+            Some(&format!("\"{text}\"")),
+        );
         assert_eq!(
             reason(&draft),
             (InvalidReason::NonCanonical, "event_time".to_owned()),
