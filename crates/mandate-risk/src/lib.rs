@@ -36,9 +36,10 @@
 //! the purpose itself from [`Origin`], the side and the position, so a proposer cannot claim an
 //! exemption by describing its own order.
 //!
-//! E6-3 lands in three stacked PRs. This one is [`evaluate`]'s spine: the eight checks in order,
-//! purpose assignment, check 1's blocked account and mode rule, the working universe, and §5.3
-//! rules 3 and 9. Every check a later PR or story owns passes, and every other entry point returns
+//! E6-3 lands in three stacked PRs; the first two are [`evaluate`]: the eight checks in order,
+//! purpose assignment, check 1's blocked account and mode rule, the working universe, the mandate
+//! limits of mandate spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9. Every check
+//! a later PR or story owns passes, and every other entry point returns
 //! [`GateError::Unimplemented`], until the story named in its doc comment lands (DEC-77, DEC-83).
 
 use core::fmt::Display;
@@ -49,6 +50,7 @@ use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
 mod gate;
+mod limits;
 #[doc(hidden)]
 pub mod spec_types;
 

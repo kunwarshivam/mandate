@@ -158,7 +158,6 @@ proptest! {
     /// and report `price_outside_collar` before the cap at check 2 was ever reached, so the
     /// property would fail on a correct gate once E6-8 lands.
     #[test]
-    #[ignore = "pending E6-3"]
     fn position_cap_is_the_lower_of_both_bounds(
         equity in 1_000_u32..40_000,
         shares in 1_u32..30,
@@ -197,7 +196,6 @@ proptest! {
     /// Gross exposure is bounded by equity as well as by the configured limit. As above, the
     /// notional varies through the quantity so the collar cannot fire first.
     #[test]
-    #[ignore = "pending E6-3"]
     fn gross_exposure_is_bounded_by_equity(
         equity in 500_u32..5_000,
         held in 0_u32..4_000,
@@ -263,7 +261,6 @@ proptest! {
 
     /// The re-entry cooldown covers every instrument of the group, not the proposed one alone.
     #[test]
-    #[ignore = "pending E6-3"]
     fn cooldown_covers_the_whole_group(elapsed_s in 0_i64..7_200) {
         let mut s = Scenario::allowing();
         let exit_at = common::at("2026-09-21T14:00:00Z");
@@ -441,7 +438,6 @@ proptest! {
     /// A shadow ledger the property accumulates itself: no sequence of allowed openings walks past
     /// a limit, however it is split.
     #[test]
-    #[ignore = "pending E6-3"]
     fn no_allowed_sequence_ever_exceeds_a_limit(
         share_counts in prop::collection::vec(1_u32..6, 1..8),
     ) {
@@ -505,7 +501,6 @@ proptest! {
 proptest! {
     /// §9.1: whichever checks would fail, the earliest one decides the reported code.
     #[test]
-    #[ignore = "pending E6-3"]
     fn the_first_failing_check_decides(
         outside_universe in any::<bool>(),
         oversized in any::<bool>(),

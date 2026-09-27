@@ -239,7 +239,7 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine;
+implementation PRs fill the crate in story by story: E6-3's first two PRs land `evaluate`;
 every check a later PR or story owns passes until it lands.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
@@ -256,7 +256,8 @@ every check a later PR or story owns passes until it lands.
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
   purpose assignment, the blocked account and the mode rule, the working universe, and §5.3 rules
-  3 and 9),
+  3 and 9), `crates/mandate-risk/src/limits.rs` (the §5.3 mandate limits: concentration, order
+  size, the re-entry cooldown, orders per day, and gross exposure with the account's own 1×),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s

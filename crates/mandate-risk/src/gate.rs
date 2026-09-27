@@ -8,7 +8,7 @@ use mandate_num::Qty;
 
 use crate::{
     AccountState, AgentMode, Check, CheckOutcome, Computed, Decision, GateError, GateInput,
-    InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse,
+    InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse, limits,
 };
 
 /// The eight checks, in §9.1's order.
@@ -72,8 +72,13 @@ fn run(
     let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
-        Check::UniverseAndLimits if opening => working_universe(input, computed),
+        Check::UniverseAndLimits if opening => match working_universe(input, computed)? {
+            None => limits::position_order_and_cooldown(input, computed),
+            stop => Ok(stop),
+        },
         Check::OrderConstraints => Ok(order_constraints(input, opening)),
+        Check::ConductControls if opening => Ok(limits::orders_per_day(input, computed)),
+        Check::BuyingPowerAndExposure if opening => limits::gross_exposure(input, computed),
         _ => Ok(None),
     }
 }
@@ -320,6 +325,34 @@ mod tests {
             },
             proposed: &proposed,
         })
+    }
+
+    #[test]
+    fn every_bound_met_exactly_allows() -> Result<(), GateError> {
+        let d = decide(AgentMode::Normal, "0")?;
+        assert_eq!(
+            (d.verdict, d.computed.gross, d.computed.gross_limit),
+            (
+                Verdict::Allow,
+                Some(Usd::parse("2000")?),
+                Some(Usd::parse("2000")?)
+            ),
+            "an order of exactly max_order_usd, an agent gross of exactly its limit and an \
+             account gross of exactly its equity all pass: every comparison is `>`"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_account_at_one_times_binds_before_the_agent_limit() -> Result<(), GateError> {
+        let d = decide(AgentMode::Normal, "1")?;
+        assert_eq!(
+            (d.verdict, d.reason, d.computed.gross),
+            (Verdict::Deny, Some(ReasonCode::GrossExposureLimit), None),
+            "another agent's 1 on an account of equity 2000 puts the account at 2001, above 1x, \
+             while this agent is exactly at its own limit, which is never reached"
+        );
+        Ok(())
     }
 
     #[test]

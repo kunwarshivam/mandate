@@ -644,49 +644,42 @@ fn reason_code(text: &str, case_id: &str) -> ReasonCode {
 /// is gated like the rest; stream J did the same in #141. The scan's blind spot itself is in the
 /// tracker's known issues, for a separate xtask change.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g01() {
     run_gate("MC-G01");
 }
 
 /// `MC-G02`: Per-instrument cap met exactly.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g02() {
     run_gate("MC-G02");
 }
 
 /// `MC-G03`: Order size above max_order_usd.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g03() {
     run_gate("MC-G03");
 }
 
 /// `MC-G04`: Agent gross exposure exceeded (working order in another instrument counts).
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g04() {
     run_gate("MC-G04");
 }
 
 /// `MC-G05`: Fraction cap binds when equity falls.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g05() {
     run_gate("MC-G05");
 }
 
 /// `MC-G06`: Equity below max_gross_exposure_usd caps gross exposure.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g06() {
     run_gate("MC-G06");
 }
 
 /// `MC-G07`: Orders per day reached.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g07() {
     run_gate("MC-G07");
 }
@@ -711,21 +704,18 @@ fn mc_g10() {
 
 /// `MC-G11`: Re-entry cooldown after an exit fill.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g11() {
     run_gate("MC-G11");
 }
 
 /// `MC-G12`: Re-entry cooldown applies across the instrument group.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g12() {
     run_gate("MC-G12");
 }
 
 /// `MC-G13`: Re-entry allowed once the cooldown has passed.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g13() {
     run_gate("MC-G13");
 }
