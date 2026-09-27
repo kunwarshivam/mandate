@@ -70,7 +70,7 @@ pub enum ParseError {
     #[error("`{path}` is not in the `{grammar}` grammar the schema declares for it", grammar = grammar.as_str())]
     OffGrammar { path: Pointer, grammar: DecGrammar },
     /// An array the schema marks `uniqueItems` holds the same value twice; the path names the
-    /// second one (DEC-151 item 5).
+    /// second one.
     #[error("`{path}` repeats an earlier item of an array whose items must be unique")]
     NotUnique { path: Pointer },
     #[error("conditions nest deeper than the schema allows")]
