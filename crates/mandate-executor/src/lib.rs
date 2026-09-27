@@ -70,9 +70,16 @@
 //! account-wide endpoints. There is no deposit, withdrawal, or transfer request, no live base
 //! URL anywhere in this stream, and no path that could build one (`AGENTS.md` rule 8, ES-23).
 
+mod batch;
+mod codec;
 mod error;
+mod fold;
 mod gate;
 mod ids;
+mod intent;
+mod kill;
+mod orders;
+mod payload;
 mod ports;
 mod protection;
 mod reconcile;

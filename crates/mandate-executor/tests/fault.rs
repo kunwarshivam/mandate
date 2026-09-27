@@ -266,49 +266,41 @@ fn crash_one_protective_sequence(point: CrashPoint) {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_before_intent_received() {
     crash_one_submission(CrashPoint::BeforeIntentReceived);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_intent_received_before_gate() {
     crash_one_submission(CrashPoint::IntentReceivedBeforeGate);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_gate_before_order_submitted() {
     crash_one_submission(CrashPoint::GateBeforeOrderSubmitted);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_journal_before_request() {
     crash_one_submission(CrashPoint::JournalBeforeRequest);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_request_no_response() {
     crash_one_submission(CrashPoint::RequestNoResponse);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_request_ambiguous_response() {
     crash_one_submission(CrashPoint::RequestAmbiguousResponse);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_response_before_state_change() {
     crash_one_submission(CrashPoint::ResponseBeforeStateChange);
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_at_state_change_before_fill() {
     crash_one_submission(CrashPoint::StateChangeBeforeFill);
 }
@@ -386,7 +378,6 @@ fn crash_between_entry_fill_and_oco() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn crash_mid_reconciliation_before_the_compensating_event() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

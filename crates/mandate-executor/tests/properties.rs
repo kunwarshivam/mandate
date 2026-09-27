@@ -731,7 +731,6 @@ proptest! {
 
     /// E7-2: no two intents ever share a client order id, across restarts and across agents.
     #[test]
-    #[ignore = "pending E7-2"]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
         let run = play(&script);
         let mut owner: BTreeMap<String, String> = BTreeMap::new();
@@ -760,7 +759,6 @@ proptest! {
 
     /// E7-3's acceptance clause, read off the broker-side counter rather than the journal.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_crash_point_makes_the_broker_see_two_orders_for_one_intent(
         script in scripted(),
         point in prop::sample::select(&CrashPoint::ALL[..]),
@@ -862,7 +860,6 @@ proptest! {
 
     /// §5.7: terminal states are final.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_terminal_order_leaves_its_terminal_state(script in scripted()) {
         let run = play(&script);
         let mut terminal: BTreeMap<String, String> = BTreeMap::new();
@@ -952,7 +949,6 @@ proptest! {
 
     /// ES-21, journal §8: replaying the drafts a run journaled reproduces its state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn folding_the_journaled_drafts_reproduces_the_live_state(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -975,7 +971,6 @@ proptest! {
 
     /// ES-21, journal §8: a replay emits nothing.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_replay_emits_no_draft_and_no_broker_effect(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.shell.account_journal.is_empty());
@@ -997,7 +992,6 @@ proptest! {
 
     /// ES-21: two runs of the same inputs give equal effect lists.
     #[test]
-    #[ignore = "pending E7-2"]
     fn two_runs_of_the_same_inputs_give_equal_effects(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -1284,7 +1278,6 @@ proptest! {
 
     /// §5.7: the status map is total and never silently ignores.
     #[test]
-    #[ignore = "pending E7-2"]
     fn the_status_map_is_total_and_never_silently_ignores(
         status in prop::sample::select(vec![
             "new", "accepted", "pending_new", "accepted_for_bidding", "held", "partially_filled",
@@ -1334,7 +1327,6 @@ proptest! {
 
     /// §11: every order-set difference is adopted with a compensating event.
     #[test]
-    #[ignore = "pending E7-3"]
     fn every_order_difference_adopts_the_broker_with_a_compensating_event(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -1395,7 +1387,6 @@ proptest! {
 
     /// E7-3: a reconciliation leaves nothing unexplained and unpaused.
     #[test]
-    #[ignore = "pending E7-3"]
     fn a_reconciliation_leaves_nothing_unexplained_and_unpaused(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -1433,7 +1424,6 @@ proptest! {
 
     /// §11, interpretation 12: the step order is part of the algorithm.
     #[test]
-    #[ignore = "pending E7-3"]
     fn the_reconciliation_order_is_orders_then_fills_then_positions_then_cash_then_fees(
         script in scripted(),
     ) {
@@ -1483,7 +1473,6 @@ proptest! {
 
     /// §11: the cash band alerts outside it and never pauses inside it.
     #[test]
-    #[ignore = "pending E7-3"]
     fn cash_within_the_band_never_pauses_and_outside_it_always_alerts(
         cents in 0u64..500,
     ) {
@@ -1524,7 +1513,6 @@ proptest! {
     /// DEC-131 item 13, interpretation 15: a run is never positioned after a submission it did
     /// not cover.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover(
         script in scripted(),
     ) {
@@ -1554,7 +1542,6 @@ proptest! {
 
     /// §11 and interpretation 14: only an owner acknowledgment clears a mismatch pause.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_input_but_an_acknowledged_owner_ack_clears_a_mismatch_pause(
         later in prop::collection::vec(0i64..500, 1..6),
     ) {
@@ -1593,7 +1580,6 @@ proptest! {
 
     /// Journal §2: every risk input this crate appends carries a non-decreasing `risk_clock`.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_risk_input_draft_carries_a_non_decreasing_risk_clock(script in scripted()) {
         let run = play(&script);
         let risk_inputs = [
@@ -1633,7 +1619,6 @@ proptest! {
 
     /// Journal §2: every copied fact cites its origin.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_copied_draft_cites_its_origin(script in scripted()) {
         let run = play(&script);
         let copied = [
@@ -1663,7 +1648,6 @@ proptest! {
 
     /// DEC-131 item 6: an event id is a function of `(epoch, head, ordinal)` and nothing else.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_derived_event_id_is_a_function_of_epoch_head_and_ordinal(script in scripted()) {
         let first = play(&script);
         let second = play(&script);
@@ -1687,7 +1671,6 @@ proptest! {
 
     /// DEC-85: every account-stream catalogue event is interpreted or named.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_catalogue_event_is_interpreted_or_named(
         event_type in prop::sample::select(vec![
             "StreamOpened", "IntentReceived", "GateDecided", "OrderSubmitted",
@@ -1755,7 +1738,6 @@ proptest! {
 
     /// `AGENTS.md` rules 6 and 7, journal §6.4: nothing sensitive reaches a draft or an alert.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_draft_payload_holds_a_credential_or_an_account_number(script in scripted()) {
         let run = play(&script);
         prop_assume!(!run.drafts.is_empty());
@@ -1800,7 +1782,6 @@ proptest! {
 
     /// ES-21, journal §8: no submission carries an intent older than its maximum age.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_submission_carries_an_intent_older_than_its_maximum_age(script in scripted()) {
         let run = play(&script);
         let mut received: BTreeMap<String, u64> = BTreeMap::new();

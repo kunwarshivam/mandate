@@ -3,49 +3,91 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_num::{Qty, SignedQty, Usd};
+use mandate_num::{Price, Qty, SignedQty, Usd};
+use mandate_time::Date;
 
-use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, Mode, Order,
-    Protection, RiskClock, Seq, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody,
+    MarketObservation, Mode, Order, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval,
+    WriterEpoch,
 };
+
+pub use crate::fold::fold;
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
 pub const FOLD_VERSION: u32 = 1;
+
+/// The agent name an account-wide restriction is recorded under: a restriction for every agent on
+/// the account, including one the executor has not yet seen (trading-domain spec §7.3).
+pub(crate) const EVERY_AGENT: &str = "*";
+
+/// The restriction a reconciliation places for one subject — an instrument, or external activity
+/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+pub(crate) fn restriction_for(subject: &str) -> String {
+    format!("reconciliation:{subject}")
+}
 
 /// Everything the executor knows about one broker account, derived from journaled events and
 /// nothing else.
 ///
 /// Every field is private and every collection is ordered (ES-21). The folded position of each
 /// followed stream lives here and is re-derived by replay, so nothing durable exists outside the
-/// journal and a restart cannot mistake an old event for a new one.
+/// journal and a restart cannot mistake an old event for a new one. Three fields are the running
+/// process's own and are never folded: the writer epoch, the latest tick, and the quotes the shell
+/// observed, none of which a replay could know or needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorState {
-    scope: AccountScope,
-    heads: BTreeMap<String, Seq>,
-    epoch: Option<WriterEpoch>,
-    started: bool,
-    environment: Option<String>,
-    unresolved: Option<UnresolvedAppend>,
-    risk_clock: Option<RiskClock>,
-    intents: BTreeMap<IntentId, IntentRecord>,
-    orders: BTreeMap<ClientOrderId, Order>,
-    reservations: BTreeMap<ClientOrderId, Usd>,
-    protection: BTreeMap<InstrumentId, Protection>,
-    unprotected: Vec<UnprotectedInterval>,
-    positions: BTreeMap<InstrumentId, SignedQty>,
-    fills: BTreeSet<FillId>,
-    modes: BTreeMap<AgentId, Mode>,
-    account_state: AccountState,
-    consecutive_403s: u32,
-    observed: Option<ObservedAccount>,
-    mismatched: BTreeSet<InstrumentId>,
-    checkpoint: Option<ActivityCursor>,
-    reconciled_through: Option<Seq>,
-    last_submission: Option<Seq>,
+    pub(crate) scope: AccountScope,
+    pub(crate) heads: BTreeMap<String, Seq>,
+    pub(crate) epoch: Option<WriterEpoch>,
+    pub(crate) started: bool,
+    pub(crate) environment: Option<String>,
+    pub(crate) unresolved: Option<UnresolvedAppend>,
+    pub(crate) risk_clock: Option<RiskClock>,
+    pub(crate) intents: BTreeMap<IntentId, IntentRecord>,
+    pub(crate) orders: BTreeMap<ClientOrderId, Order>,
+    pub(crate) reservations: BTreeMap<ClientOrderId, Usd>,
+    pub(crate) protection: BTreeMap<InstrumentId, Protection>,
+    pub(crate) unprotected: Vec<UnprotectedInterval>,
+    pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
+    pub(crate) fills: BTreeSet<FillId>,
+    pub(crate) modes: BTreeMap<AgentId, Mode>,
+    pub(crate) account_state: AccountState,
+    pub(crate) consecutive_403s: u32,
+    pub(crate) observed: Option<ObservedAccount>,
+    pub(crate) mismatched: BTreeSet<InstrumentId>,
+    pub(crate) checkpoint: Option<ActivityCursor>,
+    pub(crate) reconciled_through: Option<Seq>,
+    pub(crate) last_submission: Option<Seq>,
+    pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
+    pub(crate) held: BTreeSet<IntentId>,
+    pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
+    pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
+    pub(crate) copied: BTreeMap<EventId, EventId>,
+    pub(crate) pending_actions: BTreeSet<InstrumentId>,
+    pub(crate) asset_fees: BTreeMap<InstrumentId, Qty>,
+    pub(crate) unposted_fees: Usd,
+    pub(crate) simulated_fees: Usd,
+    pub(crate) cash_flow: Usd,
+    pub(crate) fill_notional: Usd,
+    pub(crate) trading_day: Option<Date>,
+    pub(crate) now: Option<RiskClock>,
+    pub(crate) quotes: BTreeMap<InstrumentId, Vec<MarketObservation>>,
+}
+
+/// What the fold knows about one order beyond [`Order`]: the exact request, so a resubmission
+/// after a confirmed absence sends the same body; where it was journaled, so a reconciliation can
+/// tell which submissions its snapshot covered; and the broker's cumulative filled quantity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct OrderDetail {
+    pub(crate) request: Option<SubmitOrder>,
+    pub(crate) submitted_seq: Option<Seq>,
+    pub(crate) unknown_since: Option<RiskClock>,
+    pub(crate) last_absence: Option<RiskClock>,
+    pub(crate) broker_filled: Option<Qty>,
+    pub(crate) limit: Option<Price>,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -121,6 +163,20 @@ impl ExecutorState {
             checkpoint: None,
             reconciled_through: None,
             last_submission: None,
+            bodies: BTreeMap::new(),
+            held: BTreeSet::new(),
+            details: BTreeMap::new(),
+            restrictions: BTreeMap::new(),
+            copied: BTreeMap::new(),
+            pending_actions: BTreeSet::new(),
+            asset_fees: BTreeMap::new(),
+            unposted_fees: Usd::ZERO,
+            simulated_fees: Usd::ZERO,
+            cash_flow: Usd::ZERO,
+            fill_notional: Usd::ZERO,
+            trading_day: None,
+            now: None,
+            quotes: BTreeMap::new(),
         }
     }
 
@@ -136,8 +192,8 @@ impl ExecutorState {
     }
 
     /// The folded `seq` of one stream, or `None` for a stream with nothing folded yet.
-    pub fn head(&self, _stream: &str) -> Option<Seq> {
-        None
+    pub fn head(&self, stream: &str) -> Option<Seq> {
+        self.heads.get(stream).copied()
     }
 
     /// The latest risk-clock second the fold has seen.
@@ -147,8 +203,8 @@ impl ExecutorState {
 
     /// What the fold knows about one intent. `Some` is the whole of the deduplication: the
     /// handoff is at-least-once by design, and an intent already here costs an empty effect list.
-    pub fn intent(&self, _intent: &IntentId) -> Option<&IntentRecord> {
-        None
+    pub fn intent(&self, intent: &IntentId) -> Option<&IntentRecord> {
+        self.intents.get(intent)
     }
 
     /// Every order the fold carries, by client order id.
@@ -157,14 +213,17 @@ impl ExecutorState {
     }
 
     /// One order, or `None` for an id this executor never derived.
-    pub fn order(&self, _client_order_id: &ClientOrderId) -> Option<&Order> {
-        None
+    pub fn order(&self, client_order_id: &ClientOrderId) -> Option<&Order> {
+        self.orders.get(client_order_id)
     }
 
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
-        Vec::new()
+        self.orders
+            .values()
+            .filter(|order| order.state == crate::types::OrderState::Submitting)
+            .collect()
     }
 
     /// Reservations by client order id. An `Unknown` order reserves its maximum cost, and only
@@ -174,15 +233,16 @@ impl ExecutorState {
     }
 
     /// One instrument's resting protection and the quantity it covers.
-    pub fn protection(&self, _instrument: &InstrumentId) -> Option<&Protection> {
-        None
+    pub fn protection(&self, instrument: &InstrumentId) -> Option<&Protection> {
+        self.protection.get(instrument)
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
     /// position.
-    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Qty {
-        let _ = &self.protection;
-        Qty::ZERO
+    pub fn protective_sell_qty(&self, instrument: &InstrumentId) -> Qty {
+        self.protection
+            .get(instrument)
+            .map_or(Qty::ZERO, |protection| protection.covered_qty)
     }
 
     /// Every unprotected interval the fold has seen, open and closed.
@@ -200,16 +260,28 @@ impl ExecutorState {
         &self.fills
     }
 
-    /// Each agent's mode on this account, as `AgentModeApplied` set it.
+    /// Each agent's mode on this account, as `AgentModeApplied` set it: the strictest of its
+    /// active restrictions, each lifting independently (mandate spec §5.9).
     pub fn modes(&self) -> &BTreeMap<AgentId, Mode> {
         &self.modes
     }
 
-    /// One agent's effective mode: the strictest of the account state and its own mode
-    /// (trading-domain spec §7.3 evaluates account state **before** agent mode).
-    pub fn effective_mode(&self, _agent: &AgentId) -> Mode {
-        let _ = (&self.modes, self.account_state);
-        Mode::Normal
+    /// One agent's effective mode: the strictest of the account state, the restrictions on every
+    /// agent of the account, and its own mode (trading-domain spec §7.3 evaluates account state
+    /// **before** agent mode).
+    pub fn effective_mode(&self, agent: &AgentId) -> Mode {
+        let account = match self.account_state {
+            AccountState::Active => Mode::Normal,
+            AccountState::ClosingOnly => Mode::ExitsOnly,
+            AccountState::Blocked => Mode::Paused,
+        };
+        let every = self
+            .modes
+            .get(&AgentId(EVERY_AGENT.to_owned()))
+            .copied()
+            .unwrap_or_default();
+        let own = self.modes.get(agent).copied().unwrap_or_default();
+        account.max(every).max(own)
     }
 
     /// The account state detected from statuses and rejects (§7.3).
@@ -230,9 +302,25 @@ impl ExecutorState {
 
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
+    ///
+    /// The model is the broker's last reported cash moved by every fill since, less unposted fees,
+    /// paper's simulated ones included (§10, R-22: paper must not look flatter than live). `None`
+    /// until the broker has reported an account, or if the arithmetic overflows: no buying power
+    /// is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
-        let _ = (&self.observed, &self.reservations);
-        None
+        let observed = self.observed.as_ref()?;
+        let model = observed
+            .cash
+            .checked_add(self.cash_flow)
+            .and_then(|cash| cash.checked_sub(self.unposted_fees))
+            .and_then(|cash| cash.checked_sub(self.simulated_fees))
+            .ok()?;
+        let reserved = self
+            .reservations
+            .values()
+            .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
+            .ok()?;
+        model.min(observed.buying_power).checked_sub(reserved).ok()
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner
@@ -275,18 +363,26 @@ impl ExecutorState {
     }
 
     /// Whether the causation chain of a copied fact is recorded for `event`.
-    pub fn copied_origin(&self, _event: &EventId) -> Option<&EventId> {
-        None
+    pub fn copied_origin(&self, event: &EventId) -> Option<&EventId> {
+        self.copied.get(event)
     }
-}
 
-/// Replays one journaled event into the state.
-///
-/// Total over the account-stream catalogue and **effect-free**: a replay can never re-send
-/// anything, which is half of crash safety (the other half is that only [`crate::handle`]
-/// produces effects). An event type, payload field, or stream this crate does not interpret is
-/// [`ExecutorError::NotInterpreted`] naming the owning story, never a silent no-op (DEC-85).
-pub fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
-    let _ = (state, event);
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
+    /// The account stream this state is the single writer of, named by its opaque ids alone
+    /// (journal spec §2, §6.4).
+    pub(crate) fn account_stream(&self) -> String {
+        format!("acct:{}:{}", self.scope.workspace.0, self.scope.account.0)
+    }
+
+    /// The account stream's folded head, zero before anything is folded.
+    pub(crate) fn account_head(&self) -> Seq {
+        self.head(&self.account_stream()).unwrap_or(Seq(0))
+    }
+
+    /// The time the core acts at: the later of the folded risk clock and the scheduler's latest
+    /// tick, or zero before either exists. Never a wall clock (ES-21).
+    pub(crate) fn clock(&self) -> RiskClock {
+        self.risk_clock
+            .max(self.now)
+            .unwrap_or(RiskClock::from_secs(0))
+    }
 }

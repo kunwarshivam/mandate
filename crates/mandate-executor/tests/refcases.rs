@@ -324,7 +324,6 @@ fn trading_domain_rc_14_kill_switch() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_04_split_cancels_the_oco_and_re_derives_protection() {
     drive(&case("RC-04", None));
 }
@@ -375,13 +374,11 @@ fn trading_domain_rc_24_presumed_halt_regular_session() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_external_order_detected() {
     drive(&case("RC-15", Some("external_order_detected")));
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_unexplained_403s() {
     drive(&case("RC-15", Some("unexplained_403s")));
 }
@@ -393,7 +390,6 @@ fn trading_domain_rc_17_instrument_claims_and_shared_buying_power() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn trading_domain_rc_08_broker_order_updates() {
     drive(&case("RC-08", None));
 }
@@ -405,7 +401,6 @@ fn trading_domain_rc_09_broker_order_updates() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn trading_domain_rc_09b_broker_order_updates() {
     drive(&case("RC-09B", None));
 }
