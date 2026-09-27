@@ -777,7 +777,9 @@ fn refcases(write: bool) -> Result<()> {
 /// and plain comments become the justification agents copy for workarounds (AGENTS.md, "The trust
 /// ladder"; DEC-80).
 fn markers() -> Result<()> {
-    eprintln!("    markers: checking for debt markers and unexplained #[ignore]");
+    eprintln!(
+        "    markers: checking for debt markers, unexplained #[ignore], and ungated pending tests"
+    );
     let debt = [
         concat!("TO", "DO"),
         concat!("FIX", "ME"),
@@ -818,6 +820,13 @@ fn markers() -> Result<()> {
                     "{file}:{n}: #[ignore] must be `#[ignore = \"pending E<n>-<n>\"]` (DEC-77)"
                 ));
             }
+        }
+        for (n, why) in generated_pending_markers(&text) {
+            problems.push(format!(
+                "{file}:{n}: a pending marker {why}; the pending gate reads the source, so a \
+                 pending test must be written out as a plain function or it is never gated \
+                 (DEC-110, DEC-137)"
+            ));
         }
     }
     report(problems, "markers")
@@ -987,17 +996,19 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 }
 
 /// Mutation testing on the diff of safety-critical library crates (ADR-0001 ES-11, ES-12). Every
-/// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`.
+/// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`. A
+/// crate whose tests are still pending runs the gate as well (DEC-137 amends DEC-83): there a
+/// missed mutant in a stub body is named and skipped, and every other one still fails.
 fn mutants() -> Result<()> {
     let Some(base) = base_ref() else {
         eprintln!("    mutants: HEAD is the base; nothing to check");
         return Ok(());
     };
-    let dirs = mutated_source_dirs()?;
+    let crates = mutated_crates()?;
     let changed = output("git", &["diff", "--name-only", &format!("{base}...HEAD")])?;
     let touched: Vec<&str> = changed
         .lines()
-        .filter(|f| f.ends_with(".rs") && dirs.iter().any(|d| f.starts_with(d.as_str())))
+        .filter(|f| f.ends_with(".rs") && crates.iter().any(|c| f.starts_with(&c.src_dir())))
         .collect();
     if touched.is_empty() {
         eprintln!("    mutants: no safety-critical library source changed");
@@ -1027,19 +1038,36 @@ fn mutants() -> Result<()> {
         ],
     );
     fs::remove_file(&diff_file).ok();
-    result
+    match result {
+        Ok(()) => Ok(()),
+        Err(failure) => stub_exemptions(Path::new("."), &crates, failure),
+    }
 }
 
-/// `src/` of every safety-critical product crate. The reference-case harness (a tool crate) is
-/// excluded: its checks are proven by bugs seeded in the code it tests, not by mutating it. So is a
-/// crate with `#[ignore = "pending <story>"]` tests: in a tests PR its code is stubs that no live
-/// test runs, and the implementation PR, which deletes those markers and replaces every stub body,
-/// passes the mutation gate instead (ADR-0001 ES-15, DEC-83).
-fn mutated_source_dirs() -> Result<Vec<String>> {
+/// A safety-critical product crate the mutation gate covers, and whether its tests still carry
+/// pending markers, which is what exempts a stub body of its own.
+struct MutatedCrate {
+    package: String,
+    dir: String,
+    pending: bool,
+}
+
+impl MutatedCrate {
+    fn src_dir(&self) -> String {
+        format!("{}/src/", self.dir)
+    }
+}
+
+/// Every safety-critical product crate. The reference-case harness (a tool crate) is excluded: its
+/// checks are proven by bugs seeded in the code it tests, not by mutating it. A crate with
+/// `#[ignore = "pending <story>"]` tests is no longer excluded (DEC-137 amends DEC-83): a tests PR
+/// carries stubs no live test runs, so only its stub bodies are exempt, and everything else it adds
+/// is gated in the PR that adds it rather than one PR later (ADR-0001 ES-15).
+fn mutated_crates() -> Result<Vec<MutatedCrate>> {
     let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
         .context("parsing xtask/layers.toml")?;
     let root = env::current_dir()?;
-    let mut dirs = Vec::new();
+    let mut crates = Vec::new();
     for pkg in workspace_packages(&metadata()?) {
         let Some(own) = policy.crates.get(&pkg.name) else {
             continue;
@@ -1052,17 +1080,235 @@ fn mutated_source_dirs() -> Result<Vec<String>> {
                 .strip_prefix(&root)
                 .context("crate outside the repository")?;
             let dir = dir.display().to_string();
-            if has_pending_tests(&dir)? {
+            let pending = has_pending_tests(&dir)?;
+            if pending {
                 eprintln!(
-                    "    mutants: skipping `{}`: it has pending tests, so its implementation PR runs the gate",
+                    "    mutants: `{}` has pending tests, so a missed mutant is a failure there \
+                     unless the function it mutates is a stub (DEC-137)",
                     pkg.name
                 );
-            } else {
-                dirs.push(format!("{dir}/src/"));
             }
+            crates.push(MutatedCrate {
+                package: pkg.name.clone(),
+                dir,
+                pending,
+            });
         }
     }
-    Ok(dirs)
+    Ok(crates)
+}
+
+/// The outcomes of the run `cargo mutants` writes under its output directory.
+#[derive(Deserialize)]
+struct MutantRun {
+    outcomes: Vec<MutantOutcome>,
+}
+
+/// One scenario's result. `scenario` is `"Baseline"` for the unmutated run and `{"Mutant": ...}`
+/// for every mutant, so the mutant is read out of the value rather than typed as an enum.
+#[derive(Deserialize)]
+struct MutantOutcome {
+    scenario: serde_json::Value,
+    summary: String,
+}
+
+#[derive(Deserialize)]
+struct Mutant {
+    name: String,
+    package: String,
+    file: String,
+    function: Option<MutatedFunction>,
+}
+
+#[derive(Deserialize)]
+struct MutatedFunction {
+    span: Span,
+}
+
+#[derive(Deserialize)]
+struct Span {
+    start: LineColumn,
+    end: LineColumn,
+}
+
+#[derive(Deserialize)]
+struct LineColumn {
+    line: usize,
+}
+
+/// Reads the failed run's outcomes and keeps the failure unless every mutant it missed sits in a
+/// stub body of a crate whose tests are still pending; those are named as skipped. Anything else
+/// the run reports, a failed baseline or a timeout included, stays a failure (DEC-137).
+fn stub_exemptions(root: &Path, crates: &[MutatedCrate], failure: anyhow::Error) -> Result<()> {
+    let outcomes = root.join("target/mutants.out/outcomes.json");
+    let Ok(text) = fs::read_to_string(&outcomes) else {
+        return Err(failure);
+    };
+    let (problems, skipped) = mutant_verdicts(root, crates, &text)
+        .with_context(|| format!("reading {}", outcomes.display()))?;
+    for name in &skipped {
+        eprintln!(
+            "    mutants: skipping `{name}`: a stub body in a crate whose tests are still pending, \
+             so no live test can catch it until its story lands (DEC-83, DEC-137)"
+        );
+    }
+    if !problems.is_empty() {
+        return report(problems, "mutants").context(failure);
+    }
+    if skipped.is_empty() {
+        return Err(failure);
+    }
+    eprintln!(
+        "    mutants: {} mutant(s) survived, all in stub bodies; the implementation PR that \
+         replaces them puts them under the gate",
+        skipped.len()
+    );
+    Ok(())
+}
+
+/// The run's problems and the mutants it is allowed to skip: a missed mutant is a problem unless it
+/// sits in a stub body of a crate whose tests are still pending, and every other summary the run
+/// reports, a failed baseline or a timeout included, is a problem of its own (DEC-137).
+fn mutant_verdicts(
+    root: &Path,
+    crates: &[MutatedCrate],
+    outcomes: &str,
+) -> Result<(Vec<String>, Vec<String>)> {
+    let run: MutantRun = serde_json::from_str(outcomes).context("parsing the mutants outcomes")?;
+    let mut problems = Vec::new();
+    let mut skipped = Vec::new();
+    for outcome in &run.outcomes {
+        let summary = outcome.summary.as_str();
+        let Some(mutated) = outcome.scenario.get("Mutant") else {
+            if summary != "Success" {
+                problems.push(format!("the unmutated baseline reports {summary}"));
+            }
+            continue;
+        };
+        let mutant: Mutant = serde_json::from_value(mutated.clone()).context("reading a mutant")?;
+        match summary {
+            "CaughtMutant" | "Unviable" | "Success" => {}
+            "MissedMutant" if is_stub_mutant(root, crates, &mutant) => skipped.push(mutant.name),
+            other => problems.push(format!(
+                "{}: {other}, and the function it mutates is not a stub",
+                mutant.name
+            )),
+        }
+    }
+    Ok((problems, skipped))
+}
+
+/// Whether a missed mutant is exempt: its crate's tests are still pending and the function it
+/// mutates is a stub in the post-change source.
+fn is_stub_mutant(root: &Path, crates: &[MutatedCrate], mutant: &Mutant) -> bool {
+    let Some(krate) = crates.iter().find(|c| c.package == mutant.package) else {
+        return false;
+    };
+    let Some(function) = &mutant.function else {
+        return false;
+    };
+    if !krate.pending {
+        return false;
+    }
+    let in_crate = root.join(&krate.dir).join(&mutant.file);
+    let path = if in_crate.exists() {
+        in_crate
+    } else {
+        root.join(&mutant.file)
+    };
+    let Ok(src) = fs::read_to_string(path) else {
+        return false;
+    };
+    is_stub_function(&src, function.span.start.line, function.span.end.line)
+}
+
+/// Whether the function spanning these lines of `src` is a stub.
+fn is_stub_function(src: &str, start: usize, end: usize) -> bool {
+    let text = src
+        .lines()
+        .skip(start.saturating_sub(1))
+        .take(end.saturating_sub(start).saturating_add(1))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let toks = tokens(&text);
+    function_body(&toks, 0).and_then(stub_return).is_some()
+}
+
+/// The tokens inside the braces of the function whose `fn` is at or after `from`, or `None` for a
+/// signature without a body.
+fn function_body(toks: &[(Token, usize)], from: usize) -> Option<&[(Token, usize)]> {
+    let open = toks
+        .iter()
+        .enumerate()
+        .skip(from)
+        .find_map(|(i, (t, _))| match t {
+            Token::Punct('{') => Some(Some(i)),
+            Token::Punct(';') => Some(None),
+            _ => None,
+        })??;
+    let close = delimited_end(toks, open, '{', '}')?;
+    toks.get(open.saturating_add(1)..close.saturating_sub(1))
+}
+
+/// The error a stub body returns: nothing but argument discards (`let _ = ...;`) and a last
+/// statement returning `Err(...)` or panicking through `todo!()`. The name is the last capitalised
+/// one of the `Err(...)`, so `Err(GateError::Unimplemented("evaluate", "E6-3"))` gives
+/// `Unimplemented` and `Err(NumError::Overflow)` gives `Overflow`. Anything else a tests PR adds is
+/// ordinary code, which the mutation gate covers and no pending test may fail on instead.
+fn stub_return(body: &[(Token, usize)]) -> Option<String> {
+    let statements = statements(body);
+    let (last, discards) = statements.split_last()?;
+    if !discards.iter().all(|s| discards_an_argument(s)) {
+        return None;
+    }
+    let names: Vec<&str> = last
+        .iter()
+        .filter_map(|(t, _)| match t {
+            Token::Ident(name) => Some(name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let returned = names.strip_prefix(&["return"]).unwrap_or(&names);
+    if matches!(returned, ["todo"] | ["unimplemented"]) {
+        return Some("not yet implemented".to_owned());
+    }
+    if returned.first() != Some(&"Err") {
+        return None;
+    }
+    returned
+        .iter()
+        .skip(1)
+        .rfind(|name| name.starts_with(char::is_uppercase))
+        .map(|name| (*name).to_owned())
+}
+
+/// The body's statements, split at every `;` outside a bracket.
+fn statements(body: &[(Token, usize)]) -> Vec<&[(Token, usize)]> {
+    let mut found = Vec::new();
+    let mut start = 0;
+    let mut depth = 0usize;
+    for (i, (t, _)) in body.iter().enumerate() {
+        match t {
+            Token::Punct('(' | '[' | '{') => depth = depth.saturating_add(1),
+            Token::Punct(')' | ']' | '}') => depth = depth.saturating_sub(1),
+            Token::Punct(';') if depth == 0 => {
+                found.push(body.get(start..i).unwrap_or_default());
+                start = i.saturating_add(1);
+            }
+            _ => {}
+        }
+    }
+    let last = body.get(start..).unwrap_or_default();
+    if !last.is_empty() {
+        found.push(last);
+    }
+    found
+}
+
+fn discards_an_argument(statement: &[(Token, usize)]) -> bool {
+    matches!(statement,
+        [(Token::Ident(let_), _), (Token::Ident(hole), _), (Token::Punct('='), _), ..]
+            if let_ == "let" && hole == "_")
 }
 
 fn has_pending_tests(dir: &str) -> Result<bool> {
@@ -1089,8 +1335,9 @@ fn has_pending_tests(dir: &str) -> Result<bool> {
 
 /// A DEC-77 tests PR marks a test `#[ignore = "pending <story>"]` because it cannot pass on the
 /// PR's stubs. One that passes anyway pins nothing, so every pending test in the workspace is run
-/// and must fail; a failure by panic, `todo!()` included, counts (DEC-110). With no pending test
-/// there is nothing to run.
+/// and must fail; a failure by panic, `todo!()` included, counts (DEC-110). The failure must also
+/// name the story's stub, or a test that can never pass on correct code would pass the gate
+/// (DEC-137). With no pending test there is nothing to run.
 fn pending() -> Result<()> {
     report(pending_problems(Path::new("."))?, "pending")
 }
@@ -1149,7 +1396,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         &filter,
     ];
     eprintln!(
-        "    pending: {} pending test(s) must fail on this change's code",
+        "    pending: {} pending test(s) must fail on this change's code, at their story's stub",
         tests.len()
     );
     eprintln!("    $ cargo {}", args.join(" "));
@@ -1169,10 +1416,11 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    let problems = verdicts(&tests, &outcomes);
+    let stubs = stub_errors_by_package(root, &packages, &tests)?;
+    let problems = verdicts(&tests, &outcomes, &stubs);
     if problems.is_empty() {
         eprintln!(
-            "    pending: all {} fail, as pending tests must; nextest's `test run failed` above is expected",
+            "    pending: all {} fail at a stub, as pending tests must; nextest's `test run failed` above is expected",
             tests.len()
         );
     }
@@ -1219,42 +1467,171 @@ impl PendingTestRun {
     }
 }
 
-/// A problem for each pending test that passed in any binary or ran in none.
-fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
+/// How a stub reports itself, read off every stub the workspace has: `Unimplemented` is the `Debug`
+/// of the variant every stub error carries, `unimplemented` its `code()`, "is not implemented yet"
+/// and "<story> has not been implemented yet" the two `Display` forms in use, and "not yet
+/// implemented" the panic of `todo!()`. A pending test's failure must show one of these, name its
+/// own story, or name an error its own crate's stubs return, so that a fixture, parse, or harness
+/// panic cannot stand in for the stub the story implements (DEC-137).
+const STUB_MARKERS: [&str; 5] = [
+    "Unimplemented",
+    "unimplemented",
+    "not implemented",
+    "implemented yet",
+    "not yet implemented",
+];
+
+/// Whether a pending test's failure output shows that it stopped at the stub of `story`. `errors`
+/// are the ones the test's own crate returns from a stub body, for a crate whose stubs name
+/// themselves no better than that (`mandate-num`'s return `NumError::Overflow`).
+fn names_a_stub(output: &str, story: &str, errors: Option<&BTreeSet<String>>) -> bool {
+    output.contains(story)
+        || STUB_MARKERS.iter().any(|marker| output.contains(marker))
+        || errors.is_some_and(|errors| errors.iter().any(|error| output.contains(error)))
+}
+
+/// The error names the stubs of each package with pending tests return, beside the markers every
+/// crate shares. Read off the post-change source rather than held as a list, so a crate whose stubs
+/// stop returning an error stops accepting it, and an implementation PR that deletes its stubs
+/// accepts none of them (DEC-137).
+fn stub_errors_by_package(
+    root: &Path,
+    packages: &[(String, String)],
+    tests: &[PendingTestRun],
+) -> Result<BTreeMap<String, BTreeSet<String>>> {
+    let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for package in tests.iter().map(|t| &t.package).collect::<BTreeSet<_>>() {
+        let Some((_, dir)) = packages.iter().find(|(name, _)| name == package) else {
+            continue;
+        };
+        let src = if dir.is_empty() {
+            "src".to_owned()
+        } else {
+            format!("{dir}/src")
+        };
+        let files = output_in(
+            root,
+            "git",
+            &[
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+                &src,
+            ],
+        )?;
+        let mut errors = BTreeSet::new();
+        for file in files.lines().filter(|f| f.ends_with(".rs")) {
+            if let Ok(text) = fs::read_to_string(root.join(file)) {
+                errors.extend(stub_errors(&text));
+            }
+        }
+        found.insert(package.clone(), errors);
+    }
+    Ok(found)
+}
+
+/// The error each stub in one source file returns: for every function whose body is a stub, the
+/// last capitalised name of its `Err(...)`, which is the variant a failure shows.
+fn stub_errors(src: &str) -> BTreeSet<String> {
+    let toks = tokens(src);
+    let mut found = BTreeSet::new();
+    for (i, (t, _)) in toks.iter().enumerate() {
+        if matches!(t, Token::Ident(kw) if kw == "fn")
+            && let Some(body) = function_body(&toks, i)
+            && let Some(error) = stub_return(body)
+        {
+            found.insert(error);
+        }
+    }
+    found
+}
+
+/// The panic a failure starts with: the `panicked at` line and the message under it, or the first
+/// lines of the output when the harness printed no panic.
+fn first_panic_line(output: &str) -> String {
+    let lines: Vec<&str> = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let from = lines
+        .iter()
+        .position(|line| line.contains("panicked at"))
+        .unwrap_or_default();
+    let text = lines
+        .get(from..)
+        .unwrap_or_default()
+        .iter()
+        .take(2)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.is_empty() {
+        return "no output".to_owned();
+    }
+    const KEPT: usize = 240;
+    match text.char_indices().nth(KEPT) {
+        Some((cut, _)) => format!("{}...", text.get(..cut).unwrap_or_default()),
+        None => text,
+    }
+}
+
+/// A problem for each pending test that passed in any binary, ran in none, or failed on something
+/// other than its story's stub.
+fn verdicts(
+    tests: &[PendingTestRun],
+    outcomes: &[TestOutcome],
+    stubs: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
     tests
         .iter()
         .filter_map(|t| {
-            let passed: Vec<bool> = outcomes
+            let runs: Vec<&TestOutcome> = outcomes
                 .iter()
                 .filter(|o| t.matches(&o.binary_id, &o.name))
-                .map(|o| o.passed)
                 .collect();
             let at = format!(
                 "{}:{}: `{}` (pending {})",
                 t.file, t.test.line, t.test.path, t.test.story
             );
-            if passed.is_empty() {
+            if runs.is_empty() {
                 Some(format!(
                     "{at} did not run, so nothing shows that it fails on this change's code"
                 ))
-            } else if passed.contains(&true) {
+            } else if runs.iter().any(|o| o.passed) {
                 Some(format!(
                     "{at} passes on this change's code; a pending test must fail until its story \
                      is implemented, so make it assert what the stubs cannot satisfy (DEC-77)"
                 ))
             } else {
-                None
+                let story = &t.test.story;
+                let errors = stubs.get(&t.package);
+                runs.iter()
+                    .find(|o| !names_a_stub(&o.output, story, errors))
+                    .map(|o| {
+                        format!(
+                            "{at} fails away from its stub; it must stop at the stub {story} \
+                             implements, so its failure must name `{story}` or the crate's \
+                             `Unimplemented` error, and a fixture, parse, or harness panic shows \
+                             nothing about the story (DEC-137). It panicked with: {}",
+                            first_panic_line(&o.output)
+                        )
+                    })
             }
         })
         .collect()
 }
 
-/// One finished test from nextest's `libtest-json` output.
+/// One finished test from nextest's `libtest-json` output, with what a failing one printed: the
+/// panic the gate reads to tell a stub failure from any other (DEC-137).
 #[derive(Debug, PartialEq)]
 struct TestOutcome {
     binary_id: String,
     name: String,
     passed: bool,
+    output: String,
 }
 
 #[derive(Deserialize)]
@@ -1263,23 +1640,39 @@ struct LibtestEvent {
     kind: String,
     event: String,
     name: Option<String>,
+    stdout: Option<String>,
+    stderr: Option<String>,
+    message: Option<String>,
 }
 
-/// Test events are named `<binary id>$<test name>`; `started` is not a result.
+/// Test events are named `<binary id>$<test name>`; `started` is not a result, and neither is
+/// `ignored`, which is a test the run skipped rather than one that failed (DEC-137).
 fn test_outcomes(stdout: &str) -> Vec<TestOutcome> {
     stdout
         .lines()
         .filter_map(|line| serde_json::from_str::<LibtestEvent>(line).ok())
-        .filter(|e| e.kind == "test" && e.event != "started")
+        .filter(|e| e.kind == "test" && e.event != "started" && e.event != "ignored")
         .filter_map(|e| {
-            let (binary_id, name) = e
-                .name?
+            let LibtestEvent {
+                kind: _,
+                event,
+                name,
+                stdout,
+                stderr,
+                message,
+            } = e;
+            let (binary_id, name) = name?
                 .split_once('$')
                 .map(|(b, n)| (b.to_owned(), n.to_owned()))?;
             Some(TestOutcome {
                 binary_id,
                 name,
-                passed: e.event == "ok",
+                passed: event == "ok",
+                output: [stdout, stderr, message]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             })
         })
         .collect()
@@ -1360,14 +1753,7 @@ fn pending_tests(src: &str) -> Vec<PendingTest> {
                 }
             }
             Token::Punct('#') => {
-                if let Some(end) = attribute_end(&toks, i)
-                    && let [
-                        (Token::Ident(ignore), _),
-                        (Token::Punct('='), _),
-                        (Token::Str(reason), _),
-                    ] = toks.get(i + 2..end - 1).unwrap_or_default()
-                    && ignore == "ignore"
-                    && is_pending_reason(reason)
+                if let Some((story, end)) = pending_attribute(&toks, i)
                     && let Some((name, line)) = function_after(&toks, end)
                 {
                     let path = mods
@@ -1376,11 +1762,7 @@ fn pending_tests(src: &str) -> Vec<PendingTest> {
                         .chain([name.as_str()])
                         .collect::<Vec<_>>()
                         .join("::");
-                    found.push(PendingTest {
-                        path,
-                        story: reason.trim_start_matches("pending ").to_owned(),
-                        line,
-                    });
+                    found.push(PendingTest { path, story, line });
                 }
             }
             _ => {}
@@ -1390,17 +1772,38 @@ fn pending_tests(src: &str) -> Vec<PendingTest> {
     found
 }
 
+/// The story of the `#[ignore = "pending <story>"]` attribute whose `#` is at `start`, and the
+/// index just past it.
+fn pending_attribute(toks: &[(Token, usize)], start: usize) -> Option<(String, usize)> {
+    let end = attribute_end(toks, start)?;
+    match toks.get(start + 2..end.checked_sub(1)?).unwrap_or_default() {
+        [
+            (Token::Ident(ignore), _),
+            (Token::Punct('='), _),
+            (Token::Str(reason), _),
+        ] if ignore == "ignore" && is_pending_reason(reason) => {
+            Some((reason.trim_start_matches("pending ").to_owned(), end))
+        }
+        _ => None,
+    }
+}
+
 /// The index just past the `]` closing the attribute whose `#` is at `start`.
 fn attribute_end(toks: &[(Token, usize)], start: usize) -> Option<usize> {
-    if toks.get(start + 1).map(|(t, _)| t) != Some(&Token::Punct('[')) {
+    delimited_end(toks, start + 1, '[', ']')
+}
+
+/// The index just past the delimiter closing the one that opens at `start`.
+fn delimited_end(toks: &[(Token, usize)], start: usize, open: char, close: char) -> Option<usize> {
+    if toks.get(start).map(|(t, _)| t) != Some(&Token::Punct(open)) {
         return None;
     }
     let mut depth = 0usize;
-    for (i, (t, _)) in toks.iter().enumerate().skip(start + 1) {
+    for (i, (t, _)) in toks.iter().enumerate().skip(start) {
         match t {
-            Token::Punct('[') => depth += 1,
-            Token::Punct(']') => {
-                depth -= 1;
+            Token::Punct(c) if *c == open => depth += 1,
+            Token::Punct(c) if *c == close => {
+                depth = depth.saturating_sub(1);
                 if depth == 0 {
                     return Some(i + 1);
                 }
@@ -1411,9 +1814,57 @@ fn attribute_end(toks: &[(Token, usize)], start: usize) -> Option<usize> {
     None
 }
 
-/// The name and line of the function an attribute list ending at `start` belongs to, past any
-/// further attributes and qualifiers (`pub(crate)`, `async`, `unsafe`, `extern "C"`).
+/// Pending markers the source scan cannot turn into a runnable test name, with why: one inside a
+/// `macro_rules!` body, and one on a `$`-named function a macro expands. Either leaves the test
+/// ungated, which is how 85 of `mandate-risk`'s 105 pending tests went unrun, so both are a failure
+/// of `cargo xtask markers` (DEC-110, DEC-137).
+fn generated_pending_markers(src: &str) -> Vec<(usize, &'static str)> {
+    let toks = tokens(src);
+    let tok = |i: usize| toks.get(i).map(|(t, _)| t);
+    let mut macro_bodies: Vec<(usize, usize)> = Vec::new();
+    for (i, (t, _)) in toks.iter().enumerate() {
+        if let Token::Ident(kw) = t
+            && kw == "macro_rules"
+            && tok(i + 1) == Some(&Token::Punct('!'))
+            && let Some(open) =
+                (i + 2..i + 4).find(|&j| matches!(tok(j), Some(Token::Punct('{' | '(' | '['))))
+            && let Some(end) = match tok(open) {
+                Some(Token::Punct('{')) => delimited_end(&toks, open, '{', '}'),
+                Some(Token::Punct('(')) => delimited_end(&toks, open, '(', ')'),
+                _ => delimited_end(&toks, open, '[', ']'),
+            }
+        {
+            macro_bodies.push((open, end));
+        }
+    }
+    let mut found = Vec::new();
+    for (i, (t, line)) in toks.iter().enumerate() {
+        if *t != Token::Punct('#') {
+            continue;
+        }
+        let Some((_, end)) = pending_attribute(&toks, i) else {
+            continue;
+        };
+        if macro_bodies.iter().any(|(from, to)| i > *from && i < *to) {
+            found.push((*line, "inside a `macro_rules!` body"));
+        } else if fn_after(&toks, end).is_some_and(|f| tok(f + 1) == Some(&Token::Punct('$'))) {
+            found.push((*line, "on a `$`-named function"));
+        }
+    }
+    found
+}
+
+/// The name and line of the function an attribute list ending at `start` belongs to.
 fn function_after(toks: &[(Token, usize)], start: usize) -> Option<(String, usize)> {
+    match toks.get(fn_after(toks, start)?.checked_add(1)?) {
+        Some((Token::Ident(name), line)) => Some((name.clone(), *line)),
+        _ => None,
+    }
+}
+
+/// The index of the `fn` an attribute list ending at `start` belongs to, past any further
+/// attributes and qualifiers (`pub(crate)`, `async`, `unsafe`, `extern "C"`).
+fn fn_after(toks: &[(Token, usize)], start: usize) -> Option<usize> {
     let qualifiers = [
         "pub", "crate", "super", "self", "in", "async", "unsafe", "const", "extern",
     ];
@@ -1423,13 +1874,9 @@ fn function_after(toks: &[(Token, usize)], start: usize) -> Option<(String, usiz
             Some((Token::Punct('#'), _)) => i = attribute_end(toks, i)?,
             Some((Token::Ident(q), _)) if qualifiers.contains(&q.as_str()) => i += 1,
             Some((Token::Punct('(' | ')') | Token::Str(_), _)) => i += 1,
-            Some((Token::Ident(kw), _)) if kw == "fn" => break,
+            Some((Token::Ident(kw), _)) if kw == "fn" => return Some(i),
             _ => return None,
         }
-    }
-    match toks.get(i + 1) {
-        Some((Token::Ident(name), line)) => Some((name.clone(), *line)),
-        _ => None,
     }
 }
 
@@ -1665,10 +2112,13 @@ mod tests {
 
     use anyhow::{Context, Result};
 
+    use std::collections::{BTreeMap, BTreeSet};
+
     use super::{
-        PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify, contains_dec_id,
-        contains_word, is_pending_marker, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, test_binary, test_outcomes, verdicts,
+        MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify,
+        contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
+        is_pending_marker, mutant_verdicts, output_in, pending_problems, pending_tests,
+        plain_comment_lines, repo_root, stub_errors, test_binary, test_outcomes, verdicts,
     };
 
     #[test]
@@ -1854,6 +2304,46 @@ mod tests {
     }
 
     #[test]
+    fn a_pending_test_a_macro_generates_is_rejected() {
+        let src = concat!(
+            "macro_rules! case {\n",
+            "    ($name:ident, $case:expr) => {\n",
+            "        #[test]\n",
+            "        #[ignore = \"pending E6-4\"]\n",
+            "        fn $name() { run($case); }\n",
+            "    };\n",
+            "}\n",
+            "case!(family_r_01, \"R-01\");\n",
+            "#[test]\n",
+            "#[ignore = \"pending E6-4\"]\n",
+            "fn written_out() { run(\"R-02\"); }\n",
+            "#[test]\n",
+            "#[ignore = \"pending E6-4\"]\n",
+            "fn $generated() {}\n",
+            "#[test]\n",
+            "#[ignore = \"slow\"]\n",
+            "fn not_pending() {}\n",
+        );
+        assert_eq!(
+            generated_pending_markers(src),
+            [
+                (4, "inside a `macro_rules!` body"),
+                (13, "on a `$`-named function")
+            ],
+            "only a marker the source scan cannot turn into a test name is a problem"
+        );
+        assert_eq!(
+            found(src),
+            expected(&[("written_out", "E6-4", 11)]),
+            "the scan itself still sees only the plain function, which is why the rule exists"
+        );
+        assert!(
+            generated_pending_markers(&fs::read_to_string("xtask/src/main.rs").unwrap_or_default())
+                .is_empty()
+        );
+    }
+
+    #[test]
     fn a_file_maps_to_its_package_and_integration_test_binary() {
         let packages = [
             ("root".to_owned(), String::new()),
@@ -1882,26 +2372,49 @@ mod tests {
             "{\"type\":\"suite\",\"event\":\"started\",\"test_count\":4}\n",
             "{\"type\":\"test\",\"event\":\"started\",\"name\":\"a::fs$passes\"}\n",
             "{\"type\":\"test\",\"event\":\"ok\",\"name\":\"a::fs$passes\",\"exec_time\":0.1}\n",
-            "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"a::fs$fails\",\"stdout\":\"x\"}\n",
+            "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"a::fs$fails\",\"stdout\":\"panicked at x.rs:1:1:\\nUnimplemented\"}\n",
             "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"a::fs$inner::passes\"}\n",
             "{\"type\":\"test\",\"event\":\"ok\",\"name\":\"a$tests::unit\"}\n",
+            "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"a::fs$away\",\"stdout\":\"running 1 test\\nthread 'away' panicked at x.rs:9:1:\\nfixture file missing\\nstack backtrace:\"}\n",
+            "{\"type\":\"test\",\"event\":\"failed\",\"name\":\"a::fs$own_error\",\"stdout\":\"panicked at x.rs:9:1:\\ncalled `Result::unwrap()` on an `Err` value: Overflow\"}\n",
+            "{\"type\":\"test\",\"event\":\"ignored\",\"name\":\"a::fs$skipped\"}\n",
             "{\"type\":\"suite\",\"event\":\"failed\",\"passed\":2,\"failed\":2}\n",
             "not a JSON line\n",
         );
         let outcomes = test_outcomes(stdout);
-        let outcome = |binary_id: &str, name: &str, passed| TestOutcome {
+        let outcome = |binary_id: &str, name: &str, passed, output: &str| TestOutcome {
             binary_id: binary_id.to_owned(),
             name: name.to_owned(),
             passed,
+            output: output.to_owned(),
         };
         assert_eq!(
             outcomes,
             [
-                outcome("a::fs", "passes", true),
-                outcome("a::fs", "fails", false),
-                outcome("a::fs", "inner::passes", false),
-                outcome("a", "tests::unit", true),
-            ]
+                outcome("a::fs", "passes", true, ""),
+                outcome(
+                    "a::fs",
+                    "fails",
+                    false,
+                    "panicked at x.rs:1:1:\nUnimplemented"
+                ),
+                outcome("a::fs", "inner::passes", false, ""),
+                outcome("a", "tests::unit", true, ""),
+                outcome(
+                    "a::fs",
+                    "away",
+                    false,
+                    "running 1 test\nthread 'away' panicked at x.rs:9:1:\nfixture file \
+                     missing\nstack backtrace:"
+                ),
+                outcome(
+                    "a::fs",
+                    "own_error",
+                    false,
+                    "panicked at x.rs:9:1:\ncalled `Result::unwrap()` on an `Err` value: Overflow"
+                ),
+            ],
+            "an ignored test is a test the run skipped, not one that failed"
         );
         let new = |line, binary: Option<&str>, path: &str| PendingTestRun {
             file: "f.rs".to_owned(),
@@ -1920,19 +2433,97 @@ mod tests {
             new(4, None, "unit"),
             new(5, None, "missing"),
             new(6, Some("a::other"), "fails"),
+            new(7, Some("a::fs"), "away"),
+            new(8, Some("a::fs"), "own_error"),
+            new(9, Some("a::fs"), "skipped"),
         ];
-        let problems: Vec<String> = verdicts(&tests, &outcomes)
+        let stubs = BTreeMap::from([("a".to_owned(), BTreeSet::from(["Overflow".to_owned()]))]);
+        let verdicts = verdicts(&tests, &outcomes, &stubs);
+        let problems: Vec<String> = verdicts
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
             .collect();
+        assert!(
+            verdicts.iter().any(|p| p.contains(
+                "It panicked with: thread 'away' panicked at x.rs:9:1: fixture file missing"
+            )),
+            "{verdicts:?}"
+        );
         assert_eq!(
             problems,
             [
                 "f.rs:1: `passes` (pending E1-1) passes on this change's code",
+                "f.rs:3: `inner::passes` (pending E1-1) fails away from its stub",
                 "f.rs:4: `unit` (pending E1-1) passes on this change's code",
                 "f.rs:5: `missing` (pending E1-1) did not run",
                 "f.rs:6: `fails` (pending E1-1) did not run",
-            ]
+                "f.rs:7: `away` (pending E1-1) fails away from its stub",
+                "f.rs:9: `skipped` (pending E1-1) did not run",
+            ],
+            "`fails` stops at an `Unimplemented`, `own_error` at the error its own crate's stubs \
+             return; neither is a problem"
+        );
+    }
+
+    #[test]
+    fn the_panic_a_failure_starts_with_is_quoted_back() {
+        let panic = concat!(
+            "running 1 test\n",
+            "\n",
+            "thread 'a_case' (1234) panicked at crates/fx/tests/hand.rs:12:9:\n",
+            "fixture file missing\n",
+            "stack backtrace:\n",
+            "   0: __rustc::rust_begin_unwind\n",
+        );
+        assert_eq!(
+            first_panic_line(panic),
+            "thread 'a_case' (1234) panicked at crates/fx/tests/hand.rs:12:9: fixture file missing"
+        );
+        assert_eq!(first_panic_line(""), "no output");
+        assert_eq!(
+            first_panic_line("no panic here\nsecond line"),
+            "no panic here second line"
+        );
+        assert!(first_panic_line(&"x ".repeat(400)).ends_with("..."));
+    }
+
+    #[test]
+    fn a_stub_body_names_the_error_it_returns() {
+        let src = concat!(
+            "pub fn evaluate(input: &Input) -> Result<Decision, GateError> {\n",
+            "    let _ = input;\n",
+            "    Err(GateError::Unimplemented(\"evaluate\", \"E6-3\"))\n",
+            "}\n",
+            "pub fn sample_variance(sum: Self, count: u32) -> Result<Self, NumError> {\n",
+            "    let _ = (sum, count);\n",
+            "    Err(NumError::Overflow)\n",
+            "}\n",
+            "pub fn fold(state: &mut State) -> Result<(), RuntimeError> {\n",
+            "    Err(RuntimeError::Unimplemented { story: \"E6-1\" })\n",
+            "}\n",
+            "pub fn answer() -> u32 { todo!() }\n",
+            "pub fn rejected() -> Result<(), Rejected> {\n",
+            "    Err(Rejected::NotEvaluated(SpecError::Unimplemented))\n",
+            "}\n",
+            "pub fn counted(n: u32) -> Result<u32, NumError> {\n",
+            "    let doubled = n + n;\n",
+            "    Err(NumError::Overflow)\n",
+            "}\n",
+            "pub fn real(n: u32) -> u32 {\n",
+            "    n + 1\n",
+            "}\n",
+            "pub trait T {\n",
+            "    fn declared(&self) -> Result<(), NumError>;\n",
+            "}\n",
+        );
+        assert_eq!(
+            stub_errors(src),
+            BTreeSet::from([
+                "Unimplemented".to_owned(),
+                "Overflow".to_owned(),
+                "not yet implemented".to_owned(),
+            ]),
+            "a body with a statement of its own (`counted`) is not a stub, and neither is `real`"
         );
     }
 
@@ -1942,9 +2533,11 @@ mod tests {
 
     const STUBS: &str = concat!(
         "#[derive(Debug, PartialEq)]\n",
-        "pub struct Missing;\n",
+        "pub enum Missing {\n",
+        "    Unimplemented,\n",
+        "}\n",
         "pub fn answer() -> u32 { todo!() }\n",
-        "pub fn lookup() -> Result<u32, Missing> { Err(Missing) }\n",
+        "pub fn lookup() -> Result<u32, Missing> { Err(Missing::Unimplemented) }\n",
     );
 
     impl Fixture {
@@ -2010,6 +2603,112 @@ mod tests {
         }
     }
 
+    /// A `cargo mutants --in-diff` run over a crate with one stub and one implemented function,
+    /// in the shape `cargo-mutants` 27.1.0 writes to `target/mutants.out/outcomes.json`.
+    fn outcomes(stub: &str, real: &str) -> String {
+        format!(
+            concat!(
+                "{{\"outcomes\": [\n",
+                "{{\"scenario\": \"Baseline\", \"summary\": \"Success\"}},\n",
+                "{{\"scenario\": {{\"Mutant\": {{\"name\": \"src/lib.rs:7:5: replace stubbed with Ok(0)\", ",
+                "\"package\": \"fx\", \"file\": \"src/lib.rs\", ",
+                "\"function\": {{\"function_name\": \"stubbed\", \"return_type\": \"-> Result<u32, Error>\", ",
+                "\"span\": {{\"start\": {{\"line\": 6, \"column\": 1}}, \"end\": {{\"line\": 9, \"column\": 2}}}}}}, ",
+                "\"span\": {{\"start\": {{\"line\": 7, \"column\": 5}}, \"end\": {{\"line\": 8, \"column\": 28}}}}, ",
+                "\"replacement\": \"Ok(0)\", \"genre\": \"FnValue\"}}}}, \"summary\": \"{stub}\"}},\n",
+                "{{\"scenario\": {{\"Mutant\": {{\"name\": \"src/lib.rs:12:5: replace real -> u32 with 0\", ",
+                "\"package\": \"fx\", \"file\": \"src/lib.rs\", ",
+                "\"function\": {{\"function_name\": \"real\", \"return_type\": \"-> u32\", ",
+                "\"span\": {{\"start\": {{\"line\": 11, \"column\": 1}}, \"end\": {{\"line\": 13, \"column\": 2}}}}}}, ",
+                "\"span\": {{\"start\": {{\"line\": 12, \"column\": 5}}, \"end\": {{\"line\": 12, \"column\": 10}}}}, ",
+                "\"replacement\": \"0\", \"genre\": \"FnValue\"}}}}, \"summary\": \"{real}\"}}\n",
+                "]}}\n"
+            ),
+            stub = stub,
+            real = real
+        )
+    }
+
+    #[test]
+    fn a_surviving_mutant_is_skipped_only_in_a_stub_of_a_crate_whose_tests_are_pending()
+    -> Result<()> {
+        let fx = Fixture::new("mutants")?;
+        fx.write(
+            "crates/fx/src/lib.rs",
+            concat!(
+                "#[derive(Debug, PartialEq)]\n",
+                "pub enum Error {\n",
+                "    Unimplemented,\n",
+                "}\n",
+                "\n",
+                "pub fn stubbed(n: u32) -> Result<u32, Error> {\n",
+                "    let _ = n;\n",
+                "    Err(Error::Unimplemented)\n",
+                "}\n",
+                "\n",
+                "pub fn real(n: u32) -> u32 {\n",
+                "    n + 1\n",
+                "}\n",
+            ),
+        )?;
+        let pending = |pending| {
+            vec![MutatedCrate {
+                package: "fx".to_owned(),
+                dir: "crates/fx".to_owned(),
+                pending,
+            }]
+        };
+        let verdicts =
+            |crates: &[MutatedCrate], json: &str| -> Result<(Vec<String>, Vec<String>)> {
+                mutant_verdicts(&fx.0, crates, json)
+            };
+
+        let (problems, skipped) =
+            verdicts(&pending(true), &outcomes("MissedMutant", "MissedMutant"))?;
+        assert_eq!(
+            skipped,
+            ["src/lib.rs:7:5: replace stubbed with Ok(0)"],
+            "a mutant of a stub body no live test can reach is skipped by name"
+        );
+        assert_eq!(
+            problems,
+            [
+                "src/lib.rs:12:5: replace real -> u32 with 0: MissedMutant, and the function it \
+                 mutates is not a stub"
+            ],
+            "a mutant surviving in implemented code fails the gate, pending tests or not"
+        );
+
+        let (problems, skipped) =
+            verdicts(&pending(false), &outcomes("MissedMutant", "CaughtMutant"))?;
+        assert!(skipped.is_empty());
+        assert_eq!(
+            problems.len(),
+            1,
+            "without pending tests nothing is exempt, which is the rule DEC-83 already had"
+        );
+
+        let (problems, skipped) =
+            verdicts(&pending(true), &outcomes("MissedMutant", "CaughtMutant"))?;
+        assert_eq!(problems, Vec::<String>::new());
+        assert_eq!(skipped.len(), 1);
+
+        let (problems, _) = verdicts(&pending(true), &outcomes("Timeout", "CaughtMutant"))?;
+        assert_eq!(
+            problems.len(),
+            1,
+            "a timeout is not a missed mutant, so no stub exempts it"
+        );
+
+        let baseline = outcomes("CaughtMutant", "CaughtMutant").replace(
+            "\"scenario\": \"Baseline\", \"summary\": \"Success\"",
+            "\"scenario\": \"Baseline\", \"summary\": \"Failure\"",
+        );
+        let (problems, _) = verdicts(&pending(true), &baseline)?;
+        assert_eq!(problems, ["the unmutated baseline reports Failure"]);
+        Ok(())
+    }
+
     #[test]
     fn the_gate_fails_exactly_the_pending_tests_that_pass_on_the_stubs() -> Result<()> {
         let fx = Fixture::new("pending")?;
@@ -2037,6 +2736,31 @@ mod tests {
             Vec::<String>::new(),
             "pending tests that fail on the stubs pass the gate"
         );
+
+        let away = concat!(
+            "#[test]\n#[ignore = \"pending E1-1\"]\n",
+            "fn fails_on_a_fixture() { panic!(\"fixture file missing\") }\n",
+        );
+        fx.write(
+            "crates/fx/tests/stubs.rs",
+            &format!("{live}{failing}{away}"),
+        )?;
+        fx.commit()?;
+        let problems = pending_problems(&fx.0)?;
+        let problem = problems.first().map(String::as_str).unwrap_or_default();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problem.starts_with(
+                "crates/fx/tests/stubs.rs:16: `fails_on_a_fixture` (pending E1-1) fails away from \
+                 its stub"
+            ),
+            "{problem}"
+        );
+        assert!(
+            problem.contains("It panicked with: thread 'fails_on_a_fixture'"),
+            "{problem}"
+        );
+        assert!(problem.contains("fixture file missing"), "{problem}");
 
         let passing = concat!(
             "#[test]\n#[ignore = \"pending E1-1\"]\n",
@@ -2066,7 +2790,7 @@ mod tests {
         assert_eq!(
             problems,
             [
-                "crates/fx/src/lib.rs:9: `tests::unit_passes` (pending E1-1) passes on this change's code",
+                "crates/fx/src/lib.rs:11: `tests::unit_passes` (pending E1-1) passes on this change's code",
                 "crates/fx/tests/stubs.rs:16: `passes_on_the_stubs` (pending E1-1) passes on this change's code",
                 "crates/fx/tests/stubs.rs:20: `never_compiled` (pending E1-1) did not run",
                 "crates/fx/tests/untracked.rs:3: `untracked_and_passing` (pending E1-2) passes on this change's code",

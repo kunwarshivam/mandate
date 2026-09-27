@@ -589,17 +589,24 @@ proves each pending test fails on them (DEC-110).
 
 ## Pending tests fail on the stubs
 
-- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110; the story playbook step 8.
-- **Code:** `pending_problems` and `pending_tests` in `xtask/src/main.rs` (markers found on tokens
-  in every tracked or untracked `.rs` file, run in one nextest `--run-ignored ignored-only`).
+- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110, DEC-137; the story playbook
+  step 8.
+- **Code:** `pending_problems`, `pending_tests`, `names_a_stub`, `stub_errors_by_package` and
+  `generated_pending_markers` in `xtask/src/main.rs` (markers found on tokens in every tracked or
+  untracked `.rs` file, run in one nextest `--run-ignored ignored-only`; each failure must name
+  its story's stub, and a marker a macro generates is a `markers` failure).
 - **Tests:** the `xtask` unit tests (markers in comments, doc comments, strings, raw strings, split
-  across lines; result matching) and a fixture workspace in a temporary git repository in which
-  committed, uncommitted, and untracked pending tests pass on the stubs.
+  across lines; a marker inside a `macro_rules!` body or on a `$`-named function; the stub errors
+  read off a source file; result matching) and a fixture workspace in a temporary git repository in
+  which committed, uncommitted, and untracked pending tests pass on the stubs or fail away from
+  them.
 - **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
 
 ## Repository automation
 
-- **Code:** `xtask`: `xtask/src/main.rs` (every CI job), `xtask/layers.toml` (crate layers and
-  safety-critical policy), `.cargo/mutants.toml` (approved equivalent mutants).
+- **Code:** `xtask`: `xtask/src/main.rs` (every CI job, including `mutant_verdicts` and
+  `is_stub_function`, which exempt a stub body of a crate with pending tests and nothing else),
+  `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
+  equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
 - **Run:** `cargo xtask check`.
