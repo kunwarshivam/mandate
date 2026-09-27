@@ -1802,7 +1802,9 @@ fn a_journal_only_order_is_reconciled_away_not_kept() {
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
     assert!(
-        run.differences.iter().any(|d| d.subject == id && d.adopted),
+        run.differences
+            .iter()
+            .any(|d| d.subject == id && d.adopted()),
         "the broker wins on the order set: our own state is never kept because it is ours \
          (planted bug 3): {:?}",
         run.differences
@@ -2165,7 +2167,6 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_fee_difference_is_alerted_and_never_adjusted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2187,7 +2188,7 @@ fn a_fee_difference_is_alerted_and_never_adjusted() {
         .find(|d| d.kind == mandate_executor::DifferenceKind::Fee)
         .expect("3.5 of accrued fees the ledger does not have is a difference");
     assert!(
-        !fee.adopted,
+        !fee.adopted(),
         "§11 says a fee difference is alerted and never silently adjusted"
     );
     assert!(
@@ -2350,7 +2351,6 @@ fn the_executor_never_lifts_a_reconciliation_pause_itself() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4663,7 +4663,6 @@ fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_power() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
