@@ -30,8 +30,9 @@ pub enum ExecutorError {
     /// An event on a stream this executor does not follow.
     #[error("stream {stream} is not one this executor follows")]
     ForeignStream { stream: String },
-    /// An append whose `environment` is not the one `StreamOpened` fixed (ADR-0001 ES-23).
-    #[error("environment {found} is not the stream's {opened}")]
+    /// A second `StreamOpened`: the first fixed the stream's `environment` for good, so another is
+    /// refused whether it names the same environment or a different one (ADR-0001 ES-23).
+    #[error("the stream was opened in {opened}; a second StreamOpened names {found}")]
     EnvironmentMismatch { opened: String, found: String },
     /// A copied cross-stream fact with no `causation_id` (journal spec §2).
     #[error("{event_type} was copied without a causation id")]

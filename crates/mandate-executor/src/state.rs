@@ -344,3 +344,120 @@ impl ExecutorState {
             .unwrap_or(RiskClock::from_secs(0))
     }
 }
+
+/// The accessors read their own fields. These cases set the private fields directly, so a mutant
+/// that answers the fresh value dies even for a field no merged slice folds yet, which no test
+/// outside the crate can reach until that slice lands (DEC-137).
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::Side;
+    use mandate_time::Date;
+
+    use super::*;
+    use crate::types::{AccountRef, Input, OrderState, Purpose, WorkspaceId};
+
+    fn id(raw: &str) -> ClientOrderId {
+        ClientOrderId::seeded_for_tests(raw)
+    }
+
+    fn apple() -> Option<InstrumentId> {
+        InstrumentId::new("AAPL").ok()
+    }
+
+    fn held() -> Option<ExecutorState> {
+        let instrument = apple()?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(7));
+        state.started = true;
+        state.environment = Some("paper".to_owned());
+        state.risk_clock = Some(RiskClock::from_secs(42));
+        state.unresolved = Some(UnresolvedAppend {
+            head: Seq(3),
+            input: Input::Tick(RiskClock::from_secs(42)),
+            drafts: Vec::new(),
+        });
+        state.orders.insert(
+            id("md-a"),
+            Order {
+                client_order_id: id("md-a"),
+                intent_id: None,
+                agent: AgentId("agent-a".to_owned()),
+                instrument: instrument.clone(),
+                side: Side::Buy,
+                qty: Qty::parse("1").ok()?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Open,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: Date::parse("2026-09-22").ok(),
+            },
+        );
+        state
+            .reservations
+            .insert(id("md-a"), Usd::parse("150").ok()?);
+        state.unprotected.push(UnprotectedInterval {
+            instrument: instrument.clone(),
+            started_at: RiskClock::from_secs(40),
+            ended_at: None,
+            alerted: false,
+        });
+        state
+            .positions
+            .insert(instrument.clone(), SignedQty::parse("10").ok()?);
+        state.fills.insert(FillId("f-1".to_owned()));
+        state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        state.account_state = AccountState::ClosingOnly;
+        state.consecutive_403s = 2;
+        state.observed = Some(ObservedAccount {
+            state: AccountState::ClosingOnly,
+            multiplier: 2,
+            equity: Usd::parse("1").ok()?,
+            cash: Usd::parse("1").ok()?,
+            buying_power: Usd::parse("1").ok()?,
+            non_marginable_buying_power: Usd::parse("1").ok()?,
+            accrued_fees: Usd::ZERO,
+        });
+        state.mismatched.insert(instrument);
+        state.checkpoint = Some(ActivityCursor("cursor-9".to_owned()));
+        state.reconciled_through = Some(Seq(5));
+        state.last_submission = Some(Seq(4));
+        Some(state)
+    }
+
+    #[test]
+    fn every_field_accessor_answers_its_own_field() {
+        let state = held();
+        assert!(state.is_some(), "the held state builds");
+        let Some(state) = state else { return };
+        assert_eq!(state.epoch(), Some(WriterEpoch(7)));
+        assert!(state.started());
+        assert_eq!(state.environment(), Some("paper"));
+        assert_eq!(state.risk_clock(), Some(RiskClock::from_secs(42)));
+        assert_eq!(state.unresolved().map(|u| u.head), Some(Seq(3)));
+        assert_eq!(state.orders().len(), 1);
+        assert_eq!(state.reservations().len(), 1);
+        assert_eq!(state.unprotected_intervals().len(), 1);
+        assert_eq!(state.positions().len(), 1);
+        assert_eq!(state.fills().len(), 1);
+        assert_eq!(state.modes().len(), 1);
+        assert_eq!(state.account_state(), AccountState::ClosingOnly);
+        assert_eq!(state.consecutive_403s(), 2);
+        assert_eq!(state.observed_account().map(|a| a.multiplier), Some(2));
+        assert_eq!(state.mismatched().len(), 1);
+        assert_eq!(
+            state.checkpoint(),
+            Some(&ActivityCursor("cursor-9".to_owned()))
+        );
+        assert_eq!(state.reconciled_through(), Some(Seq(5)));
+        assert_eq!(state.last_submission(), Some(Seq(4)));
+    }
+}
