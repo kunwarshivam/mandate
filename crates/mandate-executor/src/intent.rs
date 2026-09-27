@@ -7,7 +7,7 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
-use crate::gate::{Proposal, decide};
+use crate::gate::{Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::state::IntentOutcome;
@@ -93,7 +93,7 @@ fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bo
     else {
         return Ok(false);
     };
-    let decision = decide(
+    let decision = account_stream_checks(
         &batch.view,
         &Proposal {
             agent: &agent,
@@ -115,6 +115,7 @@ fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bo
                 ("reason_code", text(decision.reason_code())),
                 ("purpose", text(purpose_name(*purpose))),
                 ("checks", decision.checks_value()?),
+                ("evaluation", text("account_stream_only")),
             ],
         )?;
     }

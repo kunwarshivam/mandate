@@ -14,9 +14,6 @@ use crate::types::{
     ReconcileReason, WriterEpoch,
 };
 
-/// How many quotes per instrument the step keeps for the exit ladder's fallbacks (§5.6).
-const QUOTES_KEPT: usize = 16;
-
 /// One step of the executor (ADR-0001 ES-06).
 ///
 /// The **only** producer of effects, which is what makes a replay safe: [`crate::fold`] emits
@@ -55,15 +52,8 @@ pub fn handle(
     {
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
-    match &input {
-        Input::Tick(at) => state.now = state.now.max(Some(*at)),
-        Input::Market(observed) => {
-            let kept = state.quotes.entry(observed.instrument.clone()).or_default();
-            kept.push(observed.clone());
-            let excess = kept.len().saturating_sub(QUOTES_KEPT);
-            kept.drain(..excess);
-        }
-        _ => {}
+    if let Input::Tick(at) = &input {
+        state.now = state.now.max(Some(*at));
     }
     let head = state.account_head();
     let mut batch = Batch::new(state, ports)?;

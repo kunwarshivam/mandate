@@ -51,10 +51,15 @@
 //! [`Input::Intent`], and the adapter that implements stream I's sink on this executor's behalf
 //! lives in the shell, at layer 7, the one place that may depend on both (DEC-131, ES-02).
 //!
-//! The binding gate is **not** a port. `mandate-risk` is a direct, crate-private dependency,
-//! because a binding gate a caller can substitute is not independent of agent logic
-//! (`AGENTS.md` rule 1). Stream I's injected `GateDryRun` is the advisory call and can only
-//! narrow; this one decides.
+//! # The gate is partial: no caller outside tests may drive [`handle`] yet
+//!
+//! Stream G's §9.1 evaluation is not wired. Until the gate port lands — whose production adapter
+//! calls `mandate-risk` and fails closed on every check G has not yet implemented — the executor
+//! runs only its own account-stream checks, and every verdict is a [`PartialGateDecision`]
+//! journaled with `evaluation: account_stream_only`. **No caller outside this crate's tests may
+//! drive [`handle`] until then**, and no paper run may treat an allow from it as the §9.1
+//! evaluation. Stream I's injected `GateDryRun` is the advisory call and can only narrow; the gate
+//! port will be the binding one, and it too can only narrow what this crate already refuses.
 //!
 //! # Determinism
 //!
@@ -88,7 +93,7 @@ mod step;
 mod types;
 
 pub use error::{ExecutorError, JsonError};
-pub use gate::GateDecision;
+pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use ports::{BrokerConnector, IdGen, InstrumentSnapshot, MandateView, Ports};
 pub use protection::{LadderPrice, LadderReference};

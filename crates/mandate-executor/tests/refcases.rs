@@ -312,13 +312,11 @@ fn trading_domain_rc_14_plain_add_blocked() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_add_via_bracket() {
     drive(&case("RC-14", Some("add_via_bracket")));
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn trading_domain_rc_14_kill_switch() {
     drive(&case("RC-14", Some("kill_switch")));
 }

@@ -3,7 +3,6 @@
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Qty, ShareIncrement, SignedQty, SplitRatio, Usd};
-use mandate_time::Date;
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
@@ -14,9 +13,9 @@ use crate::payload::{
 };
 use crate::state::{ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail};
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, BracketLegs, EventId, FillId, FoldedEvent, IntentBody,
-    Mode, OcoLegs, Order, OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder,
-    TimeInForce, UnprotectedInterval,
+    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
+    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2. Each carries a `causation_id` naming its
@@ -129,7 +128,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
-                "active" => AccountState::Active,
                 "closing_only" => AccountState::ClosingOnly,
                 "blocked" => AccountState::Blocked,
                 _ => return Err(refused("restriction")),
@@ -138,9 +136,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             Ok(())
         }
         "RejectObserved" => {
-            let counted =
-                optional_int(payload, "http_status") == Some(403) && !flag(payload, "known_cause");
-            state.consecutive_403s = if counted {
+            state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
                 state.consecutive_403s.saturating_add(1)
             } else {
                 0
@@ -149,10 +145,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         }
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
-        "TradingDayStarted" => {
-            state.trading_day = Some(Date::parse(required_text(payload, "date")?)?);
-            Ok(())
-        }
         _ => Ok(()),
     }
 }
@@ -314,47 +306,27 @@ fn gate_decided(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
 }
 
 /// The exact request an `OrderSubmitted` names, rebuilt from its payload, so a resubmission after
-/// a confirmed absence sends the same body with the same id (trading-domain spec §5.7).
+/// a confirmed absence sends the same body with the same id (trading-domain spec §5.7). A field an
+/// older draft left out takes the value this crate's own drafts would have written: a buy, a limit
+/// order, day, and an opening.
 fn request_of(
-    state: &ExecutorState,
     payload: &Value,
     client_order_id: ClientOrderId,
-    intent: Option<&IntentId>,
 ) -> Result<SubmitOrder, ExecutorError> {
-    let quantity = optional_qty(payload, "qty")?.unwrap_or(Qty::ZERO);
-    let purpose = match optional_text(payload, "purpose") {
-        Some(name) => purpose_of(name)?,
-        None => match intent.and_then(|id| state.bodies.get(id)) {
-            Some(IntentBody::Order { purpose, .. }) => *purpose,
-            _ => Purpose::Open,
-        },
-    };
-    let take_profit = optional_price(payload, "take_profit")?;
-    let stop = optional_price(payload, "stop")?;
-    let class = optional_text(payload, "order_class");
-    let legs = take_profit.zip(stop);
     Ok(SubmitOrder {
         client_order_id,
         instrument: instrument(payload)?,
         side: optional_text(payload, "side").map_or(Ok(Side::Buy), side_of)?,
-        qty: quantity,
+        qty: optional_qty(payload, "qty")?.unwrap_or(Qty::ZERO),
         order_type: optional_text(payload, "order_type")
             .map_or(Ok(OrderType::Limit), order_type_of)?,
         tif: optional_text(payload, "tif").map_or(Ok(TimeInForce::Day), tif_of)?,
         limit_price: optional_price(payload, "limit")?,
         stop_price: optional_price(payload, "stop_price")?,
-        bracket: legs
-            .filter(|_| class == Some("bracket"))
-            .map(|(take_profit, stop)| BracketLegs { take_profit, stop }),
-        oco: legs
-            .filter(|_| class == Some("oco"))
-            .map(|(take_profit, stop)| OcoLegs {
-                take_profit,
-                stop,
-                qty: quantity,
-            }),
+        bracket: None,
+        oco: None,
         extended_hours: flag(payload, "extended_hours"),
-        purpose,
+        purpose: optional_text(payload, "purpose").map_or(Ok(Purpose::Open), purpose_of)?,
     })
 }
 
@@ -362,7 +334,7 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
     let payload = &event.payload;
     let id = client_order_id(payload)?;
     let intent = optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned())));
-    let request = request_of(state, payload, id.clone(), intent.as_ref())?;
+    let request = request_of(payload, id.clone())?;
     let attempt = optional_int(payload, "attempt")
         .and_then(|attempt| u32::try_from(attempt).ok())
         .unwrap_or(1);
@@ -373,7 +345,7 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         Side::Sell => Usd::ZERO,
     };
     let agent = AgentId(required_text(payload, "agent")?.to_owned());
-    let created_on = state.trading_day;
+    let created_on = None;
     let order = state.orders.entry(id.clone()).or_insert_with(|| Order {
         client_order_id: id.clone(),
         intent_id: intent.clone(),
@@ -399,7 +371,6 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
     state.details.insert(
         id,
         OrderDetail {
-            limit: request.limit_price,
             request: Some(request),
             submitted_seq: Some(event.seq),
             ..OrderDetail::default()
@@ -439,7 +410,7 @@ fn order_state_changed(
         order.absent_lookups = order.absent_lookups.saturating_add(1);
         order.first_absence_at = order.first_absence_at.or(Some(at));
         detail.last_absence = Some(at);
-    } else if next == OrderState::Unknown && order.state != OrderState::Unknown {
+    } else if next == OrderState::Unknown {
         order.absent_lookups = 0;
         order.first_absence_at = None;
         detail.unknown_since = Some(at);
@@ -454,7 +425,6 @@ fn order_state_changed(
             order.replaced_by = Some(new.clone());
             state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
         }
-        release_protection(state, &id);
     }
     Ok(())
 }
@@ -482,26 +452,14 @@ fn replacement(
     Ok(())
 }
 
-/// A protective order that reached a terminal state no longer rests, so it no longer covers.
-fn release_protection(state: &mut ExecutorState, id: &ClientOrderId) {
-    let Some(order) = state.orders.get(id) else {
-        return;
-    };
-    if let Some(protection) = state.protection.get_mut(&order.instrument)
-        && protection.resting.contains(id)
-    {
-        protection.resting.retain(|resting| resting != id);
-        protection.covered_qty = protection
-            .covered_qty
-            .checked_sub(order.qty)
-            .unwrap_or(Qty::ZERO);
-    }
-}
-
+/// `OrderAbandoned` ends an intent. An intent abandoned before it was ever submitted has no order
+/// yet, so the order is recorded from the intent, in its terminal state.
 fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let intent = intent_id(payload)?;
-    if !state.orders.contains_key(&id) {
+    if let Some(order) = state.orders.get_mut(&id) {
+        order.state = OrderState::Abandoned;
+    } else {
         let (
             Some(IntentBody::Order {
                 instrument,
@@ -532,13 +490,9 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
             first_absence_at: None,
             cancel_unconfirmed: false,
             replaced_by: None,
-            created_on: state.trading_day,
+            created_on: None,
         };
         state.orders.insert(id.clone(), order);
-    }
-    if let Some(order) = state.orders.get_mut(&id) {
-        order.state = OrderState::Abandoned;
-        order.cancel_unconfirmed = false;
     }
     state.reservations.remove(&id);
     if let Some(record) = state.intents.get_mut(&intent) {
@@ -658,7 +612,7 @@ fn protection_changed(
                     first_absence_at: None,
                     cancel_unconfirmed: false,
                     replaced_by: None,
-                    created_on: state.trading_day,
+                    created_on: None,
                 });
                 state.reservations.entry(id.clone()).or_insert(Usd::ZERO);
                 resting.push(id);
@@ -671,12 +625,6 @@ fn protection_changed(
                     covered_qty: covered,
                 },
             );
-        }
-        "cancelled" => {
-            if let Some(protection) = state.protection.get_mut(&instrument) {
-                protection.resting.clear();
-                protection.covered_qty = Qty::ZERO;
-            }
         }
         "unprotected_start" => state.unprotected.push(UnprotectedInterval {
             instrument,

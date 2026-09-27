@@ -2465,7 +2465,6 @@ fn a_passive_exit_becomes_a_new_oco_keeping_the_stop() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_passive_exit_never_leaves_the_position_unprotected() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2760,7 +2759,6 @@ fn protection_is_re_placed_at_the_buffer_day() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3239,7 +3237,6 @@ fn the_ladder_never_prices_below_the_floor() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3459,7 +3456,6 @@ fn a_kill_switch_applies_the_mode_before_it_cancels() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_automated_flatten_defers_equity_sells_to_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3592,7 +3588,6 @@ fn an_owner_exit_outside_the_session_prices_from_the_confirmed_bid() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unconfirmed_owner_exit_waits_for_the_session() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3800,7 +3795,6 @@ fn entering_exits_only_cancels_the_working_opening_orders() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn entering_exits_only_leaves_protective_orders_resting() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3912,7 +3906,6 @@ fn the_reducing_sell_waits_for_the_cancel_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_kill_switch_jumps_a_full_queue() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3946,7 +3939,6 @@ fn a_kill_switch_jumps_a_full_queue() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_journaled_order_is_the_handling_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

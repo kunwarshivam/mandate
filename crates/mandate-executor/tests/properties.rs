@@ -1013,7 +1013,6 @@ proptest! {
     /// `AGENTS.md` rule 13, made unrepresentable: no agent-scoped effect names the account-wide
     /// endpoints. The script only ever fires an agent-scoped switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_agent_scoped_effect_can_name_the_account_wide_endpoints(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1036,7 +1035,6 @@ proptest! {
 
     /// §5.5: the final mode is journaled before any cancel and any sell of the same switch.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_mode_draft_precedes_every_cancel_and_every_sell(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
@@ -1131,7 +1129,6 @@ proptest! {
 
     /// §5.4: nothing is submitted while an unconfirmed cancel is outstanding.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
         let mut outstanding: BTreeSet<String> = BTreeSet::new();
@@ -1168,7 +1165,6 @@ proptest! {
 
     /// §5.4: an order submitted inside an unprotected interval is marketable, never resting.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_resting_order_is_submitted_inside_an_unprotected_interval(script in scripted()) {
         let run = play(&script);
         let mut unprotected: BTreeSet<String> = BTreeSet::new();
@@ -1215,7 +1211,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: no risk-reducing submission is ever denied by a pacing control.
     #[test]
-    #[ignore = "pending E7-4"]
     fn no_risk_reducing_submission_is_ever_denied_by_a_pacing_control(script in scripted()) {
         let run = play(&script);
         let pacing = [
@@ -1250,7 +1245,6 @@ proptest! {
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
     #[test]
-    #[ignore = "pending E7-4"]
     fn the_only_holds_on_an_exit_are_the_four_the_rule_names(script in scripted()) {
         let run = play(&script);
         let allowed = ["agent_paused", "agent_stopped", "unknown_order_in_flight", "broker"];

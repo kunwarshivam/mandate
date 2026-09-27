@@ -1,13 +1,13 @@
-//! The binding gate's call site.
+//! The executor's own checks at the binding gate's call site: **partial**, and named so.
 //!
-//! `mandate-risk` (layer 4) is a **direct, crate-private dependency**: not injected, not behind a
-//! trait, and not replaceable by configuration, because a binding gate a caller can substitute is
-//! not independent of agent logic (`AGENTS.md` rule 1, task brief interpretation 4). Stream G's
-//! evaluation is not yet implemented, so until it is this function runs the checks whose inputs
-//! the account stream itself carries — the account state, the agent's mode, an `Unknown` order in
-//! the instrument, the working universe, and the quantity a sell may take — and nothing it runs
-//! can be replaced from outside. It can only be narrowed further when stream G's evaluation is
-//! added in front of the submission.
+//! Stream G's §9.1 evaluation (`mandate-risk`) is not wired here yet. It arrives through a gate
+//! port whose production adapter assembles G's inputs and fails closed (the coordinator's ruling
+//! on DEC-129's partial gate). Until then this module runs only the checks whose inputs the
+//! account stream itself carries — the account state, the agent's mode, an `Unknown` order in the
+//! instrument, the working universe, and the quantity a sell may take — and every verdict it
+//! returns is a [`PartialGateDecision`], journaled with `evaluation: account_stream_only`. An
+//! allow from it is **not** the §9.1 evaluation, and no paper run may treat it as one. Nothing it
+//! runs can be replaced from outside; the gate port can only narrow it further.
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
@@ -19,10 +19,11 @@ use crate::ports::Ports;
 use crate::state::ExecutorState;
 use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderState, Purpose};
 
-/// What one gate run concluded, journaled as `GateDecided` with the verdict, the first failing
-/// check's reason code, and the whole `checks` list (journal spec §9).
+/// What the executor's own account-stream checks concluded: a **partial** gate verdict, journaled
+/// as `GateDecided` with `evaluation: account_stream_only`, the verdict, the first failing check's
+/// reason code, and the whole `checks` list (journal spec §9). It is never the §9.1 evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GateDecision {
+pub struct PartialGateDecision {
     pub verdict: GateVerdict,
     pub checks: Vec<GateCheck>,
     /// Whether the first failing check is one of the holds `AGENTS.md` rule 13 names — agent mode
@@ -31,7 +32,7 @@ pub struct GateDecision {
     held: bool,
 }
 
-impl GateDecision {
+impl PartialGateDecision {
     /// The verdict's journal name: `allow`, `deny`, or `hold`.
     pub(crate) fn verdict_name(&self) -> &'static str {
         match &self.verdict {
@@ -86,11 +87,11 @@ pub(crate) struct Proposal<'s> {
 /// buying power, or opening-session rules (`AGENTS.md` rule 13): none of those is among these
 /// checks, and a risk-reducing order a mode or an `Unknown` order stops is **held**, never
 /// denied.
-pub(crate) fn decide(
+pub(crate) fn account_stream_checks(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
     ports: &Ports<'_>,
-) -> Result<GateDecision, ExecutorError> {
+) -> Result<PartialGateDecision, ExecutorError> {
     let adds = proposal.purpose.adds_risk();
     let mut checks = Vec::new();
     let mut first: Option<(&'static str, bool)> = None;
@@ -133,7 +134,7 @@ pub(crate) fn decide(
             held,
         ),
     };
-    Ok(GateDecision {
+    Ok(PartialGateDecision {
         verdict,
         checks,
         held,
@@ -150,8 +151,7 @@ fn account_failure(state: AccountState, adds: bool) -> Option<(&'static str, boo
 }
 
 /// The agent's mode (§7.4). A risk-increasing order is denied by any mode stricter than `normal`;
-/// a risk-reducing one is only ever held, and only by `paused` or `stopped`. A flatten is the kill
-/// switch's own sell and is exempt from the mode it applied (§5.5).
+/// a risk-reducing one is only ever held, and only by `paused` or `stopped`.
 fn mode_failure(
     state: &ExecutorState,
     proposal: &Proposal<'_>,
@@ -166,7 +166,7 @@ fn mode_failure(
     };
     if adds {
         Some((reason, false))
-    } else if mode >= Mode::Paused && proposal.purpose != Purpose::Flatten {
+    } else if mode >= Mode::Paused {
         Some((reason, true))
     } else {
         None

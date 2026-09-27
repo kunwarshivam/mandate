@@ -148,26 +148,13 @@ pub(crate) fn described(
     match status_mapping(&order.status) {
         Err(_) => unmapped(batch, &id)?,
         Ok(StatusMapping::Unchanged) => {
-            let mut pairs = vec![
-                ("client_order_id", text(id.as_str())),
-                ("state", text(state_name(current))),
-            ];
-            pairs.extend(status);
-            batch.journal("OrderStateChanged", None, pairs)?;
+            transition(batch, &id, current, status)?;
         }
         Ok(StatusMapping::AcceptedFlaggedRestricted) => {
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
         Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
-        Ok(StatusMapping::Becomes(to)) if to == current => {
-            let mut pairs = vec![
-                ("client_order_id", text(id.as_str())),
-                ("state", text(state_name(current))),
-            ];
-            pairs.extend(status);
-            batch.journal("OrderStateChanged", None, pairs)?;
-        }
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {

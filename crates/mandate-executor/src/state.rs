@@ -3,14 +3,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_num::{Price, Qty, SignedQty, Usd};
-use mandate_time::Date;
+use mandate_num::{Qty, SignedQty, Usd};
 
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody,
-    MarketObservation, Mode, Order, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval,
-    WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
+    Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -34,9 +32,9 @@ pub(crate) fn restriction_for(subject: &str) -> String {
 ///
 /// Every field is private and every collection is ordered (ES-21). The folded position of each
 /// followed stream lives here and is re-derived by replay, so nothing durable exists outside the
-/// journal and a restart cannot mistake an old event for a new one. Three fields are the running
-/// process's own and are never folded: the writer epoch, the latest tick, and the quotes the shell
-/// observed, none of which a replay could know or needs.
+/// journal and a restart cannot mistake an old event for a new one. Two fields are the running
+/// process's own and are never folded: the writer epoch and the latest tick, neither of which a
+/// replay could know or needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorState {
     pub(crate) scope: AccountScope,
@@ -72,9 +70,7 @@ pub struct ExecutorState {
     pub(crate) simulated_fees: Usd,
     pub(crate) cash_flow: Usd,
     pub(crate) fill_notional: Usd,
-    pub(crate) trading_day: Option<Date>,
     pub(crate) now: Option<RiskClock>,
-    pub(crate) quotes: BTreeMap<InstrumentId, Vec<MarketObservation>>,
 }
 
 /// What the fold knows about one order beyond [`Order`]: the exact request, so a resubmission
@@ -87,7 +83,6 @@ pub(crate) struct OrderDetail {
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
     pub(crate) broker_filled: Option<Qty>,
-    pub(crate) limit: Option<Price>,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -174,9 +169,7 @@ impl ExecutorState {
             simulated_fees: Usd::ZERO,
             cash_flow: Usd::ZERO,
             fill_notional: Usd::ZERO,
-            trading_day: None,
             now: None,
-            quotes: BTreeMap::new(),
         }
     }
 
