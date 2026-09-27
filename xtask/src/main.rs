@@ -216,7 +216,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
-        "mutants" => mutants(Path::new(".")),
+        "mutants" => mutants(Path::new("."), base_ref().as_deref()),
         "fast" => {
             for part in FAST_JOB {
                 ci(part)?;
@@ -1000,8 +1000,8 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`. A
 /// crate whose tests are still pending runs the gate as well (DEC-137 amends DEC-83): there a
 /// missed mutant in a stub body is named and skipped, and every other one still fails.
-fn mutants(root: &Path) -> Result<()> {
-    let Some(base) = base_ref_in(root) else {
+fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
+    let Some(base) = base else {
         eprintln!("    mutants: HEAD is the base; nothing to check");
         return Ok(());
     };
@@ -2201,20 +2201,13 @@ fn tokens(src: &str) -> Vec<(Token, usize)> {
 /// The commit a change is compared against. An all-zero `MANDATE_BASE_REF` is what a forge sends
 /// for a branch's first push, meaning there is no base.
 fn base_ref() -> Option<String> {
-    base_ref_in(Path::new("."))
-}
-
-/// The same, in a given repository, so a fixture repository can drive a whole job (DEC-139). The
-/// environment override is the process's, as CI sets it; a fixture reaches the merge-base path by
-/// carrying its own `origin/main`.
-fn base_ref_in(root: &Path) -> Option<String> {
     if let Ok(base) = env::var("MANDATE_BASE_REF")
         && !base.is_empty()
     {
         return (!base.chars().all(|c| c == '0')).then_some(base);
     }
-    let merge_base = output_in(root, "git", &["merge-base", "HEAD", "origin/main"]).ok()?;
-    let head = output_in(root, "git", &["rev-parse", "HEAD"]).ok()?;
+    let merge_base = output("git", &["merge-base", "HEAD", "origin/main"]).ok()?;
+    let head = output("git", &["rev-parse", "HEAD"]).ok()?;
     let merge_base = merge_base.trim().to_string();
     (merge_base != head.trim()).then_some(merge_base)
 }
@@ -2316,12 +2309,12 @@ mod tests {
     use anyhow::{Context, Result};
 
     use super::{
-        MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths,
+        MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, ci,
         classify, contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        is_pending_marker, is_stub_function, listed_mutant_counts, live_test_counts,
-        mutant_verdicts, mutants, mutants_outcome, names_a_stub, output_in, pending_problems,
-        pending_tests, plain_comment_lines, repo_root, test_binary, test_outcomes,
-        unjudged_mutants, verdicts,
+        has_pending_tests, is_pending_marker, is_stub_function, listed_mutant_counts,
+        live_test_counts, mutant_verdicts, mutants, mutants_outcome, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, repo_root, test_binary,
+        test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -2823,7 +2816,7 @@ mod tests {
                     "}\n",
                 ),
             )?;
-            fixture.write(".gitignore", "/target\n")?;
+            fixture.write(".gitignore", "/target\n/base\n")?;
             fs::copy(
                 repo_root()?.join("rust-toolchain.toml"),
                 fixture.0.join("rust-toolchain.toml"),
@@ -2837,6 +2830,7 @@ mod tests {
                 "git",
                 &["update-ref", "refs/remotes/origin/main", base.trim()],
             )?;
+            fs::write(fixture.0.join("base"), base.trim())?;
             fixture.write(
                 "crates/probe/src/lib.rs",
                 concat!(
@@ -3077,8 +3071,10 @@ mod tests {
     #[test]
     fn the_job_refuses_a_crate_whose_mutants_no_live_test_would_judge() -> Result<()> {
         let fx = Fixture::gated("mutants-job")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
 
-        let refused = mutants(&fx.0).expect_err(
+        let refused = mutants(&fx.0, Some(base)).expect_err(
             "the gate refuses `probe`: it has mutants and no live test, so a run would report them \
              caught while nothing ran",
         );
@@ -3094,11 +3090,38 @@ mod tests {
             "#[test]\nfn the_code_names_the_refusal() {\n                 assert_eq!(probe::code(true), \"refused\");\n                 assert_eq!(probe::code(false), \"accepted\");\n}\n",
         )?;
         fx.commit()?;
-        mutants(&fx.0).context(
+        mutants(&fx.0, Some(base)).context(
             "with one live test over `code`, the same diff passes: the pre-flight is precise, not a \
              refusal of every crate whose tests are pending",
         )?;
+        assert!(
+            mutants(&fx.0, None).is_ok(),
+            "with no base there is no diff to judge, so the job has nothing to do"
+        );
         Ok(())
+    }
+
+    /// A pending marker anywhere in a crate is what makes a stub body exempt, so the gate must read
+    /// each crate's own files and no other's.
+    #[test]
+    fn a_crates_pending_tests_are_its_own() -> Result<()> {
+        let fx = Fixture::gated("pending-tests")?;
+        assert!(
+            has_pending_tests(&fx.0, "crates/probe")?,
+            "`probe`'s only test is marked pending"
+        );
+        assert!(
+            !has_pending_tests(&fx.0, "crates/covered")?,
+            "`covered`'s test runs, and `probe`'s marker is not its own"
+        );
+        Ok(())
+    }
+
+    /// The job dispatch refuses a name it does not know, rather than reporting a job it never ran.
+    #[test]
+    fn an_unknown_ci_job_is_refused() {
+        let unknown = ci("no-such-job").expect_err("an unknown job name is an error");
+        assert!(unknown.to_string().contains("unknown CI job"), "{unknown}");
     }
 
     /// `cargo mutants --list --json`, trimmed to the one member the gate reads. Two crates have
