@@ -13,10 +13,11 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
-use crate::payload::text;
+use crate::payload::{int, text};
 use crate::state::{EVERY_AGENT, restriction_for};
 use crate::types::{
-    BrokerFill, BrokerOrder, BrokerRequest, EventId, Mode, OrderState, StatusMapping,
+    AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
+    Mode, OrderState, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -376,8 +377,13 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
             vec![("fill_id", text(fill.fill_id.0.clone()))],
         )?;
         batch.journal("FillApplied", None, pairs)?;
-        every_agent(batch, Mode::ExitsOnly, &restriction_for(EXTERNAL))?;
-        batch.notify(ingested, "external_activity");
+        every_agent_alerted(
+            batch,
+            Mode::ExitsOnly,
+            &restriction_for(EXTERNAL),
+            ingested,
+            "external_activity",
+        )?;
         return Ok(());
     };
     pairs.push(("client_order_id", text(id.as_str())));
@@ -411,12 +417,18 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
     Ok(())
 }
 
-/// A restriction on every agent of the account, originated here rather than copied.
-pub(crate) fn every_agent(
+/// Every agent of the account to `mode` under `restriction`, and the owner alerted about
+/// `subject` under `key`, in one call: the `*` restriction reaches an agent the executor has not
+/// yet seen (DEC-133 item 39), and the alert cannot be split from it (§7.1, §7.3). Originated here
+/// rather than copied. The alert carries the subject event's id and a message key only
+/// (`AGENTS.md` rule 6).
+pub(crate) fn every_agent_alerted(
     batch: &mut Batch<'_, '_>,
     mode: Mode,
     restriction: &str,
-) -> Result<EventId, ExecutorError> {
+    subject: EventId,
+    key: &'static str,
+) -> Result<(), ExecutorError> {
     batch.journal(
         "AgentModeApplied",
         None,
@@ -426,7 +438,9 @@ pub(crate) fn every_agent(
             ("restriction", text(restriction)),
             ("originated", Value::Bool(true)),
         ],
-    )
+    )?;
+    batch.notify(subject, key);
+    Ok(())
 }
 
 /// The subject external activity is recorded and acknowledged under (§7.1).
@@ -510,6 +524,143 @@ fn simulated_fee(
         pairs.push((fee_name(fee.kind), text(fee.usd.to_string())));
     }
     batch.journal("FeesCharged", None, pairs)?;
+    Ok(())
+}
+
+/// An account snapshot the broker pushed: journaled without the account number or id, which the
+/// type has nowhere to hold (journal spec §6.4), and read against §7.3's first row.
+pub(crate) fn account(
+    batch: &mut Batch<'_, '_>,
+    account: &BrokerAccount,
+) -> Result<(), ExecutorError> {
+    batch.journal(
+        "AccountStateObserved",
+        None,
+        vec![
+            ("status", text(account.status.clone())),
+            ("crypto_status", text(account.crypto_status.clone())),
+            ("trading_blocked", Value::Bool(account.trading_blocked)),
+            ("account_blocked", Value::Bool(account.account_blocked)),
+            (
+                "trade_suspended_by_user",
+                Value::Bool(account.trade_suspended_by_user),
+            ),
+            ("multiplier", int(u64::from(account.multiplier))?),
+            ("equity", text(account.equity.to_string())),
+            ("cash", text(account.cash.to_string())),
+            ("buying_power", text(account.buying_power.to_string())),
+            (
+                "non_marginable_buying_power",
+                text(account.non_marginable_buying_power.to_string()),
+            ),
+            ("accrued_fees", text(account.accrued_fees.to_string())),
+        ],
+    )?;
+    let blocked = account.status != "ACTIVE"
+        || account.trading_blocked
+        || account.account_blocked
+        || account.trade_suspended_by_user;
+    if blocked {
+        restrict(batch, Restriction::Blocked, "account_trading_blocked")?;
+    }
+    Ok(())
+}
+
+/// The two restrictions §7.3 detects. There is no variant for an active account, so a restriction
+/// can never be written as `active`, which the fold refuses.
+#[derive(Debug, Clone, Copy)]
+enum Restriction {
+    ClosingOnly,
+    Blocked,
+}
+
+impl Restriction {
+    fn state(self) -> AccountState {
+        match self {
+            Self::ClosingOnly => AccountState::ClosingOnly,
+            Self::Blocked => AccountState::Blocked,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::ClosingOnly => "closing_only",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    /// §7.3's agent effect: closing only restricts every agent to exits, and a blocked account
+    /// pauses them.
+    fn mode(self) -> Mode {
+        match self {
+            Self::ClosingOnly => Mode::ExitsOnly,
+            Self::Blocked => Mode::Paused,
+        }
+    }
+}
+
+/// Stores a detected restriction as account state and applies its agent effect to every agent
+/// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
+/// answer says whether this one was new.
+fn restrict(
+    batch: &mut Batch<'_, '_>,
+    restriction: Restriction,
+    reason: &'static str,
+) -> Result<bool, ExecutorError> {
+    if batch.view.account_state >= restriction.state() {
+        return Ok(false);
+    }
+    let changed = batch.journal(
+        "AccountRestrictionChanged",
+        None,
+        vec![
+            ("restriction", text(restriction.name())),
+            ("reason_code", text(reason)),
+        ],
+    )?;
+    every_agent_alerted(batch, restriction.mode(), reason, changed, reason)?;
+    Ok(true)
+}
+
+/// A reject the broker answered with. Journaled with its status, code and message; an order of
+/// ours it names is `Rejected`, which releases its reservation. The account is restricted to
+/// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
+/// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
+/// 403 counting, a named order's included. A reject naming an id we do not know counts toward
+/// that run and is nothing more. The account is asked for again once, when the run restricts it,
+/// not at every 403 after.
+pub(crate) fn reject(
+    batch: &mut Batch<'_, '_>,
+    reject: &BrokerReject,
+) -> Result<(), ExecutorError> {
+    let mut pairs = vec![
+        ("http_status", int(u64::from(reject.http_status))?),
+        ("message", text(reject.message.clone())),
+    ];
+    if let Some(raw) = &reject.client_order_id {
+        pairs.push(("client_order_id", text(raw.clone())));
+    }
+    if let Some(code) = &reject.code {
+        pairs.push(("code", text(code.clone())));
+    }
+    batch.journal("RejectObserved", None, pairs)?;
+    if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
+        let extra = reject
+            .code
+            .iter()
+            .map(|code| ("reject_code", text(code.clone())))
+            .collect();
+        transition(batch, &id, OrderState::Rejected, extra)?;
+    }
+    let message = reject.message.to_ascii_lowercase();
+    let closing_only = message.contains("closing") || message.contains("restricted");
+    let threshold = batch.view.consecutive_403s >= batch.ports.config.restriction_403_threshold;
+    if (closing_only || threshold)
+        && restrict(batch, Restriction::ClosingOnly, "account_restricted")?
+        && threshold
+    {
+        batch.broker(BrokerRequest::GetAccount);
+    }
     Ok(())
 }
 

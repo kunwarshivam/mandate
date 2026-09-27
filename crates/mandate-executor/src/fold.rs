@@ -8,9 +8,10 @@ use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, qty, required_text,
+    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    required_text, usd,
 };
-use crate::state::{ExecutorState, IntentOutcome, IntentRecord, OrderDetail};
+use crate::state::{ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail};
 use crate::types::{
     AccountState, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order, OrderState,
     OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
@@ -93,12 +94,23 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "FeesCharged" | "ExternalActivityIngested" => Ok(()),
+        "FeesCharged" => fees_charged(state, payload),
+        "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
                 "blocked" => AccountState::Blocked,
                 _ => return Err(refused("restriction")),
+            };
+            state.consecutive_403s = 0;
+            Ok(())
+        }
+        "AccountStateObserved" => account_observed(state, payload),
+        "RejectObserved" => {
+            state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
+                state.consecutive_403s.saturating_add(1)
+            } else {
+                0
             };
             Ok(())
         }
@@ -106,11 +118,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     }
 }
 
-/// Cash and fee balances, corporate actions, the account snapshot, rejects, reconciliation's
-/// records, the owner acknowledgment, the trading and risk days, protection and the kill switch
-/// (trading-domain spec §5.4 to §5.7, §6, §7.3, §10, §11): the later slices of this stack. Until
-/// the cash slice folds the balances, a `FeesCharged` and an `ExternalActivityIngested` fold as
-/// records only: nothing this crate reads yet depends on either.
+/// Corporate actions, reconciliation's records and snapshot, conduct breaches, recorded broker
+/// exchanges, the owner acknowledgment, the trading and risk days, protection and the kill switch
+/// (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this stack. An
+/// `ExternalActivityIngested` folds as a record only: the restriction it causes is its own
+/// `AgentModeApplied`.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
@@ -453,12 +465,15 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     }
     let instrument = instrument(payload)?;
     let quantity = qty(payload, "qty_gross")?;
-    let signed = match side_of(required_text(payload, "side")?)? {
-        Side::Buy => SignedQty::from(quantity),
-        Side::Sell => SignedQty::from(quantity).negated(),
+    let notional =
+        quantity.notional(optional_price(payload, "price")?.ok_or_else(|| refused("price"))?)?;
+    let (signed, cash) = match side_of(required_text(payload, "side")?)? {
+        Side::Buy => (SignedQty::from(quantity), notional.negated()),
+        Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
+    state.cash_flow = state.cash_flow.checked_add(cash)?;
     if let Some(order) = optional_text(payload, "client_order_id")
         .and_then(|raw| ClientOrderId::parse(raw).ok())
         .and_then(|id| state.orders.get_mut(&id))
@@ -526,6 +541,56 @@ fn replacement(
         ..original.clone()
     };
     state.orders.insert(id.clone(), linked);
+    Ok(())
+}
+
+/// The broker's account as last reported (trading-domain spec §7.2, §7.3). The model's cash is
+/// moved from this base by every fill since, which is what buying power and the cash comparison
+/// start from (§11). Its state reads §7.3's first row: any blocking flag, or a status other than
+/// `ACTIVE`, is `blocked`. `crypto_status` is journaled and not folded until the crypto row of §7.3
+/// is (the backlog carries it). An account missing `non_marginable_buying_power` or
+/// `accrued_fees` is incomplete, and buying power is `None` for it rather than guessed.
+fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let buying_power = usd(payload, "buying_power")?;
+    let non_marginable = optional_usd(payload, "non_marginable_buying_power")?;
+    let accrued = optional_usd(payload, "accrued_fees")?;
+    let blocked = required_text(payload, "status")? != "ACTIVE"
+        || flag(payload, "trading_blocked")
+        || flag(payload, "account_blocked")
+        || flag(payload, "trade_suspended_by_user");
+    state.observed = Some(ObservedAccount {
+        state: if blocked {
+            AccountState::Blocked
+        } else {
+            AccountState::Active
+        },
+        multiplier: optional_int(payload, "multiplier")
+            .and_then(|multiplier| u32::try_from(multiplier).ok())
+            .unwrap_or(1),
+        equity: usd(payload, "equity")?,
+        cash: usd(payload, "cash")?,
+        buying_power,
+        non_marginable_buying_power: non_marginable.unwrap_or(buying_power),
+        accrued_fees: accrued.unwrap_or(Usd::ZERO),
+        complete: non_marginable.is_some() && accrued.is_some(),
+    });
+    state.cash_flow = Usd::ZERO;
+    Ok(())
+}
+
+/// Paper's simulated fee accrues in its `(family, day)` bucket, which buying power charges at
+/// `round(bucket, 2, ceiling)` as `mandate-accounting` charges it (trading-domain spec §6.2, §7.2,
+/// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
+/// unposted, are the cash slice's; until then they fold as records only.
+fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if flag(payload, "simulated") {
+        let bucket = (
+            required_text(payload, "family")?.to_owned(),
+            required_text(payload, "day")?.to_owned(),
+        );
+        let accrued = state.simulated_fees.entry(bucket).or_insert(Usd::ZERO);
+        *accrued = accrued.checked_add(usd(payload, "accrued")?)?;
+    }
     Ok(())
 }
 
@@ -601,7 +666,6 @@ mod tests {
         }
     }
 
-    /// An original that held no reservation passes none: the new order gets no zero entry.
     #[test]
     fn a_replacement_passes_on_only_a_reservation_that_was_held() -> Result<(), ExecutorError> {
         let mut state = ExecutorState::new(AccountScope {
@@ -663,6 +727,317 @@ mod tests {
             state.reservations.is_empty(),
             "no reservation was held, so none, not a zero, is passed on: {:?}",
             state.reservations
+        );
+        Ok(())
+    }
+}
+
+/// Buying power over the journal (trading-domain spec §6.2, §7.2, §10, DEC-104), driven by the
+/// events the executor writes and read back, with `mandate-accounting`'s own `Account` as the
+/// independent oracle for the arithmetic.
+#[cfg(test)]
+mod buying_power_tests {
+    use mandate_accounting::{
+        Account, AccountType, AssetClass, Config, CryptoFees, EquityFees, Execution,
+        Input as AccountingInput, InstrumentId, Record, Reservations, Side, TafCapBasis,
+    };
+    use mandate_canon::Value;
+    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, Usd};
+    use mandate_time::{Date, NewYorkTime, TradingCalendar, new_york_instant};
+
+    use super::fold;
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object, text};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AccountState, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
+    };
+
+    /// One paper account stream, folded event by event.
+    struct Stream {
+        state: ExecutorState,
+        seq: u64,
+    }
+
+    impl Stream {
+        fn opened() -> Result<Self, ExecutorError> {
+            let mut stream = Self {
+                state: ExecutorState::new(AccountScope {
+                    account: AccountRef("acct-1".to_owned()),
+                    workspace: WorkspaceId("ws1".to_owned()),
+                }),
+                seq: 0,
+            };
+            stream.seq = 1;
+            let event = stream.event(
+                "StreamOpened",
+                object(vec![("environment", text("paper"))])?,
+            );
+            fold(&mut stream.state, &event)?;
+            Ok(stream)
+        }
+
+        fn event(&self, event_type: &str, payload: Value) -> FoldedEvent {
+            FoldedEvent {
+                stream: self.state.account_stream(),
+                seq: Seq(self.seq),
+                event_id: EventId(format!("e-{}", self.seq)),
+                event_type: event_type.to_owned(),
+                causation_id: None,
+                payload,
+            }
+        }
+
+        fn fold(
+            &mut self,
+            event_type: &str,
+            mut pairs: Vec<(&str, Value)>,
+        ) -> Result<(), ExecutorError> {
+            self.seq = self.seq.saturating_add(1);
+            pairs.push(("risk_clock", clock(RiskClock::from_secs(10))?));
+            let event = self.event(event_type, object(pairs)?);
+            fold(&mut self.state, &event)
+        }
+    }
+
+    fn usd(raw: &str) -> Result<Usd, ExecutorError> {
+        Ok(Usd::parse(raw)?)
+    }
+
+    fn account(cash: &str, buying_power: &str) -> Vec<(&'static str, Value)> {
+        vec![
+            ("status", text("ACTIVE")),
+            ("crypto_status", text("ACTIVE")),
+            ("trading_blocked", Value::Bool(false)),
+            ("account_blocked", Value::Bool(false)),
+            ("trade_suspended_by_user", Value::Bool(false)),
+            ("equity", text(cash)),
+            ("cash", text(cash)),
+            ("buying_power", text(buying_power)),
+            ("non_marginable_buying_power", text(buying_power)),
+            ("accrued_fees", text("0")),
+        ]
+    }
+
+    fn fill(id: &str, side: &str, qty: &str, price: &str) -> Vec<(&'static str, Value)> {
+        vec![
+            ("fill_id", text(id)),
+            ("instrument", text("AAPL")),
+            ("side", text(side)),
+            ("qty_gross", text(qty)),
+            ("price", text(price)),
+        ]
+    }
+
+    fn fee(day: &str, accrued: &str, simulated: bool) -> Vec<(&'static str, Value)> {
+        vec![
+            ("family", text("equities")),
+            ("day", text(day)),
+            ("accrued", text(accrued)),
+            ("charged", text("0")),
+            ("simulated", Value::Bool(simulated)),
+        ]
+    }
+
+    #[test]
+    fn buying_power_moves_by_quantity_times_price_and_restarts_at_each_report()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        assert_eq!(
+            stream.state.buying_power(),
+            None,
+            "before the broker reports an account there is no buying power, never a guess"
+        );
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        assert_eq!(stream.state.buying_power(), Some(usd("1000")?));
+        stream.fold("FillApplied", fill("f-1", "buy", "2", "100"))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("800")?),
+            "a buy of 2 at 100 lowers it by 200, never raises it (rule 3)"
+        );
+        stream.fold("FillApplied", fill("f-2", "sell", "1", "110"))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("910")?),
+            "an Alpaca account is a margin account (§7.2), so a sell's unsettled proceeds count"
+        );
+        stream.fold("AccountStateObserved", account("950", "5000"))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("950")?),
+            "a later report is the new base: the fills before it are in the broker's cash"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_fill_with_no_price_is_refused_never_priced_at_zero() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        let mut unpriced = fill("f-1", "buy", "2", "100");
+        unpriced.retain(|(key, _)| *key != "price");
+        assert!(
+            stream.fold("FillApplied", unpriced).is_err(),
+            "a fill without a price has no cash effect the fold could know"
+        );
+        assert_eq!(stream.state.buying_power(), Some(usd("1000")?));
+        Ok(())
+    }
+
+    #[test]
+    fn an_incomplete_report_or_an_overflow_gives_no_buying_power() -> Result<(), ExecutorError> {
+        for missing in ["non_marginable_buying_power", "accrued_fees"] {
+            let mut stream = Stream::opened()?;
+            let mut report = account("1000", "5000");
+            report.retain(|(key, _)| *key != missing);
+            stream.fold("AccountStateObserved", report)?;
+            assert_eq!(
+                stream.state.buying_power(),
+                None,
+                "a report without `{missing}` fails closed, never defaulting to the richer value"
+            );
+        }
+        let mut stream = Stream::opened()?;
+        stream.fold(
+            "AccountStateObserved",
+            account(
+                "50000000000000000000000000000",
+                "50000000000000000000000000000",
+            ),
+        )?;
+        stream.state.cash_flow = usd("50000000000000000000000000000")?;
+        assert_eq!(
+            stream.state.buying_power(),
+            None,
+            "an overflow is no buying power, never zero or a wrapped figure"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn simulated_fees_are_charged_per_family_and_day_at_the_ceiling_cent()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        stream.fold("FeesCharged", fee("2026-09-22", "0.0471", true))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("999.95")?),
+            "round(0.0471, 2, ceiling) is 0.05 (§7.2, DEC-104)"
+        );
+        stream.fold("FeesCharged", fee("2026-09-22", "0.0001", true))?;
+        stream.fold("FeesCharged", fee("2026-09-23", "0.001", true))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("999.94")?),
+            "each (family, day) bucket is rounded on its own: 0.05 for 0.0472, and 0.01 for 0.001"
+        );
+        stream.fold("FeesCharged", fee("2026-09-23", "5", false))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("999.94")?),
+            "a broker fee is the cash slice's and is not subtracted here"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_blocking_flag_folds_the_observed_account_as_blocked() -> Result<(), ExecutorError> {
+        for flag in [
+            "trading_blocked",
+            "account_blocked",
+            "trade_suspended_by_user",
+        ] {
+            let mut stream = Stream::opened()?;
+            let mut report = account("1000", "5000");
+            for pair in &mut report {
+                if pair.0 == flag {
+                    pair.1 = Value::Bool(true);
+                }
+            }
+            stream.fold("AccountStateObserved", report)?;
+            assert_eq!(
+                stream
+                    .state
+                    .observed_account()
+                    .map(|observed| observed.state),
+                Some(AccountState::Blocked),
+                "§7.3 row 1: `{flag}` alone is a blocked account, whatever the status says"
+            );
+        }
+        Ok(())
+    }
+
+    /// The fee configuration of the trading-domain reference cases (`test_default`).
+    fn config() -> Result<Config, ExecutorError> {
+        let date = |raw: &str| Date::parse(raw).map_err(ExecutorError::from);
+        Ok(Config {
+            equities: EquityFees {
+                sec_rate: FeeRate::parse("0.00003")?,
+                taf_per_share: FeePerShare::parse("0.0002")?,
+                taf_cap: FeeCap::parse("9.79")?,
+                taf_cap_basis: TafCapBasis::PerExecution,
+                cat_per_share: FeePerShare::parse("0.00001")?,
+            },
+            crypto: CryptoFees {
+                maker: Bps::parse("15")?,
+                taker: Bps::parse("25")?,
+            },
+            calendar: TradingCalendar::new(
+                date("2026-09-01")?,
+                date("2026-12-31")?,
+                [date("2026-11-26")?, date("2026-12-25")?],
+                [date("2026-10-12")?, date("2026-11-11")?],
+            )?,
+        })
+    }
+
+    #[test]
+    fn the_executors_buying_power_agrees_with_the_accounts_own() -> Result<(), ExecutorError> {
+        let config = config()?;
+        let mut ledger = Account::opening(AccountType::Margin, usd("1000")?, Vec::new());
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "1000000"))?;
+        for (id, side, qty, price, day) in [
+            ("f-1", Side::Buy, "2", "100", "2026-09-22"),
+            ("f-2", Side::Sell, "1", "110", "2026-09-22"),
+            ("f-3", Side::Buy, "1", "50", "2026-09-23"),
+        ] {
+            let trade_date = Date::parse(day)?;
+            let applied = ledger.apply(
+                &AccountingInput::Fill(Execution {
+                    fill_id: id.to_owned(),
+                    client_order_id: None,
+                    instrument: InstrumentId::new("AAPL")?,
+                    asset_class: AssetClass::UsEquity,
+                    side,
+                    qty_gross: Qty::parse(qty)?,
+                    price: Price::parse(price)?,
+                    liquidity: None,
+                    executed_at: new_york_instant(trade_date, NewYorkTime::new(12, 0)?)?,
+                }),
+                &config,
+            )?;
+            let Record::Fill { fees, .. } = &applied.record else {
+                return Err(ExecutorError::Unimplemented { story: "E7-3" });
+            };
+            let accrued = fees
+                .iter()
+                .try_fold(Usd::ZERO, |total, fee| total.checked_add(fee.usd))?;
+            ledger = applied.account;
+            let named = match side {
+                Side::Buy => "buy",
+                Side::Sell => "sell",
+            };
+            stream.fold("FillApplied", fill(id, named, qty, price))?;
+            stream.fold("FeesCharged", fee(day, &accrued.to_string(), true))?;
+        }
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(ledger.buying_power(Reservations::NONE)?),
+            "the same fills and fees give the executor the figure `mandate-accounting` gives, one \
+             ceiling cent per (family, day) bucket included"
         );
         Ok(())
     }

@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_num::{Qty, SignedQty, Usd};
+use mandate_num::{Qty, Rounding, SignedQty, Usd};
 
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
@@ -52,6 +52,8 @@ pub struct ExecutorState {
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
+    pub(crate) cash_flow: Usd,
+    pub(crate) simulated_fees: BTreeMap<(String, String), Usd>,
     pub(crate) mismatched: BTreeSet<InstrumentId>,
     pub(crate) checkpoint: Option<ActivityCursor>,
     pub(crate) reconciled_through: Option<Seq>,
@@ -117,6 +119,8 @@ pub struct ObservedAccount {
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
     pub accrued_fees: Usd,
+    /// Whether the report carried every field buying power reads.
+    pub(crate) complete: bool,
 }
 
 impl ExecutorState {
@@ -142,6 +146,8 @@ impl ExecutorState {
             account_state: AccountState::Active,
             consecutive_403s: 0,
             observed: None,
+            cash_flow: Usd::ZERO,
+            simulated_fees: BTreeMap::new(),
             mismatched: BTreeSet::new(),
             checkpoint: None,
             reconciled_through: None,
@@ -276,12 +282,40 @@ impl ExecutorState {
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
     ///
-    /// The model is the broker's last reported cash moved by every fill since, less unposted fees,
-    /// paper's simulated ones included (§10, R-22: paper must not look flatter than live). `None`
-    /// until the broker has reported an account, or if the arithmetic overflows: no buying power
-    /// is ever guessed.
+    /// The model is §7.2's margin row, since an Alpaca account is always a margin account: the
+    /// broker's last reported cash moved by every fill since (a buy lowers it by quantity × price,
+    /// and a sell's proceeds count, unsettled or not), less paper's simulated fees charged per
+    /// `(family, day)` bucket at `round(bucket, 2, ceiling)` (§6.2, §10, DEC-104). The cash slice
+    /// adds the broker's own unposted fees. `None` until the broker has reported a complete
+    /// account, or if the arithmetic overflows: no buying power is ever guessed.
+    ///
+    /// It stays `pub` because this crate's integration tests, a separate crate, read it. Until the
+    /// cash slice (slice 6) subtracts the broker's unposted fees, nothing may read it for a
+    /// decision: the backlog row "Blocks the gate port reading `buying_power`" says so, and the gate
+    /// port that would read it is not wired.
     pub fn buying_power(&self) -> Option<Usd> {
-        None
+        let observed = self
+            .observed
+            .as_ref()
+            .filter(|observed| observed.complete)?;
+        let fees = self
+            .simulated_fees
+            .values()
+            .try_fold(Usd::ZERO, |total, bucket| {
+                total.checked_add(bucket.round(2, Rounding::Ceiling)?)
+            })
+            .ok()?;
+        let model = observed
+            .cash
+            .checked_add(self.cash_flow)
+            .and_then(|cash| cash.checked_sub(fees))
+            .ok()?;
+        let reserved = self
+            .reservations
+            .values()
+            .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
+            .ok()?;
+        model.min(observed.buying_power).checked_sub(reserved).ok()
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner
@@ -460,6 +494,7 @@ mod tests {
             buying_power: Usd::parse("1").ok()?,
             non_marginable_buying_power: Usd::parse("1").ok()?,
             accrued_fees: Usd::ZERO,
+            complete: true,
         });
         state.mismatched.insert(instrument);
         state.checkpoint = Some(ActivityCursor("cursor-9".to_owned()));
