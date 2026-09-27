@@ -375,6 +375,11 @@ proptest! {
     /// different price in each, and the oracle below, which values the sell at 100 a share, would
     /// then reject correct trims: at 851 dollars over 8 shares the right trim is one share, and
     /// the oracle wants at least 101 dollars of it.
+    ///
+    /// The band is `rebalance_band × cap`, **not** `rebalance_band × target`: mandate §5.5 says a
+    /// position trims when `MV − factor × cap ≥ rebalance_band × cap`, so the band is 0.05 × 1500 =
+    /// 75 whatever the factor. Scaling it with the target made the oracle demand a trim at 8 shares
+    /// and factor 0.5, where 50 over the 750 target is inside the 75 band and no trim is correct.
     #[test]
     #[ignore = "pending E6-4"]
     fn a_trim_never_sells_below_the_target(
@@ -384,7 +389,7 @@ proptest! {
         let price_per_share = 100_u32;
         let held_dollars = held_shares * price_per_share;
         let mut s = Scenario::allowing();
-        s.mandate = common::mandate_with(common::two_scaling_rungs());
+        s.mandate = common::mandate_with(common::two_trimming_rungs());
         s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
         s.risk.size_factor = common::ratio(factor);
         s.agent.positions.insert(asset(INSTRUMENT_2), qty(&held_shares.to_string()));
@@ -402,7 +407,7 @@ proptest! {
             "0.5" => cap_is_min_of_1500_and_point_two_times_10000 / 2,
             _ => cap_is_min_of_1500_and_point_two_times_10000 / 5,
         };
-        let band_dollars = target_dollars / 20;
+        let band_dollars = cap_is_min_of_1500_and_point_two_times_10000 / 20;
         let over = held_dollars.saturating_sub(target_dollars);
 
         if over >= band_dollars && over > 0 {

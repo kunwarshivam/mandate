@@ -148,6 +148,12 @@ fn limits_from(base: &str, risk: &Value) -> RiskLimits {
         )
         .unwrap_or(u32::MAX),
         rebalance_band: sizing_rebalance_band(base),
+        breach_confirm_s: u32::try_from(
+            risk.get("breach_confirm_s")
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| panic!("breach_confirm_s is a number")),
+        )
+        .unwrap_or(u32::MAX),
         drawdown_ladder: ladder,
     }
 }
@@ -629,47 +635,152 @@ fn reason_code(text: &str, case_id: &str) -> ReasonCode {
         .unwrap_or_else(|| panic!("{case_id} names {text}, which no ReasonCode variant spells"))
 }
 
-macro_rules! gate_case {
-    ($name:ident, $id:literal) => {
-        #[test]
-        #[ignore = "pending E6-3"]
-        fn $name() {
-            run_gate($id);
-        }
-    };
+/// `MC-G01`: Per-instrument cap exceeded (current + working + proposed).
+///
+/// This case and the nineteen below it are plain functions rather than a macro expansion, because
+/// `cargo xtask ci pending` scans the source for `fn <name>()` beside an `#[ignore = "pending …"]`
+/// literal: a macro-generated test is invisible to it, so review round 5 found these twenty
+/// ungated, and one of them passing on the stubs would not have failed CI. Written out, every one
+/// is gated like the rest; stream J did the same in #141. The scan's blind spot itself is in the
+/// tracker's known issues, for a separate xtask change.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g01() {
+    run_gate("MC-G01");
 }
 
-macro_rules! flatten_case {
-    ($name:ident, $id:literal) => {
-        #[test]
-        #[ignore = "pending E6-3"]
-        fn $name() {
-            run_flatten($id);
-        }
-    };
+/// `MC-G02`: Per-instrument cap met exactly.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g02() {
+    run_gate("MC-G02");
 }
 
-gate_case!(mc_g01, "MC-G01");
-gate_case!(mc_g02, "MC-G02");
-gate_case!(mc_g03, "MC-G03");
-gate_case!(mc_g04, "MC-G04");
-gate_case!(mc_g05, "MC-G05");
-gate_case!(mc_g06, "MC-G06");
-gate_case!(mc_g07, "MC-G07");
-gate_case!(mc_g08, "MC-G08");
-gate_case!(mc_g09, "MC-G09");
-gate_case!(mc_g10, "MC-G10");
-gate_case!(mc_g11, "MC-G11");
-gate_case!(mc_g12, "MC-G12");
-gate_case!(mc_g13, "MC-G13");
-gate_case!(mc_g14, "MC-G14");
-gate_case!(mc_g15, "MC-G15");
-gate_case!(mc_g16, "MC-G16");
+/// `MC-G03`: Order size above max_order_usd.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g03() {
+    run_gate("MC-G03");
+}
 
-flatten_case!(mc_f01, "MC-F01");
-flatten_case!(mc_f02, "MC-F02");
-flatten_case!(mc_f03, "MC-F03");
-flatten_case!(mc_f04, "MC-F04");
+/// `MC-G04`: Agent gross exposure exceeded (working order in another instrument counts).
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g04() {
+    run_gate("MC-G04");
+}
+
+/// `MC-G05`: Fraction cap binds when equity falls.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g05() {
+    run_gate("MC-G05");
+}
+
+/// `MC-G06`: Equity below max_gross_exposure_usd caps gross exposure.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g06() {
+    run_gate("MC-G06");
+}
+
+/// `MC-G07`: Orders per day reached.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g07() {
+    run_gate("MC-G07");
+}
+
+/// `MC-G08`: Exit is allowed when orders per day is at the limit.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g08() {
+    run_gate("MC-G08");
+}
+
+/// `MC-G09`: Risk exit larger than max_order_usd is allowed.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g09() {
+    run_gate("MC-G09");
+}
+
+/// `MC-G10`: Owner exit is allowed by every mandate limit.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g10() {
+    run_gate("MC-G10");
+}
+
+/// `MC-G11`: Re-entry cooldown after an exit fill.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g11() {
+    run_gate("MC-G11");
+}
+
+/// `MC-G12`: Re-entry cooldown applies across the instrument group.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g12() {
+    run_gate("MC-G12");
+}
+
+/// `MC-G13`: Re-entry allowed once the cooldown has passed.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g13() {
+    run_gate("MC-G13");
+}
+
+/// `MC-G14`: Opening an instrument outside the working universe.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g14() {
+    run_gate("MC-G14");
+}
+
+/// `MC-G15`: Exiting an instrument outside the working universe is allowed.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g15() {
+    run_gate("MC-G15");
+}
+
+/// `MC-G16`: An empty working universe denies every opening.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_g16() {
+    run_gate("MC-G16");
+}
+
+/// `MC-F01`: Automated flatten on a shared account touches only that agent.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_f01() {
+    run_flatten("MC-F01");
+}
+
+/// `MC-F02`: Automated flatten after hours: equity sells wait; crypto sells go now.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_f02() {
+    run_flatten("MC-F02");
+}
+
+/// `MC-F03`: Owner kill switch after hours with the bid confirmed: sells now, never below the floor price.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_f03() {
+    run_flatten("MC-F03");
+}
+
+/// `MC-F04`: Owner kill switch after hours without confirmation: equity sells wait.
+#[test]
+#[ignore = "pending E6-3"]
+fn mc_f04() {
+    run_flatten("MC-F04");
+}
 
 /// The harness passes a case's `purpose` through rather than re-deriving it (DEC-129 item 19).
 ///

@@ -101,6 +101,7 @@ pub fn two_stock_swing_limits() -> RiskLimits {
         max_orders_per_day: 50,
         reentry_cooldown_s: 3600,
         rebalance_band: fraction("0.05"),
+        breach_confirm_s: 60,
         drawdown_ladder: vec![
             Rung {
                 index: 0,
@@ -148,6 +149,21 @@ pub fn two_scaling_rungs() -> RiskLimits {
             scale_action: Some(ScaleAction::LimitBuys),
         },
     ];
+    limits
+}
+
+/// The same two rungs under `scale_action: trim_to_target`, which is the only action that trims.
+///
+/// Mandate §5.5 and the brief give `trim_proposals` to `trim_to_target` alone: under `limit_buys`
+/// the size factor only multiplies the order builder's targets, and a correct gate proposes no
+/// trim at all. Review round 5 found every trim test driving a `limit_buys` ladder, so all five
+/// would have failed on a correct gate; `a_limit_buys_rung_never_trims` is the paired negative.
+#[must_use]
+pub fn two_trimming_rungs() -> RiskLimits {
+    let mut limits = two_scaling_rungs();
+    for rung in &mut limits.drawdown_ladder {
+        rung.scale_action = Some(ScaleAction::TrimToTarget);
+    }
     limits
 }
 

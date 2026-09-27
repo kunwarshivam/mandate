@@ -777,14 +777,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     through contradicts rule 9 and risks doubling a position whose true size is unknown. So the
     fuzz's `Hold` codes are `agent_paused`, `agent_stopped`, and `unknown_order_in_flight`, while
     `account_trading_blocked` stays the only denial a reducing purpose may carry.
-23. **A real halt and a presumed halt are different denials, under different codes.** §4.4 says a
-    halted or paused instrument takes "no new opening orders", while a stale quote or dropped status
-    feed is "treated as a presumed halt: no market orders; exits use marketable limit orders". The
-    two effects differ, so the codes do: a halt is `instrument_halted` at check 3 and bars the
-    opening outright; a presumed halt leaves openings alone and refuses only market orders, which is
-    check 4's `market_order_not_allowed`. Collapsing them onto one code would either bar openings a
-    presumed halt permits or permit market orders a halt does not.
-24. **A `removed_instrument` restriction is the working-universe check, not a separate one.** An
+23. **A `removed_instrument` restriction is the working-universe check, not a separate one.** An
     instrument becomes `removed_instrument` exactly when it leaves the working universe (mandate
     §2.3's state machine and §5.9), so the same fold produces both and check 2 reports it as
     `not_in_working_universe`, which is registered. That matters because `removed_instrument`
@@ -793,6 +786,13 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     and is registered: it is evaluated at check 5 with mark freshness, which is where §9.1 puts it.
     `ref.py`'s `order_decision` returns the restriction's own name because it models the two as one
     parameter; the split by code is this crate's, and it changes no verdict.
+24. **A real halt and a presumed halt are different denials, under different codes.** §4.4 says a
+    halted or paused instrument takes "no new opening orders", while a stale quote or dropped status
+    feed is "treated as a presumed halt: no market orders; exits use marketable limit orders". The
+    two effects differ, so the codes do: a halt is `instrument_halted` at check 3 and bars the
+    opening outright; a presumed halt leaves openings alone and refuses only market orders, which is
+    check 4's `market_order_not_allowed`. Collapsing them onto one code would either bar openings a
+    presumed halt permits or permit market orders a halt does not.
 28. **A presumed halt re-prices an exit; it never denies one.** §4.4's sentence has two clauses —
     "no market orders; exits use marketable limit orders" — and §5.6 lists presumed halts among the
     conditions where an exit that must be marketable takes the exit price ladder. So a risk or
@@ -800,8 +800,8 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     with `Pacing::marketable_limit_required` set, while a market order to open or increase is
     denied at check 4 as `market_order_not_allowed`. Reading only the first clause would put an
     instrument restriction in front of a risk exit, which MI-1 names outright. Numbered 28 rather
-    than beside 23 because renumbering accepted items invalidates references already written
-    against them; this list's 23 is the DEC row's 24 and its 24 is the DEC row's 23.
+    than beside 24 because renumbering accepted items invalidates references already written
+    against them.
 
 ## Decisions needed
 

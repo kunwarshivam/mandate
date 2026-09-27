@@ -109,6 +109,10 @@ pub struct RiskLimits {
     pub max_orders_per_day: u32,
     pub reentry_cooldown_s: u32,
     pub rebalance_band: Fraction,
+    /// How long a rung must have been active before a `trim_to_target` trim is proposed
+    /// (mandate §5.5, and §5.5's rung table). A mandate limit like the rest, read from the
+    /// mandate rather than configured, so a rung that has only just breached cannot trim.
+    pub breach_confirm_s: u32,
     pub drawdown_ladder: Vec<Rung>,
 }
 

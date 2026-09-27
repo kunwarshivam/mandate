@@ -545,7 +545,7 @@ fn a_flatten_sells_the_sub_ledger_not_the_brokers_position() {
 #[ignore = "pending E6-4"]
 fn two_active_rungs_multiply() {
     let mut s = Scenario::allowing();
-    s.mandate = mandate_with(common::two_scaling_rungs());
+    s.mandate = mandate_with(common::two_trimming_rungs());
     s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
     s.risk.size_factor = common::ratio("0.2");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
@@ -584,7 +584,7 @@ fn two_active_rungs_multiply() {
 #[ignore = "pending E6-4"]
 fn a_trim_rounds_up_to_the_increment() {
     let mut s = Scenario::allowing();
-    s.mandate = mandate_with(common::two_scaling_rungs());
+    s.mandate = mandate_with(common::two_trimming_rungs());
     s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
     s.risk.size_factor = common::ratio("0.5");
     s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
@@ -621,7 +621,7 @@ fn a_trim_waits_for_the_regular_session() {
     let scenario_at = |when: &str| {
         let mut s = Scenario::allowing();
         s.now = at(when);
-        s.mandate = mandate_with(common::two_scaling_rungs());
+        s.mandate = mandate_with(common::two_trimming_rungs());
         s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
         s.risk.size_factor = common::ratio("0.5");
         s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
@@ -669,7 +669,7 @@ fn no_trim_while_holding() {
     let trims_for = |goal: mandate_risk::spec_types::GoalState| {
         let mut s = Scenario::allowing();
         s.mandate = mandate_risk::ValidatedMandate::from_validated_parts(
-            common::two_scaling_rungs(),
+            common::two_trimming_rungs(),
             goal,
             false,
             false,
@@ -702,6 +702,98 @@ fn no_trim_while_holding() {
         Some(qty("3")),
         "the same position under a Running goal is trimmed, so the emptiness above is DEC-65 and \
          not an unimplemented trim"
+    );
+}
+
+/// Only `scale_action: trim_to_target` trims; `limit_buys` never proposes a sell.
+///
+/// Mandate §5.5 gives the trim to `trim_to_target` alone — under `limit_buys` the size factor only
+/// multiplies the order builder's targets, which is stream H's job, not the gate's. Both arms,
+/// because an empty result is also what an unimplemented `trim_proposals` returns: the identical
+/// position under `trim_to_target` is trimmed, so the action is the only thing that differs.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_limit_buys_rung_never_trims() {
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+    let trims_under = |limits: mandate_risk::spec_types::RiskLimits| {
+        let mut s = Scenario::allowing();
+        s.mandate = mandate_with(limits);
+        s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+        s.risk.size_factor = common::ratio("0.5");
+        s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+        s.agent
+            .market_values
+            .insert(asset(INSTRUMENT_2), usd("1000"));
+        mandate_risk::trim_proposals(
+            s.now,
+            &s.config,
+            &s.mandate,
+            &s.risk,
+            &s.agent,
+            &instruments,
+        )
+        .expect("the trims compute")
+    };
+
+    assert!(
+        trims_under(common::two_scaling_rungs()).is_empty(),
+        "a limit_buys rung scales the order builder's targets; it never sells a position down"
+    );
+    assert_eq!(
+        trims_under(common::two_trimming_rungs())
+            .first()
+            .map(|t| t.qty),
+        Some(qty("3")),
+        "the same position under trim_to_target is trimmed, so the emptiness above is the scale \
+         action and not an unimplemented trim"
+    );
+}
+
+/// A rung trims only once it has been active for `breach_confirm_s` (mandate §5.5).
+///
+/// The fixture's `breach_confirm_s` is 60 s, so a rung active for 59 s proposes nothing and the
+/// same rung at 60 s proposes the trim. The boundary is on the allowing side, like every other
+/// limit comparison in this crate (DEC-129 item 15): at exactly `breach_confirm_s` the trim runs.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_rung_trims_only_after_breach_confirm_s() {
+    let mut instruments = BTreeMap::new();
+    instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+    let trims_after = |active_s: u64| {
+        let mut s = Scenario::allowing();
+        s.mandate = mandate_with(common::two_trimming_rungs());
+        assert_eq!(
+            s.mandate.risk().breach_confirm_s,
+            60,
+            "this test's two arms straddle the fixture's breach_confirm_s"
+        );
+        s.risk.active_rungs = [(0_u8, active_s)].into_iter().collect();
+        s.risk.size_factor = common::ratio("0.5");
+        s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+        s.agent
+            .market_values
+            .insert(asset(INSTRUMENT_2), usd("1000"));
+        mandate_risk::trim_proposals(
+            s.now,
+            &s.config,
+            &s.mandate,
+            &s.risk,
+            &s.agent,
+            &instruments,
+        )
+        .expect("the trims compute")
+    };
+
+    assert!(
+        trims_after(59).is_empty(),
+        "a rung that has not held for breach_confirm_s does not trim yet"
+    );
+    assert_eq!(
+        trims_after(60).first().map(|t| t.qty),
+        Some(qty("3")),
+        "at exactly breach_confirm_s the trim runs, so the emptiness above is the confirm window \
+         and not an unimplemented trim"
     );
 }
 
