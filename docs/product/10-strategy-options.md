@@ -389,23 +389,28 @@ owner-input API. The evidence below is unchanged.
 - **Target.** Segments A, C, and D: owners who want to test strategy changes before risking money.
   **Value.** "Test up to three versions of your strategy against each other on the same market, with
   the hypothesis written down before the run, and promote the one you choose."
-- **Shape.** A mandate (the owner's envelope) holds up to about three variants: one live and the
+- **Shape.** A mandate (the owner's envelope) holds at most three variants: one live and the
   others in shadow. Each variant is its own owner-confirmed mandate version that differs only in
   strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants see
-  the same market data and pass the same gate; each keeps a simulated book, and nothing is sent to the
-  broker. Each variant's hypothesis and success criterion are journaled before it runs
+  the same market data and pass the same gate, evaluated against their own simulated account state;
+  each keeps a simulated book, never consumes or holds the live account's buying power, day-trade
+  budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis and success criterion are journaled before it runs
   (pre-registration), so neither the user nor the platform can cherry-pick results afterwards.
 - **Promotion.** Always an owner action that creates a new confirmed mandate version. No automatic
   winner-picking: v1 has no calibration, and the platform does not recommend trades.
 - **Why now.** It extends the roadmap's Phase 3 shadow mode for new mandate versions (E15-4) from one
   candidate to a small set, on the journal, gate, and simulated execution that are already built or
   in review.
-- **For.** It turns the pre-registered track record that cannot be backfilled into a per-user habit:
-  the journal is hash-chained, so "we recorded it before it happened" is provable (E5-1 to E5-4).
+- **For.** It turns the pre-registered track record into a per-user habit. The hash chain makes the
+  journal tamper-evident, and its stream heads are anchored externally with an RFC 3161 timestamp
+  every 5 minutes and at each end of day ([journal spec §10](../specs/journal.md#10-anchoring)), so
+  "we recorded it before it happened" is provable to within the anchor interval, and best-effort
+  while timestamping is unavailable (E5-1 to E5-4).
   Stateless competitors would have to rebuild their core to match it, and the accumulated experiment
   history is a switching cost.
-- **Against.** Model cost grows with the number of variants, hence the cap of about three. Shadow
-  fills are simulated and must be labelled as simulated, like paper. It is scope growth.
+- **Against.** Model cost grows with the number of variants, hence the cap of three. Shadow fills are
+  simulated and must be labelled as simulated, like paper, and any comparison between variants is
+  labelled as hypothetical performance. It is scope growth.
 - **Plan impact.** The v1 build is unchanged. Story E15-5 is scheduled right after the Phase 1 exit
   (M5 to M7, one autonomous agent on Alpaca paper), pulled forward from roadmap Phase 3.
 - **Regulatory exposure.** Flag: comparisons of simulated results are hypothetical performance
@@ -492,6 +497,9 @@ product and the channel, and is the only credible opening to option 4 later.
 
 **Keep as planned:** option 15 (M11), and option 0's forward-paper experiment, run now.
 
+**Scheduled after the Phase 1 exit: option 16** (mandate experiments, story E15-5), with its paper
+experiment run now ([DEC-145](../project/04-decision-log.md#decisions) rules out a loss guarantee).
+
 **Deprioritize:** option 9 (CTA exposure, leverage), option 12 (out of scope), option 4 as a lead
 motion (revisit after option 6 has outside users).
 
@@ -521,8 +529,10 @@ to E12 and E8. None needs a new story yet.
 The P0 differentiators above are what a user sees. What a competitor would find hardest to copy, in
 the founder's order (2026-09-27):
 
-1. **The provable, pre-registered track record.** Every decision is journaled before acting, and a
-   monthly breach record is published; neither can be backfilled.
+1. **The provable, pre-registered track record.** Every decision is journaled before acting, and its
+   existence at a time is provable to within the anchor interval (journal spec §10). A monthly breach
+   record for each owner is proposed (story E12-4, not yet planned); publishing it beyond the owner
+   needs counsel's answer and the founder (DEC-79).
 2. **Mandate experiments** (option 16), which make the first one per-user.
 3. **Distribution through brokers** as a supervision layer (option 4).
 4. **Owning the conformance standard:** the journal spec and verifier (options 5 and 6).
