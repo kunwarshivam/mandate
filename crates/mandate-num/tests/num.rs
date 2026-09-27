@@ -3,8 +3,9 @@
 //! independent of the library's 256-bit sign-and-magnitude arithmetic.
 
 use mandate_num::{
-    Adverse, Bps, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice, NumError, Price,
-    Qty, Ratio, Rounding, ShareIncrement, SignedQty, SplitRatio, TickRule, Usd,
+    Adverse, Bps, Conviction, CostBasis, FeeCap, FeePerShare, FeeRate, Fraction, MarkPrice,
+    NumError, Price, Qty, Ratio, Rounding, ShareIncrement, Signed, SignedQty, SizeFraction,
+    SplitRatio, TickRule, Unit, Usd, UsdExact,
 };
 use proptest::prelude::*;
 
@@ -1594,4 +1595,390 @@ proptest! {
             );
         }
     }
+}
+
+/// Half-even rounding of `numerator ÷ denominator` to an integer, written out here so the sizing
+/// oracle below never borrows the library's own rounding.
+fn round_half_even_i128(numerator: i128, denominator: i128) -> i128 {
+    let quotient = numerator.div_euclid(denominator);
+    let remainder = numerator.rem_euclid(denominator);
+    let twice = remainder * 2;
+    if twice > denominator || (twice == denominator && quotient % 2 != 0) {
+        quotient + 1
+    } else {
+        quotient
+    }
+}
+
+/// DEC-130 item 7: the four newtypes carry exactly the places their fields need, and refuse text
+/// that is not canonical, out of range, or too precise.
+///
+/// Live rather than pending: the constructors are the grammar checks every other E6-2 test needs to
+/// build a value at all (DEC-128 item 22), so they carry logic today and a test that passed on a
+/// stub would pin nothing (DEC-110).
+#[test]
+fn the_sizing_newtypes_hold_the_places_their_fields_need() {
+    assert_eq!(
+        SizeFraction::parse("0.000000000001").map(|v| v.to_string()),
+        Ok("0.000000000001".to_owned())
+    );
+    assert_eq!(
+        SizeFraction::parse("0.0000000000001"),
+        Err(NumError::TooPrecise)
+    );
+    assert_eq!(
+        SizeFraction::parse("1").map(|v| v.to_string()),
+        Ok("1".to_owned())
+    );
+    assert_eq!(
+        SizeFraction::parse("1.000000000001"),
+        Err(NumError::AboveOne)
+    );
+    assert_eq!(SizeFraction::parse("-0.5"), Err(NumError::Negative));
+    assert_eq!(SizeFraction::parse("0.50"), Err(NumError::NotCanonical));
+    assert!(SizeFraction::ZERO.is_zero());
+    assert!(!SizeFraction::ONE.is_zero(), "one is not zero");
+    assert!(SizeFraction::parse("0.5").is_ok_and(|v| !v.is_zero()));
+    assert_eq!(SizeFraction::ONE.to_string(), "1");
+
+    assert_eq!(
+        Unit::parse("0.999999999999999999").map(|v| v.to_string()),
+        Ok("0.999999999999999999".to_owned())
+    );
+    assert_eq!(
+        Unit::parse("0.9999999999999999999"),
+        Err(NumError::TooPrecise)
+    );
+    assert_eq!(Unit::parse("1.1"), Err(NumError::AboveOne));
+    assert_eq!(Unit::parse("-0.1"), Err(NumError::Negative));
+    assert!(Unit::ZERO.is_zero());
+    assert!(!Unit::ONE.is_zero(), "one is not zero");
+    assert!(Unit::parse("0.5").is_ok_and(|v| !v.is_zero()));
+    assert_eq!(Unit::parse("1").map(|v| v.to_string()), Ok("1".to_owned()));
+    assert_eq!(Unit::parse("0").map(|v| v.to_string()), Ok("0".to_owned()));
+    assert_eq!(Unit::ONE.to_string(), "1");
+
+    assert_eq!(
+        Conviction::parse("-1").map(|v| v.to_string()),
+        Ok("-1".to_owned())
+    );
+    assert_eq!(
+        Conviction::parse("1").map(|v| v.to_string()),
+        Ok("1".to_owned()),
+        "the conviction interval is closed at both ends"
+    );
+    assert_eq!(
+        Conviction::parse("-1.000000000000000001"),
+        Err(NumError::AboveOne)
+    );
+    assert_eq!(
+        Conviction::parse("1.000000000000000001"),
+        Err(NumError::AboveOne)
+    );
+    assert_eq!(
+        Conviction::parse("-0.0000000000000000001"),
+        Err(NumError::TooPrecise)
+    );
+    assert!(Conviction::parse("-0.5").is_ok_and(Conviction::is_negative));
+    assert!(!Conviction::ZERO.is_negative());
+    assert_eq!(Conviction::MINUS_ONE.to_string(), "-1");
+    assert_eq!(
+        Conviction::parse("-0.5").map(|v| v.negated().to_string()),
+        Ok("0.5".to_owned())
+    );
+    assert_eq!(
+        Conviction::ZERO.negated().to_string(),
+        "0",
+        "negating zero keeps it unsigned"
+    );
+
+    assert_eq!(
+        Signed::parse("-123.456789012345678").map(|v| v.to_string()),
+        Ok("-123.456789012345678".to_owned())
+    );
+    assert_eq!(
+        Signed::parse("-0.1234567890123456789"),
+        Err(NumError::TooPrecise)
+    );
+    assert!(Signed::parse("-0.01").is_ok_and(Signed::is_negative));
+    assert!(!Signed::ZERO.is_negative());
+}
+
+/// DEC-130 item 7: `UsdExact` carries a signed amount wider than `Usd`, prints it canonically, and
+/// compares **by value** rather than by representation, which is the trap DEC-128 item 24 records
+/// for `SchemaDec`.
+///
+/// Live for the same reason as the newtypes above: every sizing expectation is written as its text.
+#[test]
+fn usd_exact_is_canonical_text_and_compares_by_value() {
+    for canonical in [
+        "0",
+        "1500",
+        "-645",
+        "8.7",
+        "0.000000000000000000000000000000001",
+    ] {
+        assert_eq!(
+            UsdExact::parse(canonical).map(|v| v.to_string()),
+            Ok(canonical.to_owned()),
+            "`{canonical}` round-trips"
+        );
+    }
+    for off in ["1500.0", "0.50", "-0", "00", ".5", "1e3", ""] {
+        assert!(
+            UsdExact::parse(off).is_err(),
+            "`{off}` is not canonical decimal text"
+        );
+    }
+    assert_eq!(UsdExact::zero().to_string(), "0");
+    assert_eq!(UsdExact::one().to_string(), "1");
+    assert_eq!(
+        UsdExact::of(Usd::parse("699.3").unwrap_or(Usd::ZERO)).to_string(),
+        "699.3"
+    );
+    assert_eq!(
+        UsdExact::of_qty(Qty::parse("0.010025").unwrap_or(Qty::ZERO)).to_string(),
+        "0.010025"
+    );
+    assert_eq!(
+        UsdExact::of_price(Price::parse("99.9").unwrap_or_else(|e| panic!("a price: {e}")))
+            .to_string(),
+        "99.9"
+    );
+    assert_eq!(
+        UsdExact::of_mark(MarkPrice::parse("54990").unwrap_or_else(|e| panic!("a mark: {e}")))
+            .to_string(),
+        "54990"
+    );
+    assert_eq!(
+        UsdExact::of_fee_rate(FeeRate::parse("0.0025").unwrap_or_else(|e| panic!("a rate: {e}")))
+            .to_string(),
+        "0.0025"
+    );
+    let one = UsdExact::parse("1").unwrap_or_else(|e| panic!("1 is exact: {e}"));
+    let also_one = UsdExact::of(Usd::parse("1").unwrap_or(Usd::ZERO));
+    assert_eq!(one, also_one, "one written two ways is one amount");
+    assert_ne!(one, UsdExact::zero());
+}
+
+/// §8.3 step 1, DEC-130 item 7: each weighted ratio is **one** half-even rounding of **one** exact
+/// quotient at 12 places, against an `i128` oracle that scales the terms and divides once.
+///
+/// Half-up would differ on a tie, and summing rounded terms would differ on almost everything; the
+/// oracle catches both because it never rounds until the end.
+#[test]
+#[ignore = "pending E6-2"]
+fn a_weighted_ratio_is_one_rounding_of_the_exact_quotient() {
+    let weights = ["0.6", "0.4"];
+    let confidences = ["0.65", "0.6499999999999"];
+    let convictions = ["1", "1"];
+    let parsed_weights: Vec<SizeFraction> = weights
+        .iter()
+        .map(|w| SizeFraction::parse(w).unwrap_or_else(|e| panic!("`{w}`: {e}")))
+        .collect();
+    let score_terms: Vec<(SizeFraction, Unit)> = weights
+        .iter()
+        .zip(confidences)
+        .map(|(w, c)| {
+            (
+                SizeFraction::parse(w).unwrap_or_else(|e| panic!("`{w}`: {e}")),
+                Unit::parse(c).unwrap_or_else(|e| panic!("`{c}`: {e}")),
+            )
+        })
+        .collect();
+    let score = Unit::weighted_ratio(&score_terms, &parsed_weights)
+        .unwrap_or_else(|e| panic!("the score is one rounding, not {e}"));
+    let numerator = 6_000_000_000_000i128 * 650_000_000_000_000_000
+        + 4_000_000_000_000i128 * 649_999_999_999_900_000_000 / 1_000;
+    let denominator = 10_000_000_000_000i128;
+    let expected = round_half_even_i128(
+        numerator,
+        denominator * 1_000_000_000_000_000_000 / 1_000_000_000_000,
+    );
+    assert_eq!(
+        score.to_string(),
+        text(expected, 12),
+        "s = round₁₂(Σ wᵢ·confᵢ ÷ W)"
+    );
+
+    let conviction_terms: Vec<(SizeFraction, Conviction, Unit)> = weights
+        .iter()
+        .zip(convictions)
+        .zip(confidences)
+        .map(|((w, v), c)| {
+            (
+                SizeFraction::parse(w).unwrap_or_else(|e| panic!("`{w}`: {e}")),
+                Conviction::parse(v).unwrap_or_else(|e| panic!("`{v}`: {e}")),
+                Unit::parse(c).unwrap_or_else(|e| panic!("`{c}`: {e}")),
+            )
+        })
+        .collect();
+    let exit = Conviction::weighted_ratio(&conviction_terms, &[], &parsed_weights)
+        .unwrap_or_else(|e| panic!("the exit conviction is one rounding, not {e}"));
+    assert_eq!(
+        exit.to_string(),
+        "0.65",
+        "MC-B13's c, rounded once at 12 places"
+    );
+
+    let tie = [(
+        SizeFraction::parse("1").unwrap_or(SizeFraction::ONE),
+        Unit::parse("0.0000000000005").unwrap_or(Unit::ZERO),
+    )];
+    let rounded = Unit::weighted_ratio(&tie, &[SizeFraction::ONE])
+        .unwrap_or_else(|e| panic!("a tie rounds, not {e}"));
+    assert_eq!(
+        rounded.to_string(),
+        "0",
+        "half-even sends an exact half to the even neighbour, where half-up would give 0.000000000001"
+    );
+
+    let missing = Conviction::weighted_ratio(&[], &[SizeFraction::ONE], &[SizeFraction::ONE])
+        .unwrap_or_else(|e| panic!("a fully missing set is a ratio, not {e}"));
+    assert_eq!(missing.to_string(), "-1", "every model missing is b = −1");
+    assert_eq!(
+        Conviction::weighted_ratio(&[], &[], &[]).map_err(|e| e.code()),
+        Err("division_by_zero"),
+        "no configured model has no denominator"
+    );
+}
+
+/// DEC-130 item 7 and the digit budget: the wide sizing chain is exact or an error, never an
+/// approximation, and the one truncation goes to the increment the caller names.
+#[test]
+#[ignore = "pending E6-2"]
+fn the_builder_arithmetic_is_exact_or_an_error() {
+    let cap = UsdExact::of(Usd::parse("10000").unwrap_or(Usd::ZERO));
+    let fraction = SizeFraction::parse("0.2").unwrap_or(SizeFraction::ZERO);
+    assert_eq!(
+        cap.times_size_fraction(fraction)
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("an exact product, not {e}")),
+        "2000"
+    );
+    let conviction = Conviction::parse("0.472").unwrap_or(Conviction::ZERO);
+    assert_eq!(
+        UsdExact::parse("1500")
+            .and_then(|c| c.times_conviction(conviction))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("an exact product, not {e}")),
+        "708"
+    );
+    let delta = UsdExact::parse("708")
+        .and_then(|target| target.checked_sub(UsdExact::parse("699.3")?))
+        .unwrap_or_else(|e| panic!("an exact difference, not {e}"));
+    assert_eq!(
+        delta.to_string(),
+        "8.7",
+        "MC-B18's Delta, exact at one place"
+    );
+    assert!(
+        delta
+            .is_positive()
+            .unwrap_or_else(|e| panic!("a sign, not {e}")),
+        "8.7 is positive"
+    );
+    assert!(
+        UsdExact::parse("-645")
+            .and_then(|d| d.is_positive())
+            .map(|positive| !positive)
+            .unwrap_or_else(|e| panic!("a sign, not {e}")),
+        "MC-B16's Delta is not"
+    );
+    assert_eq!(
+        UsdExact::parse("708")
+            .and_then(|a| a.min(UsdExact::parse("1000")?))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a minimum, not {e}")),
+        "708"
+    );
+    assert!(
+        UsdExact::parse("8.7")
+            .and_then(|delta| delta.is_below(UsdExact::parse("75")?))
+            .unwrap_or_else(|e| panic!("a comparison, not {e}")),
+        "8.7 is inside MC-B18's 75 band"
+    );
+    let shares = UsdExact::parse("708")
+        .and_then(|budget| budget.shares_at(Price::parse("100")?, Qty::parse("1")?))
+        .unwrap_or_else(|e| panic!("a truncation, not {e}"));
+    assert_eq!(
+        shares.to_string(),
+        "7",
+        "708 at 100 buys 7 whole shares, never 7.08"
+    );
+    let fine = UsdExact::parse("1000")
+        .and_then(|budget| budget.shares_at(Price::parse("55000")?, Qty::parse("0.000001")?))
+        .unwrap_or_else(|e| panic!("a truncation, not {e}"));
+    assert_eq!(
+        fine.to_string(),
+        "0.018181",
+        "the increment is a decimal, not a nine-place grid"
+    );
+    assert_eq!(
+        UsdExact::parse("1000")
+            .and_then(|b| b.shares_at(Price::parse("100")?, Qty::parse("0")?))
+            .map_err(|e| e.code()),
+        Err("not_positive"),
+        "a zero increment is refused rather than guessed"
+    );
+    let received = UsdExact::parse("0.01")
+        .and_then(|remaining| {
+            remaining.truncated_quotient(UsdExact::parse("0.9975")?, Qty::parse("0.000001")?)
+        })
+        .unwrap_or_else(|e| panic!("a truncation, not {e}"));
+    assert_eq!(
+        received.to_string(),
+        "0.010025",
+        "MC-B28's quantity received per unit"
+    );
+    assert_eq!(
+        UsdExact::parse("708")
+            .and_then(|v| v.round(2, Rounding::HalfEven))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a rounding, not {e}")),
+        "708"
+    );
+    assert_eq!(
+        UsdExact::parse("-0.05")
+            .and_then(|headroom| {
+                headroom.truncated_quotient(UsdExact::parse("2000")?, Qty::parse("0.0001")?)
+            })
+            .map(|q| q.to_string())
+            .unwrap_or_else(|e| panic!("a bound below zero is a quantity, not {e}")),
+        "0",
+        "a negative bound is no room at all, and a Qty is non-negative (Decisions item 5); an error \
+         here would refuse the proposal where §8.3 step 5 holds on it"
+    );
+    assert_eq!(
+        UsdExact::parse("-1000")
+            .and_then(|budget| budget.shares_at(Price::parse("100")?, Qty::parse("1")?))
+            .map(|q| q.to_string())
+            .unwrap_or_else(|e| panic!("a negative amount is a quantity, not {e}")),
+        "0",
+        "`shares_at` clamps alike, so the two cannot disagree about which hold a zero band reaches"
+    );
+    assert_eq!(
+        UsdExact::parse("0.015")
+            .and_then(|v| v.round(2, Rounding::HalfEven))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a rounding, not {e}")),
+        "0.02",
+        "`round` rounds in the mode it is given; truncation would give 0.01"
+    );
+    assert_eq!(
+        UsdExact::parse("0.025")
+            .and_then(|v| v.round(2, Rounding::HalfEven))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a rounding, not {e}")),
+        "0.02",
+        "and half-even sends an exact half to the even neighbour, where half-up would give 0.03"
+    );
+    let widest = "1".to_owned() + &"0".repeat(70);
+    assert_eq!(
+        UsdExact::parse(&widest)
+            .and_then(|v| v.checked_mul(UsdExact::parse(&widest)?))
+            .map_err(|e| e.code()),
+        Err("overflow"),
+        "beyond 256 bits the answer is `overflow`, never a wrapped number"
+    );
 }
