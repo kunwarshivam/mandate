@@ -623,7 +623,6 @@ fn a_condition_whose_value_does_not_match_its_field_type_is_refused() {
 /// §6.3, V-018: `unusual_input` is reserved until the input-drift detector ships, so a rule naming
 /// it is refused and the field is never reached.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_rule_using_unusual_input_is_refused() {
     let reserved = policy(
         vec![Rule {
@@ -3074,7 +3073,6 @@ fn the_after_values_a_rule_reads_include_this_order() {
 /// Validating first passes every other test in this suite, because every refusal test uses `Open`
 /// and every reducing-purpose test uses a well-typed policy — the gap the independent review found.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_malformed_rule_set_never_blocks_a_reducing_purpose() {
     let reserved = policy(
         vec![Rule {

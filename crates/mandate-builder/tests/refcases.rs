@@ -845,28 +845,24 @@ fn assert_outcome(id: &str, outcome: &Outcome, expect: &Value) {
 
 /// `MC-A01`: Discretionary exit is AUTO regardless of rules.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a01() {
     autonomy_case("MC-A01");
 }
 
 /// `MC-A02`: Protective order is AUTO.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a02() {
     autonomy_case("MC-A02");
 }
 
 /// `MC-A03`: Risk exit is AUTO.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a03() {
     autonomy_case("MC-A03");
 }
 
 /// `MC-A04`: Owner exit is AUTO.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a04() {
     autonomy_case("MC-A04");
 }
@@ -901,7 +897,6 @@ fn mc_a08() {
 
 /// `MC-A09`: No rule matches: default ask.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a09() {
     autonomy_case("MC-A09");
 }

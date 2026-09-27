@@ -2543,7 +2543,6 @@ fn the_admission_ceiling_is_monotone_in_strictness() {
 /// `two_approver_above_usd`, and one otherwise. The comparison is recomputed here from the
 /// generated numbers.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_approver_count_is_two_exactly_above_the_threshold() {
     check(
         (well_typed_policy(), action_context(), 0i128..=5_000i128),
