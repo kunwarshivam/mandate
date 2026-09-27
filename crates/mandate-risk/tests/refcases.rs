@@ -24,9 +24,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::{Scenario, asset, at, fraction, price, qty, usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
 use mandate_risk::{
-    AgentId, AgentMode, AgentPosition, AssetClass, AssetId, ClientOrderId, FlattenInitiator,
-    FlattenInput, FlattenPricing, Origin, Purpose, ReasonCode, Session, Side, ValidatedMandate,
-    Verdict, WorkingUniverse, agent_flatten, evaluate,
+    AgentId, AgentMode, AgentPosition, AssetClass, AssetId, Check, CheckOutcome, ClientOrderId,
+    FlattenInitiator, FlattenInput, FlattenPricing, Origin, Purpose, ReasonCode, Session, Side,
+    ValidatedMandate, Verdict, WorkingUniverse, agent_flatten, evaluate,
 };
 use serde_json::Value;
 
@@ -330,6 +330,33 @@ fn gate_scenario(id: &str) -> GateCase {
     }
 }
 
+/// The `kind: gate` cases whose `expect` the full gate cannot give, each with the one check outside
+/// `ref.py`'s `gate` subset that decides it and the `computed` keys it stops the gate before
+/// reaching (DEC-150 item 1, amending DEC-129 item 19; the MC-G02 finding on claim #123).
+///
+/// DEC-129 item 19 says a `kind: gate` case pins `ref.py`'s `gate`: the working universe,
+/// concentration, order size, the cooldown, orders per day and gross exposure. This harness drives
+/// the full `evaluate` instead, which is stricter than a case whenever a check outside that subset
+/// fails. `MC-G02` proposes an increase in instrument 2 beside a working opening order in
+/// instrument 2, so trading-domain §5.3 rule 6 (at most one working non-protective order per
+/// instrument per account, check 4) denies it `working_order_limit` before checks 6 and 7 compute
+/// its gross exposure. For a listed case the harness asserts that checks 1 and 2 pass, that the
+/// named check is the only failure and decides the verdict, that the `computed` figures the gate
+/// reached match the case, and that the listed keys were never reached. What the entry gives up is
+/// `MC-G02`'s own `gross` and `gross_limit`. `MC-G04` and `MC-G06` pin gross exposure at check 7
+/// only on a denial, and `MC-G13`, the other allow case that states `gross`, stays pending on
+/// E6-8's stub, so until E6-8 lands no live reference case pins `gross` on an allow path (DEC-150
+/// item 1; `gate.rs`'s in-module tests hold it meanwhile). A listed
+/// case whose full verdict already matches its `expect` fails, so no entry outlives its reason, and
+/// every case is named one by one: a rule such as "skip the verdict when check 2 passes" would also
+/// exempt `MC-G04`, `MC-G06` and `MC-G07`, whose own denials sit at checks 6 and 7.
+const FULL_GATE_ONLY: [(&str, Check, ReasonCode, &[&str]); 1] = [(
+    "MC-G02",
+    Check::OrderConstraints,
+    ReasonCode::WorkingOrderLimit,
+    &["gross", "gross_limit"],
+)];
+
 /// Drives one `kind: gate` case end to end and compares its whole `expect` block.
 fn run_gate(id: &str) {
     let GateCase {
@@ -353,6 +380,41 @@ fn run_gate(id: &str) {
         .get("reason")
         .and_then(Value::as_str)
         .map(|r| reason_code(r, id));
+    if let Some(&(_, check, code, unreached)) = FULL_GATE_ONLY.iter().find(|entry| entry.0 == id) {
+        assert_ne!(
+            (d.verdict, d.reason),
+            (want_verdict, want_reason),
+            "{id}: the full gate now gives the case's own verdict, so its FULL_GATE_ONLY entry has \
+             expired; delete it"
+        );
+        assert_eq!(
+            (d.verdict, d.reason, d.purpose),
+            (Verdict::Deny, Some(code), expected_purpose(&purpose_text)),
+            "{id}: only the check FULL_GATE_ONLY names may decide it"
+        );
+        assert_eq!(
+            d.checks.get(..2),
+            Some(
+                &[
+                    CheckOutcome::Passed(Check::AccountAndMode),
+                    CheckOutcome::Passed(Check::UniverseAndLimits),
+                ][..]
+            ),
+            "{id}: checks 1 and 2, where the case's own limits sit, pass"
+        );
+        let failed: Vec<&CheckOutcome> = d
+            .checks
+            .iter()
+            .filter(|c| matches!(c, CheckOutcome::Failed(..)))
+            .collect();
+        assert_eq!(
+            failed,
+            [&CheckOutcome::Failed(check, code)],
+            "{id}: the named check is the only failure"
+        );
+        compare_computed(id, expect, &d, unreached);
+        return;
+    }
     assert_eq!(
         (d.verdict, d.reason),
         (want_verdict, want_reason),
@@ -365,7 +427,7 @@ fn run_gate(id: &str) {
         "{id}: the gate assigns the purpose the case states"
     );
 
-    compare_computed(id, expect, &d);
+    compare_computed(id, expect, &d, &[]);
 }
 
 /// The `computed` block, which 13 of the 16 G cases carry and which is the case's own arithmetic.
@@ -374,11 +436,23 @@ fn run_gate(id: &str) {
 /// exact failure mode `MC-G05` exists to catch, where the cap binds at 1425 rather than 1500. Every
 /// key the case states is compared; a key the harness cannot yet produce fails as "not interpreted
 /// until <story>" rather than being skipped (DEC-85).
-fn compare_computed(id: &str, expect: &Value, d: &mandate_risk::Decision) {
+///
+/// A key in `unreached` is one the deciding check stops the gate before computing
+/// ([`FULL_GATE_ONLY`]): it is asserted absent rather than compared, so a gate that computed it
+/// anyway, or computed it wrongly, is still caught.
+fn compare_computed(id: &str, expect: &Value, d: &mandate_risk::Decision, unreached: &[&str]) {
     let Some(computed) = expect.get("computed").and_then(Value::as_object) else {
         return;
     };
     for (key, want) in computed {
+        if unreached.contains(&key.as_str()) {
+            assert_eq!(
+                d.computed.get(key.as_str()),
+                None,
+                "{id}: computed.{key} is after the deciding check, so the gate never reached it"
+            );
+            continue;
+        }
         let want_text = match want {
             Value::String(s) => s.clone(),
             Value::Number(n) => n.to_string(),
@@ -650,7 +724,7 @@ fn mc_g01() {
 
 /// `MC-G02`: Per-instrument cap met exactly.
 #[test]
-#[ignore = "pending E6-3"]
+#[ignore = "pending E6-6"]
 fn mc_g02() {
     run_gate("MC-G02");
 }
