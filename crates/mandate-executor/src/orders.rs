@@ -2,7 +2,7 @@
 //! status updates, fills, and silence.
 
 use mandate_accounting::{
-    Account, AccountType, AssetClass, Execution, Input as AccountingInput, Record,
+    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, Record,
 };
 use mandate_canon::Value;
 use mandate_num::{Qty, Usd};
@@ -365,6 +365,10 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
         ("fees", text(fill.fees.to_string())),
         ("trade_date", text(fill.trade_date.to_string())),
     ];
+    let prior = ours
+        .as_ref()
+        .and_then(|id| batch.view.orders.get(id))
+        .map_or(Qty::ZERO, |order| order.filled_qty);
     let Some(id) = ours else {
         let ingested = batch.journal(
             "ExternalActivityIngested",
@@ -383,7 +387,7 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
         "FillApplied"
     };
     batch.journal(kind, None, pairs)?;
-    simulated_fee(batch, fill, &id)?;
+    simulated_fee(batch, fill, &id, prior)?;
     if terminal {
         batch.request_reconciliation();
         return Ok(());
@@ -433,45 +437,89 @@ pub(crate) const EXTERNAL: &str = "external_activity";
 /// own rules from the effective fee configuration and booked `simulated = true`: in P&L and buying
 /// power, and out of the cash comparison. Crypto fees are the broker's own on paper too, so only
 /// equity fills are simulated.
+///
+/// Only a fill attributed to one of our orders books one. §10 does not say whether an
+/// unattributed paper fill (external activity, §7.1) does; the backlog carries that question, and
+/// until it is answered an unattributed fill books no simulated fee.
+///
+/// The fee is keyed as the journal keys every fee (journal spec §6): `family` `equities`, `day` the
+/// fill's New York trade date as the account's calendar derives it, `accrued` at full precision,
+/// and `charged` zero, because a simulated fee is never charged by the broker. The components
+/// travel beside them.
+///
+/// DEC-87's per-order TAF cap is `max(0, cap − TAF already charged on the fill's client order)`.
+/// The order's `prior` filled quantity is replayed first as one earlier execution under the same
+/// client order id, so the account's own TAF rule sees what the order has already been charged:
+/// under `per_order` its cumulative TAF is `min(cap, rate × quantity)` however it was split, and
+/// under `per_execution` the earlier execution changes nothing.
 fn simulated_fee(
     batch: &mut Batch<'_, '_>,
     fill: &BrokerFill,
     id: &ClientOrderId,
+    prior: Qty,
 ) -> Result<(), ExecutorError> {
     let equity =
         batch.ports.instruments.asset_class(&fill.instrument) == Some(AssetClass::UsEquity);
     if batch.view.environment() != Some("paper") || !equity {
         return Ok(());
     }
-    let execution = Execution {
-        fill_id: fill.fill_id.0.clone(),
+    let executed_at = new_york_instant(fill.trade_date, NewYorkTime::new(12, 0)?)?;
+    let execution = |fill_id: String, qty_gross: Qty| Execution {
+        fill_id,
         client_order_id: Some(id.as_str().to_owned()),
         instrument: fill.instrument.clone(),
         asset_class: AssetClass::UsEquity,
         side: fill.side,
-        qty_gross: fill.qty,
+        qty_gross,
         price: fill.price,
         liquidity: None,
-        executed_at: new_york_instant(fill.trade_date, NewYorkTime::new(12, 0)?)?,
+        executed_at,
     };
-    let applied = Account::opening(AccountType::Margin, Usd::ZERO, Vec::new())
-        .apply(&AccountingInput::Fill(execution), batch.ports.fees)?;
-    let Record::Fill { fees, .. } = applied.record else {
+    let fees = batch.ports.fees;
+    let mut account = Account::opening(AccountType::Margin, Usd::ZERO, Vec::new());
+    if !prior.is_zero() {
+        let earlier = execution(format!("{}:earlier", fill.fill_id.0), prior);
+        account = account
+            .apply(&AccountingInput::Fill(earlier), fees)?
+            .account;
+    }
+    let applied = account.apply(
+        &AccountingInput::Fill(execution(fill.fill_id.0.clone(), fill.qty)),
+        fees,
+    )?;
+    let Record::Fill {
+        trade_date: Some(day),
+        fees: components,
+        ..
+    } = applied.record
+    else {
         return Ok(());
     };
-    let accrued = fees
+    let accrued = components
         .iter()
         .try_fold(Usd::ZERO, |total, fee| total.checked_add(fee.usd))?;
-    batch.journal(
-        "FeesCharged",
-        None,
-        vec![
-            ("family", text("regulatory")),
-            ("instrument", text(fill.instrument.as_str())),
-            ("accrued", text(accrued.to_string())),
-            ("charged", text("0")),
-            ("simulated", Value::Bool(true)),
-        ],
-    )?;
+    let mut pairs = vec![
+        ("family", text("equities")),
+        ("day", text(day.to_string())),
+        ("accrued", text(accrued.to_string())),
+        ("charged", text("0")),
+        ("simulated", Value::Bool(true)),
+        ("client_order_id", text(id.as_str())),
+    ];
+    for fee in &components {
+        pairs.push((fee_name(fee.kind), text(fee.usd.to_string())));
+    }
+    batch.journal("FeesCharged", None, pairs)?;
     Ok(())
+}
+
+/// The payload name of one fee component.
+fn fee_name(kind: FeeKind) -> &'static str {
+    match kind {
+        FeeKind::Sec => "sec",
+        FeeKind::Taf => "taf",
+        FeeKind::Cat => "cat",
+        FeeKind::CryptoAsset => "crypto_asset",
+        FeeKind::CryptoUsd => "crypto_usd",
+    }
 }

@@ -462,6 +462,28 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   owns the day fold (protection re-placement at the GTC buffer day, §5.4) must interpret both, move
   them back into `properties::INTERPRETED` with live tests that fail when either arm is stubbed, and
   land before the executor runs across a session boundary (#194 review, round 2).
+- Report a safety-critical function whose only mutants are unviable. `ci mutants` counted the one
+  mutant of `mandate-executor`'s `every_agent` (a body of `Ok(Default::default())`, which does not
+  compile because `EventId` has no `Default`) as unviable, so "0 missed" said nothing about the
+  function that enforces §7.1's `exits_only`. Such a function needs a named live test, and the gate
+  or the review checklist should list every function whose mutants are all unviable, so a reviewer
+  names that test (#196 review, round 1, finding 2).
+- Question for the spec owner: does §10's simulated regulatory fee apply to an **unattributed**
+  paper equity fill (external activity, §7.1)? §10 books paper's regulatory fees in the shadow
+  ledger without distinguishing, and an external fill has no client order for DEC-87's per-order
+  TAF cap. Since #196 the executor books one only for a fill attributed to one of its orders,
+  stated in `orders::simulated_fee`'s doc; booking it too would lower paper buying power, the
+  conservative side (#196 review, round 1, finding 7).
+- Make the pending gate's verdict on `mandate-executor`'s three E7-4 properties reproducible
+  (`protective_sell_quantity_never_exceeds_the_position`,
+  `every_unprotected_interval_has_a_journaled_start_and_end`,
+  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their minimal case fails on its own
+  assertion (the protected lead has no bracket, which is E7-4's), and the gate accepts them only
+  because other generated cases stop at a later E7-3 slice's stub first and put its report in the
+  output. proptest draws a fresh seed per run, so the verdict depends on the seed: the review
+  measured three problems at `6d58c94`, and two local runs there and on the merged head measured
+  none. A fixed seed for pending properties, or a script that stops at E7-4's own entry point,
+  would make it one answer (#196 review, round 1, finding 5).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
