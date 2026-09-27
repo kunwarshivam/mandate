@@ -46,8 +46,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! [`fold_theses`] is still a stub returning [`ResearchError::Unimplemented`] until E17-9's fold
-//! lands (DEC-77, DEC-83); every other entry point is implemented.
+//! [`fold_theses`] is the one stub left, returning [`ResearchError::Unimplemented`] until E17-9's
+//! fold lands in the next PR (DEC-77, DEC-83); every other entry point is implemented.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -467,7 +467,7 @@ pub struct Admission {
 /// admission, and [`ResearchError::TimeOutOfRange`] when `as_of + horizon_s` leaves `UtcNanos`'s
 /// range, so check 2 has no instant to compare with.
 pub fn checks(input: &AdmissionInput<'_>) -> Result<Vec<Check>, ResearchError> {
-    let active = known_instruments(input.universe)?;
+    let (active, _) = known_instruments(input.universe)?;
     let thesis = &input.proposal.thesis;
     let horizon_end = plus_seconds(thesis.output.as_of, thesis.horizon_s)?;
     let verdicts = CheckInputs {
@@ -500,13 +500,7 @@ pub fn admit(input: &AdmissionInput<'_>) -> Result<Admission, ResearchError> {
         .iter()
         .find(|check| check.failed)
         .map(|check| check.reason);
-    let (active, pinned) = match input.universe {
-        WorkingUniverse::Known {
-            instruments,
-            pinned,
-        } => (instruments, *pinned),
-        WorkingUniverse::Unavailable => return Err(ResearchError::UniverseUnavailable),
-    };
+    let (active, pinned) = known_instruments(input.universe)?;
     let proposal = input.proposal;
     let thesis = &proposal.thesis;
     let mut instruments = active.clone();
@@ -518,14 +512,13 @@ pub fn admit(input: &AdmissionInput<'_>) -> Result<Admission, ResearchError> {
         },
         None => {
             instruments.insert(thesis.instrument_id.clone());
-            journal.push(ResearchEvent::UniverseChanged(UniverseChangedEntry {
-                instrument: thesis.instrument_id.clone(),
-                change: UniverseChange::Admitted,
-                reason: UniverseChangeReason::ThesisAdmitted,
-                thesis_id: thesis.thesis_id.clone(),
-                lineage_id: thesis.lineage_id.clone(),
-                universe_size_after: instruments.len(),
-            }));
+            journal.push(universe_changed(
+                &thesis.instrument_id,
+                UniverseChange::Admitted,
+                UniverseChangeReason::ThesisAdmitted,
+                (&thesis.thesis_id, &thesis.lineage_id),
+                instruments.len(),
+            ));
             AdmissionDecision::Admitted {
                 change: AdmissionChange::Admitted,
             }
@@ -549,13 +542,36 @@ pub fn admit(input: &AdmissionInput<'_>) -> Result<Admission, ResearchError> {
     })
 }
 
-/// The members of a universe that has been read; an unread one is an error, never an empty set
-/// (§2.3, DEC-132 item 18).
-fn known_instruments(universe: &WorkingUniverse) -> Result<&BTreeSet<AssetId>, ResearchError> {
+/// The members and the pinned flag of a universe that has been read; an unread one is an error,
+/// never an empty set (§2.3, DEC-132 item 18).
+fn known_instruments(
+    universe: &WorkingUniverse,
+) -> Result<(&BTreeSet<AssetId>, bool), ResearchError> {
     match universe {
-        WorkingUniverse::Known { instruments, .. } => Ok(instruments),
+        WorkingUniverse::Known {
+            instruments,
+            pinned,
+        } => Ok((instruments, *pinned)),
         WorkingUniverse::Unavailable => Err(ResearchError::UniverseUnavailable),
     }
+}
+
+/// One `UniverseChanged` entry (journal spec §9), naming the thesis and lineage it follows from.
+fn universe_changed(
+    instrument: &AssetId,
+    change: UniverseChange,
+    reason: UniverseChangeReason,
+    (thesis_id, lineage_id): (&ThesisId, &LineageId),
+    universe_size_after: usize,
+) -> ResearchEvent {
+    ResearchEvent::UniverseChanged(UniverseChangedEntry {
+        instrument: instrument.clone(),
+        change,
+        reason,
+        thesis_id: thesis_id.clone(),
+        lineage_id: lineage_id.clone(),
+        universe_size_after,
+    })
 }
 
 /// `at + seconds`, or [`ResearchError::TimeOutOfRange`] past `UtcNanos`'s range.
@@ -875,14 +891,13 @@ pub fn expire_theses(
     let mut journal = Vec::new();
     for (entry, reason) in &ended {
         remaining = remaining.saturating_sub(1);
-        journal.push(ResearchEvent::UniverseChanged(UniverseChangedEntry {
-            instrument: entry.instrument.clone(),
-            change: UniverseChange::Removed,
-            reason: *reason,
-            thesis_id: entry.thesis_id.clone(),
-            lineage_id: entry.lineage_id.clone(),
-            universe_size_after: remaining,
-        }));
+        journal.push(universe_changed(
+            &entry.instrument,
+            UniverseChange::Removed,
+            *reason,
+            (&entry.thesis_id, &entry.lineage_id),
+            remaining,
+        ));
     }
     let removed: Vec<AssetId> = ended
         .iter()
