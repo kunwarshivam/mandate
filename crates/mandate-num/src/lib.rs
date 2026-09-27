@@ -324,6 +324,30 @@ impl Price {
         moved.to_decimal(QTY_SCALE).and_then(positive).map(Self)
     }
 
+    /// The price collar's bound (trading-domain spec §9.6): `ask × (1 + x)` for a buy limit and
+    /// `bid × (1 − x)` for a sell limit, each rounded so the constraint gets **stricter**: a buy's
+    /// ceiling truncates down and a sell's floor rounds up, so a rounded bound never admits a price
+    /// the exact comparison would refuse. One rounding, at the 9 places a price holds (spec §2.1).
+    ///
+    /// [`Adverse::Up`] asks for a buy's upper bound and [`Adverse::Down`] for a sell's lower one,
+    /// the same reading of the flag that [`Price::slipped`] uses. `not_positive` when a sell's
+    /// bound reaches zero.
+    pub fn collar_bound(self, x: Fraction, adverse: Adverse) -> Result<Self, NumError> {
+        let amount = self.exact().mul(x.exact())?;
+        let bounded = match adverse {
+            Adverse::Up => self
+                .exact()
+                .add(amount)?
+                .div_toward_zero(Exact::integer(1), QTY_SCALE)?,
+            Adverse::Down => {
+                self.exact()
+                    .sub(amount)?
+                    .div(Exact::integer(1), QTY_SCALE, Rounding::Ceiling)?
+            }
+        };
+        bounded.to_decimal(QTY_SCALE).and_then(positive).map(Self)
+    }
+
     /// The nearest price on `tick`'s grid, moved against the order: down for a buy limit
     /// ([`Adverse::Up`] is the direction slippage moves a buy, so a buy's limit rounds the other
     /// way) and up for a sell limit, which is spec §2.1's rule for limit and stop prices. A price
@@ -522,6 +546,30 @@ impl Usd {
 
     pub fn is_negative(self) -> bool {
         self.0 < Decimal::ZERO
+    }
+
+    /// `self × fraction`, exact: the risk gate's `max_position_fraction × equity` (mandate spec
+    /// §5.3). Exact rather than rounded, because §5.2 compares a limit exactly and a rounded cap
+    /// would admit or refuse an order the comparison itself would not.
+    pub fn times_fraction(self, fraction: Fraction) -> Result<Self, NumError> {
+        self.exact()
+            .mul(fraction.exact())?
+            .to_decimal(FULL_SCALE)
+            .map(Self)
+    }
+
+    /// The absolute value, for Σ |market value| in the §9.3 gross-exposure check.
+    ///
+    /// Built from [`Usd::is_negative`] and [`Usd::negated`] rather than a comparison of its own:
+    /// negating zero yields zero, so a fresh `<` here would carry a boundary mutant no test could
+    /// tell from the real code, and reusing two tested methods leaves none to exclude.
+    #[must_use]
+    pub fn abs(self) -> Self {
+        if self.is_negative() {
+            self.negated()
+        } else {
+            self
+        }
     }
 
     /// `self × rate`, exact.
