@@ -75,6 +75,8 @@ fn every_owned_case_key_is_read() {
 }
 
 /// A family another stream owns fails with that stream's story, so nobody can mistake it for covered.
+/// Family N (`admission`, `lineage`, `thesis_expiry`, `stagger`) left this list when stream J's
+/// harness interpreted it (E17-3, DEC-77 stage 4); its own oracle is in `src/mandate/research.rs`.
 #[test]
 fn a_family_another_stream_owns_fails_with_its_story() {
     let fixture = fixture();
@@ -83,10 +85,6 @@ fn a_family_another_stream_owns_fails_with_its_story() {
         ("agent_flatten", "E6-3"),
         ("builder", "E6-2"),
         ("autonomy", "E6-2"),
-        ("admission", "E17-3"),
-        ("lineage", "E17-3"),
-        ("thesis_expiry", "E17-3"),
-        ("stagger", "E17-3"),
     ];
     let mut seen = 0;
     for (kind, story) in expected {
@@ -104,7 +102,7 @@ fn a_family_another_stream_owns_fails_with_its_story() {
             "{id} (`{kind}`) must name {story}, got: {failure}"
         );
     }
-    assert_eq!(seen, 8, "all eight unowned kinds are dispatched");
+    assert_eq!(seen, 4, "all four unowned kinds are dispatched");
 }
 
 /// A wrong expected value fails its case. On the stubs only the schema family can show this, because
