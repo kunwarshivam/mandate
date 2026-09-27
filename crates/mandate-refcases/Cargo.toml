@@ -15,6 +15,7 @@ mandate-accounting.workspace = true
 mandate-canon.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-spec.workspace = true
 mandate-sim.workspace = true
 mandate-time.workspace = true
 serde_json.workspace = true

@@ -46,6 +46,12 @@ safety_critical = true
 pure = true
 allowed_external = ["sha2", "thiserror"]
 
+[crates.mandate-domain]
+layer = 1
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-journal]
 layer = 2
 safety_critical = true
@@ -58,11 +64,29 @@ safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
 
+[crates.mandate-spec]
+layer = 3
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
 [crates.mandate-refcases]
 layer = "tool"
 safety_critical = true
 pure = false
 allowed_external = ["libtest-mimic", "serde_json", "toml"]
+
+[crates.mandate-risk]
+layer = 4
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
+
+[crates.mandate-research]
+layer = 5
+safety_critical = true
+pure = true
+allowed_external = ["thiserror"]
 
 [crates.mandate-sim]
 layer = 6
