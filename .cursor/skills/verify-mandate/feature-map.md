@@ -312,7 +312,7 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine.
+implementation PRs fill the crate in story by story: E6-3's first two PRs land `evaluate`.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -331,7 +331,9 @@ check still owed.
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
   purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
-  refusal of an opening while a check is owed),
+  refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
+  mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
+  exposure with the account's own 1×),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
@@ -668,17 +670,27 @@ proves each pending test fails on them (DEC-110).
 
 ## Pending tests fail on the stubs
 
-- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110; the story playbook step 8.
-- **Code:** `pending_problems` and `pending_tests` in `xtask/src/main.rs` (markers found on tokens
-  in every tracked or untracked `.rs` file, run in one nextest `--run-ignored ignored-only`).
+- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110, DEC-137; the story playbook
+  step 8. Gap 1 is closed only in part: the gate reads a failure's text, not its cause (E1-3).
+- **Code:** `pending_problems`, `pending_tests`, `STUB_MARKERS`, `names_a_stub` and
+  `generated_pending_markers` in `xtask/src/main.rs` (markers found on tokens in every tracked or
+  untracked `.rs` file, run in one nextest `--run-ignored ignored-only`; each failure must carry
+  its stub's own report, and a marker the scan cannot attach to a named function is a `markers`
+  failure).
 - **Tests:** the `xtask` unit tests (markers in comments, doc comments, strings, raw strings, split
-  across lines; result matching) and a fixture workspace in a temporary git repository in which
-  committed, uncommitted, and untracked pending tests pass on the stubs.
+  across lines; a marker inside a `macro_rules!` body, on a `$`-named function, or on no named
+  function at all; which bodies are stubs; result matching) and a fixture workspace in a temporary
+  git repository in
+  which committed, uncommitted, and untracked pending tests pass on the stubs or fail away from
+  them.
 - **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
 
 ## Repository automation
 
-- **Code:** `xtask`: `xtask/src/main.rs` (every CI job), `xtask/layers.toml` (crate layers and
-  safety-critical policy), `.cargo/mutants.toml` (approved equivalent mutants).
+- **Code:** `xtask`: `xtask/src/main.rs` (every CI job, including `mutants_outcome`,
+  `mutant_verdicts` and `is_stub_function`, which exempt an `Unimplemented` stub body of a crate
+  with pending tests, on a missed-mutant exit status, and nothing else),
+  `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
+  equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
 - **Run:** `cargo xtask check`.

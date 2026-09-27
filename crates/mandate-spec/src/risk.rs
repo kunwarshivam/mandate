@@ -539,10 +539,20 @@ pub struct Confirmation {
 
 impl Confirmation {
     /// Credits `elapsed_s` by the condition at the interval's start, then takes this input's
-    /// condition. True when the limit triggers here.
-    pub fn update(&mut self, breached: bool, elapsed_s: u64, need_s: u32) -> bool {
+    /// condition. `Ok(true)` when the limit triggers here.
+    ///
+    /// # Errors
+    /// A step that cannot be decided is an error, not a silent `false`: the breach clock a rung
+    /// reads cannot be allowed to stand still because the sum did not fit or because E6-4 has not
+    /// been implemented yet (DEC-137).
+    pub fn update(
+        &mut self,
+        breached: bool,
+        elapsed_s: u64,
+        need_s: u32,
+    ) -> Result<bool, SpecError> {
         let _ = (breached, elapsed_s, need_s);
-        false
+        Err(SpecError::Unimplemented)
     }
 
     /// True while breach time is accumulating, which is what a step reports as `pending`.

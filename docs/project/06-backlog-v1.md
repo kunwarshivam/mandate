@@ -40,6 +40,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* CI runs build, tests, and lint on every push; main is protected.
 - **E1-2 (Must)** As an engineer, I want an ADR template and coding conventions so that
   decisions and code stay consistent.
+- **E1-3 (Should)** As an engineer, I want the pending-test gate to read a failure's *cause* rather
+  than its text, so that no wording in a test can stand in for the stub it is meant to reach
+  (DEC-137, gap 1's remainder; the coordinator's round-2 ruling item 4).
+  *Accepted when:* `cargo xtask ci pending` accepts only the `Err` value printed after
+  `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
+  `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
+  message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
+  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate.
 
 ### E2 Market data
 
@@ -385,3 +393,16 @@ a coordinator ruling rather than left undone (DEC-131 item 25):
   action adds risk, and carries no order body, so the runtime records a response and re-proposes at
   the next evaluation rather than placing the bound order; the bound content is M7's (DEC-131 item
   25(a)).
+
+From the independent review of stream G's mandate limits (`mandate-risk`, #160):
+
+- Give `Computed` the account's own figures (`account_gross`, `account_equity`), so an account-1×
+  `gross_exposure_limit` denial journals the figures it compared; today it carries none and is told
+  apart from the agent-limit denial only by `computed.gross` being unset. It is an addition to
+  #136's public API, so it needs its own ruling.
+- Settle what DEC-129 item 2's "`computed` blocks included" means: `ref.py`'s keys only, or every
+  figure the gate computed. The flat `Computed` also reports `order_usd`, `instrument_total` and
+  `cap` on branches whose reference block omits them, and `compare_computed` checks only the keys a
+  case states, so nothing asserts either reading.
+- Give §3.3's "organization ceiling" on the per-instrument cap a `GateConfig` field and an owning
+  story; check 2 has no value to bound the mandate's cap with today.
