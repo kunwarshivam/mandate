@@ -222,7 +222,6 @@ proptest! {
     /// Journal §6.4, interpretation 24: nothing the recorder saved holds an account number or an
     /// account id, and the redaction pass agrees with an oracle that walks the JSON itself.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_recorded_exchange_holds_an_account_number_or_an_account_id(
         which in prop::sample::select(every_scenario()),
     ) {
@@ -300,7 +299,6 @@ proptest! {
     /// `AGENTS.md` rule 7: no request this crate builds carries a credential in its body or its
     /// path, because credentials travel only as headers the transport sets.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_recorded_request_holds_a_credential(
         which in prop::sample::select(every_scenario()),
     ) {

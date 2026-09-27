@@ -293,7 +293,6 @@ fn a_symbol_with_two_dots_inside_it_is_allowed_and_sent_unchanged() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn the_client_refuses_a_path_that_is_not_a_paper_trading_endpoint() {
     let (client, transport) = client("submit_limit_accepted");
     let error = client
@@ -577,6 +576,103 @@ fn assert_refused_activity_id(id: &str) {
     );
 }
 
+/// A position's symbol reaches `/v2/positions/{symbol}`, so it is held to a symbol's alphabet:
+/// one or two `/`-separated segments of letters, digits and `.`, each starting with a letter or a
+/// digit (#191 review, round 3).
+#[test]
+fn a_position_symbol_outside_a_symbols_alphabet_is_unreadable() {
+    let row = |symbol: &str| {
+        serde_json::to_vec(&serde_json::json!([{
+            "asset_class": "us_equity",
+            "avg_entry_price": "150",
+            "qty": "1",
+            "side": "long",
+            "symbol": symbol,
+        }]))
+        .expect("serialises")
+    };
+    for symbol in ["AAPL", "BRK.B", "BTC/USD", "FRAC1"] {
+        let positions =
+            wire::positions(&row(symbol)).unwrap_or_else(|e| panic!("{symbol} is a symbol: {e}"));
+        assert_eq!(
+            positions.first().map(|p| p.instrument.as_str()),
+            Some(symbol),
+            "{symbol} reads as itself"
+        );
+    }
+    for symbol in [
+        ".", "..", ".A", "%2e", "AAPL/..", "A/B/C", "AAPL?x=1", "", "/AAPL", "AAPL/", "A B", "A-B",
+        "A%2FB",
+    ] {
+        let error = wire::positions(&row(symbol)).expect_err("not a symbol");
+        assert_eq!(
+            (error.code(), error.to_string()),
+            ("wrong_type", "field symbol has the wrong type".to_owned()),
+            "{symbol:?} is refused before it can reach /v2/positions/{{symbol}}"
+        );
+    }
+}
+
+/// An order placed by notional amount names no share quantity (`qty: null`). One on the open-orders
+/// page is external activity the owner can create on their own account, so it is ingested with
+/// its filled quantity as the only quantity known, rather than failing the whole page and with it
+/// the reconciliation (§11, #191 review, round 1).
+#[test]
+fn an_external_notional_order_on_the_open_orders_page_is_ingested() {
+    let mut page: serde_json::Value =
+        serde_json::from_slice(&body_of("open_orders_page", 0)).expect("valid JSON");
+    let recorded = page.as_array().map_or(0, Vec::len);
+    let mut notional = page
+        .as_array()
+        .and_then(|all| all.first())
+        .cloned()
+        .expect("the page records at least one order");
+    if let Some(object) = notional.as_object_mut() {
+        object.insert(
+            "id".to_owned(),
+            serde_json::json!("0f0f0f0f-0000-4000-8000-00000000abcd"),
+        );
+        object.insert(
+            "client_order_id".to_owned(),
+            serde_json::json!("owner-app-1"),
+        );
+        object.insert("qty".to_owned(), serde_json::Value::Null);
+        object.insert("notional".to_owned(), serde_json::json!("100"));
+        object.insert("filled_qty".to_owned(), serde_json::json!("0"));
+    }
+    if let Some(all) = page.as_array_mut() {
+        all.push(notional);
+    }
+    let text = serde_json::to_vec(&page).expect("re-serialises");
+    let orders = wire::open_orders(&text).expect("a notional order does not fail the page");
+    assert_eq!(
+        orders.len(),
+        recorded + 1,
+        "every order on the page is read"
+    );
+    let external = orders.last().expect("the notional order");
+    assert_eq!(external.client_order_id.as_deref(), Some("owner-app-1"));
+    assert_eq!(
+        external.qty, external.filled_qty,
+        "with no share quantity, its filled quantity is the only one known"
+    );
+    let mut missing: serde_json::Value =
+        serde_json::from_slice(&body_of("open_orders_page", 0)).expect("valid JSON");
+    if let Some(object) = missing
+        .as_array_mut()
+        .and_then(|all| all.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        object.remove("qty");
+    }
+    let text = serde_json::to_vec(&missing).expect("re-serialises");
+    assert_eq!(
+        wire::open_orders(&text).err().map(|e| e.code()),
+        Some("missing_field"),
+        "an order that omits qty altogether is still unreadable"
+    );
+}
+
 #[tokio::test]
 async fn a_submission_carries_our_client_order_id_on_the_wire() {
     let recorded = scenario("submit_limit_accepted");
@@ -603,7 +699,6 @@ async fn a_submission_carries_our_client_order_id_on_the_wire() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn the_broker_refusing_our_own_id_is_folded_as_already_submitted() {
     let (client, _transport) = client("submit_duplicate_client_order_id");
     let recorded = scenario("submit_duplicate_client_order_id");
@@ -627,7 +722,6 @@ async fn the_broker_refusing_our_own_id_is_folded_as_already_submitted() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn an_absent_order_is_an_absence_and_never_an_error() {
     let (client, _transport) = client("order_by_client_id_absent");
     let outcome = client
@@ -641,7 +735,6 @@ async fn an_absent_order_is_an_absence_and_never_an_error() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_transport_failure_is_an_unknown_outcome_and_never_a_rejection() {
     let transport = FakeTransport::serving([Err(mandate_alpaca::TransportError::Timeout)]);
     let client = TradingClient::new(transport, FakeClock::default(), RetryPolicy::default());
@@ -980,7 +1073,6 @@ fn the_account_wide_endpoints_are_the_two_the_spec_names() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_exchange_is_recorded_with_its_credentials_redacted() {
     let request = HttpRequest::new(
         Method::Post,
@@ -1010,7 +1102,6 @@ fn a_broker_exchange_is_recorded_with_its_credentials_redacted() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_account_body_is_recorded_with_its_account_number_replaced_by_a_pii_ref() {
     let response = mandate_alpaca::Response {
         status: 200,
@@ -1032,12 +1123,14 @@ fn an_account_body_is_recorded_with_its_account_number_replaced_by_a_pii_ref() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_large_exchange_is_recorded_by_artifact_reference() {
     let filler = "x".repeat(mandate_alpaca::INLINE_LIMIT.saturating_add(1));
     let response = mandate_alpaca::Response {
         status: 200,
-        body: format!("{{\"message\":\"{filler}\"}}").into_bytes(),
+        body: format!(
+            "{{\"account_number\":\"PA3ABCDEFGHI\",\"message\":\"{filler}\",\"unread\":1}}"
+        )
+        .into_bytes(),
     };
     let recorded = record::response("/v2/orders", &response).expect("the response records");
     let mandate_alpaca::RecordedBody::Artifact { digest, bytes } = &recorded.body else {
@@ -1058,6 +1151,80 @@ fn a_large_exchange_is_recorded_by_artifact_reference() {
         bytes.len() > mandate_alpaca::INLINE_LIMIT,
         "and the redacted bytes the digest names travel with it, for the shell to store"
     );
+    assert_eq!(
+        digest,
+        &format!("sha256:{}", mandate_canon::Digest::of(bytes).to_hex()),
+        "the reference names the redacted bytes, never the body as the broker sent it \
+         (interpretation 24, DEC-133 item 24)"
+    );
+    assert!(
+        !String::from_utf8_lossy(bytes).contains("PA3ABCDEFGHI"),
+        "and those bytes have never held the account number"
+    );
+}
+
+#[test]
+fn an_account_id_is_personal_data_wherever_it_appears() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"account_id":"acct-7f3e","status":"filled"}"#.to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    assert!(
+        !format!("{:?}", recorded.body).contains("acct-7f3e"),
+        "an `account_id` field is replaced, not kept (DEC-133 item 33): {:?}",
+        recorded.body
+    );
+    assert_eq!(recorded.pii_refs.len(), 1, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn an_account_nested_in_an_array_is_redacted() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"legs":[{"account_number":"PA3INARRAY","id":"acct-in-array","symbol":"AAPL"}]}"#
+            .to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    let rendered = format!("{:?}", recorded.body);
+    assert!(
+        !rendered.contains("PA3INARRAY") && !rendered.contains("acct-in-array"),
+        "an account inside an array is redacted like one at the top: {rendered}"
+    );
+    assert_eq!(recorded.pii_refs.len(), 2, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn an_account_nested_in_an_object_is_redacted() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"take_profit":{"account_number":"PA3INOBJECT","id":"acct-in-object"}}"#.to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    let rendered = format!("{:?}", recorded.body);
+    assert!(
+        !rendered.contains("PA3INOBJECT") && !rendered.contains("acct-in-object"),
+        "an account inside an object is redacted like one at the top: {rendered}"
+    );
+    assert_eq!(recorded.pii_refs.len(), 2, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn the_pii_refs_are_a_sorted_set() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"account_number":"PA3SORTED","id":"acct-sorted","legs":[{"account_id":"acct-leg"}]}"#
+            .to_vec(),
+    };
+    let recorded = record::response("/v2/account", &response).expect("the response records");
+    let mut sorted = recorded.pii_refs.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        recorded.pii_refs, sorted,
+        "journal §3's `pii_refs` is a sorted set, whatever order the fields were met in"
+    );
+    assert_eq!(recorded.pii_refs.len(), 3);
 }
 
 /// A client serving scripted replies, and the transport that records what it sent.
@@ -1259,7 +1426,6 @@ fn a_crypto_stop_limit_body_is_simple_with_no_extended_hours() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_submit_posts_the_body_and_folds_the_acceptance() {
     let (client, transport) = serving(vec![common::reply(200, "submit_limit_accepted", 0)]);
     let order = recorded_limit_order();
@@ -1287,7 +1453,6 @@ async fn a_submit_posts_the_body_and_folds_the_acceptance() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_rejected_submission_is_a_rejection_with_its_status_and_message() {
     let (client, transport) = serving(vec![common::reply(422, "submit_rejected", 0)]);
     let outcome = client
@@ -1310,7 +1475,6 @@ async fn a_rejected_submission_is_a_rejection_with_its_status_and_message() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_duplicate_client_order_id_on_submit_is_already_submitted() {
     let (client, _transport) = serving(vec![common::reply(
         422,
@@ -1333,7 +1497,6 @@ async fn a_duplicate_client_order_id_on_submit_is_already_submitted() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_5xx_on_submit_is_an_unknown_outcome_never_a_rejection() {
     let (client, transport) = serving(vec![common::inline(503, "{\"message\":\"unavailable\"}")]);
     let error = common::answered(
@@ -1358,7 +1521,6 @@ async fn a_5xx_on_submit_is_an_unknown_outcome_never_a_rejection() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id() {
     let (client, transport) = serving(vec![
         common::reply(200, "order_by_client_id_found", 0),
@@ -1389,7 +1551,6 @@ async fn a_cancel_looks_the_order_up_then_deletes_it_by_the_broker_id() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_cancel_of_an_order_the_broker_does_not_have_is_an_absence() {
     let (client, transport) = serving(vec![common::reply(404, "order_by_client_id_absent", 0)]);
     let outcome = client
@@ -1412,7 +1573,6 @@ async fn a_cancel_of_an_order_the_broker_does_not_have_is_an_absence() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_cancel_refused_as_not_cancelable_reads_the_order_back() {
     let (client, transport) = serving(vec![
         common::reply(200, "order_by_client_id_found", 0),
@@ -1445,7 +1605,6 @@ async fn a_cancel_refused_as_not_cancelable_reads_the_order_back() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn the_order_query_reads_by_our_client_order_id() {
     let (client, transport) = serving(vec![
         common::reply(200, "order_by_client_id_found", 0),
@@ -1480,7 +1639,6 @@ async fn the_order_query_reads_by_our_client_order_id() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn the_open_orders_are_listed_in_one_page() {
     let (client, transport) = serving(vec![common::reply(200, "open_orders_page", 0)]);
     let outcome = client
@@ -1502,7 +1660,6 @@ async fn the_open_orders_are_listed_in_one_page() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn the_positions_are_listed() {
     let held = r#"[{"asset_class":"us_equity","avg_entry_price":"150","qty":"10","side":"long","symbol":"AAPL"}]"#;
     let (client, transport) = serving(vec![common::inline(200, held)]);
@@ -1522,7 +1679,6 @@ async fn the_positions_are_listed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn the_account_is_read() {
     let (client, transport) = serving(vec![common::reply(200, "account_active", 0)]);
     let outcome = client
@@ -1542,7 +1698,6 @@ async fn the_account_is_read() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn the_activities_walk_resumes_from_its_cursor_and_answers_the_next_one() {
     let (client, transport) = serving(vec![
         common::reply(200, "partial_then_filled", 2),
@@ -1591,7 +1746,6 @@ async fn the_activities_walk_resumes_from_its_cursor_and_answers_the_next_one() 
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn the_connector_hands_the_executor_only_unknown_outcomes() {
     use mandate_executor::BrokerConnector;
     let (mut client, _transport) = serving(vec![
@@ -1867,7 +2021,6 @@ async fn the_tokio_pause_waits_for_the_duration() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_5xx_on_the_cancels_delete_is_an_unknown_outcome() {
     let (client, transport) = serving(vec![
         common::reply(200, "order_by_client_id_found", 0),
@@ -1895,7 +2048,6 @@ async fn a_5xx_on_the_cancels_delete_is_an_unknown_outcome() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-3"]
 async fn a_5xx_on_a_reconciliation_read_is_an_unknown_outcome_not_an_unreadable_body() {
     let (client, _transport) = serving(vec![common::inline(503, "{\"message\":\"unavailable\"}")]);
     let error = common::answered(
@@ -1913,7 +2065,6 @@ async fn a_5xx_on_a_reconciliation_read_is_an_unknown_outcome_not_an_unreadable_
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_exchange_of_exactly_the_inline_limit_stays_inline() {
     let envelope = "{\"message\":\"\"}".len();
     let filler = "x".repeat(mandate_alpaca::INLINE_LIMIT.saturating_sub(envelope));
