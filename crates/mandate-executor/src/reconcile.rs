@@ -152,7 +152,6 @@ fn orders(
                 Ok(StatusMapping::ReplacedPair) => OrderState::Replaced,
                 Ok(StatusMapping::Unchanged) | Err(_) => ours,
             },
-            None if ours == OrderState::Unknown => ours,
             None => OrderState::Unknown,
         };
         if adopted != ours {

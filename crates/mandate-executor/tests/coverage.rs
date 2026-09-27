@@ -1329,7 +1329,7 @@ fn an_unprotected_interval_ends_for_its_own_instrument() {
     };
     fold(&mut state, &action(2, AAPL, "unprotected_start", 1)).expect("folds");
     fold(&mut state, &action(3, CPHC, "unprotected_start", 2)).expect("folds");
-    fold(&mut state, &action(4, CPHC, "unprotected_end", 3)).expect("folds");
+    fold(&mut state, &action(4, AAPL, "unprotected_end", 3)).expect("folds");
     let open: Vec<&str> = state
         .unprotected_intervals()
         .iter()
@@ -1338,9 +1338,82 @@ fn an_unprotected_interval_ends_for_its_own_instrument() {
         .collect();
     assert_eq!(
         open,
-        vec![AAPL],
-        "ending CPHC's interval leaves AAPL's open"
+        vec![CPHC],
+        "ending AAPL's interval leaves CPHC's open, though CPHC's opened later"
     );
+}
+
+#[test]
+fn an_order_adopted_as_unknown_is_queried_and_one_adopted_as_known_is_not() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    let queried = |run: &mandate_executor::Reconciliation| {
+        run.effects.iter().any(|effect| {
+            matches!(
+                effect,
+                mandate_executor::Effect::Broker(BrokerRequest::GetOrderByClientId(queried))
+                    if queried.as_str() == id
+            )
+        })
+    };
+    let missing = snapshot(shell.head().0, ReconcileReason::Scheduled);
+    let run = reconcile(&shell.state, &missing, &ports).expect("runs");
+    assert!(
+        queried(&run),
+        "an order missing from the open orders is resolved by query on its id (§5.7)"
+    );
+    let mut partly = snapshot(shell.head().0, ReconcileReason::Scheduled);
+    partly.open_orders = vec![broker_order(
+        "b-1",
+        Some(&id),
+        AAPL,
+        Side::Buy,
+        "10",
+        "4",
+        "partially_filled",
+    )];
+    let run = reconcile(&shell.state, &partly, &ports).expect("runs");
+    assert!(
+        !queried(&run),
+        "an order the broker described needs no query"
+    );
+}
+
+#[test]
+fn external_activity_reaches_an_agent_the_executor_has_not_yet_seen() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
+    taken.open_orders = vec![
+        broker_order("b-1", Some(&id), AAPL, Side::Buy, "10", "0", "new"),
+        broker_order(
+            "b-9",
+            Some("manual-web-1"),
+            AAPL,
+            Side::Buy,
+            "5",
+            "0",
+            "new",
+        ),
+    ];
+    shell.run(Input::BrokerSnapshot(taken), &ports);
+    for who in [common::AGENT, "agent-deployed-later"] {
+        assert_eq!(
+            shell.state.effective_mode(&agent(who)),
+            Mode::ExitsOnly,
+            "every agent on the account, until the owner acknowledges (§7.1): {who}"
+        );
+    }
 }
 
 #[test]
