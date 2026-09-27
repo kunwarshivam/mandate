@@ -7,9 +7,11 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::ports::Ports;
+use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
-    BrokerOutcome, BrokerRequest, BrokerUpdate, Effect, Input, OrderState, WriterEpoch,
+    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, OrderState,
+    ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -46,6 +48,7 @@ pub fn handle(
     }
     if let Some(batch) = &state.unresolved
         && batch.input != input
+        && !superseded(&batch.input, &input)
     {
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
@@ -73,9 +76,25 @@ pub fn handle(
     Ok(effects)
 }
 
+/// Whether a new input may replace an unresolved batch. Only a fresh snapshot may, and only one
+/// whose predecessor was a snapshot too: a reconciliation is appended at the head its snapshot was
+/// taken at, so a submission that landed in between makes the whole batch answer `HeadMismatch`
+/// and commit nothing, and the run is recomputed against the fresh snapshot rather than retried
+/// (interpretation 15). Were the earlier batch in fact committed, its first event id — derived from
+/// the same epoch, head, and ordinal — would collide with the new batch's, and the journal refuses
+/// a collision rather than appending a second event.
+fn superseded(unresolved: &Input, input: &Input) -> bool {
+    matches!(
+        (unresolved, input),
+        (Input::BrokerSnapshot(_), Input::BrokerSnapshot(_))
+    )
+}
+
 /// `Input::Started`: the process folded the stream and took an epoch. Every order whose outcome
 /// the journal does not know is queried, a received intent too old to submit is abandoned, and
-/// the startup reconciliation is requested; nothing is submitted until it has run.
+/// the startup reconciliation is requested. The intents waiting at the start are not submitted
+/// until it has run; a new intent received before it runs is gated and submitted at once (see
+/// `resume`).
 fn started(
     state: &mut ExecutorState,
     epoch: WriterEpoch,
@@ -100,7 +119,7 @@ fn started(
     for id in unresolved {
         batch.broker(BrokerRequest::GetOrderByClientId(id));
     }
-    resume(&mut batch)?;
+    resume(&mut batch, true)?;
     batch.request_reconciliation();
     Ok(batch.effects)
 }
@@ -117,10 +136,21 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Broker(Err(_)) => silence(batch),
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
-        Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one),
+        Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one, None),
         Input::BrokerUpdate(BrokerUpdate::Account(snapshot)) => account(batch, &snapshot),
         Input::BrokerUpdate(BrokerUpdate::Reject(refused)) => reject(batch, &refused),
-        Input::BrokerSnapshot(_) | Input::Command(_) => later_slice(),
+        Input::BrokerSnapshot(snapshot) => {
+            run(batch, &snapshot)?;
+            if snapshot.reason == ReconcileReason::Startup {
+                resume(batch, false)?;
+            }
+            Ok(())
+        }
+        Input::Command(Command::Reconcile(_)) => {
+            batch.request_reconciliation();
+            Ok(())
+        }
+        Input::Command(Command::KillSwitch { .. }) => later_slice(),
     }
 }
 

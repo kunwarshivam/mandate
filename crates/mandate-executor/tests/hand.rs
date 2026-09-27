@@ -1789,7 +1789,6 @@ fn reconciling(ports: &mandate_executor::Ports<'_>) -> Shell {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_journal_only_order_is_reconciled_away_not_kept() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1812,7 +1811,6 @@ fn a_journal_only_order_is_reconciled_away_not_kept() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn every_adoption_journals_a_compensating_event_with_the_difference() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1862,7 +1860,6 @@ fn every_adoption_journals_a_compensating_event_with_the_difference() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_position_difference_is_not_written_away_as_a_compensating_event() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1915,7 +1912,6 @@ fn a_position_difference_is_not_written_away_as_a_compensating_event() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_unexplained_position_pauses_the_agent_and_alerts() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1943,7 +1939,6 @@ fn an_unexplained_position_pauses_the_agent_and_alerts() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_missing_fill_explains_the_position_and_pauses_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1989,7 +1984,6 @@ fn a_missing_fill_explains_the_position_and_pauses_nothing() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_equity_difference_of_one_share_is_a_mismatch() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2096,7 +2090,6 @@ fn paused_anyone(effects: &[Effect]) -> bool {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[BTC]);
@@ -2205,7 +2198,6 @@ fn a_fee_difference_is_alerted_and_never_adjusted() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_unknown_broker_order_becomes_external_activity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2241,7 +2233,6 @@ fn an_unknown_broker_order_becomes_external_activity() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn external_activity_switches_every_agent_to_exits_only() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2329,7 +2320,6 @@ fn a_reject_for_an_unknown_client_order_id_is_not_external_activity_without_a_fi
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_executor_never_lifts_a_reconciliation_pause_itself() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2402,7 +2392,6 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_startup_reconciliation_covers_every_submission_it_reports_on() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2432,7 +2421,6 @@ fn a_startup_reconciliation_covers_every_submission_it_reports_on() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2498,7 +2486,6 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reconciliation_ingests_a_missing_fill_before_it_compares_positions() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
