@@ -1725,12 +1725,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// Each still runs and fails, and E7-4's implementation PR deletes each row with its `#[ignore]`
 /// line. The stub check runs first, so a row whose test stops at a stub is reported for deletion
 /// rather than applied (#194 review, round 1, finding 4).
-///
-/// The 4 cash-and-fee rows are slice 6's (#202 review, round 1, finding 1): slice 5 holds openings
-/// on a run it cannot complete rather than answering a stub, so these tests see no cash or fee
-/// comparison where the cash slice's belongs. Slice 6's PR deletes each row with its `#[ignore]`
-/// line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 16] = [
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-risk/tests/hand.rs",
         "an_unconfirmed_owner_exit_defers",
@@ -1778,22 +1773,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 16] = [
     (
         "crates/mandate-executor/tests/fault.rs",
         "crash_between_entry_fill_and_oco",
-    ),
-    (
-        "crates/mandate-executor/tests/coverage.rs",
-        "cash_within_the_band_agrees_and_beyond_it_differs",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_fee_difference_is_alerted_and_never_adjusted",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_power",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "cash_within_the_band_never_pauses_and_outside_it_always_alerts",
     ),
 ];
 
