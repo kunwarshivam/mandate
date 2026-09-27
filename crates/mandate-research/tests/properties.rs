@@ -850,6 +850,11 @@ proptest! {
             .iter()
             .map(|s| s.decision)
             .collect();
+        prop_assert_eq!(
+            before.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         let mut injected = fold_of(&revisions, cap);
         for p in &mut injected.proposals {
@@ -1135,6 +1140,11 @@ proptest! {
     ) {
         let f = fold_of(&revisions, cap);
         let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(
+            fold.steps.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         let mut running: BTreeSet<String> = BTreeSet::new();
         for step in &fold.steps {
@@ -1180,6 +1190,11 @@ proptest! {
     ) {
         let f = fold_of(&revisions, cap);
         let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(
+            fold.steps.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         for step in &fold.steps {
             let removals: Vec<&mandate_research::UniverseChangedEntry> = step
@@ -1322,6 +1337,11 @@ proptest! {
             }
         }
         let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(
+            fold.steps.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         for step in &fold.steps {
             let removals = step
@@ -1358,6 +1378,11 @@ proptest! {
         }
         let f = common::FoldScenario::new(cap, theses);
         let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(
+            fold.steps.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         let events: Vec<ResearchEvent> =
             fold.steps.iter().flat_map(|s| s.journal.iter().cloned()).collect();
@@ -1389,6 +1414,11 @@ proptest! {
         }
         let f = common::FoldScenario::new(3, theses);
         let fold = fold_theses(&f.input()).expect("the fold decides");
+        prop_assert_eq!(
+            fold.steps.len(),
+            revisions.len(),
+            "one step per proposal, so the property below is not vacuous over an empty fold"
+        );
 
         for (step, revision) in fold.steps.iter().zip(revisions.iter()) {
             let entries: Vec<&ResearchEvent> = step
