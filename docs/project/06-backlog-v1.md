@@ -40,6 +40,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* CI runs build, tests, and lint on every push; main is protected.
 - **E1-2 (Must)** As an engineer, I want an ADR template and coding conventions so that
   decisions and code stay consistent.
+- **E1-3 (Should)** As an engineer, I want the pending-test gate to read a failure's *cause* rather
+  than its text, so that no wording in a test can stand in for the stub it is meant to reach
+  (DEC-137, gap 1's remainder; the coordinator's round-2 ruling item 4).
+  *Accepted when:* `cargo xtask ci pending` accepts only the `Err` value printed after
+  `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
+  `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
+  message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
+  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate.
 
 ### E2 Market data
 
