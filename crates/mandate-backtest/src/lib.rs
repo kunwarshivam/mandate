@@ -53,12 +53,12 @@ use mandate_sim::{
 use mandate_time::{Date, TimeError, UtcNanos, new_york_date_and_hour};
 
 /// Spec §6.2 charges an equity trade date's accrued fees at 20:00 ET, the hour after-hours trading
-/// ends (§4.3), so the first bar of that date at or past that hour carries the charge.
+/// ends (§4.3), so the first bar at or after that instant carries the charge.
 const CHARGE_HOUR_NEW_YORK: u8 = 20;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum BacktestError {
-    #[error("a backtest needs at least one bar")]
+    #[error("a backtest needs at least one bar that closes a period")]
     NoBars,
     #[error("bar {0} is labelled with a trade date the calendar does not give its start")]
     BarTradeDateMismatch(usize),
@@ -227,7 +227,7 @@ pub fn run(input: &BacktestInput<'_>) -> Result<BacktestRun, BacktestError> {
     Ok(BacktestRun {
         report: Report {
             report_version: REPORT_VERSION,
-            inputs: InputDigests::of(input.bars, config)?,
+            inputs: InputDigests::of(input)?,
             excess_total_return: strategy_metrics
                 .total_return
                 .checked_sub(benchmark_metrics.total_return)?,
@@ -576,13 +576,17 @@ fn closing_bars(bars: &[SimBar]) -> Vec<bool> {
 
 /// The days whose accrued fees this bar is the first to reach the charging instant of, in date
 /// order: 20:00 ET on an equity trade date (spec §6.2) and 00:00 UTC after a crypto date (spec
-/// §6.3). Nothing is swept at the end of a run, so an accrual whose instant the bars never reach
-/// stays accrued, exactly as the fold would hold it (DEC-127 item 17).
+/// §6.3).
 ///
-/// Both boundaries are read through [`Ord`], in place rather than through a helper: no fixture has a
-/// bar that first reaches a date's charge hour later than 20:59 ET, and none ends a crypto run with a
-/// fee accrued on the run's own last UTC date, so a shifted operator or a helper's constant answer
-/// there would be indistinguishable from the rule.
+/// Both instants are **points in time** the bars pass, so the first bar at or after one charges its
+/// day whatever that bar's own hour is: a 09:30 bar of the next trade date has passed 20:00 ET on the
+/// previous one and charges it (DEC-127 item 17, as the independent review of the implementation PR
+/// rules it). An equity day is therefore compared as the pair (New York date, hour) against
+/// (day, 20:00), and a crypto day as its UTC date. Nothing is swept at the end of a run: an accrual
+/// whose instant no bar reaches stays accrued, exactly as the fold would hold it at that instant.
+///
+/// Both comparisons are read through [`Ord`] rather than through operators, because no fixture has a
+/// bar exactly at an instant that a shifted operator would move it across.
 fn charges_due(
     bar: &SimBar,
     dates: &BTreeSet<Date>,
@@ -591,17 +595,15 @@ fn charges_due(
 ) -> Result<Vec<Date>, BacktestError> {
     let reached: Vec<Date> = match asset_class {
         AssetClass::UsEquity => {
-            let (today, hour) = new_york_date_and_hour(bar.start)?;
-            let reached_the_charge_hour = matches!(
-                hour.cmp(&CHARGE_HOUR_NEW_YORK),
-                Ordering::Equal | Ordering::Greater
-            );
+            let passed = new_york_date_and_hour(bar.start)?;
             dates
                 .iter()
                 .copied()
                 .filter(|day| {
-                    reached_the_charge_hour
-                        && matches!(today.cmp(day), Ordering::Equal | Ordering::Greater)
+                    matches!(
+                        passed.cmp(&(*day, CHARGE_HOUR_NEW_YORK)),
+                        Ordering::Equal | Ordering::Greater
+                    )
                 })
                 .collect()
         }

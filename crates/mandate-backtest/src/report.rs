@@ -4,7 +4,7 @@
 use core::fmt;
 
 use crate::metrics::Metrics;
-use crate::{BacktestError, RunConfig};
+use crate::{BacktestError, BacktestInput, RunConfig};
 use mandate_accounting::{AccountType, Config as FeeConfig, TafCapBasis};
 use mandate_canon::{Digest, Int, Key, Object, Value};
 use mandate_num::{NumError, Ratio, TickRule};
@@ -57,16 +57,17 @@ pub struct InputDigests {
 }
 
 impl InputDigests {
-    /// The digest of the bars' canonical form and of the configuration's, each over
+    /// The digest of the bar input's canonical form and of the configuration's, each over
     /// `mandate_canon::to_canonical` of a value holding every field as canonical text.
-    pub fn of(bars: &[SimBar], config: &RunConfig) -> Result<Self, BacktestError> {
-        let rows = bars
-            .iter()
-            .map(bar_row)
-            .collect::<Result<Vec<Value>, BacktestError>>()?;
+    ///
+    /// The bar input is everything the fill model reads about the snapshot: the rows, the coverage
+    /// start, and the 20-session median at each bar's start. The last two change which bars can fill
+    /// and how much (spec §6.4 rules 1 and 3), so a report that omitted them could claim two runs
+    /// came from the same inputs while their fills differed.
+    pub fn of(input: &BacktestInput<'_>) -> Result<Self, BacktestError> {
         Ok(Self {
-            bars: Digest::of(&mandate_canon::to_canonical(&Value::Array(rows))),
-            config: Digest::of(&mandate_canon::to_canonical(&configuration(config)?)),
+            bars: Digest::of(&mandate_canon::to_canonical(&bar_input(input)?)),
+            config: Digest::of(&mandate_canon::to_canonical(&configuration(input.config)?)),
         })
     }
 }
@@ -182,6 +183,28 @@ fn metrics(block: &Metrics) -> Result<Value, BacktestError> {
                 .absent
                 .map_or(Value::Null, |reason| text(reason.as_str())),
         ),
+    ])
+}
+
+/// Every bar the run was given, the coverage start the fill model measures a session's first covered
+/// bar from (DEC-106 item 4), and the median volume it would read at each bar's start, `null` where
+/// there is none (spec §6.4 rule 3). The medians are taken for every bar rather than only for the
+/// bars that open a session, so this digest does not restate the model's rule for which bars ask.
+fn bar_input(input: &BacktestInput<'_>) -> Result<Value, BacktestError> {
+    let rows = input
+        .bars
+        .iter()
+        .map(bar_row)
+        .collect::<Result<Vec<Value>, BacktestError>>()?;
+    let medians = input
+        .bars
+        .iter()
+        .map(|bar| optional(input.first_bar_volumes.median_at(bar.start)))
+        .collect();
+    object(vec![
+        ("rows", Value::Array(rows)),
+        ("coverage_start", decimal(input.coverage_start)),
+        ("first_bar_medians", Value::Array(medians)),
     ])
 }
 
