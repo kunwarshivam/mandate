@@ -1736,7 +1736,7 @@ mod tests {
         assert_eq!(
             [
                 limit_row(with("100", "100", "0", "0"))?,
-                limit_row(with("100", "100", "0", "-5"))?,
+                limit_row(with("99", "99", "0", "-5"))?,
                 limit_row(with("100", "99.99", "1000", "0"))?,
                 limit_row(with("99.99", "100", "1000", "0"))?,
                 limit_row(|o| {
@@ -1748,8 +1748,8 @@ mod tests {
                     with("1000", "99.99", "100", "0")(o)
                 })?,
             ],
-            [Err("E6-8"), Err("E6-8"), short, short, short, Err("E6-10")],
-            "1 × 100 at exactly 100 passes, a negative fee cannot loosen it, the lower figure \
+            [Err("E6-8"), short, short, short, short, Err("E6-10")],
+            "1 × 100 at exactly 100 passes, a fee of -5 cannot bring 100 within 99, the lower figure \
              binds, and crypto reads the non-marginable figure rather than the marginable one"
         );
         assert_eq!(
