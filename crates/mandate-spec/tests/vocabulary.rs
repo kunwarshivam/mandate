@@ -318,6 +318,7 @@ fn every_error_variant_has_its_own_stable_code() {
         (ParseError::NotInEnum { path: path() }, "not_in_enum"),
         (ParseError::OffPattern { path: path() }, "off_pattern"),
         (ParseError::OutOfBounds { path: path() }, "out_of_bounds"),
+        (ParseError::NotUnique { path: path() }, "not_unique"),
         (
             ParseError::OffGrammar {
                 path: path(),

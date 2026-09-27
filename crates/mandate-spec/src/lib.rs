@@ -69,6 +69,10 @@ pub enum ParseError {
     OutOfBounds { path: Pointer },
     #[error("`{path}` is not in the `{grammar}` grammar the schema declares for it", grammar = grammar.as_str())]
     OffGrammar { path: Pointer, grammar: DecGrammar },
+    /// An array the schema marks `uniqueItems` holds the same value twice; the path names the
+    /// second one.
+    #[error("`{path}` repeats an earlier item of an array whose items must be unique")]
+    NotUnique { path: Pointer },
     #[error("conditions nest deeper than the schema allows")]
     TooDeep { path: Pointer },
     /// The stubs of this story's tests PR return this, so every pending test fails on them
@@ -91,6 +95,7 @@ impl ParseError {
             Self::OffPattern { .. } => "off_pattern",
             Self::OutOfBounds { .. } => "out_of_bounds",
             Self::OffGrammar { .. } => "off_grammar",
+            Self::NotUnique { .. } => "not_unique",
             Self::TooDeep { .. } => "too_deep",
             Self::Unimplemented => "unimplemented",
             Self::Domain(e) => e.code(),
