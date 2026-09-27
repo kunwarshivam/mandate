@@ -377,8 +377,13 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
             vec![("fill_id", text(fill.fill_id.0.clone()))],
         )?;
         batch.journal("FillApplied", None, pairs)?;
-        every_agent(batch, Mode::ExitsOnly, &restriction_for(EXTERNAL))?;
-        batch.notify(ingested, "external_activity");
+        every_agent_alerted(
+            batch,
+            Mode::ExitsOnly,
+            &restriction_for(EXTERNAL),
+            ingested,
+            "external_activity",
+        )?;
         return Ok(());
     };
     pairs.push(("client_order_id", text(id.as_str())));
@@ -412,12 +417,18 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
     Ok(())
 }
 
-/// A restriction on every agent of the account, originated here rather than copied.
-pub(crate) fn every_agent(
+/// Every agent of the account to `mode` under `restriction`, and the owner alerted about
+/// `subject` under `key`, in one call: the `*` restriction reaches an agent the executor has not
+/// yet seen (DEC-133 item 39), and the alert cannot be split from it (§7.1, §7.3). Originated here
+/// rather than copied. The alert carries the subject event's id and a message key only
+/// (`AGENTS.md` rule 6).
+pub(crate) fn every_agent_alerted(
     batch: &mut Batch<'_, '_>,
     mode: Mode,
     restriction: &str,
-) -> Result<EventId, ExecutorError> {
+    subject: EventId,
+    key: &'static str,
+) -> Result<(), ExecutorError> {
     batch.journal(
         "AgentModeApplied",
         None,
@@ -427,7 +438,9 @@ pub(crate) fn every_agent(
             ("restriction", text(restriction)),
             ("originated", Value::Bool(true)),
         ],
-    )
+    )?;
+    batch.notify(subject, key);
+    Ok(())
 }
 
 /// The subject external activity is recorded and acknowledged under (§7.1).
@@ -548,46 +561,74 @@ pub(crate) fn account(
         || account.account_blocked
         || account.trade_suspended_by_user;
     if blocked {
-        restrict(
-            batch,
-            AccountState::Blocked,
-            Mode::Paused,
-            "account_trading_blocked",
-        )?;
+        restrict(batch, Restriction::Blocked, "account_trading_blocked")?;
     }
     Ok(())
+}
+
+/// The two restrictions §7.3 detects. There is no variant for an active account, so a restriction
+/// can never be written as `active`, which the fold refuses.
+#[derive(Debug, Clone, Copy)]
+enum Restriction {
+    ClosingOnly,
+    Blocked,
+}
+
+impl Restriction {
+    fn state(self) -> AccountState {
+        match self {
+            Self::ClosingOnly => AccountState::ClosingOnly,
+            Self::Blocked => AccountState::Blocked,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::ClosingOnly => "closing_only",
+            Self::Blocked => "blocked",
+        }
+    }
+
+    /// §7.3's agent effect: closing only restricts every agent to exits, and a blocked account
+    /// pauses them.
+    fn mode(self) -> Mode {
+        match self {
+            Self::ClosingOnly => Mode::ExitsOnly,
+            Self::Blocked => Mode::Paused,
+        }
+    }
 }
 
 /// Stores a detected restriction as account state and applies its agent effect to every agent
-/// (§7.3), alerting the owner. A restriction already in force is not journaled again.
+/// (§7.3), alerting the owner. A restriction already in force is not journaled again, and the
+/// answer says whether this one was new.
 fn restrict(
     batch: &mut Batch<'_, '_>,
-    state: AccountState,
-    mode: Mode,
+    restriction: Restriction,
     reason: &'static str,
-) -> Result<(), ExecutorError> {
-    if batch.view.account_state >= state {
-        return Ok(());
+) -> Result<bool, ExecutorError> {
+    if batch.view.account_state >= restriction.state() {
+        return Ok(false);
     }
-    let name = match state {
-        AccountState::Blocked => "blocked",
-        AccountState::ClosingOnly => "closing_only",
-        AccountState::Active => "active",
-    };
     let changed = batch.journal(
         "AccountRestrictionChanged",
         None,
-        vec![("restriction", text(name)), ("reason_code", text(reason))],
+        vec![
+            ("restriction", text(restriction.name())),
+            ("reason_code", text(reason)),
+        ],
     )?;
-    every_agent(batch, mode, reason)?;
-    batch.notify(changed, reason);
-    Ok(())
+    every_agent_alerted(batch, restriction.mode(), reason, changed, reason)?;
+    Ok(true)
 }
 
-/// A reject the broker answered with. Journaled with its code; an order of ours it names is
-/// `Rejected`, which releases its reservation; a closing-only message, or the configured run of
-/// 403s with no known order-level cause, restricts the account to closing only (§7.3). A reject
-/// naming an id we do not know counts toward that threshold and is nothing more.
+/// A reject the broker answered with. Journaled with its status, code and message; an order of
+/// ours it names is `Rejected`, which releases its reservation. The account is restricted to
+/// closing only (§7.3) by DEC-143's reading: a message that says `closing` or `restricted`, since
+/// no connector reject table maps a `code` yet, or the configured run of consecutive 403s, every
+/// 403 counting, a named order's included. A reject naming an id we do not know counts toward
+/// that run and is nothing more. The account is asked for again once, when the run restricts it,
+/// not at every 403 after.
 pub(crate) fn reject(
     batch: &mut Batch<'_, '_>,
     reject: &BrokerReject,
@@ -614,16 +655,11 @@ pub(crate) fn reject(
     let message = reject.message.to_ascii_lowercase();
     let closing_only = message.contains("closing") || message.contains("restricted");
     let threshold = batch.view.consecutive_403s >= batch.ports.config.restriction_403_threshold;
-    if closing_only || threshold {
-        restrict(
-            batch,
-            AccountState::ClosingOnly,
-            Mode::ExitsOnly,
-            "account_restricted",
-        )?;
-        if threshold {
-            batch.broker(BrokerRequest::GetAccount);
-        }
+    if (closing_only || threshold)
+        && restrict(batch, Restriction::ClosingOnly, "account_restricted")?
+        && threshold
+    {
+        batch.broker(BrokerRequest::GetAccount);
     }
     Ok(())
 }

@@ -456,6 +456,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **`mandate-executor`, the cash slice:** §7.2's crypto row, `min(equity model, broker non_marginable_buying_power)` for a crypto order, which needs the order's asset class, so `ExecutorState::buying_power` (the equity row today) grows it with the gate port that asks for it (#198 review, round 1, finding 7).
+- Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - **Blocks the gate port reading `buying_power`:** subtract the broker's own unposted fees in
   `ExecutorState::buying_power`. Since slice 4 it is the lower of the broker's figure and the model
   (reported cash moved by every fill since, less paper's simulated fees), less reservations, but a

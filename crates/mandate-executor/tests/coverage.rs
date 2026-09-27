@@ -2007,3 +2007,193 @@ fn a_fill_on_a_pending_cancel_or_replace_keeps_its_state() {
         );
     }
 }
+
+/// Asserts §7.3's consequence on every agent: the `*` restriction to `mode`, a second agent that
+/// placed nothing held to it too, and one alert naming the event that recorded the restriction by
+/// its opaque id under `key` (DEC-133 item 39, AGENTS.md rule 6).
+fn every_agent_restricted_and_the_owner_alerted(
+    shell: &Shell,
+    ran: &common::Ran,
+    mode: Mode,
+    to: &str,
+    key: &str,
+) {
+    let applied = ran
+        .draft("AgentModeApplied")
+        .expect("the restriction reaches the agents");
+    assert_eq!(
+        (
+            applied.payload.get("agent").and_then(Value::as_str),
+            applied.payload.get("to").and_then(Value::as_str),
+        ),
+        (Some("*"), Some(to)),
+        "every agent on the account, including one the executor has not yet seen"
+    );
+    assert_eq!(shell.state.effective_mode(&agent(OTHER_AGENT)), mode);
+    let changed = ran
+        .draft("AccountRestrictionChanged")
+        .map(|draft| draft.event_id.clone());
+    let alerts: Vec<_> = ran
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            mandate_executor::Effect::Notify(reference) => {
+                Some((Some(reference.subject_event.clone()), reference.message_key))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        alerts,
+        vec![(changed, key)],
+        "the owner is alerted once, by the restriction's event id and a message key"
+    );
+}
+
+/// §7.3 row 1: a blocked account pauses every agent, and the owner is alerted.
+#[test]
+fn a_blocked_account_restricts_every_agent_and_alerts_the_owner() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(mandate_executor::BrokerAccount {
+            trading_blocked: true,
+            ..broker_account()
+        })),
+        &ports,
+    );
+    every_agent_restricted_and_the_owner_alerted(
+        &shell,
+        &ran,
+        Mode::Paused,
+        "paused",
+        "account_trading_blocked",
+    );
+}
+
+/// §7.3 row 2, DEC-143: a reject whose message says `closing`, without `restricted`, restricts
+/// every agent to exits, and the owner is alerted.
+#[test]
+fn a_closing_message_alone_restricts_every_agent_and_alerts_the_owner() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Reject(broker_reject(
+            None,
+            403,
+            "account is closing transactions only",
+        ))),
+        &ports,
+    );
+    assert_eq!(shell.state.account_state(), AccountState::ClosingOnly);
+    every_agent_restricted_and_the_owner_alerted(
+        &shell,
+        &ran,
+        Mode::ExitsOnly,
+        "exits_only",
+        "account_restricted",
+    );
+}
+
+/// Journal spec §6: a reject is journaled with its status, code and message.
+#[test]
+fn a_reject_is_journaled_with_its_status_code_and_message() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Reject(mandate_executor::BrokerReject {
+            code: Some("40310000".to_owned()),
+            ..broker_reject(None, 422, "insufficient qty available for order")
+        })),
+        &ports,
+    );
+    let observed = ran
+        .draft("RejectObserved")
+        .expect("the reject is journaled");
+    let field = |name: &str| observed.payload.get(name).cloned();
+    assert_eq!(field("http_status").and_then(|v| v.as_int()), Some(422));
+    assert_eq!(field("code"), Some(text("40310000")));
+    assert_eq!(
+        field("message"),
+        Some(text("insufficient qty available for order"))
+    );
+}
+
+/// DEC-143: every 403 counts toward §7.3's run, one naming one of our orders with a code
+/// included, the stricter reading of "without a known order-level cause".
+#[test]
+fn a_403_naming_one_of_our_orders_still_counts_toward_the_run() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    for intent in [INTENT, OTHER_INTENT, "01JABCDEFGHJKMNPQRSTVWXYZ2"] {
+        let id = accepted(&mut shell, &ports, intent, common::AGENT, AAPL);
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Reject(mandate_executor::BrokerReject {
+                code: Some("40310000".to_owned()),
+                ..broker_reject(Some(&id), 403, "forbidden")
+            })),
+            &ports,
+        );
+    }
+    assert_eq!(
+        shell.state.account_state(),
+        AccountState::ClosingOnly,
+        "three 403s in a row restrict the account, whichever orders they named"
+    );
+}
+
+/// §7.3: a restriction starts a fresh run of 403s, and the account is asked for once, when the run
+/// restricts it, not at every 403 after.
+#[test]
+fn a_restriction_resets_the_run_and_asks_for_the_account_once() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let asked = |ran: &common::Ran| {
+        ran.requests
+            .iter()
+            .filter(|request| matches!(request, BrokerRequest::GetAccount))
+            .count()
+    };
+    let forbidden =
+        || Input::BrokerUpdate(BrokerUpdate::Reject(broker_reject(None, 403, "forbidden")));
+    let mut total = 0;
+    for _ in 0..3 {
+        total += asked(&shell.run(forbidden(), &ports));
+    }
+    assert_eq!(
+        total, 1,
+        "the third 403 restricts the account and asks for it"
+    );
+    assert_eq!(
+        shell.state.consecutive_403s(),
+        0,
+        "and the restriction starts the run afresh"
+    );
+    for _ in 0..4 {
+        assert_eq!(
+            asked(&shell.run(forbidden(), &ports)),
+            0,
+            "a restricted account is not asked for again at every 403"
+        );
+    }
+}

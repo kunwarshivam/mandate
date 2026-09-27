@@ -3,7 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
-use mandate_num::{Qty, SignedQty, Usd};
+use mandate_num::{Qty, Rounding, SignedQty, Usd};
 
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
@@ -53,7 +53,7 @@ pub struct ExecutorState {
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     pub(crate) cash_flow: Usd,
-    pub(crate) simulated_fees: Usd,
+    pub(crate) simulated_fees: BTreeMap<(String, String), Usd>,
     pub(crate) mismatched: BTreeSet<InstrumentId>,
     pub(crate) checkpoint: Option<ActivityCursor>,
     pub(crate) reconciled_through: Option<Seq>,
@@ -119,6 +119,8 @@ pub struct ObservedAccount {
     pub buying_power: Usd,
     pub non_marginable_buying_power: Usd,
     pub accrued_fees: Usd,
+    /// Whether the report carried every field buying power reads.
+    pub(crate) complete: bool,
 }
 
 impl ExecutorState {
@@ -145,7 +147,7 @@ impl ExecutorState {
             consecutive_403s: 0,
             observed: None,
             cash_flow: Usd::ZERO,
-            simulated_fees: Usd::ZERO,
+            simulated_fees: BTreeMap::new(),
             mismatched: BTreeSet::new(),
             checkpoint: None,
             reconciled_through: None,
@@ -280,17 +282,28 @@ impl ExecutorState {
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
     ///
-    /// The model is the broker's last reported cash moved by every fill since, less paper's
-    /// simulated fees (§10, R-22: paper must not look flatter than live), so it never overstates
-    /// what a paper account could spend on live. The cash slice adds the broker's own unposted
-    /// fees. `None` until the broker has reported an account, or if the arithmetic overflows: no
-    /// buying power is ever guessed.
+    /// The model is §7.2's margin row, since an Alpaca account is always a margin account: the
+    /// broker's last reported cash moved by every fill since (a buy lowers it by quantity × price,
+    /// and a sell's proceeds count, unsettled or not), less paper's simulated fees charged per
+    /// `(family, day)` bucket at `round(bucket, 2, ceiling)` (§6.2, §10, DEC-104). The cash slice
+    /// adds the broker's own unposted fees. `None` until the broker has reported a complete
+    /// account, or if the arithmetic overflows: no buying power is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
-        let observed = self.observed.as_ref()?;
+        let observed = self
+            .observed
+            .as_ref()
+            .filter(|observed| observed.complete)?;
+        let fees = self
+            .simulated_fees
+            .values()
+            .try_fold(Usd::ZERO, |total, bucket| {
+                total.checked_add(bucket.round(2, Rounding::Ceiling)?)
+            })
+            .ok()?;
         let model = observed
             .cash
             .checked_add(self.cash_flow)
-            .and_then(|cash| cash.checked_sub(self.simulated_fees))
+            .and_then(|cash| cash.checked_sub(fees))
             .ok()?;
         let reserved = self
             .reservations
@@ -476,6 +489,7 @@ mod tests {
             buying_power: Usd::parse("1").ok()?,
             non_marginable_buying_power: Usd::parse("1").ok()?,
             accrued_fees: Usd::ZERO,
+            complete: true,
         });
         state.mismatched.insert(instrument);
         state.checkpoint = Some(ActivityCursor("cursor-9".to_owned()));
