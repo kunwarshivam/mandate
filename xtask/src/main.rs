@@ -1608,10 +1608,10 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                 runs.iter().find(|o| !names_a_stub(&o.output)).map(|o| {
                     format!(
                         "{at} fails away from its stub; it must stop at the stub {story} \
-                         implements, so its failure must carry that stub's own report — an \
-                         `Unimplemented` error or a `todo!()` panic — and neither a fixture, parse, \
-                         or harness panic nor the test's own story id counts (DEC-137). It \
-                         panicked with: {}",
+                         implements, so its failure must carry that stub's own report, which is \
+                         the `Unimplemented` error of its crate, and neither a fixture, parse, or \
+                         harness panic nor the test's own story id counts (DEC-137). It panicked \
+                         with: {}",
                         first_panic_line(&o.output)
                     )
                 })
