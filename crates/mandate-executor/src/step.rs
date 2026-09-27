@@ -3,7 +3,7 @@
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::intent::{received, release_held, resume};
-use crate::orders::{absent, cancelled, described, duplicate, lookups_due, silence};
+use crate::orders::{absent, cancelled, described, duplicate, fill, lookups_due, silence};
 use crate::ports::Ports;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -115,6 +115,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Broker(Err(_)) => silence(batch),
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
+        Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one),
         Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Command(_) => later_slice(),
     }
 }

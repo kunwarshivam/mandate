@@ -1,16 +1,23 @@
 //! The §5.7 order state machine over what the broker says: acknowledgments, query answers,
-//! status updates, and silence.
+//! status updates, fills, and silence.
 
+use mandate_accounting::{
+    Account, AccountType, AssetClass, Execution, FeeKind, Input as AccountingInput, Record,
+};
 use mandate_canon::Value;
-use mandate_num::Qty;
+use mandate_num::{Qty, Usd};
+use mandate_time::{NewYorkTime, new_york_instant};
 
 use crate::batch::Batch;
-use crate::codec::state_name;
+use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::text;
-use crate::types::{BrokerOrder, BrokerRequest, EventId, OrderState, StatusMapping};
+use crate::state::{EVERY_AGENT, restriction_for};
+use crate::types::{
+    BrokerFill, BrokerOrder, BrokerRequest, EventId, Mode, OrderState, StatusMapping,
+};
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
 /// maps, and any other value is [`ExecutorError::UnmappedBrokerStatus`], which the step turns into
@@ -147,7 +154,7 @@ pub(crate) fn described(
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
-        Ok(StatusMapping::ReplacedPair) => replaced()?,
+        Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {
@@ -252,12 +259,6 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     Ok(())
 }
 
-/// `replaced`: the old order becomes `Replaced` and a new one, linked to it, holds its reservation
-/// (§5.7, interpretation 26). A later slice of this stack, with the fills its tests need.
-fn replaced() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
-}
-
 /// A cancel the broker confirmed, which only the kill switch's and E7-4's cancels ask for: a later
 /// slice of this stack.
 pub(crate) fn cancelled() -> Result<(), ExecutorError> {
@@ -293,5 +294,232 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
         .collect();
     for id in due {
         batch.broker(BrokerRequest::GetOrderByClientId(id));
+    }
+}
+
+/// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived
+/// from the event that records the replacement, becomes `Accepted` holding the old reservation
+/// (§5.7, interpretation 26).
+fn replaced(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    order: &BrokerOrder,
+    mut status: Vec<(&'static str, Value)>,
+) -> Result<(), ExecutorError> {
+    let from = batch
+        .view
+        .orders
+        .get(id)
+        .map_or(OrderState::Unknown, |known| known.state);
+    if !legal(from, OrderState::Replaced) {
+        transition(batch, id, OrderState::Replaced, status)?;
+        return Ok(());
+    }
+    let linked = ClientOrderId::for_replacement(&batch.next_id())?;
+    status.push(("replaced_by", text(linked.as_str())));
+    if let Some(broker) = &order.replaced_by_broker_order_id {
+        status.push(("replaced_by_broker_order_id", text(broker.clone())));
+    }
+    transition(batch, id, OrderState::Replaced, status)?;
+    batch.journal(
+        "OrderStateChanged",
+        None,
+        vec![
+            ("client_order_id", text(linked.as_str())),
+            ("state", text(state_name(OrderState::Accepted))),
+            ("replaces", text(id.as_str())),
+        ],
+    )?;
+    Ok(())
+}
+
+/// One broker fill, applied by its fill id, once (§5.7). A fill for a terminal order is a
+/// `LateFillApplied` that triggers a reconciliation. A fill that cannot be one of our orders' —
+/// not our id, another instrument or side, or more than the order has left — is still applied to
+/// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
+/// alerted (§7.1), so filled quantity never exceeds an order's quantity.
+pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), ExecutorError> {
+    if batch.view.fills.contains(&fill.fill_id) {
+        return Ok(());
+    }
+    let ours = known(batch, fill.client_order_id.as_deref()).filter(|id| {
+        batch.view.orders.get(id).is_some_and(|order| {
+            order.instrument == fill.instrument
+                && order.side == fill.side
+                && order
+                    .qty
+                    .checked_sub(order.filled_qty)
+                    .is_ok_and(|left| fill.qty <= left)
+        })
+    });
+    let terminal = ours
+        .as_ref()
+        .and_then(|id| batch.view.orders.get(id))
+        .is_some_and(|order| order.state.is_terminal());
+    let mut pairs = vec![
+        ("fill_id", text(fill.fill_id.0.clone())),
+        ("instrument", text(fill.instrument.as_str())),
+        ("side", text(side_name(fill.side))),
+        ("qty_gross", text(fill.qty.to_string())),
+        ("price", text(fill.price.to_string())),
+        ("fees", text(fill.fees.to_string())),
+        ("trade_date", text(fill.trade_date.to_string())),
+    ];
+    let prior = ours
+        .as_ref()
+        .and_then(|id| batch.view.orders.get(id))
+        .map_or(Qty::ZERO, |order| order.filled_qty);
+    let Some(id) = ours else {
+        let ingested = batch.journal(
+            "ExternalActivityIngested",
+            None,
+            vec![("fill_id", text(fill.fill_id.0.clone()))],
+        )?;
+        batch.journal("FillApplied", None, pairs)?;
+        every_agent(batch, Mode::ExitsOnly, &restriction_for(EXTERNAL))?;
+        batch.notify(ingested, "external_activity");
+        return Ok(());
+    };
+    pairs.push(("client_order_id", text(id.as_str())));
+    let kind = if terminal {
+        "LateFillApplied"
+    } else {
+        "FillApplied"
+    };
+    batch.journal(kind, None, pairs)?;
+    simulated_fee(batch, fill, &id, prior)?;
+    if terminal {
+        batch.request_reconciliation();
+        return Ok(());
+    }
+    if let Some(order) = batch.view.orders.get(&id) {
+        let pending = matches!(
+            order.state,
+            OrderState::PendingCancel | OrderState::PendingReplace
+        );
+        let to = if order.filled_qty >= order.qty {
+            OrderState::Filled
+        } else if pending {
+            order.state
+        } else {
+            OrderState::PartiallyFilled
+        };
+        if to != order.state {
+            transition(batch, &id, to, Vec::new())?;
+        }
+    }
+    Ok(())
+}
+
+/// A restriction on every agent of the account, originated here rather than copied.
+pub(crate) fn every_agent(
+    batch: &mut Batch<'_, '_>,
+    mode: Mode,
+    restriction: &str,
+) -> Result<EventId, ExecutorError> {
+    batch.journal(
+        "AgentModeApplied",
+        None,
+        vec![
+            ("agent", text(EVERY_AGENT)),
+            ("to", text(crate::codec::mode_name(mode))),
+            ("restriction", text(restriction)),
+            ("originated", Value::Bool(true)),
+        ],
+    )
+}
+
+/// The subject external activity is recorded and acknowledged under (§7.1).
+pub(crate) const EXTERNAL: &str = "external_activity";
+
+/// Paper's regulatory fees (trading-domain spec §10, R-22). Alpaca paper charges no SEC, TAF, or
+/// CAT fee, so on a paper stream the fee live would charge is computed with `mandate-accounting`'s
+/// own rules from the effective fee configuration and booked `simulated = true`: in P&L and buying
+/// power, and out of the cash comparison. Crypto fees are the broker's own on paper too, so only
+/// equity fills are simulated.
+///
+/// Only a fill attributed to one of our orders books one. §10 does not say whether an
+/// unattributed paper fill (external activity, §7.1) does; the backlog carries that question, and
+/// until it is answered an unattributed fill books no simulated fee.
+///
+/// The fee is keyed as the journal keys every fee (journal spec §6): `family` `equities`, `day` the
+/// fill's New York trade date as the account's calendar derives it, `accrued` at full precision,
+/// and `charged` zero, because a simulated fee is never charged by the broker. The components
+/// travel beside them.
+///
+/// DEC-87's per-order TAF cap is `max(0, cap − TAF already charged on the fill's client order)`.
+/// The order's `prior` filled quantity is replayed first as one earlier execution under the same
+/// client order id, so the account's own TAF rule sees what the order has already been charged:
+/// under `per_order` its cumulative TAF is `min(cap, rate × quantity)` however it was split, and
+/// under `per_execution` the earlier execution changes nothing.
+fn simulated_fee(
+    batch: &mut Batch<'_, '_>,
+    fill: &BrokerFill,
+    id: &ClientOrderId,
+    prior: Qty,
+) -> Result<(), ExecutorError> {
+    let equity =
+        batch.ports.instruments.asset_class(&fill.instrument) == Some(AssetClass::UsEquity);
+    if batch.view.environment() != Some("paper") || !equity {
+        return Ok(());
+    }
+    let executed_at = new_york_instant(fill.trade_date, NewYorkTime::new(12, 0)?)?;
+    let execution = |fill_id: String, qty_gross: Qty| Execution {
+        fill_id,
+        client_order_id: Some(id.as_str().to_owned()),
+        instrument: fill.instrument.clone(),
+        asset_class: AssetClass::UsEquity,
+        side: fill.side,
+        qty_gross,
+        price: fill.price,
+        liquidity: None,
+        executed_at,
+    };
+    let fees = batch.ports.fees;
+    let mut account = Account::opening(AccountType::Margin, Usd::ZERO, Vec::new());
+    if !prior.is_zero() {
+        let earlier = execution(format!("{}:earlier", fill.fill_id.0), prior);
+        account = account
+            .apply(&AccountingInput::Fill(earlier), fees)?
+            .account;
+    }
+    let applied = account.apply(
+        &AccountingInput::Fill(execution(fill.fill_id.0.clone(), fill.qty)),
+        fees,
+    )?;
+    let Record::Fill {
+        trade_date: Some(day),
+        fees: components,
+        ..
+    } = applied.record
+    else {
+        return Ok(());
+    };
+    let accrued = components
+        .iter()
+        .try_fold(Usd::ZERO, |total, fee| total.checked_add(fee.usd))?;
+    let mut pairs = vec![
+        ("family", text("equities")),
+        ("day", text(day.to_string())),
+        ("accrued", text(accrued.to_string())),
+        ("charged", text("0")),
+        ("simulated", Value::Bool(true)),
+        ("client_order_id", text(id.as_str())),
+    ];
+    for fee in &components {
+        pairs.push((fee_name(fee.kind), text(fee.usd.to_string())));
+    }
+    batch.journal("FeesCharged", None, pairs)?;
+    Ok(())
+}
+
+/// The payload name of one fee component.
+fn fee_name(kind: FeeKind) -> &'static str {
+    match kind {
+        FeeKind::Sec => "sec",
+        FeeKind::Taf => "taf",
+        FeeKind::Cat => "cat",
+        FeeKind::CryptoAsset => "crypto_asset",
+        FeeKind::CryptoUsd => "crypto_usd",
     }
 }

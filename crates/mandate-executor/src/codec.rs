@@ -94,6 +94,10 @@ pub(crate) fn purpose_of(text: &str) -> Result<Purpose, ExecutorError> {
     value(&PURPOSES, text, "purpose")
 }
 
+pub(crate) fn mode_name(mode: Mode) -> &'static str {
+    name(&MODES, mode)
+}
+
 pub(crate) fn mode_of(text: &str) -> Result<Mode, ExecutorError> {
     value(&MODES, text, "to")
 }
