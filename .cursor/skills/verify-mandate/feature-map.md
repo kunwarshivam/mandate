@@ -326,7 +326,7 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3's first two PRs land `evaluate`.
+implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -348,6 +348,7 @@ check still owed.
   refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
   mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
   exposure with the account's own 1×),
+  `crates/mandate-risk/src/flatten.rs` (`agent_flatten`, the agent-scoped kill switch's plan),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
