@@ -31,11 +31,38 @@ pub(crate) fn eligibility(input: &GateInput<'_>) -> Result<Option<Stop>, GateErr
     } else {
         below(
             i.median_dollar_volume_30d,
-            config.crypto_liquidity_floor_usd,
+            binding(
+                config.crypto_liquidity_floor_usd,
+                platform_liquidity_floor()?,
+            ),
         )
         .then_some(ReasonCode::BelowLiquidityFloor)
     };
     Ok(failed.map(|code| (Verdict::Deny, code)))
+}
+
+/// §3.2's platform minimum for the price floor: an organization setting may raise it, never lower
+/// it. `GateConfig`'s fields are public and nothing validates them, so the gate enforces the
+/// minimum itself rather than trusting the figure it is handed: an independent gate that takes a
+/// weakened floor on trust is not independent (DEC-129 item 32).
+fn platform_price_floor() -> Result<Usd, GateError> {
+    Ok(Usd::parse("1")?)
+}
+
+/// §3.2's platform minimum for both liquidity floors, the 20-day equity one and the 30-day crypto
+/// one. See [`platform_price_floor`] for why the gate applies it rather than trusting the config.
+fn platform_liquidity_floor() -> Result<Usd, GateError> {
+    Ok(Usd::parse("1000000")?)
+}
+
+/// The binding floor: the organization's setting, or the platform minimum when the setting is
+/// below it. Never the lower of the two.
+fn binding(configured: Usd, minimum: Usd) -> Usd {
+    if configured > minimum {
+        configured
+    } else {
+        minimum
+    }
 }
 
 /// Items 4 to 6 for a US equity: the price floor, the 20-day liquidity floor, then the ETP rule.
@@ -43,10 +70,16 @@ fn equity_items(input: &GateInput<'_>) -> Result<Option<ReasonCode>, GateError> 
     let i = input.instrument;
     let config = input.config;
     let prior_close = i.prior_close.map(per_share).transpose()?;
-    if below(prior_close, config.price_floor) {
+    if below(
+        prior_close,
+        binding(config.price_floor, platform_price_floor()?),
+    ) {
         return Ok(Some(ReasonCode::BelowPriceFloor));
     }
-    if below(i.median_dollar_volume_20d, config.liquidity_floor_usd) {
+    if below(
+        i.median_dollar_volume_20d,
+        binding(config.liquidity_floor_usd, platform_liquidity_floor()?),
+    ) {
         return Ok(Some(ReasonCode::BelowLiquidityFloor));
     }
     let enabled =
@@ -59,6 +92,12 @@ fn equity_items(input: &GateInput<'_>) -> Result<Option<ReasonCode>, GateError> 
 /// §3.2 item 6's "older than the configured age", failing closed: a classification with no date
 /// is as unknown as one past `etp_classification_max_age_s` (DEC-129 item 10). Exactly at the age
 /// is not older, so it passes (DEC-129 item 15).
+///
+/// **This denies every US-equity opening on a stale or absent date, not only an ETP's** (DEC-129
+/// item 33). §3.2 item 6 says "ETP openings are denied", but `EtpClass::Plain` covers a plain ETF
+/// and a common stock alike, so a stale date leaves the gate unable to tell an ETP from a stock:
+/// the instrument that was `Plain` a year ago may be a leveraged ETP today. Denying only what is
+/// already known to be complex would fail open on exactly the data the rule exists to distrust.
 fn classification_stale(input: &GateInput<'_>) -> Result<bool, GateError> {
     let Some(at) = input.instrument.etp_classified_at else {
         return Ok(true);

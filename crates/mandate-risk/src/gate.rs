@@ -35,12 +35,23 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check, while any part of it is owed. Checks 1 and 2 are whole here;
+/// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
+/// is whole for a US equity but still owes §3.2 item 7's "USD pairs only" for crypto (E6-10);
 /// check 3 its sessions and auction windows (E6-6; the halt is here),
 /// check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls (E6-8) and check 7 buying power
 /// (E6-6), and checks 5 and 8 are not written yet.
-fn owed(check: Check) -> Option<&'static str> {
+///
+/// Check 2 takes the input because "USD pairs only" has no field to read: `InstrumentSnapshot`
+/// carries no quote currency and `AssetId` is a UUID, so nothing distinguishes BTC/USD from
+/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened the moment E6-6
+/// and E6-8 land, so a crypto opening stays owed and is refused by the fail-closed rule until
+/// E6-10 supplies the field (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues
+/// only for an opening.
+fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
     match check {
+        Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
+            Some("E6-10")
+        }
         Check::AccountAndMode | Check::UniverseAndLimits => None,
         Check::SessionAndHalt
         | Check::OrderConstraints
@@ -80,7 +91,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
-            None => match owed(check) {
+            None => match owed(check, input) {
                 Some(story) => {
                     checks.push(CheckOutcome::NotReached(check));
                     if opening {
@@ -358,7 +369,7 @@ mod tests {
         let config = GateConfig {
             price_floor: usd("5")?,
             liquidity_floor_usd: usd("1000000")?,
-            crypto_liquidity_floor_usd: usd("1000000")?,
+            crypto_liquidity_floor_usd: usd("2000000")?,
             collar_liquid_threshold_usd: usd("50000000")?,
             collar_liquid_x: fraction("0.01")?,
             collar_other_x: fraction("0.02")?,
@@ -1112,6 +1123,16 @@ mod tests {
             .then_some(ReasonCode::LeveragedEtpNotEnabled)
     }
 
+    /// The floor's verdict for a scenario built directly, rather than from a [`FloorRow`].
+    fn floor(o: &Owned) -> Result<Option<ReasonCode>, GateError> {
+        o.with_input(floor::eligibility)?.map(|stop| {
+            stop.map(|(verdict, code)| {
+                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                code
+            })
+        })
+    }
+
     fn floor_of(o: &mut Owned, r: FloorRow) -> Result<Option<ReasonCode>, GateError> {
         let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
         let i = &mut o.instrument;
@@ -1138,7 +1159,7 @@ mod tests {
         i.median_dollar_volume_20d =
             figure(r.volume_20d, "90000000", "1000000", "999999.999999999")?;
         i.median_dollar_volume_30d =
-            figure(r.volume_30d, "90000000", "1000000", "999999.999999999")?;
+            figure(r.volume_30d, "90000000", "2000000", "1999999.999999999")?;
         i.etp = r.etp;
         let age = match r.classified {
             0 => Some(1),
@@ -1223,6 +1244,67 @@ mod tests {
             (165_888, 6),
             "every row ran, and every floor code was reached"
         );
+        Ok(())
+    }
+
+    /// §3.2's platform minimums bind whatever the organization set: price 1.00, and 1,000,000 for
+    /// both the 20-day equity volume and the 30-day crypto volume.
+    ///
+    /// `GateConfig`'s fields are public and nothing in the repo validates them, so a config below a
+    /// platform minimum is representable and the gate has to refuse it on its own. The main floor
+    /// table cannot show this: its config sits at or above every minimum, so deleting the
+    /// enforcement changes none of its 165888 rows. Review round 1 found exactly that — two
+    /// substitutions that dropped the minimum survived the whole suite.
+    ///
+    /// Each pair below is the reviewer's own probe and the value one unit above it: the weakened
+    /// config would have admitted the first, and the platform minimum denies it, while the second
+    /// shows the minimum is the floor rather than a blanket refusal.
+    #[test]
+    fn a_config_below_a_platform_minimum_does_not_weaken_the_floor() -> Result<(), GateError> {
+        let weak = |o: &mut Owned| -> Result<(), GateError> {
+            o.config.price_floor = Usd::parse("0.5")?;
+            o.config.liquidity_floor_usd = Usd::parse("1")?;
+            o.config.crypto_liquidity_floor_usd = Usd::parse("1")?;
+            Ok(())
+        };
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.prior_close = Some(Price::parse("0.6")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowPriceFloor),
+            "0.6 clears a 0.5 setting but not the 1.00 platform minimum"
+        );
+        o.instrument.prior_close = Some(Price::parse("1")?);
+        assert_eq!(
+            floor(&o)?,
+            None,
+            "exactly at the 1.00 platform minimum passes, so the minimum is a floor not a ban"
+        );
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.median_dollar_volume_20d = Some(Usd::parse("10")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowLiquidityFloor),
+            "10 clears a 1 setting but not the 1000000 platform minimum"
+        );
+        o.instrument.median_dollar_volume_20d = Some(Usd::parse("1000000")?);
+        assert_eq!(floor(&o)?, None, "exactly at the platform minimum passes");
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.asset_class = AssetClass::Crypto;
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("10")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowLiquidityFloor),
+            "the crypto floor has the same 1000000 minimum, and its own setting cannot lower it"
+        );
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("1000000")?);
+        assert_eq!(floor(&o)?, None, "exactly at the platform minimum passes");
         Ok(())
     }
 

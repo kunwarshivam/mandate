@@ -135,6 +135,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E6-9 (Must)** As an owner, I want account restrictions and trading halts checked before every
   order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
   RC-15 passes.
+- **E6-10 (Must)** As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain
+  §3.2 item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written
+  for. Needs a quote-currency input: `InstrumentSnapshot` carries none and `AssetId` is a UUID, so
+  today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
+  check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
+  non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
 
 ### E7 Alpaca connector and recovery
 
