@@ -49,10 +49,6 @@ impl PartialGateDecision {
         }
     }
 
-    pub(crate) fn allows(&self) -> bool {
-        self.verdict == GateVerdict::Allow
-    }
-
     /// The `checks` list as the journal carries it: each check's id and whether it passed.
     pub(crate) fn checks_value(&self) -> Result<Value, ExecutorError> {
         let checks = self
@@ -141,10 +137,13 @@ pub(crate) fn account_stream_checks(
     })
 }
 
-/// §9.1 check 1: account state is evaluated before agent mode (§7.3).
+/// §9.1 check 1: account state is evaluated before agent mode (§7.3). A blocked account denies a
+/// risk-increasing order; a risk-reducing one is only **held**, for the broker, which is one of the
+/// four holds `AGENTS.md` rule 13 names — the executor itself never denies an exit on it.
 fn account_failure(state: AccountState, adds: bool) -> Option<(&'static str, bool)> {
     match state {
-        AccountState::Blocked => Some(("account_trading_blocked", false)),
+        AccountState::Blocked if adds => Some(("account_trading_blocked", false)),
+        AccountState::Blocked => Some(("broker", true)),
         AccountState::ClosingOnly if adds => Some(("account_restricted", false)),
         AccountState::Active | AccountState::ClosingOnly => None,
     }

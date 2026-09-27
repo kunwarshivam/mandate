@@ -72,16 +72,23 @@ pub(crate) fn gate_and_submit(
     if too_old(batch, intent) {
         return abandon(batch, intent, "intent_too_old");
     }
-    if gate(batch, intent, true)? {
+    if gate(batch, intent, true)? == ALLOW {
         submit(batch, intent)?;
     }
     Ok(())
 }
 
-/// Runs the binding gate on an intent and journals the decision. With `always` false, a decision
-/// that does not allow is not journaled again: a held intent re-checked at a tick records only the
-/// moment it is released.
-fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bool, ExecutorError> {
+const ALLOW: &str = "allow";
+const HOLD: &str = "hold";
+
+/// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
+/// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
+/// journaled again: a held intent re-checked at a tick records only the moment it is released.
+fn gate(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    always: bool,
+) -> Result<&'static str, ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         instrument,
@@ -91,7 +98,10 @@ fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bo
         ..
     } = &body
     else {
-        return Ok(false);
+        return Err(ExecutorError::NotInterpreted {
+            what: "a flatten plan at the gate".to_owned(),
+            story: "E7-4",
+        });
     };
     let decision = account_stream_checks(
         &batch.view,
@@ -104,8 +114,8 @@ fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bo
         },
         batch.ports,
     )?;
-    let allowed = decision.allows();
-    if allowed || always {
+    let verdict = decision.verdict_name();
+    if verdict == ALLOW || always {
         batch.journal(
             "GateDecided",
             None,
@@ -119,7 +129,7 @@ fn gate(batch: &mut Batch<'_, '_>, intent: &IntentId, always: bool) -> Result<bo
             ],
         )?;
     }
-    Ok(allowed)
+    Ok(verdict)
 }
 
 fn intent_of(
@@ -230,27 +240,41 @@ fn abandon(
 }
 
 /// `Unknown → Intent` after a confirmed absence: the gate re-runs and the order is resubmitted
-/// with the **same** client order id and the next attempt number, or abandoned (§5.7).
+/// with the **same** client order id and the next attempt number, or abandoned (§5.7). Only a
+/// re-check that **denies** abandons; one that holds leaves the order in `Intent`, held, for the
+/// first tick its hold clears — an exit is held, never denied (`AGENTS.md` rule 13).
 pub(crate) fn resubmit(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
-    let Some(order) = batch.view.orders.get(id).cloned() else {
-        return Ok(());
+    let Some(intent) = batch
+        .view
+        .orders
+        .get(id)
+        .and_then(|order| order.intent_id.clone())
+    else {
+        return send_again(batch, id);
     };
+    if too_old(batch, &intent) {
+        return abandon(batch, &intent, "intent_too_old");
+    }
+    match gate(batch, &intent, true)? {
+        ALLOW => send_again(batch, id),
+        HOLD => Ok(()),
+        _ => abandon(batch, &intent, "gate_recheck"),
+    }
+}
+
+/// Sends the request an `OrderSubmitted` already named again, under the same id with the next
+/// attempt number.
+fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
+    let unknown = || ExecutorError::UnknownOrder {
+        client_order_id: id.as_str().to_owned(),
+    };
+    let order = batch.view.orders.get(id).cloned().ok_or_else(unknown)?;
     let request = batch
         .view
         .details
         .get(id)
         .and_then(|detail| detail.request.clone())
-        .ok_or_else(|| ExecutorError::UnknownOrder {
-            client_order_id: id.as_str().to_owned(),
-        })?;
-    if let Some(intent) = &order.intent_id {
-        if too_old(batch, intent) {
-            return abandon(batch, intent, "intent_too_old");
-        }
-        if !gate(batch, intent, true)? {
-            return abandon(batch, intent, "gate_recheck");
-        }
-    }
+        .ok_or_else(unknown)?;
     let attempt = order.attempt.saturating_add(1);
     send(
         batch,
@@ -286,15 +310,21 @@ pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), 
     Ok(())
 }
 
-/// A held intent is released at the first tick its hold has cleared, abandoned once it is too
-/// old, and otherwise left waiting without a journal entry per tick.
+/// A held intent is released at the first tick its hold has cleared — as its first submission, or
+/// as the resubmission of an order a confirmed absence returned to `Intent` — abandoned once it is
+/// too old, and otherwise left waiting without a journal entry per tick.
 pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let held: Vec<IntentId> = batch.view.held.iter().cloned().collect();
     for intent in held {
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
-        } else if gate(batch, &intent, false)? {
-            submit(batch, &intent)?;
+        } else if gate(batch, &intent, false)? == ALLOW {
+            let id = ClientOrderId::for_intent(&intent)?;
+            if batch.view.orders.contains_key(&id) {
+                send_again(batch, &id)?;
+            } else {
+                submit(batch, &intent)?;
+            }
         }
     }
     Ok(())

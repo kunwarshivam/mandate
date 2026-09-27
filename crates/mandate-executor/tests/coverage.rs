@@ -1441,3 +1441,110 @@ fn the_client_order_id_grammar_is_the_derivations_and_nothing_else() {
         Err(ExecutorError::MalformedClientOrderId { .. })
     ));
 }
+
+#[test]
+fn a_blocked_account_holds_an_exit_for_the_broker_and_never_denies_it() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = holding(&ports);
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            next_seq(&shell),
+            "AccountRestrictionChanged",
+            with_clock(&[("restriction", text("blocked"))], 1),
+        ))
+        .expect("folds");
+    let ran = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
+        &ports,
+    );
+    assert_eq!(
+        gate_field(&ran, "verdict").as_deref(),
+        Some("hold"),
+        "the broker is one of the four holds rule 13 names; the executor denies no exit on it"
+    );
+    assert_eq!(gate_field(&ran, "reason_code").as_deref(), Some("broker"));
+}
+
+#[test]
+fn a_resubmission_the_recheck_holds_waits_in_intent_and_goes_once_released() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = holding(&ports);
+    let sent = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
+        &ports,
+    );
+    let id = sent
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("sent");
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+    let paused = copied(
+        ACCOUNT_STREAM,
+        next_seq(&shell),
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(common::AGENT)),
+                ("to", text("paused")),
+                ("restriction", text("daily_loss")),
+            ],
+            1,
+        ),
+        &EventId(format!("{AGENT_STREAM}-5")),
+    );
+    shell.fold_one(&paused).expect("folds");
+    let absent = || {
+        Input::Broker(Ok(BrokerOutcome::Absent {
+            client_order_id: id.clone(),
+        }))
+    };
+    shell.run(absent(), &ports);
+    shell.run(Input::Tick(clock(8)), &ports);
+    shell.run(absent(), &ports);
+    shell.run(Input::Tick(clock(16)), &ports);
+    let third = shell.run(absent(), &ports);
+    assert!(third.submissions().is_empty(), "paused holds the exit");
+    assert!(
+        !third.draft_types().contains(&"OrderAbandoned"),
+        "a hold is not a denial, so the exit is not abandoned: {:?}",
+        third.draft_types()
+    );
+    assert_eq!(
+        shell.state.order(&key(&id)).map(|order| order.state),
+        Some(OrderState::Intent)
+    );
+    let lifted = copied(
+        ACCOUNT_STREAM,
+        next_seq(&shell),
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(common::AGENT)),
+                ("to", text("normal")),
+                ("restriction", text("daily_loss")),
+            ],
+            17,
+        ),
+        &EventId(format!("{AGENT_STREAM}-6")),
+    );
+    shell.fold_one(&lifted).expect("folds");
+    let released = shell.run(Input::Tick(clock(18)), &ports);
+    assert_eq!(
+        released
+            .submissions()
+            .first()
+            .map(|order| order.client_order_id.as_str()),
+        Some(id.as_str()),
+        "the same id, resubmitted once the hold clears"
+    );
+}
