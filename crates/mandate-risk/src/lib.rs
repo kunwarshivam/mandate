@@ -36,11 +36,11 @@
 //! the purpose itself from [`Origin`], the side and the position, so a proposer cannot claim an
 //! exemption by describing its own order.
 //!
-//! E6-3 lands in three stacked PRs; the first two are [`evaluate`]: the eight checks in order,
-//! purpose assignment, check 1's blocked account and mode rule, the working universe, the mandate
-//! limits of mandate spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9. Every check
-//! a later PR or story owns passes, and every other entry point returns
-//! [`GateError::Unimplemented`], until the story named in its doc comment lands (DEC-77, DEC-83).
+//! E6-3 implements [`evaluate`] — the eight checks in order, purpose assignment, check 1's blocked
+//! account and mode rule, the working universe, the mandate limits of mandate spec §5.3 with the
+//! account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`]. Every check a later
+//! story owns passes, and every other entry point returns [`GateError::Unimplemented`], until the
+//! story named in its doc comment lands (DEC-77, DEC-83).
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
@@ -49,6 +49,7 @@ use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
+mod flatten;
 mod gate;
 mod limits;
 #[doc(hidden)]
@@ -829,8 +830,7 @@ pub struct FlattenPlan {
 /// # Errors
 /// Returns [`GateError`] when a floor price cannot be computed exactly.
 pub fn agent_flatten(input: &FlattenInput<'_>) -> Result<FlattenPlan, GateError> {
-    let _ = input;
-    Err(GateError::Unimplemented("agent_flatten", "E6-3"))
+    flatten::agent_flatten(input)
 }
 
 /// The day's surveillance figures per workspace (§9.6). It states figures and flags thresholds; it

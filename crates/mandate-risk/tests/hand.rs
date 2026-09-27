@@ -238,7 +238,6 @@ fn the_floor_never_blocks_an_exit_in_a_held_instrument() {
 
 /// `ref.py` takes an explicit `owner_floor_price` ahead of the computed one.
 #[test]
-#[ignore = "pending E6-3"]
 fn an_explicit_owner_floor_price_overrides_the_computed_one() {
     let orders = BTreeMap::new();
     let positions = vec![AgentPosition {
@@ -269,7 +268,6 @@ fn an_explicit_owner_floor_price_overrides_the_computed_one() {
 
 /// A zero-quantity position produces no sell at all.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_flat_position_produces_no_sell() {
     let orders = BTreeMap::new();
     let positions = vec![AgentPosition {
@@ -426,7 +424,6 @@ fn purpose_is_assigned_from_origin_side_and_position() {
 
 /// §5.5's sequence starts with the mode, before any cancel is sent.
 #[test]
-#[ignore = "pending E6-3"]
 fn the_final_mode_is_applied_first() {
     let plan = flatten_of(Session::Regular, FlattenInitiator::RiskLimit, None, None);
     assert_eq!(
@@ -438,7 +435,6 @@ fn the_final_mode_is_applied_first() {
 
 /// An agent-scoped flatten never touches another agent's orders or positions.
 #[test]
-#[ignore = "pending E6-3"]
 fn an_agent_flatten_never_touches_another_agent() {
     let mut orders = BTreeMap::new();
     orders.insert(
@@ -492,7 +488,6 @@ fn an_agent_flatten_never_touches_another_agent() {
 
 /// The sub-ledger, not the broker's quantity, is what a flatten sells (`MC-F01`'s note).
 #[test]
-#[ignore = "pending E6-3"]
 fn a_flatten_sells_the_sub_ledger_not_the_brokers_position() {
     let orders = BTreeMap::new();
     let positions = vec![AgentPosition {
@@ -1182,7 +1177,6 @@ fn the_surveillance_report_matches_a_hand_computed_day() {
 
 /// Crypto trades continuously, so a crypto sell in a flatten never waits for a session.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_crypto_sell_never_waits_for_a_session() {
     let orders = BTreeMap::new();
     let positions = vec![AgentPosition {
@@ -1213,7 +1207,6 @@ fn a_crypto_sell_never_waits_for_a_session() {
 
 /// A flatten prices by the session alone: the same position, two sessions, two pricings.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_flatten_prices_by_session_alone() {
     let regular = flatten_of(Session::Regular, FlattenInitiator::RiskLimit, None, None);
     let after = flatten_of(
