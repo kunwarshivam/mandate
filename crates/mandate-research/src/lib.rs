@@ -597,6 +597,14 @@ impl CheckInputs<'_> {
     /// expression: V-036 makes "no admitting model" and "no research envelope" the same condition
     /// for a validated mandate, so two separate disjuncts would differ only on inputs validation
     /// rejects, which no test can reach.
+    ///
+    /// Check 6 reads the overlay's effective `autonomy.admission` although today's overlay only
+    /// tightens `auto` to `ask` and never to `deny`, so the read changes no verdict and no test can
+    /// tell it from the mandate's own value. It stays so that a policy able to deny admission binds
+    /// here without a code change (DEC-132 item 22).
+    ///
+    /// Check 17 refuses if the ceiling does not fit a `usize`, which no supported target reaches:
+    /// an impossible input resolves toward refusal (AGENTS.md rule 3).
     fn fails(&self, reason: RefusalReason) -> bool {
         let input = self.input;
         let envelope = input.mandate.envelope();
@@ -666,7 +674,7 @@ impl CheckInputs<'_> {
             RefusalReason::UniverseFull => {
                 !self.active.contains(instrument)
                     && usize::try_from(overlay.effective_max_instruments(envelope.max_instruments))
-                        .is_ok_and(|ceiling| self.active.len() >= ceiling)
+                        .map_or(true, |ceiling| self.active.len() >= ceiling)
             }
         }
     }
@@ -1202,5 +1210,130 @@ impl ResearchError {
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }
+    }
+}
+
+/// What the tests PR's files cannot pin on the implementation, each shown by a planted bug every
+/// live test passed (the post-merge review of #158): check 7 compares against the overlay's
+/// `research_cost_cap_usd_per_day` when it is below the mandate's own cap, which is DEC-132
+/// item 22's claim that a lowered ceiling binds at check 7.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MC-N01's admitting inputs, with the mandate's cap at 5 USD and the overlay's at 2.5 USD.
+    struct Owned {
+        mandate: ValidatedMandate,
+        overlay: PolicyOverlay,
+        universe: WorkingUniverse,
+        proposal: ProposedThesis,
+        facts: AdmissionFacts,
+        lineages: LineageState,
+    }
+
+    impl Owned {
+        fn new(spend: &str) -> Result<Self, ResearchError> {
+            let source = SourceId::new("src.filings")?;
+            let thesis = Thesis {
+                thesis_id: ThesisId::new("th-1")?,
+                lineage_id: LineageId::new("th-1")?,
+                revision: 0,
+                predecessor_thesis_id: None,
+                instrument_id: AssetId::new("7b4a1c2e-5555-4a2b-9c3d-000000000005")?,
+                output: OutputEnvelope {
+                    model_id: ModelId::new("llm.research_agent")?,
+                    model_version: ModelVersion::new("0.1.0"),
+                    content_hash: ContentHash::new(Digest::of_parts(&[b"model"])),
+                    as_of: UtcNanos::parse("2026-09-22T14:00:00.000000000Z")?,
+                    expires_at: UtcNanos::parse("2026-09-23T14:00:00.000000000Z")?,
+                },
+                direction: Direction::Long,
+                horizon_s: 86_400,
+                conviction: SchemaDec::from_checked_text("0.7"),
+                confidence: SchemaDec::from_checked_text("0.8"),
+                evidence: None,
+                evidence_sources: vec![source.clone()],
+                invalidation: Invalidation::new("Guidance is cut.")?,
+            };
+            Ok(Self {
+                mandate: ValidatedMandate::from_validated_envelope(MandateEnvelope {
+                    universe_pinned: false,
+                    max_instruments: 5,
+                    asset_classes: BTreeSet::from([AssetClass::UsEquity]),
+                    leveraged_etps_enabled: false,
+                    leveraged_etp_disclosure_version: None,
+                    admits_instruments: true,
+                    research: Some(ResearchEnvelope {
+                        interval_s: 3_600,
+                        cost_cap_usd_per_day: Usd::parse("5")?,
+                        max_revisions_per_lineage: 3,
+                    }),
+                    admission: AutonomyDecision::Ask,
+                }),
+                overlay: PolicyOverlay {
+                    research_cost_cap_usd_per_day: Some(Usd::parse("2.5")?),
+                    ..PolicyOverlay::permissive()
+                },
+                universe: WorkingUniverse::Known {
+                    instruments: BTreeSet::new(),
+                    pinned: false,
+                },
+                proposal: ProposedThesis {
+                    thesis,
+                    instrument: InstrumentFacts {
+                        asset_class: AssetClass::UsEquity,
+                        leveraged_or_inverse_etp: false,
+                    },
+                    corroboration: Some(Corroboration::IndependentSource),
+                },
+                facts: AdmissionFacts {
+                    allowlist: SourceAllowlist {
+                        version: AllowlistVersion(1),
+                        sources: BTreeSet::from([source]),
+                    },
+                    eligibility_failures: BTreeSet::new(),
+                    instrument_groups: BTreeMap::new(),
+                    claimed_by_other_agents: BTreeSet::new(),
+                    halted_instruments: BTreeSet::new(),
+                    disclosures_accepted: BTreeSet::new(),
+                    data_universe: None,
+                    research_spend_usd_today: Usd::parse(spend)?,
+                },
+                lineages: LineageState::default(),
+            })
+        }
+
+        fn decide(&self) -> Result<AdmissionDecision, ResearchError> {
+            admit(&AdmissionInput {
+                mandate: &self.mandate,
+                overlay: &self.overlay,
+                universe: &self.universe,
+                proposal: &self.proposal,
+                facts: &self.facts,
+                lineages: &self.lineages,
+            })
+            .map(|admission| admission.decision)
+        }
+    }
+
+    #[test]
+    fn check_7_a_policy_cap_below_the_mandates_binds_at_equality() -> Result<(), ResearchError> {
+        assert_eq!(
+            Owned::new("2.5")?.decide()?,
+            AdmissionDecision::Refused {
+                reason: RefusalReason::CostCapReached
+            },
+            "the overlay's 2.5 USD is the stricter cap, so a spend of 2.5 has reached it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn check_7_a_cent_below_the_policy_cap_still_admits() -> Result<(), ResearchError> {
+        assert!(
+            Owned::new("2.49")?.decide()?.admitted(),
+            "below the stricter cap, and the mandate's own 5 USD is further away still"
+        );
+        Ok(())
     }
 }
