@@ -20,6 +20,7 @@
 
 mod exact;
 
+use core::cmp::Ordering;
 use core::fmt;
 
 use exact::Exact;
@@ -82,6 +83,13 @@ const FULL_SCALE: u32 = 28;
 const BPS_PER_UNIT: u64 = 10_000;
 /// The `sqrt` impact model takes its root at 18 fractional digits (spec §6.4, DEC-106 item 3).
 const ROOT_SCALE: u32 = 18;
+/// Every figure a backtest report rounds is rounded at 12 fractional digits, including its roots
+/// ([E4-2 task brief](../../../docs/project/tasks/E4-2-backtest-baseline.md), DEC-127).
+const REPORT_SCALE: u32 = 12;
+/// Reg NMS Rule 612's coarse tick, 0.01 USD, which applies at or above 1.00 USD (spec §2.1).
+const PENNY_TICK_PLACES: u32 = 2;
+/// Reg NMS Rule 612's fine tick, 0.0001 USD, which applies below 1.00 USD (spec §2.1).
+const SUB_DOLLAR_TICK_PLACES: u32 = 4;
 
 fn parse(text: &str, max_scale: u32) -> Result<Decimal, NumError> {
     let value = Exact::parse(text)?.to_decimal(max_scale)?;
@@ -354,8 +362,29 @@ impl Price {
     /// already on the grid is returned unchanged. `not_positive` when rounding a buy limit down
     /// reaches zero, and `division_by_zero` for an increment of zero.
     pub fn on_tick(self, tick: TickRule, adverse: Adverse) -> Result<Self, NumError> {
-        let _ = (tick, adverse);
-        Err(NumError::Overflow)
+        let increment = match tick {
+            TickRule::RegNmsEquity => Exact::of(Decimal::new(1, self.reg_nms_tick_places())),
+            TickRule::Increment(increment) => increment.exact(),
+        };
+        let steps = match adverse {
+            Adverse::Up => self.exact().div_toward_zero(increment, 0)?,
+            Adverse::Down => self.exact().div(increment, 0, Rounding::Ceiling)?,
+        };
+        steps
+            .mul(increment)?
+            .to_decimal(QTY_SCALE)
+            .and_then(positive)
+            .map(Self)
+    }
+
+    /// Reg NMS Rule 612's tick for this price: 0.01 at or above 1.00 USD, 0.0001 below it (spec
+    /// §2.1). The boundary is read through [`Ord`] rather than a comparison operator because 1.00
+    /// sits on both grids, so no case could tell a strict boundary from an inclusive one.
+    fn reg_nms_tick_places(self) -> u32 {
+        match self.0.cmp(&Decimal::ONE) {
+            Ordering::Less => SUB_DOLLAR_TICK_PLACES,
+            Ordering::Equal | Ordering::Greater => PENNY_TICK_PLACES,
+        }
     }
 }
 
@@ -602,16 +631,21 @@ impl Usd {
     /// 9, and 10). `division_by_zero` when `denominator` is zero, which the caller avoids by
     /// checking that the equity it divides by is positive.
     pub fn ratio_to(self, denominator: Usd, scale: u32, mode: Rounding) -> Result<Ratio, NumError> {
-        let _ = (denominator, scale, mode);
-        Err(NumError::Overflow)
+        self.exact()
+            .div(denominator.exact(), scale, mode)?
+            .to_decimal(RATIO_SCALE)
+            .map(Ratio)
     }
 
     /// `truncate(self ÷ price, increment)`: the shares this amount of money buys at `price`, never
     /// more (spec §2.1 truncates an order quantity to the increment). `division_by_zero` cannot
     /// happen, because a [`Price`] is positive.
     pub fn shares_at(self, price: Price, increment: ShareIncrement) -> Result<Qty, NumError> {
-        let _ = (price, increment);
-        Err(NumError::Overflow)
+        self.exact()
+            .div_toward_zero(price.exact(), increment.places())?
+            .to_decimal(QTY_SCALE)
+            .and_then(non_negative)
+            .map(Qty)
     }
 }
 
@@ -723,41 +757,60 @@ impl Ratio {
 
     /// `self + other`, exact.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
-        let _ = (self.exact(), other.exact());
-        Err(NumError::Overflow)
+        self.exact()
+            .add(other.exact())?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `self − other`, exact: a backtest report's excess return over its benchmark (DEC-127).
     pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Overflow)
+        self.exact()
+            .sub(other.exact())?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `self × factor`, exact: annualizing a variance or a squared Sharpe by the period count
     /// (DEC-127 items 6 and 7), which is exact because the factor is an integer.
     pub fn times_int(self, factor: u32) -> Result<Self, NumError> {
-        let _ = factor;
-        Err(NumError::Overflow)
+        self.exact()
+            .mul(Exact::integer(u64::from(factor)))?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `Σ values`, exact: a backtest report's `return_sum`.
     pub fn sum(values: &[Self]) -> Result<Self, NumError> {
-        let _ = values;
-        Err(NumError::Overflow)
+        Self::exact_sum(values.iter().map(|value| Ok(value.exact())))?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `Σ values²`, exact: a backtest report's `return_sum_of_squares`, which needs 24 places when
     /// the values hold 12.
     pub fn sum_of_squares(values: &[Self]) -> Result<Self, NumError> {
-        let _ = values;
-        Err(NumError::Overflow)
+        Self::exact_sum(values.iter().map(|value| value.exact().mul(value.exact())))?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
+    }
+
+    /// Σ of exact terms, kept on 256-bit intermediates so no term is stored on its own.
+    fn exact_sum(
+        mut terms: impl Iterator<Item = Result<Exact, NumError>>,
+    ) -> Result<Exact, NumError> {
+        terms.try_fold(Exact::integer(0), |total, term| total.add(term?))
     }
 
     /// `round(Σ values ÷ n, 12, half_even)`: the mean of a period-return series (DEC-127 item 4).
     /// `division_by_zero` for an empty series.
     pub fn mean(values: &[Self]) -> Result<Self, NumError> {
-        let _ = values;
-        Err(NumError::Overflow)
+        let count = u64::try_from(values.len()).map_err(|_| NumError::Overflow)?;
+        Self::sum(values)?
+            .exact()
+            .div(Exact::integer(count), REPORT_SCALE, Rounding::HalfEven)?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `round((n × Σr² − (Σr)²) ÷ (n × (n − 1)), 12, half_even)`, the sample variance of a period
@@ -765,30 +818,52 @@ impl Ratio {
     /// report shows, so the figure recomputes from the report. `division_by_zero` below two periods,
     /// which the caller reports as absent instead.
     pub fn sample_variance(sum: Self, sum_of_squares: Self, count: u32) -> Result<Self, NumError> {
-        let _ = (sum, sum_of_squares, count);
-        Err(NumError::Overflow)
+        let periods = Exact::integer(u64::from(count));
+        let degrees_of_freedom = Exact::integer(u64::from(count).saturating_sub(1));
+        periods
+            .mul(sum_of_squares.exact())?
+            .sub(sum.exact().mul(sum.exact())?)?
+            .div(
+                periods.mul(degrees_of_freedom)?,
+                REPORT_SCALE,
+                Rounding::HalfEven,
+            )?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// `round(numerator² ÷ denominator, 12, half_even)`: a squared Sharpe from an excess mean and a
     /// variance (DEC-127 item 7). `division_by_zero` for a zero denominator, which the caller
     /// reports as absent instead.
     pub fn squared_quotient(numerator: Self, denominator: Self) -> Result<Self, NumError> {
-        let _ = (numerator, denominator);
-        Err(NumError::Overflow)
+        numerator
+            .exact()
+            .mul(numerator.exact())?
+            .div(denominator.exact(), REPORT_SCALE, Rounding::HalfEven)?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// The greatest value with 12 fractional digits whose square is at or below `self`, so a root
     /// taken this way never overstates the figure it stands for: a report's Sharpe with a
     /// non-negative sign (DEC-127 item 7). `negative` below zero.
     pub fn root_floor(self) -> Result<Self, NumError> {
-        Err(NumError::Overflow)
+        non_negative(self.0)?;
+        self.exact()
+            .floor_root_of_ratio(Exact::integer(1), REPORT_SCALE)?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 
     /// The least value with 12 fractional digits whose square is at or above `self`, so a root taken
     /// this way never understates the figure it stands for: a report's volatility, and the magnitude
     /// of a negative Sharpe (DEC-127 items 6 and 7). `negative` below zero.
     pub fn root_ceiling(self) -> Result<Self, NumError> {
-        Err(NumError::Overflow)
+        non_negative(self.0)?;
+        self.exact()
+            .ceiling_root_of_ratio(Exact::integer(1), REPORT_SCALE)?
+            .to_decimal(RATIO_SCALE)
+            .map(Self)
     }
 }
 
