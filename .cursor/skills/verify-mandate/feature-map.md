@@ -130,8 +130,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Autonomy and the order builder (E6-2)
 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
-DEC-130. The crate holds stubs until the implementation PR; the 125 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
+`autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
+(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. The builder's tests stay pending until
+slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -140,10 +142,12 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
   pacing of a discretionary exit).
 - **Code:** `mandate-builder`: `crates/mandate-builder/src/lib.rs` (the crate's contract and
-  `BuilderError`'s fourteen refusals with their stable codes),
+  `BuilderError`'s refusals with their stable codes),
   `crates/mandate-builder/src/autonomy.rs` (§6.2's order, the built-in AUTO purposes, the first
   match, the default, the admission ceiling, the approver count, and the `Facts` a proposed action
-  presents to a §6.3 rule), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
+  presents to a §6.3 rule, with in-module tests of the rule walk, the re-check and `decide`),
+  `crates/mandate-spec/src/condition.rs` (`Condition::matches`, with in-module tests of every
+  operator and combinator), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
   and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
   arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
   `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
