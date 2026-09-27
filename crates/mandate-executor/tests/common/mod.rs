@@ -911,20 +911,30 @@ impl Shell {
     }
 
     /// A restart made ready to open, as a production shell starts: `Input::Started`, then the
-    /// startup reconciliation. The executor holds an opening on a reported account until a run has
-    /// completed since the start (§11, the coordinator's rulings on #174), so a case whose subject
-    /// is not the startup itself begins here.
+    /// startup reconciliation, then the broker's account reported. The executor holds every
+    /// opening until both have happened since the start (§11, the coordinator's rulings on #174),
+    /// so a case whose subject is not the startup itself begins here.
     pub fn restart_ready(&self, ports: &Ports<'_>) -> Self {
         let (mut next, _) = self.restart(ports);
         next.ready(ports);
         next
     }
 
-    /// The startup reconciliation, on a process already started, against a broker that agrees
-    /// with the journal: it holds the positions the fold holds and lists every order the fold has
-    /// at the broker under that order's own status, so the run finds nothing to adopt or pause and
-    /// the case's own subject is untouched.
+    /// The startup reconciliation and then the account report, on a process already started,
+    /// against a broker that agrees with the journal: it holds the positions the fold holds and
+    /// lists every live order the fold has, so the run pauses nothing and differs on nothing. The
+    /// one adoption is the known exception: an order the journal left `Submitting` or `Unknown` is
+    /// listed as `accepted`, which the run adopts with an `OrderStateChanged` and its
+    /// `CompensatingEvent`. The run is asserted to draft only its record, the positions it
+    /// observed, the account snapshot when an account was already reported, and that adoption
+    /// when such an order exists, so a case's own subject is never changed behind its back.
     pub fn ready(&mut self, ports: &Ports<'_>) {
+        let reported = self.state.observed_account().is_some();
+        let in_doubt = self
+            .state
+            .orders()
+            .values()
+            .any(|order| matches!(order.state, OrderState::Submitting | OrderState::Unknown));
         let mut startup = snapshot(self.head().0, ReconcileReason::Startup);
         startup.positions = self
             .state
@@ -968,7 +978,25 @@ impl Shell {
                 })
             })
             .collect();
-        self.run(Input::BrokerSnapshot(startup), ports);
+        let ran = self.run(Input::BrokerSnapshot(startup), ports);
+        let unexpected: Vec<&str> = ran
+            .draft_types()
+            .into_iter()
+            .filter(|kind| match *kind {
+                "ReconciliationRun" | "BrokerPositionObserved" => false,
+                "AccountSnapshotRecorded" => !reported,
+                "OrderStateChanged" | "CompensatingEvent" => !in_doubt,
+                _ => true,
+            })
+            .collect();
+        assert!(
+            unexpected.is_empty(),
+            "the startup run of a ready shell records and adopts nothing else: {unexpected:?}"
+        );
+        self.run(
+            Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(broker_account())),
+            ports,
+        );
     }
 
     fn restart_with(&self, broker: FakeConnector, ports: &Ports<'_>) -> (Self, Ran) {
