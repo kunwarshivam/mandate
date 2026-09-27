@@ -166,7 +166,7 @@ it is trusted (AGENTS.md, "Independent oracles"; "Planted bugs" below).
 | **Sentinel scanner** | Generates instruments, quantities, prices, thesis text, agent names, and rule ids from distinctive sentinels, serializes every `Notification` the run produced, and fails on any sentinel substring | EI-9 |
 | **Principal generator** | Generates responses from every `actor.kind` and from responders inside and outside `approvers`, and asserts admission only for the `user`-and-listed cell | EI-10 |
 | **Assertion ledger** | Its own set of assertion ids seen, and its own `authenticated_at` window check | EI-11 |
-| **Risk-reduction probe** | After every generated input, injects an exit, a protective re-placement, and a kill switch, and asserts each is handed in the same step whatever the approval state | EI-8 |
+| **Risk-reduction probe** | After every generated input, injects an exit, a protective re-placement, and a kill switch, and asserts each is handed in the same step whatever the approval state; the injected kill switch is drawn with fresh, stale, malformed, and missing step-up evidence, and every one must stop the agent and flatten as an automated flatten does (equities waiting for the regular session), while an owner-exit privilege without valid evidence is refused | EI-8, EI-11 |
 | **Budget counter** | Counts `ApprovalRequested` per agent per America/New_York risk day with its own day boundary from `mandate-time`'s calendar fixtures, and the suppression windows from its own table | EI-13 |
 | **MC-A expectations** | The mandate reference cases MC-A01 to MC-A16, used as the table of expected classifications for re-classification | EI-5 (re-classification) |
 
@@ -453,8 +453,8 @@ pub enum StepUpMethod {
 - **Never needs step-up:** skip (PX-7: "Skip needs no step-up") and pause (PX-4). Pause is the
   always-available brake: it needs nothing, cancels every pending approval, and stops every new
   risk-adding proposal (DEC-131 items 10 and 23).
-- **How the kill switch keeps rule 13's "always available" while it needs step-up** (the
-  mitigations DEC-158 keeps alongside option (c)):
+- **How the kill switch keeps rule 13's "always available"** (option (c) makes the stop and flatten
+  independent of step-up; these mitigations DEC-158 keeps alongside it cover the privileges that still need it):
   1. `CliConfirm` is **local and cannot fail except by a mistyped code**: the kill switch's code is
      derived on the owner's host from the scope typed and the control stream's head, with no network,
      no identity provider, no runtime, and no model state (rule 13: "does not depend on model state").
@@ -674,6 +674,7 @@ results table.
 | PB-12 | Assertion reuse accepted | MC-E15 |
 | PB-13 | A pending approval holds an exit or a kill switch | EI-8 risk-reduction probe |
 | PB-14 | Pause demands step-up, or a kill switch committed with fresh evidence is refused because a runtime processed it late | EI-8 probe; `cli::pause_needs_no_step_up`; `runtime::a_late_read_kill_switch_still_applies` |
+| PB-14b | A kill switch with missing, stale, or malformed step-up evidence is refused, or applies the stop without the flatten | EI-8/EI-11 risk-reduction probe; `runtime::a_kill_switch_without_step_up_still_stops_and_flattens` |
 | PB-15 | The content hash is not compared | MC-E07; EI-14 field comparer |
 | PB-16 | The ask budget resets at UTC midnight | MC-E26 across the DST change; budget counter |
 | PB-17 | Quiet hours computed in UTC, or applied to `cli_inbox` | MC-E30 in both DST states; MC-E29 |
@@ -715,9 +716,10 @@ among them: it is **DEC-158, accepted by the founder on 2026-09-27 as option (c)
 3. **The request carries its content inline** as a canonical object with a content hash; large
    parts stay artifacts by reference.
 4. **Step-up v0 is `CliConfirm`**, paper only by type; approve, resume, the owner Stop, acknowledge,
-   owner exit, and the kill switch need it (mandate spec §6.1, PX-4); skip and pause never do. The
-   kill switch's code is computed locally and its freshness judged at commit; whether it should need
-   step-up at all is DEC-158, accepted by the founder as option (c).
+   owner exit, and the kill switch's privileges beyond the stop need it (mandate spec §6.1, PX-4); skip
+   and pause never do. Under DEC-158 option (c), accepted by the founder, a kill switch without valid
+   step-up still stops the agent and flattens as an automated flatten does; its code is computed
+   locally and its freshness judged at commit.
 5. **The CLI is an untrusted surface and a one-shot writer.** It commits events; the runtime re-runs
    every check that decides an outcome. On `Fenced` it retries with a new epoch, which DEC-131 item 18
    forbids only for the runtime's long-lived writer.
