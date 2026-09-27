@@ -36,11 +36,15 @@
 //! the purpose itself from [`Origin`], the side and the position, so a proposer cannot claim an
 //! exemption by describing its own order.
 //!
-//! E6-3 implements [`evaluate`] — the eight checks in order, purpose assignment, check 1's blocked
-//! account and mode rule, the working universe, the mandate limits of mandate spec §5.3 with the
-//! account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`]. Every check a later
-//! story owns passes, and every other entry point returns [`GateError::Unimplemented`], until the
-//! story named in its doc comment lands (DEC-77, DEC-83).
+//! E6-3 implements [`evaluate`] — the eight checks in order, purpose assignment, check 1 whole
+//! (the account's state, then the mode rule), the working universe, the mandate limits of mandate
+//! spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`].
+//! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
+//! opening or increasing order the implemented checks would allow returns
+//! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
+//! check reports first, and a reducing purpose passes a check that does not exist yet. Every other
+//! entry point returns [`GateError::Unimplemented`] until the story named in its doc comment lands
+//! (DEC-77, DEC-83).
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};

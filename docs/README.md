@@ -40,6 +40,7 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | [Metrics](product/06-metrics.md) | North star, input and guardrail metrics, instrumentation |
 | [Pricing and packaging](product/07-pricing-and-packaging.md) | Plans, price levers, questions to validate |
 | [Compliance and regulatory](product/08-compliance-and-regulatory.md) | Regulatory posture and derived requirements (not legal advice) |
+| [Product experience](product/09-product-experience.md) | Web v1 experience brief: principles, journeys, screen inventory and states, UX rules from the safety rules, open product decisions |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Project

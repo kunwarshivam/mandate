@@ -239,8 +239,10 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`;
-every check a later PR or story owns passes until it lands.
+implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`.
+Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
+implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
+check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -255,9 +257,10 @@ every check a later PR or story owns passes until it lands.
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
-  purpose assignment, the blocked account and the mode rule, the working universe, and §5.3 rules
-  3 and 9), `crates/mandate-risk/src/limits.rs` (the §5.3 mandate limits: concentration, order
-  size, the re-entry cooldown, orders per day, and gross exposure with the account's own 1×),
+  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
+  refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
+  mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
+  exposure with the account's own 1×),
   `crates/mandate-risk/src/flatten.rs` (`agent_flatten`, the agent-scoped kill switch's plan),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
@@ -388,9 +391,16 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
   broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
+  `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
+  state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
+  breach confirmation either side of the window, the two-quote hard trigger, the rollover, the daily
+  lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
+  carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
+  `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
-  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
+  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
+  PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
   and J and fail as "not interpreted until" their owning story. A rejection that carries no reason

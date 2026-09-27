@@ -50,7 +50,6 @@ fn assert_refused(s: &Scenario, expected: RefusalReason) {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n01_a_corroborated_thesis_in_an_allowed_asset_class_is_admitted() {
     let s = Scenario::admitting();
 
@@ -83,7 +82,6 @@ fn mc_n01_a_corroborated_thesis_in_an_allowed_asset_class_is_admitted() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n01_admission_journals_the_thesis_entry_and_the_universe_change() {
     let s = Scenario::admitting();
 
@@ -121,7 +119,6 @@ fn mc_n01_admission_journals_the_thesis_entry_and_the_universe_change() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_1_a_short_thesis_is_ignored() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.direction = Direction::Other;
@@ -135,7 +132,6 @@ fn check_1_a_short_thesis_is_ignored() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_2_an_expiry_that_disagrees_with_the_horizon_is_ignored() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.output.expires_at = at("2026-09-23T14:00:01.000000000Z");
@@ -151,7 +147,6 @@ fn check_2_an_expiry_that_disagrees_with_the_horizon_is_ignored() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_3_a_revision_without_a_predecessor_is_ignored() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.revision = 1;
@@ -162,7 +157,6 @@ fn check_3_a_revision_without_a_predecessor_is_ignored() {
 
 /// The other half of check 3, which a test for the missing predecessor alone would not reach.
 #[test]
-#[ignore = "pending E17-3"]
 fn check_3_a_revision_zero_carrying_a_predecessor_is_ignored() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.predecessor_thesis_id = Some(thesis_id("th-0"));
@@ -171,7 +165,6 @@ fn check_3_a_revision_zero_carrying_a_predecessor_is_ignored() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_4_no_admitting_model_refuses() {
     let s = Scenario::admitting().with_envelope(|e| {
         e.admits_instruments = false;
@@ -184,7 +177,6 @@ fn check_4_no_admitting_model_refuses() {
 /// The overlay's `research_agent_allowed` reaches check 4 as well, which only ever refuses more
 /// (DEC-132 item 22). No committed case exercises it.
 #[test]
-#[ignore = "pending E17-3"]
 fn check_4_a_policy_that_forbids_the_research_agent_refuses() {
     let mut s = Scenario::admitting();
     s.overlay = PolicyOverlay {
@@ -199,7 +191,6 @@ fn check_4_a_policy_that_forbids_the_research_agent_refuses() {
 /// MC-N08's base pins the universe *and* clears the research envelope, because V-036 with V-037
 /// require it, so check 4 decides. Check 5 is only reachable for an input nobody validated.
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n08_a_pinned_validated_mandate_refuses_at_check_four() {
     let s = Scenario::admitting().with_envelope(|e| {
         e.universe_pinned = true;
@@ -212,7 +203,6 @@ fn mc_n08_a_pinned_validated_mandate_refuses_at_check_four() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_5_a_pinned_universe_admits_nothing_even_with_an_admitting_model() {
     let s = Scenario::admitting().with_envelope(|e| e.universe_pinned = true);
 
@@ -220,7 +210,6 @@ fn check_5_a_pinned_universe_admits_nothing_even_with_an_admitting_model() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_6_admission_deny_refuses_outright() {
     let s = Scenario::admitting().with_envelope(|e| e.admission = AutonomyDecision::Deny);
 
@@ -230,7 +219,6 @@ fn check_6_admission_deny_refuses_outright() {
 /// The overlay tightens `auto` to `ask` and never to `deny`, so a profile with
 /// `admission_auto_allowed: false` refuses nothing at check 6 but raises the ceiling (MI-17).
 #[test]
-#[ignore = "pending E17-3"]
 fn the_internal_research_profile_makes_every_admission_ask_without_refusing_any() {
     let mut s = Scenario::admitting().with_envelope(|e| e.admission = AutonomyDecision::Auto);
     s.overlay = PolicyOverlay::internal_research_profile();
@@ -250,7 +238,6 @@ fn the_internal_research_profile_makes_every_admission_ask_without_refusing_any(
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_7_the_cost_cap_binds_at_equality() {
     let mut s = Scenario::admitting();
     s.facts.research_spend_usd_today = usd("5");
@@ -259,7 +246,6 @@ fn check_7_the_cost_cap_binds_at_equality() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_7_a_cent_below_the_cap_still_admits() {
     let mut s = Scenario::admitting();
     s.facts.research_spend_usd_today = usd("4.99");
@@ -274,7 +260,6 @@ fn check_7_a_cent_below_the_cap_still_admits() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_8_the_thin_slices_data_universe_refuses_anything_outside_it() {
     let mut s = Scenario::admitting();
     s.facts.data_universe = Some(BTreeSet::from([asset(INSTRUMENT_2), asset(INSTRUMENT_3)]));
@@ -283,7 +268,6 @@ fn check_8_the_thin_slices_data_universe_refuses_anything_outside_it() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_9_an_operator_halt_refuses_the_admission() {
     let mut s = Scenario::admitting();
     s.facts.halted_instruments = BTreeSet::from([asset(INSTRUMENT_5)]);
@@ -292,7 +276,6 @@ fn check_9_an_operator_halt_refuses_the_admission() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_10_an_asset_class_outside_the_envelope_is_refused() {
     let mut s = Scenario::admitting();
     s.proposal.instrument.asset_class = AssetClass::Crypto;
@@ -304,7 +287,6 @@ fn check_10_an_asset_class_outside_the_envelope_is_refused() {
 /// thesis has no field to disagree with it (DEC-132 item 6). This test asserts the shape rather than
 /// a value, because the hole is unrepresentable.
 #[test]
-#[ignore = "pending E17-3"]
 fn check_10_reads_reference_data_and_a_thesis_has_no_asset_class_to_claim() {
     let mut s = Scenario::admitting();
     s.proposal.instrument.asset_class = AssetClass::Crypto;
@@ -323,7 +305,6 @@ fn check_10_reads_reference_data_and_a_thesis_has_no_asset_class_to_claim() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n16_a_leveraged_etp_without_the_owner_opt_in_is_refused() {
     let mut s = Scenario::admitting();
     s.proposal.instrument.leveraged_or_inverse_etp = true;
@@ -332,7 +313,6 @@ fn mc_n16_a_leveraged_etp_without_the_owner_opt_in_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n25_a_leveraged_etp_with_a_different_accepted_disclosure_version_is_refused() {
     let mut s = Scenario::admitting().with_envelope(|e| {
         e.leveraged_etps_enabled = true;
@@ -345,7 +325,6 @@ fn mc_n25_a_leveraged_etp_with_a_different_accepted_disclosure_version_is_refuse
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n26_a_leveraged_etp_with_the_opt_in_and_the_exact_disclosure_is_admitted() {
     let mut s = Scenario::admitting().with_envelope(|e| {
         e.leveraged_etps_enabled = true;
@@ -366,7 +345,6 @@ fn mc_n26_a_leveraged_etp_with_the_opt_in_and_the_exact_disclosure_is_admitted()
 /// The opt-in without any accepted disclosure is still a refusal: both halves of V-005's condition
 /// are required, which a test for the wrong version alone would not show.
 #[test]
-#[ignore = "pending E17-3"]
 fn check_11_the_opt_in_alone_does_not_admit_a_leveraged_etp() {
     let mut s = Scenario::admitting().with_envelope(|e| {
         e.leveraged_etps_enabled = true;
@@ -378,7 +356,6 @@ fn check_11_the_opt_in_alone_does_not_admit_a_leveraged_etp() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_12_a_thesis_failing_the_eligibility_floor_is_refused() {
     let mut s = Scenario::admitting();
     s.facts.eligibility_failures = BTreeSet::from([asset(INSTRUMENT_5)]);
@@ -387,7 +364,6 @@ fn check_12_a_thesis_failing_the_eligibility_floor_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_13_an_instrument_group_claimed_by_another_agent_is_refused() {
     let mut s = Scenario::admitting();
     s.facts.claimed_by_other_agents = BTreeSet::from([asset(INSTRUMENT_5)]);
@@ -398,7 +374,6 @@ fn check_13_an_instrument_group_claimed_by_another_agent_is_refused() {
 /// A claim on a *sibling* in the same named group refuses too: the check compares groups, not
 /// instruments (trading spec §7.1).
 #[test]
-#[ignore = "pending E17-3"]
 fn check_13_a_group_claimed_through_a_sibling_refuses() {
     let mut s = Scenario::admitting();
     let group = GroupId::new("grp.megacap").expect("a fixture group id is not empty");
@@ -414,7 +389,6 @@ fn check_13_a_group_claimed_through_a_sibling_refuses() {
 /// An ungrouped instrument stands as its own group, and a named group whose id spells another
 /// instrument's asset id claims nothing (DEC-132 item 12).
 #[test]
-#[ignore = "pending E17-3"]
 fn check_13_an_ungrouped_instrument_is_its_own_group_and_a_group_id_spelling_an_asset_id_claims_nothing()
  {
     let mut s = Scenario::admitting();
@@ -440,7 +414,6 @@ fn check_13_an_ungrouped_instrument_is_its_own_group_and_a_group_id_spelling_an_
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn check_14_one_source_off_the_allowlist_refuses_the_whole_thesis() {
     let mut s = Scenario::admitting();
     s.proposal
@@ -454,7 +427,6 @@ fn check_14_one_source_off_the_allowlist_refuses_the_whole_thesis() {
 /// DEC-101's point: a thesis citing only allowlisted sources still needs corroboration, and one
 /// without it is refused whatever it cited.
 #[test]
-#[ignore = "pending E17-7"]
 fn check_15_a_thesis_without_corroboration_is_refused() {
     let mut s = Scenario::admitting();
     s.proposal.corroboration = None;
@@ -463,7 +435,6 @@ fn check_15_a_thesis_without_corroboration_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-7"]
 fn check_15_market_data_corroboration_admits_a_thesis_citing_no_sources() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.evidence_sources.clear();
@@ -479,7 +450,6 @@ fn check_15_market_data_corroboration_admits_a_thesis_citing_no_sources() {
 }
 
 #[test]
-#[ignore = "pending E17-9"]
 fn check_16_a_retired_lineage_admits_nothing_further() {
     let mut s = Scenario::admitting();
     s.proposal.thesis = revision("th-2", "th-1", 1, "th-1", INSTRUMENT_5);
@@ -503,7 +473,6 @@ fn check_16_a_retired_lineage_admits_nothing_further() {
 }
 
 #[test]
-#[ignore = "pending E17-9"]
 fn check_16_a_revision_past_the_cap_is_refused() {
     let mut s = Scenario::admitting();
     s.proposal.thesis = revision("th-5", "th-1", 4, "th-4", INSTRUMENT_5);
@@ -512,7 +481,6 @@ fn check_16_a_revision_past_the_cap_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E17-9"]
 fn check_16_a_revision_at_the_cap_is_admitted() {
     let mut s = Scenario::admitting();
     s.proposal.thesis = revision("th-4", "th-1", 3, "th-3", INSTRUMENT_5);
@@ -529,7 +497,6 @@ fn check_16_a_revision_at_the_cap_is_admitted() {
 /// A policy that lowers `max_revisions_per_lineage` below the mandate's binds, because the key is a
 /// maximum (§4.3).
 #[test]
-#[ignore = "pending E17-9"]
 fn check_16_a_policy_ceiling_lowers_the_revision_cap() {
     let mut s = Scenario::admitting();
     s.proposal.thesis = revision("th-3", "th-1", 2, "th-2", INSTRUMENT_5);
@@ -544,7 +511,6 @@ fn check_16_a_policy_ceiling_lowers_the_revision_cap() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n02_a_full_universe_refuses_rather_than_displacing() {
     let mut s = Scenario::admitting();
     s.universe = universe_of(&[
@@ -571,7 +537,6 @@ fn mc_n02_a_full_universe_refuses_rather_than_displacing() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n14_renewing_an_active_instrument_adds_no_second_entry() {
     let mut s = Scenario::admitting();
     s.universe = universe_of(&[INSTRUMENT_5]);
@@ -604,7 +569,6 @@ fn mc_n14_renewing_an_active_instrument_adds_no_second_entry() {
 
 /// Check 17 is the only one a renewal skips: at the ceiling, a renewal still admits.
 #[test]
-#[ignore = "pending E17-3"]
 fn a_renewal_skips_only_the_full_check() {
     let mut s = Scenario::admitting();
     s.universe = universe_of(&[
@@ -629,7 +593,6 @@ fn a_renewal_skips_only_the_full_check() {
 
 /// A lowered `max_instruments` refuses further admissions and removes nothing (DEC-132 item 14).
 #[test]
-#[ignore = "pending E17-3"]
 fn a_lowered_ceiling_refuses_and_never_removes() {
     let mut s = Scenario::admitting();
     s.universe = universe_of(&[INSTRUMENT_1, INSTRUMENT_2, INSTRUMENT_3]);
@@ -657,7 +620,6 @@ fn a_lowered_ceiling_refuses_and_never_removes() {
 
 /// §8.5's order, shown where two checks fail at once: the lower number is the journaled reason.
 #[test]
-#[ignore = "pending E17-3"]
 fn the_lower_numbered_check_decides_when_several_fail() {
     let mut s = Scenario::admitting();
     s.proposal.instrument.asset_class = AssetClass::Crypto;
@@ -675,7 +637,6 @@ fn the_lower_numbered_check_decides_when_several_fail() {
 }
 
 #[test]
-#[ignore = "pending E17-3"]
 fn checks_reports_all_seventeen_in_the_spec_order() {
     let s = Scenario::admitting();
 
@@ -694,7 +655,6 @@ fn checks_reports_all_seventeen_in_the_spec_order() {
 
 /// §2.3: an unread universe is an error, never an admission and never an empty set.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_unavailable_universe_is_an_error() {
     let mut s = Scenario::admitting();
     s.universe = WorkingUniverse::Unavailable;
@@ -710,7 +670,6 @@ fn an_unavailable_universe_is_an_error() {
 /// The entry type follows the revision number, not the verdict: an ignored revision is still a
 /// `ThesisRevised` (MC-N19).
 #[test]
-#[ignore = "pending E17-3"]
 fn the_entry_type_follows_the_revision_number() {
     let mut s = Scenario::admitting();
     s.proposal = proposal(revision("th-40", "th-40", 1, "th-39", INSTRUMENT_5));
@@ -737,7 +696,6 @@ fn the_entry_type_follows_the_revision_number() {
 
 /// The thesis's own timestamps are what check 2 reads, and the horizon pairs them exactly (DEC-118).
 #[test]
-#[ignore = "pending E17-3"]
 fn the_horizon_pairs_as_of_with_expires_at_exactly() {
     let mut s = Scenario::admitting();
     s.proposal.thesis.horizon_s = HORIZON_S;
