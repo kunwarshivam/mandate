@@ -3303,17 +3303,6 @@ mod tests {
     /// live test must fail the gate before the run rather than have that exit code stand in for
     /// evidence (DEC-139).
     #[test]
-    fn an_empty_mutants_listing_is_no_mutants_and_a_malformed_one_is_an_error() -> Result<()> {
-        assert_eq!(listed_mutant_counts("")?, BTreeMap::new());
-        assert_eq!(listed_mutant_counts("\n")?, BTreeMap::new());
-        assert!(
-            listed_mutant_counts("[{").is_err(),
-            "a truncated listing is not read as no mutants"
-        );
-        Ok(())
-    }
-
-    #[test]
     fn a_crate_with_no_live_test_cannot_have_its_mutants_counted_as_caught() -> Result<()> {
         let mutants = listed_mutant_counts(LISTED_MUTANTS)?;
         let live = live_test_counts(NEXTEST_LISTING)?;
@@ -3357,6 +3346,17 @@ mod tests {
         assert!(
             unjudged_mutants(&mutants, &all_live).is_empty(),
             "every crate with a live test is judged"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_empty_mutants_listing_is_no_mutants_and_a_malformed_one_is_an_error() -> Result<()> {
+        assert_eq!(listed_mutant_counts("")?, BTreeMap::new());
+        assert_eq!(listed_mutant_counts("\n")?, BTreeMap::new());
+        assert!(
+            listed_mutant_counts("[{").is_err(),
+            "a truncated listing is not read as no mutants"
         );
         Ok(())
     }

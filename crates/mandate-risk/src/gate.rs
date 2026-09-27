@@ -1580,8 +1580,9 @@ mod tests {
     /// position can come from, each typed by the brief's purpose table rather than by
     /// `assign_purpose`: no breach of the universe or the floor denies an exit, and check 2 is
     /// listed `Passed` for it, or `NotReached` for crypto, whose check 2 stays owed to E6-10 for
-    /// every purpose until the quote currency is an input (DEC-129 items 29 and 34). Each breach first denies an opening with its own code at check 2, so
-    /// an exit's allow is never an instrument that happens to pass the floor.
+    /// every purpose until the quote currency is an input (DEC-129 items 29 and 34). Each breach
+    /// first denies an opening with its own code at check 2, so an exit's allow is never an
+    /// instrument that happens to pass the floor.
     #[test]
     fn no_floor_breach_denies_an_exit_from_any_origin() -> Result<(), GateError> {
         let exits = [
