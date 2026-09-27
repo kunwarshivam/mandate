@@ -558,15 +558,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
   `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
   every named entry are already caught (round-3 review finding 3).
-- **Blocks E7-4 (the first `AccountWideScope` constructor):** encode a crypto pair's `/` where
-  `/v2/positions/{symbol}` is built (`HttpRequest::close_position` and the positions read). `wire`
-  holds a broker symbol to one or two segments of letters, digits and `.` (slice a2), so nothing
-  hostile reaches the path, but `BTC/USD` still builds two segments where Alpaca takes `BTCUSD` or
-  `BTC%2FUSD`. Since #195 the allowlist refuses both the read and the close, and a refused close
-  answers `NotSent`, never a broker's rejection, so a crypto close fails loudly rather than going
-  to the wrong path; until this lands the account and workspace kill switches cannot close a crypto
-  position by close-position, so E7-4 must not construct an `AccountWideScope` before it (#191
-  review, round 3; #195 review, round 1, finding 1).
+- Normalize a crypto symbol `mandate-alpaca` reads back from the broker. Position paths now write
+  `BTC/USD` as `BTCUSD` (`http::position_path`, the positions read and the account-wide close), but
+  `wire` keeps whatever symbol a response names, so a position reported as `BTCUSD` and an order
+  placed as `BTC/USD` would be two instrument ids, where trading-domain spec §2.3 makes them one.
+  Only a recorded crypto position shows which form the paper host sends; normalize on
+  `asset_class: crypto` before E7-3's reconciliation compares crypto positions.
 - Read a working external notional order's exposure. `wire` ingests an external order placed by
   notional with `qty` equal to its `filled_qty`, so a working one understates what it can still
   buy, and its `notional` is read nowhere and is not in `record::RECORDED_FIELDS`. The exposure is
@@ -578,8 +575,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
-- **`mandate-executor` slice 6, the cash slice:** reconciliation's cash and fee comparisons (§11 steps 4 and 5), the fee balances they read (the broker's unposted fees, crypto asset fees, fill notional), and the owner acknowledgment that lifts a reconciliation restriction (interpretation 14). It clears the row below. Until it lands, a slice-5 run with cash or fees to compare (the broker has reported an account, or the run is a fee posting) publishes no `ReconciliationRun` and puts every agent `exits_only` under `reconciliation:incomplete`, alerting the owner: every account that has reported disables openings after its first reconciliation, exits stay open, and slice 6's owner acknowledgment of `incomplete` lifts it (DEC-140's slice-5 amendment).
-- **`mandate-executor`, the cash slice:** §7.2's crypto row, `min(equity model, broker non_marginable_buying_power)` for a crypto order, which needs the order's asset class, so `ExecutorState::buying_power` (the equity row today) grows it with the gate port that asks for it (#198 review, round 1, finding 7).
 - **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
 - Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
   whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
@@ -593,14 +588,13 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   items 23 and 27, ADR-0001 ES-09; #206 review).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
-- Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
+- Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
+  restriction stands "until the owner acknowledges and the account is refreshed", but
+  `state::restriction_for` only yields `reconciliation:{subject}`, so no `OwnerAcknowledged` can
+  name `account_trading_blocked`, and a later `ACTIVE` read leaves `account_state` `Blocked` and the
+  restriction in place. Pre-existing on main; the cash slice is the first to raise it from every
+  reconciliation run (#205 review, round 2, minor 3).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
-- **Blocks the gate port reading `buying_power`:** subtract the broker's own unposted fees in
-  `ExecutorState::buying_power`. Since slice 4 it is the lower of the broker's figure and the model
-  (reported cash moved by every fill since, less paper's simulated fees), less reservations, but a
-  broker fee accrued and not yet posted is not subtracted, so it can overstate what the account can
-  spend, the less conservative direction (`AGENTS.md` rule 3). Nothing reads it yet; the gate port
-  and every other caller must not until the cash slice folds those fees (slice 4 review).
 - **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
   `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
   `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that
@@ -635,16 +629,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
   `day` taken straight from the broker's `trade_date`, bypassing the account's calendar, passes the
   suite. A fixture with a Saturday or holiday `trade_date` pins it (#196 review, round 2, finding 1).
-- **Decide before E7-3's cash slice:** how an asset-denominated crypto fee is journaled. Two pending
-  E7-3 tests fold `FeesCharged` with `family: "crypto_asset"`, no `day`, and an `instrument`:
-  `hand::unposted_crypto_asset_fees_explain_the_crypto_difference` and the RC-07 harness reached
-  by `refcases::trading_domain_rc_07_unposted_crypto_fees_reconcile`. `crypto_asset` is a `FeeKind`
-  payload name, not a `FeeFamily` (`Equities | Crypto`), and `mandate-refcases`'s reference
-  implementation refuses it as an unknown fee family, so both die on the fold. Unlike `sec_31` (#197)
-  the fix is not a literal swap: §6.3 says asset-denominated fees are not accrued liabilities, which
-  suggests that path should not journal a `FeesCharged` at all. Settle the event first (the
-  coordinator's call, with a decision-log row), then correct both tests in one reviewed
-  tests-correction PR so E7-3's implementer isn't blocked (#197 review, round 1, finding 1).
+- Reconcile journal spec §9's "daily snapshot" with `AccountSnapshotRecorded`'s cadence in
+  `mandate-executor`: since the cash slice every reconciliation run that has a base records one
+  (at startup, at each `Unknown`, at session boundaries, at fee postings). Either the spec line
+  names every run, or the executor records the daily one only and carries the comparison's base
+  another way (#205 review, round 1, finding 7a).
+- Give `AccountSnapshotRecorded` one shape in `mandate-executor`: a fee posting with no cash base
+  records it through `fees()`'s fallback without `model_cash`, `cash_band` or `cash_in_band`,
+  while a run with a base records all three (#205 review, round 1, finding 7b).
+- Answer an underflow in `mandate-executor`'s `asset_fees` with a typed error: a posted crypto asset
+  fee larger than the one held is folded as `checked_sub(charged).unwrap_or(Qty::ZERO)`, which errs
+  strict but silently, where the crate's convention is a typed error (#205 review, round 1,
+  finding 7c).
+- Wire the gate's buying-power port in `mandate-executor`. `ExecutorState::buying_power` and
+  `crypto_buying_power` are computed and pinned but only tests read them; the gate still checks no
+  buying power. The port must read the equity row for an equity order and the crypto row for a
+  crypto order, and treat `None` (no account reported, an incomplete report, or an overflow) as no
+  buying power, failing closed (`AGENTS.md` rule 3; #205 review, round 1).
 - Make the reproduction line `ci pending` prints runnable as printed: quote the `-E` filterset
   (it contains parentheses, so a shell refuses it) and add `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
   which the gate sets and nextest requires for libtest JSON. Both fail loudly today rather than
