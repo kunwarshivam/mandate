@@ -130,7 +130,8 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Autonomy and the order builder (E6-2)
 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
-DEC-130; the paths arrive with the tests PR, which updates this entry.
+DEC-130. The crate holds stubs until the implementation PR; the 125 tests below are pending and
+every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -138,20 +139,33 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
   (exact comparisons and the limits the proposal is clipped to); `docs/specs/trading-domain.md` §5.1
   and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
   pacing of a discretionary exit).
-- **Code:** `mandate-builder` (new; the §6 classification with its condition language, and the §8.3
-  combine, decide, size, and clip walk), with the exact arithmetic (a unit-interval type, a signed
-  conviction, the weighted 12-place quotients, and the wide sizing intermediates) in `mandate-num`.
-  The gate's dry-run verdict reaches the crate as a value, so `mandate-risk` is not a dependency
-  (DEC-130 item 2).
-- **Tests:** the hand-calculated A and B case recomputations of the brief, the freshness and
-  tie-breaking cases, the four clips and the accumulate clips, and property tests against an
-  independent integer combine oracle, a rational sizing oracle compared by cross-multiplication, and
-  a naive rule walk. Planted bugs per test: the task brief.
+- **Code:** `mandate-builder`: `crates/mandate-builder/src/lib.rs` (the crate's contract and
+  `BuilderError`'s fourteen refusals with their stable codes),
+  `crates/mandate-builder/src/autonomy.rs` (§6.2's order, the built-in AUTO purposes, the first
+  match, the default, the admission ceiling, the approver count, and the `Facts` a proposed action
+  presents to a §6.3 rule), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
+  and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
+  arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
+  `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
+  verdict reaches the crate as a value, so `mandate-risk` is not a dependency (DEC-130 item 2), and
+  the §6.3 condition tree is `mandate-spec`'s (DEC-128 item 18).
+- **Tests:** `crates/mandate-builder/tests/hand.rs` (54 tests: every §6 and §8.3 figure recomputed
+  by hand from the rule, the two freshness bounds at their exact instants, the tie-break among
+  duplicate outputs, the four clips, the accumulate clips with fees, and the two orderings DEC-130
+  item 21 fixes), `crates/mandate-builder/tests/properties.rs` (25 properties against three
+  independent oracles: the combine step as `i128` integer arithmetic with its own half-even
+  rounding, the sizing chain as rationals compared by cross-multiplication, and a naive rule walk
+  that re-reads the list from the start), `crates/mandate-builder/tests/refcases.rs` (the 16 `MC-A`
+  and 28 `MC-B` cases loaded from the fixture, one test per case id),
+  `crates/mandate-builder/tests/common/mod.rs` (the two reference bases as typed inputs), and the
+  two `mandate-num` additions in `crates/mandate-num/tests/num.rs`. Planted bugs per test: the task
+  brief and the tests PR's body.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
   harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
   family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder`.
+- **Run:** `cargo nextest run -p mandate-builder`; the pending tests with
+  `cargo nextest run -p mandate-builder --run-ignored all`.
 
 ## Agent runtime and kill switches
 
