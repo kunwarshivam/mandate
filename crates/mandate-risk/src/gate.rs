@@ -919,8 +919,8 @@ mod tests {
         Result<(Verdict, Option<ReasonCode>, Option<Check>, Option<Pacing>), &'static str>;
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
-    /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
-    /// `exits_only` denying an opening (§7.4), then §4.4's halt for an opening at check 3, then
+    /// rule of `ref.py`'s `order_decision` (check 1), then `exits_only` denying an opening (§7.4),
+    /// then §4.4's halt for an opening at check 3, then
     /// §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal of
     /// DEC-129 item 29; an exit is allowed, and re-priced as a marketable limit when it is a
     /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
