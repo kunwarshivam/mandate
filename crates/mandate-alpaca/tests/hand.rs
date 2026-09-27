@@ -541,7 +541,14 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
         );
         assert_refused_activity_id(id);
     }
-    assert_refused_activity_id("20260926234500000::x&side=sell");
+    for injected in [
+        "20260926234500000::x&y",
+        "20260926234500000::x=y",
+        "20260926234500000::x%26y",
+        "20260926234500000::x/y",
+    ] {
+        assert_refused_activity_id(injected);
+    }
     let fills = wire::activities(&body_of("partial_then_filled", 2)).expect("the fixture parses");
     assert!(
         fills.iter().all(|f| f.fill_id.0.contains("::")),
