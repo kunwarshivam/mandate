@@ -275,7 +275,7 @@ fn admission_matches_the_check_table() {
 /// EI-2, EI-15: across dropped, duplicated, and out-of-order ticks, nothing at or after the
 /// deadline by the accumulator's own clock is admitted, and a valid response before it is.
 #[test]
-#[ignore = "pending E8-2"]
+#[ignore = "pending E8-3"]
 fn silence_and_lateness_never_admit() {
     let steps = prop::collection::vec((prop::bool::ANY, -60i64..120), 1..20);
     check(steps, |steps| {
