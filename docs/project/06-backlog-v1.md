@@ -406,3 +406,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   case states, so nothing asserts either reading.
 - Give §3.3's "organization ceiling" on the per-instrument cap a `GateConfig` field and an owning
   story; check 2 has no value to bound the mandate's cap with today.
+- Pin that the **agent's** gross exposure counts only its own working openings
+  (`limits.rs`'s `working_cost(input, None, false)`): the substitution `false` → `true` survives
+  every live test (#160 round-2 finding 4). It is conservative, since the whole-account sum is a
+  superset and can only deny an opening earlier, so it is not a rule-1 breach; one assertion in
+  `the_account_bound_counts_other_agents_working_orders` would close it.
