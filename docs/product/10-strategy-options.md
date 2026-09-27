@@ -549,9 +549,18 @@ The founder decided on 2026-09-27 ([DEC-149](../project/04-decision-log.md#decis
 - **The harness moat.** Generic harnesses and MCP gateways enforce stateless per-call rules; Mandate's
   harness is stateful and domain-aware, journals before acting, and reduces risk without approval
   ([harness engineering §6](11-harness-engineering.md#6-what-mandate-already-does-that-most-harnesses-dont)).
+- **Build for all three enterprise segments.** The founder, the same day: "could we not build for
+  all?" The shared core serves brokers, fintechs, and agent builders alike, so it is built once, and
+  the segment packaging (self-hosting and house rules for brokers, an embedded API and white-label
+  for fintechs, a software kit and self-serve sign-up for agent builders) is built alongside it rather
+  than waiting for a buyer, because the builders are agents working under the founder's existing
+  subscription. What limits pace is review and merge throughput, the plan's usage limits, and the
+  founder's decisions, not build cost. A self-serve front door for agent builders (the open verifier,
+  the conformance kit, and an MCP server on Alpaca paper) doubles as the demand test.
 - **Open for discovery: the first enterprise customer.** Which of brokers, fintechs, or agent
-  builders comes first is not decided. Customer outreach needs the founder's authorization
-  ([DEC-79](../project/04-decision-log.md#decisions)).
+  builders buys first is not decided. Customer outreach needs the founder's authorization
+  ([DEC-79](../project/04-decision-log.md#decisions)). Anything that costs money or needs counsel
+  (a SOC 2 audit, broker agreements, legal text) still waits for the founder.
 
 DEC-149 amends DEC-141's positioning without reversing it: the complete product, the research agent
 inside the envelope, and the optional MCP channel still hold. Milestone order does not change; the
