@@ -4699,7 +4699,8 @@ fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_p
         "FeesCharged",
         with_clock(
             &[
-                ("family", text("sec_31")),
+                ("family", text("equities")),
+                ("day", text("2026-09-22")),
                 ("accrued", text("0.02")),
                 ("charged", text("0")),
                 ("simulated", mandate_canon::Value::Bool(true)),
