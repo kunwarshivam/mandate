@@ -273,7 +273,6 @@ proptest! {
 
     /// ES-23: a decimal field is read as text or refused, never rounded.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_decimal_field_is_ever_read_through_a_float(
         text in "(0|[1-9][0-9]{0,6})(\\.[0-9]{1,12})?",
     ) {
