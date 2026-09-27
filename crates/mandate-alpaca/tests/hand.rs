@@ -371,7 +371,6 @@ fn a_transport_error_names_no_url_and_no_header() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_decimal_with_nine_places_parses_exactly() {
     let raw = serde_json::json!("0.123456789");
     let parsed = wire::decimal_text(&raw, "qty").expect("nine places is the quantity scale");
@@ -379,7 +378,6 @@ fn a_broker_decimal_with_nine_places_parses_exactly() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_number_in_exponent_form_is_rejected_with_its_code() {
     let raw = serde_json::json!("1e3");
     let error = wire::decimal_text(&raw, "limit_price").expect_err("an exponent is not canonical");
@@ -387,7 +385,6 @@ fn a_broker_number_in_exponent_form_is_rejected_with_its_code() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_json_number_is_rejected_because_it_has_already_been_through_a_float() {
     let raw = serde_json::json!(150.25);
     let error = wire::decimal_text(&raw, "price").expect_err("a JSON number is not raw text");
@@ -395,7 +392,6 @@ fn a_json_number_is_rejected_because_it_has_already_been_through_a_float() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_quantity_with_more_places_than_the_increment_is_rejected() {
     let raw = serde_json::json!("0.1234567891");
     let error = wire::decimal_text(&raw, "qty").expect_err("ten places is past the scale");
@@ -403,7 +399,6 @@ fn a_quantity_with_more_places_than_the_increment_is_rejected() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn every_broker_status_in_the_table_maps() {
     use mandate_executor::{OrderState, StatusMapping};
     let becomes = StatusMapping::Becomes;
@@ -433,7 +428,6 @@ fn every_broker_status_in_the_table_maps() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_status_outside_the_table_is_a_typed_error_not_a_guess() {
     let error = wire::status("quantum_superposition").expect_err("§5.7's last row");
     assert_eq!(error.code(), "unknown_status", "{error}");
@@ -445,7 +439,6 @@ fn a_status_outside_the_table_is_a_typed_error_not_a_guess() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_recorded_accepted_order_parses_into_the_executor_vocabulary() {
     let parsed = wire::order(&body_of("submit_limit_accepted", 0)).expect("the recording parses");
     assert_eq!(
@@ -459,7 +452,6 @@ fn a_recorded_accepted_order_parses_into_the_executor_vocabulary() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_parser_accepts_unknown_extra_fields() {
     let mut body: serde_json::Value =
         serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
@@ -486,7 +478,6 @@ fn the_parser_accepts_unknown_extra_fields() {
 /// `[A-Za-z0-9-]+` is an answer this crate cannot read, and it never reaches the
 /// `/v2/orders/{id}` the cancel builds from it (DEC-133 item 18a, #174).
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
     for id in [
         ".",
@@ -517,11 +508,76 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
             "unreadable",
             "and the shell stops and alerts on it rather than sending anything (DEC-85)"
         );
+        let mut legged: serde_json::Value =
+            serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        if let Some(object) = legged.as_object_mut() {
+            object.insert(
+                "legs".to_owned(),
+                serde_json::json!([{ "id": "e02fc2d2-0ff3-444f-a0ab-6253613302ff" }, { "id": id }]),
+            );
+        }
+        let text = serde_json::to_vec(&legged).expect("re-serialises");
+        let error = wire::order(&text).expect_err("a hostile leg id is not an order's leg");
+        assert_eq!(
+            (error.code(), error.to_string()),
+            ("wrong_type", "field id has the wrong type".to_owned()),
+            "a leg id {id:?} is a broker order id a cancel is built from too, so it is refused \
+             the same way"
+        );
+        let mut replacing: serde_json::Value =
+            serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        if let Some(object) = replacing.as_object_mut() {
+            object.insert("replaced_by".to_owned(), serde_json::json!(id));
+        }
+        let text = serde_json::to_vec(&replacing).expect("re-serialises");
+        let error = wire::order(&text).expect_err("a hostile replacement id is not an order's");
+        assert_eq!(
+            (error.code(), error.to_string()),
+            (
+                "wrong_type",
+                "field replaced_by has the wrong type".to_owned()
+            ),
+            "a replacement id {id:?} names a broker order a cancel is built from too"
+        );
+        assert_refused_activity_id(id);
     }
+    for injected in [
+        "20260926234500000::x&y",
+        "20260926234500000::x=y",
+        "20260926234500000::x%26y",
+        "20260926234500000::x/y",
+    ] {
+        assert_refused_activity_id(injected);
+    }
+    let fills = wire::activities(&body_of("partial_then_filled", 2)).expect("the fixture parses");
+    assert!(
+        fills.iter().all(|f| f.fill_id.0.contains("::")),
+        "and a real activity id, a timestamp, `::` and a UUID, still reads"
+    );
+}
+
+/// An activity id becomes the cursor the next activities read sends as `page_token`, so one
+/// outside a timestamp-and-UUID alphabet is refused before it can reach a query.
+fn assert_refused_activity_id(id: &str) {
+    let mut body: serde_json::Value =
+        serde_json::from_slice(&body_of("partial_then_filled", 2)).expect("valid JSON");
+    if let Some(object) = body
+        .as_array_mut()
+        .and_then(|all| all.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        object.insert("id".to_owned(), serde_json::json!(id));
+    }
+    let text = serde_json::to_vec(&body).expect("re-serialises");
+    let error = wire::activities(&text).expect_err("a hostile activity id is not a fill's");
+    assert_eq!(
+        (error.code(), error.to_string()),
+        ("wrong_type", "field id has the wrong type".to_owned()),
+        "the activity id {id:?} is refused before it can become a page_token"
+    );
 }
 
 #[tokio::test]
-#[ignore = "pending E7-2"]
 async fn a_submission_carries_our_client_order_id_on_the_wire() {
     let recorded = scenario("submit_limit_accepted");
     let sent = recorded
@@ -603,7 +659,6 @@ async fn a_transport_failure_is_an_unknown_outcome_and_never_a_rejection() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_open_orders_page_parses_into_the_order_set() {
     let orders = wire::open_orders(&body_of("open_orders_page", 0)).expect("the recording parses");
     assert!(
@@ -617,7 +672,6 @@ fn the_open_orders_page_parses_into_the_order_set() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_positions_source_parses() {
     let positions = wire::positions(&body_of("positions", 0)).expect("the recording parses");
     assert!(
@@ -648,7 +702,6 @@ fn the_positions_source_parses() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn broker_decimals_with_trailing_zeros_parse_into_the_exact_values() {
     let mut order: serde_json::Value =
         serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
@@ -699,7 +752,6 @@ fn broker_decimals_with_trailing_zeros_parse_into_the_exact_values() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_account_source_parses_and_carries_no_account_number() {
     let account = wire::account(&body_of("account_active", 0)).expect("the recording parses");
     assert_eq!(account.status, "ACTIVE");
@@ -712,7 +764,6 @@ fn the_account_source_parses_and_carries_no_account_number() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_blocked_account_parses_into_the_restriction_signals() {
     let account = wire::account(&body_of("account_blocked", 0)).expect("the recording parses");
     assert!(
@@ -722,7 +773,6 @@ fn a_blocked_account_parses_into_the_restriction_signals() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_activities_source_parses_fills_by_fill_id() {
     let fills = wire::activities(&body_of("partial_then_filled", 2)).expect("the fixture parses");
     assert_eq!(fills.len(), 2, "a partial and its completion");
@@ -741,7 +791,6 @@ fn the_activities_source_parses_fills_by_fill_id() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reject_parses_into_the_restriction_table_signals() {
     let reject = wire::reject(422, &body_of("submit_rejected", 0)).expect("the recording parses");
     assert_eq!(reject.http_status, 422);
@@ -752,7 +801,6 @@ fn a_reject_parses_into_the_restriction_table_signals() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_bracket_shares_one_tif_and_carries_no_extended_hours() {
     let recorded = scenario("submit_bracket_accepted");
     let sent = recorded
@@ -774,7 +822,6 @@ fn a_bracket_shares_one_tif_and_carries_no_extended_hours() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_oco_for_a_filled_quantity_carries_the_brackets_prices() {
     let recorded = scenario("submit_oco_accepted");
     let sent = recorded
@@ -805,7 +852,6 @@ fn an_oco_for_a_filled_quantity_carries_the_brackets_prices() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_is_one_simple_gtc_order_with_its_limit_derived() {
     let recorded = scenario("submit_crypto_stop_limit");
     let sent = recorded
@@ -841,7 +887,6 @@ fn a_crypto_stop_limit_is_one_simple_gtc_order_with_its_limit_derived() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_cancel_is_confirmed_by_the_broker_and_not_by_the_request() {
     let recorded = scenario("cancel_confirmed");
     assert_eq!(
@@ -857,7 +902,6 @@ fn a_cancel_is_confirmed_by_the_broker_and_not_by_the_request() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_cancel_of_an_order_that_filled_first_is_not_a_confirmation() {
     let recorded = scenario("cancel_rejected_already_filled");
     assert_eq!(recorded.exchanges.first().map(|e| e.status), Some(422));
@@ -869,7 +913,6 @@ fn a_cancel_of_an_order_that_filled_first_is_not_a_confirmation() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_initiated_replace_links_the_new_order_to_the_old() {
     let pending = wire::order(&body_of("replace_pending_then_replaced", 0)).expect("parses");
     assert_eq!(
@@ -887,7 +930,6 @@ fn a_broker_initiated_replace_links_the_new_order_to_the_old() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_late_fill_names_an_order_that_is_already_terminal() {
     let terminal = wire::order(&body_of("late_fill_after_terminal", 0)).expect("parses");
     assert_eq!(terminal.status, "canceled");
@@ -900,7 +942,6 @@ fn a_late_fill_names_an_order_that_is_already_terminal() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn the_account_wide_endpoints_are_the_two_the_spec_names() {
     let cancel_all = scenario("cancel_all_account_scope");
     assert_eq!(
@@ -1104,7 +1145,6 @@ fn built_body(order: &mandate_executor::SubmitOrder) -> serde_json::Value {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_simple_equity_limit_body_is_the_recorded_one_with_extended_hours_false() {
     let built = built_body(&recorded_limit_order());
     assert_eq!(
@@ -1120,7 +1160,6 @@ fn a_simple_equity_limit_body_is_the_recorded_one_with_extended_hours_false() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_bracket_body_is_the_recorded_one_with_no_extended_hours() {
     let order = mandate_executor::SubmitOrder {
         client_order_id: client_order_id("md-daea915c1fc0042bcc19a4caed"),
@@ -1139,7 +1178,6 @@ fn a_bracket_body_is_the_recorded_one_with_no_extended_hours() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_oco_body_has_no_top_level_limit_and_no_extended_hours() {
     let order = mandate_executor::SubmitOrder {
         client_order_id: client_order_id(
@@ -1162,10 +1200,43 @@ fn an_oco_body_has_no_top_level_limit_and_no_extended_hours() {
         built.get("limit_price").is_none() && built.get("extended_hours").is_none(),
         "an OCO's prices are its legs' only: take_profit.limit_price and stop_loss.stop_price"
     );
+    let two_quantities = mandate_executor::SubmitOrder {
+        oco: Some(mandate_executor::OcoLegs {
+            take_profit: exact_price("170"),
+            stop: exact_price("140"),
+            qty: exact_qty("40"),
+        }),
+        ..order.clone()
+    };
+    assert_eq!(
+        wire::submission_body(&two_quantities)
+            .err()
+            .map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO whose legs name 40 while the order names 60 is refused, never sent with either \
+         quantity: §5.4's OCO is for the filled quantity, and a guess could over-sell"
+    );
+    let with_a_limit = mandate_executor::SubmitOrder {
+        limit_price: Some(exact_price("170")),
+        ..order.clone()
+    };
+    assert_eq!(
+        wire::submission_body(&with_a_limit).err().map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO carrying a top-level limit is refused: its prices are its legs' only"
+    );
+    let with_a_stop = mandate_executor::SubmitOrder {
+        stop_price: Some(exact_price("140")),
+        ..order
+    };
+    assert_eq!(
+        wire::submission_body(&with_a_stop).err().map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO carrying a top-level stop is refused the same way"
+    );
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn a_crypto_stop_limit_body_is_simple_with_no_extended_hours() {
     let order = mandate_executor::SubmitOrder {
         client_order_id: client_order_id("md-c7c0b6a5d2e14f8b9a3c5d7e11"),
