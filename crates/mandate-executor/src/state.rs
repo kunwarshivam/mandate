@@ -351,6 +351,32 @@ pub(crate) fn restriction_for(subject: &str) -> String {
     format!("reconciliation:{subject}")
 }
 
+/// A restriction is the one an acknowledgment of its own subject lifts, so no two subjects share
+/// one (§11). The owner acknowledgment that reads it lands in a later slice of this stack.
+#[cfg(test)]
+mod restriction_tests {
+    use super::restriction_for;
+
+    #[test]
+    fn each_subject_has_its_own_restriction() {
+        let subjects = ["AAPL", "BTC/USD", "external_activity"];
+        for (i, subject) in subjects.iter().enumerate() {
+            let own = restriction_for(subject);
+            assert!(
+                own.ends_with(subject),
+                "the restriction names its subject: {own}"
+            );
+            for other in subjects.iter().skip(i + 1) {
+                assert_ne!(
+                    own,
+                    restriction_for(other),
+                    "an acknowledgment of {subject} never lifts {other}'s restriction"
+                );
+            }
+        }
+    }
+}
+
 /// The accessors read their own fields. These cases set the private fields directly, so a mutant
 /// that answers the fresh value dies even for a field no merged slice folds yet, which no test
 /// outside the crate can reach until that slice lands (DEC-137).
