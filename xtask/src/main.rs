@@ -3084,10 +3084,15 @@ mod tests {
              caught while nothing ran",
         );
         let named = format!("{refused:#}");
-        assert!(named.contains("mutants"), "{named}");
+        assert_eq!(
+            named, "mutants: 1 problem(s)",
+            "the gate's own verdict on one crate, not a tool that would not start, whose error \
+             reads `failed:` instead (the message itself is pinned by \
+             a_crate_with_no_live_test_cannot_have_its_mutants_counted_as_caught)"
+        );
         assert!(
             !fx.0.join(MUTANTS_OUT).exists(),
-            "it refuses before the run, so the run wrote nothing: {named}"
+            "and it refuses before the run, so the run wrote nothing"
         );
 
         fx.write(
@@ -3109,7 +3114,12 @@ mod tests {
              function it mutates is not a stub",
         );
         let missed = format!("{missed:#}");
-        assert!(missed.contains("mutants"), "{missed}");
+        assert_eq!(missed, "mutants: 1 problem(s)", "one live mutant survived");
+        assert!(
+            fx.0.join(MUTANTS_OUT).exists(),
+            "and this verdict is the run's own, so the run did happen: the pre-flight passed and \
+             `cargo mutants` reported the miss"
+        );
 
         assert!(
             mutants(&fx.0, None).is_ok(),
