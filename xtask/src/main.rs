@@ -1609,6 +1609,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         .current_dir(root)
         .args(args)
         .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
+        .env("PROPTEST_RNG_SEED", PENDING_PROPTEST_SEED)
         .stderr(Stdio::inherit())
         .output()
         .context("starting `cargo nextest` (is it installed? see AGENTS.md)")?;
@@ -1680,6 +1681,14 @@ impl PendingTestRun {
 /// test) is still a stub. A crate whose stubs report none of these is fixed, not excused: that is
 /// why `mandate-num`'s E4-2 stubs and `mandate-spec`'s `Confirmation::update` are `todo!()`
 /// (DEC-137).
+/// The seed every pending property draws its cases from in `ci pending`, so the gate gives one
+/// verdict for one tree. A pending property's failure can depend on which cases it draws: #196's
+/// review measured three `mandate-executor` properties stopping at a later slice's stub on some
+/// seeds and shrinking to their own E7-4 assertion on others, which turned the required `fast`
+/// check red and green on the same code. Live properties keep drawing a fresh seed in `ci test`,
+/// where variety finds bugs; only the pending verdict is pinned.
+const PENDING_PROPTEST_SEED: &str = "20260927";
+
 const STUB_MARKERS: [&str; 5] = [
     "Unimplemented",
     "unimplemented",
