@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141 and DEC-145 and for option 16. Not a PRD change, and not legal advice |
+| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141, DEC-145, and DEC-148 and for option 16. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -35,7 +35,8 @@ or, for sources used only here, to [this document's source list](#sources).
    owner who already runs their own agent can connect it through a Mandate MCP server that exposes
    the same API Mandate uses to take the owner's input, so every request passes the same builder,
    autonomy rules, gate, ledger, and journal. That channel is an adoption on-ramp, not a separate
-   product. Hedge with compliance evidence for small advisers and an agent-safety conformance suite.
+   product, and never the only or the main path; DEC-148 pulls its story (E10-6) forward to M8.
+   Hedge with compliance evidence for small advisers and an agent-safety conformance suite.
 
 ## 1. Market evidence
 
@@ -163,8 +164,8 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 
 The research first framed this as a lead "gateway" product. The founder's decision keeps the
 evidence and changes the role: the complete product leads, and this is an optional channel over the
-owner-input API. The evidence below is unchanged.
-
+owner-input API, not the main path. DEC-148 pulls its story forward without changing that role. The
+evidence below is unchanged.
 
 - **Target.** Segment A, then C: owners already running Claude, ChatGPT, Codex, or a custom agent on
   Alpaca or Robinhood.
@@ -182,8 +183,11 @@ owner-input API. The evidence below is unchanged.
   many customers are unresolved (OD-12), and it has no paper environment documented [RH2], which
   is why DEC-124 uses the simulated broker. As a lead product it would weaken the "platform brings
   the ideas" headline, which is why DEC-141 makes it a channel, not the lead.
-- **Plan impact (DEC-141).** No change to milestone order. Story E10-6, a Mandate MCP server over
-  the owner-input API, follows the owner-input API work, after the tracer bullet (E7-7). It is not a
+- **Plan impact (DEC-141, DEC-148).** No change to milestone order. Story E10-6, a Mandate MCP
+  server over the owner-input API, is pulled forward (DEC-148): it is the first M8 story after the
+  owner-input API, sign-in, roles, step-up (E9-1, E9-2, E9-4), and mandate versions (E10-3), ahead
+  of M8's other Should stories, and it does not wait for M9 or M10. It cannot come earlier, because
+  the token and step-up it needs are M8 work. It stays optional and is not the main path. It is not a
   separate proposer path: requests pass the same builder, autonomy rules, gate, ledger, and journal
   as the owner's own input. The client cannot change the envelope (it may propose a mandate version
   the human confirms with step-up), cannot answer its own ASK approvals, and holds none of the
@@ -203,7 +207,8 @@ owner-input API. The evidence below is unchanged.
 - **Kill (of the channel's priority, not of the decision).** Fewer than 4 of 10 agent users report an
   incident, workaround, or refusal to automate that the channel would have addressed; or no
   interviewee would connect their agent this way; or Robinhood and Alpaca ship enforced per-agent
-  limits with exportable records first. E10-6 then stays at the back of the backlog.
+  limits with exportable records first. E10-6 then loses its DEC-148 placement and goes back behind
+  the other Should stories.
 
 ### Option 2: Read-only monitor
 
@@ -470,8 +475,9 @@ The founder decided this on 2026-09-27 ([DEC-141](../project/04-decision-log.md#
 the envelope; the platform's research agent (DEC-97) brings the ideas and reaches users on the
 timetable DEC-99 and DEC-103 already set. Until then, users run bring-your-own-strategy.
 
-**The owner's own agent is an optional channel and an adoption on-ramp (option 1, DEC-141).** An owner
-who already runs an agent (for example Claude) can connect it through a Mandate MCP server that
+**The owner's own agent is an optional channel and an adoption on-ramp (option 1, DEC-141).** It is
+never the only or the main path: an owner who never connects an agent gets the complete product. An
+owner who already runs an agent (for example Claude) can connect it through a Mandate MCP server that
 exposes the owner-input API. It is not a separate proposer path, and it follows the rules below.
 
 - Every request goes through the same order builder, autonomy rules, risk gate, account ledger, and
@@ -482,12 +488,22 @@ exposes the owner-input API. It is not a separate proposer path, and it follows 
 - Owner-only privileges and the kill switch stay with the human.
 - No broker credential crosses MCP. The client has its own scoped, revocable token.
 - Every call is journaled with the client's identity.
-- The work is story E10-6, after the owner-input API and the tracer bullet. Milestone order does not
-  change.
+- The work is story E10-6, pulled forward by the founder on 2026-09-27
+  ([DEC-148](../project/04-decision-log.md#decisions)): "we can make it forward as long as we are
+  saying it is not the only or main path". It is the first M8 story after the owner-input API, E9-1,
+  E9-2, E9-4 (step-up), and E10-3 (mandate versions), ahead of M8's other Should stories, and it
+  does not wait for M9's web app. Its earlier dependencies (the journal, the order builder, the gate,
+  the executor and account ledger, and the tracer bullet E7-7) land before the Phase 1 gate.
+  Milestone order does not change.
 
 The evidence for option 1 (the Robinhood and Alpaca figures, the friction brokers name, and brokers
 disclaiming supervision) is why the channel is worth having. It argues for an on-ramp that brings
-people with their own agents into the complete product, not for replacing it.
+people with their own agents into the complete product, not for replacing it. Research on
+2026-09-27 is why it moves forward: brokers now open order entry to third-party agents while
+disclaiming supervision. Per the broker's announcement, Robinhood's agentic trading (beta from
+2026-05-27) "does not control, supervise, monitor, recommend, or audit these AI agents" [RH1]. Per
+the broker's announcement as reported, Coinbase for Agents (2026-06-11) will add custom limits such
+as maximum trade size and spend later [CB1]. Hobby projects add their own safety layers.
 
 **Hedge A: option 3.** Run discovery in parallel; change no engineering until 2 of 5 name a budget
 and a reachable custodian.
