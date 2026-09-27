@@ -357,8 +357,9 @@ fn order_state_changed(
 ) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
-    if optional_text(payload, "replaces").is_some()
-        || optional_text(payload, "replaced_by").is_some()
+    if optional_text(payload, "replaces")
+        .or(optional_text(payload, "replaced_by"))
+        .is_some()
     {
         return later_slice();
     }
