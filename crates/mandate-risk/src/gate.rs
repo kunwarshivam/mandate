@@ -1810,6 +1810,13 @@ mod tests {
                 })?,
                 pdt(&|o| {
                     o.agent.day_trades.window_count = 7;
+                    o.instrument.asset_class = AssetClass::Crypto;
+                    o.instrument.exchange = None;
+                    o.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
+                    Ok(())
+                })?,
+                pdt(&|o| {
+                    o.agent.day_trades.window_count = 7;
                     o.agent.positions.insert(id("a")?, Qty::parse("10")?);
                     o.proposed.side = Side::Sell;
                     Ok(())
@@ -1824,11 +1831,13 @@ mod tests {
                 Err("E6-8"),
                 Err("E6-8"),
                 Err("E6-8"),
+                Err("E6-10"),
                 Ok((Verdict::Allow, None)),
             ],
             "another agent's same-day opening elsewhere makes required 2; protective, closing and \
-             earlier orders do not count; at the threshold, in a cash account and under \
-             intraday_margin nothing is counted; an exit is never denied for the count"
+             earlier orders do not count; at the threshold, in a cash account, under \
+             intraday_margin and for crypto nothing is counted; an exit is never denied for the \
+             count"
         );
         Ok(())
     }
