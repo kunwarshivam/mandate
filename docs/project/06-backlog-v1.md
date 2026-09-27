@@ -588,7 +588,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
-- **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
 - **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
@@ -597,16 +596,22 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
   (#227 review, round 1, minor 4).
-- Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
-  whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
-  mode `paused` or `stopped`, an `Unknown` order in the instrument), but `held` is also true when
-  the first failing check is `startup_reconciliation_pending` (the startup hold on an opening) or
-  `broker` (a risk-reducing order on a blocked account) (#206 review).
 - **Before stream G's gate is wired in:** register `startup_reconciliation_pending` in the
   trading-domain `reason_codes` registry, or record why not. It is a third partial-gate reason code
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
+  properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
+  would satisfy them; each property must also assert a positive effect a no-op cannot produce
+  (#231 review, follow-up a).
+- **Before E7-3's buying-power path reads them:** the properties' model broker reports `equity` and
+  `buying_power` that follow its `cash_moved`, as `cash` already does; today they stay at 20000
+  whatever its fills (#231 review, follow-up b).
+- Assert the ready precondition in `mandate-executor`'s properties script: after its start, an
+  account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
+  starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
+  it starts ready (#231 review, follow-up c).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected

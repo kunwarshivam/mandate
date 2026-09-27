@@ -1127,8 +1127,8 @@ struct ListedMutant {
 
 /// How many mutants the run will test in each package. `cargo mutants` 27.1.0 answers `--list
 /// --json --in-diff` with no output at all, not `[]`, when the diff generates no mutant (a diff
-/// that touches only `#[cfg(test)]` code, #227's round-2 delta review), so empty output is zero
-/// mutants; any other output that is not a JSON list is still an error.
+/// that touches only `#[cfg(test)]` code; #227's round-2 delta review, #233), so empty output is
+/// zero mutants; any other output that is not a JSON list is still an error.
 fn listed_mutant_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
     if listing.trim().is_empty() {
         return Ok(BTreeMap::new());
@@ -3585,6 +3585,10 @@ mod tests {
         assert!(listed_mutant_counts("\n")?.is_empty());
         assert!(listed_mutant_counts("[]")?.is_empty());
         assert!(listed_mutant_counts("[").is_err());
+        assert!(
+            listed_mutant_counts("[{").is_err(),
+            "a truncated listing is not read as no mutants"
+        );
         assert!(listed_mutant_counts("no mutants").is_err());
 
         let fx = Fixture::gated("mutants-test-only")?;

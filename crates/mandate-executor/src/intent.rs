@@ -295,11 +295,9 @@ fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Execu
 /// the stale at once and resumes the rest only once the startup reconciliation has run, so a
 /// restart never submits a waiting intent on state it has not reconciled.
 ///
-/// A new opening received before that run is not resumed here. On a stream that has journaled an
-/// account, the gate holds it until a reconciliation has run since the start, and the first tick
-/// after releases it or abandons it as too old (`release_held`). On a stream that has never
-/// journaled one, it is still gated and submitted at once: that window is a backlog row that
-/// blocks E7-7.
+/// A new opening received before that run is not resumed here: the gate holds it until an account
+/// has been journaled and a reconciliation has run since the start, and the first tick after
+/// releases it or abandons it as too old (`release_held`).
 pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), ExecutorError> {
     let waiting: Vec<IntentId> = batch
         .view
