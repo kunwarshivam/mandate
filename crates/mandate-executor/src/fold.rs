@@ -16,13 +16,14 @@ use crate::types::{
     OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
-/// The copied cross-stream facts of journal spec §2. Each carries a `causation_id` naming its
-/// origin, unless the executor originated it itself and says so with `originated`.
-const COPIED: [&str; 5] = [
+/// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
+/// `causation_id` naming its origin, unless the executor originated it itself and says so with
+/// `originated`. `OwnerAcknowledged` joins them with the reconciliation slice that interprets it,
+/// and until then answers that slice's stub like every other event it has not reached.
+const COPIED: [&str; 4] = [
     "AgentModeApplied",
     "TradingDayStarted",
     "ClockAdvanced",
-    "OwnerAcknowledged",
     "UniverseChanged",
 ];
 
@@ -357,9 +358,8 @@ fn order_state_changed(
 ) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
-    if optional_text(payload, "replaces")
-        .or(optional_text(payload, "replaced_by"))
-        .is_some()
+    if optional_text(payload, "replaces").is_some()
+        || optional_text(payload, "replaced_by").is_some()
     {
         return later_slice();
     }
@@ -494,4 +494,70 @@ fn recompute(state: &mut ExecutorState, agent: &AgentId) {
         .max()
         .unwrap_or_default();
     state.modes.insert(agent.clone(), mode);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fold;
+    use crate::error::ExecutorError;
+    use crate::payload::{clock, object, text};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
+    };
+
+    /// A stream opened on paper, then an `OrderStateChanged` for an order the fold has never seen,
+    /// carrying one extra field. Without that field the fold answers `UnknownOrder`; the
+    /// replacement fields are refused before the order is looked up.
+    fn fold_state_change(extra: &str) -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let stream = state.account_stream();
+        let event = |seq: u64, event_type: &str, payload| FoldedEvent {
+            stream: stream.clone(),
+            seq: Seq(seq),
+            event_id: EventId(format!("e-{seq}")),
+            event_type: event_type.to_owned(),
+            causation_id: None,
+            payload,
+        };
+        fold(
+            &mut state,
+            &event(
+                1,
+                "StreamOpened",
+                object(vec![("environment", text("paper"))])?,
+            ),
+        )?;
+        let mut pairs = vec![
+            ("client_order_id", text("md-01JABCDEFGHJKMNPQRSTVWXYZ0")),
+            ("state", text("accepted")),
+            ("risk_clock", clock(RiskClock::from_secs(10))?),
+        ];
+        if !extra.is_empty() {
+            pairs.push((extra, text("md-r-e-1")));
+        }
+        fold(&mut state, &event(2, "OrderStateChanged", object(pairs)?))
+    }
+
+    #[test]
+    fn a_replacement_field_answers_the_later_slice_not_a_silent_fold() {
+        for field in ["replaces", "replaced_by"] {
+            let answer = fold_state_change(field);
+            assert!(
+                matches!(answer, Err(ExecutorError::Unimplemented { .. })),
+                "an OrderStateChanged carrying `{field}` alone is refused until the slice that \
+                 interprets replacements, never folded without it: {answer:?}"
+            );
+        }
+        assert!(
+            matches!(
+                fold_state_change(""),
+                Err(ExecutorError::UnknownOrder { .. })
+            ),
+            "and without either field the same event reaches the order lookup"
+        );
+    }
 }
