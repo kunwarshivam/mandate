@@ -838,7 +838,6 @@ proptest! {
 
     /// The same, for the fold: adversarial text in every thesis leaves every step's verdict alone.
     #[test]
-    #[ignore = "pending E17-9"]
     fn text_never_changes_a_fold(
         revisions in prop::collection::vec(0_u32..4, 1..6),
         cap in 0_u32..3,
@@ -1130,7 +1129,6 @@ proptest! {
     /// §8.5: the one exception to "a refusal changes nothing" is a refusal that retires a lineage.
     /// Every other refusal leaves the universe byte for byte as it was, and journals no change.
     #[test]
-    #[ignore = "pending E17-9"]
     fn only_a_retirement_lets_a_refusal_change_the_universe(
         revisions in prop::collection::vec(0_u32..5, 1..7),
         cap in 0_u32..3,
@@ -1176,7 +1174,6 @@ proptest! {
     /// §8.6 item 4: a retirement removes at most one instrument, and only the one its own lineage
     /// held — never one another lineage took over.
     #[test]
-    #[ignore = "pending E17-9"]
     fn retirement_removes_at_most_its_own_holder(
         revisions in prop::collection::vec(0_u32..5, 1..7),
         cap in 0_u32..3,
@@ -1219,7 +1216,6 @@ proptest! {
     /// §8.6, DEC-111: a lineage never admits past its cap, against an independent counter (oracle 3),
     /// and no fold step ever carries a score forward (MI-18).
     #[test]
-    #[ignore = "pending E17-9"]
     fn a_lineage_never_admits_past_its_cap(cap in 0_u32..4, revisions in prop::collection::vec(0_u32..6, 1..8)) {
         let mut theses = Vec::new();
         for (index, revision) in revisions.iter().enumerate() {
@@ -1305,7 +1301,6 @@ proptest! {
     /// §8.6 item 4: retirement happens exactly on a journaled `lineage_retired` refusal, and removes
     /// at most the instrument that lineage holds.
     #[test]
-    #[ignore = "pending E17-9"]
     fn retirement_happens_exactly_on_a_lineage_retired_refusal(
         cap in 0_u32..3,
         revisions in prop::collection::vec(0_u32..5, 1..6),
@@ -1348,7 +1343,6 @@ proptest! {
 
     /// Oracle 1 over a whole fold: the universe the fold reports is the fold of the events it emitted.
     #[test]
-    #[ignore = "pending E17-9"]
     fn the_universe_equals_the_fold_of_the_emitted_events(
         revisions in prop::collection::vec(0_u32..4, 1..7),
         cap in 0_u32..4,
@@ -1383,7 +1377,6 @@ proptest! {
     /// Every step journals exactly one thesis entry, whose type follows the revision number and whose
     /// predecessor appears exactly on a revision (journal spec §9).
     #[test]
-    #[ignore = "pending E17-9"]
     fn every_step_emits_exactly_one_thesis_entry(revisions in prop::collection::vec(0_u32..4, 1..7)) {
         let mut theses = Vec::new();
         for (index, revision) in revisions.iter().enumerate() {

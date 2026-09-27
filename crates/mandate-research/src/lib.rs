@@ -46,8 +46,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! [`fold_theses`] is the one stub left, returning [`ResearchError::Unimplemented`] until E17-9's
-//! fold lands in the next PR (DEC-77, DEC-83); every other entry point is implemented.
+//! No entry point returns [`ResearchError::Unimplemented`] any more; the variant stays only because
+//! the tests PR's `rules.rs` pins its code, so removing it is a tests correction (DEC-77).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -723,8 +723,8 @@ fn thesis_event(
 }
 
 /// One lineage's folded state: the highest revision it admitted, how many admissions it has, and
-/// whether it retired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// whether it retired. The default is a lineage the fold has just met.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Lineage {
     pub revisions: u32,
     pub admitted: u32,
@@ -834,8 +834,94 @@ pub struct Fold {
 /// # Errors
 /// Returns [`ResearchError`] for an unread universe, or a proposal sequence naming one thesis twice.
 pub fn fold_theses(input: &FoldInput<'_>) -> Result<Fold, ResearchError> {
-    let _ = input;
-    Err(ResearchError::Unimplemented("fold_theses", "E17-9"))
+    let mut seen = BTreeSet::new();
+    for proposal in input.proposals {
+        if !seen.insert(&proposal.thesis.thesis_id) {
+            return Err(ResearchError::DuplicateThesisId);
+        }
+    }
+    known_instruments(input.universe)?;
+    let mut universe = input.universe.clone();
+    let mut lineages = input.lineages.clone();
+    let mut steps = Vec::with_capacity(input.proposals.len());
+    for proposal in input.proposals {
+        let admission = admit(&AdmissionInput {
+            mandate: input.mandate,
+            overlay: input.overlay,
+            universe: &universe,
+            proposal,
+            facts: input.facts,
+            lineages: &lineages,
+        })?;
+        universe = admission.universe;
+        let mut journal = admission.journal;
+        let thesis = &proposal.thesis;
+        let (lineage, retired_now) = lineages.step(thesis, admission.decision);
+        if retired_now && let Some(removal) = retire_holder(&mut universe, &lineages, thesis) {
+            journal.push(removal);
+        }
+        steps.push(FoldStep {
+            thesis_id: thesis.thesis_id.clone(),
+            decision: admission.decision,
+            lineage_revisions: lineage.revisions,
+            lineage_retired: lineage.retired,
+            journal,
+        });
+    }
+    Ok(Fold {
+        steps,
+        lineages,
+        universe,
+    })
+}
+
+impl LineageState {
+    /// §8.6: folds one decision into its lineage. A `lineage_retired` refusal retires a live lineage;
+    /// an admission raises the highest revision, counts the admission, and moves the instrument's
+    /// holder to this lineage. Every other refusal leaves the lineage as it was, although the lineage
+    /// becomes known (MC-N19). Returns the lineage after the step, and whether this step retired it.
+    fn step(&mut self, thesis: &Thesis, decision: AdmissionDecision) -> (Lineage, bool) {
+        let lineage = self.lineages.entry(thesis.lineage_id.clone()).or_default();
+        let retired_now =
+            decision.reason() == Some(RefusalReason::LineageRetired) && !lineage.retired;
+        if retired_now {
+            lineage.retired = true;
+        }
+        if decision.admitted() {
+            lineage.revisions = lineage.revisions.max(thesis.revision);
+            lineage.admitted = lineage.admitted.saturating_add(1);
+        }
+        let lineage = *lineage;
+        if decision.admitted() {
+            self.holders.retain(|_, held| *held != thesis.instrument_id);
+            self.holders
+                .insert(thesis.lineage_id.clone(), thesis.instrument_id.clone());
+        }
+        (lineage, retired_now)
+    }
+}
+
+/// §8.6 item 4: removes the instrument a retiring lineage holds, if the universe still holds it, and
+/// returns the removal's `UniverseChanged`. A lineage that lost its holder to another lineage's
+/// admission removes nothing (MC-N28).
+fn retire_holder(
+    universe: &mut WorkingUniverse,
+    lineages: &LineageState,
+    thesis: &Thesis,
+) -> Option<ResearchEvent> {
+    let held = lineages.holder_of(&thesis.lineage_id)?;
+    let WorkingUniverse::Known { instruments, .. } = universe else {
+        return None;
+    };
+    instruments.remove(held).then(|| {
+        universe_changed(
+            held,
+            UniverseChange::Removed,
+            UniverseChangeReason::LineageRetired,
+            (&thesis.thesis_id, &thesis.lineage_id),
+            instruments.len(),
+        )
+    })
 }
 
 /// One instrument's current thesis, as the universe fold holds it.
@@ -1084,6 +1170,8 @@ pub enum ResearchError {
     EmptyId,
     #[error("a thesis states what would invalidate it")]
     EmptyInvalidation,
+    /// Returned by no entry point since the implementation landed; kept for the tests PR's pinned
+    /// code only (DEC-77).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]

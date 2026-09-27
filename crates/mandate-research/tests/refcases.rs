@@ -939,42 +939,36 @@ fn mc_n25() {
 
 /// [`MC-N17`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n17() {
     run_lineage("MC-N17");
 }
 
 /// [`MC-N18`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n18() {
     run_lineage("MC-N18");
 }
 
 /// [`MC-N19`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n19() {
     run_lineage("MC-N19");
 }
 
 /// [`MC-N24`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n24() {
     run_lineage("MC-N24");
 }
 
 /// [`MC-N27`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n27() {
     run_lineage("MC-N27");
 }
 
 /// [`MC-N28`](../../../docs/specs/reference-cases/mandate.yaml), read from the fixture.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n28() {
     run_lineage("MC-N28");
 }
