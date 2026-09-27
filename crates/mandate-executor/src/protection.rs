@@ -127,6 +127,10 @@ pub(crate) fn exit_hold(
 
 #[cfg(test)]
 mod stub_tests {
+    use std::fs;
+    use std::io;
+    use std::path::{Path, PathBuf};
+
     use mandate_accounting::InstrumentId;
     use mandate_num::Qty;
 
@@ -137,38 +141,78 @@ mod stub_tests {
         AccountRef, AccountScope, MarketObservation, Protection, Purpose, RiskClock, WorkspaceId,
     };
 
-    /// Every source file of this crate but `fold.rs`, the effect-free reader that can journal
-    /// nothing. A new file joins this list, or the pin below stops covering it.
-    const SOURCES: [(&str, &str); 15] = [
-        ("batch.rs", include_str!("batch.rs")),
-        ("codec.rs", include_str!("codec.rs")),
-        ("error.rs", include_str!("error.rs")),
-        ("gate.rs", include_str!("gate.rs")),
-        ("ids.rs", include_str!("ids.rs")),
-        ("intent.rs", include_str!("intent.rs")),
-        ("lib.rs", include_str!("lib.rs")),
-        ("orders.rs", include_str!("orders.rs")),
-        ("payload.rs", include_str!("payload.rs")),
-        ("ports.rs", include_str!("ports.rs")),
-        ("protection.rs", include_str!("protection.rs")),
-        ("reconcile.rs", include_str!("reconcile.rs")),
-        ("state.rs", include_str!("state.rs")),
-        ("step.rs", include_str!("step.rs")),
-        ("types.rs", include_str!("types.rs")),
+    /// The files that may name the protection event without writing it, each with how many times:
+    /// the executor's fold (the effect-free reader, which can journal nothing, so any count), the
+    /// journal's catalogue (the registry of event types), and the runtime's list of account-stream
+    /// types it reads. A new name in any of them, or anywhere else, fails the pin.
+    const READERS: [(&str, Option<usize>); 3] = [
+        ("crates/mandate-executor/src/fold.rs", None),
+        ("crates/mandate-journal/src/catalogue.rs", Some(1)),
+        ("crates/mandate-runtime/src/state.rs", Some(1)),
     ];
 
+    /// Every production source under `dir`: Rust and Python files outside test directories.
+    fn sources(dir: &Path, found: &mut Vec<PathBuf>) -> io::Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let path = entry?.path();
+            let name = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("");
+            if path.is_dir() {
+                if !matches!(name, "tests" | "target" | ".venv" | "__pycache__") {
+                    sources(&path, found)?;
+                }
+            } else if (name.ends_with(".rs") || name.ends_with(".py")) && !name.starts_with("test_")
+            {
+                found.push(path);
+            }
+        }
+        Ok(())
+    }
+
+    /// Nothing anywhere in the workspace — the executor, the connectors, the journal, the shell,
+    /// the runtime, the Python tools — writes `ProtectionChanged` while `sequenced` answers a stub,
+    /// so no exit in a protected instrument can reach it (`AGENTS.md` rule 13). Slice 2, the first
+    /// writer, lands no earlier than slice 3, which replaces the stub, and deletes this pin with it
+    /// (DEC-160).
     #[test]
-    fn no_step_journals_protection_while_its_exits_answer_a_stub() {
-        let written = concat!("\"Protection", "Changed\"");
-        for (name, source) in SOURCES {
+    fn no_step_journals_protection_while_its_exits_answer_a_stub() -> io::Result<()> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut found = Vec::new();
+        sources(&root.join("crates"), &mut found)?;
+        sources(&root.join("python"), &mut found)?;
+        assert!(
+            found.len() > 100,
+            "the scan reached the workspace: {} files",
+            found.len()
+        );
+        let named = concat!("Protection", "Changed");
+        for path in found {
+            let source = fs::read_to_string(&path)?;
+            let relative = path
+                .strip_prefix(&root)
+                .map_or(path.clone(), Path::to_path_buf);
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            let quoted = format!("\"{named}\"");
+            let count = if relative.ends_with(".py") {
+                source.matches(named).count()
+            } else {
+                source.matches(quoted.as_str()).count()
+            };
+            let allowed = READERS
+                .iter()
+                .find(|(reader, _)| *reader == relative)
+                .map_or(Some(0), |(_, count)| *count);
             assert!(
-                !source.contains(written),
-                "{name} names the protection event: a step that journals it makes `sequenced` \
-                 reachable, and an exit in a protected instrument would answer a stub, a denied \
-                 exit (AGENTS.md rule 13). Slice 2 writes it no earlier than slice 3 replaces \
-                 the stub (DEC-160)"
+                allowed.is_none_or(|allowed| count == allowed),
+                "{relative} names the protection event {count} time(s): a step that journals it \
+                 makes `sequenced` reachable, and an exit in a protected instrument would answer \
+                 a stub, a denied exit (AGENTS.md rule 13). Slice 2 writes it no earlier than \
+                 slice 3 replaces the stub (DEC-160)"
             );
         }
+        Ok(())
     }
 
     fn protected() -> Result<(ExecutorState, InstrumentId), ExecutorError> {
