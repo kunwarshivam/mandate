@@ -576,6 +576,11 @@ struct CheckInputs<'a> {
 impl CheckInputs<'_> {
     /// One §8.5 predicate: `true` when the check fails. Every one reads typed facts only, so no text
     /// a model wrote can move a verdict (DEC-101, R-05).
+    ///
+    /// Check 4 asks for a research envelope on a mandate whose model admits instruments, as one
+    /// expression: V-036 makes "no admitting model" and "no research envelope" the same condition
+    /// for a validated mandate, so two separate disjuncts would differ only on inputs validation
+    /// rejects, which no test can reach.
     fn fails(&self, reason: RefusalReason) -> bool {
         let input = self.input;
         let envelope = input.mandate.envelope();
@@ -591,9 +596,12 @@ impl CheckInputs<'_> {
                 (thesis.revision > 0) != thesis.predecessor_thesis_id.is_some()
             }
             RefusalReason::ResearchDisabled => {
-                !envelope.admits_instruments
-                    || envelope.research.is_none()
-                    || !overlay.research_agent_allowed
+                !overlay.research_agent_allowed
+                    || envelope
+                        .research
+                        .as_ref()
+                        .filter(|_| envelope.admits_instruments)
+                        .is_none()
             }
             RefusalReason::UniversePinned => envelope.universe_pinned,
             RefusalReason::AdmissionDenied => {
