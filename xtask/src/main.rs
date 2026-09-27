@@ -1695,12 +1695,14 @@ const STUB_MARKERS: [&str; 5] = [
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
-/// The 49 `mandate-executor` rows are E7-4's (DEC-140's addendum, the coordinator's ruling (d)
-/// on #174): the E7-2/E7-3 slices submit, hold and reconcile but never place protection, so these
-/// tests see no cancel, OCO, re-placement, ladder rung, or sub-ledger sell where E7-4's sequence
-/// belongs, instead of a stub's report. Each still runs and fails, and E7-4's implementation PR
-/// deletes each row with its `#[ignore]` line.
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 54] = [
+/// The 7 `mandate-executor` rows are E7-4's (DEC-140's addendum, the coordinator's ruling (d)
+/// on #174): the E7-2/E7-3 slices submit, hold and fill but never place protection, so these
+/// tests see no bracket, OCO or stop-limit where E7-4's protective sequence belongs, instead of a
+/// stub's report.
+/// Each still runs and fails, and E7-4's implementation PR deletes each row with its `#[ignore]`
+/// line. The stub check runs first, so a row whose test stops at a stub is reported for deletion
+/// rather than applied (#194 review, round 1, finding 4).
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-risk/tests/hand.rs",
         "an_unconfirmed_owner_exit_defers",
@@ -1723,10 +1725,6 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 54] = [
     ),
     (
         "crates/mandate-executor/tests/hand.rs",
-        "a_crypto_add_is_a_limit_ioc_inside_the_sequence",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",
     ),
     (
@@ -1739,35 +1737,7 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 54] = [
     ),
     (
         "crates/mandate-executor/tests/hand.rs",
-        "a_kill_switch_applies_the_mode_before_it_cancels",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
         "a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_passive_exit_becomes_a_new_oco_keeping_the_stop",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_passive_exit_never_leaves_the_position_unprotected",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_protective_order_submits_with_no_buying_power",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_reducing_sell_cancels_the_resting_opening_buys_first",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_risk_exit_submits_inside_the_close_window",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "a_stop_at_its_trigger_price_without_a_fill_is_watchdogged",
     ),
     (
         "crates/mandate-executor/tests/hand.rs",
@@ -1775,147 +1745,11 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 54] = [
     ),
     (
         "crates/mandate-executor/tests/hand.rs",
-        "an_account_cancel_all_covers_unknown_orders",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_add_is_a_new_bracket_not_a_replacement",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_agent_kill_switch_sells_exactly_the_sub_ledger_quantity",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_automated_flatten_sells_crypto_at_once",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
         "an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_exit_follows_cancel_confirm_regate_submit_replace",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_exit_never_submits_before_the_cancel_is_confirmed",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_order_submitted_without_protection_is_marketable",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_owner_exit_outside_the_session_prices_from_the_confirmed_bid",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_unknown_order_holds_an_exit_in_that_instrument_alone",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts",
-    ),
-    (
-        "crates/mandate-executor/tests/fault.rs",
-        "crash_at_cancel_before_confirmation",
-    ),
-    (
-        "crates/mandate-executor/tests/fault.rs",
-        "crash_at_confirmation_before_exit_submit",
     ),
     (
         "crates/mandate-executor/tests/fault.rs",
         "crash_between_entry_fill_and_oco",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "entering_exits_only_cancels_the_working_opening_orders",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "every_unprotected_interval_has_a_journaled_start_and_end",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "no_interval_exceeds_the_limit_without_an_alert",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "protection_is_not_re_placed_early",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "protection_is_re_placed_at_the_buffer_day",
-    ),
-    (
-        "crates/mandate-executor/tests/properties.rs",
-        "protective_sell_quantity_never_exceeds_the_position",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_ladder_falls_back_to_the_last_sane_bid_then_the_last_trade",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_ladder_never_prices_below_the_floor",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_ladder_prices_from_a_fresh_sane_quote_first",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_ladder_steps_only_after_the_interval",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_reducing_sell_waits_for_the_cancel_confirmation",
-    ),
-    (
-        "crates/mandate-executor/tests/hand.rs",
-        "the_watchdog_exit_is_a_risk_exit_through_the_ladder",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_04_split_cancels_the_oco_and_re_derives_protection",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_14_add_via_bracket",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_14_equity_exit_sequence_with_protective_oco",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_14_kill_switch",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_14_passive_exit_becomes_oco_take_profit",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_20_crypto_stop_limit_add_and_exit_sequences",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_21_bracket_partly_filled_and_re_placed_before_expiry",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_22_resting_buys_cancelled_before_the_exit",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_24_exit_price_ladder_in_extended_hours",
-    ),
-    (
-        "crates/mandate-executor/tests/refcases.rs",
-        "trading_domain_rc_24_presumed_halt_regular_session",
     ),
 ];
 
@@ -1963,7 +1797,9 @@ fn first_panic_line(output: &str) -> String {
 }
 
 /// A problem for each pending test that passed in any binary, ran in none, or failed on something
-/// other than its story's stub.
+/// other than its story's stub. The stub check comes first: a `BEHAVIOUR_ONLY_TESTS` row applies
+/// only to a test that fails it, and a listed test that stops at its stub anyway is a problem too,
+/// naming the row to delete, so the exception can only shrink (#194 review, round 1, finding 4).
 fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
     tests
         .iter()
@@ -1985,28 +1821,36 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                     "{at} passes on this change's code; a pending test must fail until its story \
                      is implemented, so make it assert what the stubs cannot satisfy (DEC-77)"
                 ))
-            } else if BEHAVIOUR_ONLY_TESTS
-                .iter()
-                .any(|(file, name)| *file == t.file && *name == t.test.path)
-            {
-                eprintln!(
-                    "    pending: {}:{}: `{}` fails on a partly implemented crate's answer, not at \
-                     a stub; it is named in BEHAVIOUR_ONLY_TESTS until {} lands",
-                    t.file, t.test.line, t.test.path, t.test.story
-                );
-                None
             } else {
+                let listed = BEHAVIOUR_ONLY_TESTS
+                    .iter()
+                    .any(|(file, name)| *file == t.file && *name == t.test.path);
                 let story = &t.test.story;
-                runs.iter().find(|o| !names_a_stub(&o.output)).map(|o| {
-                    format!(
+                match runs.iter().find(|o| !names_a_stub(&o.output)) {
+                    None if listed => Some(format!(
+                        "{at} fails at its stub, so its BEHAVIOUR_ONLY_TESTS row is not needed; \
+                         delete the row, which is how the exception stays as small as it must \
+                         be (DEC-137)"
+                    )),
+                    None => None,
+                    Some(_) if listed => {
+                        eprintln!(
+                            "    pending: {}:{}: `{}` fails on a partly implemented crate's \
+                             answer, not at a stub; it is named in BEHAVIOUR_ONLY_TESTS until {} \
+                             lands",
+                            t.file, t.test.line, t.test.path, story
+                        );
+                        None
+                    }
+                    Some(o) => Some(format!(
                         "{at} fails away from its stub; it must stop at the stub {story} \
                          implements, so its failure must carry that stub's own report, which is \
                          the `Unimplemented` error of its crate, and neither a fixture, parse, or \
                          harness panic nor the test's own story id counts (DEC-137). It panicked \
                          with: {}",
                         first_panic_line(&o.output)
-                    )
-                })
+                    )),
+                }
             }
         })
         .collect()
@@ -2511,12 +2355,12 @@ mod tests {
     use anyhow::{Context, Result};
 
     use super::{
-        MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, ci,
-        classify, contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        has_pending_tests, is_pending_marker, is_stub_function, listed_mutant_counts,
-        live_test_counts, mutant_verdicts, mutants, mutants_outcome, names_a_stub, output_in,
-        pending_problems, pending_tests, plain_comment_lines, repo_root, test_binary,
-        test_outcomes, unjudged_mutants, verdicts,
+        BEHAVIOUR_ONLY_TESTS, MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome,
+        backticked_paths, ci, classify, contains_dec_id, contains_word, first_panic_line,
+        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
+        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
+        names_a_stub, output_in, pending_problems, pending_tests, plain_comment_lines, repo_root,
+        test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -2875,6 +2719,61 @@ mod tests {
             ],
             "`fails` stops at an `Unimplemented` and is no problem; an `Overflow` names no stub, \
              so the crate whose stubs returned it was fixed instead of excused"
+        );
+    }
+
+    #[test]
+    fn a_behaviour_only_row_is_used_only_where_the_stub_check_fails() {
+        let (file, name) = BEHAVIOUR_ONLY_TESTS
+            .first()
+            .copied()
+            .unwrap_or_else(|| panic!("the list has a row to test with"));
+        let run = |path: &str| PendingTestRun {
+            file: file.to_owned(),
+            package: "a".to_owned(),
+            binary: Some("a::hand".to_owned()),
+            test: PendingTest {
+                path: path.to_owned(),
+                story: "E1-1".to_owned(),
+                line: 1,
+            },
+        };
+        let failed = |path: &str, output: &str| TestOutcome {
+            binary_id: "a::hand".to_owned(),
+            name: path.to_owned(),
+            passed: false,
+            output: output.to_owned(),
+        };
+        let at_the_stub = "panicked at x.rs:1:1:\nUnimplemented { story: \"E1-1\" }";
+        let on_the_answer = "panicked at x.rs:1:1:\nno cancel where the sequence belongs";
+
+        let unneeded = verdicts(&[run(name)], &[failed(name, at_the_stub)]);
+        assert_eq!(
+            unneeded.len(),
+            1,
+            "a listed test that fails at its stub is judged by the stub check, and its row is \
+             reported as not needed, so the list cannot grow silently: {unneeded:?}"
+        );
+        assert!(
+            unneeded
+                .iter()
+                .all(|p| p.contains("row is not needed") && p.contains(name)),
+            "{unneeded:?}"
+        );
+
+        assert!(
+            verdicts(&[run(name)], &[failed(name, on_the_answer)]).is_empty(),
+            "a listed test that fails on the partial answer is what the row is for"
+        );
+        let unlisted = "not_a_row_of_the_list";
+        let away = verdicts(&[run(unlisted)], &[failed(unlisted, on_the_answer)]);
+        assert!(
+            away.len() == 1 && away.iter().all(|p| p.contains("fails away from its stub")),
+            "and an unlisted one failing the same way is still a problem: {away:?}"
+        );
+        assert!(
+            verdicts(&[run(unlisted)], &[failed(unlisted, at_the_stub)]).is_empty(),
+            "while an unlisted one at its stub is what every pending test must do"
         );
     }
 

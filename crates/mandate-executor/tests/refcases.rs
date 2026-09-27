@@ -1570,6 +1570,7 @@ fn trading_domain_rc_15_status_not_active() {
 }
 
 #[test]
+#[ignore = "pending E7-3"]
 fn trading_domain_rc_15_external_order_detected() {
     drive(case("RC-15", Some("external_order_detected")));
 }

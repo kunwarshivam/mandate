@@ -18,14 +18,9 @@ use crate::types::{
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
 /// `causation_id` naming its origin, unless the executor originated it itself and says so with
-/// `originated`. `OwnerAcknowledged` joins them with the reconciliation slice that interprets it,
-/// and until then answers that slice's stub like every other event it has not reached.
-const COPIED: [&str; 4] = [
-    "AgentModeApplied",
-    "TradingDayStarted",
-    "ClockAdvanced",
-    "UniverseChanged",
-];
+/// `originated`. `OwnerAcknowledged` and `TradingDayStarted` join them with the slices that
+/// interpret them, and until then answer those slices' stubs like every other event not reached.
+const COPIED: [&str; 3] = ["AgentModeApplied", "ClockAdvanced", "UniverseChanged"];
 
 /// Replays one journaled event into the state.
 ///
@@ -96,7 +91,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderStateChanged" => order_state_changed(state, payload, at),
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "TradingDayStarted" | "ClockAdvanced" | "RiskDayStarted" | "MarkUpdated" => Ok(()),
+        "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
         "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
@@ -112,8 +107,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
 }
 
 /// Fees, corporate actions, the account snapshot, rejects, reconciliation's records, the owner
-/// acknowledgment, protection and the kill switch (trading-domain spec §5.4 to §5.7, §6, §7.3, §10,
-/// §11): the later slices of this stack.
+/// acknowledgment, the trading and risk days, protection and the kill switch (trading-domain spec
+/// §5.4 to §5.7, §6, §7.3, §10, §11): the later slices of this stack.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
