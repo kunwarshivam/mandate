@@ -786,12 +786,19 @@ requiring every pending test to fail on the stubs).
     | `ValidatedMandate::from_validated_envelope(MandateEnvelope)` | `ValidatedMandate::new(Mandate, &ValidationContext, &[PolicyLevel])` | every scenario builds a real document instead of an envelope struct |
     | `PolicyOverlay` with public fields and six infallible typed accessors | `PolicyOverlay { tightest: BTreeMap<PolicyKey, PolicyValue> }` — private — with a **fallible** `effective`, plus `auto_allowed` and `narrow(decision)` | the tests stop using struct literals, and the six accessors become fallible. `checks` already returns `Result`, so no signature in this brief changes; F's doc gives the reason the fallibility matters — an overlay that answered "no ceiling" from a stub would enforce nothing |
     | `AssetClass { UsEquity, Crypto }` | `AssetClass { Crypto, UsEquity }` | a different `Ord`, which this crate only membership-tests, so no output moves |
+    | `ModelId::new(&str) -> Result<_, SpecTypeError>` | `ModelId` with **no public constructor** — only `as_str` and `model_type` (`document.rs:268`) | **the swap cannot build one from F's crate as main stands.** F's own next tests PR ([#145](https://github.com/kunwarshivam/mandate/pull/145)) adds `ModelId::parse` for the same reason, so this row is a dependency on that landing, not a difference to absorb |
 
     So the PR that deletes `spec_types.rs` also edits `tests/common/mod.rs` and the construction lines
     of `admission.rs`, `properties.rs`, `refcases.rs` and `rules.rs`. DEC-77 otherwise lets an
     implementation PR change test files only by deleting pending markers, so that PR states the
     exception, keeps it to those lines, and changes no assertion — which a reviewer can check, because
     every assertion is a separate line from the builder that feeds it.
+
+    **This table is a reading of `main` at the time it was written, not a promise.** Stream F's tests
+    land in four PRs and only the first has merged, so a later one may add, rename, or narrow any of
+    these; #145 adding `ModelId::parse` is already an instance. The swap PR re-reads F's crates and
+    re-checks every row rather than trusting this table, and says in its body what it found — the cost
+    of trusting a stale reading is what made interpretation 15 wrong the first time.
 
 ## The case-loading design
 
