@@ -1023,24 +1023,46 @@ fn mutants() -> Result<()> {
         .to_str()
         .context("non-UTF-8 temp path")?
         .to_owned();
-    let result = sh(
-        "cargo",
-        &[
-            "mutants",
-            "--in-diff",
-            &diff_path,
-            "--test-tool",
-            "nextest",
-            "--jobs",
-            "2",
-            "--output",
-            "target",
-        ],
-    );
+    let args = [
+        "mutants",
+        "--in-diff",
+        &diff_path,
+        "--test-tool",
+        "nextest",
+        "--jobs",
+        "2",
+        "--output",
+        "target",
+    ];
+    fs::remove_dir_all(MUTANTS_OUT).ok();
+    eprintln!("    $ cargo {}", args.join(" "));
+    let status = Command::new("cargo")
+        .args(args)
+        .status()
+        .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     fs::remove_file(&diff_file).ok();
-    match result {
-        Ok(()) => Ok(()),
-        Err(failure) => stub_exemptions(Path::new("."), &crates, failure),
+    mutants_outcome(Path::new("."), &crates, status?.code())
+}
+
+/// Where `--output target` puts the run's outcomes. Removed before every run, so nothing a previous
+/// run or a restored cache left behind can be read as this run's result (DEC-137).
+const MUTANTS_OUT: &str = "target/mutants.out";
+
+/// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
+/// this status reads the outcomes and may exempt a stub body: a build failure, a diff that no longer
+/// matches the source, a timeout, or a run that stopped before it tested anything keeps the failure,
+/// whatever `target/mutants.out` holds (DEC-137).
+const MISSED_MUTANTS: i32 = 2;
+
+fn mutants_outcome(root: &Path, crates: &[MutatedCrate], code: Option<i32>) -> Result<()> {
+    match code {
+        Some(0) => Ok(()),
+        Some(MISSED_MUTANTS) => stub_exemptions(root, crates),
+        other => bail!(
+            "`cargo mutants` exited with {other:?}, which is not the status it reports for missed \
+             mutants ({MISSED_MUTANTS}); the run did not finish, so nothing in {MUTANTS_OUT} is \
+             this run's result"
+        ),
     }
 }
 
@@ -1136,14 +1158,17 @@ struct LineColumn {
     line: usize,
 }
 
-/// Reads the failed run's outcomes and keeps the failure unless every mutant it missed sits in a
+/// Reads the outcomes of a run that missed mutants and fails unless every mutant it missed sits in a
 /// stub body of a crate whose tests are still pending; those are named as skipped. Anything else
-/// the run reports, a failed baseline or a timeout included, stays a failure (DEC-137).
-fn stub_exemptions(root: &Path, crates: &[MutatedCrate], failure: anyhow::Error) -> Result<()> {
-    let outcomes = root.join("target/mutants.out/outcomes.json");
-    let Ok(text) = fs::read_to_string(&outcomes) else {
-        return Err(failure);
-    };
+/// the run reports, a failed baseline or a timeout included, is a problem of its own (DEC-137).
+fn stub_exemptions(root: &Path, crates: &[MutatedCrate]) -> Result<()> {
+    let outcomes = root.join(MUTANTS_OUT).join("outcomes.json");
+    let text = fs::read_to_string(&outcomes).with_context(|| {
+        format!(
+            "reading {} after a run that missed mutants",
+            outcomes.display()
+        )
+    })?;
     let (problems, skipped) = mutant_verdicts(root, crates, &text)
         .with_context(|| format!("reading {}", outcomes.display()))?;
     for name in &skipped {
@@ -1153,10 +1178,10 @@ fn stub_exemptions(root: &Path, crates: &[MutatedCrate], failure: anyhow::Error)
         );
     }
     if !problems.is_empty() {
-        return report(problems, "mutants").context(failure);
+        return report(problems, "mutants");
     }
     if skipped.is_empty() {
-        return Err(failure);
+        bail!("`cargo mutants` reports missed mutants that {MUTANTS_OUT} does not name");
     }
     eprintln!(
         "    mutants: {} mutant(s) survived, all in stub bodies; the implementation PR that \
@@ -1222,7 +1247,8 @@ fn is_stub_mutant(root: &Path, crates: &[MutatedCrate], mutant: &Mutant) -> bool
     is_stub_function(&src, function.span.start.line, function.span.end.line)
 }
 
-/// Whether the function spanning these lines of `src` is a stub.
+/// Whether the function spanning these lines of `src` is a stub the mutation gate may exempt:
+/// `Unimplemented` or `todo!()`, the two forms DEC-137 names, and no other always-failing body.
 fn is_stub_function(src: &str, start: usize, end: usize) -> bool {
     let text = src
         .lines()
@@ -1231,8 +1257,15 @@ fn is_stub_function(src: &str, start: usize, end: usize) -> bool {
         .collect::<Vec<_>>()
         .join("\n");
     let toks = tokens(&text);
-    function_body(&toks, 0).and_then(stub_return).is_some()
+    matches!(
+        function_body(&toks, 0).and_then(stub_return).as_deref(),
+        Some(UNIMPLEMENTED_VARIANT | TODO_PANIC)
+    )
 }
+
+/// The variant every crate's stubs but `mandate-num`'s return, and the panic `todo!()` prints.
+const UNIMPLEMENTED_VARIANT: &str = "Unimplemented";
+const TODO_PANIC: &str = "not yet implemented";
 
 /// The tokens inside the braces of the function whose `fn` is at or after `from`, or `None` for a
 /// signature without a body.
@@ -1250,11 +1283,12 @@ fn function_body(toks: &[(Token, usize)], from: usize) -> Option<&[(Token, usize
     toks.get(open.saturating_add(1)..close.saturating_sub(1))
 }
 
-/// The error a stub body returns: nothing but argument discards (`let _ = ...;`) and a last
-/// statement returning `Err(...)` or panicking through `todo!()`. The name is the last capitalised
-/// one of the `Err(...)`, so `Err(GateError::Unimplemented("evaluate", "E6-3"))` gives
-/// `Unimplemented` and `Err(NumError::Overflow)` gives `Overflow`. Anything else a tests PR adds is
-/// ordinary code, which the mutation gate covers and no pending test may fail on instead.
+/// The error a body that can only fail returns: nothing but argument discards (`let _ = ...;`) and a
+/// last statement returning `Err(...)` or panicking through `todo!()`. The name is the last
+/// capitalised one of the `Err(...)`, so `Err(GateError::Unimplemented("evaluate", "E6-3"))` gives
+/// `Unimplemented` and `Err(NumError::Overflow)` gives `Overflow`. Such a body is not a stub by
+/// itself: the mutation gate exempts only the two forms DEC-137 names, and the pending gate accepts
+/// a name here only where `STUB_ERROR_EXCEPTIONS` declares it.
 fn stub_return(body: &[(Token, usize)]) -> Option<String> {
     let statements = statements(body);
     let (last, discards) = statements.split_last()?;
@@ -1471,8 +1505,10 @@ impl PendingTestRun {
 /// of the variant every stub error carries, `unimplemented` its `code()`, "is not implemented yet"
 /// and "<story> has not been implemented yet" the two `Display` forms in use, and "not yet
 /// implemented" the panic of `todo!()`. A pending test's failure must show one of these, name its
-/// own story, or name an error its own crate's stubs return, so that a fixture, parse, or harness
-/// panic cannot stand in for the stub the story implements (DEC-137).
+/// own story as a whole word, or name an error `STUB_ERROR_EXCEPTIONS` declares for its crate, so
+/// that a fixture, parse, or harness panic cannot stand in for the stub the story implements. A
+/// story or a marker written into the test's own assertion message satisfies the gate: it proves
+/// the failure says what it stops at, not where the failure came from (DEC-137).
 const STUB_MARKERS: [&str; 5] = [
     "Unimplemented",
     "unimplemented",
@@ -1481,19 +1517,25 @@ const STUB_MARKERS: [&str; 5] = [
     "not yet implemented",
 ];
 
-/// Whether a pending test's failure output shows that it stopped at the stub of `story`. `errors`
-/// are the ones the test's own crate returns from a stub body, for a crate whose stubs name
-/// themselves no better than that (`mandate-num`'s return `NumError::Overflow`).
+/// Stub errors declared crate by crate, for stubs that name themselves no better: `mandate-num`'s
+/// E4-2 stubs return `NumError::Overflow`, which no reader can tell from a real overflow. A row
+/// holds only while that crate still has a body returning it, so it cannot outlive the stubs it
+/// excuses, and a crate not named here must fail at a marker (DEC-137).
+const STUB_ERROR_EXCEPTIONS: [(&str, &str); 1] = [("mandate-num", "Overflow")];
+
+/// Whether a pending test's failure output shows that it stopped at the stub of `story`. The story
+/// matches as a whole word, so `E6-1` is not found in `E6-10`; `errors` are the exceptions declared
+/// for the test's own crate and still confirmed by its source.
 fn names_a_stub(output: &str, story: &str, errors: Option<&BTreeSet<String>>) -> bool {
-    output.contains(story)
+    contains_word(output, story)
         || STUB_MARKERS.iter().any(|marker| output.contains(marker))
-        || errors.is_some_and(|errors| errors.iter().any(|error| output.contains(error)))
+        || errors.is_some_and(|errors| errors.iter().any(|error| contains_word(output, error)))
 }
 
-/// The error names the stubs of each package with pending tests return, beside the markers every
-/// crate shares. Read off the post-change source rather than held as a list, so a crate whose stubs
-/// stop returning an error stops accepting it, and an implementation PR that deletes its stubs
-/// accepts none of them (DEC-137).
+/// The declared stub errors each package with pending tests may fail on, each confirmed against a
+/// body still in that package's source: the declaration says which error is excused, the source says
+/// whether the stub returning it is still there, so an implementation PR that replaces its stubs
+/// stops accepting the name in the same change (DEC-137).
 fn stub_errors_by_package(
     root: &Path,
     packages: &[(String, String)],
@@ -1501,6 +1543,14 @@ fn stub_errors_by_package(
 ) -> Result<BTreeMap<String, BTreeSet<String>>> {
     let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for package in tests.iter().map(|t| &t.package).collect::<BTreeSet<_>>() {
+        let declared: BTreeSet<&str> = STUB_ERROR_EXCEPTIONS
+            .iter()
+            .filter(|(crate_name, _)| crate_name == package)
+            .map(|(_, error)| *error)
+            .collect();
+        if declared.is_empty() {
+            continue;
+        }
         let Some((_, dir)) = packages.iter().find(|(name, _)| name == package) else {
             continue;
         };
@@ -1524,7 +1574,11 @@ fn stub_errors_by_package(
         let mut errors = BTreeSet::new();
         for file in files.lines().filter(|f| f.ends_with(".rs")) {
             if let Ok(text) = fs::read_to_string(root.join(file)) {
-                errors.extend(stub_errors(&text));
+                errors.extend(
+                    stub_errors(&text)
+                        .into_iter()
+                        .filter(|error| declared.contains(error.as_str())),
+                );
             }
         }
         found.insert(package.clone(), errors);
@@ -1532,8 +1586,8 @@ fn stub_errors_by_package(
     Ok(found)
 }
 
-/// The error each stub in one source file returns: for every function whose body is a stub, the
-/// last capitalised name of its `Err(...)`, which is the variant a failure shows.
+/// The error each always-failing body in one source file returns: the last capitalised name of its
+/// `Err(...)`, which is the variant a failure shows.
 fn stub_errors(src: &str) -> BTreeSet<String> {
     let toks = tokens(src);
     let mut found = BTreeSet::new();
@@ -1815,9 +1869,11 @@ fn delimited_end(toks: &[(Token, usize)], start: usize, open: char, close: char)
 }
 
 /// Pending markers the source scan cannot turn into a runnable test name, with why: one inside a
-/// `macro_rules!` body, and one on a `$`-named function a macro expands. Either leaves the test
-/// ungated, which is how 85 of `mandate-risk`'s 105 pending tests went unrun, so both are a failure
-/// of `cargo xtask markers` (DEC-110, DEC-137).
+/// `macro_rules!` body, one on a `$`-named function a macro expands, and one the scan cannot attach
+/// to a named `fn` at all, which is what a marker forwarded to a macro call
+/// (`case!(#[ignore = "pending E6-4"] name)`) looks like. Each leaves the test ungated, which is how
+/// 85 of `mandate-risk`'s 105 pending tests went unrun, so each fails `cargo xtask markers`
+/// (DEC-110, DEC-137).
 fn generated_pending_markers(src: &str) -> Vec<(usize, &'static str)> {
     let toks = tokens(src);
     let tok = |i: usize| toks.get(i).map(|(t, _)| t);
@@ -1847,8 +1903,14 @@ fn generated_pending_markers(src: &str) -> Vec<(usize, &'static str)> {
         };
         if macro_bodies.iter().any(|(from, to)| i > *from && i < *to) {
             found.push((*line, "inside a `macro_rules!` body"));
-        } else if fn_after(&toks, end).is_some_and(|f| tok(f + 1) == Some(&Token::Punct('$'))) {
-            found.push((*line, "on a `$`-named function"));
+        } else {
+            match fn_after(&toks, end) {
+                Some(f) if tok(f + 1) == Some(&Token::Punct('$')) => {
+                    found.push((*line, "on a `$`-named function"));
+                }
+                Some(_) => {}
+                None => found.push((*line, "on no named function of its own")),
+            }
         }
     }
     found
@@ -2117,8 +2179,9 @@ mod tests {
     use super::{
         MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify,
         contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        is_pending_marker, mutant_verdicts, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, stub_errors, test_binary, test_outcomes, verdicts,
+        is_pending_marker, mutant_verdicts, mutants_outcome, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, repo_root, stub_errors, test_binary,
+        test_outcomes, verdicts,
     };
 
     #[test]
@@ -2323,19 +2386,34 @@ mod tests {
             "#[test]\n",
             "#[ignore = \"slow\"]\n",
             "fn not_pending() {}\n",
+            "forward!(#[ignore = \"pending E6-4\"] passed_to_a_macro_call);\n",
+            "#[ignore = \"pending E6-4\"]\n",
+            "struct NotAFunction;\n",
+            "proptest! {\n",
+            "    #[test]\n",
+            "    #[ignore = \"pending E6-4\"]\n",
+            "    fn inside_a_macro_call(x in 0..10u8) { prop_assert!(x < 10); }\n",
+            "}\n",
         );
         assert_eq!(
             generated_pending_markers(src),
             [
                 (4, "inside a `macro_rules!` body"),
-                (13, "on a `$`-named function")
+                (13, "on a `$`-named function"),
+                (18, "on no named function of its own"),
+                (19, "on no named function of its own"),
             ],
-            "only a marker the source scan cannot turn into a test name is a problem"
+            "a marker the source scan cannot turn into a test name is a problem; a plain function \
+             inside a macro call (`proptest!`) is not"
         );
         assert_eq!(
             found(src),
-            expected(&[("written_out", "E6-4", 11)]),
-            "the scan itself still sees only the plain function, which is why the rule exists"
+            expected(&[
+                ("written_out", "E6-4", 11),
+                ("inside_a_macro_call", "E6-4", 24)
+            ]),
+            "the scan sees the plain functions and neither macro-written test, which is why the \
+             rule exists"
         );
         assert!(
             generated_pending_markers(&fs::read_to_string("xtask/src/main.rs").unwrap_or_default())
@@ -2523,7 +2601,7 @@ mod tests {
                 "Overflow".to_owned(),
                 "not yet implemented".to_owned(),
             ]),
-            "a body with a statement of its own (`counted`) is not a stub, and neither is `real`"
+            "a body with a statement of its own (`counted`) can succeed, and so can `real`"
         );
     }
 
@@ -2707,6 +2785,72 @@ mod tests {
         let (problems, _) = verdicts(&pending(true), &baseline)?;
         assert_eq!(problems, ["the unmutated baseline reports Failure"]);
         Ok(())
+    }
+
+    #[test]
+    fn only_a_run_that_missed_mutants_may_exempt_a_stub() -> Result<()> {
+        let fx = Fixture::new("mutants-status")?;
+        let crates = [MutatedCrate {
+            package: "fx".to_owned(),
+            dir: "crates/fx".to_owned(),
+            pending: true,
+        }];
+        let stub_only = outcomes("MissedMutant", "CaughtMutant");
+        fs::create_dir_all(fx.0.join("target/mutants.out"))?;
+        fs::write(fx.0.join("target/mutants.out/outcomes.json"), &stub_only)?;
+        fx.write(
+            "crates/fx/src/lib.rs",
+            concat!(
+                "#[derive(Debug, PartialEq)]\n",
+                "pub enum Error {\n",
+                "    Unimplemented,\n",
+                "}\n",
+                "\n",
+                "pub fn stubbed(n: u32) -> Result<u32, Error> {\n",
+                "    let _ = n;\n",
+                "    Err(Error::Unimplemented)\n",
+                "}\n",
+                "\n",
+                "pub fn real(n: u32) -> u32 {\n",
+                "    n + 1\n",
+                "}\n",
+            ),
+        )?;
+        assert!(
+            mutants_outcome(&fx.0, &crates, Some(2)).is_ok(),
+            "a run that missed only a stub's mutants passes"
+        );
+        assert!(mutants_outcome(&fx.0, &crates, Some(0)).is_ok());
+        for code in [Some(1), Some(3), Some(4), None] {
+            let failure = mutants_outcome(&fx.0, &crates, code)
+                .expect_err("a run that did not finish keeps its failure, whatever it left behind");
+            assert!(
+                failure.to_string().contains("did not finish"),
+                "{failure}, for {code:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_failure_names_a_stub_only_by_a_marker_a_whole_story_or_a_declared_error() {
+        let declared = BTreeSet::from(["Overflow".to_owned()]);
+        let at = |text: &str| names_a_stub(text, "E6-1", Some(&declared));
+        assert!(at(
+            "called `Result::unwrap()` on an `Err` value: Unimplemented"
+        ));
+        assert!(at("Test failed: E6-1 has not been implemented yet."));
+        assert!(at("thread 'x' panicked: not yet implemented"));
+        assert!(at("an `Err` value: Overflow"));
+        assert!(
+            !at("Test failed: E6-10 has been implemented."),
+            "E6-10 is not E6-1"
+        );
+        assert!(!at("assertion failed: `(left == right)`"));
+        assert!(
+            !names_a_stub("an `Err` value: Overflow", "E6-1", None),
+            "a crate with no declared exception must fail at a marker"
+        );
     }
 
     #[test]

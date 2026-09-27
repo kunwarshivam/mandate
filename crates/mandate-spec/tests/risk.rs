@@ -2697,8 +2697,8 @@ proptest! {
         prop_assert_eq!(
             actual,
             expected,
-            "the input at which breach time first reaches {} s, over {:?}: a Confirmation that \
-             never confirms is the pending E6-4 stub",
+            "E6-4 implements Confirmation::update: the input at which breach time first reaches \
+             {} s, over {:?}",
             need,
             inputs
         );
