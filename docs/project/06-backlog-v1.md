@@ -422,6 +422,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
   `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
   every named entry are already caught (round-3 review finding 3).
+- Percent-encode the activities cursor where slice a2 builds `page_token` in `client.rs`. The
+  activity id is already held to `[A-Za-z0-9:-]+` by `wire::fill_from` (#191), so no `&`, `=`, `%`
+  or `/` can reach the query today; encoding it keeps that true if the alphabet ever widens
+  (#191 review, round 3).
+- Give a position's `symbol` the alphabet treatment the broker ids have. It reaches
+  `GET /v2/positions/{symbol}` and the account-wide `DELETE /v2/positions/{symbol}` guarded only by
+  `InstrumentId::new`'s non-empty check, the allowlist's per-segment dot rule, and #189's post-parse
+  check in `send`; a symbol alphabet that admits `BRK.B` and `BTC/USD`'s encoded form, refused
+  otherwise as `wrong_type`, belongs in slice a2 or E7-2's successor (pre-existing on `main`, #191
+  review, round 3).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
