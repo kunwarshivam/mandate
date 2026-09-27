@@ -111,7 +111,11 @@ fn exact_or_overflow(
         Ok(actual) => prop_assert_eq!(at_scale(&actual, scale), Some(expected)),
         Err(e) => {
             prop_assert_eq!(e, NumError::Overflow);
-            prop_assert!(!fits(expected, scale));
+            prop_assert!(
+                !fits(expected, scale),
+                "an Overflow where the oracle's {expected} fits in {scale} places: a stub \
+                 returning NumError::Overflow reaches here while its story is pending"
+            );
         }
     }
     Ok(())
