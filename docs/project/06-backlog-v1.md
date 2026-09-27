@@ -472,6 +472,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **`mandate-executor`, the cash slice:** §7.2's crypto row, `min(equity model, broker non_marginable_buying_power)` for a crypto order, which needs the order's asset class, so `ExecutorState::buying_power` (the equity row today) grows it with the gate port that asks for it (#198 review, round 1, finding 7).
+- Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
+- Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
+- Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
+- **Blocks the gate port reading `buying_power`:** subtract the broker's own unposted fees in
+  `ExecutorState::buying_power`. Since slice 4 it is the lower of the broker's figure and the model
+  (reported cash moved by every fill since, less paper's simulated fees), less reservations, but a
+  broker fee accrued and not yet posted is not subtracted, so it can overstate what the account can
+  spend, the less conservative direction (`AGENTS.md` rule 3). Nothing reads it yet; the gate port
+  and every other caller must not until the cash slice folds those fees (slice 4 review).
 - **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
   `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
   `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that

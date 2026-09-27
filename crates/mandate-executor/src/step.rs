@@ -3,7 +3,9 @@
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::intent::{received, release_held, resume};
-use crate::orders::{absent, cancelled, described, duplicate, fill, lookups_due, silence};
+use crate::orders::{
+    absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
+};
 use crate::ports::Ports;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -116,7 +118,9 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
         Input::BrokerUpdate(BrokerUpdate::Fill(one)) => fill(batch, &one),
-        Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Command(_) => later_slice(),
+        Input::BrokerUpdate(BrokerUpdate::Account(snapshot)) => account(batch, &snapshot),
+        Input::BrokerUpdate(BrokerUpdate::Reject(refused)) => reject(batch, &refused),
+        Input::BrokerSnapshot(_) | Input::Command(_) => later_slice(),
     }
 }
 
@@ -128,17 +132,17 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         }
         BrokerOutcome::Absent { client_order_id } => absent(batch, &client_order_id),
         BrokerOutcome::CancelAccepted { .. } => cancelled(),
-        BrokerOutcome::Rejected(_)
-        | BrokerOutcome::Account(_)
-        | BrokerOutcome::OpenOrders(_)
+        BrokerOutcome::Rejected(refused) => reject(batch, &refused),
+        BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
+        BrokerOutcome::OpenOrders(_)
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::AccountWideAccepted => later_slice(),
     }
 }
 
-/// Fills and fees, the account and its restrictions, reconciliation, and the agent kill switch
-/// (trading-domain spec §5.5, §5.7, §7.3, §10, §11): the later slices of this stack.
+/// The cancel's confirmation, reconciliation, and the agent kill switch (trading-domain spec §5.4,
+/// §5.5, §11): the later slices of this stack.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }

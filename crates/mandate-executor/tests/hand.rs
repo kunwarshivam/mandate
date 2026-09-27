@@ -1741,7 +1741,6 @@ fn a_replaced_orders_reservation_passes_to_the_new_order() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_reject_releases_the_reservation_and_is_journaled_with_its_code() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2299,7 +2298,6 @@ fn external_activity_switches_every_agent_to_exits_only() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reject_for_an_unknown_client_order_id_is_not_external_activity_without_a_fill() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4433,7 +4431,6 @@ fn the_journaled_order_is_the_handling_order() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_closing_only_reject_sets_the_account_restricted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4470,7 +4467,6 @@ fn a_closing_only_reject_sets_the_account_restricted() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn n_consecutive_403s_without_a_known_cause_set_closing_only() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4498,7 +4494,6 @@ fn n_consecutive_403s_without_a_known_cause_set_closing_only() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_unknown_client_order_id_reject_counts_only_toward_the_threshold() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4525,7 +4520,6 @@ fn an_unknown_client_order_id_reject_counts_only_toward_the_threshold() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_blocked_account_status_pauses_every_agent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4557,7 +4551,6 @@ fn a_blocked_account_status_pauses_every_agent() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn buying_power_is_the_lower_of_model_and_broker() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4583,7 +4576,6 @@ fn buying_power_is_the_lower_of_model_and_broker() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reservation_lowers_buying_power_by_its_amount() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4775,7 +4767,6 @@ fn an_alert_carries_only_opaque_ids() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn the_account_ref_is_an_opaque_id_not_an_account_number() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
