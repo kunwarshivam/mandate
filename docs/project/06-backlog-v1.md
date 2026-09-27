@@ -699,3 +699,7 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+- Retag `mc_g13` in `crates/mandate-risk/tests/refcases.rs` from `pending E6-3` to `pending E6-8`, in
+  the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
+  fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
+  misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
