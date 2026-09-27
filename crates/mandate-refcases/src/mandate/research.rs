@@ -1,13 +1,12 @@
-//! Family N of the `mandate` suite, run through `mandate-research` (DEC-132, the brief's
-//! "case-loading design", DEC-154). This module interprets `admission` (§8.5), `thesis_expiry`
-//! (§8.6, DEC-118), and `stagger` (§8.4, DEC-100); `lineage` still fails naming E17-3 until the
-//! stacked slice that interprets it.
+//! Family N of the `mandate` suite: the research agent's `admission`, `lineage`, `thesis_expiry`, and
+//! `stagger` cases (spec §8.4 to §8.6), run through `mandate-research` (DEC-132, the brief's
+//! "case-loading design", DEC-154).
 //!
 //! **Every key is read (DEC-85).** Each object a case carries — `input`, the thesis, its
-//! corroboration, `admission_action`, a lineage's state, an expiry entry, and the expected
-//! `first_order_autonomy` — is swept against the members this module reads, and a member it does not
-//! know fails the case naming it. A journal row is compared whole, as a JSON object built from the
-//! crate's event, so a row that grew a member fails as a difference.
+//! corroboration, `admission_action`, a lineage's state, an expiry entry, a step's expectation, and
+//! the expected `first_order_autonomy` — is swept against the members this module reads, and a
+//! member it does not know fails the case naming it. A journal row is compared whole, as a JSON
+//! object built from the crate's event, so a row that grew a member fails as a difference.
 //!
 //! **What the harness fills and why.** The envelope comes from the case's patched base, projected
 //! onto `mandate_research::MandateEnvelope` field by field, because `mandate_spec::Mandate::parse`
@@ -37,12 +36,12 @@ use mandate_canon::{DecStr, Digest};
 use mandate_num::Usd;
 use mandate_research::{
     AdmissionChange, AdmissionDecision, AdmissionFacts, AdmissionInput, AllowlistVersion,
-    AssetClass, AssetId, AutonomyDecision, ContentHash, Corroboration, Direction, GroupId,
-    InstrumentFacts, InstrumentRestriction, Invalidation, Lineage, LineageId, LineageState,
-    MandateEnvelope, ModelId, ModelVersion, OutputEnvelope, PolicyOverlay, ProposedThesis,
-    ResearchEnvelope, ResearchEvent, SchemaDec, SourceAllowlist, SourceId, StaggerWindow, Thesis,
-    ThesisId, UniverseChange, UniverseEntry, ValidatedMandate, WorkingUniverse, WorkspaceId, admit,
-    expire_theses, stagger_offset,
+    AssetClass, AssetId, AutonomyDecision, ContentHash, Corroboration, Direction, FoldInput,
+    GroupId, InstrumentFacts, InstrumentRestriction, Invalidation, Lineage, LineageId,
+    LineageState, MandateEnvelope, ModelId, ModelVersion, OutputEnvelope, PolicyOverlay,
+    ProposedThesis, ResearchEnvelope, ResearchEvent, SchemaDec, SourceAllowlist, SourceId,
+    StaggerWindow, Thesis, ThesisId, UniverseChange, UniverseEntry, ValidatedMandate,
+    WorkingUniverse, WorkspaceId, admit, expire_theses, fold_theses, stagger_offset,
 };
 use mandate_time::UtcNanos;
 use serde_json::json;
@@ -61,6 +60,8 @@ const THESIS_KEYS: &str = "thesis_id lineage_id revision predecessor_thesis_id i
 const ACTION_KEYS: &str = "order_usd combined_score instrument asset_class session \
     first_trade_in_instrument drawdown daily_pnl_fraction position_usd_after gross_usd_after \
     bought_today_usd position_pnl_fraction unusual_input";
+const STEP_KEYS: &str = "thesis_id admitted reason score_carried_forward lineage_revisions \
+    lineage_retired universe_size_after journal";
 const ENTRY_KEYS: &str = "instrument thesis_id lineage_id revision expires_at invalidated";
 const PENDING_CLASSIFY: &str =
     "`first_order_autonomy` is not interpreted until E6-2 (`mandate_builder::classify`)";
@@ -115,6 +116,65 @@ pub(super) fn admission_case(fixture: &Json, case: &Json) -> Result<(), String> 
         "first_order_autonomy: expected a decision, but admission reported no first order".into()
     })?;
     Err(PENDING_CLASSIFY.to_owned())
+}
+
+/// `kind: lineage` — a sequence of theses folded through §8.6, step by step.
+pub(super) fn lineage_case(fixture: &Json, case: &Json) -> Result<(), String> {
+    let (input, expect) = (at(case, "input")?, at(case, "expect")?);
+    swept(input, &format!("{FACT_KEYS} theses"), "input")?;
+    swept(
+        at(input, "admission_action")?,
+        ACTION_KEYS,
+        "admission_action",
+    )?;
+    let (mandate, model) = envelope(&patched_json(fixture, case)?)?;
+    let theses = list_at(input, "theses")?;
+    let proposals = theses
+        .iter()
+        .map(|t| proposal(t, &model))
+        .collect::<Result<Vec<_>, _>>()?;
+    let start = universe(input)?;
+    let fold = fold_theses(&FoldInput {
+        mandate: &mandate,
+        overlay: &PolicyOverlay::permissive(),
+        universe: &start,
+        proposals: &proposals,
+        facts: &facts(input)?,
+        lineages: &lineages(input)?,
+    })
+    .map_err(|e| format!("fold_theses: {}", e.code()))?;
+    let steps = list_at(expect, "steps")?;
+    expect_eq("steps", fold.steps.len(), steps.len())?;
+    let mut size = members(&start)?.len();
+    for ((step, want), thesis) in fold.steps.iter().zip(steps).zip(theses) {
+        let id = str_at(want, "thesis_id")?;
+        swept(want, STEP_KEYS, id)?;
+        expect_eq("step thesis_id", step.thesis_id.as_str(), id)?;
+        size = size_after(size, &step.journal)?;
+        let pairs = [
+            ("score_carried_forward", step.score_carried_forward().into()),
+            ("lineage_revisions", step.lineage_revisions.into()),
+            ("lineage_retired", step.lineage_retired.into()),
+            ("universe_size_after", size.into()),
+        ];
+        pairs
+            .into_iter()
+            .try_for_each(|(key, got)| same(key, got, want))
+            .and_then(|()| verdict(want, step.decision))
+            .and_then(|()| journal(&step.journal, list_at(want, "journal")?, &[thesis]))
+            .map_err(|e| format!("{id}: {e}"))?;
+    }
+    let folded = fold.lineages.lineages().iter();
+    let folded: serde_json::Map<_, _> = folded
+        .map(|(id, l)| (id.as_str().to_owned(), lineage_json(*l)))
+        .collect();
+    same("lineages", folded.into(), expect)?;
+    let holders = fold.lineages.holders().iter();
+    let holders: serde_json::Map<_, _> = holders
+        .map(|(id, a)| (id.as_str().to_owned(), a.as_str().into()))
+        .collect();
+    same("lineage_instruments", holders.into(), expect)?;
+    same_universe(&fold.universe, expect).map(|_| ())
 }
 
 /// `kind: thesis_expiry` — removals at the horizon, on invalidation, and on retirement (DEC-118).
@@ -392,6 +452,20 @@ fn same_universe(got: &WorkingUniverse, expect: &Json) -> Result<usize, String> 
     Ok(held.len())
 }
 
+/// The universe size after one fold step, derived from its journaled changes rather than read back
+/// from the crate, which reports no size per step.
+fn size_after(size: usize, journal: &[ResearchEvent]) -> Result<usize, String> {
+    journal.iter().try_fold(size, |size, event| match event {
+        ResearchEvent::UniverseChanged(c) if c.change == UniverseChange::Admitted => size
+            .checked_add(1)
+            .ok_or("the universe size overflows".to_owned()),
+        ResearchEvent::UniverseChanged(_) => size
+            .checked_sub(1)
+            .ok_or("a removal from an empty universe".to_owned()),
+        _ => Ok(size),
+    })
+}
+
 /// The journal, each event rendered as the fixture writes it and compared whole. `theses` are the
 /// input theses the entries came from, for `direction`, which the crate keeps only as long or not.
 fn journal(events: &[ResearchEvent], expect: &[Json], theses: &[&Json]) -> Result<(), String> {
@@ -437,6 +511,10 @@ fn row(event: &ResearchEvent, theses: &[&Json]) -> Result<Json, String> {
         members.insert("predecessor_thesis_id".to_owned(), predecessor.into());
     }
     Ok(out)
+}
+
+fn lineage_json(l: Lineage) -> Json {
+    json!({ "revisions": l.revisions, "admitted": l.admitted, "retired": l.retired })
 }
 
 fn strings(value: &Json, key: &str) -> Result<Vec<String>, String> {

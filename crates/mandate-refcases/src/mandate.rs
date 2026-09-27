@@ -3,11 +3,10 @@
 //! named test per case id (`mandate::MC-S01`), 298 of them.
 //!
 //! Stream F owns 202: the families `schema` (S), `semantic` (V), `policy` (P), `change` (C),
-//! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N is interpreted in
-//! [`research`]: `admission`, `thesis_expiry`, and `stagger` now, `lineage` in the stacked slice
-//! that follows. The rest **fail** with "not interpreted until `<story>`" rather than passing
-//! quietly, the DEC-85 rule: `gate` and `agent_flatten` to E6-3, `builder` and `autonomy` to E6-2,
-//! and `lineage` to E17-3.
+//! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N — `admission`, `lineage`,
+//! `thesis_expiry`, and `stagger` — is interpreted in [`research`]. The rest belong to other streams
+//! and **fail** with "not interpreted until `<story>`" rather than passing quietly, the DEC-85 rule:
+//! `gate` and `agent_flatten` to E6-3, and `builder` and `autonomy` to E6-2.
 //!
 //! The same rule holds inside an owned family. Every key of every owned case is read, and a case that
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
@@ -45,7 +44,6 @@ const PENDING_KINDS: &[(&str, &str)] = &[
     ("agent_flatten", "E6-3"),
     ("builder", "E6-2"),
     ("autonomy", "E6-2"),
-    ("lineage", "E17-3"),
 ];
 
 /// Every key an owned case may carry at its top level.
@@ -133,6 +131,7 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         "risk_day" => risk_day_case(case),
         "goal" => goal_case(fixture, case),
         "admission" => research::admission_case(fixture, case),
+        "lineage" => research::lineage_case(fixture, case),
         "thesis_expiry" => research::thesis_expiry_case(case),
         "stagger" => research::stagger_case(case),
         other => Err(format!("unknown case kind `{other}`")),
@@ -172,6 +171,15 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
             "journal",
             "universe_size_after",
             "first_order_autonomy",
+        ],
+    ),
+    (
+        "lineage",
+        &[
+            "steps",
+            "lineages",
+            "lineage_instruments",
+            "working_universe",
         ],
     ),
     (
