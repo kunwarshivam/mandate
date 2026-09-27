@@ -16,6 +16,7 @@ mandate-canon.workspace = true
 mandate-domain.workspace = true
 mandate-journal.workspace = true
 mandate-num.workspace = true
+mandate-research.workspace = true
 mandate-spec.workspace = true
 mandate-sim.workspace = true
 mandate-time.workspace = true
