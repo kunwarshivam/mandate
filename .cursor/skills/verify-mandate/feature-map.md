@@ -197,7 +197,7 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 ## The tracer bullet: one order end to end on Alpaca paper
 
-Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-137; the
+Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
 paths arrive with the tests PR, which updates this entry.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead

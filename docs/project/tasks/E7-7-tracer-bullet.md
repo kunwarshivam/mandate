@@ -353,7 +353,7 @@ cargo run -p mandate-shell --bin mandate-tracer -- \
 
 | Stage | Branch | Contents |
 |---|---|---|
-| 1. **Brief** (this PR) | `agent/tracer-brief` | This document, the DEC-137 row and its Reserved-identifiers row, the E7-7 backlog story, the tracker's stream L row and Claims row, and the feature-map entry. No `crates/`, `schemas/`, `docs/specs/`, `reference/`, `fixtures/`, or `Cargo.*`, so CI takes the documentation-only short path (DEC-112) |
+| 1. **Brief** (this PR) | `agent/tracer-brief` | This document, the DEC-138 row and its Reserved-identifiers row, the E7-7 backlog story, the tracker's stream L row and Claims row, and the feature-map entry. No `crates/`, `schemas/`, `docs/specs/`, `reference/`, `fixtures/`, or `Cargo.*`, so CI takes the documentation-only short path (DEC-112) |
 | 2. **Tests** | `agent/tracer-tests` | The `mandate-shell` skeleton (safety-critical lint header, module docs, every adapter and the effect runner as stubs returning `ShellError::Unimplemented`), the `xtask/layers.toml` entry and the CODEOWNERS line, all fixtures, the fail-closed suite, the property tests, the host-refusal tests, the golden journal, every test that cannot pass yet `#[ignore = "pending E7-7"]`, green `cargo xtask check` including the pending gate, and the planted-bug report in the PR body |
 | 3. **Implementation** | `agent/tracer-impl` | The adapters filled in, on the coordinator's signal, once the upstream streams have landed. Test files change **only** by deleting `#[ignore = "pending E7-7"]` lines |
 
@@ -410,7 +410,7 @@ its results.
 
 ## Decisions needed
 
-Interpretations are recorded as **DEC-137**, Accepted (agent, under DEC-79): they are reversible
+Interpretations are recorded as **DEC-138**, Accepted (agent, under DEC-79): they are reversible
 engineering choices and none touches live money, spending, legal text, or a safety invariant. The
 founder may veto any of them after the fact.
 
@@ -495,7 +495,7 @@ Stop and ask the coordinator rather than working around any of these:
 
 ## Definition of done
 
-The brief PR is done when: this document, the DEC-137 row and its Reserved-identifiers row, the
+The brief PR is done when: this document, the DEC-138 row and its Reserved-identifiers row, the
 E7-7 backlog story, the tracker's stream L and Claims rows, and the feature-map entry are in;
 `cargo xtask ci lint` and the spec guard are green; no `crates/`, `schemas/`, `docs/specs/`,
 `reference/`, `fixtures/`, or `Cargo.*` path is touched; and an independent review on a different

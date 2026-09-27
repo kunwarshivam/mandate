@@ -158,7 +158,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
 - **E7-7 (Must, M6)** As the founder, I want one order placed end to end on my Alpaca paper account
   through the real crates, so that integration defects appear before the Phase 1 soak
-  ([task brief](tasks/E7-7-tracer-bullet.md), [DEC-137](04-decision-log.md#decisions)).
+  ([task brief](tasks/E7-7-tracer-bullet.md), [DEC-138](04-decision-log.md#decisions)).
   *Accepted when:* the whole path — validated mandate, stored market data, the E4-2 moving-average
   baseline as the signal, the order builder's sizing, the risk gate, the runtime's decision cycle with
   journal-before-acting, the executor's idempotent intent, the Alpaca paper connector, the journal
