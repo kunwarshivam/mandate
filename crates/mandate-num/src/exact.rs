@@ -75,6 +75,21 @@ impl Exact {
         })
     }
 
+    /// Whether the value is below, at, or above zero.
+    pub(crate) fn sign(self) -> Ordering {
+        if self.magnitude.is_zero() {
+            Ordering::Equal
+        } else if self.negative {
+            Ordering::Less
+        } else {
+            Ordering::Greater
+        }
+    }
+
+    pub(crate) fn is_positive(self) -> bool {
+        self.sign() == Ordering::Greater
+    }
+
     pub(crate) fn neg(self) -> Self {
         Self {
             negative: !self.negative,

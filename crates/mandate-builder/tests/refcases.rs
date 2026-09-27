@@ -941,196 +941,168 @@ fn mc_a16() {
 
 /// `MC-B01`: Two models, open, AUTO by the routine rule.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b01() {
     builder_case("MC-B01");
 }
 
 /// `MC-B02`: Same outputs with the 0.5 ladder factor.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b02() {
     builder_case("MC-B02");
 }
 
 /// `MC-B03`: Between thresholds: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b03() {
     builder_case("MC-B03");
 }
 
 /// `MC-B04`: Below the exit threshold: discretionary exit, AUTO built-in.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b04() {
     builder_case("MC-B04");
 }
 
 /// `MC-B05`: Increase an existing position.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b05() {
     builder_case("MC-B05");
 }
 
 /// `MC-B06`: Missing model counts as fully bearish for buys: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b06() {
     builder_case("MC-B06");
 }
 
 /// `MC-B07`: Missing model counts as zero for exits: still exits.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b07() {
     builder_case("MC-B07");
 }
 
 /// `MC-B08`: Low combined score: ASK.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b08() {
     builder_case("MC-B08");
 }
 
 /// `MC-B09`: Future as_of is ignored.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b09() {
     builder_case("MC-B09");
 }
 
 /// `MC-B10`: Output older than the model's max_output_age_s is ignored.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b10() {
     builder_case("MC-B10");
 }
 
 /// `MC-B11`: Duplicate outputs: the latest per model wins.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b11() {
     builder_case("MC-B11");
 }
 
 /// `MC-B12`: Wrong model version is ignored (counts as missing).
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b12() {
     builder_case("MC-B12");
 }
 
 /// `MC-B13`: Score rounds to 12 places before the rule compares it.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b13() {
     builder_case("MC-B13");
 }
 
 /// `MC-B14`: Clipped to max_order_usd.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b14() {
     builder_case("MC-B14");
 }
 
 /// `MC-B15`: Working opening order counts toward the target.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b15() {
     builder_case("MC-B15");
 }
 
 /// `MC-B16`: Above target with positive conviction and limit_buys: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b16() {
     builder_case("MC-B16");
 }
 
 /// `MC-B18`: Delta within the rebalance band: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b18() {
     builder_case("MC-B18");
 }
 
 /// `MC-B19`: Value after limit clips below the band: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b19() {
     builder_case("MC-B19");
 }
 
 /// `MC-B20`: No fresh outputs: hold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b20() {
     builder_case("MC-B20");
 }
 
 /// `MC-B21`: Gate dry run denies: no ASK is sent.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b21() {
     builder_case("MC-B21");
 }
 
 /// `MC-B22`: Discretionary exit outside the regular session is deferred.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b22() {
     builder_case("MC-B22");
 }
 
 /// `MC-B23`: Discretionary exit in the close window goes out as a marketable limit.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b23() {
     builder_case("MC-B23");
 }
 
 /// `MC-B24`: Averaging-down rule denies an increase.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b24() {
     builder_case("MC-B24");
 }
 
 /// `MC-B25`: Re-entry after a round trip is not a first trade.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b25() {
     builder_case("MC-B25");
 }
 
 /// `MC-B26`: Accumulate clipped to the remaining target quantity.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b26() {
     builder_case("MC-B26");
 }
 
 /// `MC-B27`: Accumulate clipped by max_avg_price.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b27() {
     builder_case("MC-B27");
 }
 
 /// `MC-B28`: Accumulate with fees: quantity received and spend include fees.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b28() {
     builder_case("MC-B28");
 }
 
 /// `MC-B29`: Accumulate never sells on negative conviction.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_b29() {
     builder_case("MC-B29");
 }
