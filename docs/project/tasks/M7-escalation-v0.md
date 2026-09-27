@@ -43,7 +43,8 @@ conditions).
     equals the bound content field for field (EI-4); every skip is journaled with its reason.
   - CLI: every owner command reaches the runtime only as a committed control-stream event, the
     pause and skip need no step-up, the kill switch's step-up is the local `CliConfirm` and is
-    judged at the moment the owner committed it (DEC-158, option (c), accepted by the founder), and the
+    judged at the moment the owner committed it, and a kill switch without valid evidence still stops
+    and flattens (DEC-158, option (c), accepted by the founder), and the
     property tests of "Test plan" pass.
 - **PRD / HLD / spec anchors:** [PRD](../../product/04-prd-v1.md) §6.6 FR-6.1 (triggers are the
   autonomy rules; gate denials are never asked), FR-6.2 (content; never platform-authored
@@ -466,13 +467,14 @@ pub enum StepUpMethod {
   4. The CLI accepts `--yes` for the scope-confirmation prompt, never for the code, so a script can
      still reach the kill switch with a code it computes locally.
 - **Fail closed for anything that adds risk:** a grant, resume, Stop, or acknowledgment processed more
-  than 300 s after its `authenticated_at` is refused and journaled; an owner exit or kill switch whose
-  evidence was already stale when the owner committed it is refused.
+  than 300 s after its `authenticated_at` is refused and journaled; an owner exit, or a kill-switch privilege
+  beyond the stop, whose evidence was already stale when the owner committed it is refused; the kill
+  switch itself is never refused, and without valid evidence still stops and flattens (DEC-158 option (c)).
 - **An owner exit with stale evidence is refused as an owner exit, and nothing else is held.** An
   owner exit is a risk reduction, so this needs its reason: the refusal is of an *unauthenticated
   instruction*, not of an exit (rule 13 lists what may hold an exit, and an instruction that is not
   shown to be the owner's is not one yet). Outside the regular session it also protects the owner
-  from a bid confirmed minutes ago pricing the exit ladder now (DEC-66). A fresh kill switch and a pause
+  from a bid confirmed minutes ago pricing the exit ladder now (DEC-66). A kill switch (with or without valid step-up, DEC-158 option (c)) and a pause
   stay available as the owner's way out, and every automated exit, protective order, and risk exit
   runs untouched. The CLI says so in the refusal.
 - What v0 does **not** defend against, stated rather than hidden: anyone who can already write the
@@ -747,8 +749,9 @@ among them: it is **DEC-158, accepted by the founder on 2026-09-27 as option (c)
    set per approval; a grant short of `approvers_required` is `counted`, and until E8-6 and E9-5 an
    approval needing a second distinct approver, in a one-person workspace, times out.
 8. **Step-up freshness:** a grant, resume, Stop, or acknowledgment processed more than 300 s after its
-   `authenticated_at` is refused; an owner exit and a kill switch are judged at the moment the owner
-   committed them, so a late read still applies them; pause needs none.
+   `authenticated_at` is refused; an owner exit and a kill-switch privilege are judged at the moment the owner
+   committed them, so a late read still applies them; the kill switch's stop and flatten need no
+   valid evidence at all (DEC-158 option (c)); pause needs none.
 9. **DEC-131 item 25(j) is closed:** a response is its own input, and admission reads the pending set
    minus the batch's own cancellations and the mode the step applies.
 
