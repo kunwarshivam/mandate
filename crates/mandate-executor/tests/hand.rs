@@ -171,7 +171,6 @@ fn an_event_on_a_stream_the_executor_does_not_follow_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_copied_agent_mode_points_at_the_originating_event() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -195,7 +194,6 @@ fn a_copied_agent_mode_points_at_the_originating_event() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_copied_fact_without_a_causation_id_is_refused() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -213,7 +211,6 @@ fn a_copied_fact_without_a_causation_id_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_risk_input_without_a_risk_clock_is_refused() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -229,7 +226,6 @@ fn a_risk_input_without_a_risk_clock_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_risk_clock_that_goes_backwards_is_refused() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -301,7 +297,6 @@ fn the_golden_journal_folds_to_the_committed_state() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_submission_journals_before_the_request_leaves() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -347,7 +342,6 @@ fn a_submission_journals_before_the_request_leaves() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_opening_without_protective_prices_is_gated_and_sent_as_a_plain_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -382,7 +376,6 @@ fn an_opening_without_protective_prices_is_gated_and_sent_as_a_plain_order() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_intent_enters_only_as_an_input() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -404,7 +397,6 @@ fn an_intent_enters_only_as_an_input() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_re_handed_intent_produces_no_effect_at_all() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -437,7 +429,6 @@ fn a_re_handed_intent_produces_no_effect_at_all() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn two_processes_derive_one_client_order_id_for_one_intent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -486,7 +477,6 @@ fn two_processes_derive_one_client_order_id_for_one_intent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_new_intent_after_a_restart_derives_a_fresh_client_order_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -526,7 +516,6 @@ fn a_new_intent_after_a_restart_derives_a_fresh_client_order_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_resubmission_after_a_crash_reuses_the_same_client_order_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -570,7 +559,6 @@ fn a_resubmission_after_a_crash_reuses_the_same_client_order_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unacknowledged_submission_queries_before_it_resubmits() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -613,7 +601,6 @@ fn an_unacknowledged_submission_queries_before_it_resubmits() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_order_the_broker_confirms_present_is_adopted_not_resent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -660,7 +647,6 @@ fn an_order_the_broker_confirms_present_is_adopted_not_resent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn one_absent_lookup_does_not_resubmit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -696,7 +682,6 @@ fn one_absent_lookup_does_not_resubmit() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -745,6 +730,17 @@ fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
         Some(id.as_str()),
         "with the same client order id"
     );
+    let attempt = |ran: &common::Ran| {
+        ran.draft("OrderSubmitted")
+            .and_then(|draft| draft.payload.get("attempt"))
+            .and_then(mandate_canon::Value::as_int)
+    };
+    let prior = attempt(&submitted).expect("the first submission names its attempt");
+    assert_eq!(
+        attempt(&third),
+        Some(prior.saturating_add(1)),
+        "under the next attempt number (§5.7)"
+    );
     assert_eq!(
         shell.connector.accepted_for(&id),
         1,
@@ -753,7 +749,6 @@ fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_stale_intent_is_abandoned_rather_than_resubmitted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -796,7 +791,6 @@ fn a_stale_intent_is_abandoned_rather_than_resubmitted() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_stale_intent_is_abandoned_at_its_first_submission() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -852,7 +846,6 @@ fn a_stale_intent_is_abandoned_at_its_first_submission() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_abandoned_intent_is_never_re_sent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -901,7 +894,6 @@ fn an_abandoned_intent_is_never_re_sent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_gate_denial_on_re_check_abandons_the_intent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -953,7 +945,6 @@ fn a_gate_denial_on_re_check_abandons_the_intent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -990,7 +981,6 @@ fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_timeout_is_not_a_rejection() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1029,7 +1019,6 @@ fn a_timeout_is_not_a_rejection() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_duplicate_client_order_id_is_folded_as_already_submitted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1070,7 +1059,6 @@ fn a_duplicate_client_order_id_is_folded_as_already_submitted() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_retried_append_derives_the_same_event_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1107,7 +1095,6 @@ fn a_retried_append_derives_the_same_event_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_new_input_is_refused_at_an_unresolved_head() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1131,7 +1118,6 @@ fn a_new_input_is_refused_at_an_unresolved_head() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_fenced_append_stops_the_executor() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1164,7 +1150,6 @@ fn a_fenced_append_stops_the_executor() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_step_under_another_epoch_is_refused() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1212,7 +1197,6 @@ fn accepted_order(shell: &mut Shell, ports: &mandate_executor::Ports<'_>, intent
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn every_broker_status_maps_to_the_table_row() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1265,7 +1249,6 @@ fn every_broker_status_maps_to_the_table_row() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_unchanged_statuses_leave_the_state_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1306,7 +1289,6 @@ fn the_unchanged_statuses_leave_the_state_alone() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_broker_status_pauses_the_agent_and_alerts() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1351,7 +1333,6 @@ fn an_unknown_broker_status_pauses_the_agent_and_alerts() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_suspended_status_flags_restricted_and_triggers_a_reconciliation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1386,7 +1367,6 @@ fn a_suspended_status_flags_restricted_and_triggers_a_reconciliation() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_illegal_transition_is_journaled_and_ignored() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1610,7 +1590,6 @@ fn a_repeated_fill_id_changes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_order_reserves_its_maximum_cost() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1640,7 +1619,6 @@ fn an_unknown_order_reserves_its_maximum_cost() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_order_blocks_new_orders_in_the_instrument() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -1681,7 +1659,6 @@ fn an_unknown_order_blocks_new_orders_in_the_instrument() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_abandoned_order_releases_its_reservation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4762,7 +4739,6 @@ fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_p
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_alert_carries_only_opaque_ids() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
