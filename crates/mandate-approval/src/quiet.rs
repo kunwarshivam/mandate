@@ -1,9 +1,9 @@
 //! Quiet hours govern push channels only (DEC-156 item 6). `cli_inbox` is a pull channel: the
 //! inbox is the journal, so it is delivered in the request's own batch and never suppressed.
 
-use mandate_time::{NewYorkTime, UtcNanos};
+use mandate_time::NewYorkTime;
 
-use crate::ApprovalError;
+use crate::{ApprovalError, RiskClock};
 
 /// `notifications.quiet_hours`, in America/New_York wall time. A window whose end is before its
 /// start spans midnight.
@@ -33,7 +33,7 @@ pub enum Delivery {
 pub fn deliver_now(
     channel: Channel,
     quiet_hours: Option<QuietHours>,
-    at: UtcNanos,
+    at: RiskClock,
 ) -> Result<Delivery, ApprovalError> {
     let _ = (channel, quiet_hours, at);
     Err(ApprovalError::Unimplemented { story: "E8-1" })

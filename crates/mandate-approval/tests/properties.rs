@@ -19,11 +19,11 @@ mod common;
 
 use common::{DEADLINE, content, request};
 use mandate_approval::{
-    ApprovalRef, AskEvent, AskLedger, AskPermit, RiskClock, Suppression, ask_permit, content_hash,
-    notification_for, notification_payload,
+    ApprovalRef, AskEvent, AskLedger, AskPermit, AskablePurpose, AssetClass, RiskClock,
+    Suppression, ask_permit, content_hash, notification_for, notification_payload,
 };
-use mandate_canon::to_canonical;
-use mandate_num::{Price, Qty};
+use mandate_canon::{DecStr, to_canonical};
+use mandate_num::{Price, Qty, Signed};
 use proptest::prelude::*;
 use proptest::test_runner::TestCaseError;
 
@@ -180,7 +180,7 @@ fn the_ask_budget_matches_the_counter() {
 #[test]
 #[ignore = "pending E8-1"]
 fn the_content_hash_separates_every_bound_field() {
-    check((0u8..9, 1u32..1000), |(field, n)| {
+    check((0u8..14, 1u32..1000), |(field, n)| {
         let base = content();
         let mut other = content();
         match field {
@@ -192,6 +192,11 @@ fn the_content_hash_separates_every_bound_field() {
             5 => other.deadline = RiskClock(DEADLINE + i64::from(n)),
             6 => other.bound.independent_required = true,
             7 => other.bound.reference_mark = None,
+            8 => other.bound.asset_class = AssetClass::Crypto,
+            9 => other.bound.purpose = AskablePurpose::Increase,
+            10 => other.bound.combined_score = Signed::parse(&format!("0.{n}1")).unwrap(),
+            11 => other.evidence[1].artifact = Some(mandate_canon::Digest::of(&n.to_be_bytes())),
+            12 => other.risk_impact[0].value = DecStr::parse(&format!("{n}.5")).unwrap(),
             _ => {}
         }
         let a = content_hash(&base).map_err(fail("content_hash"))?;

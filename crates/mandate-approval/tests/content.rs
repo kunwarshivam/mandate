@@ -8,47 +8,94 @@
 
 mod common;
 
+use std::collections::BTreeSet;
 use std::num::NonZeroU8;
 
-use common::{DEADLINE, REQUEST_ID, T0, answer, content, hash, price, request};
+use common::{DEADLINE, REQUEST_ID, RISK_IMPACT, T0, answer, content, hash, price, request};
 use mandate_approval::{
-    ApprovalRef, Channel, Delivery, QuietHours, RiskClock, confirmation_code, content_hash,
-    content_object, deliver_now, notification_for, notification_payload,
+    ApprovalRef, AskablePurpose, AssetClass, Channel, Delivery, QuietHours, RiskClock,
+    confirmation_code, content_hash, content_object, deliver_now, notification_for,
+    notification_payload,
 };
 use mandate_canon::{Digest, Value, to_canonical};
-use mandate_num::Qty;
+use mandate_num::{Qty, Signed};
 use mandate_time::{NewYorkTime, UtcNanos};
-
-fn object(value: &Value) -> Vec<&str> {
-    value
-        .as_object()
-        .map(|o| o.keys().map(|k| k.as_str()).collect())
-        .unwrap_or_default()
-}
 
 fn text<'a>(value: &'a Value, path: &[&str]) -> Option<&'a str> {
     path.iter().try_fold(value, |v, key| v.get(key))?.as_str()
 }
 
-/// E8-1: the content is mandate spec §6.4's list as DEC-165 item 3 names it, and nothing else.
+/// Every key of `value`, at every nesting level, as a path (`action.qty`, `risk_impact[].cap`):
+/// an array contributes its elements' keys under `[]`, so one walk pins the whole shape.
+fn key_paths(value: &Value, prefix: &str, out: &mut Vec<String>) {
+    match value {
+        Value::Object(members) => {
+            for (key, member) in members {
+                let path = if prefix.is_empty() {
+                    key.to_string()
+                } else {
+                    format!("{prefix}.{key}")
+                };
+                out.push(path.clone());
+                key_paths(member, &path, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                key_paths(item, &format!("{prefix}[]"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// E8-1, EI-14: the content is mandate spec §6.4's list as DEC-165 item 3 names it, at every
+/// nesting level, and nothing else, so no field can be dropped or added unseen.
 #[test]
 #[ignore = "pending E8-1"]
 fn the_content_object_has_exactly_the_listed_fields() {
     let object_value = answer("content_object", content_object(&content()));
-    assert_eq!(
-        object(&object_value),
-        [
-            "action",
-            "approvers",
-            "choices",
-            "deadline",
-            "default",
-            "evidence",
-            "reference_mark",
-            "risk_impact",
-            "trigger"
-        ]
-    );
+    let mut paths = Vec::new();
+    key_paths(&object_value, "", &mut paths);
+    let paths: BTreeSet<String> = paths.into_iter().collect();
+    let expected: BTreeSet<String> = [
+        "action",
+        "action.asset_class",
+        "action.instrument",
+        "action.limit",
+        "action.order_usd",
+        "action.purpose",
+        "action.qty",
+        "action.side",
+        "approvers",
+        "approvers.independent",
+        "approvers.required",
+        "choices",
+        "deadline",
+        "default",
+        "evidence",
+        "evidence.combined_score",
+        "evidence.combined_score.label",
+        "evidence.combined_score.value",
+        "evidence.outputs",
+        "evidence.outputs[].artifact",
+        "evidence.outputs[].event_id",
+        "evidence.outputs[].label",
+        "reference_mark",
+        "reference_mark.price",
+        "reference_mark.seq",
+        "risk_impact",
+        "risk_impact[].cap",
+        "risk_impact[].field",
+        "risk_impact[].value",
+        "trigger",
+        "trigger.decided_by",
+        "trigger.mandate_version",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    assert_eq!(paths, expected);
 }
 
 /// E8-1: the proposed action is the bound order, its side is `buy`, and its value is limit × qty.
@@ -58,6 +105,7 @@ fn the_action_is_the_bound_order_and_its_value() {
     let object_value = answer("content_object", content_object(&content()));
     let field = |key| text(&object_value, &["action", key]);
     assert_eq!(field("instrument"), Some("asset-equity-1"));
+    assert_eq!(field("asset_class"), Some("us_equity"));
     assert_eq!(field("side"), Some("buy"));
     assert_eq!(field("qty"), Some("10"));
     assert_eq!(field("limit"), Some("187.25"));
@@ -70,6 +118,42 @@ fn the_action_is_the_bound_order_and_its_value() {
     assert_eq!(
         text(&object_value, &["trigger", "decided_by"]),
         Some("rule:large_order")
+    );
+}
+
+/// E8-1 "risk impact": the six §6.3 figures at the request, each beside the mandate's own cap,
+/// in the fixture's order; facts about the order, never an estimate.
+#[test]
+#[ignore = "pending E8-1"]
+fn the_risk_impact_lists_every_figure_with_its_cap() {
+    let object_value = answer("content_object", content_object(&content()));
+    let rendered: Vec<(Option<&str>, Option<&str>, Option<&str>)> = object_value
+        .get("risk_impact")
+        .and_then(Value::as_array)
+        .map(|figures| {
+            figures
+                .iter()
+                .map(|f| (text(f, &["field"]), text(f, &["value"]), text(f, &["cap"])))
+                .collect()
+        })
+        .unwrap_or_default();
+    let names = [
+        "order_usd",
+        "position_usd_after",
+        "gross_usd_after",
+        "bought_today_usd",
+        "drawdown",
+        "daily_pnl_fraction",
+    ];
+    let expected: Vec<(Option<&str>, Option<&str>, Option<&str>)> = names
+        .iter()
+        .zip(RISK_IMPACT)
+        .map(|(name, (_, value, cap))| (Some(*name), Some(value), Some(cap)))
+        .collect();
+    assert_eq!(rendered, expected);
+    assert_eq!(
+        text(&object_value, &["reference_mark", "price"]),
+        Some("187")
     );
 }
 
@@ -111,9 +195,27 @@ fn the_score_and_the_evidence_carry_the_spec_labels() {
         labels,
         ["Output of software you selected", "platform-authored"]
     );
+    assert_eq!(
+        text(&object_value, &["evidence", "combined_score", "value"]),
+        Some("0.62")
+    );
+    let outputs = object_value
+        .get("evidence")
+        .and_then(|e| e.get("outputs"))
+        .and_then(Value::as_array)
+        .map(<[Value]>::to_vec)
+        .unwrap_or_default();
+    let artifacts: Vec<Option<&Value>> = outputs.iter().map(|o| o.get("artifact")).collect();
+    let thesis = Value::Str(Digest::of(b"thesis").to_string());
+    assert_eq!(
+        artifacts,
+        [Some(&Value::Null), Some(&thesis)],
+        "theses stay by hash"
+    );
 }
 
-/// FR-6.2, DEC-126: nothing in the content reads as advice.
+/// FR-6.2, DEC-126: nothing in the content reads as advice. Owner-written rule text is not in the
+/// content yet (DEC-165 item 3); when it is, it is scanned apart from the platform's own text.
 #[test]
 #[ignore = "pending E8-1"]
 fn the_content_never_carries_advice_wording() {
@@ -160,7 +262,12 @@ fn every_bound_field_moves_the_content_hash() {
     edit(&|c| c.bound.approvers_required = NonZeroU8::new(2).unwrap());
     edit(&|c| c.deadline = RiskClock(DEADLINE + 1));
     edit(&|c| c.bound.reference_mark = None);
-    assert_eq!(changed.len(), 8, "every edit ran");
+    edit(&|c| c.bound.asset_class = AssetClass::Crypto);
+    edit(&|c| c.bound.purpose = AskablePurpose::Increase);
+    edit(&|c| c.bound.combined_score = Signed::parse("0.99").unwrap());
+    edit(&|c| c.risk_impact.truncate(1));
+    edit(&|c| c.evidence[1].artifact = Some(Digest::of(b"other thesis")));
+    assert_eq!(changed.len(), 13, "every edit ran");
     for (i, h) in changed.iter().enumerate() {
         assert_ne!(*h, base, "edit {i} left the hash unchanged");
     }
@@ -198,10 +305,7 @@ fn quiet() -> Option<QuietHours> {
 }
 
 fn deliver(channel: Channel, at: i64) -> Delivery {
-    answer(
-        "deliver_now",
-        deliver_now(channel, quiet(), UtcNanos::from_parts(at, 0).unwrap()),
-    )
+    answer("deliver_now", deliver_now(channel, quiet(), RiskClock(at)))
 }
 
 /// MC-E29, PB-17, DEC-156 item 6: `cli_inbox` is delivered inside quiet hours.
@@ -238,11 +342,7 @@ fn a_push_is_suppressed_from_23_00_and_sent_from_07_00_in_both_dst_states() {
     }
     let none = answer(
         "deliver_now",
-        deliver_now(
-            Channel::Push,
-            None,
-            UtcNanos::from_parts(1_768_536_000, 0).unwrap(),
-        ),
+        deliver_now(Channel::Push, None, RiskClock(1_768_536_000)),
     );
     assert_eq!(none, Delivery::Send);
 }

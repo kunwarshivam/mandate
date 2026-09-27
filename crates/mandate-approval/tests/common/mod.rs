@@ -60,6 +60,17 @@ pub fn bound() -> BoundAction {
     }
 }
 
+/// The six §6.3 figures of the fixture's order, each with the mandate's own cap, every value and cap
+/// distinct so a relabelled, zeroed, or dropped figure shows: the order value is 187.25 × 10.
+pub const RISK_IMPACT: [(RiskField, &str, &str); 6] = [
+    (RiskField::OrderUsd, "1872.5", "5000"),
+    (RiskField::PositionUsdAfter, "2872.5", "10000"),
+    (RiskField::GrossUsdAfter, "31872.5", "60000"),
+    (RiskField::BoughtTodayUsd, "4872.5", "20000"),
+    (RiskField::Drawdown, "0.031", "0.15"),
+    (RiskField::DailyPnlFraction, "-0.004", "-0.03"),
+];
+
 pub fn content() -> RequestContent {
     RequestContent {
         bound: bound(),
@@ -75,11 +86,14 @@ pub fn content() -> RequestContent {
                 author: EvidenceAuthor::Platform,
             },
         ],
-        risk_impact: vec![RiskFigure {
-            field: RiskField::OrderUsd,
-            value: DecStr::parse("1872.5").unwrap(),
-            cap: Some(DecStr::parse("5000").unwrap()),
-        }],
+        risk_impact: RISK_IMPACT
+            .iter()
+            .map(|(field, value, cap)| RiskFigure {
+                field: *field,
+                value: DecStr::parse(value).unwrap(),
+                cap: Some(DecStr::parse(cap).unwrap()),
+            })
+            .collect(),
         deadline: RiskClock(DEADLINE),
     }
 }
