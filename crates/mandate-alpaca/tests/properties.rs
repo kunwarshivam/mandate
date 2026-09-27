@@ -65,6 +65,61 @@ fn candidate_path() -> impl Strategy<Value = String> {
     ]
 }
 
+/// The personal data journal §6.4 names in a broker body, found by walking the JSON itself: the
+/// `id` of the **account object** (the object that carries `account_number`), and every
+/// `account_number` or `account_id` anywhere. An order's `id` is not personal data — trading §13
+/// keeps raw exchanges as records, and redacting order ids would destroy the audit trail for no
+/// privacy gain (the coordinator's ruling on #152).
+fn personal_data(value: &serde_json::Value) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    let mut walk = vec![value];
+    while let Some(node) = walk.pop() {
+        match node {
+            serde_json::Value::Object(map) => {
+                let account = map.contains_key("account_number");
+                for (key, inner) in map {
+                    let personal =
+                        key == "account_number" || key == "account_id" || (account && key == "id");
+                    if personal
+                        && let Some(text) = inner.as_str()
+                        && !text.starts_with("pii:")
+                    {
+                        found.insert(text.to_owned());
+                    }
+                    walk.push(inner);
+                }
+            }
+            serde_json::Value::Array(items) => walk.extend(items.iter()),
+            _ => {}
+        }
+    }
+    found
+}
+
+/// Puts realistic, unredacted personal data back into a recorded body, because the committed
+/// fixtures are already redacted and a redaction pass over them would have nothing to find.
+fn plant_personal_data(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if map.contains_key("account_number") {
+                map.insert(
+                    "account_number".to_owned(),
+                    serde_json::json!("PA3PLANTED0001"),
+                );
+                map.insert(
+                    "id".to_owned(),
+                    serde_json::json!("8f1c5b2a-1111-4000-8000-00000000plnt"),
+                );
+            }
+            for inner in map.values_mut() {
+                plant_personal_data(inner);
+            }
+        }
+        serde_json::Value::Array(items) => items.iter_mut().for_each(plant_personal_data),
+        _ => {}
+    }
+}
+
 proptest! {
     /// ES-23: every request this client can build targets the paper host and one of the seven
     /// endpoints, whatever a symbol or an order id contains.
@@ -115,32 +170,43 @@ proptest! {
         prop_assert!(!recorded.exchanges.is_empty(), "{} records nothing", which);
         let mut checked = 0usize;
         for exchange in &recorded.exchanges {
+            let mut body: serde_json::Value = serde_json::from_slice(&exchange.response)
+                .map_err(|e| TestCaseError::fail(format!("{which}: {e}")))?;
+            plant_personal_data(&mut body);
+            let planted = serde_json::to_vec(&body)
+                .map_err(|e| TestCaseError::fail(format!("{which}: {e}")))?;
             let response = mandate_alpaca::Response {
                 status: exchange.status,
-                body: exchange.response.clone(),
+                body: planted,
             };
             let pass = record::response(&exchange.path_and_query, &response)
                 .map_err(|e| TestCaseError::fail(format!("{which}: {e}")))?;
             checked = checked.saturating_add(1);
             let rendered = format!("{:?}", pass.body);
-            let oracle: BTreeSet<String> = serde_json::from_slice::<serde_json::Value>(
-                &exchange.response,
-            )
-            .ok()
-            .and_then(|value| value.as_object().cloned())
-            .into_iter()
-            .flatten()
-            .filter(|(key, _)| key == "account_number" || key == "id")
-            .filter_map(|(_, value)| value.as_str().map(str::to_owned))
-            .filter(|value| !value.starts_with("pii:"))
-            .collect();
+            let oracle = personal_data(&body);
             for secret in &oracle {
                 prop_assert!(
                     !rendered.contains(secret.as_str()),
-                    "{}: a personal-data field survived the redaction pass (planted bug 21)",
-                    which
+                    "{}: `{}` survived the redaction pass (planted bug 21)",
+                    which,
+                    secret
                 );
             }
+            prop_assert_eq!(
+                pass.pii_refs.len(),
+                oracle.len(),
+                "{}: one `pii_refs` entry per personal-data field replaced, no more and no fewer",
+                which
+            );
+            let kept = match &pass.body {
+                mandate_alpaca::RecordedBody::Inline(text) => !text.is_empty(),
+                mandate_alpaca::RecordedBody::Artifact { bytes, .. } => !bytes.is_empty(),
+            };
+            prop_assert!(
+                kept,
+                "{}: a response is recorded, not dropped (trading §13 keeps raw exchanges)",
+                which
+            );
         }
         prop_assert_eq!(checked, recorded.exchanges.len());
     }
@@ -181,11 +247,23 @@ proptest! {
     ) {
         let recorded = scenario(&which);
         let mut checked = 0usize;
+        let mut account_wide = 0usize;
         for exchange in &recorded.exchanges {
-            let request = HttpRequest {
-                method: exchange.method,
-                path_and_query: exchange.path_and_query.clone(),
-                body: exchange.body.clone(),
+            let Ok(request) = HttpRequest::new(
+                exchange.method,
+                &exchange.path_and_query,
+                exchange.body.clone(),
+            ) else {
+                prop_assert!(
+                    mandate_alpaca::endpoint_for(exchange.method, &exchange.path_and_query)
+                        .is_some_and(|endpoint| endpoint.account_wide),
+                    "{}: `{} {}` is refused and is not an account-wide endpoint",
+                    which,
+                    exchange.method.as_str(),
+                    exchange.path_and_query
+                );
+                account_wide = account_wide.saturating_add(1);
+                continue;
             };
             let pass = record::request(&request)
                 .map_err(|e| TestCaseError::fail(format!("{which}: {e}")))?;
@@ -199,9 +277,26 @@ proptest! {
                     needle
                 );
             }
+            let path = exchange
+                .path_and_query
+                .split_once('?')
+                .map_or(exchange.path_and_query.as_str(), |(path, _)| path);
+            prop_assert_eq!(
+                pass.endpoint.as_str(),
+                path,
+                "{}: the record names the endpoint and no query value",
+                which
+            );
+            let expected_body = exchange.body.clone().unwrap_or_default();
+            prop_assert_eq!(
+                &pass.body,
+                &mandate_alpaca::RecordedBody::Inline(expected_body),
+                "{}: a request body carries no personal data and is kept byte for byte",
+                which
+            );
         }
-        prop_assert_eq!(checked, recorded.exchanges.len());
-        prop_assert!(checked > 0);
+        prop_assert_eq!(checked.saturating_add(account_wide), recorded.exchanges.len());
+        prop_assert!(checked > 0 || account_wide > 0);
     }
 
     /// Every method a fixture records is one of the three this crate uses; `PUT` is absent

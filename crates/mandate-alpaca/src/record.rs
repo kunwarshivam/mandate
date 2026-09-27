@@ -16,7 +16,7 @@ use crate::http::{HttpRequest, Response};
 
 /// Above this many bytes the redacted body is stored as a `sha256:` artifact and the payload
 /// carries the reference instead (journal spec §6.3, DEC-107).
-pub const INLINE_LIMIT: usize = 16 * 1024;
+pub const INLINE_LIMIT: usize = 16_384;
 
 /// Which way the exchange went.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,8 +31,9 @@ pub enum RecordedBody {
     /// Small enough to sit in `payload.raw`.
     Inline(String),
     /// Stored under `sha256:{hex}` of the **redacted** bytes, which is what the payload
-    /// references.
-    Artifact { digest: String },
+    /// references. `bytes` are those redacted bytes, so the shell stores exactly what the digest
+    /// names and never has to go back to the unredacted body (journal §6.3, DEC-107).
+    Artifact { digest: String, bytes: Vec<u8> },
 }
 
 /// One redacted exchange, ready to become a `BrokerExchangeRecorded` payload.

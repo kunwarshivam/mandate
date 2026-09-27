@@ -83,7 +83,7 @@ mod types;
 pub use error::{ExecutorError, JsonError};
 pub use gate::GateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
-pub use ports::{BrokerConnector, IdGen, InstrumentSnapshot, MandateView, Ports};
+pub use ports::{BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports};
 pub use protection::{LadderPrice, LadderReference};
 pub use reconcile::reconcile;
 pub use state::{
@@ -92,13 +92,13 @@ pub use state::{
 };
 pub use step::handle;
 pub use types::{
-    AccountRef, AccountScope, AccountState, AccountWideScope, ActivityCursor, AgentId, BracketLegs,
-    BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerReject,
-    BrokerRequest, BrokerSnapshot, BrokerUnknown, BrokerUpdate, Command, Difference,
+    AccountRef, AccountScope, AccountState, AccountWide, AccountWideScope, ActivityCursor, AgentId,
+    BracketLegs, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition,
+    BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, BrokerUpdate, Command, Difference,
     DifferenceKind, Effect, EventDraft, EventId, ExecutorConfig, ExitTier, FillId, FlattenLeg,
     FlattenPlan, FoldedEvent, GateCheck, GateVerdict, Initiator, Input, IntentBody, IntentHandoff,
     KillScope, MandateVersion, MarketObservation, Mode, NotificationRef, OcoLegs, Order,
-    OrderState, OrderType, OwnerConfirmation, Protection, Purpose, ReconcileReason, Reconciliation,
-    ReconciliationVerdict, RiskClock, Seq, StatusMapping, SubmitOrder, TimeInForce, TimerId,
-    TimerRequest, UnprotectedInterval, WorkspaceId, WriterEpoch,
+    OrderState, OrderType, OwnerConfirmation, Protection, ProtectionPrices, Purpose,
+    ReconcileReason, Reconciliation, ReconciliationVerdict, RiskClock, Seq, StatusMapping,
+    SubmitOrder, TimeInForce, TimerId, TimerRequest, UnprotectedInterval, WorkspaceId, WriterEpoch,
 };

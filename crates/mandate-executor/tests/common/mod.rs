@@ -277,6 +277,37 @@ pub fn config() -> ExecutorConfig {
     }
 }
 
+/// The `test_default` fee configuration of the trading-domain reference cases, transcribed:
+/// SEC 0.00003 × proceeds on sells, TAF 0.0002 per share sold capped at 9.79 per execution, CAT
+/// 0.00001 per share on both sides, and crypto 15/25 bps, over the `us_2026` calendar (trading
+/// spec §6.2, §6.3). It is the `fee` configuration ref the executor reads to book paper's
+/// simulated regulatory fees (§10).
+pub fn fee_config() -> &'static mandate_accounting::Config {
+    static FEES: std::sync::OnceLock<mandate_accounting::Config> = std::sync::OnceLock::new();
+    FEES.get_or_init(|| mandate_accounting::Config {
+        equities: mandate_accounting::EquityFees {
+            sec_rate: mandate_num::FeeRate::parse("0.00003").unwrap_or_else(|e| panic!("{e}")),
+            taf_per_share: mandate_num::FeePerShare::parse("0.0002")
+                .unwrap_or_else(|e| panic!("{e}")),
+            taf_cap: mandate_num::FeeCap::parse("9.79").unwrap_or_else(|e| panic!("{e}")),
+            taf_cap_basis: mandate_accounting::TafCapBasis::PerExecution,
+            cat_per_share: mandate_num::FeePerShare::parse("0.00001")
+                .unwrap_or_else(|e| panic!("{e}")),
+        },
+        crypto: mandate_accounting::CryptoFees {
+            maker: mandate_num::Bps::parse("15").unwrap_or_else(|e| panic!("{e}")),
+            taker: mandate_num::Bps::parse("25").unwrap_or_else(|e| panic!("{e}")),
+        },
+        calendar: mandate_time::TradingCalendar::new(
+            date("2026-09-01"),
+            date("2026-12-31"),
+            [date("2026-11-26"), date("2026-12-25")],
+            [date("2026-10-12"), date("2026-11-11")],
+        )
+        .unwrap_or_else(|e| panic!("the us_2026 calendar: {e}")),
+    })
+}
+
 pub fn ports<'a>(
     ids: &'a TestIds,
     mandates: &'a FixedMandate,
@@ -288,6 +319,7 @@ pub fn ports<'a>(
         mandates,
         instruments,
         config,
+        fees: fee_config(),
     }
 }
 
@@ -419,7 +451,9 @@ pub fn handoff(intent: &str, who: &str, body: mandate_executor::IntentBody) -> I
     })
 }
 
-/// An opening limit buy, the ordinary case every idempotency test starts from.
+/// An opening limit buy that carries **no** protective prices, the ordinary case every
+/// idempotency test starts from. The executor sends it as a plain order and never invents a
+/// bracket for it (DEC-133's ruling on protective prices).
 pub fn opening(name: &str, quantity: &str, limit: &str) -> mandate_executor::IntentBody {
     mandate_executor::IntentBody::Order {
         instrument: instrument(name),
@@ -427,6 +461,58 @@ pub fn opening(name: &str, quantity: &str, limit: &str) -> mandate_executor::Int
         qty: qty(quantity),
         limit: price(limit),
         purpose: mandate_executor::Purpose::Open,
+        protection: None,
+    }
+}
+
+/// An opening limit buy carrying the protective prices the order builder computed from the
+/// mandate's distances (mandate spec §3, RC-14, RC-21): a stop, and a take-profit unless the
+/// instrument is crypto, whose take-profit the runtime watches.
+pub fn protected_opening(
+    name: &str,
+    quantity: &str,
+    limit: &str,
+    stop: &str,
+    take_profit: Option<&str>,
+) -> mandate_executor::IntentBody {
+    mandate_executor::IntentBody::Order {
+        instrument: instrument(name),
+        side: Side::Buy,
+        qty: qty(quantity),
+        limit: price(limit),
+        purpose: mandate_executor::Purpose::Open,
+        protection: Some(mandate_executor::ProtectionPrices {
+            stop: price(stop),
+            take_profit: take_profit.map(price),
+        }),
+    }
+}
+
+/// The same entry as an add to a position that is already held (§5.4's tranche model).
+pub fn protected_add(
+    name: &str,
+    quantity: &str,
+    limit: &str,
+    stop: &str,
+    take_profit: Option<&str>,
+) -> mandate_executor::IntentBody {
+    match protected_opening(name, quantity, limit, stop, take_profit) {
+        mandate_executor::IntentBody::Order {
+            instrument,
+            side,
+            qty,
+            limit,
+            protection,
+            ..
+        } => mandate_executor::IntentBody::Order {
+            instrument,
+            side,
+            qty,
+            limit,
+            purpose: mandate_executor::Purpose::Increase,
+            protection,
+        },
+        other @ mandate_executor::IntentBody::Flatten(_) => other,
     }
 }
 
@@ -438,6 +524,7 @@ pub fn risk_exit(name: &str, quantity: &str, limit: &str) -> mandate_executor::I
         qty: qty(quantity),
         limit: price(limit),
         purpose: mandate_executor::Purpose::RiskExit,
+        protection: None,
     }
 }
 
@@ -449,7 +536,17 @@ pub fn discretionary_exit(name: &str, quantity: &str, limit: &str) -> mandate_ex
         qty: qty(quantity),
         limit: price(limit),
         purpose: mandate_executor::Purpose::DiscretionaryExit,
+        protection: None,
     }
+}
+
+/// Whether a request is one of the broker's two account-wide endpoints, read off the variant
+/// rather than off anything the crate reports about itself.
+pub fn is_account_wide(request: &BrokerRequest) -> bool {
+    matches!(
+        request,
+        BrokerRequest::CancelAll(_) | BrokerRequest::ClosePosition(_, _)
+    )
 }
 
 /// What the shell did with one effect list, so a test can assert on order as well as content.
@@ -796,7 +893,25 @@ impl Shell {
     /// A crash and restart: a new process, a new epoch, the same journal, folded from seq 1, then
     /// `Input::Started`, which queries rather than resubmits.
     pub fn restart(&self, ports: &Ports<'_>) -> (Self, Ran) {
+        self.restart_with(FakeConnector::default(), ports)
+    }
+
+    /// A restart that carries the broker across, which is what lets a fault case assert "at most
+    /// one accepted submission per client order id" over the **whole run** rather than over one
+    /// process.
+    ///
+    /// The broker is handed to the new process **before** `Input::Started` runs, so anything
+    /// recovery sends is counted against what the broker already holds. (The first draft moved
+    /// the counters across after `Started` and overwrote whatever recovery had sent, so a planted
+    /// blind resubmission at restart vanished from the counter.)
+    pub fn restart_keeping_broker(&mut self, ports: &Ports<'_>) -> (Self, Ran) {
+        let broker = core::mem::take(&mut self.connector);
+        self.restart_with(broker, ports)
+    }
+
+    fn restart_with(&self, broker: FakeConnector, ports: &Ports<'_>) -> (Self, Ran) {
         let mut next = Self::new(self.epoch.0.saturating_add(1));
+        next.connector = broker;
         next.followed = self.followed.clone();
         next.account_journal = self.account_journal.clone();
         for event in self.account_journal.iter().chain(self.followed.iter()) {
@@ -805,17 +920,6 @@ impl Shell {
         }
         let epoch = next.epoch;
         let ran = next.run(Input::Started(epoch), ports);
-        (next, ran)
-    }
-
-    /// A restart that carries the broker-side counters across, which is what lets a fault case
-    /// assert "at most one accepted submission per client order id" over the **whole run** rather
-    /// than over one process.
-    pub fn restart_keeping_broker(&mut self, ports: &Ports<'_>) -> (Self, Ran) {
-        let (mut next, ran) = self.restart(ports);
-        next.connector.accepted = core::mem::take(&mut self.connector.accepted);
-        next.connector.bodies = core::mem::take(&mut self.connector.bodies);
-        next.connector.requests = core::mem::take(&mut self.connector.requests);
         (next, ran)
     }
 

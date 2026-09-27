@@ -54,7 +54,7 @@ pub mod wire;
 pub use client::{Pause, RetryPolicy, TokioPause, TradingClient};
 pub use error::{ClientError, CredentialsError, HttpSetupError, TransportError, WireError};
 pub use http::{
-    AlpacaPaperHttp, Credentials, ENDPOINTS, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST, Response,
-    SECRET_VAR, TradingTransport, is_paper_trading_path,
+    AlpacaPaperHttp, Credentials, ENDPOINTS, Endpoint, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST,
+    Response, SECRET_VAR, TradingTransport, endpoint_for, is_paper_trading_path,
 };
 pub use record::{Direction, INLINE_LIMIT, RecordedBody, RecordedExchange};
