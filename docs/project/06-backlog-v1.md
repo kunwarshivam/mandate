@@ -711,6 +711,13 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
   fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
   misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
+  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
+  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
+  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
+  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
+  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
+  undercount the account's day trades (#221 review, round 1, minor).
 
 From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
 round 1, verdict approve; minor 2, deferred by the coordinator's ruling):

@@ -724,7 +724,6 @@ fn mc_g01() {
 
 /// `MC-G02`: Per-instrument cap met exactly.
 #[test]
-#[ignore = "pending E6-6"]
 fn mc_g02() {
     run_gate("MC-G02");
 }
