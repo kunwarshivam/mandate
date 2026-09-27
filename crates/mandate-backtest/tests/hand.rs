@@ -357,7 +357,7 @@ fn the_total_return_is_net_of_accrued_and_charged_fees() {
     let charged_run = run(&charged, &seven_days()).unwrap();
 
     assert_eq!(free_run.report.strategy.fees_total, Usd::ZERO);
-    assert_eq!(charged_run.report.strategy.fees_total, usd("1.585045967"));
+    assert_eq!(charged_run.report.strategy.fees_total, usd("1.6"));
     assert!(
         charged_run.report.strategy.total_return < free_run.report.strategy.total_return,
         "fees are inside the return"
@@ -368,7 +368,7 @@ fn the_total_return_is_net_of_accrued_and_charged_fees() {
             .report
             .strategy
             .ending_equity
-            .checked_sub(usd("1.585045967"))
+            .checked_sub(usd("1.6"))
             .unwrap(),
         "the whole difference is the fees"
     );
@@ -894,8 +894,15 @@ fn a_fill_in_the_last_bar_of_a_day_is_inside_that_days_equity() {
 
 /// A settlement moves money between buckets without changing equity (spec §8.3, invariant I4), and it
 /// posts at the start of the bar whose instant it falls before. The exit fills on 2026-09-28, so its
-/// proceeds settle at 00:00 ET on 2026-09-29; with no fill and no charge left on that day, period 7's
-/// equity equals period 6's exactly.
+/// proceeds settle at 00:00 ET on 2026-09-29, at the start of that day's first bar.
+///
+/// Nothing trades on the last day, so the only other movement there is the charge of the 28th's fees,
+/// which the same bar reaches (20:00 ET on the 28th has passed, spec §6.2): the exit accrued SEC
+/// 0.00003 × 49,322.1989 = 1.479665967, TAF 0.0002 × 479 = 0.0958 and CAT 0.00479, that is
+/// 1.580255967, and charging rounds it up to the cent, 1.59. So period 7's equity is period 6's less
+/// exactly 1.59 − 1.580255967 = 0.009744033 — the rounding and nothing else. The settlement itself
+/// still moves no equity, which is what that exact difference proves: any gain or loss from the
+/// bucket transfer would not land on the rounding to the last place.
 #[test]
 fn a_settlement_posts_before_the_bars_fills() {
     let config = run_config(equity(), crossover(), "100000");
@@ -912,8 +919,10 @@ fn a_settlement_posts_before_the_bars_fills() {
         .find(|o| o.date == d("2026-09-29"))
         .expect("period 7");
     assert_eq!(
-        seventh.equity, sixth.equity,
-        "a settlement is a bucket transfer, not a gain"
+        seventh.equity,
+        sixth.equity.checked_sub(usd("0.009744033")).unwrap(),
+        "a settlement is a bucket transfer, not a gain: the whole difference is §6.2's rounding of \
+         the 28th's 1.580255967 up to 1.59"
     );
     assert!(
         run.fills
@@ -987,18 +996,28 @@ fn crypto_fees_are_charged_at_midnight_utc() {
     );
 }
 
-/// Nothing is swept at the end of a run: [`seven_days`] has no bar past 20:00 ET on any trade date,
-/// so every accrual stays accrued, exactly as the fold would hold it. The entry accrues CAT
-/// 0.00001 × 479 = 0.00479, and the exit of 479 shares at 102.9691, which is 49,322.1989, accrues SEC
-/// 0.00003 × 49322.1989 = 1.479665967, TAF 0.0002 × 479 = 0.0958, and CAT 0.00479, which with the
-/// entry's 0.00479 is 1.585045967 in all.
+/// Nothing is swept at the end of a run: an accrual whose charging instant no bar reaches stays
+/// accrued, exactly as the fold would hold it at that instant (spec §6.2, DEC-127 item 17).
+///
+/// The first four trading days end at 15:59 ET on 2026-09-24, before 20:00 ET on that date, which is
+/// when the 24th's fees are charged. The entry fills 479 shares on the 24th and accrues CAT
+/// 0.00001 × 479 = 0.00479, which is therefore still accrued when the bars run out, and the three
+/// earlier dates are charged nothing because nothing accrued on them. A charging instant **is** a
+/// point in time the bars pass, so a run that went on to the 25th would charge the 24th at that day's
+/// first bar, whatever its hour. What pins that are
+/// [`a_settlement_posts_before_the_bars_fills`],
+/// [`the_total_return_is_net_of_accrued_and_charged_fees`] and the golden report, each of which has a
+/// date charged from a **later** date's first bar; not
+/// [`equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`], whose 20:30 bar falls on
+/// the charged day itself and so cannot tell the instant from the hour. This case stops before the
+/// instant instead of relying on the hour of the bars it has.
 #[test]
 fn an_accrual_the_bars_never_reach_stays_accrued() {
     let config = run_config(equity(), crossover(), "100000");
-    let run = run(&config, &seven_days()).unwrap();
+    let run = run(&config, &days_then(4, Vec::new())).unwrap();
 
     assert_eq!(run.report.strategy.fees_charged, Usd::ZERO);
-    assert_eq!(run.report.strategy.fees_accrued, usd("1.585045967"));
+    assert_eq!(run.report.strategy.fees_accrued, usd("0.00479"));
     assert_eq!(
         run.report.strategy.fees_total,
         run.report
@@ -1038,6 +1057,75 @@ fn a_days_fees_are_charged_once_after_the_day_ends() {
 
     assert_eq!(twice.report.strategy.fees_charged, usd("0.01"));
     assert_eq!(twice.report.strategy.fees_accrued, Usd::ZERO);
+}
+
+/// A bar later than the charge hour still charges its day, because the rule is an instant and not an
+/// hour a bar must land in (spec §6.2, DEC-127 item 17): the first bar at or after 20:00 ET on a trade
+/// date carries the charge whether it falls at 20:30 or at 22:30. The entry of 479 shares on
+/// 2026-09-24 accrues CAT 0.00001 × 479 = 0.00479, and a single 22:30 bar after that day's close
+/// charges `round(0.00479, 2, ceiling)` = 0.01, leaving nothing accrued. A rule that charged only in
+/// the 20:00 hour would leave the whole accrual behind.
+#[test]
+fn a_bar_later_than_the_charge_hour_still_charges_its_day() {
+    let config = run_config(equity(), crossover(), "100000");
+    let run = run(
+        &config,
+        &days_then(
+            4,
+            vec![overnight(
+                "2026-09-24",
+                "22:30",
+                ["104.5", "104.6", "104.4", "104.5", "500"],
+            )],
+        ),
+    )
+    .unwrap();
+
+    assert_eq!(run.report.strategy.fees_charged, usd("0.01"));
+    assert_eq!(run.report.strategy.fees_accrued, Usd::ZERO);
+}
+
+/// A crypto fee accrued on a run's **last** UTC date stays accrued, because its charge is 00:00 UTC of
+/// the next date and no bar reaches it (spec §6.3, DEC-127 item 17). [`crypto_days`] exits on its
+/// sixth day and the seventh's first bar charges that sale; cut the seventh day off and the same fee is
+/// still accrued when the bars run out. The two runs pin each other: whatever the shorter run leaves
+/// accrued is exactly what the longer one charges, so the case needs no fee figure of its own and
+/// cannot drift with the fee schedule.
+#[test]
+fn a_crypto_fee_accrued_on_the_last_utc_date_stays_accrued() {
+    let config = run_config(crypto(), crossover(), "100000");
+    let six: Vec<_> = crypto_days()
+        .into_iter()
+        .filter(|b| b.trade_date < d("2026-09-27"))
+        .collect();
+    let cut = run(&config, &six).unwrap();
+
+    assert_eq!(
+        cut.report.strategy.fees_charged,
+        Usd::ZERO,
+        "no bar reaches the next 00:00 UTC"
+    );
+    assert!(
+        cut.report.strategy.fees_accrued > Usd::ZERO,
+        "the sale's USD fee is accrued"
+    );
+    assert!(
+        cut.report.strategy.fees_asset > Usd::ZERO,
+        "the buy paid its fee in the asset, which is never accrued"
+    );
+
+    let mut reaching = six;
+    reaching.push(continuous(
+        "2026-09-27",
+        "00:01",
+        ["102", "107.3", "99.5", "102", "8000"],
+    ));
+    let charged = run(&config, &reaching).unwrap();
+    assert_eq!(
+        charged.report.strategy.fees_charged, cut.report.strategy.fees_accrued,
+        "one bar past the date charges exactly what the shorter run held accrued"
+    );
+    assert_eq!(charged.report.strategy.fees_accrued, Usd::ZERO);
 }
 
 /// A signal at a period's close fills no earlier than the next bar: the decision is timed at that
@@ -1225,23 +1313,39 @@ fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
     assert_eq!(other.report.strategy.fees_total, usd("0.09"));
 }
 
-/// [`seven_days`] with thin volume on the exit day, so a cap of 10% of the 2,000-share median fills
-/// 200 of the 479 on that day's first bar and the remaining 279 on the second, whose reference is the
-/// first bar's 3,000.
+/// [`seven_days`] with the three bars the TAF-cap case needs and nothing else.
+///
+/// The exit day's two bars carry 3,000 shares, so the 2,000-share median caps that day's first bar at
+/// 200 of the 479 and the second at 10% of the first's 3,000, which is 300 and covers the remaining
+/// 279. Two more bars make that split reachable at all:
+///
+/// * the entry day's second bar has a **low of 104.20** (it was 104.30), which passes the 104.26 entry
+///   limit, so the entry's resting remainder fills there under 10% of the first bar's 8,000 and the
+///   position is the whole 479. With the old low the entry filled only the 200 its own first bar's cap
+///   allowed and expired 279 short, leaving nothing for the cap to split;
+/// * the exit day's second bar has a **high of 102.80** (it was 102.10), which passes the 102.75 exit
+///   limit, so the remainder that rests there after the first bar's 200 fills rather than expiring
+///   with the day order.
 fn thin_exit_week() -> Vec<mandate_sim::SimBar> {
-    seven_days()
-        .into_iter()
-        .map(|b| {
-            if b.trade_date == d("2026-09-28") {
-                mandate_sim::SimBar {
-                    volume: qty("3000"),
-                    ..b
-                }
-            } else {
-                b
-            }
-        })
-        .collect()
+    let mut bars = seven_days();
+    bars[7] = bar(
+        "2026-09-24",
+        "15:59",
+        ["104.5", "104.6", "104.2", "104.5", "9000"],
+    );
+    bars[10] = mandate_sim::SimBar {
+        volume: qty("3000"),
+        ..bars[10].clone()
+    };
+    bars[11] = mandate_sim::SimBar {
+        volume: qty("3000"),
+        ..bar(
+            "2026-09-28",
+            "15:59",
+            ["101.9", "102.8", "101.8", "102", "9000"],
+        )
+    };
+    bars
 }
 
 /// A bar whose `trade_date` is not the one the calendar gives its start fails the run, so a
@@ -1389,6 +1493,43 @@ fn a_changed_bar_changes_the_bars_digest() {
     );
 }
 
+/// A bar's **session** is part of the input digest, not only its prices: two runs whose bars differ in
+/// nothing but the session one bar is labelled with report different `inputs.bars`. The label decides
+/// which bars may fill (spec §4.3, §6.4 rules 5 and 6) and which bar closes a period (§8.2), so a
+/// digest that ignored it could call two runs the same snapshot while their fills differed. The two
+/// bars here share their instant, their OHLCV row, their trade date, and their session start, so the
+/// label is the only difference between the inputs.
+#[test]
+fn a_changed_session_changes_the_bars_digest() {
+    let config = run_config(equity(), buy_and_hold(), "100000");
+    let late = after_hours(
+        "2026-09-21",
+        "16:30",
+        ["100", "100.2", "99.9", "100", "500"],
+    );
+    let mut labelled_after_hours = seven_days();
+    labelled_after_hours.insert(2, late.clone());
+    let mut labelled_regular = seven_days();
+    labelled_regular.insert(
+        2,
+        mandate_sim::SimBar {
+            session: mandate_sim::Session::Regular,
+            ..late
+        },
+    );
+
+    let one = run(&config, &labelled_after_hours).unwrap();
+    let other = run(&config, &labelled_regular).unwrap();
+    assert_ne!(
+        one.report.inputs.bars, other.report.inputs.bars,
+        "the session is digested"
+    );
+    assert_eq!(
+        one.report.inputs.config, other.report.inputs.config,
+        "the configuration did not change"
+    );
+}
+
 /// The report's canonical bytes hold decimals as text and nothing else: a reader can recompute every
 /// figure from them, and the digest is the SHA-256 of exactly those bytes.
 #[test]
@@ -1413,5 +1554,18 @@ fn the_report_serializes_to_the_committed_canonical_bytes() {
         run.report.canonical().unwrap(),
         mandate_canon::parse(&bytes).unwrap(),
         "the bytes parse back to the value they came from"
+    );
+
+    let golden: &[u8] = include_bytes!("golden/backtest-report.json");
+    assert_eq!(
+        bytes.as_slice(),
+        golden,
+        "this run's canonical bytes are the committed ones; regenerate the golden file only with a \
+         report_version bump and a stated reason"
+    );
+    assert_eq!(
+        run.report.digest().unwrap(),
+        mandate_canon::Digest::of(golden),
+        "the digest is the SHA-256 of exactly the committed bytes"
     );
 }
