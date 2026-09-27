@@ -694,3 +694,14 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+
+From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
+round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
+
+- **V-023 at load must bound a decimal's precision (stream F).** The schema's `decimal` admits 28
+  fractional digits and `Ratio` holds 24, so a rule comparing `order_usd` against a 26-digit value
+  passes `mandate-builder`'s `check_rules`/`well_typed` re-check and is refused mid-walk by
+  `Condition::matches` with `too_precise`. It is still refused, so rule 3 holds, but DEC-152 (1)
+  promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
+  `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
+  the same bound so both report it by name.
