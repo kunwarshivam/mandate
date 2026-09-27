@@ -515,6 +515,17 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
 
+From the independent review of E10-1's slice-S implementation ([#225](https://github.com/kunwarshivam/mandate/pull/225)
+round 1), as the coordinator ruled there:
+
+- `tests/document.rs`'s `two_documents_that_differ_only_in_order_hash_the_same` parses one value twice,
+  and a canonical `Object` is a `BTreeMap`, so it pins determinism, not the order-independence its name
+  claims. Fix it in the next tests correction that touches the file, from key-shuffled JSON text read
+  through `mandate_canon::parse`.
+- No live `mandate-spec` test pins an absolute version digest: both canonical tests compare against the
+  same `mandate-canon` writer, so a non-canonical writer survives them. E10-3's status PR adds one
+  assertion against `btc_accumulator`'s literal `sha256:9fb03f7e…` beside `mandate::version_vector`.
+
 From the independent review of E4-2's implementation ([#163](https://github.com/kunwarshivam/mandate/pull/163)
 round 2, verdict approve), whose first two minors are closed by the third tests correction
 (DEC-127 item 26) and whose third waits on another story:
