@@ -1132,7 +1132,13 @@ mod tests {
             _ => None,
         };
         i.etp_classified_at = age
-            .map(|secs| UtcNanos::from_parts(now.secs() - secs, 0))
+            .map(|secs| {
+                let then = now
+                    .secs()
+                    .checked_sub(secs)
+                    .ok_or(GateError::ConfigOutOfRange)?;
+                Ok::<_, GateError>(UtcNanos::from_parts(then, 0)?)
+            })
             .transpose()?;
         o.mandate = ValidatedMandate::from_validated_parts(
             o.mandate.risk().clone(),
