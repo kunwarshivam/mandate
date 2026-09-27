@@ -993,9 +993,14 @@ impl Shell {
             unexpected.is_empty(),
             "the startup run of a ready shell records and adopts nothing else: {unexpected:?}"
         );
-        self.run(
+        let report = self.run(
             Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(broker_account())),
             ports,
+        );
+        assert_eq!(
+            report.draft_types(),
+            vec!["AccountStateObserved"],
+            "the account report of a ready shell records the account and restricts nothing"
         );
     }
 
