@@ -1712,9 +1712,10 @@ const STUB_MARKERS: [&str; 5] = [
 ];
 
 /// The pending tests that fail on the answer a partly implemented crate gives rather than at a
-/// stub, named one by one so the exception cannot spread. `mandate-risk`'s E6-3 spine (#157) decides
-/// an exit without E6-6's session rules or E6-8's pacing, and AGENTS.md rule 13 forbids it to refuse
-/// an exit, so these five see `Verdict::Allow` and an absent `pacing` instead of a stub's report.
+/// stub, named one by one so the exception cannot spread. `mandate-risk` decides an exit without
+/// E6-8's pacing, and AGENTS.md rule 13 forbids it to refuse an exit, so these two see an absent
+/// `pacing` instead of a stub's report; E6-6 retired the three its session rules and §5.3 rule 4
+/// decide.
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
@@ -1725,22 +1726,10 @@ const STUB_MARKERS: [&str; 5] = [
 /// Each still runs and fails, and E7-4's implementation PR deletes each row with its `#[ignore]`
 /// line. The stub check runs first, so a row whose test stops at a stub is reported for deletion
 /// rather than applied (#194 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "an_unconfirmed_owner_exit_defers",
-    ),
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "a_discretionary_exit_outside_the_session_defers",
-    ),
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
     (
         "crates/mandate-risk/tests/hand.rs",
         "a_participation_cap_slices_and_never_denies",
-    ),
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "the_first_pass_excludes_the_agents_own_protective_orders",
     ),
     (
         "crates/mandate-risk/tests/hand.rs",

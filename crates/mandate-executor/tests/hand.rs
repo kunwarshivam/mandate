@@ -1961,6 +1961,7 @@ fn a_missing_fill_explains_the_position_and_pauses_nothing() {
     )];
     taken.fills = vec![broker_fill("f-1", Some(&id), "10", "150")];
     taken.positions = vec![broker_position(AAPL, "10")];
+    taken.account.cash = usd("18500");
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
     assert!(
@@ -2132,6 +2133,7 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
 
     let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
     taken.positions = vec![broker_position(BTC, "0.5")];
+    taken.account.cash = usd("-10000");
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
     let observed = run
         .effects
@@ -2459,9 +2461,17 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
     let runs_before = runs(&shell);
     shell.next_append = AppendOutcome::HeadMismatch;
     let refused = shell.run(Input::BrokerSnapshot(taken), &ports);
+    let stale_drafts: Vec<_> = stale
+        .effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Journal(d) => Some(d.clone()),
+            _ => None,
+        })
+        .collect();
     assert!(
-        refused.draft_types().contains(&"ReconciliationRun"),
-        "the stale batch is offered to the journal: {:?}",
+        !refused.drafts.is_empty() && stale_drafts.starts_with(&refused.drafts),
+        "the stale batch is offered to the journal, draft for draft, every field equal: {:?}",
         refused.draft_types()
     );
     assert_eq!(runs(&shell), runs_before, "and the journal refused it");
