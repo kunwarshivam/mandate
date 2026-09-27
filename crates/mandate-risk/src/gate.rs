@@ -1208,12 +1208,13 @@ mod tests {
         })
     }
 
-    /// Every row of §3.2 against [`floor_oracle`]: 2 asset classes × 3 statuses × 3 exchanges × 3
-    /// item-3 states × 4 prices × 4 20-day volumes × 3 ETP classes × 4 permissions × 4
-    /// classification ages × 4 30-day volumes = 165888 rows. It pins the list order, `≥` at every
-    /// floor, an absent figure failing, the ETP rule needing both the mandate's switch and the
-    /// disclosure, the classification age failing closed only when strictly older, and which items
-    /// bind which asset class.
+    /// Every row of §3.2 against [`floor_oracle`]: 2 configs (compliant, and below every platform
+    /// minimum) × 2 asset classes × 3 statuses × 3 exchanges × 3 item-3 states × 4 prices × 4
+    /// 20-day volumes × 3 ETP classes × 4 permissions × 4 classification ages × 4 30-day volumes =
+    /// 331,776 rows. It pins the platform minimums binding over a weaker setting, the list order,
+    /// `≥` at every floor, an absent figure failing, the ETP rule needing both the mandate's switch
+    /// and the disclosure, the classification age failing closed only when strictly older, and
+    /// which items bind which asset class.
     #[test]
     fn the_floor_matches_the_oracle_on_every_row() -> Result<(), GateError> {
         let mut o = allowing()?;
@@ -1311,6 +1312,17 @@ mod tests {
             Verdict::Allow,
             "a crypto exit is never owed: first_owed accrues only for an opening"
         );
+        assert_eq!(
+            exit.checks.get(..2),
+            Some(
+                &[
+                    CheckOutcome::Passed(Check::AccountAndMode),
+                    CheckOutcome::NotReached(Check::UniverseAndLimits),
+                ][..]
+            ),
+            "E6-10 owes check 2 alone for crypto: check 1 is still run and recorded as passed, and \
+             check 2 is recorded as not reached rather than passed"
+        );
         Ok(())
     }
 
@@ -1318,10 +1330,11 @@ mod tests {
     /// both the 20-day equity volume and the 30-day crypto volume.
     ///
     /// `GateConfig`'s fields are public and nothing in the repo validates them, so a config below a
-    /// platform minimum is representable and the gate has to refuse it on its own. The main floor
-    /// table cannot show this: its config sits at or above every minimum, so deleting the
-    /// enforcement changes none of its 165888 rows. Review round 1 found exactly that — two
-    /// substitutions that dropped the minimum survived the whole suite.
+    /// platform minimum is representable and the gate has to refuse it on its own. Review round 1
+    /// found two substitutions that dropped the minimum surviving the whole suite, because the
+    /// floor table's config then sat at or above every minimum. The table now also runs every row
+    /// under a below-minimum config (331,776 rows) and catches each such plant by itself; this test
+    /// is the second, readable pin on the reviewer's own probes.
     ///
     /// Each pair below is the reviewer's own probe and the value one unit above it: the weakened
     /// config would have admitted the first, and the platform minimum denies it, while the second
