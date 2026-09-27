@@ -247,3 +247,173 @@ fn every_owned_expectation_member_is_read() {
         "both sweeps must have been exercised over every expectation the owned cases carry"
     );
 }
+
+/// Every input member of every owned case is one the harness turns into a typed value: an `initial`
+/// field, a step field, and a `goal` case's `state`.
+///
+/// Tests PR 1 swept the `expect` side and left this one open, which planted bug 26 also reaches from:
+/// a step that grew a field the harness never read would fold as though the field were not there, and
+/// the case would still compare the snapshot and pass. The three sites are counted exactly, because a
+/// case that stops carrying an input stops being swept and a loose bound would not notice.
+#[test]
+fn every_owned_input_member_is_read() {
+    let planted = "an_input_the_harness_does_not_read".to_owned();
+    let fixture = fixture();
+    let cases = fixture["cases"].as_array().expect("a case list");
+    let (mut initials, mut steps, mut states) = (0, 0, 0);
+    for case in cases {
+        let kind = case["kind"].as_str().expect("a kind");
+        if kind != "risk_state" && kind != "goal" {
+            continue;
+        }
+        let id = case["id"].as_str().expect("an id");
+        let mut doctored = fixture.clone();
+        let slot = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .expect("the case");
+        for block in ["initial", "state"] {
+            if let Some(members) = slot.get_mut(block).and_then(Json::as_object_mut) {
+                members.insert(planted.clone(), Json::Null);
+                if block == "initial" {
+                    initials += 1;
+                } else {
+                    states += 1;
+                }
+            }
+        }
+        for step in slot
+            .get_mut("steps")
+            .and_then(Json::as_array_mut)
+            .map(Vec::as_mut_slice)
+            .unwrap_or_default()
+        {
+            step.as_object_mut()
+                .expect("a step object")
+                .insert(planted.clone(), Json::Null);
+            steps += 1;
+        }
+        let failure = run(doctored, id).expect_err("an unread input must fail the case");
+        assert!(
+            failure.contains(&planted),
+            "{id}: the failure must name the input it did not read, got: {failure}"
+        );
+    }
+    assert_eq!(
+        (initials, steps, states),
+        (24, 111, 5),
+        "every `initial`, every step, and every goal `state` must have been swept"
+    );
+}
+
+/// Every member of every expected journal event is one the harness reads off the event the risk state
+/// returns, so a case cannot state a payload member that nothing compares.
+#[test]
+fn every_expected_journal_member_is_read() {
+    let planted = "a_payload_member_the_harness_does_not_read".to_owned();
+    let fixture = fixture();
+    let cases = fixture["cases"].as_array().expect("a case list");
+    let mut events = 0;
+    for case in cases {
+        if case["kind"] != "risk_state" {
+            continue;
+        }
+        let id = case["id"].as_str().expect("an id");
+        let mut doctored = fixture.clone();
+        let slot = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .expect("the case");
+        let mut planted_here = 0;
+        for step in slot
+            .get_mut("steps")
+            .and_then(Json::as_array_mut)
+            .map(Vec::as_mut_slice)
+            .unwrap_or_default()
+        {
+            for event in step["expect"]
+                .get_mut("journal")
+                .and_then(Json::as_array_mut)
+                .map(Vec::as_mut_slice)
+                .unwrap_or_default()
+            {
+                event
+                    .as_object_mut()
+                    .expect("an event object")
+                    .insert(planted.clone(), Json::Null);
+                planted_here += 1;
+            }
+        }
+        events += planted_here;
+        if planted_here == 0 {
+            continue;
+        }
+        let failure = run(doctored, id).expect_err("an unread payload member must fail the case");
+        assert!(
+            failure.contains(&planted),
+            "{id}: the failure must name the payload member it did not read, got: {failure}"
+        );
+    }
+    assert_eq!(
+        events, 138,
+        "every event the risk-state cases expect must have been swept"
+    );
+}
+
+/// A step whose `event` is not one of the eleven §5.2 inputs fails naming it, rather than being read
+/// as a clock tick that changes nothing.
+#[test]
+fn an_unknown_step_event_fails_naming_it() {
+    let fixture = fixture();
+    let id = "MC-R01";
+    let mut doctored = fixture.clone();
+    let slot = doctored["cases"]
+        .as_array_mut()
+        .expect("a case list")
+        .iter_mut()
+        .find(|c| c["id"] == id)
+        .expect("the case");
+    slot["steps"][0]["event"] = Json::String("teleport".to_owned());
+    let failure = run(doctored, id).expect_err("an unknown input must fail the case");
+    assert!(
+        failure.contains("teleport") && failure.contains("step 1"),
+        "the failure must name the input and the step, got: {failure}"
+    );
+}
+
+/// The two places the merged public API cannot express what a case states, pinned so that neither can
+/// start passing for the wrong reason before the coordinator rules (see this change's Decisions
+/// needed). Both are harness-visible today and neither is a rule this stream may change on its own.
+#[test]
+fn the_two_shapes_the_api_cannot_express_fail_loudly() {
+    let fixture = fixture();
+    let goal_failure =
+        run(fixture.clone(), "MC-L01").expect_err("the increment is not expressible");
+    assert!(
+        goal_failure.contains("qty_increment") && goal_failure.contains("ShareIncrement"),
+        "a goal increment off the two grids must name itself, got: {goal_failure}"
+    );
+    let floor_failure = run(fixture.clone(), "MC-R21").expect_err("the member is not expressible");
+    assert!(
+        floor_failure.contains("max_loss_from_allocation"),
+        "a payload member no `ApplyResult` carries must name itself, got: {floor_failure}"
+    );
+
+    let mut doctored = fixture.clone();
+    let slot = doctored["cases"]
+        .as_array_mut()
+        .expect("a case list")
+        .iter_mut()
+        .find(|c| c["id"] == "MC-L01")
+        .expect("the case");
+    slot["state"]["qty_increment"] = Json::String("1".to_owned());
+    let whole_shares = run(doctored, "MC-L01").expect_err("the rules are stubs");
+    assert!(
+        whole_shares.contains("not implemented") || whole_shares.contains("unimplemented"),
+        "a grid the type does express must get past the reader to the rule, got: {whole_shares}"
+    );
+}

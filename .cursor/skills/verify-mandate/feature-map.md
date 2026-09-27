@@ -379,9 +379,18 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
   broken ancestor, each key kind, the absence asymmetry),
-  `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
-  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
+  `crates/mandate-spec/tests/risk.rs` (§5.2's evaluation order, the two-quote hard trigger, the
+  rollover, the floor's three refusals, the loss carry under a withdrawal),
+  `crates/mandate-spec/tests/risk_day.rs` (every day of a year against `new_york_midnight`),
+  `crates/mandate-spec/tests/goal.rs` (one test per row of §3.1's table and per `on_complete`),
+  `crates/mandate-spec/tests/properties.rs` (the risk-state, risk-day, and goal invariants, each with
+  an oracle that computes its answer a second way: the journal alone, an interval accumulator, the
+  calendar, or a second run of the same market),
+  `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand, plus the
+  two session clocks §5.2 counts in); `crates/mandate-refcases/tests/mandate_harness.rs` (live: the
+  DEC-85 sweeps over case keys, expectations, inputs, and journalled members);
+  `crates/mandate-domain/tests/domain.rs` (live). The classification tests and their oracles arrive
+  with tests PR 3. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
   and J and fail as "not interpreted until" their owning story. A rejection that carries no reason

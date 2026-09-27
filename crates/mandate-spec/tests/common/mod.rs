@@ -1,3 +1,7 @@
+#![allow(
+    dead_code,
+    reason = "every test binary compiles the whole builder and uses only the part its family needs"
+)]
 //! A mandate as a canonical value, built by hand so the parse can be tested without a fixture.
 //!
 //! The reference cases cover the 31 MC-S rejections from `fixtures/refcases/mandate.json` through
@@ -7,7 +11,16 @@
 //! The shape follows `two_stock_swing`, the two-instrument equity base, because it is the one base
 //! with protection on, no research agent, and no goal instrument.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use mandate_canon::{Int, Key, Value};
+use mandate_num::Usd;
+use mandate_spec::document::{LadderAction, LadderRung, ProvenanceMap};
+use mandate_spec::policy::platform_base;
+use mandate_spec::risk::SessionClock;
+use mandate_spec::validate::{ValidatedMandate, ValidationContext};
+use mandate_spec::{DecGrammar, Mandate, SchemaDec, SpecError};
+use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
 pub fn s(text: &str) -> Value {
     Value::Str(text.to_owned())
@@ -272,4 +285,88 @@ fn set(document: &mut Value, path: &str, value: Option<Value>) {
         }
         _ => {}
     }
+}
+
+/// The one way to a [`ValidatedMandate`], which every §5 and §3.1 rule takes (DEC-128 item 8).
+///
+/// The context is the reference cases' `validation_context_defaults` — a $25,000 account with no other
+/// allocation — because the risk-state and goal families state none of their own and are not about
+/// V-rules. The registry is `None`, the fixture's spelling of "not stated", which leaves V-007
+/// unchecked.
+pub fn validated(document: &Value) -> ValidatedMandate {
+    let mandate = Mandate::parse(document).expect("the document parses");
+    let context = ValidationContext {
+        account_equity_usd: Usd::parse("25000").expect("a dollar amount"),
+        other_allocations_usd: Usd::ZERO,
+        validation_date: Date::new(2026, 9, 24).expect("a date"),
+        registry: None,
+        provenance: ProvenanceMap::default(),
+        workspace_users: 1,
+        approver_users: 1,
+        disclosures_accepted: BTreeSet::new(),
+        instrument_groups: BTreeMap::new(),
+        claimed_by_other_agents: BTreeSet::new(),
+        connection_environment: None,
+        connection_loss_carry_usd: Usd::ZERO,
+        eligibility_failures: BTreeSet::new(),
+        previous_version: None,
+    };
+    let chain = [platform_base().expect("the platform base")];
+    ValidatedMandate::new(mandate, &context, &chain).expect("the document validates")
+}
+
+/// One rung of the ladder as a value, so [`mandate_spec::risk::size_factor`] and
+/// [`mandate_spec::risk::reset_lift_order`] can be tested without a whole document.
+pub fn ladder_rung(at: &str, action: LadderAction, factor: Option<&str>) -> LadderRung {
+    LadderRung {
+        at: fraction(at),
+        action,
+        factor: factor.map(fraction),
+    }
+}
+
+/// A decimal in the `open_fraction` grammar, which is what `at`, `factor`, `max_daily_loss`,
+/// `max_drawdown`, `hysteresis`, and `max_loss_from_allocation` all declare.
+pub fn fraction(text: &str) -> SchemaDec {
+    SchemaDec::parse(text, DecGrammar::OpenFraction).expect("an open fraction")
+}
+
+/// The clock §5.2 and §5.5 count an equity's staleness and scale-lift timers in: regular-session
+/// seconds, from `mandate-time`'s NYSE calendar. The crate holds no calendar, which is why
+/// [`mandate_spec::risk::RiskState::open`] takes one (DEC-128 item 23).
+pub struct NyseRegularSeconds;
+
+impl SessionClock for NyseRegularSeconds {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        let calendar = ExchangeCalendar::us_equities().expect("the bundled NYSE calendar");
+        let mut day = from.date();
+        let mut total: u64 = 0;
+        loop {
+            for span in calendar.sessions(day).expect("a calendar day") {
+                if span.session() != Session::Regular {
+                    continue;
+                }
+                let start = span.start().secs().max(from.secs());
+                let end = span.end().secs().min(to.secs());
+                total = total.saturating_add(u64::try_from(end - start).unwrap_or_default());
+            }
+            if day >= to.date() {
+                return Ok(total);
+            }
+            day = day.next().expect("the next date");
+        }
+    }
+}
+
+/// Crypto trades continuously, so every second counts (§5.2, §5.5).
+pub struct EverySecond;
+
+impl SessionClock for EverySecond {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        u64::try_from(to.secs() - from.secs()).map_err(|_| SpecError::ClockWentBackwards)
+    }
+}
+
+pub fn instant(text: &str) -> UtcNanos {
+    UtcNanos::parse(text).expect("an instant")
 }

@@ -39,12 +39,22 @@ fn pointer_of(value: &Value) -> String {
     }
 }
 
+/// Asserts that a document parses and, when it does not, says which member the parser refused.
+///
+/// A bare `is_ok()` on a guard reports only that the guard failed, which sends the next reader looking
+/// at the wrong half of the test (review round 3 of the tests PR, item 3).
+fn must_parse(document: &Value, what: &str) {
+    if let Err(e) = parse(document) {
+        panic!("{what}: {e} [{}]", e.code());
+    }
+}
+
 #[test]
 #[ignore = "pending E10-1"]
 fn the_base_document_parses() {
-    assert!(
-        parse(&base()).is_ok(),
-        "the builder's base must be a valid mandate, or every test below is testing the wrong thing"
+    must_parse(
+        &base(),
+        "the builder's base must be a valid mandate, or every test below is testing the wrong thing",
     );
 }
 
@@ -96,9 +106,9 @@ fn an_accumulate_goal_missing_its_spend_cap_names_that_member() {
         ("end_date", Value::Null),
         ("on_complete", s("hold_protected")),
     ]);
-    assert!(
-        parse(&with("/goal", Some(accumulate.clone()))).is_ok(),
-        "the accumulate goal this row breaks must itself be valid"
+    must_parse(
+        &with("/goal", Some(accumulate.clone())),
+        "the accumulate goal this row breaks must itself be valid",
     );
     let document = with_all(&[("/goal", Some(accumulate)), ("/goal/max_spend_usd", None)]);
     assert_eq!(code_of(&document), "missing_member");
@@ -342,13 +352,12 @@ fn protection_enabled_needs_a_stop_distance() {
     let document = with("/protection/stop_distance", Some(Value::Null));
     assert_eq!(code_of(&document), "wrong_type");
     assert_eq!(pointer_of(&document), "/protection/stop_distance");
-    assert!(
-        parse(&with_all(&[
+    must_parse(
+        &with_all(&[
             ("/protection/enabled", Some(b(false))),
             ("/protection/stop_distance", Some(Value::Null)),
-        ]))
-        .is_ok(),
-        "the same null is valid with protection disabled, so the conditional is what rejects it"
+        ]),
+        "the same null is valid with protection disabled, so the conditional is what rejects it",
     );
 }
 
