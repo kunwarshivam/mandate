@@ -1210,7 +1210,6 @@ fn a_reconciliation_leaves_an_agreeing_order_and_an_unknown_one_alone() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn cash_within_the_band_agrees_and_beyond_it_differs() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

@@ -2049,7 +2049,6 @@ proptest! {
     /// the band is zero: the same 20000 is no difference and pauses nobody, and any cent more is a
     /// difference that alerts.
     #[test]
-    #[ignore = "pending E7-3"]
     fn cash_within_the_band_never_pauses_and_outside_it_always_alerts(
         cents in 0u64..500,
     ) {
