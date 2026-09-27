@@ -7,11 +7,12 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::ports::Ports;
+use crate::protection::watched;
 use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
-    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, MarketObservation,
-    OrderState, ReconcileReason, WriterEpoch,
+    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, OrderState,
+    ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -129,7 +130,7 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
         Input::Journal(_) => Ok(()),
-        Input::Market(observation) => watched(batch, &observation),
+        Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
             release_held(batch)
@@ -171,17 +172,6 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::AccountWideAccepted => later_slice(),
     }
-}
-
-/// A market observation in an instrument whose protection rests is the input of the triggered-stop
-/// watchdog and of crypto's watched take-profit (trading-domain spec §5.4, E7-4 slices 4 and 5).
-/// Until those land it answers their stub rather than letting a stop at its trigger go unwatched.
-/// Elsewhere a quote carries nothing the account stream folds.
-fn watched(batch: &Batch<'_, '_>, observation: &MarketObservation) -> Result<(), ExecutorError> {
-    if batch.view.protection.contains_key(&observation.instrument) {
-        return Err(ExecutorError::Unimplemented { story: "E7-4" });
-    }
-    Ok(())
 }
 
 /// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later

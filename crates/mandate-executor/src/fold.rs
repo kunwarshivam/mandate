@@ -696,14 +696,12 @@ fn protection_changed(
             let uncovered = optional_qty(payload, "qty")?;
             if let Some(protection) = state.protection.get_mut(&instrument) {
                 protection.resting.retain(|id| !orders.contains(id));
-                protection.covered_qty = match uncovered {
-                    Some(uncovered) if !protection.resting.is_empty() => protection
+                if let Some(uncovered) = uncovered {
+                    protection.covered_qty = protection
                         .covered_qty
                         .checked_sub(uncovered)
-                        .unwrap_or(Qty::ZERO),
-                    _ if protection.resting.is_empty() => Qty::ZERO,
-                    _ => protection.covered_qty,
-                };
+                        .unwrap_or(Qty::ZERO);
+                }
                 if protection.resting.is_empty() {
                     state.protection.remove(&instrument);
                 }
@@ -1759,6 +1757,210 @@ mod protection_tests {
         stream.protection("cancelled", "md-oco-2", "4")?;
         assert_eq!(stream.state.protection(&aapl)?, None);
         assert_eq!(stream.state.protective_sell_qty(&aapl)?, Qty::ZERO);
+        Ok(())
+    }
+
+    #[test]
+    fn a_cancel_names_its_own_legs_and_uncovers_only_what_it_says() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let aapl = aapl()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.protection("placed", "md-oco-1 md-oco-2 md-oco-3", "10")?;
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("cancelled")),
+                ("orders", text("md-oco-1")),
+            ],
+            None,
+        )?;
+        let protection = stream
+            .state
+            .protection(&aapl)?
+            .ok_or_else(|| missing("the protection the other legs keep"))?;
+        assert_eq!(
+            protection.resting,
+            vec![id("md-oco-2")?, id("md-oco-3")?],
+            "only the named leg leaves"
+        );
+        assert_eq!(
+            protection.covered_qty,
+            qty("10")?,
+            "a cancel that uncovers no quantity leaves the cover alone"
+        );
+        stream.protection("cancelled", "md-oco-2", "3")?;
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, qty("7")?);
+        stream.protection("cancelled", "md-oco-3", "20")?;
+        assert_eq!(
+            stream.state.protection(&aapl)?,
+            None,
+            "the last leg clears it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_unprotected_interval_ends_only_its_own_open_one() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let interval = |instrument: &str, action: &str| {
+            vec![
+                ("instrument", text(instrument)),
+                ("action", text(action)),
+                ("orders", text("")),
+            ]
+        };
+        stream.fold(
+            "ProtectionChanged",
+            interval("MSFT", "unprotected_start"),
+            None,
+        )?;
+        stream.fold(
+            "ProtectionChanged",
+            interval("AAPL", "unprotected_start"),
+            None,
+        )?;
+        stream.fold(
+            "ProtectionChanged",
+            interval("AAPL", "unprotected_end"),
+            None,
+        )?;
+        stream.fold(
+            "ProtectionChanged",
+            interval("AAPL", "unprotected_start"),
+            None,
+        )?;
+        stream.fold(
+            "ProtectionChanged",
+            interval("AAPL", "unprotected_end"),
+            None,
+        )?;
+        let ended: Vec<(&str, bool)> = stream
+            .state
+            .unprotected
+            .iter()
+            .map(|interval| (interval.instrument.as_str(), interval.ended_at.is_some()))
+            .collect();
+        assert_eq!(
+            ended,
+            vec![("MSFT", false), ("AAPL", true), ("AAPL", true)],
+            "each end closes its own instrument's open interval, never another's or a closed one"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn only_a_filled_buy_in_the_instrument_makes_a_holder() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.fold(
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-buy-2")),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+            ],
+            None,
+        )?;
+        stream.fold(
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-sell-1")),
+                ("agent", text("agent-c")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("2")),
+                ("limit", text("160")),
+            ],
+            None,
+        )?;
+        stream.fold(
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-sell-1")),
+                ("client_order_id", text("md-sell-1")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty_gross", text("2")),
+                ("price", text("160")),
+            ],
+            None,
+        )?;
+        stream.fold(
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-msft-1")),
+                ("agent", text("agent-d")),
+                ("instrument", text("MSFT")),
+                ("side", text("buy")),
+                ("qty", text("1")),
+                ("limit", text("400")),
+            ],
+            None,
+        )?;
+        stream.fold(
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-msft-1")),
+                ("client_order_id", text("md-msft-1")),
+                ("instrument", text("MSFT")),
+                ("side", text("buy")),
+                ("qty_gross", text("1")),
+                ("price", text("400")),
+            ],
+            None,
+        )?;
+        stream.protection("placed", "md-oco-1", "8")?;
+        let order = stream
+            .state
+            .orders
+            .get(&id("md-oco-1")?)
+            .ok_or_else(|| missing("the leg of the single holder"))?;
+        assert_eq!(
+            order.agent,
+            AgentId("agent-a".to_owned()),
+            "an unfilled buy, a filled sell and another instrument's buyer hold nothing here"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_requested_cancel_is_unconfirmed_until_a_confirmation_or_a_terminal_state()
+    -> Result<(), ExecutorError> {
+        for (then, confirmed) in [("accepted", true), ("filled", false)] {
+            let mut stream = Stream::opened()?;
+            stream.bought("agent-a", "md-buy-1", "10")?;
+            stream.fold(
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-buy-1")),
+                    ("state", text("accepted")),
+                    ("cancel_requested", Value::Bool(true)),
+                ],
+                None,
+            )?;
+            let unconfirmed = |stream: &Stream| {
+                stream
+                    .state
+                    .orders
+                    .get(&ClientOrderId::parse("md-buy-1").ok()?)
+                    .map(|order| order.cancel_unconfirmed)
+            };
+            assert_eq!(unconfirmed(&stream), Some(true), "{then}: requested");
+            stream.fold(
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-buy-1")),
+                    ("state", text(then)),
+                    ("cancel_confirmed", Value::Bool(confirmed)),
+                ],
+                None,
+            )?;
+            assert_eq!(unconfirmed(&stream), Some(false), "{then}: cleared");
+        }
         Ok(())
     }
 

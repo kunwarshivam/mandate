@@ -497,8 +497,8 @@ mod tests {
     use crate::step::handle;
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
-        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, DifferenceKind, Effect,
-        EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff,
+        BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, DifferenceKind,
+        Effect, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff,
         MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId,
         WriterEpoch,
     };
@@ -1727,6 +1727,89 @@ mod tests {
         run_first.run(report()?, &ports)?;
         let released = run_first.run(tick(2), &ports)?;
         assert_eq!(submitted(&released), 1, "run, then account: released");
+        Ok(())
+    }
+
+    /// §5.7's confirmed cancel: the broker's `CancelAccepted` makes the order `Canceled` with
+    /// `cancel_confirmed`, releasing its reservation and the unconfirmed cancel that held its
+    /// instrument; an id this executor does not carry asks for a reconciliation instead.
+    #[test]
+    fn a_confirmed_cancel_ends_the_order_and_an_unknown_one_asks_for_a_run()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = reporting(&ports)?;
+        executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ3",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        let id =
+            executor
+                .state
+                .orders
+                .keys()
+                .next()
+                .cloned()
+                .ok_or(ExecutorError::Unimplemented {
+                    story: "the submitted order",
+                })?;
+        executor.commit_one(
+            "OrderStateChanged",
+            object(vec![
+                ("client_order_id", Value::Str(id.as_str().to_owned())),
+                ("state", Value::Str("accepted".to_owned())),
+                ("cancel_requested", Value::Bool(true)),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        let confirmed = executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: id.as_str().to_owned(),
+            })),
+            &ports,
+        )?;
+        assert_eq!(drafted(&confirmed), vec!["OrderStateChanged"]);
+        let order = executor
+            .state
+            .order(&id)
+            .ok_or(ExecutorError::Unimplemented {
+                story: "the cancelled order",
+            })?;
+        assert_eq!(
+            (order.state, order.cancel_unconfirmed),
+            (OrderState::Canceled, false)
+        );
+        assert!(
+            !executor.state.reservations.contains_key(&id),
+            "the reservation is released"
+        );
+
+        let stranger = executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: "md-01JABCDEFGHJKMNPQRSTVWXYZ7".to_owned(),
+            })),
+            &ports,
+        )?;
+        assert!(
+            stranger
+                .iter()
+                .any(|effect| matches!(effect, Effect::Broker(BrokerRequest::ListOpenOrders))),
+            "an id it does not carry asks for a reconciliation: {stranger:?}"
+        );
         Ok(())
     }
 }
