@@ -1751,7 +1751,6 @@ proptest! {
 
     /// §5.7: the status map is total and never silently ignores.
     #[test]
-    #[ignore = "pending E7-2"]
     fn the_status_map_is_total_and_never_silently_ignores(
         status in prop::sample::select(vec![
             "new", "accepted", "pending_new", "accepted_for_bidding", "held", "partially_filled",

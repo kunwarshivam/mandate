@@ -370,7 +370,6 @@ fn a_first_pass_deny_is_recorded_with_its_reason_and_ends_the_intent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_opening_outside_the_working_universe_is_denied() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1007,7 +1006,6 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_update_reporting_more_filled_than_applied_asks_for_a_reconciliation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1053,7 +1051,6 @@ fn an_update_reporting_more_filled_than_applied_asks_for_a_reconciliation() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_crypto_opening_is_gtc_and_an_equity_opening_is_day() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);
