@@ -712,7 +712,13 @@ fn expect_rejection(expect: &Json, rejection: Option<risk::Rejection>) -> Result
 /// Both sides are compared as complete member maps, so an event that carries a member the case does not
 /// state fails as surely as one that is missing a member it does state: §5.10's shapes are the
 /// expectation, and a `reason` appearing where plain confirmation is meant is a different event.
-fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), String> {
+///
+/// Public so that `tests/mandate_harness.rs` can exercise it against hand-built events. Every
+/// `risk_state` case stops at the mandate parser while that is a stub, so a test that went through a case
+/// could not tell this comparison from the stub it never reached — and the two members §5.10 states that
+/// no `RiskEvent` can carry (this change's Decisions needed) rest on exactly this function failing rather
+/// than skipping.
+pub fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), String> {
     let listed = list_at(expect, "journal")?;
     ensure(journal.len() == listed.len(), || {
         format!(

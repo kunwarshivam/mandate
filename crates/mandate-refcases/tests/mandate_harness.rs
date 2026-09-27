@@ -9,7 +9,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use mandate_num::Usd;
 use mandate_refcases::{Json, mandate, read_fixture};
+use mandate_spec::document::LimitAction;
+use mandate_spec::risk::{LimitKey, RiskEvent, TriggerReason};
+use serde_json::json;
 
 fn fixture() -> Json {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -368,5 +372,85 @@ fn a_step_whose_event_the_harness_does_not_apply_fails_the_case() {
     assert!(
         failure.contains("teleported"),
         "{id}: the failure must name the kind it could not apply, got: {failure}"
+    );
+}
+
+/// One way of spoiling a case's journal, with the name the failure message uses.
+type Perturbation = (&'static str, fn(&mut Json));
+
+/// The journal comparison fails on any difference: a missing member, an extra one, a wrong value, or a
+/// different number of events.
+///
+/// Exercised directly rather than through a case, because every `risk_state` case stops at the mandate
+/// parser while that is a stub — a test that went through one could not tell this comparison from the stub
+/// it never reached. It is the function the two shapes under this change's Decisions needed rest on:
+/// `MC-R21` states a `max_loss_from_allocation` that `ApplyResult::Applied` does not carry, and every
+/// `scale_sizes` rung states an `action` that `LimitAction` cannot spell, and both must **fail** rather
+/// than be skipped.
+#[test]
+fn the_journal_comparison_fails_on_any_difference() {
+    let events = vec![
+        RiskEvent::RiskDayStarted {
+            day_start_equity: Usd::parse("9800").expect("a dollar amount"),
+        },
+        RiskEvent::RiskLimitTriggered {
+            limit: LimitKey::MaxDailyLoss,
+            action: LimitAction::ExitsOnly,
+            reason: Some(TriggerReason::ResolvedAtRollover),
+        },
+    ];
+    let matching = json!({"journal": [
+        {"type": "RiskDayStarted", "day_start_equity": "9800"},
+        {"type": "RiskLimitTriggered", "limit": "max_daily_loss", "action": "exits_only",
+         "reason": "resolved_at_rollover"},
+    ]});
+    assert_eq!(
+        mandate::expect_journal(&matching, &events),
+        Ok(()),
+        "the events the case states are the events it got"
+    );
+
+    let doctored: [Perturbation; 5] = [
+        ("a member no event carries", |j: &mut Json| {
+            j["journal"][0]["a_member_no_event_carries"] = Json::String("9800".to_owned());
+        }),
+        ("a wrong value", |j: &mut Json| {
+            j["journal"][0]["day_start_equity"] = Json::String("9801".to_owned());
+        }),
+        ("a member the event does carry, dropped", |j: &mut Json| {
+            j["journal"][1]
+                .as_object_mut()
+                .expect("an event object")
+                .remove("reason");
+        }),
+        ("one event too few", |j: &mut Json| {
+            j["journal"].as_array_mut().expect("a journal").pop();
+        }),
+        ("one event too many", |j: &mut Json| {
+            let extra = json!({"type": "RiskDayStarted", "day_start_equity": "9800"});
+            j["journal"].as_array_mut().expect("a journal").push(extra);
+        }),
+    ];
+    for (what, doctor) in doctored {
+        let mut case = matching.clone();
+        doctor(&mut case);
+        let failure = mandate::expect_journal(&case, &events);
+        assert!(
+            failure.is_err(),
+            "{what} must fail the comparison, and it reported {failure:?}"
+        );
+    }
+
+    let named = mandate::expect_journal(
+        &json!({"journal": [
+            {"type": "RiskDayStarted", "day_start_equity": "9800",
+             "max_loss_from_allocation": "0.2"},
+        ]}),
+        &events[..1],
+    )
+    .expect_err("a member `RiskEvent` has no field for must fail");
+    assert!(
+        named.contains("max_loss_from_allocation"),
+        "the failure must name the member the harness could not supply, got: {named}"
     );
 }
