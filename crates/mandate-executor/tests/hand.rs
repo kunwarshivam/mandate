@@ -2535,18 +2535,36 @@ fn a_reconciliation_ingests_a_missing_fill_before_it_compares_positions() {
     );
 }
 
-/// The two events of `RC-14`'s initial state from `first_seq` on: ten `AAPL` bought at 150, and
-/// one resting GTC OCO for them at 170 and 140, created on 2026-09-22 (so it expires on
-/// 2026-12-21, trading-domain spec §5.2).
+/// The events of `RC-14`'s initial state from `first_seq` on: ten `AAPL` bought at 150 by
+/// `common::AGENT`'s own order, filled, and one resting GTC OCO for them at 170 and 140, created on
+/// 2026-09-22 (so it expires on 2026-12-21, trading-domain spec §5.2). The buy is attributed, so
+/// the position has a single holder the OCO belongs to (DEC-160's leg-agent rule).
 fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEvent> {
     vec![
         event(
             ACCOUNT_STREAM,
             first_seq,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            first_seq.saturating_add(1),
             "FillApplied",
             with_clock(
                 &[
                     ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-1")),
                     ("instrument", text(AAPL)),
                     ("side", text("buy")),
                     ("qty_gross", text("10")),
@@ -2557,7 +2575,19 @@ fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEven
         ),
         event(
             ACCOUNT_STREAM,
-            first_seq.saturating_add(1),
+            first_seq.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            first_seq.saturating_add(3),
             "ProtectionChanged",
             with_clock(
                 &[
@@ -4116,7 +4146,7 @@ fn a_protective_order_submits_with_no_buying_power() {
             .fold_one(&event)
             .expect("the protected position folds");
     }
-    let mut shell = shell.restart_ready(&ports);
+    let (mut shell, _) = shell.restart(&ports);
     assert!(
         shell
             .state

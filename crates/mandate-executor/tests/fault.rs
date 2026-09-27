@@ -419,10 +419,29 @@ fn protected(ports: &Ports<'_>) -> Shell {
         .fold_one(&event(
             ACCOUNT_STREAM,
             2,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                ],
+                10,
+            ),
+        ))
+        .expect("the attributed buy folds");
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            3,
             "FillApplied",
             with_clock(
                 &[
                     ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-1")),
                     ("instrument", text(AAPL)),
                     ("side", text("buy")),
                     ("qty_gross", text("10")),
@@ -435,7 +454,21 @@ fn protected(ports: &Ports<'_>) -> Shell {
     shell
         .fold_one(&event(
             ACCOUNT_STREAM,
-            3,
+            4,
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ))
+        .expect("the buy's fill completes it");
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            5,
             "ProtectionChanged",
             with_clock(
                 &[
