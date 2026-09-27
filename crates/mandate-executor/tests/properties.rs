@@ -2313,8 +2313,32 @@ proptest! {
             event_type,
             common::with_clock(&[], 10),
         );
+        const OTHER_STREAMS: [&str; 9] = [
+            "RelatedAccountsCoordination",
+            "MandateVersionApplied",
+            "RiskLimitTriggered",
+            "RiskLimitLifted",
+            "HighWaterMarkReset",
+            "PositionReleased",
+            "InstrumentRestrictionChanged",
+            "GoalCompleted",
+            "UniverseChanged",
+        ];
+        /// The catalogue events a merged slice interprets. Every other event this crate owns
+        /// answers its story's stub until the slice that implements it moves it here, in the same
+        /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
+        const INTERPRETED: [&str; 1] = ["StreamOpened"];
+        let stubbed = event_type != "NobodyEverWroteThis"
+            && !OTHER_STREAMS.contains(&event_type)
+            && !INTERPRETED.contains(&event_type);
         match mandate_executor::fold(&mut state, &candidate) {
             Ok(()) => {
+                prop_assert!(
+                    !stubbed,
+                    "{} folded silently before any slice interprets it: it must answer its \
+                     story's stub (DEC-137)",
+                    event_type
+                );
                 prop_assert_ne!(
                     event_type,
                     "NobodyEverWroteThis",
@@ -2353,6 +2377,15 @@ proptest! {
                         "{} is on the account stream's own catalogue",
                         event_type
                     );
+                    if stubbed {
+                        prop_assert!(
+                            error.code() == "unimplemented" && format!("{error}").contains("E7-"),
+                            "{} is not interpreted by any merged slice, so it answers its \
+                             story's stub, naming the story (DEC-137): {}",
+                            event_type,
+                            error
+                        );
+                    }
                     if error.code() == "not_interpreted" {
                         prop_assert!(
                             format!("{error}").contains('E'),
