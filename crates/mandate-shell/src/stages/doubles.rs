@@ -62,6 +62,8 @@ pub struct Tally {
     pub queries: u32,
     /// Broker answers the executor double was handed.
     pub executor_broker_inputs: u32,
+    /// The stream of every committed event the executor double was asked to fold.
+    pub executor_folds: Vec<String>,
     next_id: u64,
 }
 
@@ -112,6 +114,14 @@ impl Ledger {
         body.get("event_type")
             .and_then(Value::as_str)
             .map(str::to_owned)
+    }
+
+    /// How many events `stream` holds.
+    pub fn len(&self, stream: &str) -> usize {
+        match self.streams.get(stream) {
+            Some(rows) => rows.len(),
+            None => 0,
+        }
     }
 
     fn has(&self, event_type: &str, field: &str, value: &str) -> bool {
@@ -210,6 +220,10 @@ pub fn setup() -> Result<Setup, String> {
 
 pub fn agent_stream() -> String {
     crate::envelope::agent_stream("tracer", AGENT)
+}
+
+pub fn account_stream() -> String {
+    crate::envelope::account_stream("tracer", "tracer-paper")
 }
 
 pub fn instrument() -> Result<InstrumentId, Cause> {
@@ -700,7 +714,11 @@ impl Executor for PaperExecutor {
     }
 
     fn committed(&mut self, event: &mandate_executor::FoldedEvent) -> Result<(), Cause> {
-        let _ = event;
+        self.world
+            .tally
+            .borrow_mut()
+            .executor_folds
+            .push(event.stream.clone());
         Ok(())
     }
 }

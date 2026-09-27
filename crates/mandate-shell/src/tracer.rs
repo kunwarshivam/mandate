@@ -371,7 +371,9 @@ impl<'s> Session<'s> {
         Ok(())
     }
 
-    /// Appends one draft at the stream's head and folds what committed back into both cores.
+    /// Appends one draft at the stream's head and folds what committed back into both cores. An
+    /// `AlreadyCommitted` answer can name rows this session already folded; those are never folded
+    /// twice, since a fold of a `seq` already held is out of order.
     fn append(&mut self, stream: &str, bytes: Vec<u8>) -> Result<(), ShellError> {
         let head = self.head(stream);
         let epoch = self.epoch(stream);
@@ -391,8 +393,10 @@ impl<'s> Session<'s> {
                 });
             }
         };
-        for row in rows.iter().filter(|row| row.seq > head) {
-            self.fold(stream, row)?;
+        for row in rows {
+            if !self.recorded.contains(&row.event_id) {
+                self.fold(stream, &row)?;
+            }
         }
         Ok(())
     }

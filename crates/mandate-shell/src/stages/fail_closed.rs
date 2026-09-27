@@ -18,8 +18,8 @@ use mandate_runtime::{AgentId, Autonomy, Command, Initiator, Input, KillScope};
 
 use super::doubles::{
     FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, OneShare,
-    PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, agent_stream,
-    passed_checks, setup, stub,
+    PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
+    agent_stream, passed_checks, setup, stub,
 };
 use super::{MandateSource, Stage};
 use crate::adapters::{Sources, production};
@@ -165,6 +165,14 @@ fn all_doubles_place_exactly_one_order() -> Result<(), String> {
     assert!(report.would_place.is_none());
     shadow_book_matches(&ledger, &tally.submitted)?;
     every_draft_is_paper(&ledger)?;
+    let account = account_stream();
+    let held = ledger.len(&account);
+    assert!(held > 0);
+    assert_eq!(
+        tally.executor_folds,
+        vec![account; held],
+        "the executor folds every account-stream event once, and nothing else"
+    );
     Ok(())
 }
 

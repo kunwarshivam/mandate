@@ -227,6 +227,12 @@ mod tests {
             };
             assert_eq!(error.code(), stage.code());
             assert_eq!(error.stage(), Some(stage));
+            assert_eq!(
+                error.to_string(),
+                format!(
+                    "the tracer stopped at {stage:?}: this stage is not implemented yet (pending E7-7)"
+                )
+            );
         }
         assert_eq!(ShellError::CycleAlreadyOpen.stage(), None);
         assert_eq!(ShellError::SecondSubmission.code(), "one_order_only");
