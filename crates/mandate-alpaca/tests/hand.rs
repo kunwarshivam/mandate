@@ -524,7 +524,50 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
             "a leg id {id:?} is a broker order id a cancel is built from too, so it is refused \
              the same way"
         );
+        let mut replacing: serde_json::Value =
+            serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        if let Some(object) = replacing.as_object_mut() {
+            object.insert("replaced_by".to_owned(), serde_json::json!(id));
+        }
+        let text = serde_json::to_vec(&replacing).expect("re-serialises");
+        let error = wire::order(&text).expect_err("a hostile replacement id is not an order's");
+        assert_eq!(
+            (error.code(), error.to_string()),
+            (
+                "wrong_type",
+                "field replaced_by has the wrong type".to_owned()
+            ),
+            "a replacement id {id:?} names a broker order a cancel is built from too"
+        );
+        assert_refused_activity_id(id);
     }
+    assert_refused_activity_id("20260926234500000::x&side=sell");
+    let fills = wire::activities(&body_of("partial_then_filled", 2)).expect("the fixture parses");
+    assert!(
+        fills.iter().all(|f| f.fill_id.0.contains("::")),
+        "and a real activity id, a timestamp, `::` and a UUID, still reads"
+    );
+}
+
+/// An activity id becomes the cursor the next activities read sends as `page_token`, so one
+/// outside a timestamp-and-UUID alphabet is refused before it can reach a query.
+fn assert_refused_activity_id(id: &str) {
+    let mut body: serde_json::Value =
+        serde_json::from_slice(&body_of("partial_then_filled", 2)).expect("valid JSON");
+    if let Some(object) = body
+        .as_array_mut()
+        .and_then(|all| all.first_mut())
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        object.insert("id".to_owned(), serde_json::json!(id));
+    }
+    let text = serde_json::to_vec(&body).expect("re-serialises");
+    let error = wire::activities(&text).expect_err("a hostile activity id is not a fill's");
+    assert_eq!(
+        (error.code(), error.to_string()),
+        ("wrong_type", "field id has the wrong type".to_owned()),
+        "the activity id {id:?} is refused before it can become a page_token"
+    );
 }
 
 #[tokio::test]
@@ -1168,12 +1211,21 @@ fn an_oco_body_has_no_top_level_limit_and_no_extended_hours() {
     );
     let with_a_limit = mandate_executor::SubmitOrder {
         limit_price: Some(exact_price("170")),
-        ..order
+        ..order.clone()
     };
     assert_eq!(
         wire::submission_body(&with_a_limit).err().map(|e| e.code()),
         Some("wrong_type"),
         "an OCO carrying a top-level limit is refused: its prices are its legs' only"
+    );
+    let with_a_stop = mandate_executor::SubmitOrder {
+        stop_price: Some(exact_price("140")),
+        ..order
+    };
+    assert_eq!(
+        wire::submission_body(&with_a_stop).err().map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO carrying a top-level stop is refused the same way"
     );
 }
 

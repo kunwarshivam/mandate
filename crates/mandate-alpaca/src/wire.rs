@@ -236,7 +236,7 @@ pub fn status(raw: &str) -> Result<StatusMapping, WireError> {
 /// no `extended_hours` (the legs share the entry's TIF and take no extended hours), an OCO has no
 /// top-level limit because its take-profit leg is the limit, and `extended_hours` is sent only on
 /// a simple equity order, never on crypto, which trades around the clock. An OCO whose legs name
-/// another quantity than the order, or that carries a top-level limit, is refused rather than sent
+/// another quantity than the order, or that carries a top-level limit or stop, is refused rather than sent
 /// with one of the two: §5.4's OCO is for the filled quantity, and a guess could over-sell.
 pub fn submission_body(order: &SubmitOrder) -> Result<String, WireError> {
     let mut body = Map::new();
@@ -264,7 +264,7 @@ pub fn submission_body(order: &SubmitOrder) -> Result<String, WireError> {
         }
         (Some(bracket), None) => Some(("bracket", bracket.take_profit, bracket.stop)),
         (None, Some(oco)) => {
-            if oco.qty != order.qty || order.limit_price.is_some() {
+            if oco.qty != order.qty || order.limit_price.is_some() || order.stop_price.is_some() {
                 return Err(WireError::WrongType { field: "oco" });
             }
             Some(("oco", oco.take_profit, oco.stop))
@@ -419,15 +419,31 @@ fn new_york_date(fields: &Map<String, Value>, field: &'static str) -> Result<Dat
     Ok(new_york_date_and_hour(at)?.0)
 }
 
-/// The broker's order id, which the cancel puts in a path (`/v2/orders/{id}`). Alpaca's is a UUID,
-/// so an id outside `[A-Za-z0-9-]+` is not one this crate can read: a dot, a percent sign or a
-/// slash never reaches path building, behind the allowlist's own dot-segment rule (#174, #189).
-fn broker_id(fields: &Map<String, Value>) -> Result<String, WireError> {
-    let id = text(fields, "id")?;
-    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
-        return Err(WireError::WrongType { field: "id" });
+/// A broker order id: the entry's own, a leg's, or the one a replacement names. The cancel puts
+/// each in a path (`/v2/orders/{id}`), and Alpaca's is a UUID, so an id outside `[A-Za-z0-9-]+`
+/// is not one this crate can read: a dot, a percent sign or a slash never reaches path building,
+/// behind the allowlist's own dot-segment rule (#174, #189).
+fn broker_id(raw: &str, field: &'static str) -> Result<String, WireError> {
+    checked_id(raw, field, b"")
+}
+
+/// A broker activity id, which becomes the activities cursor the next read sends as its
+/// `page_token`. Alpaca's is a timestamp, `::`, and a UUID, so the colon is the one byte it adds
+/// to a broker order id's alphabet; `&`, `=`, `%`, `.` and `/` stay refused, so no id can add a
+/// query parameter or move the path.
+fn activity_id(raw: &str) -> Result<String, WireError> {
+    checked_id(raw, "id", b":")
+}
+
+fn checked_id(raw: &str, field: &'static str, extra: &[u8]) -> Result<String, WireError> {
+    if raw.is_empty()
+        || !raw
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || extra.contains(&b))
+    {
+        return Err(WireError::WrongType { field });
     }
-    Ok(id.to_owned())
+    Ok(raw.to_owned())
 }
 
 fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
@@ -436,11 +452,11 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
         None | Some(Value::Null) => Vec::new(),
         Some(legs) => list(legs, "legs")?
             .iter()
-            .map(|leg| broker_id(object(leg, "legs")?))
+            .map(|leg| broker_id(text(object(leg, "legs")?, "id")?, "id"))
             .collect::<Result<_, WireError>>()?,
     };
     Ok(BrokerOrder {
-        broker_order_id: broker_id(fields)?,
+        broker_order_id: broker_id(text(fields, "id")?, "id")?,
         client_order_id: optional_text(fields, "client_order_id")?.map(str::to_owned),
         instrument: instrument(fields)?,
         side: side(fields)?,
@@ -450,7 +466,9 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
         stop_price: optional_price(fields, "stop_price")?,
         status: text(fields, "status")?.to_owned(),
         reject_code: None,
-        replaced_by_broker_order_id: optional_text(fields, "replaced_by")?.map(str::to_owned),
+        replaced_by_broker_order_id: optional_text(fields, "replaced_by")?
+            .map(|raw| broker_id(raw, "replaced_by"))
+            .transpose()?,
         legs,
         created_on: Some(new_york_date(fields, "created_at")?),
     })
@@ -474,7 +492,7 @@ fn fill_from(value: &Value) -> Result<BrokerFill, WireError> {
         });
     }
     Ok(BrokerFill {
-        fill_id: FillId(text(fields, "id")?.to_owned()),
+        fill_id: FillId(activity_id(text(fields, "id")?)?),
         client_order_id: optional_text(fields, "client_order_id")?.map(str::to_owned),
         instrument: instrument(fields)?,
         side: side(fields)?,
