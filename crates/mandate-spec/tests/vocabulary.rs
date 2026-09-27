@@ -14,8 +14,8 @@ use mandate_spec::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
 };
 use mandate_spec::document::{
-    Goal, LadderAction, LimitAction, ModelId, OnComplete, Pointer, Provenance, ProvenanceMap,
-    Source,
+    ApproverRef, Goal, LadderAction, LimitAction, ModelId, OnComplete, Pointer, Provenance,
+    ProvenanceMap, RuleId, Source,
 };
 use mandate_spec::policy::{KeyKind, LevelName, PolicyKey};
 use mandate_spec::risk::{
@@ -657,6 +657,83 @@ fn a_model_id_is_one_of_the_three_prefixes_and_a_lowercase_name() {
             id.model_type(),
             Some(kind),
             "the policy hierarchy's signal_model_types reads this prefix (§4.3)"
+        );
+    }
+}
+
+/// The two grammar checks stream H's tests PR added under DEC-128 item 22, so that an
+/// [`Autonomy`](mandate_spec::document::Autonomy) block can be built at all: a rule's id and an
+/// approver reference, each exactly the schema's pattern and nothing wider.
+#[test]
+fn a_rule_id_is_the_schemas_lowercase_snake_case() {
+    for accepted in [
+        "a",
+        "low_score",
+        "no_averaging_down",
+        "rule1",
+        &"a".repeat(32),
+    ] {
+        assert!(
+            RuleId::parse(accepted).is_ok_and(|id| id.as_str() == accepted),
+            "`{accepted}` is a rule id"
+        );
+    }
+    for refused in [
+        "",
+        "A",
+        "Low_score",
+        "1rule",
+        "_rule",
+        "low-score",
+        "low score",
+        "lowScore",
+        "low.score",
+        &"a".repeat(33),
+    ] {
+        assert_eq!(
+            RuleId::parse(refused)
+                .map(|id| id.as_str().to_owned())
+                .map_err(|e| e.code()),
+            Err("off_pattern"),
+            "`{refused}` is not a rule id"
+        );
+    }
+}
+
+#[test]
+fn an_approver_reference_is_a_role_or_a_user() {
+    for accepted in [
+        "role:approver",
+        "role:owner",
+        "role:workspace_admin",
+        "user:a",
+        "user:abc123",
+        "user:a_b",
+        "user:a-b",
+    ] {
+        assert!(
+            ApproverRef::parse(accepted).is_ok_and(|a| a.as_str() == accepted),
+            "`{accepted}` is an approver reference"
+        );
+    }
+    for refused in [
+        "",
+        "approver",
+        "role:",
+        "role:admin",
+        "role:Approver",
+        "user:",
+        "user:a.b",
+        "user:a b",
+        "group:approvers",
+        "role:approver:extra",
+    ] {
+        assert_eq!(
+            ApproverRef::parse(refused)
+                .map(|a| a.as_str().to_owned())
+                .map_err(|e| e.code()),
+            Err("off_pattern"),
+            "`{refused}` is not an approver reference"
         );
     }
 }

@@ -19,11 +19,14 @@
 //! [trading-domain spec §2.1]: ../../../docs/specs/trading-domain.md#21-numbers
 
 mod exact;
+mod sizing;
 
 use core::fmt;
 
 use exact::Exact;
 use rust_decimal::Decimal;
+
+pub use sizing::{COMBINE_SCALE, Conviction, Signed, SizeFraction, Unit, UsdExact};
 
 /// Rounding modes named by the trading-domain spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +55,10 @@ pub enum NumError {
     DivisionByZero,
     #[error("the value must not exceed one")]
     AboveOne,
+    /// The stubs of the E6-2 tests PR return this, so every pending test fails on them (DEC-77,
+    /// DEC-83, DEC-110); the implementation PR replaces the stubs and removes the variant.
+    #[error("this arithmetic is not implemented yet")]
+    Unimplemented,
 }
 
 impl NumError {
@@ -65,6 +72,7 @@ impl NumError {
             Self::NotPositive => "not_positive",
             Self::DivisionByZero => "division_by_zero",
             Self::AboveOne => "above_one",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }

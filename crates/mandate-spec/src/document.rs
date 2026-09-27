@@ -476,6 +476,27 @@ pub struct Rule {
 pub struct RuleId(String);
 
 impl RuleId {
+    /// The schema's `$defs/rule/properties/id`: `^[a-z][a-z0-9_]{0,31}$`.
+    ///
+    /// A grammar check with no rule logic, added by stream H's tests PR under DEC-128 item 22 for
+    /// the reason that admitted [`ModelId::parse`]: §6.2's rule walk is stream H's, and an
+    /// [`Autonomy`] block keyed by a type with no public constructor cannot be built at all, so
+    /// every autonomy test would have to go through the mandate parser to reach one rule.
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        let off_pattern = || ParseError::OffPattern {
+            path: Pointer::new("/autonomy/rules/id"),
+        };
+        let mut bytes = text.bytes();
+        let first = bytes.next().ok_or_else(off_pattern)?;
+        if !first.is_ascii_lowercase() || text.len() > 32 {
+            return Err(off_pattern());
+        }
+        if !bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_') {
+            return Err(off_pattern());
+        }
+        Ok(Self(text.to_owned()))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -501,6 +522,31 @@ pub enum OnTimeout {
 pub struct ApproverRef(String);
 
 impl ApproverRef {
+    /// The schema's approver form: `role:approver`, `role:owner`, `role:workspace_admin`, or
+    /// `user:` and one to 64 of `[A-Za-z0-9_-]`. A grammar check with no rule logic, added beside
+    /// [`RuleId::parse`] and for the same reason (DEC-128 item 22): an [`Approval`] cannot be built
+    /// without one.
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        let off_pattern = || ParseError::OffPattern {
+            path: Pointer::new("/autonomy/approval/approvers"),
+        };
+        let allowed = match text.split_once(':') {
+            Some(("role", role)) => matches!(role, "approver" | "owner" | "workspace_admin"),
+            Some(("user", user)) => {
+                (1..=64).contains(&user.len())
+                    && user
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+            }
+            _ => false,
+        };
+        if allowed {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(off_pattern())
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
