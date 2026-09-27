@@ -351,19 +351,3 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
   spelling that asset id claims it; DEC-132 item 12 and the merged test admit it. Align `ref.py`.
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
-
-From the independent reviews of stream I's implementation (`mandate-runtime`, #151, round 4):
-
-- A risk-limit kill switch is lifted by a looser account copy caused by any `OwnerAcknowledged` the
-  fold has seen, not only the acknowledgment of that switch. Once `KillSwitchActivated` names its
-  limit, match the acknowledgment's subject to the switch before lifting.
-- A risk-limit switch pulled while the agent is already paused records no mode change, so it can
-  never be confirmed or lifted. This fails closed, but two limits in one cycle leave the agent paused
-  until redeploy; give the second switch a confirmable record.
-- Re-letter DEC-131 item 25's list, which reads (i), (j), (l).
-
-From the independent review of the risk-gate fuzz correction (#166):
-
-- `crates/mandate-risk/tests/fuzz.rs`'s `EVERY_COUNTER` reset list has no tie to the coverage `seen`
-  list, so a counter added to one but not the other lets later seeds pass on earlier evidence. Assert
-  their lengths match in the E6-3 implementation PR.
