@@ -456,6 +456,7 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **`mandate-executor` slice 6, the cash slice:** reconciliation's cash and fee comparisons (§11 steps 4 and 5), the fee balances they read (the broker's unposted fees, crypto asset fees, fill notional), and the owner acknowledgment that lifts a reconciliation restriction (interpretation 14). It clears the row below. Until it lands, slice 5's run refuses with its stub whenever the broker has reported an account or the run is a fee posting, so the executor stops rather than publishing a run that skipped a comparison (DEC-140's slice-5 amendment).
 - **Blocks the gate port reading `buying_power`:** subtract the broker's own unposted fees in
   `ExecutorState::buying_power`. Since slice 4 it is the lower of the broker's figure and the model
   (reported cash moved by every fill since, less paper's simulated fees), less reservations, but a

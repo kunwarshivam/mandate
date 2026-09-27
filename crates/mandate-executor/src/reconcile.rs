@@ -85,7 +85,7 @@ pub(crate) fn run(
         }
     }
     positions(batch, snapshot, &mut differences)?;
-    cash_and_fees(batch, snapshot)?;
+    cash_and_fees(&batch.view, snapshot)?;
     let unexplained = differences
         .iter()
         .any(|difference| !difference.adopted && difference.kind != DifferenceKind::MissingFill);
@@ -335,8 +335,8 @@ fn positions(
 /// always has fees to compare, so either answers the later slice's stub and the executor stops
 /// rather than publishing a run that skipped a comparison. Before any account is reported there is
 /// no base to compare the broker's cash with, as in the full comparison.
-fn cash_and_fees(batch: &Batch<'_, '_>, snapshot: &BrokerSnapshot) -> Result<(), ExecutorError> {
-    if batch.view.observed.is_some() || snapshot.reason == ReconcileReason::FeePosting {
+fn cash_and_fees(state: &ExecutorState, snapshot: &BrokerSnapshot) -> Result<(), ExecutorError> {
+    if state.observed.is_some() || snapshot.reason == ReconcileReason::FeePosting {
         return Err(ExecutorError::Unimplemented { story: "E7-3" });
     }
     Ok(())
@@ -391,4 +391,76 @@ fn restrict(
         what: "a restriction on no agent".to_owned(),
         story: "E7-3",
     })
+}
+
+/// The cash and fee comparisons are the next slice's, so a run that would need either refuses
+/// rather than skipping it (§11).
+#[cfg(test)]
+mod tests {
+    use mandate_num::Usd;
+
+    use super::cash_and_fees;
+    use crate::error::ExecutorError;
+    use crate::state::{ExecutorState, ObservedAccount};
+    use crate::types::{
+        AccountRef, AccountScope, AccountState, ActivityCursor, BrokerAccount, BrokerSnapshot,
+        ReconcileReason, Seq, WorkspaceId,
+    };
+
+    fn snapshot(reason: ReconcileReason) -> BrokerSnapshot {
+        BrokerSnapshot {
+            open_orders: Vec::new(),
+            positions: Vec::new(),
+            account: BrokerAccount {
+                status: "ACTIVE".to_owned(),
+                crypto_status: "ACTIVE".to_owned(),
+                trading_blocked: false,
+                account_blocked: false,
+                trade_suspended_by_user: false,
+                multiplier: 1,
+                equity: Usd::ZERO,
+                cash: Usd::ZERO,
+                buying_power: Usd::ZERO,
+                non_marginable_buying_power: Usd::ZERO,
+                accrued_fees: Usd::ZERO,
+            },
+            fills: Vec::new(),
+            cursor: ActivityCursor("cursor-1".to_owned()),
+            reason,
+            taken_at_head: Seq(1),
+        }
+    }
+
+    #[test]
+    fn a_run_with_cash_or_fees_to_compare_refuses_until_the_cash_slice() {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let refused = Err(ExecutorError::Unimplemented { story: "E7-3" });
+        assert_eq!(
+            cash_and_fees(&state, &snapshot(ReconcileReason::Scheduled)),
+            Ok(()),
+            "with no account reported and no fee posting there is nothing to compare"
+        );
+        assert_eq!(
+            cash_and_fees(&state, &snapshot(ReconcileReason::FeePosting)),
+            refused,
+            "a fee posting always has fees to compare"
+        );
+        state.observed = Some(ObservedAccount {
+            state: AccountState::Active,
+            multiplier: 1,
+            equity: Usd::ZERO,
+            cash: Usd::ZERO,
+            buying_power: Usd::ZERO,
+            non_marginable_buying_power: Usd::ZERO,
+            accrued_fees: Usd::ZERO,
+        });
+        assert_eq!(
+            cash_and_fees(&state, &snapshot(ReconcileReason::Scheduled)),
+            refused,
+            "once the broker has reported an account there is a cash figure to compare"
+        );
+    }
 }

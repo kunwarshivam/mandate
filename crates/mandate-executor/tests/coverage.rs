@@ -2000,3 +2000,101 @@ fn a_fill_on_a_pending_cancel_or_replace_keeps_its_state() {
         );
     }
 }
+
+/// §11 step 1 compares only the orders the broker could still hold: an intent the gate denied has
+/// no order, and a terminal order is finished, so neither is adopted when the broker lists neither.
+#[test]
+fn a_reconciliation_compares_only_live_orders() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "canceled",
+        ))),
+        &ports,
+    );
+    let denied = shell.run(
+        handoff(OTHER_INTENT, common::AGENT, opening(CPHC, "1", "20")),
+        &ports,
+    );
+    assert!(
+        denied.submissions().is_empty(),
+        "the second intent has no order"
+    );
+
+    let head = shell.head().0;
+    let ran = shell.run(
+        Input::BrokerSnapshot(snapshot(head, ReconcileReason::Scheduled)),
+        &ports,
+    );
+    assert!(
+        ran.draft_types().contains(&"ReconciliationRun"),
+        "the run completes: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        !ran.draft_types().contains(&"CompensatingEvent"),
+        "and adopts nothing: {:?}",
+        ran.draft_types()
+    );
+    assert_eq!(
+        shell.state.order(&key(&id)).map(|order| order.state),
+        Some(OrderState::Canceled),
+        "the finished order stays finished"
+    );
+}
+
+/// §11, DEC-140: until the cash slice, a run that would compare cash or fees stops the executor
+/// with its stub, like every refusal (DEC-85), and publishes no run that skipped a comparison.
+#[test]
+fn a_run_that_would_compare_cash_or_fees_stops_and_publishes_nothing() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let head = shell.head().0;
+    let refused = shell.step(
+        Input::BrokerSnapshot(snapshot(head, ReconcileReason::FeePosting)),
+        &ports,
+    );
+    assert_eq!(
+        refused.map(|ran| ran.draft_types().len()),
+        Err(ExecutorError::Unimplemented { story: "E7-3" }),
+        "a fee posting has fees to compare, so the run refuses"
+    );
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(broker_account())),
+        &ports,
+    );
+    let head = shell.head().0;
+    let refused = shell.step(
+        Input::BrokerSnapshot(snapshot(head, ReconcileReason::Scheduled)),
+        &ports,
+    );
+    assert_eq!(
+        refused.map(|ran| ran.draft_types().len()),
+        Err(ExecutorError::Unimplemented { story: "E7-3" }),
+        "once the broker has reported an account there is cash to compare, so the run refuses"
+    );
+    assert!(
+        !shell
+            .account_journal
+            .iter()
+            .any(|event| event.event_type == "ReconciliationRun"),
+        "and no run was journaled as covering a comparison it skipped"
+    );
+    assert_eq!(shell.state.reconciled_through(), None);
+}
