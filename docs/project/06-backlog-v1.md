@@ -511,16 +511,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
   `day` taken straight from the broker's `trade_date`, bypassing the account's calendar, passes the
   suite. A fixture with a Saturday or holiday `trade_date` pins it (#196 review, round 2, finding 1).
-- **Decide before E7-3's cash slice:** how an asset-denominated crypto fee is journaled. Two pending
-  E7-3 tests fold `FeesCharged` with `family: "crypto_asset"`, no `day`, and an `instrument`:
-  `hand::unposted_crypto_asset_fees_explain_the_crypto_difference` and the RC-07 harness reached
-  by `refcases::trading_domain_rc_07_unposted_crypto_fees_reconcile`. `crypto_asset` is a `FeeKind`
-  payload name, not a `FeeFamily` (`Equities | Crypto`), and `mandate-refcases`'s reference
-  implementation refuses it as an unknown fee family, so both die on the fold. Unlike `sec_31` (#197)
-  the fix is not a literal swap: §6.3 says asset-denominated fees are not accrued liabilities, which
-  suggests that path should not journal a `FeesCharged` at all. Settle the event first (the
-  coordinator's call, with a decision-log row), then correct both tests in one reviewed
-  tests-correction PR so E7-3's implementer isn't blocked (#197 review, round 1, finding 1).
+- Reconcile journal spec §9's "daily snapshot" with `AccountSnapshotRecorded`'s cadence in
+  `mandate-executor`: since the cash slice every reconciliation run that has a base records one
+  (at startup, at each `Unknown`, at session boundaries, at fee postings). Either the spec line
+  names every run, or the executor records the daily one only and carries the comparison's base
+  another way (#205 review, round 1, finding 7a).
+- Give `AccountSnapshotRecorded` one shape in `mandate-executor`: a fee posting with no cash base
+  records it through `fees()`'s fallback without `model_cash`, `cash_band` or `cash_in_band`,
+  while a run with a base records all three (#205 review, round 1, finding 7b).
+- Answer an underflow in `mandate-executor`'s `asset_fees` with a typed error: a posted crypto asset
+  fee larger than the one held is folded as `checked_sub(charged).unwrap_or(Qty::ZERO)`, which errs
+  strict but silently, where the crate's convention is a typed error (#205 review, round 1,
+  finding 7c).
+- Wire the gate's buying-power port in `mandate-executor`. `ExecutorState::buying_power` and
+  `crypto_buying_power` are computed and pinned but only tests read them; the gate still checks no
+  buying power. The port must read the equity row for an equity order and the crypto row for a
+  crypto order, and treat `None` (no account reported, an incomplete report, or an overflow) as no
+  buying power, failing closed (`AGENTS.md` rule 3; #205 review, round 1).
 - Make the reproduction line `ci pending` prints runnable as printed: quote the `-E` filterset
   (it contains parentheses, so a shell refuses it) and add `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
   which the gate sets and nextest requires for libtest JSON. Both fail loudly today rather than

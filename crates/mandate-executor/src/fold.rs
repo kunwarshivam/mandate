@@ -132,7 +132,12 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
+        "AccountStateObserved" => account_observed(state, payload),
+        "AccountSnapshotRecorded" => {
+            account_observed(state, payload)?;
+            cash_compared(state, payload);
+            Ok(())
+        }
         "RejectObserved" => {
             state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
                 state.consecutive_403s.saturating_add(1)
@@ -628,6 +633,20 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
     Ok(())
 }
 
+/// A reconciliation's recorded snapshot says whether the broker's cash fell inside the band. The
+/// consecutive runs outside it are counted here, from the journal, so the count survives the
+/// re-anchor the snapshot makes and a restart (§11, DEC-145); a snapshot that compared no cash
+/// leaves it alone.
+fn cash_compared(state: &mut ExecutorState, payload: &Value) {
+    match payload.get("cash_in_band") {
+        Some(Value::Bool(true)) => state.cash_out_of_band = 0,
+        Some(Value::Bool(false)) => {
+            state.cash_out_of_band = state.cash_out_of_band.saturating_add(1);
+        }
+        _ => {}
+    }
+}
+
 /// Paper's simulated fee accrues in its `(family, day)` bucket, which buying power charges at
 /// `round(bucket, 2, ceiling)` as `mandate-accounting` charges it (trading-domain spec §6.2, §7.2,
 /// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
@@ -670,8 +689,14 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
 
 /// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
 /// pause it caused (trading-domain spec §11, interpretation 14).
+///
+/// The owner is who authorizes it: the event reaches the account stream only as a copy from the
+/// control stream, which only the owner-facing surface writes, and it names its `user` (required,
+/// opaque) and carries step-up evidence. Inside this crate nothing else tells an owner from an
+/// agent (journal spec §9, #205 review, round 1, finding 6).
 fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let subject = required_text(payload, "subject")?;
+    required_text(payload, "user")?;
     if required_text(payload, "step_up")?.is_empty() {
         return Ok(());
     }
@@ -840,7 +865,7 @@ mod buying_power_tests {
         Input as AccountingInput, InstrumentId, Record, Reservations, Side, TafCapBasis,
     };
     use mandate_canon::Value;
-    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, Usd};
+    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, SignedQty, Usd};
     use mandate_time::{Date, NewYorkTime, TradingCalendar, new_york_instant};
 
     use super::fold;
@@ -965,6 +990,47 @@ mod buying_power_tests {
             stream.state.buying_power(),
             Some(usd("950")?),
             "a later report is the new base: the fills before it are in the broker's cash"
+        );
+        Ok(())
+    }
+
+    /// §6.3 and §11's crypto row, as DEC-146 records: an asset-denominated crypto fee is not an
+    /// accrued USD liability. It leaves the position net of the fee, is held per instrument in
+    /// `asset_fees` until it posts, and never reaches the USD `unposted_fees` the cash band and the
+    /// fee comparison read.
+    #[test]
+    fn a_crypto_asset_fee_is_held_in_the_asset_never_as_usd() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold(
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-btc")),
+                ("instrument", text("BTC/USD")),
+                ("side", text("buy")),
+                ("qty_gross", text("0.5")),
+                ("price", text("60000")),
+            ],
+        )?;
+        stream.fold(
+            "FeesCharged",
+            vec![
+                ("family", text("crypto_asset")),
+                ("accrued", text("0.00125")),
+                ("charged", text("0")),
+                ("instrument", text("BTC/USD")),
+            ],
+        )?;
+        let btc = InstrumentId::new("BTC/USD")?;
+        assert_eq!(
+            stream.state.asset_fees.get(&btc).copied(),
+            Some(Qty::parse("0.00125")?),
+            "held in the asset"
+        );
+        assert_eq!(stream.state.unposted_fees, Usd::ZERO, "never as USD");
+        assert_eq!(
+            stream.state.positions.get(&btc).copied(),
+            Some(SignedQty::parse("0.49875")?),
+            "the position is net of the fee"
         );
         Ok(())
     }
