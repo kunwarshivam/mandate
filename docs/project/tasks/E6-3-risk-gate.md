@@ -590,7 +590,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | trading §3.2 item 6 an unclassified or stale ETP fails closed | `hand::an_unclassified_etp_is_complex`, `hand::a_stale_classification_denies_an_etp_opening`, `properties::etp_fails_closed`, `RC-16::leveraged_etps_enabled` |
 | trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits` |
 | trading §4.3 sessions: regular-session openings, extended-hours exits as limit orders, nothing overnight | `hand::an_opening_outside_the_regular_session_is_denied`, `hand::an_extended_hours_opening_needs_a_limit`, `RC-25` |
-| trading §4.3 the opening auction and market orders are `auction_window`; the closing ten minutes are `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order`, `hand::the_close_window_follows_the_early_close_calendar` |
+| trading §4.3 a market opening in either auction window is `auction_window` and a market exit there is re-priced (DEC-159); the closing ten minutes are `close_window` | `RC-25` step 2, `hand::an_auction_window_denies_a_market_opening_and_reprices_a_market_exit`, `hand::the_close_window_follows_the_early_close_calendar` |
 | trading §4.4 a halt, and a dropped status feed as a presumed halt | `hand::a_halted_instrument_denies_an_opening`, `hand::a_dropped_status_feed_is_a_presumed_halt` |
 | trading §5.3 rules 1 to 9 in list order, and the first-pass exclusion of the agent's own orders | `hand::order_constraints_report_the_first_failing_rule`, `hand::the_first_pass_excludes_the_agents_own_protective_orders`, `RC-03::gate_rejects_zero_crossing_order` |
 | trading §7.3 account states: `blocked` denies every purpose, `closing_only` allows exits | `RC-15` and its three variants, `hand::a_blocked_account_holds_even_a_risk_exit`, `hand::three_consecutive_unexplained_403s_restrict_the_account` |
@@ -751,6 +751,9 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     increasing order in the closing ten minutes is check 6's `close_window`, which is how the reason
     registry annotates the two. Nothing is lost: an opening order at 09:28 is in pre-market and
     check 3's session rule already denies it.
+    **Amended by DEC-159:** `auction_window` denies a market *opening* only; a market-order exit
+    of any purpose in either window is allowed and sent as a marketable limit
+    (`Pacing::marketable_limit_required`), as items 28 and 31 do under a halt.
 19. **The `kind: gate` harness runs `ref.py`'s `gate`, not the whole of §9.1** (DEC-85 style). Those
     cases carry a `purpose`, a `state`, and a `proposed` order and nothing that could feed checks 1,
     3, 4, 5, or 8 — no session, no quote, no account status — so the harness passes the case's
@@ -963,7 +966,7 @@ missing test, and the tests PR does not merge with one.
 | 40 | The decision is not deterministic: the check list is built from a `HashMap` iteration | `properties::mi8_identical_inputs_give_identical_decisions` (and clippy's `disallowed-types`, which is why the crate is `pure`) |
 | 41 | `paused` holds a protective order, or lets a non-kill-switch `risk_exit` through | `hand::a_protective_order_is_never_held_by_a_mode`, `hand::a_paused_agent_holds_a_plain_risk_exit`, `properties::a_hold_follows_the_mode_rule_exactly` |
 | 42 | A kill switch's own `risk_exit` is held by `paused` | `hand::a_kill_switch_order_is_exempt_from_paused`, `properties::a_hold_follows_the_mode_rule_exactly`. Not `MC-F02`: `agent_flatten` takes no mode and never runs the mode rule, so no `kind: agent_flatten` case can catch this |
-| 43 | The closing ten minutes report `auction_window` instead of `close_window` | `RC-25` step 2, `hand::the_opening_auction_denies_a_market_order` (the other half: the opening auction still reports `auction_window`) |
+| 43 | The closing ten minutes report `auction_window` instead of `close_window` | `RC-25` step 2, `hand::an_auction_window_denies_a_market_opening_and_reprices_a_market_exit` (the other half: a market opening at 15:55 ET still reports `auction_window`) |
 | 44 | Check 7 subtracts reservations a second time from `Account::buying_power`'s figure | `RC-18` step 3 (449.97 after the reservation, not 449.97 less it again), `properties::buying_power_is_the_lower_of_the_two` |
 | 45 | `evaluate_cancel` applies the resting-time rule to a cancel that precedes a risk-reducing order | `hand::a_cancel_before_a_risk_reducing_order_is_exempt`, `properties::a_cancel_that_precedes_a_reduction_is_never_denied` |
 | 46 | The `kind: gate` harness reassigns the case's `purpose` from side and position, turning `MC-G15` into a denial | `MC-G15`, `harness::a_gate_case_purpose_is_passed_through` |
