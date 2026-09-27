@@ -236,22 +236,21 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
     Ok(())
 }
 
-/// The state the repository is in: every production adapter a stub.
+/// The production stages with no mandate file and no dataset refuse before anything could be sent:
+/// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
-fn the_production_stages_refuse_to_start() -> Result<(), String> {
+fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
     let mut stages = production(Sources {
-        mandate: PathBuf::from("mandate.json"),
-        dataset: PathBuf::from("bars"),
+        mandate: PathBuf::from("no-such-mandate.json"),
+        dataset: PathBuf::from("no-such-dataset"),
         journal: None,
         agent: AgentId("tracer-aapl".to_owned()),
         transport: (),
     });
     let error = refusal(run_with(&mut stages)?)?;
-    assert_eq!(error.code(), "exit_path_unavailable");
-    assert_eq!(
-        error.to_string(),
-        "the tracer stopped at FlattenProbe: this stage is not implemented yet (pending E7-7)"
-    );
+    let stage = error.stage().ok_or(format!("{error}"))?;
+    assert!(stage.position() <= Stage::Validate.position(), "{error}");
+    assert_eq!(error.code(), stage.code());
     Ok(())
 }
 
@@ -432,6 +431,25 @@ fn a_restart_sends_nothing_and_a_repeat_run_is_refused() -> Result<(), String> {
     assert_eq!(tally.hands, 1);
     assert_eq!(ledger.count("IntentProposed"), 1);
     assert_eq!(ledger.count("ReconciliationRun"), 2);
+    Ok(())
+}
+
+/// TI-12 counts intents, not events: a stream whose last run was denied at the gate carries no
+/// intent, so the next run is a new decision rather than a refusal.
+#[test]
+fn a_denied_run_leaves_no_cycle_open() -> Result<(), String> {
+    let world = World::default();
+    let mut denying = world.stages();
+    denying.gate = Box::new(FixedGate {
+        world: world.clone(),
+        verdict: Verdict::Deny,
+        checks: passed_checks(),
+    });
+    let error = refusal(run_with(&mut denying)?)?;
+    assert_eq!(error.code(), "gate_refused");
+    assert!(!world.ledger.borrow().bodies().is_empty());
+    let report = run_with(&mut world.stages())?.map_err(|e| e.to_string())?;
+    assert_eq!(report.submitted.len(), 1);
     Ok(())
 }
 

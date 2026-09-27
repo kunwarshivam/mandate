@@ -56,6 +56,8 @@ mod tests {
             "http://127.0.0.1:8080",
             "paper-api.alpaca.markets",
             "  HTTPS://API.ALPACA.MARKETS  ",
+            "ftp://10.0.0.1:21",
+            "http:10.0.0.1",
         ] {
             assert_eq!(
                 refused_var(&[("PATH", "/usr/bin"), ("ALPACA_HOST", value)]).as_deref(),

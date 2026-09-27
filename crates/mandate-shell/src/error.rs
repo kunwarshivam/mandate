@@ -176,3 +176,59 @@ impl ShellError {
 pub(crate) fn refused(stage: Stage) -> impl FnOnce(Cause) -> ShellError {
     move |cause| ShellError::Refused { stage, cause }
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_executor::{BrokerUnknown, ConnectorError};
+    use mandate_runtime::SinkError;
+
+    use super::{Cause, ShellError};
+    use crate::stages::Stage;
+
+    #[test]
+    fn a_cause_carries_its_upstream_code() {
+        let cases = [
+            (Cause::Unimplemented { story: "E7-7" }, "unimplemented"),
+            (
+                Cause::Connector(ConnectorError::Unknown(BrokerUnknown::Timeout)),
+                "timeout",
+            ),
+            (
+                Cause::Connector(ConnectorError::Unreadable { code: "wire" }),
+                "wire",
+            ),
+            (
+                Cause::Connector(ConnectorError::NotSent {
+                    code: "refused_path",
+                }),
+                "refused_path",
+            ),
+            (Cause::Sink(SinkError::Unavailable), "sink_unavailable"),
+            (
+                Cause::Sink(SinkError::Refused {
+                    reason: "closed".to_owned(),
+                }),
+                "sink_refused",
+            ),
+            (Cause::Append { outcome: "Fenced" }, "append_refused"),
+            (Cause::Absent { what: "gap" }, "absent"),
+        ];
+        for (cause, code) in cases {
+            assert_eq!(cause.code(), code, "{cause:?}");
+        }
+    }
+
+    #[test]
+    fn a_refusal_reports_its_stages_code_and_names_its_stage() {
+        for stage in Stage::ALL {
+            let error = ShellError::Refused {
+                stage,
+                cause: Cause::Unimplemented { story: "E7-7" },
+            };
+            assert_eq!(error.code(), stage.code());
+            assert_eq!(error.stage(), Some(stage));
+        }
+        assert_eq!(ShellError::CycleAlreadyOpen.stage(), None);
+        assert_eq!(ShellError::SecondSubmission.code(), "one_order_only");
+    }
+}

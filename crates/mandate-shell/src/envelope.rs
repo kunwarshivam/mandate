@@ -250,11 +250,20 @@ mod tests {
             field("event_time").as_deref(),
             Some("2026-09-25T20:00:00.000000000Z")
         );
-        let kind = envelope
-            .get("actor")
-            .and_then(|actor| actor.get("kind"))
-            .and_then(Value::as_str);
-        assert_eq!(kind, Some("system"));
+        let actor = |name: &str| {
+            envelope
+                .get("actor")
+                .and_then(|actor| actor.get(name))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        assert_eq!(actor("kind").as_deref(), Some("system"));
+        assert_eq!(actor("id").as_deref(), Some("executor"));
+        assert_eq!(actor("version").as_deref(), Some(env!("CARGO_PKG_VERSION")));
+        let build = mandate_canon::Digest::of(
+            format!("mandate-shell/{}", env!("CARGO_PKG_VERSION")).as_bytes(),
+        );
+        assert_eq!(actor("build"), Some(format!("sha256:{}", build.to_hex())));
         Ok(())
     }
 
