@@ -3118,6 +3118,7 @@ fn protection_is_not_re_placed_early() {
         shell
             .state
             .protection(&instrument(AAPL))
+            .expect("the protection accessor answers")
             .is_some_and(|p| p.resting.iter().any(|id| id.as_str() == "md-oco-1")),
         "and the resting OCO stays where it is"
     );
@@ -4275,6 +4276,7 @@ fn entering_exits_only_leaves_protective_orders_resting() {
         shell
             .state
             .protection(&instrument(AAPL))
+            .expect("the protection accessor answers")
             .is_some_and(|p| !p.resting.is_empty()),
         "and the fold still carries them"
     );
