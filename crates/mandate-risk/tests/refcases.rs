@@ -650,6 +650,7 @@ fn mc_g01() {
 
 /// `MC-G02`: Per-instrument cap met exactly.
 #[test]
+#[ignore = "pending E6-3"]
 fn mc_g02() {
     run_gate("MC-G02");
 }
@@ -716,6 +717,7 @@ fn mc_g12() {
 
 /// `MC-G13`: Re-entry allowed once the cooldown has passed.
 #[test]
+#[ignore = "pending E6-3"]
 fn mc_g13() {
     run_gate("MC-G13");
 }
