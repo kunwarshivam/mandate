@@ -55,6 +55,14 @@ jobs:
         if: steps.change.outputs.docs_only != 'true'
         with:
           tool: cargo-nextest@0.9.146,typos@1.50.2
+      # `test` runs xtask's own tests, and one of them drives the whole mutation gate over a fixture
+      # repository, so this check needs the tool the gate calls as well (DEC-139).
+      - name: Install cargo-mutants (checksum-verified)
+        if: steps.change.outputs.docs_only != 'true'
+        run: |
+          curl -sSfL -o cargo-mutants.tgz "https://github.com/sourcefrog/cargo-mutants/releases/download/v${CARGO_MUTANTS_VERSION}/cargo-mutants-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_MUTANTS_SHA256}  cargo-mutants.tgz" | sha256sum --check
+          tar xzf cargo-mutants.tgz cargo-mutants && sudo install cargo-mutants /usr/local/bin/ && rm cargo-mutants cargo-mutants.tgz
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         if: steps.change.outputs.docs_only != 'true'
         run: rustup show active-toolchain || rustup toolchain install
