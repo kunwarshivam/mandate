@@ -320,7 +320,6 @@ proptest! {
 
     /// The eligibility floor fails closed for anything the ETP source has not classified.
     #[test]
-    #[ignore = "pending E6-7"]
     fn etp_fails_closed(unclassified in any::<bool>()) {
         let mut s = Scenario::allowing();
         s.instrument.etp = if unclassified {
