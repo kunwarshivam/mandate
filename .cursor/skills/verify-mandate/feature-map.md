@@ -157,8 +157,8 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
 and DEC-131, and implemented in the DEC-77 stage-3 PR: every stub carries its real logic, the 88
-pending markers are gone, and all 97 tests run live: the round-3 sanctioned case plus the eight the round-1
-implementation review's ruling added, one per finding (DEC-131 item 25(k)).
+pending markers are gone, and all 99 tests run live: the round-3 sanctioned case plus the ten the
+implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -180,7 +180,7 @@ implementation review's ruling added, one per finding (DEC-131 item 25(k)).
   fold can rebuild state from). Over
   `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** `crates/mandate-runtime/tests/hand.rs` (71 hand cases: the fold's sequencing and loud
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (73 hand cases: the fold's sequencing and loud
   refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
   approvals, version application, recovery, and the kill switches),
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no

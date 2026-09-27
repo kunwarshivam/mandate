@@ -2393,7 +2393,10 @@ fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
         Mode::Paused,
         "a mandate limit's flatten pauses"
     );
-    let lifted = mode_applied(2, "normal", 110);
+    let the_accounts_own_pause = mode_applied(2, "paused", 110);
+    shell.fold_one(&the_accounts_own_pause).expect("folds");
+    shell.run(Input::Journal(the_accounts_own_pause), &ports);
+    let lifted = mode_applied(3, "normal", 120);
     shell.fold_one(&lifted).expect("folds");
     shell.run(Input::Journal(lifted), &ports);
     let resumed = shell.run(Input::Command(Command::Resume), &ports);
@@ -2412,13 +2415,101 @@ fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
 
     let mut terminal = armed_shell(&ports);
     terminal.run(kill(this_agent(), Initiator::Owner, None), &ports);
-    let ignored = mode_applied(2, "normal", 110);
+    let ignored = mode_applied(2, "paused", 110);
     terminal.fold_one(&ignored).expect("folds");
     terminal.run(Input::Journal(ignored), &ports);
+    let also_ignored = mode_applied(3, "normal", 120);
+    terminal.fold_one(&also_ignored).expect("folds");
+    terminal.run(Input::Journal(also_ignored), &ports);
     assert_eq!(
         terminal.state.effective_mode(),
         Mode::Stopped,
         "an owner stop is terminal and lifts for no one, the account stream included"
+    );
+
+    let mut stricter = armed_shell(&ports);
+    stricter.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let harsher_than_the_switch = mode_applied(2, "stopped", 110);
+    stricter.fold_one(&harsher_than_the_switch).expect("folds");
+    stricter.run(Input::Journal(harsher_than_the_switch), &ports);
+    let cleared = mode_applied(3, "normal", 120);
+    stricter.fold_one(&cleared).expect("folds");
+    stricter.run(Input::Journal(cleared), &ports);
+    assert_eq!(
+        stricter.state.effective_mode(),
+        Mode::Normal,
+        "a copied mode **stricter** than the switch's own confirms it just as its own mode does, so \
+         the clearance that follows still lifts it"
+    );
+}
+
+/// Round-2 review finding 1: the executor copies the runtime's `AgentModeChanged` back as
+/// `AgentModeApplied` (journal spec §2), so a switch's own `paused` returns as an account-stream
+/// fact. Retiring the switch on it would retire it the instant it was pulled, and a restart would
+/// then have no flatten to hand — the round-1 finding 1 fix defeated by its own echo.
+#[test]
+fn an_echo_of_its_own_pause_does_not_retire_the_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let the_executors_copy_of_our_own_mode = mode_applied(2, "paused", 110);
+    shell
+        .fold_one(&the_executors_copy_of_our_own_mode)
+        .expect("folds");
+    shell.run(Input::Journal(the_executors_copy_of_our_own_mode), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the echo of the switch's own mode is the account stream confirming it, never lifting it"
+    );
+
+    let (_after, started) = shell.restart(&ports);
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "so a restart still hands the unfinished flatten: a switch retired by its own echo is a \
+         switch that never reaches the executor at all: {:?}",
+        started.handed
+    );
+}
+
+/// Round-2 review finding 2: the streams have no global order (journal spec §2), so an
+/// `AgentModeApplied{normal}` written before the breach can fold after the switch command. Lifting on
+/// it would hand the agent back to `normal` with the breach unaddressed, and the very next tick would
+/// propose an opening order (`AGENTS.md` rules 1 and 3).
+#[test]
+fn a_stale_account_normal_does_not_lift_an_unconfirmed_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let written_before_the_breach = mode_applied(2, "normal", 110);
+    shell.fold_one(&written_before_the_breach).expect("folds");
+    shell.run(Input::Journal(written_before_the_breach), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a mode the account stream never confirmed the switch with cannot lift it: with no global \
+         order across streams, that `normal` may predate the breach entirely"
+    );
+
+    let ran = shell.run(Input::Tick(clock(200)), &ports);
+    assert!(
+        !ran.draft_types().contains(&"IntentProposed"),
+        "and nothing that adds risk follows: {:?}",
+        ran.draft_types()
     );
 }
 

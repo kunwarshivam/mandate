@@ -452,6 +452,19 @@ from one `handle` call:
 | `Handoff::Pending` | `IntentProposed` commits | `IntentReceived` on the account stream | Whether `Input::Started` hands it again. Once the executor has it, handing it again achieves nothing |
 | *live* (in either handoff state) | `IntentProposed` commits | a terminal outcome: a `GateDecided` denial, an `OrderAbandoned`, or a terminal order state | Whether it belongs in a flatten's `working_orders`. **An order the executor took and is working is exactly the one a kill switch must name** |
 
+**What the implementation of this table does and does not do** (DEC-131 item 25(d), round-2 review
+minor 3). The *live* end of the second row is not implemented: the fold interprets `GateDecided`,
+`OrderAbandoned`, and `OrderStateChanged` and changes nothing on them, so `outstanding` never
+shrinks. That is the safe direction for the column the row is about — an order stays in a flatten's
+cancel list rather than dropping out of it — and no case in the frozen suite folds a terminal
+outcome, so implementing it would be untested code under DEC-77. It has one **liveness cost**,
+stated here rather than left to be discovered: because taking the startup hold wants nothing
+outstanding, an agent that has ever proposed an intent takes the hold on every later restart, and
+stays `paused` until the next clean `ReconciliationRun` lifts it. Lifting does not wait on
+`outstanding` (that is the round-1 review's finding 4), so the cost is one reconciliation of
+latency after each restart and never a stuck agent. Closing it needs the executor's
+`client_order_id`-to-intent mapping, which is M6's, and a case that folds a terminal outcome.
+
 An earlier draft made these one set, ending at "`IntentReceived` followed by a terminal outcome",
 which is why the independent review found the brief and a test contradicting each other: with one
 set, either a restart re-hands an intent the executor already holds, or an order it took drops out of
