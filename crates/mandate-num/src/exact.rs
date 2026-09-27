@@ -180,6 +180,25 @@ impl Exact {
         })
     }
 
+    /// `floor(sqrt(self ÷ divisor), scale)`: the greatest value with `scale` fractional digits
+    /// whose square stays at or below the ratio, so a root taken this way never overstates the
+    /// figure it stands for — a backtest report's Sharpe with a non-negative sign (DEC-127 item 7).
+    /// The ratio is truncated at twice `scale`, which an integer root then turns into the floor of
+    /// the root itself: for an integer n, n² ≤ ratio × 10^2·scale exactly when
+    /// n² ≤ trunc(ratio × 10^2·scale). `division_by_zero` when `divisor` is zero.
+    pub(crate) fn floor_root_of_ratio(self, divisor: Self, scale: u32) -> Result<Self, NumError> {
+        let squared_scale = scale.checked_mul(2).ok_or(NumError::Overflow)?;
+        let (numerator, denominator, _) = self.quotient_terms(divisor, squared_scale)?;
+        let squared = numerator
+            .checked_div(denominator)
+            .ok_or(NumError::DivisionByZero)?;
+        Ok(Self {
+            negative: false,
+            magnitude: floor_sqrt(squared)?,
+            scale,
+        })
+    }
+
     /// Stores the value, dropping only trailing zeros; anything that would need rounding or more
     /// than 96 significand bits is an error.
     pub(crate) fn to_decimal(self, max_scale: u32) -> Result<Decimal, NumError> {

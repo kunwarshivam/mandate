@@ -400,7 +400,6 @@ proptest! {
     /// Every period return is one half-even rounding of the exact quotient, as the integer oracle
     /// computes it.
     #[test]
-    #[ignore = "pending E4-2"]
     fn returns_match_the_integer_oracle(bars in generated_bars()) {
         let run = generated_run(&bars);
         let observations = checked(&run, &bars);
@@ -417,7 +416,6 @@ proptest! {
 
     /// The variance's root never understates the variance: v² ≥ variance > (v − 10⁻¹²)².
     #[test]
-    #[ignore = "pending E4-2"]
     fn volatility_brackets_the_variance(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -436,7 +434,6 @@ proptest! {
     /// The Sharpe's sign is the sign of the excess mean, and its magnitude never exceeds the root of
     /// the squared figure.
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_sharpe_sign_matches_the_excess_mean(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -467,7 +464,6 @@ proptest! {
     /// The maximum drawdown, its amount, and both periods match a running-peak oracle that includes
     /// the starting equity as the first peak.
     #[test]
-    #[ignore = "pending E4-2"]
     fn max_drawdown_matches_the_running_peak_oracle(bars in generated_bars()) {
         let run = generated_run(&bars);
         let observations = checked(&run, &bars);
@@ -487,7 +483,6 @@ proptest! {
 
     /// Turnover is the smaller side over the starting equity, never the sum and never the half-sum.
     #[test]
-    #[ignore = "pending E4-2"]
     fn turnover_matches_the_min_of_the_two_sides(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -508,7 +503,6 @@ proptest! {
     /// Every figure recomputes from the figures the report shows: the sums, the count, the mean, the
     /// variance, and the period count are enough to rebuild the whole block (DEC-127 item 15).
     #[test]
-    #[ignore = "pending E4-2"]
     fn every_reported_statistic_recomputes_from_the_reported_inputs(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -548,7 +542,6 @@ proptest! {
 
     /// The annualized figures are the period figures times the period count, exactly.
     #[test]
-    #[ignore = "pending E4-2"]
     fn annualized_figures_scale_the_squares(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -564,7 +557,6 @@ proptest! {
     /// Each equity observation matches the ledger the sequencer folds independently, and each is
     /// taken at its period's closing bar.
     #[test]
-    #[ignore = "pending E4-2"]
     fn every_equity_observation_matches_the_independent_ledger(bars in generated_bars()) {
         let config = run_config(equity(), crossover(), "100000");
         let run = run(&config, &bars).expect("a generated run folds");
@@ -575,7 +567,6 @@ proptest! {
 
     /// A period is observed at its closing bar, and that bar's close is the mark behind it.
     #[test]
-    #[ignore = "pending E4-2"]
     fn every_period_marks_at_its_last_bars_close(bars in generated_bars()) {
         let run = generated_run(&bars);
         let observations = checked(&run, &bars);
@@ -591,7 +582,6 @@ proptest! {
 
     /// No order fills in the bar whose close decided it (§6.4 rule 1, DEC-127 item 2).
     #[test]
-    #[ignore = "pending E4-2"]
     fn no_order_fills_in_the_bar_that_decided_it(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -605,7 +595,6 @@ proptest! {
     /// At most one order works at a time (§5.3 rule 6): each order's decision bar is past the bar
     /// where the previous order stopped working.
     #[test]
-    #[ignore = "pending E4-2"]
     fn at_most_one_order_ever_works(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -640,7 +629,6 @@ proptest! {
     /// The run's fills are exactly what the fill model returns for the same order over the same whole
     /// bar slice: the loop re-derives nothing (DEC-127 item 18).
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_runs_fills_are_exactly_what_simulate_returned(bars in generated_bars()) {
         let config = run_config(equity(), crossover(), "100000");
         let run = run(&config, &bars).expect("a generated run folds");
@@ -665,7 +653,6 @@ proptest! {
 
     /// No fill ID is ever reused, so the fold never rejects a fill as a duplicate (DEC-127 item 21).
     #[test]
-    #[ignore = "pending E4-2"]
     fn no_fill_id_is_ever_reused(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -679,7 +666,6 @@ proptest! {
     /// The signal matches a rational comparison oracle that cross-multiplies the window sums as
     /// integers, and it never reads a close later than the period it is asked about.
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_signal_matches_the_rational_comparison_oracle(bars in generated_bars()) {
         let closes: Vec<Price> = sequencer::closing_bars(&bars)
             .into_iter()
@@ -698,7 +684,6 @@ proptest! {
     /// were. A loop that handed the signal a later close would decide differently on the earlier
     /// periods, which is the bug this discriminates.
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_signal_never_reads_a_later_close(bars in generated_bars()) {
         let config = run_config(equity(), crossover(), "100000");
         let first = run(&config, &bars).expect("a generated run folds");
@@ -732,7 +717,6 @@ proptest! {
     /// The strategy is long only and never crosses zero: no sell exceeds what is held, and no
     /// position ever goes short (DEC-32, §5.3 rule 3).
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_strategy_never_crosses_zero_and_never_goes_short(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -750,7 +734,6 @@ proptest! {
 
     /// The benchmark submits one order and never trades again.
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_benchmark_never_trades_after_its_first_order(bars in generated_bars()) {
         let config = run_config(equity(), buy_and_hold(), "100000");
         let run = run(&config, &bars).expect("a generated run folds");
@@ -763,7 +746,6 @@ proptest! {
     /// A higher fee never raises the return: fees are inside equity (§8.2), so raising a rate can only
     /// leave the return the same or lower it.
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_higher_fee_never_raises_the_return(bars in generated_bars()) {
         let mut cheap = run_config(equity(), crossover(), "100000");
         cheap.fees = no_equity_fees();
@@ -795,7 +777,6 @@ proptest! {
     /// what was submitted and what filled (DEC-127 items 10 and 22). A loop that summed net quantities,
     /// limit prices, or one side twice would disagree here.
     #[test]
-    #[ignore = "pending E4-2"]
     fn the_totals_recompute_from_the_runs_fills_and_orders(bars in generated_bars()) {
         let run = generated_run(&bars);
         checked(&run, &bars);
@@ -832,7 +813,6 @@ proptest! {
     /// Identical inputs give byte-identical reports and the same digest, which is the story's
     /// acceptance criterion.
     #[test]
-    #[ignore = "pending E4-2"]
     fn identical_inputs_give_byte_identical_reports(bars in generated_bars()) {
         let config = run_config(equity(), crossover(), "100000");
         let first = run(&config, &bars).expect("a generated run folds");
@@ -848,7 +828,6 @@ proptest! {
     /// A run repeated in the same process is equal in every field, not only in its bytes: no
     /// collection's order and no hash's seed reaches a figure (ES-21).
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_run_repeated_in_the_same_process_is_equal(bars in generated_bars()) {
         let config = run_config(equity(), crossover(), "100000");
         let first = run(&config, &bars).expect("a generated run folds");
