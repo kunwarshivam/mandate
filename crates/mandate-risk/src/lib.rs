@@ -41,7 +41,8 @@
 //! spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`].
 //! E6-9 adds check 3's halt and, at check 4, §4.4's "no market orders" under a presumed halt: a
 //! market opening is denied and a market exit is re-priced as a marketable limit (DEC-129 items 24
-//! and 28).
+//! and 28). E6-7 adds check 2's eligibility floor (§3.2, items 1 to 7 in list order), which makes
+//! checks 1 and 2 whole.
 //! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
 //! opening or increasing order the implemented checks would allow returns
 //! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
@@ -57,6 +58,7 @@ use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
 mod flatten;
+mod floor;
 mod gate;
 mod limits;
 #[doc(hidden)]
