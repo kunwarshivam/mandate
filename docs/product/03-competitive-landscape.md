@@ -204,31 +204,92 @@ for software-delivered strategies.
   recommendations in a blog guide, not as documented product features [SF5]. The guide tells the
   user to write the prompt "like an investment mandate" and says "A good agent is only as clear as
   the mandate behind it"; marketing says agents run "according to user-defined logic" [SF5] [SF9].
-- Terms (updated 2026-08-17): a "quantitative research platform" that "does not offer financial
-  advice"; trades are "at your direction" [SF8].
-- Vendor claim (launch page, more than a year old): "around 800 paying traders, over 34,000
-  signups, and $74,000 in monthly revenue" [SF6].
+- Terms (updated 2026-08-17): "Scalar Field is a quantitative research platform that provides
+  compute, data, and infrastructure for live trading"; it "does not offer financial advice"; trades
+  are "at your direction"; "All fees are non-refundable" [SF8].
+- AI disclosure (updated 2026-05-07): its AI "can create and manage automated trading agents that
+  execute buy and sell orders on your behalf". The user can "Set allocation limits and configure
+  risk parameters (e.g., maximum drawdown thresholds)", "Review and approve agent activation", and
+  "pause, resume, or emergency-liquidate any active agent at any time" [SF16].
+- The full docs describe a strategy lifecycle of Active, Frozen, and Paused, and
+  `strategy.liquidate()` as a flatten of the strategy's positions. `venue.trade()` is "Direct
+  execution — no approval workflow" [SF19].
+- Scheduled runs: "Each run starts with a clean slate — no state is carried over from previous
+  runs"; each run is capped at 3 minutes and 512 MB; a run triggered while the previous one is
+  still active "is skipped" [SF17].
+- Robinhood connection: "A desktop computer", "Google Chrome or Brave", and a bridge extension;
+  "Margin is not supported — buying power reflects cash only" [SF18].
+- Pricing is credit-metered: Free $0 with 10 credits, Pro $80 to $175 a month, Ultra $200 to $1,000
+  a month, Enterprise custom. Strategy agents are charged "0.01 credits / second" of execution
+  [SF14].
+- Fees disagree between pages. The pricing page lists Polymarket and Jupiter DEX with a "1% fee on
+  trades" [SF6]; the fees doc lists both at "0 bps (currently waived)" [SF15].
+- Venues over time. A pricing snapshot of 2026-06-01 lists Alpaca, Polymarket, and Jupiter DEX
+  under Trading, with "Public.com (coming soon)" and "Webull (coming soon)" [SF12]. The current
+  pricing page lists Robinhood, Alpaca, Public.com, Polymarket, Jupiter DEX, and Hyperliquid, with
+  "Webull (coming soon)" [SF6].
+- Timeline. A Show HN of 2024-12-18 described "a GPT-based quantitative research tool" (2 points)
+  [SF10]. First YC launch on 2025-05-08, "Reinventing the Trading Terminal, One Intelligent Agent
+  at a Time" [SF6]. A homepage snapshot of 2026-03-05 still reads "Your ultimate AI research
+  assistant designed to transform the way you explore trading ideas"; by 2026-06-25 the page
+  title is "Scalar Field | AI Agentic Trading Desk" [SF11]. Second YC launch on 2026-07-16, "The
+  agentic trading desk", with "approximately 300 ms event-to-trade latency" [SF7].
+- YC company page: team size 3 [SF13].
+- Vendor claim (first launch, 2025-05-08): "around 800 paying traders, over 34,000 signups, and
+  $74,000 in monthly revenue" [SF6]. No later traction figure was found. That is an absence of
+  evidence, not evidence of decline. The About page's team and funding text could not be
+  corroborated elsewhere [SF21].
 
-**What it does not document.** Order types and paper availability for its Robinhood path;
-cross-strategy capital arbitration; a kill switch; approvals; export or integrity of logs.
+**Reported.** Trustpilot shows 3 reviews with a TrustScore of 3.4. A 1-star review of June 2026
+says "lost a tonne of money on this janky platform"; a 5-star review of July 2026 says "From
+robinhood to polymarket, can trade everything"; the third, from 2024, concerns hiring assessments
+[SF20].
+
+**What it does not document.** As of 2026-09-27, the full docs were not found to describe a
+drawdown limit, a loss limit, per-trade approval, or an account-wide kill switch; the drawdown
+thresholds appear in the AI disclosure and the blog guide only [SF16] [SF19] [SF5]. Also not
+documented: order types and paper availability for its Robinhood path, cross-strategy capital
+arbitration, and export or integrity of logs.
 
 **Overlap with Mandate.** The closest shipped competitor. Multi-broker execution, isolation between
-strategies, idempotent execution, and reconciliation are not unique to Mandate. Compare exact
-authority boundaries and recovery behavior on identical scenarios, not feature lists.
+strategies, idempotent execution, reconciliation, activation approval, and pause and flatten are not
+unique to Mandate. Its product moved from a research assistant to an agentic trading desk between
+March and June 2026 (inference, from the snapshots) [SF11]. Compare exact authority boundaries and
+recovery behavior on identical scenarios, not feature lists.
 
 ### Conviction (YC S25)
 
-**What it documents.** "Describe a trading idea in natural language. Conviction tests it on
-historical data and deploys an AI agent that trades on your behalf", with paper trading before
-connecting a brokerage [CV1] [CV2].
+**What it documents**
 
-**What it does not document.** Supported brokers (a search snippet lists several; the site renders
-client-side and could not be read), live-order mechanics, pricing, controls beyond strategy rules
-such as stop losses, and its regulatory posture.
+- "Describe a trading idea in natural language. Conviction tests it on historical data and deploys
+  an AI agent that trades on your behalf", with paper trading before connecting a brokerage [CV1]
+  [CV2]. Trading launch about 2026-09-16 [CV2].
+- Brokers: "Robinhood, Alpaca, Public, E*Trade, and Trading 212 supported" [CV3].
+- "every order must pass through deterministic guardrails before it reaches your broker. If a
+  trade violates your rules, it is blocked" [CV3].
+- Guardrails the site lists: "max position size, max portfolio exposure, max daily loss, allowed
+  assets, stop-loss rules, take-profit rules, leverage restrictions, shorting restrictions,
+  cooldowns, event blackouts, and human approval requirements" [CV3]. The user can "require human
+  approval before live execution" [CV3].
+- "Conviction is a research, simulation, and strategy-testing platform. It does not provide
+  personalized financial advice or guarantee investment performance" [CV3].
+- Origin. "Launch HN: Parachute (YC S25) – Guardrails for Clinical AI" was posted on 2025-08-19
+  [CV4]. Conviction's YC page lists the Parachute launch, "Evaluate, Deploy, and Monitor Clinical
+  AI", among its launches, and the Parachute company page now shows Conviction [CV1]. The trading
+  product is a pivot by the same founders (inference) [CV1] [CV4].
+
+All of the above are site claims. No public documentation, help center, or API reference was found.
+
+**What it does not document.** How the guardrails are enforced, live-order mechanics, handling of
+ambiguous submissions and restarts, pricing, records or their export, and its regulatory posture
+beyond the disclaimer.
 
 **Overlap with Mandate.** Research, backtest, paper, then deployment is already a competitor's
-proposition. v0.1 of this document called its risk layer "thin"; no source supports that. The
-accurate statement is "not documented publicly".
+proposition. Deterministic guardrails outside the agent and human approval before live execution
+are now claimed by a competitor too, so neither is by itself a differentiator. What remains
+unverified publicly is enforcement, recovery, and evidence: whether the guardrails hold, what
+happens after a failure, and whether a user can check the record. v0.1 of this document called
+its risk layer "thin"; no source supports that.
 
 ### TradeAgentic (RLG, LLC)
 
@@ -376,9 +437,9 @@ Legend: **Yes** documented; **Partly** documented for part of the capability, sc
 
 | Differentiator | Public Agents | Robinhood Agentic | Scalar Field | QuantConnect Mia + LEAN | Composer by SoFi | TradeAgentic | Regent | Mandate (status) |
 |---|---|---|---|---|---|---|---|---|
-| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; loss limits only in guidance [SF1] [SF5] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
+| D1 Owner limits enforced outside strategy or agent logic | Partly: limits live in each plan; buying power, eligibility, per-agent margin outside it [PU3] [PU10] | Partly: the funded agentic account caps capital; Robinhood states it does not supervise agents [RH1] [RH2] | Partly: capital and buying power enforced per strategy; drawdown thresholds only in the AI disclosure and guidance [SF1] [SF5] [SF16] | Partly: LEAN risk model runs inside the algorithm [QC2] | Not documented [CO1] | Yes (vc) [TA1] | Yes (vc), payments, devnet [RG1] | Specified; gate code merged (#157, #160), flatten open (#176) [M1] |
 | D2 Coordination across agents on one account | No: agents run independently [PU5] | Not documented [RH2] | Partly: isolated books, aggregate reconciliation [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Yes (vc): one shared capital pool [TA2] | Not documented [RG1] | Specified (E7-5, RC-17); not built [M2] |
-| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: approvals only in guidance [SF5] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
+| D3 Per-action approval with expiry and revalidation | No: no confirmation before each transaction [PU8] | Partly: optional per-trade approval; expiry not documented [RH3] | Not documented: activation approval only; `venue.trade()` has no approval workflow [SF16] [SF19] | Not documented: live deployment decision stays with the user [QC1] | Not documented [CO1] | No: no per-trade override by design [TA2] | Partly (vc): hold verdict [RG1] | Classification tests merged (#175); approvals and drift revalidation are M7 (E8-1 to E8-3) [M3] |
 | D4 Exportable, verifiable decision record | Partly: run logs and activity feed; export not documented; automated extraction barred [PU5] [PU8] | Not documented [RH1] | Not documented [SF1] | Not documented [QC1] | Not documented [CO1] | Partly (vc): refusals recorded and scored; integrity not documented [TA1] | Yes (vc): anchored, operator-independent [RG1] | Journal hash chain and verify CLI merged (E5-1, E5-4); decision view is M9 (E12) [M4] |
 | D5 Documented handling of ambiguous submissions and restarts | Partly: repeated failures become "action required" [PU7] | Not documented [RH3] | Yes: idempotent execution, pending-order rule, reconcile and freeze [SF1] [SF2] | Not documented [QC1] | Not documented [CO1] | Partly (vc): resumes after reboot [TA1] | Not documented [RG1] | Specified (E7-2, E7-3); tests #152 and implementation #174 open [M5] |
 | D6 Rehearsal before live (paper or forward evidence) | No backtest as of 2026-09-14; paper not documented [PU6] [PU7] | Not documented: no paper environment found [RH2] | Partly: paper on Alpaca; no evidence page [SF3] | Yes: backtest, paper, divergence monitoring [QC1] | Partly: backtest before activation [CO1] | Partly (vc): out-of-sample scoring [TA1] | Not applicable | Alpaca paper tracer (E7-7, #173) and forward-paper evaluation (DEC-99, E17-8) specified [M6] |
@@ -441,10 +502,10 @@ may place an order (`AGENTS.md` rule 8). Where access is unavailable, record "no
 | Public | Does Research propose specific trades, and can one click turn an answer into an Agent? |
 | Robinhood | Is there any paper or test path for agentic accounts? What order types and sessions can an agent use? |
 | Robinhood | May a hosted platform act as the MCP client for many customers (OD-12)? Token lifetime and revocation? |
-| Scalar Field | Does any limit span strategies (the sum of allocations against buying power)? Are loss limits or a kill switch in the product? |
+| Scalar Field | Does any limit span strategies (the sum of allocations against buying power)? Are the drawdown thresholds in its AI disclosure enforced, and where? Does emergency liquidation span all strategies on an account? |
 | Scalar Field | Is an order intent persisted before submission, and what happens on a lost acknowledgment? |
 | Scalar Field | Which order types and environments does its Robinhood path support today? |
-| Conviction | Which brokers work, what are its controls beyond strategy rules, and what is its regulatory posture? |
+| Conviction | Do its listed brokers take live orders today? Where are its guardrails enforced, and what happens on a rejected or ambiguous submission? What record can a user export? |
 | TradeAgentic | Who is behind RLG, LLC; which brokers work; is its scoring inspectable before purchase? |
 | NexusTrade | Is manual confirmation still required for live trades? |
 | Webull | Can an agent submit without confirmation? |
@@ -484,12 +545,26 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | SF3 | [Scalar Field docs: Alpaca venue](https://scalarfield.io/docs/trading/venues/alpaca.md) | accessed |
 | SF4 | [Scalar Field docs: Robinhood venue](https://scalarfield.io/docs/trading/venues/robinhood.md) | accessed |
 | SF5 | [Scalar Field blog: create your own AI trading agent](https://blogs.scalarfield.io/guides/create-your-own-ai-trading-agent) | undated |
-| SF6 | [Scalar Field YC launch: reinventing the trading terminal](https://www.ycombinator.com/launches/NSw-scalar-field-reinventing-the-trading-terminal-one-intelligent-agent-at-a-time) and [pricing](https://scalarfield.io/pricing) | launch more than a year before 2026-09-26; pricing accessed |
-| SF7 | [Scalar Field YC launch: the agentic trading desk](https://www.ycombinator.com/launches/RZm-scalar-field-the-agentic-trading-desk) | about 2026-07 |
+| SF6 | [Scalar Field YC launch: reinventing the trading terminal](https://www.ycombinator.com/launches/NSw-scalar-field-reinventing-the-trading-terminal-one-intelligent-agent-at-a-time) and [pricing](https://scalarfield.io/pricing) | launch 2025-05-08; pricing accessed 2026-09-27 |
+| SF7 | [Scalar Field YC launch: the agentic trading desk](https://www.ycombinator.com/launches/RZm-scalar-field-the-agentic-trading-desk) | 2026-07-16 |
 | SF8 | [Scalar Field terms of use](https://scalarfield.io/terms-of-use) | updated 2026-08-17 |
 | SF9 | [Scalar Field: what is agentic trading](https://scalarfield.io/ai-agentic-trading) | accessed |
+| SF10 | [Show HN: Quant Trading Tool with LLM (code gen)](https://news.ycombinator.com/item?id=42446888) | 2024-12-18 |
+| SF11 | Scalar Field home page in the Wayback Machine: [2026-03-05](https://web.archive.org/web/20260305145958/https://scalarfield.io/) and [2026-06-25](https://web.archive.org/web/20260625193549/https://scalarfield.io/) | snapshots 2026-03-05 and 2026-06-25 |
+| SF12 | [Scalar Field pricing in the Wayback Machine](https://web.archive.org/web/20260601002037/https://scalarfield.io/pricing) | snapshot 2026-06-01 |
+| SF13 | [Scalar Field, YC company page](https://www.ycombinator.com/companies/scalar-field) | accessed |
+| SF14 | [Scalar Field docs: pricing](https://scalarfield.io/docs/usage/pricing) | accessed |
+| SF15 | [Scalar Field docs: fees](https://scalarfield.io/docs/usage/fees) | accessed |
+| SF16 | [Scalar Field AI disclosure](https://scalarfield.io/ai-disclosure) | updated 2026-05-07 |
+| SF17 | [Scalar Field docs: execution limits](https://scalarfield.io/docs/usage/execution-limits) | accessed |
+| SF18 | [Scalar Field blog: connect Robinhood](https://blogs.scalarfield.io/guides/connect-robinhood-on-scalar-field) | undated |
+| SF19 | [Scalar Field full docs (llms-full.txt)](https://scalarfield.io/docs/llms-full.txt) | accessed 2026-09-27 |
+| SF20 | [Trustpilot: Scalar Field reviews](https://www.trustpilot.com/review/scalarfield.io) (reported) | accessed 2026-09-27 |
+| SF21 | [Scalar Field: about](https://scalarfield.io/about) | accessed |
 | CV1 | [Conviction, YC company page](https://www.ycombinator.com/companies/conviction) | accessed |
 | CV2 | [Conviction YC launch: trading desk in your pocket](https://www.ycombinator.com/launches/U6n-conviction-trading-desk-in-your-pocket) | about 2026-09-16 |
+| CV3 | [Conviction home page](https://www.convictiontrade.ai/) (client-rendered; text read from its published script bundle) | accessed 2026-09-27 |
+| CV4 | [Launch HN: Parachute (YC S25) – Guardrails for Clinical AI](https://news.ycombinator.com/item?id=44952246) | 2025-08-19 |
 | TA1 | [TradeAgentic home page](https://tradeagentic.ai/) | accessed |
 | TA2 | [TradeAgentic: agentic trading strategies](https://tradeagentic.ai/agentic-trading-strategies/) | updated 2026-09 |
 | RG1 | [Regent Protocol](https://regentprotocol.org/) | accessed |
