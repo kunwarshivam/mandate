@@ -554,15 +554,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
   `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
   every named entry are already caught (round-3 review finding 3).
-- **Blocks E7-4 (the first `AccountWideScope` constructor):** encode a crypto pair's `/` where
-  `/v2/positions/{symbol}` is built (`HttpRequest::close_position` and the positions read). `wire`
-  holds a broker symbol to one or two segments of letters, digits and `.` (slice a2), so nothing
-  hostile reaches the path, but `BTC/USD` still builds two segments where Alpaca takes `BTCUSD` or
-  `BTC%2FUSD`. Since #195 the allowlist refuses both the read and the close, and a refused close
-  answers `NotSent`, never a broker's rejection, so a crypto close fails loudly rather than going
-  to the wrong path; until this lands the account and workspace kill switches cannot close a crypto
-  position by close-position, so E7-4 must not construct an `AccountWideScope` before it (#191
-  review, round 3; #195 review, round 1, finding 1).
+- Normalize a crypto symbol `mandate-alpaca` reads back from the broker. Position paths now write
+  `BTC/USD` as `BTCUSD` (`http::position_path`, the positions read and the account-wide close), but
+  `wire` keeps whatever symbol a response names, so a position reported as `BTCUSD` and an order
+  placed as `BTC/USD` would be two instrument ids, where trading-domain spec §2.3 makes them one.
+  Only a recorded crypto position shows which form the paper host sends; normalize on
+  `asset_class: crypto` before E7-3's reconciliation compares crypto positions.
 - Read a working external notional order's exposure. `wire` ingests an external order placed by
   notional with `qty` equal to its `filled_qty`, so a working one understates what it can still
   buy, and its `notional` is read nowhere and is not in `record::RECORDED_FIELDS`. The exposure is
