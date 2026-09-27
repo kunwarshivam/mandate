@@ -1641,4 +1641,68 @@ mod tests {
         );
         Ok(())
     }
+
+    /// The never-observed hold on its own, not through any test harness's startup: an opening is
+    /// held while no account has been journaled, however many runs complete, and released at the
+    /// next tick once an account is journaled and a run has completed since the start, whichever
+    /// comes first (#222 review, minor 3).
+    #[test]
+    fn the_hold_lifts_on_an_account_and_a_run_in_either_order() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let opening = |id: &str| intent(id, "agent-a", Side::Buy, Purpose::Open);
+        let tick = |at: i64| Input::Tick(crate::types::RiskClock::from_secs(at));
+        let report = || -> Result<Input, ExecutorError> {
+            Ok(Input::BrokerUpdate(BrokerUpdate::Account(account(
+                "100000",
+            )?)))
+        };
+
+        let mut never = Executor::opened(&ports)?;
+        let held = never.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ0")?, &ports)?;
+        assert_eq!(submitted(&held), 0, "no account reported: held");
+        for at in 1..=3 {
+            let taken = never.snapshot(ReconcileReason::Scheduled)?;
+            never.run(Input::BrokerSnapshot(taken), &ports)?;
+            let still = never.run(tick(at), &ports)?;
+            assert_eq!(
+                submitted(&still),
+                0,
+                "runs complete, but with no account reported the opening stays held"
+            );
+        }
+
+        let mut account_first = Executor::opened(&ports)?;
+        account_first.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ1")?, &ports)?;
+        account_first.run(report()?, &ports)?;
+        let reported_only = account_first.run(tick(1), &ports)?;
+        assert_eq!(submitted(&reported_only), 0, "an account alone: held");
+        let taken = BrokerSnapshot {
+            account: account("100000")?,
+            ..account_first.snapshot(ReconcileReason::Startup)?
+        };
+        let startup = account_first.run(Input::BrokerSnapshot(taken), &ports)?;
+        assert_eq!(
+            submitted(&startup),
+            1,
+            "account, then run: the startup run's resume releases it at once"
+        );
+
+        let mut run_first = Executor::opened(&ports)?;
+        run_first.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ2")?, &ports)?;
+        let taken = run_first.snapshot(ReconcileReason::Startup)?;
+        run_first.run(Input::BrokerSnapshot(taken), &ports)?;
+        let run_only = run_first.run(tick(1), &ports)?;
+        assert_eq!(submitted(&run_only), 0, "a run alone: held");
+        run_first.run(report()?, &ports)?;
+        let released = run_first.run(tick(2), &ports)?;
+        assert_eq!(submitted(&released), 1, "run, then account: released");
+        Ok(())
+    }
 }
