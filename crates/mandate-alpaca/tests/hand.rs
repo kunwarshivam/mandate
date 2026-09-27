@@ -506,9 +506,9 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
         let text = serde_json::to_vec(&body).expect("re-serialises");
         let error = wire::order(&text).expect_err("a hostile broker id is not an order");
         assert_eq!(
-            error.code(),
-            "unsafe_id",
-            "the id {id:?} is refused as unsafe to put in a path"
+            (error.code(), error.to_string()),
+            ("wrong_type", "field id has the wrong type".to_owned()),
+            "the id {id:?} is not a UUID's alphabet, so it is refused before it can reach a path"
         );
         assert_eq!(
             mandate_alpaca::ClientError::from(error)
