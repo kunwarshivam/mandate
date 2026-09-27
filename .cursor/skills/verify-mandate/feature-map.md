@@ -170,8 +170,9 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+and DEC-131, and implemented in the DEC-77 stage-3 PR: every stub carries its real logic, the 88
+pending markers are gone, and all 101 tests run live: the round-3 sanctioned case plus the twelve the
+implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -187,10 +188,13 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   `FlattenPlan` — which has no account-wide variant, so `cancel-all` and `close-position` are
   unrepresentable), `crates/mandate-runtime/src/ports.rs` (the pure `IdGen`, `GateDryRun`, and
   `OrderPlan` in `Ports`, and the shell-driven `IntentSink` and `TimerSource`),
-  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
+  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant), and
+  `crates/mandate-runtime/src/payload.rs` (the one place a journaled payload becomes a core value and
+  a core value becomes a canonical payload again, so every draft the runtime writes is one its own
+  fold can rebuild state from). Over
   `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (75 hand cases: the fold's sequencing and loud
   refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
   approvals, version application, recovery, and the kill switches),
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
@@ -202,8 +206,8 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
-- **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
-  `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
+- **Run:** `cargo nextest run -p mandate-runtime`, and the mutation gate the implementation PR must
+  pass, `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants`.
 
 ## Idempotent executor and broker connector
 
@@ -253,7 +257,10 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-crate exists as stubs and tests; the implementation PRs fill it in story by story.
+implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine.
+Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
+implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
+check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -267,7 +274,10 @@ crate exists as stubs and tests; the implementation PRs fill it in story by stor
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
-  `surveillance`), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
+  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
+  refusal of an opening while a check is owed),
+  `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
