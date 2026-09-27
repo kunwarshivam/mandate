@@ -1481,6 +1481,153 @@ mod tests {
         Ok(())
     }
 
+    /// One way to fail check 2: its name, how it changes the scenario, and the code it must report.
+    type Breach = (&'static str, fn(&mut Owned), ReasonCode);
+
+    /// Every way an instrument fails check 2 ahead of concentration, one breach each: the working
+    /// universe, then §3.2's items in list order. The expected code is written out here rather
+    /// than read from the floor, which is the thing under test.
+    fn floor_breaches() -> [Breach; 15] {
+        [
+            (
+                "outside the working universe",
+                |o| {
+                    o.universe = WorkingUniverse::Known {
+                        instruments: BTreeSet::new(),
+                        pinned: true,
+                    }
+                },
+                ReasonCode::NotInWorkingUniverse,
+            ),
+            (
+                "status not active",
+                |o| o.instrument.status_active = false,
+                ReasonCode::NotInWorkingUniverse,
+            ),
+            (
+                "not tradable",
+                |o| o.instrument.tradable = false,
+                ReasonCode::NotInWorkingUniverse,
+            ),
+            (
+                "an OTC listing",
+                |o| o.instrument.exchange = Some(crate::Exchange::Otc),
+                ReasonCode::IneligibleExchange,
+            ),
+            (
+                "an equity with no exchange",
+                |o| o.instrument.exchange = None,
+                ReasonCode::IneligibleExchange,
+            ),
+            (
+                "IPO day",
+                |o| o.instrument.ipo = true,
+                ReasonCode::IpoNotTradable,
+            ),
+            (
+                "a PTP without the exception",
+                |o| o.instrument.ptp_no_exception = true,
+                ReasonCode::IpoNotTradable,
+            ),
+            (
+                "a prior close under the price floor",
+                |o| o.instrument.prior_close = Price::parse("4.99").ok(),
+                ReasonCode::BelowPriceFloor,
+            ),
+            (
+                "no prior close",
+                |o| o.instrument.prior_close = None,
+                ReasonCode::BelowPriceFloor,
+            ),
+            (
+                "a 20-day volume under the liquidity floor",
+                |o| o.instrument.median_dollar_volume_20d = Usd::parse("999999.99").ok(),
+                ReasonCode::BelowLiquidityFloor,
+            ),
+            (
+                "no 20-day volume",
+                |o| o.instrument.median_dollar_volume_20d = None,
+                ReasonCode::BelowLiquidityFloor,
+            ),
+            (
+                "a complex ETP without the opt-in",
+                |o| o.instrument.etp = EtpClass::Complex,
+                ReasonCode::LeveragedEtpNotEnabled,
+            ),
+            (
+                "an unclassified ETP",
+                |o| o.instrument.etp = EtpClass::Unclassified,
+                ReasonCode::LeveragedEtpNotEnabled,
+            ),
+            (
+                "no classification date",
+                |o| o.instrument.etp_classified_at = None,
+                ReasonCode::LeveragedEtpNotEnabled,
+            ),
+            (
+                "a crypto pair under the 30-day liquidity floor",
+                |o| {
+                    o.instrument.asset_class = AssetClass::Crypto;
+                    o.instrument.exchange = None;
+                    o.instrument.median_dollar_volume_30d = Usd::parse("1999999.99").ok();
+                },
+                ReasonCode::BelowLiquidityFloor,
+            ),
+        ]
+    }
+
+    /// §3.2's last paragraph and `AGENTS.md` rule 13, probed for every origin a sell within the
+    /// position can come from, each typed by the brief's purpose table rather than by
+    /// `assign_purpose`: no breach of the universe or the floor denies an exit, and check 2 is
+    /// listed `Passed` for it, or `NotReached` for crypto, whose check 2 stays owed to E6-10 for
+    /// every purpose until the quote currency is an input (DEC-129 items 29 and 34). Each breach first denies an opening with its own code at check 2, so
+    /// an exit's allow is never an instrument that happens to pass the floor.
+    #[test]
+    fn no_floor_breach_denies_an_exit_from_any_origin() -> Result<(), GateError> {
+        let exits = [
+            (Origin::OrderBuilder, Purpose::DiscretionaryExit),
+            (Origin::GoalCompletion, Purpose::DiscretionaryExit),
+            (Origin::RemovedInstrument, Purpose::DiscretionaryExit),
+            (Origin::RiskEngine, Purpose::RiskExit),
+            (Origin::TrimToTarget, Purpose::RiskExit),
+            (Origin::StopWatchdog, Purpose::RiskExit),
+            (Origin::AutomatedKillSwitch, Purpose::RiskExit),
+            (Origin::OwnerClose, Purpose::OwnerExit),
+            (Origin::OwnerKillSwitch, Purpose::OwnerExit),
+            (Origin::ProtectiveLeg, Purpose::Protective),
+        ];
+        for (breach, apply, code) in floor_breaches() {
+            let mut opening = allowing()?;
+            apply(&mut opening);
+            let d = opening.decide()?;
+            assert_eq!(
+                (d.verdict, d.reason, d.checks.get(1).cloned()),
+                (
+                    Verdict::Deny,
+                    Some(code),
+                    Some(CheckOutcome::Failed(Check::UniverseAndLimits, code))
+                ),
+                "{breach}: an opening is denied at check 2"
+            );
+            for (origin, purpose) in exits {
+                let mut exit = allowing()?.selling(origin)?;
+                apply(&mut exit);
+                let e = exit.decide()?;
+                let listed = if exit.instrument.asset_class == AssetClass::Crypto {
+                    CheckOutcome::NotReached(Check::UniverseAndLimits)
+                } else {
+                    CheckOutcome::Passed(Check::UniverseAndLimits)
+                };
+                assert_eq!(
+                    (e.verdict, e.reason, e.purpose, e.checks.get(1).cloned()),
+                    (Verdict::Allow, None, purpose, Some(listed)),
+                    "{breach}: a sell from {origin:?} is allowed regardless of the floor"
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// §5.3 dates the cooldown from the *last* exit in the group: with exits in `a` 3000 s ago and
     /// in `b` 100 s ago, both in group 7, the denial reports `b`'s.
     #[test]
