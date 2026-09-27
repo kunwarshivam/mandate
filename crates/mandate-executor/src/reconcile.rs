@@ -349,7 +349,7 @@ fn positions(
 /// §11's cash row is two tiers, "alert above threshold; pause if persistent": a run out of the
 /// band alerts the owner and pauses nobody, and the [`CASH_PERSISTENT_RUNS`]th consecutive one
 /// pauses every agent until the owner acknowledges `cash`. The count is folded from the recorded
-/// snapshots, so it survives the re-anchor each snapshot makes and a restart (DEC-145).
+/// snapshots, so it survives the re-anchor each snapshot makes and a restart (DEC-146).
 fn cash(
     batch: &mut Batch<'_, '_>,
     snapshot: &BrokerSnapshot,
@@ -392,7 +392,7 @@ fn cash(
 const CASH_BAND: &str = "0.01";
 
 /// How many consecutive runs out of the cash band make a difference persistent, which pauses
-/// every agent; fewer only alert (§11, DEC-145).
+/// every agent; fewer only alert (§11, DEC-146).
 pub(crate) const CASH_PERSISTENT_RUNS: u32 = 2;
 
 /// Step 5, at a fee posting: fees are exact once posted. A difference pauses every agent and alerts
@@ -897,7 +897,7 @@ mod tests {
             restrictions,
             vec!["reconciliation:fees"],
             "a fee difference pauses every agent; a first cash drift beyond the band only alerts \
-             (§11's two tiers, DEC-145)"
+             (§11's two tiers, DEC-146)"
         );
         let alerts: Vec<_> = run
             .effects
@@ -1394,7 +1394,7 @@ mod tests {
         executor.run(Input::BrokerSnapshot(taken), ports)
     }
 
-    /// §11's cash row is two tiers (DEC-145): the first run out of the band alerts and pauses
+    /// §11's cash row is two tiers (DEC-146): the first run out of the band alerts and pauses
     /// nobody; the second consecutive one pauses every agent. The count is folded from the
     /// journal, so it survives each snapshot's re-anchor and a restart; a run inside the band
     /// starts it again.

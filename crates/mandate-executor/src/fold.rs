@@ -635,7 +635,7 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
 
 /// A reconciliation's recorded snapshot says whether the broker's cash fell inside the band. The
 /// consecutive runs outside it are counted here, from the journal, so the count survives the
-/// re-anchor the snapshot makes and a restart (§11, DEC-145); a snapshot that compared no cash
+/// re-anchor the snapshot makes and a restart (§11, DEC-146); a snapshot that compared no cash
 /// leaves it alone.
 fn cash_compared(state: &mut ExecutorState, payload: &Value) {
     match payload.get("cash_in_band") {
@@ -994,7 +994,7 @@ mod buying_power_tests {
         Ok(())
     }
 
-    /// §6.3 and §11's crypto row, as DEC-146 records: an asset-denominated crypto fee is not an
+    /// §6.3 and §11's crypto row, as DEC-147 records: an asset-denominated crypto fee is not an
     /// accrued USD liability. It leaves the position net of the fee, is held per instrument in
     /// `asset_fees` until it posts, and never reaches the USD `unposted_fees` the cash band and the
     /// fee comparison read.
