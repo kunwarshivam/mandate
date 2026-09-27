@@ -5,16 +5,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::InstrumentId;
 use mandate_num::{Qty, SignedQty, Usd};
 
-use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, Mode, Order,
-    Protection, RiskClock, Seq, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, Mode, Order, Protection,
+    RiskClock, Seq, UnprotectedInterval, WriterEpoch,
 };
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
 pub const FOLD_VERSION: u32 = 1;
+
+pub use crate::fold::fold;
 
 /// Everything the executor knows about one broker account, derived from journaled events and
 /// nothing else.
@@ -24,11 +25,11 @@ pub const FOLD_VERSION: u32 = 1;
 /// journal and a restart cannot mistake an old event for a new one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorState {
-    scope: AccountScope,
-    heads: BTreeMap<String, Seq>,
+    pub(crate) scope: AccountScope,
+    pub(crate) heads: BTreeMap<String, Seq>,
     epoch: Option<WriterEpoch>,
     started: bool,
-    environment: Option<String>,
+    pub(crate) environment: Option<String>,
     unresolved: Option<UnresolvedAppend>,
     risk_clock: Option<RiskClock>,
     intents: BTreeMap<IntentId, IntentRecord>,
@@ -136,8 +137,8 @@ impl ExecutorState {
     }
 
     /// The folded `seq` of one stream, or `None` for a stream with nothing folded yet.
-    pub fn head(&self, _stream: &str) -> Option<Seq> {
-        None
+    pub fn head(&self, stream: &str) -> Option<Seq> {
+        self.heads.get(stream).copied()
     }
 
     /// The latest risk-clock second the fold has seen.
@@ -276,17 +277,12 @@ impl ExecutorState {
     pub fn copied_origin(&self, _event: &EventId) -> Option<&EventId> {
         None
     }
-}
 
-/// Replays one journaled event into the state.
-///
-/// Total over the account-stream catalogue and **effect-free**: a replay can never re-send
-/// anything, which is half of crash safety (the other half is that only [`crate::handle`]
-/// produces effects). An event type, payload field, or stream this crate does not interpret is
-/// [`ExecutorError::NotInterpreted`] naming the owning story, never a silent no-op (DEC-85).
-pub fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
-    let _ = (state, event);
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
+    /// The account stream this state is the single writer of, named by its opaque ids alone
+    /// (journal spec §2, §6.4).
+    pub(crate) fn account_stream(&self) -> String {
+        format!("acct:{}:{}", self.scope.workspace.0, self.scope.account.0)
+    }
 }
 
 /// The accessors read their own fields. Only a stubbed `fold` can move a state off fresh, so these

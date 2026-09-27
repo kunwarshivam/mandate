@@ -71,8 +71,10 @@
 //! URL anywhere in this stream, and no path that could build one (`AGENTS.md` rule 8, ES-23).
 
 mod error;
+mod fold;
 mod gate;
 mod ids;
+mod payload;
 mod ports;
 mod protection;
 mod reconcile;
