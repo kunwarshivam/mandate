@@ -159,7 +159,7 @@ them in the decision log.
 | Fee reservations for buying power | E6-6 |
 | The accounting fold copies the account on every input; measure before long backtests | E4-2 |
 | The backtest runner DEC-127 items 15, 24 and 25 name has no story row: a dataset adapter, the journal's `BacktestRunRecorded` with the canonical report as its artifact, a CLI command, and the `mandate-backtest` split ES-13's line budget asks for | After M3; write the story before the first owner-facing backtest |
-| `NumError::Unimplemented` is returned only by `mandate-num::sizing`'s fifteen E6-2 stubs, so it stays live code until they are implemented; drop the variant and its row in `num::error_codes_are_stable` together once nothing constructs it (E4-2 review round 2, minor 3) | E6-2 |
+| `NumError::Unimplemented` is returned only by `mandate-num::sizing`'s fourteen E6-2 stubs, so it stays live code until they are implemented; drop the variant and its row in `num::error_codes_are_stable` together once nothing constructs it (E4-2 review round 2, minor 3) | E6-2 |
 | ~~Market-data writes use a fixed `.partial` temporary name; concurrent writers to one partition need a lock or unique names~~ **Resolved (claim #86, PR #90):** each write holds an advisory lock on the dataset directory, uses a temporary name no other writer uses, and publishes a partition by hard link ([brief](tasks/marketdata-write-safety.md)) | `cursor` |
 | `AssetClass` exists in both `mandate-accounting` and `mandate-marketdata`; move it to `mandate-domain` | The story that creates `mandate-domain` |
 | Market data keeps prices as `DecStr` because `Price` holds 9 places and bars need up to 18 | Same |

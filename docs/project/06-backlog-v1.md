@@ -387,7 +387,7 @@ From the independent review of E4-2's implementation ([#163](https://github.com/
 round 2, verdict approve), whose first two minors are closed by the third tests correction
 (DEC-127 item 26) and whose third waits on another story:
 
-- `NumError::Unimplemented` stays: it is returned by the fifteen `mandate-num::sizing` stubs E6-2 owes,
+- `NumError::Unimplemented` stays: it is returned by the fourteen `mandate-num::sizing` stubs E6-2 owes,
   so it is live code, not a leftover, and its row in `num::error_codes_are_stable` holds the wire
   spelling those stubs return. Drop the variant and the row together in a tests correction once E6-2's
   sizing is implemented and nothing constructs it.
