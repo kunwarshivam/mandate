@@ -1,0 +1,2 @@
+DELETE /v2/positions/AAPL?percentage=100
+GET /v2/positions

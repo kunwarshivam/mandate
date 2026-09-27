@@ -1,0 +1,2 @@
+DELETE /v2/orders/e02fc2d2-0ff3-444f-a0ab-6253613302fe
+GET /v2/orders:by_client_order_id?client_order_id=md-e144b97773a6f87c1978cc2831

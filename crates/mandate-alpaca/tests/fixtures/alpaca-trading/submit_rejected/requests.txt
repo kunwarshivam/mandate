@@ -1,0 +1,1 @@
+POST /v2/orders {"client_order_id":"md-095e999463a80c3248e022de33","qty":"0","side":"buy","symbol":"AAPL","time_in_force":"gtc","type":"market"}

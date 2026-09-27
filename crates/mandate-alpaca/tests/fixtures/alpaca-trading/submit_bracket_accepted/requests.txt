@@ -1,0 +1,1 @@
+POST /v2/orders {"client_order_id":"md-daea915c1fc0042bcc19a4caed","limit_price":"1.00","order_class":"bracket","qty":"1","side":"buy","stop_loss":{"stop_price":"0.80"},"symbol":"AAPL","take_profit":{"limit_price":"999.00"},"time_in_force":"gtc","type":"limit"}

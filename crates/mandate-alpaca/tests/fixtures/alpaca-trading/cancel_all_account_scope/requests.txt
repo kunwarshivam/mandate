@@ -1,0 +1,2 @@
+DELETE /v2/orders
+GET /v2/orders?status=open&limit=50&direction=asc
