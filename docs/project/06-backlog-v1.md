@@ -339,3 +339,15 @@ From the final review of mandate spec v0.3:
 - Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
 - Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
 - Add fuzz coverage for multiple agents, trims, and owner exits.
+
+From the independent reviews of stream J's implementation (`mandate-research`, #158 and #159):
+
+- `reference/mandate/ref.py`'s `lineage_fold` starts from an empty lineage map and ignores the
+  `lineages` input, while `fold_theses` continues from the `LineageState` it is given. No case
+  exercises the difference; align `ref.py` or record the continuation in DEC-132.
+- `ref.py`'s `T()` reads instants to whole seconds while the crate compares nanoseconds, so the two
+  differ one nanosecond past a horizon. The crate is right; every fixture uses whole seconds.
+- `ref.py`'s `_group_claimed` defaults an ungrouped instrument's group to its asset id, so a group id
+  spelling that asset id claims it; DEC-132 item 12 and the merged test admit it. Align `ref.py`.
+- `ResearchError::Unimplemented` is returned by no entry point, but stays until
+  `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
