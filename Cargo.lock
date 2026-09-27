@@ -1420,6 +1420,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-risk"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-runtime"
 version = "0.0.0"
 dependencies = [
