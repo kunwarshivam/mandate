@@ -4,6 +4,9 @@
 |---|---|
 | **Mandate** (product) | Working name of the platform |
 | **mandate** (object) | An agent's binding specification: goal, instruments, capital, connection, signal models, sizing, cadence, protection, risk limits, autonomy rules, notifications ([mandate spec](../specs/mandate.md)). Called the "agent spec" in the HLD |
+| **Harness** | Mandate's enterprise layer: the gate, autonomy rules, journal, executor, connectors, conformance suite, and MCP channel, sold to brokers, fintechs, and teams building agents ([DEC-149](../project/04-decision-log.md#decisions)). Not the same as a test harness |
+| **Platform (Mandate)** | Mandate's retail layer for owners; it runs through the harness and has no private path around it ([DEC-149](../project/04-decision-log.md#decisions)) |
+| **Inner harness / outer harness** | The inner harness is the code around a model: loop, tools, context, sandbox, permissions, and hooks. The outer harness is what a team builds so agents do reliable work: the repository as system of record, mechanical invariants, evals, and feedback ([harness engineering §1](11-harness-engineering.md#1-what-harness-engineering-means)) |
 | **Agent** | A versioned mandate plus the logic that executes it |
 | **Deployment** | A running instance of one agent version |
 | **Organization** | Billing and SSO entity; sets org-wide limits |
