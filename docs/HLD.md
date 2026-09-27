@@ -375,9 +375,10 @@ flowchart TB
   idempotency key, so a retry after a crash can never double-trade.
 - **Event-sourced state:** on restart, the runtime replays its journal, reconciles against the
   broker's actual positions and open orders, and resumes.
-- **Durable timers:** long waits (an approval pending for hours, "run until December") use a
-  durable-execution engine. Restate is preferred because it ships as a single Rust binary that
-  also runs on the edge; Temporal is the established alternative.
+- **Durable timers:** long waits (an approval pending for hours, "run until December") are
+  journal-backed: a timer is a journaled event, read back behind the `TimerSource` trait, and it
+  fires into the runtime as a journaled input. There is no external durable-execution engine, so
+  the journal stays the single source of truth ([DEC-16](project/04-decision-log.md#decisions)).
 - **Venue-side protection:** protective exits rest at the broker as OCO or bracket orders, so
   positions keep protection if the platform is down, within limits: equity stops trigger only in
   the regular session, crypto stop-limits can miss on gaps, and exits briefly remove protection
@@ -669,7 +670,7 @@ Speed tiers:
 | Research, model training and calibration, LLM tooling, Python SDK | Python (PyO3 bindings, gRPC) |
 | Web app / mobile approvals | Next.js / React Native with push notifications |
 | Storage | Postgres, object storage (S3, or MinIO on the edge), ClickHouse at scale |
-| Messaging / durable execution | NATS JetStream / Restate (or Temporal) |
+| Messaging / durable execution | Postgres `LISTEN`/`NOTIFY` and journal tailing (DEC-17); durable timers are journal-backed (DEC-16) |
 | Orchestration | Kubernetes cells (managed); Helm chart or single-node k3s (customer site) |
 | Packaging | One installer deploys the global control plane, workspace control services, and data plane in any mode; signed release bundles for air-gapped sites |
 | Sandboxing | WebAssembly plug-ins; Firecracker for heavier workloads |

@@ -301,6 +301,11 @@ impl ExecutorState {
     /// `(family, day)` bucket at `round(bucket, 2, ceiling)` (§6.2, §10, DEC-104). The cash slice
     /// adds the broker's own unposted fees. `None` until the broker has reported a complete
     /// account, or if the arithmetic overflows: no buying power is ever guessed.
+    ///
+    /// It stays `pub` because this crate's integration tests, a separate crate, read it. Until the
+    /// cash slice (slice 6) subtracts the broker's unposted fees, nothing may read it for a
+    /// decision: the backlog row "Blocks the gate port reading `buying_power`" says so, and the gate
+    /// port that would read it is not wired.
     pub fn buying_power(&self) -> Option<Usd> {
         let observed = self
             .observed
