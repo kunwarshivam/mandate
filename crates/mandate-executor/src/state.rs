@@ -439,6 +439,34 @@ pub(crate) fn restriction_for(subject: &str) -> String {
 
 /// A restriction is the one an acknowledgment of its own subject lifts, so no two subjects share
 /// one (§11): the account-wide cash, fee and incomplete-run restrictions included.
+/// The protection and copied-origin accessors answer their story's stub until E7-4 folds what
+/// they read, never a silent "none" an order path could take for an answer.
+#[cfg(test)]
+mod loud_stub_tests {
+    use mandate_accounting::InstrumentId;
+
+    use super::ExecutorState;
+    use crate::error::ExecutorError;
+    use crate::types::{AccountRef, AccountScope, EventId, WorkspaceId};
+
+    #[test]
+    fn the_unfolded_accessors_answer_their_stub() -> Result<(), ExecutorError> {
+        let state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let stub = Err(ExecutorError::Unimplemented { story: "E7-4" });
+        let aapl = InstrumentId::new("AAPL")?;
+        assert_eq!(state.protection(&aapl).map(|_| ()), stub.clone());
+        assert_eq!(state.protective_sell_qty(&aapl).map(|_| ()), stub.clone());
+        assert_eq!(
+            state.copied_origin(&EventId("e-1".to_owned())).map(|_| ()),
+            stub
+        );
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod restriction_tests {
     use super::restriction_for;
