@@ -50,7 +50,10 @@ fn owed(check: Check) -> Option<&'static str> {
 
 /// §9.1: the first failing check decides, and every check after it is listed as not reached. An
 /// owed check is listed as not reached too, for every purpose: the gate did not look, and the
-/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29).
+/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29). So
+/// `pacing: None` on an allowed reduction means nothing was paced *because checks 5 and 6 were
+/// not reached*, which `Decision::checks` records, not that the collar and the participation caps
+/// found nothing to do.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let held = input
         .agent
@@ -128,11 +131,12 @@ fn run(
 /// (MI-6).
 fn account_and_mode(input: &GateInput<'_>, purpose: Purpose, opening: bool) -> Option<Stop> {
     let account = input.account;
-    if account.state == AccountState::Blocked {
-        return Some((Verdict::Deny, ReasonCode::AccountTradingBlocked));
-    }
-    if opening && account.state == AccountState::ClosingOnly {
-        return Some((Verdict::Deny, ReasonCode::AccountRestricted));
+    match account.state {
+        AccountState::Blocked => return Some((Verdict::Deny, ReasonCode::AccountTradingBlocked)),
+        AccountState::ClosingOnly if opening => {
+            return Some((Verdict::Deny, ReasonCode::AccountRestricted));
+        }
+        AccountState::ClosingOnly | AccountState::Active => {}
     }
     if opening && input.instrument.asset_class == AssetClass::Crypto && !account.crypto_active {
         return Some((Verdict::Deny, ReasonCode::CryptoAccountInactive));
@@ -685,6 +689,32 @@ mod tests {
             matches!(a, Err(GateError::Unimplemented("evaluate", "E6-7")))
                 && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-7"))),
             "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
+        );
+        Ok(())
+    }
+
+    /// DEC-129 item 23: a `removed_instrument` restriction on an instrument still in the working
+    /// universe denies an opening at check 2 as `not_in_working_universe`, and says nothing about
+    /// another instrument.
+    #[test]
+    fn a_removed_instrument_is_the_working_universe_check() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        o.agent.instrument_restrictions.insert(
+            o.proposed.instrument.clone(),
+            [InstrumentRestriction::RemovedInstrument].into(),
+        );
+        let d = o.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason, d.checks.get(1)),
+            (
+                Verdict::Deny,
+                Some(ReasonCode::NotInWorkingUniverse),
+                Some(&CheckOutcome::Failed(
+                    Check::UniverseAndLimits,
+                    ReasonCode::NotInWorkingUniverse
+                ))
+            ),
+            "the instrument is in the universe; the restriction alone denies, at check 2"
         );
         Ok(())
     }

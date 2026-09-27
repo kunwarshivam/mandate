@@ -403,6 +403,13 @@ fn coverage_reached(seed: u64) {
         ),
         ("a hold", SAW_HOLD.load(Ordering::Relaxed)),
     ];
+    assert_eq!(
+        EVERY_COUNTER.len(),
+        seen.len() + 1,
+        "EVERY_COUNTER resets every counter `seen` reads, plus SAW_DEFER, which the coverage gate \
+         does not require; a counter read here but missing from the reset list would let a later \
+         seed pass on an earlier seed's evidence"
+    );
     let missing: BTreeSet<&str> = seen
         .iter()
         .filter_map(|(name, n)| (*n == 0).then_some(*name))

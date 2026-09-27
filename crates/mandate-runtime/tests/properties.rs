@@ -271,7 +271,6 @@ fn play_with(
 
 proptest! {
     #[test]
-    #[ignore = "pending E6-1"]
     fn two_runs_of_the_same_inputs_give_equal_effects(script in prop::collection::vec(scripted(), 1..8)) {
         let (_, first, _) = play(&script, Autonomy::Auto);
         let (_, again, _) = play(&script, Autonomy::Auto);
@@ -280,7 +279,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn folding_the_journaled_drafts_reproduces_the_live_state(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
@@ -295,7 +293,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn a_replay_of_any_run_emits_no_draft_and_no_intent(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
@@ -312,7 +309,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn started_re_journals_nothing_but_the_startup_hold(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
@@ -336,7 +332,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn every_intent_effect_follows_the_draft_that_records_it(
         script in prop::collection::vec(scripted(), 1..8),
         initiator in initiator(),
@@ -387,7 +382,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_input_but_started_hands_an_intent_whose_draft_is_absent_from_the_list(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
@@ -415,7 +409,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn the_effective_mode_is_the_maximum_of_the_restriction_lattice(
         copied_mode in mode_name(),
         pause in any::<bool>(),
@@ -460,7 +453,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_opening_intent_is_proposed_outside_normal(
         mode in prop_oneof!["exits_only", "paused"],
         at in 100_i64..400,
@@ -504,7 +496,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn extra_ticks_never_change_the_journaled_drafts(
         script in prop::collection::vec(scripted(), 1..6),
         extra in prop::collection::vec(100_i64..400, 1..4),
@@ -535,7 +526,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn durations_match_the_interval_oracle(
         ticks in prop::collection::vec(100_i64..900, 1..6),
     ) {
@@ -574,7 +564,6 @@ proptest! {
 
 proptest! {
     #[test]
-    #[ignore = "pending E6-1"]
     fn a_derived_event_id_is_a_function_of_epoch_head_and_ordinal(
         epoch in 1_u64..5,
         head in 0_u64..20,
@@ -618,7 +607,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn the_fold_rejects_every_out_of_order_sequence(
         first in 1_u64..6,
         second in 1_u64..6,
@@ -644,7 +632,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn every_catalogue_event_is_interpreted_or_named(
         name in prop_oneof![
             "MarkUpdated", "FillApplied", "FeesCharged", "AgentModeApplied", "UniverseChanged",
@@ -690,7 +677,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn every_copied_draft_cites_its_origin(mode in mode_name()) {
         let ids = TestIds;
         let gate = AllowGate;
@@ -729,7 +715,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn every_intent_carries_the_builder_output_that_produced_it(
         at in 100_i64..400,
     ) {
@@ -758,7 +743,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_effect_reaches_a_broker(script in prop::collection::vec(scripted(), 1..8)) {
         let mut script = script;
         script.insert(0, Scripted::Fresh(100));
@@ -785,7 +769,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_notification_payload_holds_an_instrument_or_a_price(
         script in prop::collection::vec(scripted(), 1..8),
     ) {
@@ -818,7 +801,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_timeout_ever_acts(window in 1_i64..5) {
         let ids = TestIds;
         let gate = AllowGate;
@@ -849,7 +831,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn no_approval_outlives_the_mode_that_forbids_its_action(
         mode in prop_oneof!["exits_only", "paused"],
     ) {
@@ -890,7 +871,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-1"]
     fn the_same_events_give_the_same_run_whatever_woke_the_shell(
         script in prop::collection::vec(scripted(), 1..6),
         pad in prop::collection::vec(any::<bool>(), 0..3),
@@ -949,7 +929,6 @@ fn scope() -> impl Strategy<Value = KillScope> {
 
 proptest! {
     #[test]
-    #[ignore = "pending E6-5"]
     fn every_initiator_yields_a_mode_and_never_an_error(
         initiator in initiator(),
         scope in scope(),
@@ -1002,7 +981,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-5"]
     fn the_mode_draft_precedes_every_other_effect_of_a_kill_switch(
         initiator in initiator(),
         script in prop::collection::vec(scripted(), 0..4),
@@ -1048,7 +1026,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-5"]
     fn no_intent_follows_a_kill_switch_in_any_input_order(
         initiator in initiator(),
         after in prop::collection::vec(scripted(), 1..5),
@@ -1114,7 +1091,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-5"]
     fn a_kill_switch_is_honoured_from_every_reachable_state(
         script in prop::collection::vec(scripted(), 0..6),
         initiator in initiator(),
@@ -1159,7 +1135,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-5"]
     fn no_effect_after_stopped_proposes_an_intent(
         after in prop::collection::vec(scripted(), 1..6),
     ) {
@@ -1195,7 +1170,6 @@ proptest! {
     }
 
     #[test]
-    #[ignore = "pending E6-5"]
     fn no_re_handed_intent_is_one_the_mode_forbids(
         mode in prop_oneof!["normal", "exits_only", "paused"],
     ) {
