@@ -276,7 +276,6 @@ proptest! {
 
     /// MI-8 over drawn mandates as well as drawn proposals.
     #[test]
-    #[ignore = "pending E6-3"]
     fn mi8_holds_over_drawn_mandates(m in drawn_mandate(), shares in 1_u32..8) {
         let mut limits = two_stock_swing_limits();
         limits.max_position_usd = usd(&m.max_position_usd.to_string());

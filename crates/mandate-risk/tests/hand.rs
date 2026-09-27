@@ -21,7 +21,6 @@ use mandate_risk::{
 
 /// An unread working universe is an error, never an allow and never a deny (DEC-129 item 3).
 #[test]
-#[ignore = "pending E6-3"]
 fn an_absent_working_universe_is_an_error() {
     let mut s = Scenario::allowing();
     s.universe = mandate_risk::WorkingUniverse::Unavailable;
@@ -37,7 +36,6 @@ fn an_absent_working_universe_is_an_error() {
 /// A protective order is never held by a mode; `paused` holds a plain risk exit but not a kill
 /// switch's (DEC-129 item 17).
 #[test]
-#[ignore = "pending E6-3"]
 fn a_protective_order_is_never_held_by_a_mode() {
     let mut s = Scenario::allowing();
     s.agent.mode = AgentMode::Paused;
@@ -53,7 +51,6 @@ fn a_protective_order_is_never_held_by_a_mode() {
 }
 
 #[test]
-#[ignore = "pending E6-3"]
 fn a_paused_agent_holds_a_plain_risk_exit() {
     let mut s = Scenario::allowing();
     s.agent.mode = AgentMode::Paused;
@@ -69,7 +66,6 @@ fn a_paused_agent_holds_a_plain_risk_exit() {
 }
 
 #[test]
-#[ignore = "pending E6-3"]
 fn a_kill_switch_order_is_exempt_from_paused() {
     let mut s = Scenario::allowing();
     s.agent.mode = AgentMode::Paused;
@@ -92,7 +88,6 @@ fn a_kill_switch_order_is_exempt_from_paused() {
 
 /// An owner's ordinary close is not a kill switch, so `paused` holds it (DEC-129 item 17).
 #[test]
-#[ignore = "pending E6-3"]
 fn a_paused_agent_holds_an_owner_close_but_not_an_owner_kill_switch() {
     let mut s = Scenario::allowing();
     s.agent.mode = AgentMode::Paused;
@@ -118,7 +113,6 @@ fn a_paused_agent_holds_an_owner_close_but_not_an_owner_kill_switch() {
 
 /// An `Unknown` order denies an opening and holds a reduction, under one code (DEC-129 item 22).
 #[test]
-#[ignore = "pending E6-3"]
 fn an_unknown_order_denies_an_opening_and_holds_a_reduction() {
     let mut s = Scenario::allowing();
     s.account.unknown_orders.insert(asset(INSTRUMENT_3));
@@ -148,7 +142,6 @@ fn an_unknown_order_denies_an_opening_and_holds_a_reduction() {
 /// A blocked account denies every purpose, a risk exit included: the broker arm of MI-1's list
 /// (`RC-15::status_not_active`).
 #[test]
-#[ignore = "pending E6-9"]
 fn a_blocked_account_holds_even_a_risk_exit() {
     let mut s = Scenario::allowing();
     s.account.state = mandate_risk::AccountState::Blocked;
@@ -165,7 +158,6 @@ fn a_blocked_account_holds_even_a_risk_exit() {
 
 /// A `closing_only` account still allows every exit (`RC-15` step 4).
 #[test]
-#[ignore = "pending E6-9"]
 fn a_restricted_account_still_allows_an_exit() {
     let mut s = Scenario::allowing();
     s.account.state = mandate_risk::AccountState::ClosingOnly;
@@ -229,7 +221,6 @@ fn a_stale_classification_denies_an_etp_opening() {
 
 /// The floor never applies to a risk-reducing order in a held instrument (`RC-16` step 8).
 #[test]
-#[ignore = "pending E6-7"]
 fn the_floor_never_blocks_an_exit_in_a_held_instrument() {
     let mut s = Scenario::allowing();
     s.instrument.exchange = Some(mandate_risk::Exchange::Otc);
@@ -308,7 +299,6 @@ fn a_flat_position_produces_no_sell() {
 
 /// A sell above the agent's position crosses zero (§5.3 rule 3).
 #[test]
-#[ignore = "pending E6-6"]
 fn a_sell_above_the_position_is_would_cross_zero() {
     let mut s = Scenario::allowing();
     s.agent.positions.insert(asset(INSTRUMENT_3), qty("5"));
@@ -324,7 +314,6 @@ fn a_sell_above_the_position_is_would_cross_zero() {
 
 /// Checks after the failing one are `NotReached`, never `Passed` (§9.1's journal payload).
 #[test]
-#[ignore = "pending E6-3"]
 fn checks_after_the_failure_are_not_reached() {
     let mut s = Scenario::allowing();
     s.universe = working_universe(&[INSTRUMENT_2]);
@@ -372,7 +361,6 @@ fn flatten_of(
 
 /// The purpose table, row by row: every `Origin` and side, against a position and without one.
 #[test]
-#[ignore = "pending E6-3"]
 fn purpose_is_assigned_from_origin_side_and_position() {
     let rows = [
         (Origin::OrderBuilder, Side::Buy, "1", "0", Purpose::Open),
@@ -911,7 +899,6 @@ fn a_discretionary_exit_outside_the_session_defers() {
 
 /// Crypto trades continuously, so the equity session rule never defers a crypto exit.
 #[test]
-#[ignore = "pending E6-6"]
 fn crypto_exits_run_at_all_hours() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
@@ -1104,7 +1091,6 @@ fn the_window_is_today_plus_four() {
 
 /// `intraday_margin` denies nothing per order: a reported deficit is an account state (§9.2).
 #[test]
-#[ignore = "pending E6-6"]
 fn a_reported_deficit_is_an_account_state_not_a_denial() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::IntradayMargin {
@@ -1121,7 +1107,6 @@ fn a_reported_deficit_is_an_account_state_not_a_denial() {
 
 /// Crypto never counts toward a day-trade budget (§9.2).
 #[test]
-#[ignore = "pending E6-6"]
 fn crypto_never_counts() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
@@ -1342,7 +1327,6 @@ fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
 
 /// §9.6: the collar binds aggressive prices only; a passive price inside the band is allowed.
 #[test]
-#[ignore = "pending E6-8"]
 fn a_passive_price_inside_the_band_is_allowed() {
     let mut s = Scenario::allowing();
     s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "90", Origin::OrderBuilder);
@@ -1375,7 +1359,6 @@ fn a_rejected_order_still_counts() {
 
 /// MI-19: a removed instrument is exits-only in that instrument, and nowhere else.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_removed_instrument_restricts_only_itself() {
     let mut s = Scenario::allowing();
     s.agent.instrument_restrictions.insert(
@@ -1416,7 +1399,6 @@ fn an_opening_needs_a_fresh_quote() {
 }
 
 #[test]
-#[ignore = "pending E6-8"]
 fn a_risk_exit_accepts_a_last_trade_mark() {
     let mut s = Scenario::allowing();
     s.market.quote = None;
@@ -1483,7 +1465,6 @@ fn an_opposite_side_rest_in_a_related_account_blocks_an_opening() {
 
 /// §9.6: the order-to-fill ratio is only evaluated after twenty orders.
 #[test]
-#[ignore = "pending E6-8"]
 fn the_order_to_fill_ratio_needs_twenty_orders() {
     let mut s = Scenario::allowing();
     s.conduct
@@ -1501,7 +1482,6 @@ fn the_order_to_fill_ratio_needs_twenty_orders() {
 
 /// §5.3: the constraints report the first failing rule of the list, not the worst.
 #[test]
-#[ignore = "pending E6-6"]
 fn order_constraints_report_the_first_failing_rule() {
     let mut s = Scenario::allowing();
     s.agent.positions.insert(asset(INSTRUMENT_3), qty("5"));
@@ -1550,7 +1530,6 @@ fn the_first_pass_excludes_the_agents_own_protective_orders() {
 
 /// §9.1: when two checks would fail, the earlier one is reported.
 #[test]
-#[ignore = "pending E6-3"]
 fn two_simultaneous_failures_report_the_earlier_check() {
     let mut s = Scenario::allowing();
     s.universe = working_universe(&[]);

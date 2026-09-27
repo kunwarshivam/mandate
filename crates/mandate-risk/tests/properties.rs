@@ -39,7 +39,6 @@ proptest! {
     /// budget, or buying power. The only denial a reducing purpose may carry is
     /// `account_trading_blocked`, the broker arm of MI-1's own list.
     #[test]
-    #[ignore = "pending E6-3"]
     fn mi1_reduction_is_never_denied_by_a_limit(
         origin in reducing_origin(),
         position in 1_u32..50,
@@ -84,7 +83,6 @@ proptest! {
     /// A discretionary exit is never denied at all: §9.6 paces it, and a defer is never converted
     /// to a deny.
     #[test]
-    #[ignore = "pending E6-8"]
     fn a_discretionary_exit_is_never_denied(
         position in 1_u32..50,
         limit in whole_dollars(),
@@ -111,7 +109,6 @@ proptest! {
     /// A `Hold` carries only the three codes that can hold an order, and the two `agent_*` ones
     /// follow the mode rule exactly. The mode rule has no `Unknown`-order arm: that is check 4's.
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_hold_follows_the_mode_rule_exactly(
         origin in prop::sample::select(vec![
             Origin::RiskEngine, Origin::AutomatedKillSwitch, Origin::OwnerClose,
@@ -233,7 +230,6 @@ proptest! {
 
     /// Every limit comparison is strictly greater, so a value exactly at a limit passes (MC-G02).
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_value_exactly_at_a_limit_passes(order in 1_u32..=1_000) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -248,7 +244,6 @@ proptest! {
 
     /// A stricter mode is never more permissive: raising the mode never turns a deny into an allow.
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_stricter_mode_is_never_more_permissive(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -295,7 +290,6 @@ proptest! {
     /// Every decision lists all eight checks, in §9.1 order, with the ones after a failure marked
     /// `NotReached`.
     #[test]
-    #[ignore = "pending E6-3"]
     fn every_decision_lists_the_checks_it_reached(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -434,7 +428,6 @@ proptest! {
 
     /// MI-8: identical inputs give identical decisions, check list included.
     #[test]
-    #[ignore = "pending E6-3"]
     fn mi8_identical_inputs_give_identical_decisions(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -537,7 +530,6 @@ proptest! {
 
     /// Mark freshness is a check on openings; it never blocks a reduction.
     #[test]
-    #[ignore = "pending E6-8"]
     fn mark_freshness_never_blocks_a_reduction(has_quote in any::<bool>()) {
         let mut s = Scenario::allowing();
         if !has_quote {
@@ -555,7 +547,6 @@ proptest! {
 
     /// Nothing opens outside the working universe, whatever the other inputs say.
     #[test]
-    #[ignore = "pending E6-3"]
     fn an_opening_needs_the_working_universe(inside in any::<bool>(), shares in 1_u32..5) {
         let mut s = Scenario::allowing();
         s.universe = if inside {
@@ -648,7 +639,6 @@ proptest! {
 /// Purpose assignment is total over the origins and sides v1 can produce, and never turns a buy
 /// into an exit.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_buy_is_never_an_exit() {
     for origin in [
         Origin::OrderBuilder,

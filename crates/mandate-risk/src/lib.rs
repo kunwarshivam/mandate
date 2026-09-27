@@ -36,8 +36,10 @@
 //! the purpose itself from [`Origin`], the side and the position, so a proposer cannot claim an
 //! exemption by describing its own order.
 //!
-//! Stubs only: every entry point returns [`GateError::Unimplemented`] until the story named in its
-//! doc comment lands (DEC-77, DEC-83).
+//! E6-3 lands in three stacked PRs. This one is [`evaluate`]'s spine: the eight checks in order,
+//! purpose assignment, check 1's blocked account and mode rule, the working universe, and §5.3
+//! rules 3 and 9. Every check a later PR or story owns passes, and every other entry point returns
+//! [`GateError::Unimplemented`], until the story named in its doc comment lands (DEC-77, DEC-83).
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};
@@ -46,6 +48,7 @@ use mandate_num::{Fraction, Price, Qty, Usd};
 use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
+mod gate;
 #[doc(hidden)]
 pub mod spec_types;
 
@@ -685,8 +688,7 @@ pub struct DayTradeLedger {
 /// Returns [`GateError`] when an input makes the decision impossible rather than negative — an
 /// unread working universe above all, which is never an allow.
 pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
-    let _ = input;
-    Err(GateError::Unimplemented("evaluate", "E6-3"))
+    gate::evaluate(input)
 }
 
 /// §9.6's minimum resting time, and §5.3 rule 5's cancels before a risk-reducing order.
@@ -698,18 +700,21 @@ pub fn evaluate_cancel(input: &CancelInput<'_>) -> Result<Decision, GateError> {
     Err(GateError::Unimplemented("evaluate_cancel", "E6-8"))
 }
 
-/// The purpose §9.1 assigns to a proposal, from its origin, side and the agent's position.
+/// The purpose §9.1 assigns to a proposal, from its origin, side and the agent's position. A sell
+/// above the position is typed [`Purpose::Open`]: it would open a short, and check 4 denies it
+/// `would_cross_zero`.
 ///
 /// # Errors
-/// Returns [`GateError::PurposeUnassignable`] when no row of the table applies.
+/// None today: every origin, side and position has a row of the table. The `Result` is the
+/// signature #136 fixed, and [`GateError::PurposeUnassignable`] stays for a row a later origin
+/// might lack.
 pub fn assign_purpose(
     origin: Origin,
     side: Side,
     qty: Qty,
     agent_position: Qty,
 ) -> Result<Purpose, GateError> {
-    let _ = (origin, side, qty, agent_position);
-    Err(GateError::Unimplemented("assign_purpose", "E6-3"))
+    Ok(gate::assign_purpose(origin, side, qty, agent_position))
 }
 
 /// The session, auction windows and close window at `now`, from the committed calendar.
