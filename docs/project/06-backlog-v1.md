@@ -487,6 +487,25 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   reported as not needed, because the output names a stub. When E1-3 reads the failure's own
   cause, these three fail away from the stub and need their rows, expiring with E7-4 (#196 review,
   round 1, finding 5; #199 review, round 1, finding 4).
+- Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
+  hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
+  fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
+  `day` taken straight from the broker's `trade_date`, bypassing the account's calendar, passes the
+  suite. A fixture with a Saturday or holiday `trade_date` pins it (#196 review, round 2, finding 1).
+- **Decide before E7-3's cash slice:** how an asset-denominated crypto fee is journaled. Two pending
+  E7-3 tests fold `FeesCharged` with `family: "crypto_asset"`, no `day`, and an `instrument`:
+  `hand::unposted_crypto_asset_fees_explain_the_crypto_difference` and the RC-07 harness reached
+  by `refcases::trading_domain_rc_07_unposted_crypto_fees_reconcile`. `crypto_asset` is a `FeeKind`
+  payload name, not a `FeeFamily` (`Equities | Crypto`), and `mandate-refcases`'s reference
+  implementation refuses it as an unknown fee family, so both die on the fold. Unlike `sec_31` (#197)
+  the fix is not a literal swap: §6.3 says asset-denominated fees are not accrued liabilities, which
+  suggests that path should not journal a `FeesCharged` at all. Settle the event first (the
+  coordinator's call, with a decision-log row), then correct both tests in one reviewed
+  tests-correction PR so E7-3's implementer isn't blocked (#197 review, round 1, finding 1).
+- Make the reproduction line `ci pending` prints runnable as printed: quote the `-E` filterset
+  (it contains parentheses, so a shell refuses it) and add `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
+  which the gate sets and nextest requires for libtest JSON. Both fail loudly today rather than
+  giving a different verdict (#199 review, round 2, minor).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
