@@ -15,6 +15,8 @@ use mandate_time::Date;
 use crate::condition::Condition;
 use crate::{ParseError, SchemaDec};
 
+mod parse;
+
 /// A JSON Pointer into a mandate (RFC 6901), which is also how provenance, policy violations, and
 /// change classification name a field.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -59,6 +61,9 @@ pub const MANDATE_SCHEMA_VERSION: u32 = 1;
 /// its field's grammar, and a [`ValidatedMandate`](crate::ValidatedMandate) is a document that passed
 /// every rule. That keeps the one thing a caller must not be able to fake — an unvalidated mandate
 /// reaching the gate — unrepresentable, without accessors that a stub could not return.
+///
+/// The one private field is the canonical value the fields were read from, so [`Mandate::parse`] is
+/// the only way to make one and [`Mandate::version`] hashes exactly what the owner confirmed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mandate {
     pub mandate_schema_version: u32,
@@ -74,6 +79,8 @@ pub struct Mandate {
     pub risk: Risk,
     pub autonomy: Autonomy,
     pub notifications: Notifications,
+    /// The canonical value this mandate was parsed from, which is what [`Mandate::canonical`] hashes.
+    source: Value,
 }
 
 impl Mandate {
@@ -84,27 +91,37 @@ impl Mandate {
     /// The input is `mandate_canon::Value` and not `serde_json::Value` because a mandate reaches the
     /// platform as canonical JSON (journal spec §4); this crate carries no JSON parser of its own.
     ///
-    /// Accepting exactly what `jsonschema` accepts is ES-22, and the 31 MC-S cases are the test.
+    /// Accepting exactly what `jsonschema` accepts is ES-22, and the 31 MC-S cases are the test. The
+    /// schema's `date` is a pattern, not a calendar, so `2026-02-30` parses (MC-V22) and V-015 rejects
+    /// it: such an `end_date` is `None` in the typed goal and its text stays in the document, which is
+    /// where V-015 reads it (DEC-151).
     pub fn parse(value: &Value) -> Result<Self, ParseError> {
-        let _ = value;
-        Err(ParseError::Unimplemented)
+        parse::mandate(value)
     }
 
-    /// The canonical JSON the version hashes, byte for byte as the writer produces it for the value
-    /// the document was parsed from. Round-tripping is what keeps a version hash equal to the one the
-    /// owner confirmed, and it holds because every schema decimal grammar is canonical (DEC-128 item 3).
+    /// The canonical JSON the version hashes: the value the document was parsed from, kept whole, so
+    /// the version hash is the one the owner confirmed. Re-serialising the typed fields instead would
+    /// sort a set-like array V-009 must see unsorted and drop a date V-015 must see invalid.
+    ///
+    /// The fields are public, so this re-parses that value and refuses with
+    /// [`ParseError::Diverged`] when the fields no longer match it: a version never names anything
+    /// but the mandate the gate enforces.
     pub fn canonical(&self) -> Result<Value, ParseError> {
-        Err(ParseError::Unimplemented)
+        if Self::parse(&self.source)? == *self {
+            Ok(self.source.clone())
+        } else {
+            Err(ParseError::Diverged)
+        }
     }
 
     /// `to_canonical` of [`Mandate::canonical`].
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ParseError> {
-        Err(ParseError::Unimplemented)
+        Ok(mandate_canon::to_canonical(&self.canonical()?))
     }
 
     /// The version: `sha256:` plus the SHA-256 of those bytes (§9.1).
     pub fn version(&self) -> Result<MandateVersion, ParseError> {
-        Err(ParseError::Unimplemented)
+        Ok(MandateVersion(Digest::of(&self.canonical_bytes()?)))
     }
 
     /// The value at a pointer, for provenance (§2.1), policy reporting (§4.3), and classification

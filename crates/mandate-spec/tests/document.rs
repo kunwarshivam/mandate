@@ -51,7 +51,6 @@ fn must_parse(value: &Value, why: &str) {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_base_document_parses() {
     must_parse(
         &base(),
@@ -61,7 +60,6 @@ fn the_base_document_parses() {
 
 /// MC-S05 adds `/leverage`.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_unknown_member_names_itself() {
     let document = with("/leverage", Some(s("2")));
     assert_eq!(code_of(&document), "unknown_member");
@@ -71,7 +69,6 @@ fn an_unknown_member_names_itself() {
 /// MC-S22 removes a model's output age, MC-S27 the research cost cap, and the rest are the members
 /// every mandate needs.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_missing_required_member_names_itself() {
     for path in [
         "/risk/max_drawdown",
@@ -96,7 +93,6 @@ fn a_missing_required_member_names_itself() {
 /// branches, and a parse that dispatches on `type` names the member the accumulate branch needs
 /// rather than reporting the whole goal as off its union.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_accumulate_goal_missing_its_spend_cap_names_that_member() {
     let accumulate = obj(vec![
         ("type", s("accumulate")),
@@ -118,7 +114,6 @@ fn an_accumulate_goal_missing_its_spend_cap_names_that_member() {
 
 /// MC-S06 and MC-S16. The journal grammar is a text-level type; a JSON number could not carry 28 places and would not round-trip (journal spec §4.6).
 #[test]
-#[ignore = "pending E10-1"]
 fn a_decimal_sent_as_a_json_number_is_not_a_decimal() {
     let document = with("/capital/allocation_usd", Some(i(10_000)));
     assert_eq!(code_of(&document), "decimal_as_number");
@@ -134,7 +129,6 @@ fn a_decimal_sent_as_a_json_number_is_not_a_decimal() {
 
 /// MC-S02, MC-S23, MC-S28.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_value_off_its_enum_names_itself() {
     for (path, value) in [
         ("/autonomy/approval/on_timeout", "execute"),
@@ -155,7 +149,6 @@ fn a_value_off_its_enum_names_itself() {
 /// The pointer is the half review round 2 found unpinned: a rejection that says only "off_grammar"
 /// leaves an author hunting for which of a mandate's forty decimals it meant.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_decimal_off_its_fields_grammar_says_which_grammar() {
     for path in [
         "/risk/max_drawdown",
@@ -189,7 +182,6 @@ fn a_decimal_off_its_fields_grammar_says_which_grammar() {
 
 /// MC-S09, MC-S21, MC-S24, MC-S25, MC-S30, MC-S31.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_integer_outside_its_bounds_names_itself() {
     for (path, value) in [
         ("/behavior/cadence/interval_s", 30),
@@ -207,7 +199,6 @@ fn an_integer_outside_its_bounds_names_itself() {
 
 /// MC-S08 (a model id with no type prefix), MC-S18 (month 13).
 #[test]
-#[ignore = "pending E10-1"]
 fn a_string_off_its_pattern_names_itself() {
     assert_eq!(
         code_of(&with("/behavior/signal_models/0/id", Some(s("momentum")))),
@@ -226,7 +217,6 @@ fn a_string_off_its_pattern_names_itself() {
 
 /// MC-S07.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_unknown_condition_field_is_not_an_enum_member() {
     let condition = obj(vec![
         ("field", s("vibes")),
@@ -241,7 +231,6 @@ fn an_unknown_condition_field_is_not_an_enum_member() {
 
 /// MC-S19: `in` takes a non-empty array.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_empty_in_list_is_out_of_bounds() {
     let condition = obj(vec![
         ("field", s("purpose")),
@@ -256,7 +245,6 @@ fn an_empty_in_list_is_out_of_bounds() {
 
 /// MC-S11: `distribute` was removed from the spec, so the tagged union has no branch for it.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_removed_goal_type_is_no_longer_a_goal() {
     let goal = obj(vec![
         ("type", s("distribute")),
@@ -268,7 +256,6 @@ fn a_removed_goal_type_is_no_longer_a_goal() {
 
 /// V-017 is a semantic rule, but the schema also bounds the nesting, so the parse is where a deeper tree stops.
 #[test]
-#[ignore = "pending E10-1"]
 fn conditions_nest_at_most_four_deep() {
     let mut condition = obj(vec![
         ("field", s("order_usd")),
@@ -286,7 +273,6 @@ fn conditions_nest_at_most_four_deep() {
 
 /// The round trip the version hash rests on. It holds because every decimal grammar is canonical, so a `SchemaDec` is already the journal form (DEC-128 item 3); planted bug 25 re-serialises from the typed fields instead and loses a digit.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_canonical_bytes_reproduce_the_document_they_were_parsed_from() {
     let document = base();
     let mandate = parse(&document).expect("the base parses");
@@ -299,7 +285,6 @@ fn the_canonical_bytes_reproduce_the_document_they_were_parsed_from() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn a_version_is_the_digest_of_those_bytes() {
     let mandate = parse(&base()).expect("the base parses");
     let bytes = mandate.canonical_bytes().expect("canonical bytes");
@@ -312,7 +297,6 @@ fn a_version_is_the_digest_of_those_bytes() {
 
 /// A canonical object sorts its keys, so provenance, member order, and whitespace cannot move a version hash.
 #[test]
-#[ignore = "pending E10-1"]
 fn two_documents_that_differ_only_in_order_hash_the_same() {
     let a = parse(&base()).expect("the base parses");
     let b = parse(&base()).expect("the base parses again");
@@ -325,7 +309,6 @@ fn two_documents_that_differ_only_in_order_hash_the_same() {
 /// Added in review round 1: nine cases had a `schema_valid: false` in the fixture and no test here
 /// saying *why*, and "why" is the whole reason these tests exist beside the harness.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_remaining_schema_rejections_name_their_reason() {
     assert_eq!(
         code_of(&with("/behavior/signal_models/0/weight", Some(s("0")))),
@@ -348,7 +331,6 @@ fn the_remaining_schema_rejections_name_their_reason() {
 /// and that is what `jsonschema` reports for this case too, which ES-22 requires the two to agree on.
 /// Review round 2 raised the choice; this is the side the schema takes.
 #[test]
-#[ignore = "pending E10-1"]
 fn protection_enabled_needs_a_stop_distance() {
     let document = with("/protection/stop_distance", Some(Value::Null));
     assert_eq!(code_of(&document), "wrong_type");
@@ -367,7 +349,6 @@ fn protection_enabled_needs_a_stop_distance() {
 /// The builder's base has `research: null` (no admitting model), so each row sets a research object
 /// first and then breaks one thing in it.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_research_object_has_its_own_required_members_and_bounds() {
     let research = |interval: u64, revisions: u64, with_cap: bool| {
         let mut members = vec![("interval_s", i(interval))];
