@@ -322,9 +322,43 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
     }
 }
 
-/// `/v2/positions/{symbol}` for one instrument.
+/// `/v2/positions/{symbol}` for one instrument, the one path both the positions read and the
+/// account-wide close are built on.
+///
+/// A crypto pair is written without its slash, `BTC/USD` as `BTCUSD`: Alpaca answers
+/// `/v2/positions/BTC/USD` with a 404 and `/v2/positions/BTCUSD` with the position (alpaca-py
+/// issue 537, on the paper host), and keeps the slash-free form as its legacy pair symbol. Only a
+/// pair of two letter-and-digit halves loses its slash; every other symbol must already be one
+/// segment of `wire`'s symbol alphabet, letters, digits and `.`, starting with a letter or a
+/// digit. Anything else — a third segment, an empty half, a dot segment, a percent sign, a query
+/// — is [`TransportError::RefusedPath`], so a hostile instrument id is never folded into another
+/// symbol's path, and the allowlist still judges what this returns.
 pub fn position_path(instrument: &InstrumentId) -> Result<String, TransportError> {
-    Ok(format!("/v2/positions/{}", instrument.as_str()))
+    let symbol = instrument.as_str();
+    let segment = match symbol.split_once('/') {
+        None => symbol.to_owned(),
+        Some((base, quote)) if is_pair_half(base) && is_pair_half(quote) => {
+            format!("{base}{quote}")
+        }
+        Some(_) => return Err(TransportError::RefusedPath),
+    };
+    let symbol_like = segment
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphanumeric())
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.');
+    if symbol_like {
+        Ok(format!("/v2/positions/{segment}"))
+    } else {
+        Err(TransportError::RefusedPath)
+    }
+}
+
+/// One half of a crypto pair: letters and digits only, and at least one.
+fn is_pair_half(half: &str) -> bool {
+    !half.is_empty() && half.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
 /// Whether `segment` is a dot segment, `.` or `..`, in any spelling a URL parser decodes: each dot
