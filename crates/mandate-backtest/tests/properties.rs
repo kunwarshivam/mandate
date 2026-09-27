@@ -341,6 +341,13 @@ fn close() -> impl Strategy<Value = u32> {
     5_000u32..20_000
 }
 
+/// Canonical decimal text for a whole number of cents, which is the only form `Price::parse` takes:
+/// the grammar has no trailing fractional zero, so 5,000 cents is `50` and 5,010 cents is `50.1`.
+fn dollars(cents: u32) -> String {
+    let text = format!("{}.{:02}", cents / 100, cents % 100);
+    text.trim_end_matches('0').trim_end_matches('.').to_string()
+}
+
 /// Two regular bars for each of `days` trading days from 2026-09-21, built around generated closes.
 fn generated_bars() -> impl Strategy<Value = Vec<SimBar>> {
     proptest::collection::vec((close(), 1_000u32..20_000), 2..7).prop_map(|days| {
@@ -356,9 +363,9 @@ fn generated_bars() -> impl Strategy<Value = Vec<SimBar>> {
         let mut bars = Vec::new();
         for (index, (cents, volume)) in days.into_iter().enumerate() {
             let day = dates[index];
-            let close = format!("{}.{:02}", cents / 100, cents % 100);
-            let high = format!("{}.{:02}", (cents + 50) / 100, (cents + 50) % 100);
-            let low = format!("{}.{:02}", (cents - 50) / 100, (cents - 50) % 100);
+            let close = dollars(cents);
+            let high = dollars(cents + 50);
+            let low = dollars(cents - 50);
             let volume = volume.to_string();
             bars.push(auction(
                 day,
