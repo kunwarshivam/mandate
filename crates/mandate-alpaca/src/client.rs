@@ -451,6 +451,20 @@ mod tests {
             client.transport.sent.borrow().is_empty(),
             "and no request left the process"
         );
+        let ordinary = client
+            .account_wide(HttpRequest::account_wide_for_tests(
+                Method::Delete,
+                "/v2/orders/b-1",
+            ))
+            .await;
+        assert_eq!(
+            ordinary.map_err(|error| error.to_connector()),
+            Err(ConnectorError::NotSent {
+                code: "refused_path"
+            }),
+            "nor does the account-wide constructor build an ordinary endpoint's request"
+        );
+        assert!(client.transport.sent.borrow().is_empty());
     }
 
     #[tokio::test]
