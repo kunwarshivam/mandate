@@ -1588,3 +1588,36 @@ fn a_resubmission_the_recheck_holds_waits_in_intent_and_goes_once_released() {
         "the same id, resubmitted once the hold clears"
     );
 }
+
+#[test]
+#[ignore = "pending E7-3"]
+fn a_paper_crypto_fill_books_no_simulated_regulatory_fee() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, BTC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, BTC);
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+            instrument: instrument(BTC),
+            ..broker_fill("f-1", Some(&id), "1", "60000")
+        })),
+        &ports,
+    );
+
+    assert!(
+        ran.draft_types().contains(&"FillApplied"),
+        "the crypto fill is applied: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        !ran.drafts.iter().any(|d| d.event_type == "FeesCharged"
+            && d.payload.get("simulated") == Some(&Value::Bool(true))),
+        "SEC, TAF and CAT are equity fees, and crypto fees are the broker's own on paper too, so a \
+         paper crypto fill books no simulated fee (§10): {:?}",
+        ran.draft_types()
+    );
+}
