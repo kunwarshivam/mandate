@@ -42,8 +42,8 @@ finishing first.
   envelope), §5.1 (the append protocol, idempotency, fencing), §5.2 (write before acting: "the executor
   journals `OrderSubmitted` **before** the broker request", and recovery by `client_order_id`), §8
   (replay and `fold_version`), §9 (the account-stream catalogue), §12 (export);
-  [ADR-0001](../../adr/0001-engineering-setup.md) ES-02 (`mandate-executor` and `mandate-alpaca` at
-  layer 6 are the planned crates, both safety-critical), ES-06 (`handle(&mut State, Input) -> Vec<Effect>`,
+  [ADR-0001](../../adr/0001-engineering-setup.md) ES-02 (`mandate-executor` at layer 6 and
+  `mandate-alpaca` at layer 7, DEC-133 item 1 as amended, both safety-critical), ES-06 (`handle(&mut State, Input) -> Vec<Effect>`,
   one task per broker account owns its ledger, a priority channel for kill-switch and risk-exit
   commands, one fenced `StreamWriter` per stream, effects only after `Committed` or `AlreadyCommitted`,
   `IdGen` injected), ES-09 (typed errors with stable codes, `secrecy`, a log scan), ES-19 (injected
@@ -245,7 +245,8 @@ a seeded bug before it is trusted; the planted-bug table below is that evidence.
   while sitting beside `mandate-runtime` rather than under it. It does **not** depend on
   `mandate-runtime`: they are the same layer, so the `IntentSink` adapter is the shell's (see Data
   shapes).
-- **In scope, new: `mandate-alpaca`.** Recommended `layer = 6`, `pure = false`,
+- **In scope, new: `mandate-alpaca`.** Recommended `layer = 7` (DEC-133 item 1 as amended by PR
+  #152: an adapter over the core that implements the executor's trait sits above it), `pure = false`,
   `safety_critical = true`, `allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]`,
   with a CODEOWNERS line. It depends on `mandate-num`, `mandate-time`, and `mandate-executor` (it
   implements the connector trait the executor declares); nothing depends on it except the shell and its
@@ -271,6 +272,8 @@ a seeded bug before it is trusted; the planted-bug table below is that evidence.
   intent protocol, and the order state machine; (2) reconciliation and the fault-injection suite;
   (3) the protective sequences and the ladder; (4) `mandate-alpaca`'s client, wire types, and
   fixtures. Each is its own PR against `main` if the first exceeds the budget on its own.
+  The tests PR (#152) carries the stubs and vocabulary in `src` above the budget; the split
+  governs the implementation PRs (#174's slices), not the tests PR (review round 2).
 
 ## Data shapes
 
@@ -798,7 +801,8 @@ Each item fixes how code realises a rule the specs already state. Item 1 is the 
 founder-owned files; the items under "Decisions needed" that would add a number to a spec table stay
 `Proposed (founder)`.
 
-1. **Two crates, at layer 6, both safety-critical.** `mandate-executor` (`pure = true`,
+1. **Two crates, both safety-critical: `mandate-executor` at layer 6 and `mandate-alpaca` at layer 7**
+   (amended by PR #152 review round 1). `mandate-executor` (`pure = true`,
    `allowed_external = ["thiserror"]`) and `mandate-alpaca` (`pure = false`,
    `allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]`),
    each with a CODEOWNERS line, exactly as ES-02 plans them. The split is the one ES-02 already names,
@@ -1005,13 +1009,14 @@ means the test is wrong, not the bug.
 ## Decisions needed
 
 1. **The `mandate-executor` and `mandate-alpaca` entries in `xtask/layers.toml` and `CODEOWNERS`**
-   (founder-owned files). Recommendation as interpretation 1 states them: both `layer = 6` and
+   (founder-owned files). Recommendation as interpretation 1 states them: `mandate-executor` at
+   `layer = 6` and `mandate-alpaca` at `layer = 7` (DEC-133 item 1 as amended), both
    `safety_critical = true`; `mandate-executor` `pure = true` with `allowed_external = ["thiserror"]`;
    `mandate-alpaca` `pure = false` with
    `allowed_external = ["reqwest", "rustls", "secrecy", "serde", "serde_json", "thiserror", "tokio"]`;
    plus `/crates/mandate-executor/ @kunwarshivam` and `/crates/mandate-alpaca/ @kunwarshivam`. ES-02
-   already names both crates at layer 6 and both as safety-critical, so this is a transcription rather
-   than a new choice, but the files are the founder's. **Proposed (founder).**
+   names both crates as safety-critical; the layer of `mandate-alpaca` moved to 7 because it implements
+   a trait the layer-6 executor declares, so the files, which are the founder's, need that one change. **Proposed (founder).**
 2. **The five parameters trading-domain spec §5.4 and §5.7 name without a value.** They govern how long
    an order may stay unresolved and how early protection is re-placed, so the numbers belong in the spec
    table beside the ones that already have defaults. Adding them edits `docs/specs/`, which ES-22 says

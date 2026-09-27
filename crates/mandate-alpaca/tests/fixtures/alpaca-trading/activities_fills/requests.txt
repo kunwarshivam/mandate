@@ -1,0 +1,1 @@
+GET /v2/account/activities?activity_types=FILL&page_size=50

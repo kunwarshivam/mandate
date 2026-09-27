@@ -130,7 +130,8 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Autonomy and the order builder (E6-2)
 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
-DEC-130; the paths arrive with the tests PR, which updates this entry.
+DEC-130. The crate holds stubs until the implementation PR; the 125 tests below are pending and
+every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -138,20 +139,33 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
   (exact comparisons and the limits the proposal is clipped to); `docs/specs/trading-domain.md` §5.1
   and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
   pacing of a discretionary exit).
-- **Code:** `mandate-builder` (new; the §6 classification with its condition language, and the §8.3
-  combine, decide, size, and clip walk), with the exact arithmetic (a unit-interval type, a signed
-  conviction, the weighted 12-place quotients, and the wide sizing intermediates) in `mandate-num`.
-  The gate's dry-run verdict reaches the crate as a value, so `mandate-risk` is not a dependency
-  (DEC-130 item 2).
-- **Tests:** the hand-calculated A and B case recomputations of the brief, the freshness and
-  tie-breaking cases, the four clips and the accumulate clips, and property tests against an
-  independent integer combine oracle, a rational sizing oracle compared by cross-multiplication, and
-  a naive rule walk. Planted bugs per test: the task brief.
+- **Code:** `mandate-builder`: `crates/mandate-builder/src/lib.rs` (the crate's contract and
+  `BuilderError`'s fourteen refusals with their stable codes),
+  `crates/mandate-builder/src/autonomy.rs` (§6.2's order, the built-in AUTO purposes, the first
+  match, the default, the admission ceiling, the approver count, and the `Facts` a proposed action
+  presents to a §6.3 rule), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
+  and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
+  arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
+  `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
+  verdict reaches the crate as a value, so `mandate-risk` is not a dependency (DEC-130 item 2), and
+  the §6.3 condition tree is `mandate-spec`'s (DEC-128 item 18).
+- **Tests:** `crates/mandate-builder/tests/hand.rs` (54 tests: every §6 and §8.3 figure recomputed
+  by hand from the rule, the two freshness bounds at their exact instants, the tie-break among
+  duplicate outputs, the four clips, the accumulate clips with fees, and the two orderings DEC-130
+  item 21 fixes), `crates/mandate-builder/tests/properties.rs` (25 properties against three
+  independent oracles: the combine step as `i128` integer arithmetic with its own half-even
+  rounding, the sizing chain as rationals compared by cross-multiplication, and a naive rule walk
+  that re-reads the list from the start), `crates/mandate-builder/tests/refcases.rs` (the 16 `MC-A`
+  and 28 `MC-B` cases loaded from the fixture, one test per case id),
+  `crates/mandate-builder/tests/common/mod.rs` (the two reference bases as typed inputs), and the
+  two `mandate-num` additions in `crates/mandate-num/tests/num.rs`. Planted bugs per test: the task
+  brief and the tests PR's body.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
   harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
   family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder`.
+- **Run:** `cargo nextest run -p mandate-builder`; the pending tests with
+  `cargo nextest run -p mandate-builder --run-ignored all`.
 
 ## Agent runtime and kill switches
 
@@ -244,7 +258,8 @@ paths arrive with the tests PR, which updates this entry.
 ## Idempotent executor and broker connector
 
 Planned by [the E7-2, E7-3 and E7-4 task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)
-and DEC-133; the paths arrive with the tests PR, which updates this entry.
+and DEC-133. The tests PR has landed the two crate skeletons, their stubs, and the suite; the
+implementation PR turns the pending tests green without editing them (DEC-77).
 
 - **Spec:** `docs/specs/trading-domain.md` section 5.1 to 5.7 (the v1 order policy, the Alpaca
   capability matrix, the constraints before submission, protective exits and the tranche model, the
@@ -257,7 +272,17 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   (replay and `fold_version`), 9 (the account-stream catalogue); `docs/HLD.md` section 5 ("Durability")
   and 6.D (crash recovery); ADR-0001 ES-02, ES-06, ES-09, ES-19, ES-20, ES-21, ES-23, ES-24; backlog
   E7-2, E7-3, E7-4.
-- **Code:** `mandate-executor` (new; `fold` and `handle` over the account stream, the intent protocol,
+- **Code:** `crates/mandate-executor/src/state.rs` (`ExecutorState` and `fold`),
+  `crates/mandate-executor/src/step.rs` (`handle`, the only producer of effects),
+  `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
+  parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
+  `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`;
+  `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
+  credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
+  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`.
+  In prose: `mandate-executor` (`fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
@@ -270,15 +295,26 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reject mappings). It calls `mandate-risk` directly as the binding gate and reads
   `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
   connector is not here.
-- **Tests:** the hand cases of the brief (the submission chain, the `Unknown` lookup discipline, the
+- **Tests:** `crates/mandate-executor/tests/hand.rs`,
+  `crates/mandate-executor/tests/properties.rs`, `crates/mandate-executor/tests/fault.rs`,
+  `crates/mandate-executor/tests/refcases.rs`, `crates/mandate-executor/tests/common/mod.rs`,
+  `crates/mandate-executor/tests/common/golden.rs`,
+  `crates/mandate-executor/tests/golden-journal.json`;
+  `crates/mandate-alpaca/tests/hand.rs`, `crates/mandate-alpaca/tests/properties.rs`,
+  `crates/mandate-alpaca/tests/fixtures.rs`, `crates/mandate-alpaca/tests/common/mod.rs`,
+  `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
+  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`. In prose: the hand cases of the brief
+  (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
   against four independent oracles: a broker-side submission counter inside the fake connector, a
   shadow order book rebuilt from the drafts' canonical bytes, an `i128` shadow position ledger, and a
   protection accountant that finds every unprotected interval. Alpaca fixtures follow
   `mandate-marketdata`'s recorded-scenario shape adapted for a write API (method and body in
-  `requests.txt`, `response-N.json`, its own `record.sh`) and are hand-built; a recording pass against
-  the paper host is an addition on top. Planted bugs per test (21): the task brief.
+  `requests.txt`, `response-N.json`, its own `record.sh`), with `statuses.txt` beside them because a
+  trading endpoint distinguishes a rejection from a duplicate id from an absence by status: eleven
+  scenarios are recorded against the paper host and twelve are hand-built from the spec. Planted bugs
+  per test (21): the task brief.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
@@ -290,7 +326,7 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine.
+implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -309,7 +345,10 @@ check still owed.
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
   purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
-  refusal of an opening while a check is owed),
+  refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
+  mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
+  exposure with the account's own 1×),
+  `crates/mandate-risk/src/flatten.rs` (`agent_flatten`, the agent-scoped kill switch's plan),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
@@ -659,13 +698,18 @@ proves each pending test fails on them (DEC-110).
   git repository in
   which committed, uncommitted, and untracked pending tests pass on the stubs or fail away from
   them.
-- **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`; `cargo xtask ci mutants`.
 
 ## Repository automation
 
 - **Code:** `xtask`: `xtask/src/main.rs` (every CI job, including `mutants_outcome`,
   `mutant_verdicts` and `is_stub_function`, which exempt an `Unimplemented` stub body of a crate
-  with pending tests, on a missed-mutant exit status, and nothing else),
+  with pending tests, on a missed-mutant exit status, and nothing else, and
+  `live_tests_judge_every_mutant` with `listed_mutant_counts`, `live_test_counts` and
+  `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
+  run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
+  repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
+  pre-flight can be deleted without a test failing),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.

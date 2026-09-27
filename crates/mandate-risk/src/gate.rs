@@ -15,6 +15,7 @@ use mandate_num::Qty;
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
     GateInput, InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse,
+    limits,
 };
 
 /// The eight checks, in §9.1's order.
@@ -33,12 +34,12 @@ const ORDER: [Check; 8] = [
 pub(crate) type Stop = (Verdict, ReasonCode);
 
 /// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
-/// still lacks the §5.3 limits (E6-3's next PR) and the floor (E6-7), check 4 its rules 1, 2 and 4
-/// to 8, and checks 3 and 5 to 8 are not written yet.
+/// still lacks the floor (E6-7), check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls
+/// (E6-8) and check 7 buying power (E6-6), and checks 3, 5 and 8 are not written yet.
 fn owed(check: Check) -> Option<&'static str> {
     match check {
         Check::AccountAndMode => None,
-        Check::UniverseAndLimits => Some("E6-3"),
+        Check::UniverseAndLimits => Some("E6-7"),
         Check::SessionAndHalt
         | Check::OrderConstraints
         | Check::BuyingPowerAndExposure
@@ -112,8 +113,13 @@ fn run(
 ) -> Result<Option<Stop>, GateError> {
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
-        Check::UniverseAndLimits if opening => working_universe(input, computed),
+        Check::UniverseAndLimits if opening => match working_universe(input, computed)? {
+            None => limits::position_order_and_cooldown(input, computed),
+            stop => Ok(stop),
+        },
         Check::OrderConstraints => Ok(order_constraints(input, opening)),
+        Check::ConductControls if opening => Ok(limits::orders_per_day(input, computed)),
+        Check::BuyingPowerAndExposure if opening => limits::gross_exposure(input, computed),
         _ => Ok(None),
     }
 }
@@ -225,8 +231,9 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// What the tests PR's files cannot pin on this PR's code, each shown by a planted bug that every
 /// live test passed (the #157 reviews): the eight check ids in §9.1's order, the order in which two
 /// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
-/// crypto account denying an opening, a protective leg above the position crossing zero, and the
-/// partial gate failing closed.
+/// crypto account denying an opening, a protective leg above the position crossing zero, the
+/// partial gate failing closed, a value exactly at each limit passing, and the account's own 1×
+/// bound.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -238,8 +245,8 @@ mod tests {
     use crate::spec_types::{GoalState, RiskLimits, RiskSnapshot, ValidatedMandate};
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
-        ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass,
-        InstrumentSnapshot, MarketSnapshot, ProposedKind, ProposedOrder, TimeInForce,
+        ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass, GroupId,
+        InstrumentSnapshot, MarketSnapshot, ProposedKind, ProposedOrder, TimeInForce, WorkingOrder,
     };
 
     /// Every input of one decision, owned, so a test changes only the field it is about.
@@ -557,12 +564,12 @@ mod tests {
     }
 
     /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
-    /// that completes the first check still owed (check 2's §5.3 limits, E6-3's next PR).
+    /// that completes the first check still owed (check 2's eligibility floor, E6-7).
     #[test]
     fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
         let refused = allowing()?.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-3"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
             "a partial gate fails closed for adding risk, not open: {refused:?}"
         );
         Ok(())
@@ -589,13 +596,15 @@ mod tests {
         Ok(())
     }
 
-    /// §5.3 rule 3 for a protective leg: a stop that sells 1000 against a position of 10 would
-    /// open a short if it triggered, so it is typed an opening and denied `would_cross_zero`; and a
+    /// §5.3 rule 3 for a protective leg: a stop that sells 11 against a position of 10 would open a
+    /// short if it triggered, so it is typed an opening and denied `would_cross_zero`; and a
     /// protective "buy" adds risk in a long-only book, so it is an opening too (DEC-129 item 30).
+    /// 11 × 90 = 990 sits inside every §5.3 limit, so check 2 passes it and check 4 is what denies.
     #[test]
     fn a_protective_leg_above_the_position_crosses_zero() -> Result<(), GateError> {
         let mut o = allowing()?.selling(Origin::ProtectiveLeg)?;
-        o.proposed.qty = Qty::parse("1000")?;
+        o.proposed.qty = Qty::parse("11")?;
+        o.proposed.limit_price = Price::parse("90")?;
         let d = o.decide()?;
         let buy = assign_purpose(
             Origin::ProtectiveLeg,
@@ -613,6 +622,73 @@ mod tests {
             ),
             "a sell above the position is denied (§9.1), a protective leg's too; only a sell \
              within it protects"
+        );
+        Ok(())
+    }
+
+    /// DEC-129 item 15: an order of exactly `max_order_usd` (10 × 100 = 1000), an instrument total
+    /// of exactly the cap (500 held + 1000 = 1500), an agent gross of exactly its limit (500 + 500
+    /// elsewhere + 1000 = 2000) and an account gross of exactly its equity all pass every limit.
+    /// The opening is still refused, as item 29 requires while the floor is owed, and a limit that
+    /// compared with `>=` would deny it instead.
+    #[test]
+    fn a_value_exactly_at_every_limit_passes_it() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        let b = id("b")?;
+        let held = Usd::parse("500")?;
+        o.agent.market_values = [(o.proposed.instrument.clone(), held), (b.clone(), held)].into();
+        o.agent
+            .positions
+            .insert(o.proposed.instrument.clone(), Qty::parse("5")?);
+        o.account.market_values = o.agent.market_values.clone();
+        o.account.equity = Usd::parse("2000")?;
+        let refused = o.decide();
+        assert!(
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            "every comparison is `>`, so a value exactly at a limit passes it: {refused:?}"
+        );
+        Ok(())
+    }
+
+    /// §9.3: the account at 1× binds before the agent's own limit. Another agent's 1 on an account
+    /// of equity 1000 puts the account at 1001, while this agent's 1000 is half its own limit.
+    #[test]
+    fn the_account_at_one_times_binds_before_the_agent_limit() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        o.account.market_values = [(id("c")?, Usd::parse("1")?)].into();
+        o.account.equity = Usd::parse("1000")?;
+        let d = o.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason, d.computed.gross),
+            (Verdict::Deny, Some(ReasonCode::GrossExposureLimit), None),
+            "the account bound denies before the agent's gross is ever computed"
+        );
+        Ok(())
+    }
+
+    /// Mandate §5.3's re-entry cooldown binds only an exit fill in the instrument's own group, and
+    /// only strictly inside `reentry_cooldown_s`. An exit in an ungrouped other instrument 10 s ago
+    /// denies nothing, and an exit in this instrument exactly 3600 s ago has run its course: both
+    /// openings pass the cooldown and are refused only because the floor is owed (item 29).
+    #[test]
+    fn the_cooldown_binds_only_its_group_and_only_strictly_inside_it() -> Result<(), GateError> {
+        let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
+        let mut other_group = allowing()?;
+        other_group
+            .agent
+            .last_exit_fill_at
+            .insert(id("z")?, UtcNanos::from_parts(now.secs() - 10, 0)?);
+        let mut run_its_course = allowing()?;
+        let mine = run_its_course.proposed.instrument.clone();
+        run_its_course
+            .agent
+            .last_exit_fill_at
+            .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
+        let (a, b) = (other_group.decide(), run_its_course.decide());
+        assert!(
+            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-7")))
+                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
         );
         Ok(())
     }
@@ -639,6 +715,172 @@ mod tests {
                 ))
             ),
             "the instrument is in the universe; the restriction alone denies, at check 2"
+        );
+        Ok(())
+    }
+
+    /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err(story)` for the
+    /// refusal of the next owed check (item 29), which is what "passes every limit" looks like.
+    fn limit_row(
+        edit: impl FnOnce(&mut Owned) -> Result<(), GateError>,
+    ) -> Result<Result<ReasonCode, &'static str>, GateError> {
+        let mut o = allowing()?;
+        o.proposed.qty = Qty::parse("1")?;
+        edit(&mut o)?;
+        match o.decide() {
+            Ok(d) => Ok(d.reason.ok_or("allowed")),
+            Err(GateError::Unimplemented(_, story)) => Ok(Err(story)),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The agent's gross limit is `min(max_gross_exposure_usd, agent equity)`, never the account's
+    /// equity: with the agent at 1500 on an account of 1000000, 1400 held elsewhere plus 100 is
+    /// exactly the limit and passes, and one nano-dollar more is denied.
+    #[test]
+    fn the_agent_gross_limit_is_on_agent_equity() -> Result<(), GateError> {
+        let held_elsewhere = |mv: &'static str| {
+            move |o: &mut Owned| -> Result<(), GateError> {
+                o.risk.agent_equity = Usd::parse("1500")?;
+                o.account.equity = Usd::parse("1000000")?;
+                o.agent.market_values = [(id("b")?, Usd::parse(mv)?)].into();
+                Ok(())
+            }
+        };
+        assert_eq!(
+            [
+                limit_row(held_elsewhere("1400"))?,
+                limit_row(held_elsewhere("1400.000000001"))?,
+            ],
+            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            "1400 + 100 against min(2000, agent equity 1500)"
+        );
+        Ok(())
+    }
+
+    /// The per-instrument cap scales the agent's equity: at 1000 the cap is min(1500, 0.2 × 1000)
+    /// = 200, so 100 held plus 100 passes, one nano-dollar more is denied, and the denial reports
+    /// that cap.
+    #[test]
+    fn the_fraction_cap_is_on_agent_equity() -> Result<(), GateError> {
+        let held_here = |mv: &'static str| {
+            move |o: &mut Owned| -> Result<(), GateError> {
+                o.risk.agent_equity = Usd::parse("1000")?;
+                o.account.equity = Usd::parse("1000000")?;
+                o.agent.market_values = [(o.proposed.instrument.clone(), Usd::parse(mv)?)].into();
+                o.agent
+                    .positions
+                    .insert(o.proposed.instrument.clone(), Qty::parse("1")?);
+                Ok(())
+            }
+        };
+        let mut over = allowing()?;
+        over.proposed.qty = Qty::parse("1")?;
+        held_here("100.000000001")(&mut over)?;
+        assert_eq!(
+            (limit_row(held_here("100"))?, over.decide()?.computed.cap,),
+            (Err("E6-7"), Some(Usd::parse("200")?)),
+            "100 + 100 is exactly the cap of 200; over it the denial reports cap 200"
+        );
+        assert_eq!(
+            limit_row(held_here("100.000000001"))?,
+            Ok(ReasonCode::ConcentrationLimit),
+            "one nano-dollar over the cap"
+        );
+        Ok(())
+    }
+
+    /// The account's 1× bound counts every agent's working opening orders: another agent's 900
+    /// plus this 100 is exactly an account equity of 1000 and passes; one nano-dollar more denies.
+    #[test]
+    fn the_account_bound_counts_other_agents_working_orders() -> Result<(), GateError> {
+        let other_agent = |cost: &'static str| {
+            move |o: &mut Owned| -> Result<(), GateError> {
+                o.account.equity = Usd::parse("1000")?;
+                o.account.working_orders.insert(
+                    ClientOrderId(9),
+                    WorkingOrder {
+                        agent: AgentId(2),
+                        instrument: id("c")?,
+                        side: Side::Buy,
+                        max_cost: Usd::parse(cost)?,
+                        open_qty: Qty::parse("1")?,
+                        protective: false,
+                        opening: true,
+                        submitted_on: mandate_time::Date::parse("2026-09-21")?,
+                    },
+                );
+                Ok(())
+            }
+        };
+        assert_eq!(
+            [
+                limit_row(other_agent("900"))?,
+                limit_row(other_agent("900.000000001"))?,
+            ],
+            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            "900 of another agent's + 100 against the account's 1000"
+        );
+        Ok(())
+    }
+
+    /// Working cost is the agent's working *opening, non-protective* orders: a 100000 order in the
+    /// instrument that is protective, or that is not an opening, changes nothing.
+    #[test]
+    fn working_cost_ignores_protective_and_non_opening_orders() -> Result<(), GateError> {
+        let big_order = |protective: bool, opening: bool| {
+            move |o: &mut Owned| -> Result<(), GateError> {
+                o.account.working_orders.insert(
+                    ClientOrderId(9),
+                    WorkingOrder {
+                        agent: AgentId(1),
+                        instrument: o.proposed.instrument.clone(),
+                        side: Side::Buy,
+                        max_cost: Usd::parse("100000")?,
+                        open_qty: Qty::parse("1")?,
+                        protective,
+                        opening,
+                        submitted_on: mandate_time::Date::parse("2026-09-21")?,
+                    },
+                );
+                Ok(())
+            }
+        };
+        assert_eq!(
+            [
+                limit_row(big_order(true, true))?,
+                limit_row(big_order(false, false))?,
+                limit_row(big_order(false, true))?,
+            ],
+            [Err("E6-7"), Err("E6-7"), Ok(ReasonCode::ConcentrationLimit)],
+            "protective, non-opening, and an opening order that does count"
+        );
+        Ok(())
+    }
+
+    /// §5.3 dates the cooldown from the *last* exit in the group: with exits in `a` 3000 s ago and
+    /// in `b` 100 s ago, both in group 7, the denial reports `b`'s.
+    #[test]
+    fn the_cooldown_reports_the_last_exit_in_the_group() -> Result<(), GateError> {
+        let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
+        let (a, b) = (id("a")?, id("b")?);
+        let mut o = allowing()?;
+        o.agent.instrument_groups = [(a.clone(), GroupId(7)), (b.clone(), GroupId(7))].into();
+        let recent = UtcNanos::from_parts(now.secs() - 100, 0)?;
+        o.agent.last_exit_fill_at = [
+            (a, UtcNanos::from_parts(now.secs() - 3000, 0)?),
+            (b.clone(), recent),
+        ]
+        .into();
+        let d = o.decide()?;
+        assert_eq!(
+            (
+                d.reason,
+                d.computed.instrument,
+                d.computed.last_exit_fill_at
+            ),
+            (Some(ReasonCode::ReentryCooldown), Some(b), Some(recent)),
+            "the binding exit is the latest one in the group"
         );
         Ok(())
     }

@@ -34,13 +34,14 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 |---|---|
 | [Vision and strategy](product/01-vision-and-strategy.md) | Why Mandate exists, who it is for, principles, positioning, strategy |
 | [Personas and journeys](product/02-personas-and-journeys.md) | Target users, roles, key journeys |
-| [Competitive landscape](product/03-competitive-landscape.md) | Open-source frameworks, infrastructure, YC companies, differentiators |
+| [Competitive landscape](product/03-competitive-landscape.md) | Sourced, dated landscape: broker agents, direct competitors, platforms, channels, capability matrix, claims not to make |
 | [PRD: v1](product/04-prd-v1.md) | Requirements for the design-partner release |
 | [Roadmap](product/05-roadmap.md) | Phases, exit criteria, what is not planned |
 | [Metrics](product/06-metrics.md) | North star, input and guardrail metrics, instrumentation |
 | [Pricing and packaging](product/07-pricing-and-packaging.md) | Plans, price levers, questions to validate |
 | [Compliance and regulatory](product/08-compliance-and-regulatory.md) | Regulatory posture and derived requirements (not legal advice) |
 | [Product experience](product/09-product-experience.md) | Web v1 experience brief: principles, journeys, screen inventory and states, UX rules from the safety rules, open product decisions |
+| [Strategy options](product/10-strategy-options.md) | Market and regulatory evidence, strategy options ranked, the recommendation as decided in DEC-141 (the complete product leads; the owner's own agent is an optional channel), broker, demo, and discovery plans |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Project

@@ -1,0 +1,1 @@
+POST /v2/orders {"client_order_id":"md-e144b97773a6f87c1978cc2831","extended_hours":false,"limit_price":"1.00","order_class":"simple","qty":"1","side":"buy","symbol":"AAPL","time_in_force":"gtc","type":"limit"}

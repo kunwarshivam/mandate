@@ -230,6 +230,44 @@ impl Exact {
     }
 }
 
+impl Exact {
+    /// The canonical decimal text of the value: no exponent, no trailing fractional zeros, `0` for
+    /// zero, and a leading `-` only for a non-zero negative. This is the form
+    /// [`crate::parse`] accepts and the form the reference cases write, so a value that round-trips
+    /// through it is the same value.
+    pub(crate) fn to_canonical_string(self) -> String {
+        let digits = self.magnitude.to_string();
+        let scale = usize::try_from(self.scale).unwrap_or(usize::MAX);
+        let padded = if digits.len() <= scale {
+            format!(
+                "{}{digits}",
+                "0".repeat(scale.saturating_sub(digits.len()).saturating_add(1))
+            )
+        } else {
+            digits
+        };
+        let point = padded.len().saturating_sub(scale);
+        let (int, frac) = padded.split_at(point);
+        let frac = frac.trim_end_matches('0');
+        let magnitude = if frac.is_empty() {
+            int.to_owned()
+        } else {
+            format!("{int}.{frac}")
+        };
+        if self.negative && !self.magnitude.is_zero() {
+            format!("-{magnitude}")
+        } else {
+            magnitude
+        }
+    }
+}
+
+impl core::fmt::Display for Exact {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&self.to_canonical_string())
+    }
+}
+
 /// `numerator ÷ denominator` rounded to an integer; `negative` is the sign of the true quotient.
 fn round_quotient(
     numerator: U256,

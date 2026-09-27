@@ -19,12 +19,15 @@
 //! [trading-domain spec §2.1]: ../../../docs/specs/trading-domain.md#21-numbers
 
 mod exact;
+mod sizing;
 
 use core::cmp::Ordering;
 use core::fmt;
 
 use exact::Exact;
 use rust_decimal::Decimal;
+
+pub use sizing::{COMBINE_SCALE, Conviction, Signed, SizeFraction, Unit, UsdExact};
 
 /// Rounding modes named by the trading-domain spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

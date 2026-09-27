@@ -218,6 +218,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
+- **E10-6 (Should)** As an owner who already runs my own agent (for example Claude), I want to
+  connect it through a Mandate MCP server that exposes the same API Mandate uses to take my input,
+  so that my agent can work inside my mandate without a separate path around it
+  ([DEC-141](04-decision-log.md#decisions)). Follows the owner-input API work, after the tracer
+  bullet (E7-7); no change to milestone order. *Accepted when:* every client request passes through
+  the same order builder, autonomy rules, risk gate, account ledger, and journal as the owner's own
+  input; the client cannot change an envelope field (it may only propose a mandate version that the
+  human confirms with step-up); ASK approvals go only to the human owner, and a client cannot approve
+  its own proposal; owner-only privileges (owner exits outside the regular session at a confirmed
+  bid, Stop and release, the kill switch) stay with the human; the client authenticates with its own
+  scoped, revocable token and no broker credential crosses MCP; every client call is journaled with
+  the client's identity; and the owner can revoke the client at any time.
 
 ### E11 Web app: dashboard and controls
 
@@ -371,6 +383,28 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
 
+From the independent review of stream H's tests PR (`mandate-builder`, [#175](https://github.com/kunwarshivam/mandate/pull/175)
+round 2, verdict approve), each deferred by the freeze rule and none of them a gap in what the tests
+assert:
+
+- **Floor the accumulate goal clip per bound, not as a whole.** `properties::accumulate_coverage_reached`
+  requires a goal clip; it does not require each of §8.3 step 4's three bounds to have been the binding
+  one. The review measured them over 256 cases: the remaining quantity bound 151 times, the spend 7 and
+  the average price 2. A floor at 2 in 256 would be flaky across seeds, so the fix is not a counter on
+  its own — the `Accumulate` shape has to make each bound bind reliably first, which today it cannot,
+  because it always sets `max_avg_price` to the ask and so leaves `a − max_avg × β` at zero and the
+  average-price **clip** off (only its guard runs). Each bound is pinned exactly by
+  `hand::accumulate_clipped_to_the_remaining_target_quantity`, `hand::accumulate_clipped_by_max_spend`
+  and `hand::accumulate_clipped_by_max_avg_price`, so this buys explicit fuzz evidence, not new coverage.
+- **Carry fees in the rational sizing oracle.** It takes `a = ask` and `β = 1`, so the fee arithmetic of
+  §8.3 step 4 is pinned by `hand::accumulate_with_fees_counts_the_spend_and_the_quantity_received` and
+  `MC-B28` rather than by the oracle. Widening the oracle means widening the generator to fee rates,
+  which changes the rational magnitudes the `i128` oracle carries; worth doing deliberately.
+- **The coverage counters are process-global statics.** Under `cargo test`'s shared process another
+  property's cases could feed the gate. `cargo nextest` gives each test its own process and is what
+  both `cargo xtask check` and CI run, so the gate is sound as used; a per-run counter would make it
+  sound under either runner.
+
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
 
@@ -393,3 +427,29 @@ a coordinator ruling rather than left undone (DEC-131 item 25):
   action adds risk, and carries no order body, so the runtime records a response and re-proposes at
   the next evaluation rather than placing the bound order; the bound content is M7's (DEC-131 item
   25(a)).
+
+From the independent review of stream G's mandate limits (`mandate-risk`, #160):
+
+- Give `Computed` the account's own figures (`account_gross`, `account_equity`), so an account-1×
+  `gross_exposure_limit` denial journals the figures it compared; today it carries none and is told
+  apart from the agent-limit denial only by `computed.gross` being unset. It is an addition to
+  #136's public API, so it needs its own ruling.
+- Settle what DEC-129 item 2's "`computed` blocks included" means: `ref.py`'s keys only, or every
+  figure the gate computed. The flat `Computed` also reports `order_usd`, `instrument_total` and
+  `cap` on branches whose reference block omits them, and `compare_computed` checks only the keys a
+  case states, so nothing asserts either reading.
+- Give §3.3's "organization ceiling" on the per-instrument cap a `GateConfig` field and an owning
+  story; check 2 has no value to bound the mandate's cap with today.
+- Pin that the **agent's** gross exposure counts only its own working openings
+  (`limits.rs`'s `working_cost(input, None, false)`): the substitution `false` → `true` survives
+  every live test (#160 round-2 finding 4). It is conservative, since the whole-account sum is a
+  superset and can only deny an opening earlier, so it is not a rule-1 breach; one assertion in
+  `the_account_bound_counts_other_agents_working_orders` would close it.
+- Decide what `agent_flatten` does when `max_exit_offset = 1` (#176 round-1 nit 3): the floor
+  `bid × 0` fails `positive()`, so the owner's kill switch returns `GateError` where `ref.py` plans a
+  floor of `0`, the one way the function can refuse an owner kill switch (AGENTS.md rule 13, "the
+  kill switch is always available"). Unreachable today, since §5.6's fixed tier table sets the
+  offset at 0.03 or 0.05 and no code path sets it to 1; a fix either bounds the offset below 1
+  where it is configured or plans the flatten without a floor.
+- Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
+  row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.

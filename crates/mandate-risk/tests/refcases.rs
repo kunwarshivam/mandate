@@ -644,7 +644,6 @@ fn reason_code(text: &str, case_id: &str) -> ReasonCode {
 /// is gated like the rest; stream J did the same in #141. The scan's blind spot itself is in the
 /// tracker's known issues, for a separate xtask change.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g01() {
     run_gate("MC-G01");
 }
@@ -658,35 +657,30 @@ fn mc_g02() {
 
 /// `MC-G03`: Order size above max_order_usd.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g03() {
     run_gate("MC-G03");
 }
 
 /// `MC-G04`: Agent gross exposure exceeded (working order in another instrument counts).
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g04() {
     run_gate("MC-G04");
 }
 
 /// `MC-G05`: Fraction cap binds when equity falls.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g05() {
     run_gate("MC-G05");
 }
 
 /// `MC-G06`: Equity below max_gross_exposure_usd caps gross exposure.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g06() {
     run_gate("MC-G06");
 }
 
 /// `MC-G07`: Orders per day reached.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g07() {
     run_gate("MC-G07");
 }
@@ -711,14 +705,12 @@ fn mc_g10() {
 
 /// `MC-G11`: Re-entry cooldown after an exit fill.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g11() {
     run_gate("MC-G11");
 }
 
 /// `MC-G12`: Re-entry cooldown applies across the instrument group.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g12() {
     run_gate("MC-G12");
 }
@@ -750,28 +742,24 @@ fn mc_g16() {
 
 /// `MC-F01`: Automated flatten on a shared account touches only that agent.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f01() {
     run_flatten("MC-F01");
 }
 
 /// `MC-F02`: Automated flatten after hours: equity sells wait; crypto sells go now.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f02() {
     run_flatten("MC-F02");
 }
 
 /// `MC-F03`: Owner kill switch after hours with the bid confirmed: sells now, never below the floor price.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f03() {
     run_flatten("MC-F03");
 }
 
 /// `MC-F04`: Owner kill switch after hours without confirmation: equity sells wait.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f04() {
     run_flatten("MC-F04");
 }
