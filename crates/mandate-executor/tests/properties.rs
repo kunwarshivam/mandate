@@ -531,6 +531,34 @@ const PROTECTED_LEAD: [Step; 4] = [
     Step::Fill,
 ];
 
+/// The steps of the submission flow alone: intents (fresh or repeated, opening or exiting),
+/// acknowledgments, restarts, and the clock. No fill, timeout, absence, cancel, snapshot, or kill
+/// switch, so an executor with only the flow built is judged on what it has.
+fn flow_step() -> impl Strategy<Value = Step> {
+    prop_oneof![
+        3 => (0u8..4, any::<bool>(), any::<bool>(), any::<bool>()).prop_map(
+            |(which, exiting, other, protected)| Step::Intent {
+                which,
+                exiting,
+                other,
+                protected,
+            }
+        ),
+        2 => Just(Step::Acknowledge),
+        1 => Just(Step::Restart),
+        1 => Just(Step::Wait),
+    ]
+}
+
+/// The prefix, then submission-flow steps only.
+fn scripted_flow() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(flow_step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(random);
+        script
+    })
+}
+
 fn scripted() -> impl Strategy<Value = Vec<Step>> {
     (any::<bool>(), prop::collection::vec(step(), 1..14)).prop_map(|(lead, random)| {
         let mut script = PREFIX.to_vec();
@@ -1071,6 +1099,78 @@ proptest! {
     #[test]
     #[ignore = "pending E7-2"]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
+        let run = play(&script);
+        let book = ShadowBook::of(&run.drafts);
+        let mut owner: BTreeMap<String, String> = BTreeMap::new();
+        let mut seen = 0usize;
+        for draft in &run.drafts {
+            if draft.event_type != "OrderSubmitted" {
+                continue;
+            }
+            let Some(id) = field(draft, "client_order_id") else {
+                continue;
+            };
+            let Some(intent) = field(draft, "intent_id") else {
+                prop_assert!(
+                    book.protective.contains(id),
+                    "{} was submitted with no intent and is not a protective order the journal \
+                     placed",
+                    id
+                );
+                seen = seen.saturating_add(1);
+                continue;
+            };
+            seen = seen.saturating_add(1);
+            if let Some(previous) = owner.insert(id.to_owned(), intent.to_owned()) {
+                prop_assert_eq!(
+                    &previous,
+                    intent,
+                    "{} names two intents (planted bug 8)",
+                    id
+                );
+            }
+        }
+        prop_assert_eq!(seen, book.submissions.len());
+    }
+
+    /// E7-2, over the submission flow alone: the id is a function of the intent id alone.
+    #[test]
+    fn a_client_order_id_is_a_function_of_the_intent_id_alone_in_the_flow(
+        script in scripted_flow()
+    ) {
+        let run = play(&script);
+        let mut by_intent: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        for draft in &run.drafts {
+            if draft.event_type != "OrderSubmitted" {
+                continue;
+            }
+            let (Some(intent), Some(id)) =
+                (field(draft, "intent_id"), field(draft, "client_order_id"))
+            else {
+                continue;
+            };
+            by_intent
+                .entry(intent.to_owned())
+                .or_default()
+                .insert(id.to_owned());
+        }
+        prop_assert!(!by_intent.is_empty(), "the prefix's opening is submitted");
+        for (intent, ids) in &by_intent {
+            prop_assert_eq!(
+                ids.len(),
+                1,
+                "intent {} produced {:?}, so the id depends on more than the intent \
+                 (planted bug 7)",
+                intent,
+                ids
+            );
+        }
+    }
+
+    /// E7-2, over the submission flow alone: no two intents ever share a client order id,
+    /// across restarts and across agents.
+    #[test]
+    fn distinct_intents_never_share_a_client_order_id_in_the_flow(script in scripted_flow()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
         let mut owner: BTreeMap<String, String> = BTreeMap::new();
