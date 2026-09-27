@@ -39,6 +39,8 @@
 //! E6-3 implements [`evaluate`] — the eight checks in order, purpose assignment, check 1 whole
 //! (the account's state, then the mode rule), the working universe, the mandate limits of mandate
 //! spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`].
+//! E6-9 adds check 3's halt and §5.1's limit-only openings at check 4, and re-prices a market exit
+//! under a real or presumed halt as a marketable limit (DEC-129 items 24 and 28).
 //! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
 //! opening or increasing order the implemented checks would allow returns
 //! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
