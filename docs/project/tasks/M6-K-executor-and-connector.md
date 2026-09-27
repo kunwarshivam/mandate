@@ -380,8 +380,12 @@ pub trait BrokerConnector {
 `mandate-runtime` and `mandate-executor` are both layer 6, so neither can name the other's types and
 neither can implement the other's trait: a second declaration here would be a second, incompatible
 trait with the same name. What this crate exposes instead is `Input::Intent`, and **the adapter that
-implements stream I's `IntentSink` by handing a proposal to this executor lives in the shell**, at
-layer 7, which is the one place that may depend on both (review round 1, finding 4). In one process the
+implements stream I's `IntentSink` by handing a proposal to this executor lives in the shell**, which
+is the one place that may depend on both (review round 1, finding 4). That shell is `mandate-shell` at
+**layer 8**, not layer 7: [DEC-138](../04-decision-log.md#decisions) amends DEC-133 item 1, because the
+shell must also see `mandate-backtest` at layer 7 (the tracer's signal) and a crate may depend only on
+strictly lower layers. Nothing else about this stream changes; the coordinator ruled this alignment onto
+the tracer brief's PR (#173). In one process the
 adapter is a direct call; across processes it is DEC-131 item 5's notify-and-tail, where the executor
 reads the agent stream from its folded position and journals `IntentReceived` — the durable path being
 the journal either way. Nothing about the executor changes between the two, which is why the shell owns

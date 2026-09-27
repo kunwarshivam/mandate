@@ -195,6 +195,52 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 - **Run:** `cargo nextest run -p mandate-runtime`, and the mutation gate the implementation PR must
   pass, `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants`.
 
+## The tracer bullet: one order end to end on Alpaca paper
+
+Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
+paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
+  intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
+  `docs/specs/trading-domain.md` section 5.1 (limit openings in the regular session), 5.7 (the order
+  lifecycle), 9.1 (the binding gate), 10 (paper mode), 11 (reconciliation), 12 (the account-stream
+  events); `docs/specs/mandate.md` section 5.3, 6, 8; `docs/specs/journal.md` section 5.1 (append,
+  idempotency, fencing), 5.2 (write before acting), 8 (replay), 11 (verification); ADR-0001 ES-02,
+  ES-06, ES-09, ES-19, ES-20, ES-21, ES-23; backlog E7-7.
+- **Code:** `mandate-shell` (new, layer 8, safety-critical, impure): the process shell, one adapter per
+  stage of the path, the effect runner that appends every journal draft before it hands an intent, the
+  host controls, and the `mandate-tracer` binary. It holds no trading logic — no sizing, no gating,
+  no pricing, no state machine, and no arithmetic on money or quantity. It binds
+  `mandate-spec` (`validate`), `mandate-marketdata` (`dataset::read_manifest`,
+  `dataset::partition::read`), `mandate-backtest` (`Strategy::signal`, E4-2's moving-average baseline),
+  `mandate-builder` (sizing and autonomy, behind `OrderPlan`), `mandate-risk` (`evaluate`, behind
+  `GateDryRun`; the binding call stays inside the executor), `mandate-runtime` (`handle`, `fold`,
+  `IntentSink`), `mandate-executor` (`handle`, `reconcile`, `ClientOrderId::for_intent`),
+  `mandate-alpaca` (`TradingClient`, `AlpacaPaperHttp`, `PAPER_HOST`), and the journal, all unchanged.
+- **Tests:** the fail-closed suite in a `#[cfg(test)]` module inside `src/`, one case per `Stage` built
+  from an exhaustive match, each built with the **other** stages as permissive doubles so the path
+  reaches the stubbed stage, asserting zero `IntentSink::hand` calls, zero `IntentProposed` and
+  `OrderSubmitted` drafts, zero submissions, and the stage's stable error code; an all-stubs case for
+  the state the repository is in; an all-doubles case that proves the harness can place an order at
+  all. Then `tests/tracer.rs`, the end-to-end run over recorded Alpaca paper scenarios (`happy`,
+  `gate_denies`, `gate_allow_with_not_reached_refused`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
+  `oversized_proposal`, `outlier_close`, `duplicate_after_restart`,
+  `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, `reconcile_mismatch_pauses`) with
+  a golden journal and an injected clock and `IdGen`; the refusal of a configured host and the host
+  scanner; the environment scanner over every committed draft, which `verify_events` does not cover;
+  and property tests that no mapping of any source error can permit an order and that an opening
+  `Allow` carrying a `NotReached` check is refused. The gate itself already refuses an opening while
+  any §9.1 check is owed (`Err(GateError::Unimplemented)`, DEC-129 item 29), so the shell only declines
+  to soften that and holds no list of its own of which story owns which check. `AlpacaPaperHttp` is never constructed in a test, so no test can
+  reach a network (ES-19). Planted bugs per test (16): the task brief.
+- **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
+  this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
+  `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
+- **Run:** `cargo nextest run -p mandate-shell`; the manual paper run is
+  `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset <dir> --journal <dsn>
+  --confirm-paper --place-one-order`, which needs both flags, refuses any attempt to configure a host,
+  and cannot reach one of its own because the crate's `allowed_external` names no HTTP client.
+
 ## Idempotent executor and broker connector
 
 Planned by [the E7-2, E7-3 and E7-4 task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)
@@ -216,7 +262,8 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
   account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
-  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-8 shell
+  (`mandate-shell`; DEC-138 amends DEC-133 item 1), since
   the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
