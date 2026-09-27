@@ -508,6 +508,22 @@ fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
             "unreadable",
             "and the shell stops and alerts on it rather than sending anything (DEC-85)"
         );
+        let mut legged: serde_json::Value =
+            serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        if let Some(object) = legged.as_object_mut() {
+            object.insert(
+                "legs".to_owned(),
+                serde_json::json!([{ "id": "e02fc2d2-0ff3-444f-a0ab-6253613302ff" }, { "id": id }]),
+            );
+        }
+        let text = serde_json::to_vec(&legged).expect("re-serialises");
+        let error = wire::order(&text).expect_err("a hostile leg id is not an order's leg");
+        assert_eq!(
+            (error.code(), error.to_string()),
+            ("wrong_type", "field id has the wrong type".to_owned()),
+            "a leg id {id:?} is a broker order id a cancel is built from too, so it is refused \
+             the same way"
+        );
     }
 }
 
@@ -1133,6 +1149,31 @@ fn an_oco_body_has_no_top_level_limit_and_no_extended_hours() {
     assert!(
         built.get("limit_price").is_none() && built.get("extended_hours").is_none(),
         "an OCO's prices are its legs' only: take_profit.limit_price and stop_loss.stop_price"
+    );
+    let two_quantities = mandate_executor::SubmitOrder {
+        oco: Some(mandate_executor::OcoLegs {
+            take_profit: exact_price("170"),
+            stop: exact_price("140"),
+            qty: exact_qty("40"),
+        }),
+        ..order.clone()
+    };
+    assert_eq!(
+        wire::submission_body(&two_quantities)
+            .err()
+            .map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO whose legs name 40 while the order names 60 is refused, never sent with either \
+         quantity: §5.4's OCO is for the filled quantity, and a guess could over-sell"
+    );
+    let with_a_limit = mandate_executor::SubmitOrder {
+        limit_price: Some(exact_price("170")),
+        ..order
+    };
+    assert_eq!(
+        wire::submission_body(&with_a_limit).err().map(|e| e.code()),
+        Some("wrong_type"),
+        "an OCO carrying a top-level limit is refused: its prices are its legs' only"
     );
 }
 

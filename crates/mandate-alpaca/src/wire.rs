@@ -235,7 +235,9 @@ pub fn status(raw: &str) -> Result<StatusMapping, WireError> {
 /// The order class follows §5.2's capability matrix: a bracket or an OCO carries its two legs and
 /// no `extended_hours` (the legs share the entry's TIF and take no extended hours), an OCO has no
 /// top-level limit because its take-profit leg is the limit, and `extended_hours` is sent only on
-/// a simple equity order, never on crypto, which trades around the clock.
+/// a simple equity order, never on crypto, which trades around the clock. An OCO whose legs name
+/// another quantity than the order, or that carries a top-level limit, is refused rather than sent
+/// with one of the two: §5.4's OCO is for the filled quantity, and a guess could over-sell.
 pub fn submission_body(order: &SubmitOrder) -> Result<String, WireError> {
     let mut body = Map::new();
     let mut put = |key: &str, value: Value| body.insert(key.to_owned(), value);
@@ -261,7 +263,12 @@ pub fn submission_body(order: &SubmitOrder) -> Result<String, WireError> {
             });
         }
         (Some(bracket), None) => Some(("bracket", bracket.take_profit, bracket.stop)),
-        (None, Some(oco)) => Some(("oco", oco.take_profit, oco.stop)),
+        (None, Some(oco)) => {
+            if oco.qty != order.qty || order.limit_price.is_some() {
+                return Err(WireError::WrongType { field: "oco" });
+            }
+            Some(("oco", oco.take_profit, oco.stop))
+        }
         (None, None) => None,
     };
     match legs {
@@ -287,6 +294,11 @@ pub fn submission_body(order: &SubmitOrder) -> Result<String, WireError> {
 /// zero is dropped on the way into `mandate-num`. Whether the rest is a well-formed decimal is
 /// `mandate-num`'s to judge, once: its parser accepts only text that is its own canonical form, so
 /// a stray sign, letter or second point cannot become a quantity, a price or an amount.
+///
+/// So the text this answers is **not** yet a number: `abc` and `1.2.3` come back `Ok`. It is
+/// public for the ES-23 tests that pin the float and exponent refusals, and a caller that needs a
+/// value parses the text with `mandate-num`, as every parser in this module does through
+/// `number`.
 pub fn decimal_text(raw: &serde_json::Value, field: &'static str) -> Result<String, WireError> {
     let text = match raw {
         Value::String(text) => text.as_str(),
@@ -424,7 +436,7 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
         None | Some(Value::Null) => Vec::new(),
         Some(legs) => list(legs, "legs")?
             .iter()
-            .map(|leg| Ok(text(object(leg, "legs")?, "id")?.to_owned()))
+            .map(|leg| broker_id(object(leg, "legs")?))
             .collect::<Result<_, WireError>>()?,
     };
     Ok(BrokerOrder {
