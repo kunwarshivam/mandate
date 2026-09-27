@@ -1551,7 +1551,7 @@ mod tests {
         o
     }
 
-    /// §5.3 rules 5 and 6 are §9.6 conduct controls, which deny openings only (DEC-150 item 1):
+    /// §5.3 rules 5 and 6 are §9.6 conduct controls, which deny openings only (DEC-150 item 2):
     /// another working non-protective order in the instrument denies an opening
     /// `working_order_limit`, while a risk exit and a discretionary exit pass it at both passes.
     #[test]
@@ -1653,7 +1653,7 @@ mod tests {
     }
 
     /// §5.3 rules 2 and 7 have no registered code, so an opening that breaks one is refused, never
-    /// allowed, and an exit is never refused for them (DEC-129 item 27, DEC-150 item 3).
+    /// allowed, and an exit is never refused for them (DEC-129 item 27, DEC-150 item 4).
     #[test]
     fn the_unregistered_rules_refuse_an_opening_and_never_an_exit() -> Result<(), GateError> {
         let buying =

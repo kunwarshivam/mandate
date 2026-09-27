@@ -497,8 +497,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
   PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
-  and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
+  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -543,8 +543,10 @@ proves each pending test fails on them (DEC-110).
   crate carries live, pinned unignored so `cargo mutants` reaches it). Planted bugs per test: the task
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
-  thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
-  with streams F, G, and H.
+  thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
+  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
+  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
+  case and require it to fail.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
@@ -557,7 +559,9 @@ proves each pending test fails on them (DEC-110).
   power; every other step type and expectation key fails as "not interpreted until" its owning
   story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
-  without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
+  without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
+  (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).

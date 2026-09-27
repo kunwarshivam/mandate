@@ -65,7 +65,7 @@ pub(crate) fn sell_available(input: &GateInput<'_>) -> Result<Option<Stop>, Gate
 /// working non-protective order per instrument on the account (rule 6) is already one side at a
 /// time (rule 5). They bind openings only: §9.6 lists them as market-conduct controls, which "deny
 /// opening and increasing orders", and `AGENTS.md` rule 13 exempts every exit from conduct controls
-/// (DEC-150 item 1). Rule 8: a plain equity opening in an instrument with a resting protective order
+/// (DEC-150 item 2). Rule 8: a plain equity opening in an instrument with a resting protective order
 /// is `add_blocked_by_protective_order` (§5.4), because a risk-increasing order never cancels
 /// protection; a bracket is a new tranche with its own, and crypto follows DEC-36's sequence.
 pub(crate) fn one_working_order(input: &GateInput<'_>) -> Option<Stop> {
@@ -119,7 +119,7 @@ pub(crate) fn buying_power(input: &GateInput<'_>) -> Result<Option<Stop>, GateEr
 ///
 /// The budget is the account's, so `DayTradeLedger` must be too: `AgentSnapshot::day_trades` is
 /// read as the account-wide ledger, which E6-6's second slice folds from every agent's fills on the
-/// account (DEC-129 item 6, DEC-150 item 6).
+/// account (DEC-129 item 6, DEC-150 item 7).
 pub(crate) fn day_trade_budget(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
     let a = input.account;
     let applies = a.regime == DayTradeRegime::LegacyPdt
