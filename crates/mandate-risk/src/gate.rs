@@ -33,11 +33,10 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check for an opening or an increase, while any part of it is owed.
-/// Check 1 is whole here; check 2 still lacks the floor (E6-7), check 4 its rules 1, 2 and 4 to 8,
-/// check 6 its conduct controls (E6-8) and check 7 buying power (E6-6), and checks 3, 5 and 8 are
-/// not written yet.
-fn owed_for_openings(check: Check) -> Option<&'static str> {
+/// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
+/// still lacks the floor (E6-7), check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls
+/// (E6-8) and check 7 buying power (E6-6), and checks 3, 5 and 8 are not written yet.
+fn owed(check: Check) -> Option<&'static str> {
     match check {
         Check::AccountAndMode => None,
         Check::UniverseAndLimits => Some("E6-7"),
@@ -49,8 +48,9 @@ fn owed_for_openings(check: Check) -> Option<&'static str> {
     }
 }
 
-/// §9.1: the first failing check decides, and every check after it is listed as not reached. A
-/// check owed for an opening is listed as not reached too: the gate did not look.
+/// §9.1: the first failing check decides, and every check after it is listed as not reached. An
+/// owed check is listed as not reached too, for every purpose: the gate did not look, and the
+/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29).
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let held = input
         .agent
@@ -64,7 +64,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let mut computed = Computed::default();
     let mut checks = Vec::with_capacity(ORDER.len());
     let mut stop: Option<Stop> = None;
-    let mut owed: Option<&'static str> = None;
+    let mut first_owed: Option<&'static str> = None;
     for check in ORDER {
         if stop.is_some() {
             checks.push(CheckOutcome::NotReached(check));
@@ -75,16 +75,18 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
-            None => match owed_for_openings(check).filter(|_| opening) {
+            None => match owed(check) {
                 Some(story) => {
                     checks.push(CheckOutcome::NotReached(check));
-                    owed = owed.or(Some(story));
+                    if opening {
+                        first_owed = first_owed.or(Some(story));
+                    }
                 }
                 None => checks.push(CheckOutcome::Passed(check)),
             },
         }
     }
-    let (verdict, reason) = match (stop, owed) {
+    let (verdict, reason) = match (stop, first_owed) {
         (Some((verdict, reason)), _) => (verdict, Some(reason)),
         (None, Some(story)) => return Err(GateError::Unimplemented("evaluate", story)),
         (None, None) => (Verdict::Allow, None),
@@ -171,7 +173,8 @@ fn working_universe(
 /// Check 4, the rules this story owns: rule 3 (every sell above the position, a protective leg's
 /// included, is typed an opening by [`assign_purpose`], so it is the only sell that reaches here as
 /// one), then rule 9, which denies an opening and holds a reduction under one code (DEC-129 item
-/// 22).
+/// 22). §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
+/// rules 4 to 6 (`sell_exceeds_available`, E6-6), not to rule 3.
 fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
     if opening && input.proposed.side == Side::Sell {
         return Some((Verdict::Deny, ReasonCode::WouldCrossZero));
@@ -194,8 +197,9 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
 /// §9.1's purpose table, with the two rows v1's long-only book decides (DEC-129 item 30). Every
 /// buy adds risk, a protective leg's included, since v1 holds no short for a buy to protect
 /// (DEC-32). Every sell above the agent's position would open a short, so it is typed an opening
-/// whatever its origin — a protective leg's too, which §5.3 checks against the position — and
-/// check 4 denies it `would_cross_zero`: no reducing purpose is ever what a zero crossing is
+/// whatever its origin — a protective leg's too — and check 4 denies it `would_cross_zero`, which
+/// is §9.1's own rule ("a sell above the position is denied"): no reducing purpose is ever what a
+/// zero crossing is
 /// denied under, which keeps MI-1 true as stated. Typed an opening, it meets check 1 before check
 /// 4, so under `paused` or `stopped` it is held (and under `exits_only` denied
 /// `agent_exits_only`) rather than denied `would_cross_zero`: §9.1's order applied as written, and
@@ -461,6 +465,21 @@ mod tests {
             "§9.1: account and mode, universe and limits, session and halt, order constraints, \
              mark and collar, conduct, buying power and exposure, day-trade budget"
         );
+        assert_eq!(
+            d.checks,
+            [
+                CheckOutcome::Passed(Check::AccountAndMode),
+                CheckOutcome::NotReached(Check::UniverseAndLimits),
+                CheckOutcome::NotReached(Check::SessionAndHalt),
+                CheckOutcome::NotReached(Check::OrderConstraints),
+                CheckOutcome::NotReached(Check::MarkAndCollar),
+                CheckOutcome::NotReached(Check::ConductControls),
+                CheckOutcome::NotReached(Check::BuyingPowerAndExposure),
+                CheckOutcome::NotReached(Check::DayTradeBudget),
+            ],
+            "an owed check is journaled NotReached for a reduction too, never Passed: the gate did \
+             not look"
+        );
         Ok(())
     }
 
@@ -597,7 +616,8 @@ mod tests {
                 Purpose::Open,
                 Purpose::Open
             ),
-            "a protective leg is checked against the position; only a sell within it protects"
+            "a sell above the position is denied (§9.1), a protective leg's too; only a sell \
+             within it protects"
         );
         Ok(())
     }
@@ -638,6 +658,33 @@ mod tests {
             (d.verdict, d.reason, d.computed.gross),
             (Verdict::Deny, Some(ReasonCode::GrossExposureLimit), None),
             "the account bound denies before the agent's gross is ever computed"
+        );
+        Ok(())
+    }
+
+    /// Mandate §5.3's re-entry cooldown binds only an exit fill in the instrument's own group, and
+    /// only strictly inside `reentry_cooldown_s`. An exit in an ungrouped other instrument 10 s ago
+    /// denies nothing, and an exit in this instrument exactly 3600 s ago has run its course: both
+    /// openings pass the cooldown and are refused only because the floor is owed (item 29).
+    #[test]
+    fn the_cooldown_binds_only_its_group_and_only_strictly_inside_it() -> Result<(), GateError> {
+        let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
+        let mut other_group = allowing()?;
+        other_group
+            .agent
+            .last_exit_fill_at
+            .insert(id("z")?, UtcNanos::from_parts(now.secs() - 10, 0)?);
+        let mut run_its_course = allowing()?;
+        let mine = run_its_course.proposed.instrument.clone();
+        run_its_course
+            .agent
+            .last_exit_fill_at
+            .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
+        let (a, b) = (other_group.decide(), run_its_course.decide());
+        assert!(
+            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-7")))
+                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
         );
         Ok(())
     }
