@@ -7,18 +7,107 @@
 
 # Mandate
 
-A deterministic core for autonomous trading agents that run on their owner's own brokerage
-account, inside an envelope the owner sets: capital, goal, limits, allowed asset classes, and when
-the agent must ask before acting. Language models produce opinions (theses, admissions,
-signal-model outputs); deterministic code sizes and builds every order, an independent risk gate
-decides whether it may go out, and every step is written to a hash-chained journal that a third
-party can verify without trusting the operator.
+Autonomous trading agents that run on their owner's own brokerage account, inside a mandate the
+owner writes and can enforce. The owner sets the envelope: capital, goal, risk limits, allowed
+asset classes, how much the agent may do alone, and when it must ask. Inside that envelope a
+research agent proposes theses from market data, news, and filings, and admits instruments into
+the agent's working universe only through an eligibility floor and the owner's autonomy rules.
+Deterministic code sizes and builds every order, an independent risk gate decides whether it may go
+out, the agent asks the owner when a decision exceeds what it may do alone, and every observation,
+decision, approval, order, and fill is written to a hash-chained journal a third party can verify
+without trusting the operator.
 
-This repository is the engine: exact arithmetic, market data, accounting, simulated execution, the
-journal, and the specifications those crates reproduce case for case. There is no user interface,
-no live broker connector, and no real-money trading yet ([status](#status)).
+Mandate never holds customer funds or any permission that can move them, never charges per trade
+or on profits, and trades paper only until securities counsel signs off on live trading
+([compliance](docs/product/08-compliance-and-regulatory.md)).
 
-## Design invariants
+> **Where it stands:** the core engine (exact arithmetic, market data, accounting, simulated
+> execution, the journal) is built and verified; the agent runtime, risk gate, order builder,
+> research agent, and the Alpaca paper connector are being built now. Nothing in this repository
+> places a real order ([status](#status)).
+
+## How it works
+
+```mermaid
+flowchart LR
+    owner["Owner<br/>writes the mandate"] --> mandate["Mandate<br/>validated, versioned"]
+    research["Research agent<br/>theses with evidence"] --> admit["Admission<br/>eligibility floor,<br/>autonomy rules"]
+    mandate --> admit
+    admit --> universe["Working universe"]
+    universe --> signals["Signal models<br/>opinions, never orders"]
+    signals --> builder["Order builder<br/>deterministic sizing"]
+    mandate --> builder
+    builder --> gate["Risk gate<br/>limits, US account rules"]
+    gate -->|"within limits"| exec["Executor<br/>journal first,<br/>idempotent"]
+    gate -->|"needs approval"| ask["Ask the owner<br/>deadline, safe default"]
+    ask --> exec
+    exec --> broker[("Owner's broker<br/>Alpaca paper")]
+    exec --> journal[("Hash-chained journal")]
+```
+
+- **The mandate is the contract.** No code path lets an agent act outside it; limits are enforced
+  by the risk gate, independent of the agent's own logic.
+- **Reducing risk never needs approval; increasing risk beyond the limits always does.** Timeouts
+  and ambiguity resolve to a default that never adds risk.
+- **Language models produce opinions, never orders.** A thesis or a signal is typed input with a
+  confidence; sizing, order construction, and the risk decision are pure functions.
+- **Journal before acting.** Every order intent is recorded with an idempotency key before it is
+  sent, so a crash at any step recovers without a duplicate order.
+- **Kill switches work without the model** and touch only their scope.
+
+## What we are building
+
+Built means merged and verified against its reference cases; in progress means tests or briefs are
+merged and the implementation is under way; planned means scheduled in the
+[milestones](docs/project/02-milestones-and-wbs.md).
+
+| Component | What it does | Milestone | State |
+|---|---|---|---|
+| Exact arithmetic, time, canonical JSON | Decimal money and quantity types, the NYSE calendar and sessions, the hashing format | M0 | Built |
+| Market data | Alpaca historical bars, trades, quotes, and corporate actions into verified datasets | M1 | Built |
+| Accounting | Positions, cash and settlement, fees, corporate actions, P&L, buying power | M2 | Built |
+| Simulated execution and backtest | The fill model, the backtest loop, a baseline strategy, an exact metrics report | M3 | Fill model built; backtest in progress |
+| Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store planned |
+| Mandate document | Parsing, validation, the policy hierarchy, change classification, risk state | M5 | In progress |
+| Risk gate | The ordered checks, US account rules, eligibility, conduct controls, forced flatten | M5 | In progress |
+| Order builder and autonomy | AUTO, ASK, or DENY per decision; deterministic sizing and order construction | M5 | In progress |
+| Agent runtime and kill switches | One writer per agent, the decision cycle, restarts, kill switches | M5 | In progress |
+| Research agent | Theses, corroboration, admission, revision lineages, expiry | M5 | In progress (thin slice) |
+| Executor and Alpaca paper connector | Idempotent intents, reconciliation after restart, protective exits at the broker | M6 | In progress |
+| Escalation | Approval requests with deadlines and safe defaults; email, one chat channel, CLI control | M7 | Planned |
+| Control plane and workspace services | Organizations and workspaces, SSO, roles, step-up auth, OAuth broker connections, the policy service | M8 | Planned |
+| Web app | Mandate authoring, backtest and paper views, dashboard, audit explorer | M9 | Planned |
+| Private approvals and channels | Notifications carrying only opaque IDs, details served from the workspace; push, email, chat | M10 | Planned |
+| Hybrid installer | Helm chart and Docker Compose, outbound-only connectivity, signed releases | M11 | Planned |
+| Billing | Organization plans and agent counts, with no per-trade or outcome-based pricing | M12 | Planned |
+| Hardening and release | Security review, penetration test, runbooks, terms and disclosures, soak | M13 | Planned |
+
+Phase 1 ends when one agent trades an Alpaca paper account unattended through a soak with forced
+restarts and escalations and no duplicate orders (M5 to M7). Phase 2 is the platform for design
+partners (M8 to M13). Later releases add further brokers and exchanges; options, short sales, and
+margin are out of scope for v1 ([PRD](docs/product/04-prd-v1.md)).
+
+## Repository
+
+This repository is the monorepo for all of Mandate. Today it holds:
+
+| Path | Contents |
+|---|---|
+| `crates/` | The Rust core: every crate listed under [Engine](#engine) |
+| `python/` | `mandate_tools` (the reference-case exporter) and `research_spike` (theses from news and prices through an LLM, sized under caps, paper orders, a journal, a scorecard) |
+| `docs/` | Product, design ([HLD](docs/HLD.md)), specifications, decisions, and the work tracker |
+| `schemas/` | JSON Schemas for the mandate and the policy |
+| `reference/` | The Python reference implementation of the mandate spec, which generates its cases |
+| `fixtures/` | Machine-readable reference cases the Rust tests reproduce |
+| `xtask/` | The CI pipeline as a binary |
+| `assets/` | Brand assets |
+
+The web app, the workspace and control-plane services, and the installer join this repository when
+their milestones start.
+
+## Engine
+
+### Design invariants
 
 - **Exact arithmetic, or an error.** Money, prices, quantities, and basis points are typed
   wrappers over a 96-bit decimal with a declared scale per type (quantities 9 places, marks 12,
@@ -37,10 +126,8 @@ no live broker connector, and no real-money trading yet ([status](#status)).
 - **The journal is the source of truth.** Canonical JSON bytes, SHA-256 hash chaining, per-stream
   heads with writer fencing, content-addressed artifacts, and Merkle anchors, with a verifier that
   reports the first failing check by its stable code.
-- **LLMs never place orders.** The order builder and the risk gate are pure functions over typed
-  inputs; a model's output is an opinion with a confidence, never an instruction.
 
-## Architecture
+### Crates
 
 Crates are layered; a crate may depend only on workspace crates in strictly lower layers, and CI
 checks the graph against the declaration in `xtask/layers.toml`.
@@ -50,8 +137,14 @@ flowchart BT
     num[mandate-num]
     time[mandate-time]
     canon[mandate-canon]
+    domain[mandate-domain]
     acct[mandate-accounting] --> num
+    acct --> domain
     journal[mandate-journal] --> canon
+    spec[mandate-spec] --> domain
+    spec --> canon
+    runtime[mandate-runtime] --> journal
+    runtime --> acct
     sim[mandate-sim] --> acct
     md[mandate-marketdata] --> time
     pg[mandate-journal-pg] --> journal
@@ -66,8 +159,11 @@ flowchart BT
 | 0 | `mandate-num` | `Usd`, `Price`, `Qty`, `Bps`, `Fraction` with exact-or-error arithmetic, square-root impact and integer roots; `Ratio`, tick rounding, money-to-shares sizing, and the metric arithmetic are stubs with their tests merged, pending E4-2 | yes | yes |
 | 0 | `mandate-time` | `UtcNanos` (RFC 3339 with fractional seconds), dates, the NYSE calendar, trading sessions, trade-date rules | yes | yes |
 | 0 | `mandate-canon` | Canonical JSON, the decimal grammar, SHA-256 digests | yes | yes |
+| 1 | `mandate-domain` | The shared vocabulary: asset identifiers, the working universe, autonomy decisions, agent modes, purposes, market sessions | yes | yes |
 | 2 | `mandate-accounting` | The account fold: positions, cost basis, cash and settlement, fees with per-order caps, marks, realized and unrealized P&L, corporate actions, buying power | yes | yes |
 | 2 | `mandate-journal` | Drafts, the append protocol (idempotency, fencing, heads), verification, anchoring, the artifact core | yes | yes |
+| 3 | `mandate-spec` | The mandate document as code: parsing against the schema's decimal grammars, validation, the policy hierarchy, change classification, risk state (API and tests merged, implementation in progress) | yes | yes |
+| 6 | `mandate-runtime` | The agent runtime core: one writer per agent, the decision cycle as a pure fold and handler, the startup hold, kill switches (API and tests merged, implementation in progress) | yes | yes |
 | 6 | `mandate-sim` | The backtest fill model as a pure function: eligibility, touch and through, marketable limits, volume caps with square-root impact, stops, stop-limits, OCO, gaps, auctions | yes | yes |
 | 6 | `mandate-marketdata` | Alpaca historical bars, trades, and quotes as exact vendor numbers in idempotent Parquet datasets; corporate actions; sessions; data-quality inspection; header-driven rate limiting | no | no |
 | 6 | `mandate-journal-pg` | The Postgres hot store: canonical bytes with a hash check, append-only roles and triggers, stream heads with writer fencing | yes | no |
@@ -77,24 +173,19 @@ flowchart BT
 | tool | `mandate-refcases` | One named test per reference case, driven by `fixtures/refcases/*.json`; `status.toml` records which cases pass | yes | no |
 | tool | `xtask` | The CI pipeline as a binary: `cargo xtask check` | no | no |
 
-Phase 1 adds `mandate-domain`, `mandate-spec` (the mandate document, validation, policy, change
-classification, risk state), `mandate-risk` (the gate), `mandate-builder` (autonomy and the order
-builder), the agent runtime, and `mandate-executor` with `mandate-alpaca`
+Phase 1 adds `mandate-risk` (the gate), `mandate-builder` (autonomy and the order builder),
+`mandate-research` (admission and lineages), and `mandate-executor` with `mandate-alpaca`
 ([ADR-0001 ES-02](docs/adr/0001-engineering-setup.md), [HLD](docs/HLD.md)).
 
-`python/` holds `mandate_tools` (the reference-case exporter that turns the YAML specs into the
-JSON fixtures) and `research_spike` (a Python spike: theses from news and prices through an LLM,
-sized under caps, paper orders, a hash-chained journal, a scorecard against SPY).
-
-## Specifications and reference cases
+### Specifications and reference cases
 
 | Spec | Version | Reference cases | How the code is held to it |
 |---|---|---|---|
 | [Trading domain](docs/specs/trading-domain.md) | v0.10, approved | 26 worked cases (RC-01 onward) and 40 registered reason codes over accounting, settlement, corporate actions, fills, US account rules | `mandate-refcases` runs each case as a test; `status.toml` marks the ones that pass and a passing case may never regress |
 | [Journal](docs/specs/journal.md) | v0.4 | Byte-exact vectors: decimal normalization, string escaping, a 5-event chain, the export line, the Merkle anchor, 9 append-protocol cases (idempotent retry, stale head, fenced writer, rejected float), 9 tamper cases with their expected first failure | Conformance tests reproduce every vector byte for byte; `mandate journal verify` reports the tamper cases' codes |
-| [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness for these cases is Phase 1 work |
+| [Mandate](docs/specs/mandate.md) | v0.6 | 298 generated cases across schema, validation, policy, change classification, risk state, autonomy, the order builder, the gate, admission, lineage, and expiry | A Python reference implementation (`reference/mandate`) generates the cases; CI regenerates them and diffs, runs the checker, a fuzzer over the invariants MI-1 to MI-20, and a seeded-mutant check. The Rust harness runs every case, with each family pending until its implementation lands |
 
-## Verification pipeline
+### Verification pipeline
 
 `cargo xtask check` runs every CI job locally, in this order (`spec-guard` runs earlier in the `fast` CI job):
 
@@ -138,17 +229,17 @@ historical endpoints with keys you supply in the environment.
 | Milestone | State |
 |---|---|
 | M0 Foundations | Done: workspace, CI, conventions, the agent workflow |
-| M1 Market data | Done except the exit run on real credentials: bars, trades, quotes, sessions and early closes, corporate actions, safe concurrent writes, data-quality reporting, proactive rate limiting |
+| M1 Market data | Done: bars, trades, quotes, sessions and early closes, corporate actions, safe concurrent writes, data-quality reporting, proactive rate limiting; exit run on real data passed 2026-09-26 |
 | M2 Accounting | Done: verified against the hand-calculated reference cases including splits, dividends, partial fills, settlement |
 | M3 Simulated execution and backtest | Fill model done (RC-10, RC-12, RC-19 passing); the backtest loop and metrics report have their tests merged, implementation in progress |
 | M4 Journal | Done except the cold store and segment manifests: hash chain, verification, Postgres hot store, artifact store, the verification command |
-| M5 Agent runtime and risk (Phase 1) | Started: five streams (the mandate document as code with its case harness, the risk gate, the order builder, the runtime skeleton, the research-agent thin slice) run as brief, tests, and implementation pull requests; the runtime and order-builder briefs are merged (#126, #128) and the risk-gate and mandate-document briefs are in review (#127, #129); the mandate spec v0.6 with its 298 cases is the contract |
+| M5 Agent runtime and risk | In progress: the mandate document, risk gate, order builder, runtime, and research thin slice each run as brief, tests, and implementation pull requests. All five briefs are merged; the runtime tests (#134) and the first mandate-document tests (#140) are merged; the risk-gate and research tests are in review |
+| M6 Alpaca connector | In progress: the executor and connector brief is merged (#139); its tests, including recorded Alpaca paper scenarios, are being written |
+| M7 to M13 | Planned ([milestones](docs/project/02-milestones-and-wbs.md)) |
 
-The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision
-with its PR numbers. Phase 1 ends when an agent trades an Alpaca paper account unattended through a
-soak with forced restarts and no duplicate orders. Nothing trades live with real money until
-securities counsel has signed off ([DEC-98](docs/project/04-decision-log.md),
-[DEC-102](docs/project/04-decision-log.md)).
+The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision with
+its PR numbers. Nothing trades live with real money until securities counsel has signed off
+([DEC-98](docs/project/04-decision-log.md), [DEC-102](docs/project/04-decision-log.md)).
 
 ## How changes land
 
