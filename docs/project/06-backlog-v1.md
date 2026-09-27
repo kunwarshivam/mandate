@@ -383,6 +383,15 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
 
+From the independent review of E4-2's implementation ([#163](https://github.com/kunwarshivam/mandate/pull/163)
+round 2, verdict approve), whose first two minors are closed by the third tests correction
+(DEC-127 item 26) and whose third waits on another story:
+
+- `NumError::Unimplemented` stays: it is returned by the fifteen `mandate-num::sizing` stubs E6-2 owes,
+  so it is live code, not a leftover, and its row in `num::error_codes_are_stable` holds the wire
+  spelling those stubs return. Drop the variant and the row together in a tests correction once E6-2's
+  sizing is implemented and nothing constructs it.
+
 From the independent review of stream H's tests PR (`mandate-builder`, [#175](https://github.com/kunwarshivam/mandate/pull/175)
 round 2, verdict approve), each deferred by the freeze rule and none of them a gap in what the tests
 assert:
