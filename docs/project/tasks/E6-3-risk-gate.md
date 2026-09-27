@@ -742,18 +742,20 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     the opposite of rule 3's safe default. MI-1 is satisfied either way: it says an exit *may* be
     held only by those four things, not that each of them always holds one. The rule is written once
     in "The exemptions, in one place" and the fuzz compares against `order_decision`.
-18. **`auction_window` is the opening auction and market orders; the closing ten minutes are
-    `close_window`.** §4.3's closing auction window and §9.6's close window are the same interval
-    and both bar opening orders, and check 3 runs before check 6, so without this the first code
-    would always win and `RC-25` step 2 could not pass. Check 3 therefore emits `auction_window`
-    only for the 09:28 to 09:30 opening auction and for a market order in either window (§4.3:
-    "exits in them use limit orders, never market orders"), and the denial of an opening or
-    increasing order in the closing ten minutes is check 6's `close_window`, which is how the reason
-    registry annotates the two. Nothing is lost: an opening order at 09:28 is in pre-market and
-    check 3's session rule already denies it.
-    **Amended by DEC-159:** `auction_window` denies a market *opening* only; a market-order exit
-    of any purpose in either window is allowed and sent as a marketable limit
-    (`Pacing::marketable_limit_required`), as items 28 and 31 do under a halt.
+18. **`auction_window` is a market opening in either auction window; the closing ten minutes are
+    `close_window` for every other opening** (amended by DEC-159). §4.3's closing auction window and
+    §9.6's close window are the same interval and both bar opening orders, and check 3 runs before
+    check 6, so without this the first code would always win and `RC-25` step 2 could not pass.
+    Check 3 therefore emits `auction_window` only for a **market opening** (open or increase) in the
+    09:28 to 09:30 opening auction or in the closing ten minutes, and the denial of a limit opening
+    or increase in the closing ten minutes is check 6's `close_window`, which is how the reason
+    registry annotates the two. A market-order **exit** of any purpose in either window is not
+    denied: it is allowed and sent as a marketable limit (`Pacing::marketable_limit_required`), as
+    items 28 and 31 do under a halt, because §4.3's "exits in them use limit orders, never market
+    orders" constrains an exit's form and MI-1 forbids a session rule to deny it (DEC-159). Check 3
+    reads the session first, so any opening at 09:28 is in pre-market and its session rule denies
+    it as `session_not_allowed`; the reachable `auction_window` denial is a market opening in the
+    closing ten minutes.
 19. **The `kind: gate` harness runs `ref.py`'s `gate`, not the whole of §9.1** (DEC-85 style). Those
     cases carry a `purpose`, a `state`, and a `proposed` order and nothing that could feed checks 1,
     3, 4, 5, or 8 — no session, no quote, no account status — so the harness passes the case's
