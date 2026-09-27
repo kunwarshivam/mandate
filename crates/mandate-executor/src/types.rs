@@ -155,20 +155,31 @@ pub enum KillScope {
     Workspace(WorkspaceId),
 }
 
+/// The two kill-switch scopes that may reach the broker's account-wide endpoints, and only those
+/// two. There is no `Agent` variant, so not even code inside this crate can describe an
+/// agent-scoped account-wide request (trading-domain spec §5.5, `AGENTS.md` rule 13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountWide {
+    Account(AccountRef),
+    Workspace(WorkspaceId),
+}
+
 /// A witness that a kill switch is account- or workspace-scoped.
 ///
-/// [`BrokerRequest::CancelAll`] and [`BrokerRequest::ClosePosition`] take one, and only the
-/// account and workspace kill-switch paths inside this crate can construct one, so no agent-scoped
-/// code path can name those endpoints. That is how `AGENTS.md` rule 13 is made unrepresentable
-/// rather than merely forbidden (trading-domain spec §5.5, task brief interpretation 18).
+/// [`BrokerRequest::CancelAll`] and [`BrokerRequest::ClosePosition`] take one. Its field is
+/// private, so nothing outside this crate can construct one, and the field is an
+/// [`AccountWide`], which has no agent variant, so nothing inside it can build one for an agent
+/// either. That is how `AGENTS.md` rule 13 is made unrepresentable rather than merely forbidden
+/// (trading-domain spec §5.5, task brief interpretation 18). The account and workspace
+/// kill-switch paths construct it in the implementation PR.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountWideScope {
-    scope: KillScope,
+    scope: AccountWide,
 }
 
 impl AccountWideScope {
     /// Which of the two account-wide scopes this is. There is no public constructor.
-    pub fn scope(&self) -> &KillScope {
+    pub fn scope(&self) -> &AccountWide {
         &self.scope
     }
 }
@@ -217,8 +228,26 @@ pub enum IntentBody {
         qty: Qty,
         limit: Price,
         purpose: Purpose,
+        /// The protective prices the order builder computed from the mandate's stop and
+        /// take-profit distances (stream H, mandate spec §3's `protection`). The executor places
+        /// and re-places exactly these and never invents one: an entry that carries them goes as a
+        /// bracket (or, for crypto, is followed by a stop-limit), and one that does not goes as a
+        /// plain order. Whether protection is required is the mandate's `protection_required`,
+        /// which the gate reads, not this crate (DEC-133).
+        protection: Option<ProtectionPrices>,
     },
     Flatten(FlattenPlan),
+}
+
+/// The protective prices one entry carries (trading-domain spec §5.4, RC-14, RC-21).
+///
+/// `take_profit` is `None` for crypto, whose take-profit the runtime watches rather than the
+/// broker (§5.4, DEC-36); a crypto stop-limit's limit is stop × (1 − `crypto_stop_limit_offset`)
+/// from the mandate view, derived by the executor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProtectionPrices {
+    pub stop: Price,
+    pub take_profit: Option<Price>,
 }
 
 /// One handoff. `intent_id` **is** the `event_id` of the agent stream's `IntentProposed`
@@ -664,14 +693,6 @@ pub enum BrokerRequest {
     },
     CancelAll(AccountWideScope),
     ClosePosition(AccountWideScope, InstrumentId),
-}
-
-impl BrokerRequest {
-    /// Whether this request is one of the two account-wide endpoints. `AGENTS.md` rule 13 says an
-    /// agent-scoped effect never is, and a property walks every effect this crate can emit.
-    pub fn is_account_wide(&self) -> bool {
-        matches!(self, Self::CancelAll(_) | Self::ClosePosition(_, _))
-    }
 }
 
 /// Which deadline a timer is for. Keyed so that arming twice replaces rather than duplicates.

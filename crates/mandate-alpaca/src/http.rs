@@ -5,10 +5,23 @@
 //! (ADR-0001 ES-23: "Only the paper trading and data hosts are compiled in"). Credentials live in
 //! [`SecretString`]s, travel only as request headers marked sensitive, and never appear in
 //! `Debug` output, in an error, in a draft, or in a file this code writes (`AGENTS.md` rule 7).
+//!
+//! # The allowlist is a type
+//!
+//! An [`HttpRequest`] has private fields. The only ways to obtain one are
+//! [`HttpRequest::new`], which checks the **method and the path together** against
+//! [`ENDPOINTS`] and refuses both account-wide endpoints, and [`HttpRequest::cancel_all`] and
+//! [`HttpRequest::close_position`], which take the executor's [`AccountWideScope`] — a witness
+//! only the account and workspace kill-switch paths can construct. So `DELETE /v2/orders`
+//! (cancel every order) and `DELETE /v2/positions/{symbol}` (close a position) cannot be built,
+//! let alone sent, from an agent-scoped path (`AGENTS.md` rule 13), and no request to a path
+//! outside the table can exist for [`TradingTransport::send`] to be handed.
 
 use std::future::Future;
 use std::time::Duration;
 
+use mandate_accounting::InstrumentId;
+use mandate_executor::AccountWideScope;
 use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
@@ -22,30 +35,14 @@ pub const KEY_ID_VAR: &str = "MANDATE_ALPACA_PAPER_KEY_ID";
 /// Environment variable holding the paper API secret (ADR-0001 ES-19).
 pub const SECRET_VAR: &str = "MANDATE_ALPACA_PAPER_SECRET";
 
-/// The seven endpoints this stream needs, as **whole paths**: a fixed path, or a fixed prefix
-/// plus exactly one more segment where the broker's grammar takes an id.
-///
-/// Matching is on the whole path, not on a prefix, because `/v2/account/activities` is an
-/// endpoint and `/v2/account/configurations` is not, and a prefix match cannot tell them apart.
-/// There is no funding, transfer, or journal endpoint here and no way to add one at runtime
-/// (`AGENTS.md` rule 8: no custody of funds).
-pub const ENDPOINTS: [&str; 7] = [
-    "/v2/orders",
-    "/v2/orders:by_client_order_id",
-    "/v2/orders/{id}",
-    "/v2/positions",
-    "/v2/positions/{symbol}",
-    "/v2/account",
-    "/v2/account/activities",
-];
-
 const KEY_ID_HEADER: HeaderName = HeaderName::from_static("apca-api-key-id");
 const SECRET_HEADER: HeaderName = HeaderName::from_static("apca-api-secret-key");
 const USER_AGENT: &str = concat!("mandate-alpaca/", env!("CARGO_PKG_VERSION"));
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// The HTTP methods this crate uses. `PUT` is absent because §5.1 forbids our own replaces.
+/// The HTTP methods this crate uses. `PUT` and `PATCH` are absent because §5.1 forbids our own
+/// replaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     Get,
@@ -63,16 +60,129 @@ impl Method {
     }
 }
 
+/// One call the client may make: a method and a whole-path pattern, matched together, and
+/// whether the call is one of the two account-wide endpoints.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Endpoint {
+    pub method: Method,
+    /// A fixed path, or a fixed prefix plus exactly one more segment where the broker's grammar
+    /// takes an id or a symbol (`{id}`, `{symbol}`).
+    pub path: &'static str,
+    /// `DELETE /v2/orders` and `DELETE /v2/positions/{symbol}`: reachable only through
+    /// [`HttpRequest::cancel_all`] and [`HttpRequest::close_position`] (trading-domain spec §5.5).
+    pub account_wide: bool,
+}
+
+const fn ordinary(method: Method, path: &'static str) -> Endpoint {
+    Endpoint {
+        method,
+        path,
+        account_wide: false,
+    }
+}
+
+/// Every call this stream makes, as method and **whole path** together.
+///
+/// Matching is on the whole path, not on a prefix, because `/v2/account/activities` is an
+/// endpoint and `/v2/account/configurations` is not, and a prefix match cannot tell them apart.
+/// It is on the method as well, because `GET /v2/orders` lists the open orders and
+/// `DELETE /v2/orders` cancels every one of them. There is no funding, transfer, or journal
+/// endpoint here and no way to add one at runtime (`AGENTS.md` rule 8: no custody of funds), and
+/// no `DELETE /v2/positions`, which would close every position at once.
+pub const ENDPOINTS: [Endpoint; 11] = [
+    ordinary(Method::Post, "/v2/orders"),
+    ordinary(Method::Get, "/v2/orders"),
+    ordinary(Method::Get, "/v2/orders:by_client_order_id"),
+    ordinary(Method::Get, "/v2/orders/{id}"),
+    ordinary(Method::Delete, "/v2/orders/{id}"),
+    ordinary(Method::Get, "/v2/positions"),
+    ordinary(Method::Get, "/v2/positions/{symbol}"),
+    ordinary(Method::Get, "/v2/account"),
+    ordinary(Method::Get, "/v2/account/activities"),
+    Endpoint {
+        method: Method::Delete,
+        path: "/v2/orders",
+        account_wide: true,
+    },
+    Endpoint {
+        method: Method::Delete,
+        path: "/v2/positions/{symbol}",
+        account_wide: true,
+    },
+];
+
 /// One request against the paper trading host: the method, the path and query, and the canonical
 /// request body.
 ///
+/// The fields are private. A request exists only if its method and path are one of
+/// [`ENDPOINTS`] (see the module documentation), so the transport is never handed anything else.
 /// A trading call is identified by **what it sends** as well as by where it sends it, which is
 /// why the recorded fixtures record the method and the body and not only the path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HttpRequest {
-    pub method: Method,
-    pub path_and_query: String,
-    pub body: Option<String>,
+    method: Method,
+    path_and_query: String,
+    body: Option<String>,
+}
+
+impl HttpRequest {
+    /// A request to one of the **ordinary** endpoints. Anything else — a path outside the table,
+    /// a method the table does not pair with the path, or either account-wide endpoint — is
+    /// [`TransportError::RefusedPath`], and no request exists to be sent.
+    pub fn new(
+        method: Method,
+        path_and_query: &str,
+        body: Option<String>,
+    ) -> Result<Self, TransportError> {
+        match endpoint_for(method, path_and_query) {
+            Some(endpoint) if !endpoint.account_wide => Ok(Self {
+                method,
+                path_and_query: path_and_query.to_owned(),
+                body,
+            }),
+            Some(_) | None => Err(TransportError::RefusedPath),
+        }
+    }
+
+    /// The broker's cancel-all, `DELETE /v2/orders`. Only an [`AccountWideScope`] opens it, and
+    /// only the account and workspace kill switches hold one (trading-domain spec §5.5).
+    pub fn cancel_all(scope: &AccountWideScope) -> Self {
+        let _ = scope;
+        Self {
+            method: Method::Delete,
+            path_and_query: "/v2/orders".to_owned(),
+            body: None,
+        }
+    }
+
+    /// The broker's close-position for one instrument, `DELETE /v2/positions/{symbol}`. Only an
+    /// [`AccountWideScope`] opens it, and the symbol is an [`InstrumentId`], which is already one
+    /// path segment.
+    pub fn close_position(scope: &AccountWideScope, instrument: &InstrumentId) -> Self {
+        let _ = scope;
+        Self {
+            method: Method::Delete,
+            path_and_query: format!("/v2/positions/{}", instrument.as_str()),
+            body: None,
+        }
+    }
+
+    pub fn method(&self) -> Method {
+        self.method
+    }
+
+    pub fn path_and_query(&self) -> &str {
+        &self.path_and_query
+    }
+
+    pub fn body(&self) -> Option<&str> {
+        self.body.as_deref()
+    }
+
+    /// The whole URL: the paper host and this path, and nothing a caller chose.
+    pub fn url(&self) -> String {
+        format!("{PAPER_HOST}{}", self.path_and_query)
+    }
 }
 
 /// An HTTP response: the status code and the body bytes. No headers are carried out of the
@@ -83,7 +193,8 @@ pub struct Response {
     pub body: Vec<u8>,
 }
 
-/// Sends one request to the paper trading host.
+/// Sends one request to the paper trading host. Every [`HttpRequest`] is already one of
+/// [`ENDPOINTS`], so an implementation has nothing left to decide about what may be sent.
 pub trait TradingTransport {
     fn send(&self, request: &HttpRequest)
     -> impl Future<Output = Result<Response, TransportError>>;
@@ -132,13 +243,28 @@ impl Credentials {
     }
 }
 
-/// Whether `path_and_query` names one of the seven paper trading endpoints, with a path and
-/// query that cannot change the host, add a header, or reach another endpoint.
+/// Whether `path_and_query` is the path of any endpoint in [`ENDPOINTS`], with a path and query
+/// that cannot change the host, add a header, or reach another endpoint. The method is checked
+/// together with the path by [`endpoint_for`], which is what [`HttpRequest::new`] calls.
 ///
-/// The path is compared whole against [`ENDPOINTS`]; a `{…}` placeholder matches exactly one
-/// further segment of unreserved characters. A crafted symbol or order id therefore cannot walk
-/// out of the endpoint it was given to.
+/// The path is compared whole; a `{…}` placeholder matches exactly one further segment of
+/// unreserved characters. A crafted symbol or order id therefore cannot walk out of the endpoint
+/// it was given to.
 pub fn is_paper_trading_path(path_and_query: &str) -> bool {
+    ENDPOINTS
+        .iter()
+        .any(|endpoint| path_matches(endpoint.path, path_and_query))
+}
+
+/// The one endpoint `method` and `path_and_query` name together, or `None`.
+pub fn endpoint_for(method: Method, path_and_query: &str) -> Option<&'static Endpoint> {
+    ENDPOINTS
+        .iter()
+        .find(|endpoint| endpoint.method == method && path_matches(endpoint.path, path_and_query))
+}
+
+/// One endpoint pattern against one whole path and its query.
+fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
     let (path, query) = match path_and_query.split_once('?') {
         Some((path, query)) => (path, query),
         None => (path_and_query, ""),
@@ -146,11 +272,6 @@ pub fn is_paper_trading_path(path_and_query: &str) -> bool {
     if path.contains("..") || !safe(query, b"-._~%&=:,") {
         return false;
     }
-    ENDPOINTS.iter().any(|endpoint| matches(endpoint, path))
-}
-
-/// One endpoint pattern against one whole path.
-fn matches(endpoint: &str, path: &str) -> bool {
     match endpoint.split_once('{') {
         None => endpoint == path,
         Some((prefix, _)) => path
@@ -193,18 +314,10 @@ impl AlpacaPaperHttp {
 }
 
 impl TradingTransport for AlpacaPaperHttp {
-    /// The path is checked against the allowlist **before anything is sent**, so no caller can
-    /// reach a host or an endpoint this crate does not name, and a refusal costs no round trip.
+    /// The request is one of [`ENDPOINTS`] by construction, so nothing here decides what may be
+    /// sent: this only dials [`PAPER_HOST`] with the credentials as sensitive headers.
     async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
-        if !is_paper_trading_path(&request.path_and_query) {
-            return Err(TransportError::RefusedPath);
-        }
-        let url = Url::parse(&format!("{PAPER_HOST}{}", request.path_and_query))
-            .map_err(|_| TransportError::RefusedPath)?;
-        let base = Url::parse(PAPER_HOST).map_err(|_| TransportError::RefusedPath)?;
-        if url.origin() != base.origin() || url.fragment().is_some() {
-            return Err(TransportError::RefusedPath);
-        }
+        let url = Url::parse(&request.url()).map_err(|_| TransportError::Request)?;
         let method = match request.method {
             Method::Get => reqwest::Method::GET,
             Method::Post => reqwest::Method::POST,

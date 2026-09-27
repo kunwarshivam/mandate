@@ -85,6 +85,31 @@ check() {
     rm -rf "$root/$scenario"
     exit 1
   fi
+  # The account object's own `id` is personal data too (journal spec §6.4). An order's `id` is not,
+  # so the check reads the object that carries `account_number`, the same scope `redact` uses.
+  if ! python3 - "$file" <<'PY'
+import json, sys
+try:
+    value = json.load(open(sys.argv[1]))
+except (OSError, json.JSONDecodeError):
+    sys.exit(0)
+def unredacted(node):
+    if isinstance(node, dict):
+        if "account_number" in node:
+            for key in ("account_number", "id"):
+                if key in node and not str(node[key]).startswith("pii:"):
+                    return True
+        return any(unredacted(inner) for inner in node.values())
+    if isinstance(node, list):
+        return any(unredacted(item) for item in node)
+    return False
+sys.exit(1 if unredacted(value) else 0)
+PY
+  then
+    echo "unredacted account id in $file" >&2
+    rm -rf "$root/$scenario"
+    exit 1
+  fi
 }
 
 # record <scenario> <method> <path and query> [body]

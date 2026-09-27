@@ -8,7 +8,7 @@
 use std::future::Future;
 use std::time::Duration;
 
-use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, BrokerUnknown};
+use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_time::UtcNanos;
 
 use crate::error::ClientError;
@@ -48,8 +48,8 @@ impl Pause for TokioPause {
 
 /// How many times a request whose outcome is **settled** may be retried, and how long the waits
 /// are. A request whose outcome is **unknown** is never retried here: it answers
-/// [`BrokerUnknown`], and the executor resolves it by querying on the client order id, never by
-/// resubmitting (trading-domain spec §5.7, task brief interpretation 10).
+/// [`ConnectorError::Unknown`], and the executor resolves it by querying on the client order id,
+/// never by resubmitting (trading-domain spec §5.7, task brief interpretation 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
@@ -116,15 +116,16 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
 
 /// The connector the executor declares.
 ///
-/// The mapping is the interesting part: only a failure whose outcome is genuinely **unknown**
-/// becomes a [`BrokerUnknown`], because that is what makes the executor query rather than
-/// resubmit (task brief interpretation 10). A parse failure is an answer this crate could not
-/// read, so it fails loudly as `Ambiguous` rather than being reported as a settled rejection —
-/// treating it as a rejection is how a duplicate is born.
+/// The mapping is [`ClientError::to_connector`]: only a failure whose outcome is genuinely
+/// **unknown** becomes [`ConnectorError::Unknown`], because that is what makes the executor query
+/// rather than resubmit (task brief interpretation 10). A body this crate could not read is
+/// [`ConnectorError::Unreadable`] and a request that never left the process is
+/// [`ConnectorError::NotSent`]: the shell stops and alerts on both (DEC-85), and neither is ever
+/// reported as a rejection — treating an unread answer as a rejection is how a duplicate is born.
 impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
-    async fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, BrokerUnknown> {
+    async fn call(&mut self, request: &BrokerRequest) -> Result<BrokerOutcome, ConnectorError> {
         self.call_one(request)
             .await
-            .map_err(|error| error.as_unknown().unwrap_or(BrokerUnknown::Ambiguous))
+            .map_err(|error| error.to_connector())
     }
 }
