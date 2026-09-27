@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Owner** | Product (web stream W1) |
-| **Status** | Draft v0.1. The founder decided to start web design ahead of M9 ([DEC-134](../project/04-decision-log.md#decisions)); the open product decisions in §6 wait for the founder |
+| **Status** | Draft v0.1. The founder decided to start web design ahead of M9 ([DEC-134](../project/04-decision-log.md#decisions)); the product decisions in §6 were decided by the founder on 2026-09-27 ([DEC-135](../project/04-decision-log.md#decisions), [DEC-136](../project/04-decision-log.md#decisions)) |
 | **Related** | [PRD](04-prd-v1.md) · [Personas](02-personas-and-journeys.md) · [Compliance](08-compliance-and-regulatory.md) · [HLD](../HLD.md) · [Mandate spec](../specs/mandate.md) · [Trading domain spec](../specs/trading-domain.md) · [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
 This brief records the product-experience decisions that the designs and, later, the web code are
@@ -36,7 +36,7 @@ These principles decide trade-offs. When two of them conflict, the lower number 
 | # | Principle | What it means on screen | Traced to |
 |---|---|---|---|
 | P1 | **Reducing risk is always within reach and never blocked by the interface.** | Pause, close, and the kill switch are on every screen where they apply, and loading, stale data, errors, and pending approvals never disable them. The spec requires step-up for an owner exit; nothing else stands in front of it | [AGENTS.md](../../AGENTS.md) rules 2 and 13; [trading §1](../specs/trading-domain.md#1-principles) principle 4; [trading §5.5](../specs/trading-domain.md#55-kill-switch); DEC-05, DEC-48 |
-| P2 | **The owner sets the envelope, and can see that they did.** | Every envelope field shows where its value came from: the owner's words (with the quoted span), the owner's entry, a platform proposal, or a platform default. A proposed value looks inactive until the owner confirms it. `auto` is never proposed, never preselected, and never offered as a chip | Rule 11; [mandate §2.1](../specs/mandate.md#21-provenance-and-confirmation), [§7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97); V-020, V-022, MI-12; DEC-97 |
+| P2 | **The owner sets the envelope, and can see that they did.** | Every envelope field shows where its value came from: the owner's words (with the quoted span), the owner's entry, a template, a platform proposal, or a platform default. A proposed value looks inactive until the owner confirms it. `auto` is never proposed, never preselected, and never offered as a chip | Rule 11; [mandate §2.1](../specs/mandate.md#21-provenance-and-confirmation), [§7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97); V-020, V-022, MI-12; DEC-97 |
 | P3 | **The platform explains and never persuades.** | The platform does originate ideas (DEC-97), so the interface does not pretend otherwise: a thesis is labeled platform-authored. But no screen says "recommended", estimates profit, sets a price target, ranks models, or shows a scorecard beside a decision. Approve and Skip carry equal weight | [mandate §6.4](../specs/mandate.md#64-approvals), [§8.1](../specs/mandate.md#81-signal-model-contract-dec-52-dec-97); DEC-52, DEC-126; compliance questions 26 and 35 |
 | P4 | **Silence is safe, and the screen says so.** | Every request shows what happens if the owner does nothing ("If you do nothing, this action is skipped"). A timeout, a lost connection, or a failed step-up never turns into an approval | Rule 3; DEC-06; FR-6.6 |
 | P5 | **Notifications carry nothing about trading.** | Push, email, SMS, and chat carry an opaque ID and generic text only: no instrument, size, price, thesis, or agent name. The same applies to anything a browser or operating system may copy elsewhere: URLs, page titles, and cached pages | Rule 6; DEC-11; FR-6.4 |
@@ -90,7 +90,8 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
 
 1. Describe the agent in plain language, optionally from a template [A1].
 2. The compiler returns the mandate [A2]. Each field carries a provenance badge: *stated by you* (the
-   quoted span of the owner's words), *entered by you*, *proposed by the platform — confirm or change*,
+   quoted span of the owner's words), *entered by you*, *from template* (`template_structure`, present
+   because the template included the field or rule), *proposed by the platform — confirm or change*,
    or *platform default*. Constraints the mandate cannot express are flagged **not enforced**
    ([mandate §7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97)).
 3. The owner edits in the form or YAML [A3]; both stay in sync (FR-3.2).
@@ -166,9 +167,11 @@ screen says exactly what the owner may now do.
 4. **Goal complete / Holding** [D11]: release (the positions become the owner's and **unprotected**;
    step-up; the warning shown is recorded) or close.
 
-5. **Stop** [G2, D2]: ends the agent without selling (DEC-131): terminal, positions and resting
-   protection stay where they are, step-up (the brief's addition, because it cannot be undone). What
-   the owner can then do with those positions is §7 question 1; PX-13 proposes changing the rule.
+5. **Stop** [G2, D2]: ends the agent, terminal, step-up (the brief's addition, because it cannot be
+   undone), and offered only when the agent is flat (DEC-136, PX-13 (a)). An agent that holds
+   positions offers instead the kill switch (close and stop) or "stop and release positions to me"
+   (as `release`: the positions become the owner's and **unprotected**; step-up; the warning shown
+   is recorded).
 
 *Moment that matters:* in a panic, the owner reaches the right stop in two taps and knows its scope.
 
@@ -221,19 +224,20 @@ accepted (§9).
   is unavailable"; P1, P9.
 
 **G2 Stop sheet** ⚠
-- *Shows:* in the current context (agent, connection, workspace), the three ways to stop, each with
-  its scope in words: **Pause** (no new orders; protection stays; reversible; no step-up), **Stop**
-  (agent scope only: ends the agent, terminal, sells nothing, and leaves positions and resting
-  protection where they are, DEC-131; step-up, the brief's addition because it cannot be undone), and
-  **Kill switch** (cancel and flatten, terminal; step-up, as the spec requires for an owner exit).
+- *Shows:* in the current context (agent, connection, workspace, organization; HLD §8), the three
+  ways to stop, each with its scope in words: **Pause** (no new orders; protection stays; reversible;
+  no step-up), **Stop** (agent scope only: ends the agent, terminal, sells nothing, and is offered
+  only when the agent is flat, DEC-136; step-up, the brief's addition because it cannot be undone),
+  and **Kill switch** (cancel and flatten, terminal; step-up, as the spec requires for an owner exit).
 - *Primary action:* Pause, the least drastic, is first; Stop and Kill switch follow as distinct
   choices.
 - *States:* Paused agent: offers Resume, Stop, and Kill switch. Stopped by a kill switch: shown as
-  done. Stopped by an owner Stop while holding positions: says that an owner-stopped agent sends no further orders and re-places no protection; any positions it held
-stay in the account under whatever protection is resting (DEC-131, PX-13 (b)), and that
-  what the owner can still do with them through Mandate is open (§7 question 1). Loading and Stale:
+  done. Agent holding positions: Stop is replaced by two choices, the kill switch (close and stop)
+  and "Stop and release positions to me" (as `release`: the positions become the owner's and
+  **unprotected**; step-up; the warning shown is recorded; DEC-136, PX-13 (a)). Loading and Stale:
   every action stays enabled.
-- *Governs:* trading §5.5, §7.4; PRD FR-8.2; DEC-131 (owner Pause, Resume, Stop); PX-3, PX-4, PX-11.
+- *Governs:* trading §5.5, §7.4; PRD FR-8.2; DEC-131 (owner Pause, Resume, Stop) as amended by
+  DEC-136; PX-3, PX-4, PX-11, PX-13.
 
 **G3 Step-up dialog** ⚠
 - *Shows:* the action being authorized, in one line, and the passkey prompt.
@@ -301,9 +305,10 @@ explains what a mandate is, without example returns.
 
 **A2 Compiled review** ⚠
 - *Shows:* every envelope field grouped by section (goal, capital, universe, behavior, sizing,
-  protection, risk, autonomy, notifications), each with its provenance badge and, for a stated value,
-  the quoted span. Proposed values look inactive until confirmed. **Not enforced** constraints listed
-  apart, with the note that they reach models only as description text.
+  protection, risk, autonomy, notifications), each with its provenance badge (the five of J-B step 2,
+  *from template* included) and, for a stated value, the quoted span. Proposed values look inactive
+  until confirmed. **Not enforced** constraints listed apart, with the note that they reach models
+  only as description text.
 - *Primary action:* Review and confirm, per section.
 - *States:* Loading (the compiler is a model call): progress, never partial fields shown as final.
   Error (compiler output fails the schema): "we could not compile this", and the form stays
@@ -372,8 +377,9 @@ labeled simulated; trading §10). Paper results are labeled "paper — simulated
 #### Operate
 
 **D1 Dashboard**
-- *Shows:* agents with environment, effective mode, positions, P&L (paper labeled simulated), open
-  approvals with deadlines, recent decisions, and alerts.
+- *Shows:* agents with environment, effective mode, positions, P&L (paper labeled simulated) with the
+  disclosure placeholder `[[DISCLOSURE-PERFORMANCE]]` beside it (the user's own historical results with
+  disclosures, compliance), open approvals with deadlines, recent decisions, and alerts.
 - *Primary action:* open an agent or an approval.
 - *States:* Empty: "Describe your first agent". Stale: P&L marked with the mark's age. Degraded: named
   per dependency.
@@ -381,17 +387,17 @@ labeled simulated; trading §10). Paper results are labeled "paper — simulated
 
 **D2 Agent detail** ⚠
 - *Shows:* the effective mode and **every active restriction with what it blocks and how it lifts**
-  (§4.3); limits with headroom in dollars; ladder rungs, the active size factor, and any `pending`
+  (§4.3); P&L with the disclosure placeholder `[[DISCLOSURE-PERFORMANCE]]` beside it, as on D1;
+  limits with headroom in dollars; ladder rungs, the active size factor, and any `pending`
   breach confirmation; the lifetime floor in dollars; positions with protection status; the working
   universe [D4] or the pinned list; open approvals; recent decisions linking to the trace [J2].
 - *Primary action:* Stop control (G2: Pause, Stop, Kill switch); the acknowledgment the current
-  restriction needs, if any [D7]. The owner Stop states that it ends the agent without selling and
-  leaves positions and resting protection where they are (DEC-131; PX-13).
+  restriction needs, if any [D7]. The owner Stop is offered only when the agent is flat; while it
+  holds positions, G2 offers the kill switch or "stop and release positions to me" (DEC-136; PX-13).
 - *States:* Paused, Restricted: banner per §4.3. Recovering (`awaiting_reconciliation` at startup):
   "Checking with the broker", no action needed. Holding: see D11. Stopped: read-only, with the reason;
-  after an owner Stop with positions, the positions and their resting protection stay listed, with the
-  statement that an owner-stopped agent sends no further orders and re-places no protection; any positions it held
-stay in the account under whatever protection is resting (DEC-131, PX-13 (b)) and that closing them through Mandate is open (§7 question 1).
+  an owner Stop leaves no positions with the agent, since it needs the agent flat or its positions
+  released to the owner (DEC-136).
 - *Governs:* mandate §5.3 to §5.9, §3.1; trading §7.4; FR-8.1, FR-8.2.
 
 **D3 Position detail** ⚠
@@ -475,8 +481,12 @@ activity, account restriction, surveillance), because each acknowledgment restor
 - *Shows:* the scope and exactly what it does. **Agent:** cancels only this agent's orders, sells only
   its shares, leaves other agents and the owner's own holdings untouched, and ends the agent
   (`stopped`). **Connection or workspace:** the broker's cancel-all and close-position; the list of
-  orders and positions affected, including any not managed by Mandate (PX-12). Outside the regular
-  session, the owner-exit confirmation of D9 for equities.
+  orders and positions affected, including any not managed by Mandate (PX-12). **Organization**
+  ([HLD §8](../HLD.md#8-multi-tenancy-and-security) lists agent, connection, workspace, and
+  organization): the workspace kill switch in every workspace of the organization, with the same list
+  per workspace. Outside the regular session, the owner-exit confirmation of D9 for equities is
+  optional: declining it, or having no fresh quote, still activates the cancel and `stopped`, and
+  equity sells then wait for the session (trading §5.5; rule 13).
 - *Primary action:* Activate (step-up).
 - *States:* In progress: each step as journaled (mode applied, orders canceled and confirmed, sells
   submitted or deferred). Degraded (deployment unreachable): says the switch could not be delivered
@@ -533,7 +543,9 @@ question 7 asks for that event; D7 is designed as a record screen so it is ready
 - It renders deterministically from the data it records; the stored artifact and the UI build
   identify exactly what was on screen (mandate §10).
 - Once shown, values that the owner confirms do not change underneath them. A quote that moves
-  requires a fresh render and a fresh confirmation, never a silent update.
+  requires a fresh render and a fresh confirmation, never a silent update. On the kill switch (D10)
+  the bid confirmation is optional and never holds the switch: without it, the cancel and `stopped`
+  apply at once and equity sells wait for the session (trading §5.5).
 - Collapsed content counts as not shown. Anything the rule requires the owner to see is expanded
   (PX-1).
 - The action button is enabled only once the full screen has rendered.
@@ -608,10 +620,13 @@ A rung whose breach is still confirming is shown as `pending` with its time in b
 
 ## 6. Open product decisions for the founder
 
-Each question has options, a recommendation, and the reason. Until the founder answers, designs
-follow the recommendation, because each is the more conservative option (rule 9), except PX-13, where
-the designs follow the accepted rule (b) of DEC-131 until the founder records a change. Answers are
-recorded as decision-log rows. The labels PX-1 to PX-14 are local to this brief.
+Decided by the founder on 2026-09-27: every recommendation below is accepted as written (DEC-135).
+PX-13 (a) amends DEC-131 (DEC-136).
+
+Each question has options, a recommendation, and the reason. Before the founder answered, designs
+followed the recommendation, because each is the more conservative option (rule 9), except PX-13, where
+they followed DEC-131's rule (b); they now follow every recommendation, PX-13 (a) included (DEC-136).
+Answers are recorded as decision-log rows. The labels PX-1 to PX-14 are local to this brief.
 
 **PX-1. How much of the compiled mandate the confirmation screen shows by default.**
 (a) Every field expanded. (b) The plain-language summary and dollar figures on top; below, every
@@ -621,12 +636,16 @@ expanded with its explanation. (c) The summary only, with "view details".
 (compliance questions 23 and 24), and collapsed content counts as not shown (§4.1), which rules out
 (c). Fully expanded (a) buries the few values that need attention among fifty that do not.
 
+*Decision: (b), accepted.*
+
 **PX-2. Can the owner accept all platform proposals at once?**
 (a) One "accept all proposed" button. (b) Per-section confirmation, where each proposed value in the
 section must be ticked or edited. (c) Per-field confirmation for everything.
 *Recommendation: (b).* MI-12 requires every field confirmed, and a proposal accepted in bulk is the
 platform choosing limits in all but name (compliance question 23). Per-field for all fields (c) is
 tedious for values the owner stated in their own words.
+
+*Decision: (b), accepted.*
 
 **PX-3. What the one Stop control offers.**
 (a) Only the kill switch. (b) Pause first (instant, no flatten, reversible), then the owner Stop
@@ -637,6 +656,8 @@ pause preserves positions and protection and can be undone. Stop is for ending t
 selling, and says it leaves positions in place (PX-13). One entry keeps the panic path to two taps, and
 a sheet makes each scope explicit.
 
+*Decision: (b), accepted; the owner Stop in it is as amended by DEC-136 (offered only when flat).*
+
 **PX-4. Step-up on pause, resume, and stop.** The spec requires step-up for an owner exit (so for the
 kill switch) and for resuming after a reconciliation pause; it says nothing for an owner pause, its
 resume, or an owner Stop.
@@ -645,6 +666,8 @@ resume, or an owner Stop.
 cost; resume restores risk-taking, which is the case step-up exists for (FR-1.4); Stop cannot be
 undone and leaves positions without further management (DEC-131), so it gets the same check as the
 kill switch. Needs a line in the runtime brief or the mandate spec.
+
+*Decision: (b), accepted; the owner Stop in it is as amended by DEC-136 (offered only when flat).*
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
@@ -657,6 +680,8 @@ resume once the difference is adopted.
 not seen, which makes the step-up theater; the acknowledgment should carry the evidence the way a
 mandate confirmation does.
 
+*Decision: (b), accepted.*
+
 **PX-6. What a notification may name.** The HLD and persona examples put the agent's name in the
 push ("Agent btc-accumulator needs approval"), but agent names are chosen by users and often contain
 a ticker.
@@ -665,6 +690,8 @@ a ticker.
 *Recommendation: (b), with (c) as an option the owner can turn on.* Rule 6 says generic text; the
 name leaks the instrument to the relay, the push provider, and the lock screen. Updating the HLD and
 persona examples follows.
+
+*Decision: (b), with (c) as an option the owner can turn on, accepted.*
 
 **PX-7. How the approval deadline and step-up work on a phone.**
 (a) The deadline goes in the notification. (b) The notification is generic; the detail screen shows
@@ -676,15 +703,22 @@ binds each passkey gesture to one decision, and a passkey is one gesture, so the
 (c) is allowed by the spec but lets one gesture approve several orders. The deadline is enforced by
 the server: an approval arriving after it fails closed and shows "skipped". Skip needs no step-up.
 
+*Decision: (b), accepted.*
+
 **PX-8. Paper to live, given that `environment` never changes (V-031).** Going live cannot be a new
 version of the paper mandate.
 (a) "Promote to live" creates a new live mandate prefilled from the paper one; the live confirmation
 shows every field, highlights the two that differ (environment and connection), and needs step-up;
+`environment` and `connection_id` are always `user_entered` on the live mandate, and every prefilled
+field is confirmed again with its provenance recorded (V-020, V-038; mandate §7, "live is always
+user-entered");
 E10-4's paper-run requirement is defined as a run of an identical envelope. (b) The owner authors the
 live mandate from scratch. (c) Change V-031 so a version may switch paper to live.
 *Recommendation: (a).* (b) invites typing errors between paper and live; (c) weakens an approved spec
 rule for convenience. This needs a spec and PRD clarification of "a paper run of this mandate"
 (§7 question 3), and it matters only once counsel allows live.
+
+*Decision: (a), accepted.*
 
 **PX-9. What the product says about the research agent before users may have it.**
 (a) Hide it; users see bring-your-own-strategy only. (b) Show it as "not available yet". (c) Show it
@@ -692,6 +726,8 @@ with an explanation of what it will do.
 *Recommendation: (a).* Anything that describes a future capability to bring ideas invites expectations
 of performance before the DEC-99 evaluation exists (compliance question 35). Designs still cover the
 research mode fully so it can switch on by policy.
+
+*Decision: (a), accepted.*
 
 **PX-10. How approve and skip are weighted on the approval screen.**
 (a) Approve is the primary button. (b) Approve and Skip have equal weight and neither is preselected;
@@ -701,12 +737,16 @@ the default.
 engagement design amounts to a recommendation; (c) is a nudge the other way that makes approvers
 distrust the tool. Neutral design is the defensible position.
 
+*Decision: (b), accepted.*
+
 **PX-11. Which roles may stop an agent.**
 (a) Operators and admins only. (b) Operators and admins may pause, stop, and flatten; approvers may
 pause. (c) Anyone with access, viewers included.
 *Recommendation: (b).* An approver who sees something wrong at 3 a.m. should be able to stop new
 orders; pausing never adds risk and can be undone. Stop ends the agent for good and flattening
 realizes losses, so both are the operator's call. Viewers and auditors act on nothing.
+
+*Decision: (b), accepted.*
 
 **PX-12. The account-wide kill switch and the owner's own holdings.** At connection or workspace scope,
 the spec uses the broker's cancel-all and close-position, which can close positions no agent manages.
@@ -718,21 +758,26 @@ per-agent form.
 holdings by surprise is a harm of its own. The account-wide switch stays for a compromised or runaway
 account, where closing everything is the point.
 
-**PX-13. Owner stop while holding positions.** **The current rule is (b), accepted under DEC-131:**
+*Decision: (b), accepted.*
+
+**PX-13. Owner stop while holding positions.** **Before DEC-136 the rule was (b), under DEC-131:**
 an owner Stop sets `stopped`, cancels approvals, and hands no flatten; "stopping an agent leaves its
 positions where they are, and flattening them is what a kill switch is for"
 ([runtime brief](../project/tasks/E6-1-agent-runtime-and-kill-switches.md), agent modes). The
-designs follow (b) until the founder decides otherwise.
+designs followed (b) until the founder decided (a).
 (a) Stop is offered only when flat; otherwise the choice is the kill switch (close and stop) or
 "stop and release positions to me" (as `release`: unprotected, with the warning, step-up). (b) Stop
 leaves positions where they are, under whatever protection is resting, with no further management
-(DEC-131, current). (c) Stop always flattens.
+(DEC-131, the rule before DEC-136). (c) Stop always flattens.
 *Proposed change to DEC-131: (a).* Every ending then has a defined owner of the positions; under (b)
 nobody re-places protection when the GTC orders expire, and the open questions of §7 question 1
 remain. Choosing (a) changes an accepted decision, so under rule 9 it needs a new decision-log entry,
 which the founder makes. What it costs: the runtime's Stop gains a flat-or-release precondition and
-one more owner choice in G2. Until then, D2 offers Stop with the plain statement that it leaves
-positions and resting protection in place, and G2 offers the kill switch for ending with a flatten.
+one more owner choice in G2. Before the decision, D2 offered Stop with the plain statement that it
+left positions and resting protection in place, and G2 offered the kill switch for ending with a
+flatten; G2 and D2 now follow (a).
+
+*Decision: (a), accepted (DEC-136, amending DEC-131).*
 
 **PX-14. When to ratify the web stack.** DEC-134 starts design, not code.
 [HLD §11](../HLD.md#11-technology) names Next.js for the web app and React Native for mobile
@@ -745,21 +790,25 @@ for those screens. The HLD's Next.js choice is consistent with that constraint.
 designs will say more about what the stack needs; waiting until M9 itself would put the choice on the
 critical path.
 
+*Decision: (c), accepted.*
+
 ## 7. Questions for the specs
 
 Designing the screens found places where the specs are silent, disagree, or need a change. They are for the spec
 owners, with a recommended reading; none is decided here.
 
-1. **A stopped agent that still holds positions.** DEC-131's runtime brief settles that an owner Stop
-   leaves positions where they are (PX-13 (b)). Two parts stay open: what happens to the resting
-   protection once it reaches GTC expiry, since a stopped agent re-places nothing (trading §5.4); and
+1. **A stopped agent that still holds positions.** DEC-136 (PX-13 (a)) removes the case once the
+   runtime's Stop gains its flat-or-release precondition; until that change, DEC-131's runtime rule
+   leaves positions where they are (PX-13 (b)), and for that interval two parts stay open: what
+   happens to the resting protection once it reaches GTC expiry, since a stopped agent re-places
+   nothing (trading §5.4); and
    whether a stopped agent with positions retires (mandate §2, `AgentStopped`), and if so what net
    dollar loss joins the connection's loss carry while positions are still held (mandate §5.7).
    A third follows from them: whether the owner can still close those positions through Mandate (D9 or
    the agent kill switch), since a stopped runtime proposes nothing, ever. The one path the specs do
    give is selling at the broker, which is external activity (trading §7.1) and switches every agent on
-   the account to `exits_only` until acknowledged. G2 and D2 point here.
-   Recommended: answer both in the runtime brief; PX-13 (a) would remove the case.
+   the account to `exits_only` until acknowledged.
+   Recommended: answer both in the runtime brief for the interval; DEC-136 removes the case after it.
 2. **Owner exit while paused, or with an `Unknown` order.** Trading §5.5 exempts kill-switch orders
    from the agent's mode, while MI-1 lets `paused` hold exits. Is closing one position (`owner_exit`,
    not a kill switch) held by `paused`? And during a reconciliation mismatch, which quantity does a
@@ -769,8 +818,9 @@ owners, with a recommended reading; none is decided here.
 3. **"A paper run of this mandate" (E10-4, FR-4.4) under V-031.** The live mandate has a different
    environment and connection, so a different hash. Recommended: define the requirement as a paper
    run of a mandate whose envelope is identical except for those two fields (PX-8).
-4. **The owner pause as a restriction.** Mandate §5.9's restriction list does not name an owner pause
-   (runtime DEC-131 notes the gap in its Decisions needed 4); PX-4 adds step-up on resume.
+4. **The owner pause as a restriction.** Should §5.9 list an owner pause, and does resuming from it
+   need step-up? (Runtime DEC-131 raises the first part in its Decisions needed 4; PX-4 bears on the
+   second.)
 5. **Account-wide close-position scope.** Trading §5.5 says "close-position endpoint per instrument"
    without saying which instruments. Recommended: the confirmation lists every position it will close,
    including those no agent manages (PX-12).
