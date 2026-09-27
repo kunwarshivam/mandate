@@ -721,6 +721,7 @@ fn crash_between_entry_fill_and_oco() {
         shell
             .state
             .protection(&instrument(AAPL))
+            .expect("the protection accessor answers")
             .is_some_and(|p| !p.resting.is_empty()),
         "and the fold carries it as resting protection"
     );

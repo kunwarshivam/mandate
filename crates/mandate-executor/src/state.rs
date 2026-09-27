@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mandate_accounting::InstrumentId;
 use mandate_num::{Qty, Rounding, SignedQty, Usd};
 
+use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
@@ -236,16 +237,21 @@ impl ExecutorState {
         &self.reservations
     }
 
-    /// One instrument's resting protection and the quantity it covers.
-    pub fn protection(&self, _instrument: &InstrumentId) -> Option<&Protection> {
-        None
+    /// One instrument's resting protection and the quantity it covers. A stub until E7-4 folds
+    /// protection: it answers `Unimplemented` rather than "no protection", so a silent absence can
+    /// never reach an order path.
+    pub fn protection(
+        &self,
+        _instrument: &InstrumentId,
+    ) -> Result<Option<&Protection>, ExecutorError> {
+        let _ = &self.protection;
+        Err(ExecutorError::Unimplemented { story: "E7-4" })
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
-    /// position.
-    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Qty {
-        let _ = &self.protection;
-        Qty::ZERO
+    /// position. A stub until E7-4, answering `Unimplemented` rather than zero.
+    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+        Err(ExecutorError::Unimplemented { story: "E7-4" })
     }
 
     /// Every unprotected interval the fold has seen, open and closed.
@@ -399,9 +405,10 @@ impl ExecutorState {
         self.started
     }
 
-    /// Whether the causation chain of a copied fact is recorded for `event`.
-    pub fn copied_origin(&self, _event: &EventId) -> Option<&EventId> {
-        None
+    /// Whether the causation chain of a copied fact is recorded for `event`. A stub until E7-4,
+    /// answering `Unimplemented` rather than "not recorded".
+    pub fn copied_origin(&self, _event: &EventId) -> Result<Option<&EventId>, ExecutorError> {
+        Err(ExecutorError::Unimplemented { story: "E7-4" })
     }
 
     /// The account stream this state is the single writer of, named by its opaque ids alone
