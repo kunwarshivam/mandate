@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.1, 2026-09-27. Research input for the founder. Not an accepted decision, not a PRD change, and not legal advice |
+| **Status** | Draft v0.2, 2026-09-27. Research input for the founder, updated for the founder's decision on DEC-141. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision needed** | [DEC-141](../project/04-decision-log.md#decisions), Proposed (founder): whether outside agents may act as proposers behind Mandate's gate |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -30,19 +30,19 @@ or, for sources used only here, to [this document's source list](#sources).
 3. **Idea origination is the least proven and most regulated part of the plan.** Language models
    lost money in Alpha Arena's US-equities season [NF2]. Platform-originated, personalized ideas are
    the shape of investment advice, which is why DEC-98 assumes Mandate may need to register.
-4. **Recommendation.** Lead with *the enforceable envelope around any proposer*: a governed path for
-   the owner's own agent, with the platform's research agent (DEC-97) as a second proposer behind the
-   same gate once DEC-99 passes. Hedge with compliance evidence for small advisers and an
-   agent-safety conformance suite. This changes go-to-market order, not the destination. It needs
-   the founder's decision on DEC-141, because it interprets `AGENTS.md` rules 4 and 11. Until then
-   DEC-97 stands as written, and no external-proposer path is built.
+4. **Recommendation, as decided in DEC-141.** The complete product leads: the owner sets the
+   envelope and the platform's research agent (DEC-97) brings the ideas. As an optional channel, an
+   owner who already runs their own agent can connect it through a Mandate MCP server that exposes
+   the same API Mandate uses to take the owner's input, so every request passes the same builder,
+   autonomy rules, gate, ledger, and journal. That channel is an adoption on-ramp, not a separate
+   product. Hedge with compliance evidence for small advisers and an agent-safety conformance suite.
 
 ## 1. Market evidence
 
 | Finding | Source |
 |---|---|
 | Robinhood: "To date, nearly 100 thousand customers have opened Agentic Trading accounts, with over $100 million in AUC" (2026-07-29). Strategies: "over 300 thousand Funded Customers with nearly $2 billion" | [RH4] |
-| Robinhood, Q2 2026 call (2026-07-29): users dislike "going to a Codex or a Claude Code and kind of stitching together these 2 apps"; models "sometimes ... will fight you" | [RH5] |
+| Robinhood, Q2 2026 call (2026-07-29): users dislike "going to a codex or a Claude code [sic] and kind of stitching together these 2 apps"; models "sometimes ... will fight you" | [RH5] |
 | Robinhood and Public: neither will "control, supervise, monitor, recommend, or audit" third-party agents | [RH1] [PU11] |
 | Public Agents generally available on 2026-08-05; available to everyone by 2026-09-15; no usage figures published | [PU7] [PU13] |
 | Alpaca: API usage growth "accelerated nearly 4x quarter-over-quarter" in Q1 2026, with monthly growth near 30%. Separately, monthly active API users "grew nearly 4x during the last six months" (July 2026). $150 million Series D in January 2026; $135 million round in July 2026 ($435 million with debt) | [AL7] [AL3] [AL8] |
@@ -67,7 +67,7 @@ before it is a capability problem.
 
 | Topic | What the public source says | Flag for counsel |
 |---|---|---|
-| FINRA 2026 oversight report | Names AI-agent risks: "Autonomy: AI agents acting autonomously without human validation and approval", and "Scope and Authority: Agents may act beyond the user's actual or intended scope" [FR1] | Maps onto the gate, autonomy policy, and journal. Useful for broker vendor reviews (question 7) |
+| FINRA 2026 oversight report | Names AI-agent risks: "Autonomy: AI agents acting autonomously without human validation and approval", and "Scope and Authority: Agents may act beyond the user's actual or intended scope and authority" [FR1] | Maps onto the gate, autonomy policy, and journal. Useful for broker vendor reviews (question 7) |
 | House Financial Services letter | Eight members (Foster, Sherman, Lynch, Himes, Casten, Tlaib, Garcia, Pettersen) sent the SEC 13 questions on agentic trading on 2026-06-23, with answers requested "by July 31, 2026". Question 7 asks when "an AI agent or its developer be required to register" [HL1] | Directly on questions 31 and 32. No SEC answer found |
 | SEC 2026 examination priorities | Covers "automated investment tools, AI technologies, and trading algorithms", and whether advice is consistent with investors' profiles or stated strategies [SE1] | If Mandate registers, the journal becomes exam evidence (questions 27, 31) |
 | SEC Chair remarks, 2026-09-10 | AI "should serve as a complement to—not a substitute for—human judgment"; "Widespread reliance on similar tools can allow errors to cascade" [SE2] | Echoes DEC-100 (correlated flow) |
@@ -126,7 +126,7 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 | # | Option | Target | Revenue model | Regulatory exposure (flag) |
 |---|---|---|---|---|
 | 0 | Baseline: platform-originated theses, retail first (#177's recommended variant) | A, B | Per-organization plan plus usage | High: adviser (DEC-98; questions 31, 33) |
-| 1 | Mandate Gateway: the owner's own agent proposes; Mandate's builder, gate, ledger, and journal decide and place | A, C | Per live agent a month | Unknown, possibly lower than 0; question 34 extended |
+| 1 | The owner's own agent as an optional channel (MCP over the owner-input API; DEC-141) | A, C | Part of the plan; per live agent | Unknown; counsel (questions 31, 32, 34) |
 | 2 | Read-only monitor for agents already running at Public or Robinhood | A | Low monthly subscription | Low; data-access terms |
 | 3 | Compliance evidence for small advisers and emerging managers | D | Per organization a month; hybrid licence | Vendor to regulated firms (questions 7, 27) |
 | 4 | Supervision layer licensed to brokers | F | Platform licence plus per-account fee | Brokers' own supervision duties; heavy vendor review |
@@ -157,12 +157,18 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 - **Kill.** None of the tested configurations beats buy-and-hold of the basket net of modeled costs
   over the window. That argues against leading with DEC-97, not against keeping it.
 
-### Option 1: Mandate Gateway for the owner's own agent (recommended wedge)
+### Option 1: The owner's own agent as an optional channel (accepted as DEC-141, as an on-ramp)
+
+The research first framed this as a lead "gateway" product. The founder's decision keeps the
+evidence and changes the role: the complete product leads, and this is an optional channel over the
+owner-input API. The evidence below is unchanged.
+
 
 - **Target.** Segment A, then C: owners already running Claude, ChatGPT, Codex, or a custom agent on
   Alpaca or Robinhood.
-- **Value.** "Use any agent. It cannot exceed your mandate, it cannot overspend against your other
-  agents, every action has a receipt, and one control stops it."
+- **Value.** "Bring the agent you already use. It works through the same controls as you do: it
+  cannot change your envelope, it cannot approve its own requests, every action has a receipt, and
+  your kill switch stops it."
 - **Why now.** Robinhood, eToro, and Alpaca's MCP v2 opened agent access in 2026; Robinhood's own
   management names the friction [RH5]; brokers disclaim supervision [RH1] [PU11]; FINRA lists scope
   and autonomy as agent risks [FR1].
@@ -171,27 +177,31 @@ experiment is paper only, spends nothing, and contacts no one without the founde
   model costs. Users get value before DEC-99 evidence exists.
 - **Against.** Brokers can add owner-level limits themselves (RAID R-13); Robinhood may reduce
   friction natively; users may resent a middle layer; Robinhood's terms for a platform acting for
-  many customers are unresolved (OD-12) and it has no paper environment (DEC-124); it weakens the
-  "platform brings ideas" headline; rules 4 and 11 need an explicit interpretation, which is
-  DEC-141.
-- **Plan impact.** If DEC-141 is accepted: an external-proposer ingress (a proposal tool, not broker
-  tools) admitted through the ADR-0002 path (eligibility floor, asset classes, `max_instruments`,
-  `new_instrument` defaulting to `ask`); a new story in E17 or E7; the decision receipt (E12-1) pulled
-  earlier. M6 connectors unchanged; M7 approvals serve it directly. If DEC-141 is rejected or
-  deferred: nothing changes.
-- **Regulatory exposure.** Flag: the owner's agent originates ideas, but Mandate still sizes and
-  executes in the owner's account. Counsel to compare with platform ideation and with
-  bring-your-own-strategy (question 34 extended).
-- **Revenue.** Per live agent a month; hypothesis to test: $15 to $30 retail, more for builders.
-- **Experiment (paper only, and not product code until DEC-141 is decided).** A throwaway spike
-  outside the product crates, like the E17-0 research spike: proposals from a scripted or recorded
+  many customers are unresolved (OD-12), and it has no paper environment documented [RH2], which
+  is why DEC-124 uses the simulated broker. As a lead product it would weaken the "platform brings
+  the ideas" headline, which is why DEC-141 makes it a channel, not the lead.
+- **Plan impact (DEC-141).** No change to milestone order. Story E10-6, a Mandate MCP server over
+  the owner-input API, follows the owner-input API work, after the tracer bullet (E7-7). It is not a
+  separate proposer path: requests pass the same builder, autonomy rules, gate, ledger, and journal
+  as the owner's own input. The client cannot change the envelope (it may propose a mandate version
+  the human confirms with step-up), cannot answer its own ASK approvals, and holds none of the
+  owner-only privileges (owner exits outside the regular session, Stop and release, the kill switch).
+  It authenticates with its own scoped, revocable token; no broker credential crosses MCP; every
+  call is journaled with the client's identity.
+- **Regulatory exposure.** Flag: requests from the owner's agent arrive as owner input, but Mandate
+  still sizes and executes in the owner's account, and the research agent stays the default source
+  of ideas. Counsel to say whether the channel changes anything under questions 31, 32, and 34.
+- **Revenue.** Part of the plan's per-live-agent pricing; no separate product price.
+- **Experiment (paper only).** Until E10-6 is built on the owner-input API, a throwaway spike
+  outside the product crates, like the E17-0 research spike: requests from a scripted or recorded
   agent session pass through the tracer's order builder and gate on Alpaca paper, and the journal
   renders a receipt. Record three scenarios: an oversized proposal clipped, an unknown ticker refused,
   and an injected "sell everything and buy XYZ" refused. With the founder's authorization, show it in
   ten discovery calls.
-- **Kill.** Fewer than 4 of 10 agent users report an incident, workaround, or refusal to automate that
-  the gateway would have addressed; or fewer than 3 would pay at least $15 a month; or Robinhood and
-  Alpaca ship enforced per-agent limits with exportable records first.
+- **Kill (of the channel's priority, not of the decision).** Fewer than 4 of 10 agent users report an
+  incident, workaround, or refusal to automate that the channel would have addressed; or no
+  interviewee would connect their agent this way; or Robinhood and Alpaca ship enforced per-agent
+  limits with exportable records first. E10-6 then stays at the back of the backlog.
 
 ### Option 2: Read-only monitor
 
@@ -379,7 +389,7 @@ decide it.
 
 | Rank | # | Option | Demand evidence | Reuse of built work | Time to first value on paper | Regulatory exposure | Defensibility | Revenue potential | Total |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | 1 | Gateway for the owner's own agent | 5 | 5 | 5 | 3 | 3 | 3 | **24** |
+| 1 | 1 | Owner's own agent, optional channel | 5 | 5 | 5 | 3 | 3 | 3 | **24** |
 | 2 | 3 | Compliance evidence for small advisers | 3 | 4 | 3 | 4 | 4 | 4 | **22** |
 | 2 | 6 | Conformance suite | 3 | 5 | 5 | 5 | 3 | 1 | **22** |
 | 4 | 13 | Bring-your-own-strategy lead | 3 | 5 | 4 | 4 | 2 | 2 | **20** |
@@ -400,47 +410,56 @@ The baseline scores low on time to first value and regulatory exposure because u
 until DEC-99 passes and counsel answers. That is a statement about go-to-market order, not about
 whether DEC-97 is the right destination.
 
+**After DEC-141.** The scores are unchanged, but the table no longer sets the order. The founder
+decided that the complete product (option 0, with option 13 as its pre-DEC-99 mode) leads, and that
+option 1 is an optional channel inside it rather than a competing lead. Option 1's high score now
+reads as "a cheap, well-evidenced on-ramp", not "the lead product". The rest of the ranking stands.
+
 ## 7. Recommendation
 
-**Wedge: option 1, the enforceable envelope around any proposer.**
+The founder decided this on 2026-09-27 ([DEC-141](../project/04-decision-log.md#decisions)):
 
-- Lead with a governed path for the owner's own agent: Alpaca paper first, Robinhood when OD-12 and
-  the live-trading gate allow.
-- Keep the research agent (DEC-97) as the platform's proposer behind the same gate. It reaches users on
-  the timetable DEC-99 and DEC-103 already set.
-- Headline, if DEC-141 is accepted: "any agent, including ours, inside limits it cannot break, with a
-  receipt for every decision". Until then the headline stays as the vision states it.
-- Why this does not reverse DEC-97: DEC-103 already keeps the research agent off users' agents until
-  the evaluation passes, and in that interim every user agent is bring-your-own-strategy. The gateway
-  widens that interim from a pinned universe to the owner's own agent, admitted through the same
-  eligibility floor and autonomy rules. The admission machinery is shared.
+> we should support it optionally, but ours should be complete product, it is just that they can
+> connect it to MCP to say claude and then use same API that we would have used for taking input
+> from user
+
+**The complete product leads (option 0, with option 13 as its mode before DEC-99).** The owner sets
+the envelope; the platform's research agent (DEC-97) brings the ideas and reaches users on the
+timetable DEC-99 and DEC-103 already set. Until then, users run bring-your-own-strategy.
+
+**The owner's own agent is an optional channel and an adoption on-ramp (option 1, DEC-141).** An owner
+who already runs an agent (for example Claude) can connect it through a Mandate MCP server that
+exposes the owner-input API. It is not a separate proposer path, and it follows the rules below.
+
+- Every request goes through the same order builder, autonomy rules, risk gate, account ledger, and
+  journal as the owner's own input.
+- The client cannot change the envelope. It may propose a mandate version, which only the human
+  confirms, with step-up.
+- ASK approvals go to the human, and a client cannot approve its own proposal.
+- Owner-only privileges and the kill switch stay with the human.
+- No broker credential crosses MCP. The client has its own scoped, revocable token.
+- Every call is journaled with the client's identity.
+- The work is story E10-6, after the owner-input API and the tracer bullet. Milestone order does not
+  change.
+
+The evidence for option 1 (the Robinhood and Alpaca figures, the friction brokers name, and brokers
+disclaiming supervision) is why the channel is worth having. It argues for an on-ramp that brings
+people with their own agents into the complete product, not for replacing it.
 
 **Hedge A: option 3.** Run discovery in parallel; change no engineering until 2 of 5 name a budget
 and a reachable custodian.
 
-**Hedge B: option 6.** Nearly free given existing tests; it strengthens option 1's trust claim and is
-the only credible opening to option 4 later.
+**Hedge B: option 6.** Nearly free given existing tests; it strengthens the trust claim of both the
+product and the channel, and is the only credible opening to option 4 later.
 
-**Keep as planned:** option 13 (it is the pre-DEC-99 mode anyway), option 15 (M11), option 0 as the
-destination, with its forward-paper experiment run now.
+**Keep as planned:** option 15 (M11), and option 0's forward-paper experiment, run now.
 
 **Deprioritize:** option 9 (CTA exposure, leverage), option 12 (out of scope), option 4 as a lead
 motion (revisit after option 6 has outside users).
 
-### The decision this needs: DEC-141 (Proposed, founder)
-
-Whether an owner's own agent may act as a proposer behind Mandate's gate. Its output would be a
-proposal (instrument, long direction, optional quantity ceiling, rationale), never an order: the
-deterministic builder sizes it, the gate decides, the account ledger places it, and the journal
-records it with its authorship. Instruments it names would enter only through the ADR-0002
-admission path. It would never receive broker credentials or broker tools.
-
-It is the founder's because it interprets `AGENTS.md` rule 4 (who may produce opinions) and rule 11
-(only the research agent supplies the working universe at runtime; bring-your-own-strategy pins it),
-and because it changes the compliance posture (question 34). Options are accept, reject, or defer
-until discovery. **The conservative default meanwhile is DEC-97 as written:** no external-proposer
-path in product code, and experiments only as throwaway spikes outside the product crates. See the
-[decision log](../project/04-decision-log.md#decisions).
+**Rules 4 and 11.** DEC-141 interprets these rules without changing them. A request from the owner's
+agent is owner input: deterministic code still sizes and places every order, and the working universe
+changes only as rule 11 allows.
 
 ## 8. Differentiators mapped to existing work
 
@@ -487,7 +506,9 @@ Tied to current work, in order. Each step proves engineering, not product value 
    duplicate order (#152, #174, E7-7).
 6. **Receipt:** from the fill back to its inputs, mandate version, gate result, intent, and broker
    response; export and `mandate-cli journal verify` (E5-4, E12-1).
-7. **If DEC-141 is accepted:** steps 2 to 6 repeated with proposals from the owner's own agent.
+7. **The optional channel (once E10-6 exists; a paper spike before then):** steps 2 to 6 repeated
+   with requests from the owner's own agent, plus a request to widen the envelope that waits for the
+   human's step-up, and an ASK the client cannot approve.
 8. **Second broker:** the same mandate on a paper second broker, with capability differences
    explained, not silently translated.
 9. **Forward-paper evidence:** research-agent results against pre-registered baselines, failures and
@@ -503,7 +524,7 @@ Outreach of any kind needs the founder's authorization; this document authorizes
 - **Ask for the last concrete incident:** a workaround, a manual intervention, or a reason they
   refused to automate. Ask what they use today and what it costs.
 - **Show** the same ordinary workflow and one failure scenario from the demo plan, in
-  bring-your-own-strategy mode and, if DEC-141 is accepted, with their own agent. Ask which evidence
+  bring-your-own-strategy mode and through their own agent over the optional channel. Ask which evidence
   changes their willingness to run it unattended.
 - **Recruit three design partners** for repeated paper use; record whether they return and whether
   requests converge.
@@ -517,16 +538,16 @@ These are discovery targets, not proof of product-market fit.
 
 | If we observe | Then |
 |---|---|
-| Robinhood or Alpaca ship enforced per-agent limits, approvals, and exportable records | Option 1 shrinks; move to multi-broker portability and verification, or lean on option 3 |
-| Fewer than 4 of 10 agent users report a real incident or fear, and no one pays $15 a month | Stop option 1; return to option 0 or option 3 |
-| The DEC-103 thin slice beats its pre-registered baselines net of costs | Platform ideas are a real differentiator; lead with option 0, consider option 10, demote the gateway to a feature |
-| The thin slice fails its baselines | Keep ideation gated and position on control and evidence (options 1, 3, 6) |
-| Counsel says the owner's-agent mode has the same exposure as platform ideation | Option 1 loses its regulatory advantage; the case rests on demand and speed |
+| Robinhood or Alpaca ship enforced per-agent limits, approvals, and exportable records | The channel's value shrinks; the complete product competes on ideas, portability, and verification; lean on option 3 |
+| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | Move E10-6 to the back of the backlog |
+| The DEC-103 thin slice beats its pre-registered baselines net of costs | Platform ideas are a real differentiator, as the lead assumes; consider option 10 |
+| The thin slice fails its baselines | Keep ideation gated; the product rests on control and evidence (options 13, 3, 6), with the channel as an on-ramp; the founder may revisit what leads |
+| Counsel says the optional channel carries different exposure from owner input | Change the channel's terms or scope with counsel before E10-6 ships |
 | Counsel says a registration route is cheap and fast | Option 10 rises |
 | Adviser interviews show budget and reachable custodians | Promote option 3 to co-primary; pull M8 roles and M11 hybrid forward |
 | A widely reported loss caused by a retail trading agent | Demand for options 1, 4, and 6 rises; accelerate the conformance suite |
 | The SEC or FINRA proposes rules on agents in customer accounts | Re-map controls to the rule text; option 4 likely rises |
-| Robinhood forbids one platform acting for many customers (OD-12) | Option 1 runs on Alpaca and paper brokers only; retail reach shrinks |
+| Robinhood forbids one platform acting for many customers (OD-12) | The product and the channel run on Alpaca and paper brokers only; retail reach shrinks |
 
 ## 13. Corrections the fact-check forced
 
@@ -535,7 +556,7 @@ verified, 2 not found at source, 3 contradicted). The corrections applied here a
 
 - Robinhood's figure is "nearly 100 thousand ... to date" from the filing of 2026-07-29, not "over
   100 thousand" or "by late June"; the call was on 2026-07-29, not 2026-08-07, the transcript's date.
-- Public's changelog has 21 entries, not 22. Its 2026-03-31 release does not list bonds for Agents.
+- Public's changelog has 21 entries, not 22. Its 2026-03-31 release mentions bonds only in company boilerplate, not for Agents.
   The prediction-market release says "available to all Public members".
 - The House letter had eight signatories, not seven.
 - Alpaca's API limit is per account, not per key, on a page dated December 2022. Its July round is

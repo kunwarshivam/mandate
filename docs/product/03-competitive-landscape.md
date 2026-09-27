@@ -5,6 +5,7 @@
 | **Owner** | Product |
 | **Status** | Draft v0.2, 2026-09-27. Replaces v0.1, which made negative claims about competitors that no source supported ([issue #177](https://github.com/kunwarshivam/mandate/issues/177)) |
 | **Method** | Public web pages only, read 2026-09-26 and 2026-09-27. Every figure used here was re-checked against its source page. No accounts, sign-ups, connectors, broker tools, or orders |
+| **Regulatory material** | Public commentary, not legal advice. Legal and compliance text is reserved for the founder and counsel ([DEC-79](../project/04-decision-log.md#decisions)) |
 | **Related** | [Strategy options](10-strategy-options.md), [Vision](01-vision-and-strategy.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
 ## How to read this document
@@ -200,9 +201,9 @@ for software-delivered strategies.
 - Reconciliation compares the aggregate of all strategies on a shared account with broker holdings,
   and freezes a strategy when holdings fall below a protected floor after a grace period [SF2].
 - Loss limits, drawdown thresholds, approvals, a kill switch, and decision logs appear as
-  recommendations in a blog guide, not as documented product features [SF5]. The guide says the
-  human writes the mandate and "the AI implements it"; marketing says agents run "according to
-  user-defined logic" [SF5] [SF9].
+  recommendations in a blog guide, not as documented product features [SF5]. The guide tells the
+  user to write the prompt "like an investment mandate" and says "A good agent is only as clear as
+  the mandate behind it"; marketing says agents run "according to user-defined logic" [SF5] [SF9].
 - Terms (updated 2026-08-17): a "quantitative research platform" that "does not offer financial
   advice"; trades are "at your direction" [SF8].
 - Vendor claim (launch page, more than a year old): "around 800 paying traders, over 34,000
@@ -249,7 +250,7 @@ Mandate has AUTO, ASK, and DENY. No traction is published.
 ### Regent Protocol
 
 **What it documents (vendor claims).** A "financial authorization and compliance layer for AI agents
-that move money": mandates "enforced before execution", allow, hold, or deny verdicts, a kill
+that move money": mandate conditions "enforced before the action executes", allow, hold, or deny verdicts, a kill
 switch, "Mandates fail closed if the control layer is unreachable", and audit batches anchored on
 Solana that verify "against published keys without trusting the operator" [RG1]. Devnet only;
 mainnet "after an independent security review" [RG1] [RG2]. Terms are governed by the laws of
@@ -274,8 +275,8 @@ named: Alpaca and TradeStation.
 
 **What it documents (vendor page).** A rules engine run by the user's own agent through Robinhood's
 MCP server. It ships disarmed, needs an account allowlist, uses a drawdown ladder against a
-high-water mark and a kill switch, fails closed, and publishes a forward-return record "even when
-negative" [CL1].
+high-water mark and a kill switch, fails closed, and publishes its record with "losses
+included" [CL1].
 
 **Overlap with Mandate.** Small, but its safety vocabulary is close to Mandate's, and it packages
 "your own agent plus Robinhood MCP plus limits", the substitute Mandate must beat.
@@ -295,9 +296,9 @@ negative" [CL1].
 
 ### QuantConnect (Mia and LEAN)
 
-**What it documents.** Mia can "design, backtest, optimize, and live-trade" strategies, generate
-ideas from news when the research pipeline is empty, deploy to paper, and monitor divergence from
-backtests; "The decision about live capital stays with you" [QC1]. LEAN's risk-management model
+**What it documents.** "Mia writes QuantConnect algorithm code, runs it, fixes what breaks", and
+backtests it. "When the pipeline is empty, she reads recent financial news" to generate ideas. She
+"deploys and monitors paper trading" and watches live performance against the backtest baseline; "The decision about live capital stays with you" [QC1]. LEAN's risk-management model
 "seeks to manage risk on the PortfolioTarget collection it receives from the Portfolio Construction
 model before the targets reach the Execution model" [QC2]. Live brokerages include Interactive
 Brokers, Schwab, Alpaca, Tradier, Webull, TradeStation, tastytrade, Coinbase, and Kraken; Robinhood
@@ -398,8 +399,9 @@ not shipped product, so no row supports a comparative claim until the demo in
 4. That Public is waitlisted or web-only. It has been generally available since 2026-08-05 [PU7].
 5. That Public cannot backtest, without a date. Say "Agent backtesting was documented as not yet
    available (help article of 2026-06-09), and no changelog entry through 2026-09-14 adds it".
-6. That Public Agents trade bonds. The 2026-03-31 release does not list bonds for Agents; bonds
-   appear only in its company boilerplate.
+6. That Public Agents trade bonds. The launch release of 2026-03-31 mentions bonds only in its
+   company boilerplate ("from stocks and bonds to crypto and options") [PU14], and the help article of
+   2026-06-09 lists corporate bond and treasury trading as not yet in the app [PU2].
 7. That QuantConnect has "no agent layer", that Conviction has a "thin risk layer", that Scalar Field
    has no controls, or that any competitor has "shallow safety".
 8. That Scalar Field's Robinhood path is live-only or market-orders-only. Its current venue page
@@ -465,6 +467,7 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | PU11 | [Public MCP server](https://public.com/mcp-trading) | accessed |
 | PU12 | [Public: AI Agents for Prediction Markets (press release)](https://www.prnewswire.com/news-releases/public-launches-ai-agents-for-prediction-markets-302888505.html) | 2026-09-24 |
 | PU13 | [Public on the App Store (version history)](https://apps.apple.com/us/app/public-com-stocks-crypto/id1204112719) | 5.5.1, 2026-09-15 |
+| PU14 | [Public: first brokerage to introduce AI Agents (press release)](https://www.prnewswire.com/news-releases/public-becomes-the-first-brokerage-to-introduce-ai-agents-for-your-portfolio-302729050.html) | 2026-03-31 |
 | RH1 | [Robinhood newsroom: Robinhood is now open to agents](https://robinhood.com/us/en/newsroom/robinhood-is-now-open-to-agents/) | 2026-05-27 |
 | RH2 | [Robinhood: Agentic Trading overview](https://robinhood.com/us/en/support/articles/agentic-trading-overview/) | accessed |
 | RH3 | [Robinhood: Trading with your agent](https://robinhood.com/us/en/support/articles/trading-with-your-agent/) | accessed |
