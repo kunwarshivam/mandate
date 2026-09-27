@@ -197,7 +197,9 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
 
 /// §4.4's "no market orders" applies under a halt, real or presumed: a halted instrument, or a
 /// dropped status feed. The stale-quote arm of a presumed halt reads the mark's freshness, which is
-/// check 5's (E6-8).
+/// check 5's (E6-8). The `halted` arm cannot change check 4's verdict on an opening, which check 3
+/// has already denied; it stays because the same predicate re-prices an exit under a real halt
+/// (DEC-129 item 31), and as defence in depth should check 3's halt ever be reordered.
 fn market_orders_barred(input: &GateInput<'_>) -> bool {
     input.instrument.halted || !input.instrument.status_feed_current
 }
@@ -918,19 +920,19 @@ mod tests {
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
     /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
-    /// then §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal
-    /// of DEC-129 item 29;
-    /// an exit is allowed, and re-priced as a marketable limit when it is a market order under a
-    /// halt or a dropped status feed (§4.4, §5.6, DEC-129 item 28).
+    /// `exits_only` denying an opening (§7.4), then §4.4's halt for an opening at check 3, then
+    /// §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal of
+    /// DEC-129 item 29; an exit is allowed, and re-priced as a marketable limit when it is a
+    /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
+    /// Only the `Market` kind is a market order: a bracket, an IOC and a plain limit are limits.
     fn halt_oracle(
         side: Side,
         origin: Origin,
         mode: AgentMode,
-        halted: bool,
-        feed_current: bool,
-        market: bool,
+        (halted, feed_current): (bool, bool),
         proposed: &crate::ProposedOrder,
     ) -> HaltRow {
+        let market = proposed.kind == ProposedKind::Market;
         let exit = side == Side::Sell;
         let exempt = exit
             && matches!(
@@ -946,6 +948,9 @@ mod tests {
         }
         if !exit {
             let deny = |code, check| Ok((Verdict::Deny, Some(code), Some(check), None));
+            if mode == AgentMode::ExitsOnly {
+                return deny(ReasonCode::AgentExitsOnly, Check::AccountAndMode);
+            }
             if halted {
                 return deny(ReasonCode::InstrumentHalted, Check::SessionAndHalt);
             }
@@ -964,12 +969,14 @@ mod tests {
         Ok((Verdict::Allow, None, None, pacing))
     }
 
-    /// Every side, origin, mode, halt, status feed and order kind against [`halt_oracle`]: 2 × 10 ×
-    /// 3 × 2 × 2 × 2 = 480 rows. It pins that a halt denies only an opening and only at check 3,
-    /// that a market opening is denied at check 4 under a dropped feed and nowhere else, that a market
-    /// exit under a real or presumed halt is allowed and re-priced at its own quantity and price,
-    /// that a limit exit and a market exit with a current feed are not paced, and that a held exit
-    /// carries no pacing.
+    /// Every side, origin (10), `AgentMode` (all 4), halt, status feed and `ProposedKind` (all 4)
+    /// against [`halt_oracle`]: 2 × 10 × 4 × 2 × 2 × 4 = 1280 rows. It pins that a halt denies
+    /// only an opening and only at check 3; that a market opening is denied at check 4 under a
+    /// dropped feed and nowhere else, and a bracket or IOC opening never is; that a market exit
+    /// under a real or presumed halt is allowed and re-priced at its own quantity and price, in
+    /// every mode that lets it through, `exits_only` included; that a limit, bracket or IOC exit
+    /// and a market exit with a current feed are not paced; and that a held exit carries no
+    /// pacing.
     #[test]
     fn halts_and_market_orders_match_the_oracle_on_every_row() -> Result<(), GateError> {
         let origins = [
@@ -987,9 +994,26 @@ mod tests {
         let mut rows = 0_u32;
         for side in [Side::Buy, Side::Sell] {
             for origin in origins {
-                for mode in [AgentMode::Normal, AgentMode::Paused, AgentMode::Stopped] {
-                    for (halted, feed_current, market) in
-                        (0..8_u8).map(|bits| (bits & 1 == 1, bits & 2 == 2, bits & 4 == 4))
+                for mode in [
+                    AgentMode::Normal,
+                    AgentMode::ExitsOnly,
+                    AgentMode::Paused,
+                    AgentMode::Stopped,
+                ] {
+                    for (halted, feed_current, kind) in (0..16_u8)
+                        .map(|bits| -> Result<_, GateError> {
+                            let kind = match bits >> 2 {
+                                0 => ProposedKind::Plain,
+                                1 => ProposedKind::Market,
+                                2 => ProposedKind::Ioc,
+                                _ => ProposedKind::Bracket {
+                                    take_profit: Price::parse("110")?,
+                                    stop: Price::parse("90")?,
+                                },
+                            };
+                            Ok((bits & 1 == 1, bits & 2 == 2, kind))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
                     {
                         let mut o = match side {
                             Side::Buy => allowing()?,
@@ -1000,18 +1024,9 @@ mod tests {
                         o.agent.mode = mode;
                         o.instrument.halted = halted;
                         o.instrument.status_feed_current = feed_current;
-                        if market {
-                            o.proposed.kind = ProposedKind::Market;
-                        }
-                        let expected = halt_oracle(
-                            side,
-                            origin,
-                            mode,
-                            halted,
-                            feed_current,
-                            market,
-                            &o.proposed,
-                        );
+                        o.proposed.kind = kind.clone();
+                        let expected =
+                            halt_oracle(side, origin, mode, (halted, feed_current), &o.proposed);
                         let actual: HaltRow = match o.decide() {
                             Ok(d) => Ok((
                                 d.verdict,
@@ -1028,14 +1043,14 @@ mod tests {
                         assert_eq!(
                             actual, expected,
                             "{side:?} from {origin:?} under {mode:?}, halted {halted}, feed \
-                             current {feed_current}, market {market}"
+                             current {feed_current}, {kind:?}"
                         );
                         rows = rows.saturating_add(1);
                     }
                 }
             }
         }
-        assert_eq!(rows, 480, "every row of the table ran");
+        assert_eq!(rows, 1280, "every row of the table ran");
         Ok(())
     }
 

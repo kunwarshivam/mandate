@@ -366,7 +366,11 @@ pub enum Check {
     DayTradeBudget,
 }
 
-/// What §9.6 did to a discretionary or owner exit that it may pace but never deny.
+/// How an allowed order must be sent when the gate constrains its form but never denies it: §9.6's
+/// pacing of a discretionary or owner exit (the collar, the participation caps, the close window),
+/// and §4.4 and §5.6's re-pricing of a market-order exit as a marketable limit under a real or
+/// presumed halt, which applies to every reducing purpose, risk exits, protective legs and
+/// kill-switch exits included (DEC-129 items 28 and 31).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pacing {
     pub qty: Qty,
