@@ -415,14 +415,21 @@ pub(crate) fn restriction_for(subject: &str) -> String {
 }
 
 /// A restriction is the one an acknowledgment of its own subject lifts, so no two subjects share
-/// one (§11). The owner acknowledgment that reads it lands in a later slice of this stack.
+/// one (§11): the account-wide cash, fee and incomplete-run restrictions included.
 #[cfg(test)]
 mod restriction_tests {
     use super::restriction_for;
 
     #[test]
     fn each_subject_has_its_own_restriction() {
-        let subjects = ["AAPL", "BTC/USD", "external_activity"];
+        let subjects = [
+            "AAPL",
+            "BTC/USD",
+            "external_activity",
+            "cash",
+            "fees",
+            "incomplete",
+        ];
         for (i, subject) in subjects.iter().enumerate() {
             let own = restriction_for(subject);
             assert!(

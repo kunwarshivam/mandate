@@ -89,9 +89,7 @@ pub(crate) fn run(
     if snapshot.reason == ReconcileReason::FeePosting {
         fees(batch, snapshot, recorded, &mut differences)?;
     }
-    let unexplained = differences
-        .iter()
-        .any(|difference| !difference.adopted && difference.kind != DifferenceKind::MissingFill);
+    let unexplained = differences.iter().any(|difference| !difference.adopted);
     let verdict = if unexplained {
         ReconciliationVerdict::Mismatch
     } else if differences.is_empty() {
@@ -482,18 +480,24 @@ mod tests {
     use mandate_accounting::{
         AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
     };
-    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Qty, ShareIncrement, Usd};
+    use mandate_canon::Value;
+    use mandate_num::{
+        Bps, FeeCap, FeePerShare, FeeRate, Fraction, Price, Qty, ShareIncrement, SignedQty, Usd,
+    };
     use mandate_time::{Date, TradingCalendar};
 
     use super::reconcile;
     use crate::error::ExecutorError;
-    use crate::ids::ClientOrderId;
+    use crate::ids::{ClientOrderId, IntentId};
+    use crate::payload::object;
     use crate::ports::{IdGen, InstrumentSnapshot, MandateView, Ports};
-    use crate::state::{ExecutorState, ObservedAccount};
+    use crate::state::{ExecutorState, ObservedAccount, fold};
+    use crate::step::handle;
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
-        BrokerSnapshot, Effect, EventId, ExecutorConfig, ExitTier, MandateVersion, Order,
-        OrderState, Purpose, ReconcileReason, Seq, WorkspaceId, WriterEpoch,
+        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, Effect, EventId,
+        ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff, MandateVersion,
+        Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId, WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
@@ -505,7 +509,7 @@ mod tests {
         }
     }
 
-    /// A mandate covering everything, and whole-share equities: reconciliation reads neither.
+    /// A mandate covering everything, and whole-share equities.
     struct Everything;
 
     impl MandateView for Everything {
@@ -569,15 +573,153 @@ mod tests {
         })
     }
 
-    /// A started executor on a paper stream: the epoch is what a batch needs.
-    fn started() -> ExecutorState {
-        let mut state = ExecutorState::new(AccountScope {
-            account: AccountRef("acct-1".to_owned()),
-            workspace: WorkspaceId("ws1".to_owned()),
-        });
-        state.epoch = Some(WriterEpoch(1));
-        state.started = true;
-        state
+    fn aapl() -> Result<InstrumentId, ExecutorError> {
+        Ok(InstrumentId::new("AAPL")?)
+    }
+
+    fn account(cash: &str) -> Result<BrokerAccount, ExecutorError> {
+        Ok(BrokerAccount {
+            status: "ACTIVE".to_owned(),
+            crypto_status: "ACTIVE".to_owned(),
+            trading_blocked: false,
+            account_blocked: false,
+            trade_suspended_by_user: false,
+            multiplier: 1,
+            equity: Usd::parse(cash)?,
+            cash: Usd::parse(cash)?,
+            buying_power: Usd::parse(cash)?,
+            non_marginable_buying_power: Usd::parse(cash)?,
+            accrued_fees: Usd::ZERO,
+        })
+    }
+
+    fn snapshot(reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+        Ok(BrokerSnapshot {
+            open_orders: Vec::new(),
+            positions: Vec::new(),
+            account: account("0")?,
+            fills: Vec::new(),
+            cursor: ActivityCursor("cursor-1".to_owned()),
+            reason,
+            taken_at_head: Seq(0),
+        })
+    }
+
+    fn intent(id: &str, agent: &str, side: Side, purpose: Purpose) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(id.to_owned())),
+            agent: AgentId(agent.to_owned()),
+            body: IntentBody::Order {
+                instrument: aapl()?,
+                side,
+                qty: Qty::parse("5")?,
+                limit: Price::parse("150")?,
+                purpose,
+                protection: None,
+            },
+        }))
+    }
+
+    /// One executor over the journal it writes: every draft `handle` answers is committed and
+    /// folded back, in order, as the shell does (journal spec §5.2).
+    struct Executor {
+        state: ExecutorState,
+        journal: Vec<FoldedEvent>,
+        epoch: u64,
+    }
+
+    impl Executor {
+        fn opened(ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+            let mut executor = Self {
+                state: ExecutorState::new(AccountScope {
+                    account: AccountRef("acct-1".to_owned()),
+                    workspace: WorkspaceId("ws1".to_owned()),
+                }),
+                journal: Vec::new(),
+                epoch: 1,
+            };
+            executor.commit_one(
+                "StreamOpened",
+                object(vec![("environment", Value::Str("paper".to_owned()))])?,
+            )?;
+            executor.run(Input::Started(WriterEpoch(1)), ports)?;
+            Ok(executor)
+        }
+
+        fn commit_one(&mut self, event_type: &str, payload: Value) -> Result<(), ExecutorError> {
+            let seq = self.state.account_head().0.saturating_add(1);
+            let event = FoldedEvent {
+                stream: self.state.account_stream(),
+                seq: Seq(seq),
+                event_id: EventId(format!("j-{seq}")),
+                event_type: event_type.to_owned(),
+                causation_id: None,
+                payload,
+            };
+            fold(&mut self.state, &event)?;
+            self.journal.push(event);
+            Ok(())
+        }
+
+        /// Handles one input and commits at most `keep` of its drafts; `usize::MAX` commits all.
+        fn run_keeping(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+            keep: usize,
+        ) -> Result<Vec<Effect>, ExecutorError> {
+            let effects = handle(&mut self.state, input, ports)?;
+            let mut kept = 0;
+            for effect in &effects {
+                if let Effect::Journal(draft) = effect {
+                    if kept == keep {
+                        break;
+                    }
+                    kept = kept.saturating_add(1);
+                    let seq = self.state.account_head().0.saturating_add(1);
+                    let event = FoldedEvent {
+                        stream: self.state.account_stream(),
+                        seq: Seq(seq),
+                        event_id: draft.event_id.clone(),
+                        event_type: draft.event_type.clone(),
+                        causation_id: draft.causation_id.clone(),
+                        payload: draft.payload.clone(),
+                    };
+                    fold(&mut self.state, &event)?;
+                    self.journal.push(event);
+                }
+            }
+            Ok(effects)
+        }
+
+        fn run(&mut self, input: Input, ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+            self.run_keeping(input, ports, usize::MAX)
+        }
+
+        /// A crash and a restart: a new process folds the same journal and takes a new epoch.
+        fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+            let mut next = Self {
+                state: ExecutorState::new(AccountScope {
+                    account: AccountRef("acct-1".to_owned()),
+                    workspace: WorkspaceId("ws1".to_owned()),
+                }),
+                journal: self.journal.clone(),
+                epoch: self.epoch.saturating_add(1),
+            };
+            for event in &self.journal {
+                fold(&mut next.state, event)?;
+            }
+            let epoch = WriterEpoch(next.epoch);
+            next.run(Input::Started(epoch), ports)?;
+            Ok(next)
+        }
+
+        fn snapshot(&self, reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+            Ok(BrokerSnapshot {
+                taken_at_head: self.state.account_head(),
+                ..snapshot(reason)?
+            })
+        }
     }
 
     fn drafted(effects: &[Effect]) -> Vec<&str> {
@@ -590,12 +732,26 @@ mod tests {
             .collect()
     }
 
+    fn submitted(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::Submit(_))))
+            .count()
+    }
+
+    fn queried(effects: &[Effect]) -> usize {
+        effects
+            .iter()
+            .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::GetOrderByClientId(_))))
+            .count()
+    }
+
     fn order(id: &ClientOrderId, state: OrderState) -> Result<Order, ExecutorError> {
         Ok(Order {
             client_order_id: id.clone(),
             intent_id: None,
             agent: AgentId("agent-a".to_owned()),
-            instrument: InstrumentId::new("AAPL")?,
+            instrument: aapl()?,
             side: Side::Buy,
             qty: Qty::parse("10")?,
             filled_qty: Qty::ZERO,
@@ -610,9 +766,11 @@ mod tests {
         })
     }
 
-    /// §11 step 1 compares only the orders the broker could still hold: a finished order, and one
-    /// waiting in `Intent` with nothing at the broker yet, are not adopted when the broker lists
-    /// neither; a live one is.
+    /// §11 step 1 compares only the orders the broker could still hold. A finished order, and one
+    /// resting in `Intent` (a held exit after a confirmed absence, which the broker never had),
+    /// stay as they are when the broker lists neither: nothing is adopted and nothing queried, so
+    /// no `Unknown` is minted to hold a reservation and block the instrument. A live one is
+    /// adopted.
     #[test]
     fn a_reconciliation_compares_only_live_orders() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -623,56 +781,63 @@ mod tests {
             config: &config,
             fees: &fees,
         };
-        let mut state = started();
-        for (raw, at) in [
-            ("md-01JABCDEFGHJKMNPQRSTVWXYZ0", OrderState::Canceled),
-            ("md-01JABCDEFGHJKMNPQRSTVWXYZ1", OrderState::Intent),
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        let resting = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ1")?;
+        for (id, at) in [
+            (
+                ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0")?,
+                OrderState::Canceled,
+            ),
+            (resting.clone(), OrderState::Intent),
         ] {
-            let id = ClientOrderId::parse(raw)?;
             state.orders.insert(id.clone(), order(&id, at)?);
         }
-        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports)?;
+        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled)?, &ports)?;
         assert_eq!(
-            drafted(&run.effects),
-            vec!["ReconciliationRun"],
-            "neither is compared, so nothing is adopted"
+            (drafted(&run.effects), queried(&run.effects)),
+            (vec!["ReconciliationRun"], 0),
+            "neither is compared, so nothing is adopted and nothing queried"
+        );
+        let mut after = state.clone();
+        for effect in &run.effects {
+            if let Effect::Journal(draft) = effect {
+                let seq = after.account_head().0.saturating_add(1);
+                let stream = after.account_stream();
+                fold(
+                    &mut after,
+                    &FoldedEvent {
+                        stream,
+                        seq: Seq(seq),
+                        event_id: draft.event_id.clone(),
+                        event_type: draft.event_type.clone(),
+                        causation_id: None,
+                        payload: draft.payload.clone(),
+                    },
+                )?;
+            }
+        }
+        assert_eq!(
+            after.order(&resting).map(|resting| resting.state),
+            Some(OrderState::Intent),
+            "the resting order stays in `Intent`"
         );
 
         let live = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ2")?;
         state
             .orders
             .insert(live.clone(), order(&live, OrderState::Accepted)?);
-        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports)?;
+        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled)?, &ports)?;
         assert!(
             drafted(&run.effects).contains(&"CompensatingEvent"),
             "while a live order the broker does not list is adopted: {:?}",
             drafted(&run.effects)
         );
         Ok(())
-    }
-
-    fn snapshot(reason: ReconcileReason) -> BrokerSnapshot {
-        BrokerSnapshot {
-            open_orders: Vec::new(),
-            positions: Vec::new(),
-            account: BrokerAccount {
-                status: "ACTIVE".to_owned(),
-                crypto_status: "ACTIVE".to_owned(),
-                trading_blocked: false,
-                account_blocked: false,
-                trade_suspended_by_user: false,
-                multiplier: 1,
-                equity: Usd::ZERO,
-                cash: Usd::ZERO,
-                buying_power: Usd::ZERO,
-                non_marginable_buying_power: Usd::ZERO,
-                accrued_fees: Usd::ZERO,
-            },
-            fills: Vec::new(),
-            cursor: ActivityCursor("cursor-1".to_owned()),
-            reason,
-            taken_at_head: Seq(1),
-        }
     }
 
     /// §11 steps 4 and 5: once an account is reported, a run compares cash within its band and
@@ -688,7 +853,12 @@ mod tests {
             config: &config,
             fees: &fees,
         };
-        let mut state = started();
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
         state.observed = Some(ObservedAccount {
             state: AccountState::Active,
             multiplier: 1,
@@ -699,14 +869,14 @@ mod tests {
             accrued_fees: Usd::ZERO,
             complete: true,
         });
-        let agreeing = reconcile(&state, &snapshot(ReconcileReason::FeePosting), &ports)?;
+        let agreeing = reconcile(&state, &snapshot(ReconcileReason::FeePosting)?, &ports)?;
         assert_eq!(
             drafted(&agreeing.effects),
             vec!["AccountSnapshotRecorded", "ReconciliationRun"],
             "the broker agrees on cash and fees: the snapshot is recorded and the run published"
         );
 
-        let mut drifted = snapshot(ReconcileReason::FeePosting);
+        let mut drifted = snapshot(ReconcileReason::FeePosting)?;
         drifted.account.cash = Usd::parse("1")?;
         drifted.account.accrued_fees = Usd::parse("3")?;
         let run = reconcile(&state, &drifted, &ports)?;
@@ -714,10 +884,9 @@ mod tests {
             .effects
             .iter()
             .filter_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => draft
-                    .payload
-                    .get("restriction")
-                    .and_then(mandate_canon::Value::as_str),
+                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => {
+                    draft.payload.get("restriction").and_then(Value::as_str)
+                }
                 _ => None,
             })
             .collect();
@@ -735,6 +904,206 @@ mod tests {
             })
             .collect();
         assert_eq!(alerts, vec!["reconciliation_cash", "reconciliation_fees"]);
+        Ok(())
+    }
+
+    /// DEC-140's slice-5 amendment: a stream slice 5 wrote may hold every agent `exits_only` under
+    /// `reconciliation:incomplete`. The cash slice completes those runs, and the owner's
+    /// acknowledgment of `incomplete`, with step-up evidence, lifts the hold (§11, interpretation
+    /// 14): openings are submitted again. A run that now completes lifts nothing by itself, and an
+    /// acknowledgment without step-up evidence lifts nothing either.
+    #[test]
+    fn an_acknowledgment_of_incomplete_lifts_the_slice_5_hold() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        executor.commit_one(
+            "AgentModeApplied",
+            object(vec![
+                ("agent", Value::Str("*".to_owned())),
+                ("to", Value::Str("exits_only".to_owned())),
+                (
+                    "restriction",
+                    Value::Str("reconciliation:incomplete".to_owned()),
+                ),
+                ("originated", Value::Bool(true)),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        let completed = executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..executor.snapshot(ReconcileReason::Scheduled)?
+            }),
+            &ports,
+        )?;
+        assert_eq!(
+            drafted(&completed),
+            vec!["AccountSnapshotRecorded", "ReconciliationRun"],
+            "the cash agrees, so the run completes"
+        );
+        let held = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&held), 0, "the hold outlives a completed run");
+
+        let acknowledged = |step_up: &str| -> Result<Value, ExecutorError> {
+            object(vec![
+                ("subject", Value::Str("incomplete".to_owned())),
+                ("user", Value::Str("user-1".to_owned())),
+                ("step_up", Value::Str(step_up.to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])
+        };
+        executor.commit_one("OwnerAcknowledged", acknowledged("")?)?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::ExitsOnly,
+            "no step-up evidence, no lift"
+        );
+        executor.commit_one("OwnerAcknowledged", acknowledged("assertion-1")?)?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Normal
+        );
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ1",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&opening), 1, "an opening is submitted again");
+        Ok(())
+    }
+
+    /// `resume`'s own claim: a restart never submits on state it has not reconciled. The startup
+    /// run comes first, so a position mismatch it finds holds the resumed opening.
+    #[test]
+    fn the_startup_run_precedes_the_resume() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.run_keeping(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+            1,
+        )?;
+        let mut executor = executor.restarted(&ports)?;
+        let mut taken = executor.snapshot(ReconcileReason::Startup)?;
+        taken.positions = vec![BrokerPosition {
+            instrument: aapl()?,
+            qty: SignedQty::parse("7")?,
+            avg_entry_price: Price::parse("150")?,
+        }];
+        let startup = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+        assert_eq!(
+            submitted(&startup),
+            0,
+            "nothing is submitted on a mismatched position"
+        );
+        assert_eq!(
+            drafted(&startup),
+            vec![
+                "BrokerPositionObserved",
+                "AgentModeApplied",
+                "ReconciliationRun",
+                "GateDecided"
+            ],
+            "the run, its pause and its record first, then the resumed intent, held"
+        );
+        Ok(())
+    }
+
+    /// DEC-133 item 13: the evidence kept instead of adopting, and what the owner reads before the
+    /// acknowledgment, names the broker's quantity and the model's by key.
+    #[test]
+    fn a_position_difference_is_recorded_with_each_quantity_by_name() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str("f-0".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty_gross", Value::Str("10".to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        let mut taken = executor.snapshot(ReconcileReason::Scheduled)?;
+        taken.positions = vec![BrokerPosition {
+            instrument: aapl()?,
+            qty: SignedQty::parse("7")?,
+            avg_entry_price: Price::parse("150")?,
+        }];
+        let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+        let observed = run
+            .iter()
+            .find_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "BrokerPositionObserved" => {
+                    Some(draft)
+                }
+                _ => None,
+            })
+            .ok_or(ExecutorError::Unimplemented { story: "E7-3" })?;
+        let field = |name: &str| observed.payload.get(name).and_then(Value::as_str);
+        assert_eq!(
+            (field("broker_qty"), field("model_qty")),
+            (Some("7"), Some("10")),
+            "each quantity under its own key"
+        );
+        assert_eq!(observed.payload.get("mismatch"), Some(&Value::Bool(true)));
         Ok(())
     }
 }
