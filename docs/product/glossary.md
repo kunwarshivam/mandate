@@ -69,6 +69,7 @@
 | **Corporate actions** | Splits, dividends, and similar events that change share counts or cash and must be applied to positions and price history |
 | **CFTC-regulated perpetual** | A perpetual future listed on a US exchange regulated by the Commodity Futures Trading Commission (for example, via Kraken Derivatives US) |
 | **Shadow mode** | Running a new mandate version alongside the live one without real orders, to compare decisions |
+| **Mandate experiment** | Up to three variants of a mandate run at once, one live and the others in shadow mode, each with its hypothesis journaled before it runs; only the owner promotes a variant, as a new confirmed mandate version |
 | **Perpetual future (perp)** | A futures contract with no expiry, kept near spot price through funding payments |
 | **Funding** | Periodic payments between long and short perpetual holders |
 | **Slippage** | Difference between the expected and actual fill price |
