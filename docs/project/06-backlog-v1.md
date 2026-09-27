@@ -599,6 +599,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
+  properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
+  would satisfy them; each property must also assert a positive effect a no-op cannot produce
+  (#231 review, follow-up a).
+- **Before E7-3's buying-power path reads them:** the properties' model broker reports `equity` and
+  `buying_power` that follow its `cash_moved`, as `cash` already does; today they stay at 20000
+  whatever its fills (#231 review, follow-up b).
+- Assert the ready precondition in `mandate-executor`'s properties script: after its start, an
+  account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
+  starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
+  it starts ready (#231 review, follow-up c).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
