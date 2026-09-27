@@ -411,3 +411,11 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   every live test (#160 round-2 finding 4). It is conservative, since the whole-account sum is a
   superset and can only deny an opening earlier, so it is not a rule-1 breach; one assertion in
   `the_account_bound_counts_other_agents_working_orders` would close it.
+- Decide what `agent_flatten` does when `max_exit_offset = 1` (#176 round-1 nit 3): the floor
+  `bid × 0` fails `positive()`, so the owner's kill switch returns `GateError` where `ref.py` plans a
+  floor of `0`, the one way the function can refuse an owner kill switch (AGENTS.md rule 13, "the
+  kill switch is always available"). Unreachable today, since §5.6's fixed tier table sets the
+  offset at 0.03 or 0.05 and no code path sets it to 1; a fix either bounds the offset below 1
+  where it is configured or plans the flatten without a floor.
+- Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
+  row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
