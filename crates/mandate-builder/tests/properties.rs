@@ -1539,7 +1539,6 @@ fn order_value(action: &Action) -> Option<Rat> {
 /// §8.3 step 1: the three figures are each one half-even rounding of one exact quotient, computed
 /// against an integer oracle that scales the weights, convictions and confidences and divides once.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_three_combined_figures_match_the_integer_oracle() {
     check(combine_scenario(), |scenario| {
         let oracle = oracle_combine(&scenario);
@@ -1577,7 +1576,6 @@ fn the_three_combined_figures_match_the_integer_oracle() {
 /// max_output_age_s`, and its pinned triple matches. The interval is recomputed here from the
 /// generated offsets, so the property never asks the crate which outputs it took.
 #[test]
-#[ignore = "pending E6-2"]
 fn freshness_matches_the_interval_oracle() {
     check(combine_scenario(), |scenario| {
         let combined = mandate_builder::combine(
@@ -1615,7 +1613,6 @@ fn freshness_matches_the_interval_oracle() {
 /// `as_of`, ties by journal position. Feeding only that output back gives an identical answer,
 /// which is what "only the latest counts" means.
 #[test]
-#[ignore = "pending E6-2"]
 fn one_output_per_model_is_used_and_it_is_the_latest() {
     check(combine_scenario(), |scenario| {
         let all = mandate_builder::combine(
@@ -1695,7 +1692,6 @@ fn one_output_per_model_is_used_and_it_is_the_latest() {
 /// output therefore moves c toward zero and never past it: a bullish output's removal lowers c and
 /// a bearish one's raises it.
 #[test]
-#[ignore = "pending E6-2"]
 fn removing_a_fresh_output_never_lowers_the_exit_conviction_below_the_rest() {
     check((combine_scenario(), 0usize..5), |(scenario, drop)| {
         if drop >= scenario.outputs.len() {
@@ -1749,7 +1745,6 @@ fn removing_a_fresh_output_never_lowers_the_exit_conviction_below_the_rest() {
 /// §8.3 step 1, MI-10: a model without a fresh output counts as fully bearish, so **any** removal
 /// lowers the buy conviction or leaves it alone. This one holds whatever the removed output said.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_missing_model_never_raises_the_buy_conviction() {
     check((combine_scenario(), 0usize..5), |(scenario, drop)| {
         if drop >= scenario.outputs.len() {
@@ -1795,7 +1790,6 @@ fn a_missing_model_never_raises_the_buy_conviction() {
 /// §8.3 step 2: the conviction line is partitioned by the two thresholds, and which band a scenario
 /// falls in is computed here from c, b and the thresholds — never read back from the crate.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_three_bands_partition_the_conviction_line() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -1832,7 +1826,6 @@ fn the_three_bands_partition_the_conviction_line() {
 /// §8.3 step 3: Delta is T − MV at the risk mark − the working opening cost, recomputed here as a
 /// rational from the generated inputs.
 #[test]
-#[ignore = "pending E6-2"]
 fn delta_matches_the_independent_target_oracle() {
     check(sizing_scenario(), |scenario| {
         let (proposal, oracle) = agree(&scenario)?;
@@ -1861,7 +1854,6 @@ fn delta_matches_the_independent_target_oracle() {
 /// §8.3 step 3, DEC-65: a positive conviction never produces a sell. There are no signal trims in
 /// v1, so a position above its target holds.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_positive_conviction_never_produces_a_sell() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -1879,7 +1871,6 @@ fn a_positive_conviction_never_produces_a_sell() {
 /// §8.3 step 5, DEC-130 item 21: every proposed quantity is strictly positive, and its value is at
 /// or above the minimum order.
 #[test]
-#[ignore = "pending E6-2"]
 fn every_proposed_quantity_is_strictly_positive() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -1900,7 +1891,6 @@ fn every_proposed_quantity_is_strictly_positive() {
 /// §8.3 step 3: a proposal never exceeds Delta, `max_order_usd`, the cap headroom, or the gross
 /// headroom, each recomputed here from the inputs rather than taken from the oracle's own budget.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_proposal_never_exceeds_any_of_the_four_bounds() {
     check(sizing_scenario(), |scenario| {
         let (proposal, oracle) = agree(&scenario)?;
@@ -1936,7 +1926,6 @@ fn a_proposal_never_exceeds_any_of_the_four_bounds() {
 /// cannot deny it for a limit the builder owns — the position after, the order value, and the gross
 /// after all stay at or below their limits.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_proposal_never_fails_the_position_order_or_gross_limit() {
     check(sizing_scenario(), |scenario| {
         let (proposal, oracle) = agree(&scenario)?;
@@ -1968,7 +1957,6 @@ fn a_proposal_never_fails_the_position_order_or_gross_limit() {
 /// §8.3 step 4: an `accumulate` buy never breaks the goal's own bounds — the remaining quantity,
 /// the remaining spend, and the projected average.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_accumulate_buy_never_breaks_a_goal_bound() {
     check(accumulate_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -2006,7 +1994,6 @@ fn an_accumulate_buy_never_breaks_a_goal_bound() {
 /// §6.1 and DEC-32: no proposal crosses zero, and no sell exceeds the position. A buy is long-only
 /// and a sell is the whole position or nothing.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_proposal_crosses_zero() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -2039,7 +2026,6 @@ fn no_proposal_crosses_zero() {
 /// §6.1: the builder never proposes a sell above the position, stated on its own because it is the
 /// one thing a sizing mistake could turn into a short.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_builder_never_proposes_a_sell_above_the_position() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -2059,7 +2045,6 @@ fn the_builder_never_proposes_a_sell_above_the_position() {
 /// §6.3: the exposure fields a rule reads are the order's **after** values, which is what makes a
 /// `bought_today_usd` bound something order splitting cannot evade.
 #[test]
-#[ignore = "pending E6-2"]
 fn position_and_gross_after_include_this_order() {
     check(sizing_scenario(), |scenario| {
         let (proposal, _) = agree(&scenario)?;
@@ -2088,7 +2073,6 @@ fn position_and_gross_after_include_this_order() {
 /// ES-21: identical inputs give an identical proposal. No clock, no randomness, no iteration order
 /// that two runs could differ on.
 #[test]
-#[ignore = "pending E6-2"]
 fn identical_inputs_give_identical_proposals() {
     check(sizing_scenario(), |scenario| {
         let (first, oracle) = agree(&scenario)?;
@@ -2109,7 +2093,6 @@ fn identical_inputs_give_identical_proposals() {
 /// 18-place confidence and conviction, a 12-place mark, 9-place quantities and prices and a value
 /// ceiling of 10¹² must produce a proposal or a **typed** refusal, never a wrapped number.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_input_within_the_stated_bounds_overflows() {
     let widest = BuilderMandate {
         models: vec![
@@ -2800,7 +2783,6 @@ const COVERAGE_SEEDS: std::ops::RangeInclusive<u64> = 1..=5;
 /// seed and their fuzzing power; only the evidence is pinned. The counts come from the **oracle**, so
 /// the code under test cannot manufacture them.
 #[test]
-#[ignore = "pending E6-2"]
 fn zz_the_generated_scenarios_reach_every_action_and_every_clip() {
     for seed in COVERAGE_SEEDS {
         for counter in EVERY_COUNTER {

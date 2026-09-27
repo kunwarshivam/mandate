@@ -47,9 +47,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
   `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
   message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
-  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate;
-  and `mandate-executor`'s three E7-4 properties that pass today only on a discarded case's stub
-  report get their rows in the same change (see the row under #196's reviews).
+  replaced by a rule that reads the cause; and the planted cases of #172's reviews all fail the
+  gate. Since DEC-164 a failing property is already read by proptest's report of its minimal
+  failure alone, and `mandate-executor`'s three E7-4 properties that passed only on a stub report
+  from a case shrinking moved past have their rows; E1-3 narrows that report, and every other
+  test's output, to the cause.
 
 ### E2 Market data
 
@@ -199,6 +201,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   ([task brief](tasks/M7-escalation-v0.md), [DEC-155](04-decision-log.md#decisions)). "Alternatives"
   means the owner's choices (approve or skip, with the default stated), never platform-authored
   alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
+  *Follow-up (DEC-165 item 3, #236):* the content's Trigger row still lacks "the rule as the owner
+  wrote it". It joins the content object once the M7 spec PR fixes §6.4's list, with a test that
+  scans owner-written text apart from the platform's own in
+  `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
+  written and never read as platform advice.
 - **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
   adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
@@ -637,17 +644,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   TAF cap. Since #196 the executor books one only for a fill attributed to one of its orders,
   stated in `orders::simulated_fee`'s doc; booking it too would lower paper buying power, the
   conservative side (#196 review, round 1, finding 7).
-- With E1-3, give `mandate-executor`'s three E7-4 properties `BEHAVIOUR_ONLY_TESTS` rows
-  (`protective_sell_quantity_never_exceeds_the_position`,
-  `every_unprotected_interval_has_a_journaled_start_and_end`,
-  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their shrunk failure is their own
-  E7-4 assertion (the protected lead has no bracket). The gate accepts them only because cases
-  discarded before shrinking stop at a later E7-3 slice's stub, and `names_a_stub` reads the whole
-  output. Since #199, `ci pending` pins their seed (`PENDING_PROPTEST_SEED`), so that verdict is one
-  answer rather than red on some runs, but it still rests on incidental evidence. A row now would be
-  reported as not needed, because the output names a stub. When E1-3 reads the failure's own
-  cause, these three fail away from the stub and need their rows, expiring with E7-4 (#196 review,
-  round 1, finding 5; #199 review, round 1, finding 4).
 - Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
   hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
@@ -754,3 +750,25 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+
+From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
+
+- **§8.3 step 2's "whole position (minus working exits)" has no input (stream H, with stream I).**
+  `AccountSnapshot` carries no working exit quantity, so `propose` sells the whole position, as
+  `reference/mandate/ref.py` does, and a second discretionary exit while one is working is proposed at
+  the full quantity. Until the field lands, the backstop is the risk gate's trading spec §5.3 rule 4
+  (`sell_exceeds_available`, merged in #221), which binds every reduction and denies the over-sell,
+  so the builder cannot turn a position short on its own. The field arrives by a DEC-77 tests
+  correction ahead of the slice that consumes it (every `AccountSnapshot` literal in
+  `crates/mandate-builder/tests/` names it); that slice then subtracts working exits in
+  `discretionary_exit` and holds when nothing is left to sell (#234 review, round 1, M1).
+- **The runtime filters model outputs by instrument before `combine` (stream I).** `combine` refuses
+  the whole call on an output for another instrument (`output_instrument_mismatch`, DEC-130), the exit
+  branch included, so handing it a tick's unfiltered output buffer would stop a discretionary exit
+  the way a crossed quote did before #234 moved that refusal to the buy path. E6-1's evaluation loop
+  passes only the outputs whose `instrument_id` is the instrument being sized, with a test that a
+  foreign output in the buffer never blocks an exit (#234 review, round 1, m2).
+- **`BuilderError::Unimplemented` and `NumError::Unimplemented` are now constructed by nothing.**
+  Both stay because `tests/vocabulary.rs` and `num::error_codes_are_stable` pin their codes, and an
+  implementation PR may not edit a test. Drop each variant with its row in the next tests correction
+  that touches those files (E6-2; the `NumError` half is the E4-2 row above).

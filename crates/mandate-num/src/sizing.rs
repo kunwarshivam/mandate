@@ -16,13 +16,15 @@
 //!
 //! [mandate spec §8.3]: ../../../docs/specs/mandate.md#83-order-builder-conviction_linear-dec-47-dec-60
 
+use core::cmp::Ordering;
 use core::fmt;
 
 use rust_decimal::Decimal;
 
 use crate::exact::Exact;
 use crate::{
-    FeeRate, MarkPrice, NegExact, NumError, Price, Qty, Rounding, Usd, non_negative, parse,
+    FULL_SCALE, FeeRate, MarkPrice, NegExact, NumError, Price, QTY_SCALE, Qty, Rounding, Usd,
+    non_negative, parse,
 };
 
 /// The sizing and limit fractions of a mandate hold at most 12 fractional digits (DEC-130 item 7).
@@ -140,8 +142,15 @@ impl Unit {
         terms: &[(SizeFraction, Unit)],
         weights: &[SizeFraction],
     ) -> Result<Self, NumError> {
-        let _ = (terms, weights);
-        Err(NumError::Unimplemented)
+        let numerator = terms
+            .iter()
+            .try_fold(Exact::integer(0), |sum, (weight, unit)| {
+                sum.add(Exact::of(weight.0).mul(Exact::of(unit.0))?)
+            })?;
+        combined_ratio(numerator, weights)
+            .and_then(non_negative)
+            .and_then(at_most_one)
+            .map(Self)
     }
 }
 
@@ -178,9 +187,33 @@ impl Conviction {
         missing: &[SizeFraction],
         weights: &[SizeFraction],
     ) -> Result<Self, NumError> {
-        let _ = (terms, missing, weights);
-        Err(NumError::Unimplemented)
+        let fresh = terms.iter().try_fold(
+            Exact::integer(0),
+            |sum, (weight, conviction, confidence)| {
+                sum.add(
+                    Exact::of(weight.0)
+                        .mul(Exact::of(conviction.0))?
+                        .mul(Exact::of(confidence.0))?,
+                )
+            },
+        )?;
+        combined_ratio(fresh.sub(sum_of(missing)?)?, weights)
+            .and_then(within_unit_interval)
+            .map(Self)
     }
+}
+
+fn sum_of(weights: &[SizeFraction]) -> Result<Exact, NumError> {
+    weights.iter().try_fold(Exact::integer(0), |sum, weight| {
+        sum.add(Exact::of(weight.0))
+    })
+}
+
+/// `round₁₂(numerator ÷ Σ weights)`, half-even: the one rounding each §8.3 step 1 figure takes.
+fn combined_ratio(numerator: Exact, weights: &[SizeFraction]) -> Result<Decimal, NumError> {
+    numerator
+        .div(sum_of(weights)?, COMBINE_SCALE, Rounding::HalfEven)?
+        .to_decimal(OUTPUT_SCALE)
 }
 
 impl Signed {
@@ -269,39 +302,33 @@ impl UsdExact {
 
     /// `self + other`, exact.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.add(other.0)?))
     }
 
     /// `self − other`, exact: Delta, the cap headroom, and the gross headroom of §8.3 step 3.
     pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.sub(other.0)?))
     }
 
     /// `self × other`, exact: MV at the risk mark, and the accumulate clips' per-unit terms.
     pub fn checked_mul(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.mul(other.0)?))
     }
 
     /// `self × fraction`, exact: `max_position_fraction × E`, `rebalance_band × cap`, and the
     /// ladder size factor applied to the target.
     pub fn times_size_fraction(self, fraction: SizeFraction) -> Result<Self, NumError> {
-        let _ = fraction;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.mul(Exact::of(fraction.0))?))
     }
 
     /// `self × conviction`, exact: `b × cap` of §8.3 step 2.
     pub fn times_conviction(self, conviction: Conviction) -> Result<Self, NumError> {
-        let _ = conviction;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.mul(Exact::of(conviction.0))?))
     }
 
     /// `self × rate`, exact: the cash fee inside the accumulate per-unit cost `a`.
     pub fn times_fee_rate(self, rate: FeeRate) -> Result<Self, NumError> {
-        let _ = rate;
-        Err(NumError::Unimplemented)
+        Ok(Self(self.0.mul(rate.exact())?))
     }
 
     /// The lesser of two amounts: the four clips of §8.3 step 3 and the accumulate bounds of step 4.
@@ -309,8 +336,7 @@ impl UsdExact {
     /// Fallible because aligning two scales can exceed 256 bits, and because a stub that answered
     /// "the first one" would size an order off a bound that does not bind.
     pub fn min(self, other: Self) -> Result<Self, NumError> {
-        let _ = other;
-        Err(NumError::Unimplemented)
+        Ok(if other.is_below(self)? { other } else { self })
     }
 
     /// `self < other`, exact.
@@ -318,8 +344,7 @@ impl UsdExact {
     /// Fallible for the same reason as [`UsdExact::min`], and because a `false` from a stub would
     /// read as "the delta is not inside the band", which is the direction that proposes an order.
     pub fn is_below(self, other: Self) -> Result<bool, NumError> {
-        let _ = other;
-        Err(NumError::Unimplemented)
+        Ok(self.0.sub(other.0)?.sign() == Ordering::Less)
     }
 
     /// `self > 0`, exact.
@@ -328,7 +353,7 @@ impl UsdExact {
     /// do-nothing answer for §8.3 step 3, and a pending test must fail on the stub rather than pass
     /// on it (DEC-110).
     pub fn is_positive(self) -> Result<bool, NumError> {
-        Err(NumError::Unimplemented)
+        Ok(self.0.sign() == Ordering::Greater)
     }
 
     /// `round(self, scale, mode)` as a [`Usd`]: the one explicit narrowing out of the wide chain.
@@ -336,8 +361,10 @@ impl UsdExact {
     /// It **rounds** in the mode the caller names; it does not truncate. `too_precise` when the
     /// value needs more places than `Usd` stores, rather than silently dropping them.
     pub fn round(self, scale: u32, mode: Rounding) -> Result<Usd, NumError> {
-        let _ = (scale, mode);
-        Err(NumError::Unimplemented)
+        self.0
+            .div(Exact::integer(1), scale, mode)?
+            .to_decimal(FULL_SCALE)
+            .map(Usd)
     }
 
     /// `truncate(self ÷ price, increment)`: the shares this amount buys at `price`, never more
@@ -350,15 +377,22 @@ impl UsdExact {
     /// `0.010025062`. This is the same correction DEC-128 item 27 made for a goal's increment.
     /// `not_positive` for an increment of zero or below, where neither answer is safe.
     pub fn shares_at(self, price: Price, increment: Qty) -> Result<Qty, NumError> {
-        let _ = (price, increment);
-        Err(NumError::Unimplemented)
+        self.truncated_quotient(Self::of_price(price), increment)
     }
 
     /// `truncate(self ÷ per_unit, increment)`: the three accumulate clips of §8.3 step 4, whose
     /// denominators are the per-unit cost `a`, the quantity received per unit `β`, and
     /// `a − max_avg_price × β` rather than a price.
     pub fn truncated_quotient(self, per_unit: Self, increment: Qty) -> Result<Qty, NumError> {
-        let _ = (per_unit, increment);
-        Err(NumError::Unimplemented)
+        if !increment.exact().is_positive() {
+            return Err(NumError::NotPositive);
+        }
+        let count = self
+            .0
+            .div_toward_zero(per_unit.0.mul(increment.exact())?, 0)?;
+        if count.sign() != Ordering::Greater {
+            return Ok(Qty::ZERO);
+        }
+        count.mul(increment.exact())?.to_decimal(QTY_SCALE).map(Qty)
     }
 }
