@@ -304,7 +304,7 @@ fn is_name(text: &str) -> bool {
 }
 
 /// `$defs/id`: `^[A-Za-z0-9_-]{1,64}$`.
-fn is_id(text: &str) -> bool {
+pub(super) fn is_id(text: &str) -> bool {
     (1..=64).contains(&text.len())
         && text
             .bytes()
