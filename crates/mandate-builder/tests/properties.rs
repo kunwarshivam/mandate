@@ -2375,7 +2375,6 @@ prop_compose! {
 /// ceiling. The oracle re-reads the list from the start for every action, so an implementation that
 /// cached a match or took the last one disagrees with it.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_decision_matches_the_first_match_oracle() {
     check(
         (well_typed_policy(), action_context()),
@@ -2404,7 +2403,6 @@ fn the_decision_matches_the_first_match_oracle() {
 /// §6.2 step 3, MI-1, DEC-05: no rule set ever denies or asks a risk-reducing purpose, and the
 /// anchor is the same rule set reaching a non-AUTO answer for an opening action.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_rule_set_ever_denies_or_asks_a_reducing_purpose() {
     check(
         (well_typed_policy(), action_context()),
@@ -2446,7 +2444,6 @@ fn no_rule_set_ever_denies_or_asks_a_reducing_purpose() {
 /// §6.2 step 5, MI-17: the ceiling only tightens. Raising `autonomy.admission` never loosens the
 /// answer for a new instrument, and never changes it at all for a held one.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_admission_ceiling_is_monotone_in_strictness() {
     check(
         (well_typed_policy(), action_context()),
@@ -2543,7 +2540,6 @@ fn the_admission_ceiling_is_monotone_in_strictness() {
 /// `two_approver_above_usd`, and one otherwise. The comparison is recomputed here from the
 /// generated numbers.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_approver_count_is_two_exactly_above_the_threshold() {
     check(
         (well_typed_policy(), action_context(), 0i128..=5_000i128),
@@ -2591,7 +2587,6 @@ fn the_approver_count_is_two_exactly_above_the_threshold() {
 /// §6.3: `all`, `any`, `not` and the comparisons evaluate as the recursive oracle says, at every
 /// depth V-017 allows.
 #[test]
-#[ignore = "pending E6-2"]
 fn conditions_match_the_recursive_oracle() {
     check(
         (well_typed_condition(), action_context()),
@@ -2641,7 +2636,6 @@ fn conditions_match_the_recursive_oracle() {
 /// field is checked before the type rules, so "either code will do" would have hidden a swap of that
 /// order.
 #[test]
-#[ignore = "pending E6-2"]
 fn every_loaded_rule_is_type_correct() {
     let maybe_typed = prop_oneof![
         well_typed_leaf(),
@@ -2701,7 +2695,6 @@ fn every_loaded_rule_is_type_correct() {
 /// §6.2 step 2, DEC-05 and DEC-48: a denied proposal never reaches an approval, and a deferred one
 /// is neither a deny nor a skip. The three verdicts give three outcomes for every policy.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_denied_proposal_ever_reaches_an_approval() {
     check(
         (well_typed_policy(), action_context()),
@@ -2740,7 +2733,6 @@ fn no_denied_proposal_ever_reaches_an_approval() {
 /// §6.2 step 2, DEC-130 item 15: `decide` returns `Deferred` exactly when the verdict defers, and
 /// the builder never derives a defer of its own — it takes no market and cannot see the session.
 #[test]
-#[ignore = "pending E6-2"]
 fn decide_returns_deferred_exactly_when_the_verdict_defers() {
     check(
         (well_typed_policy(), action_context()),
