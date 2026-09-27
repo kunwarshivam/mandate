@@ -125,4 +125,164 @@ mod tests {
         );
         Ok(())
     }
+
+    /// A transcribed `ref.py` plan: the mode, the purpose, the deferred count, and each sell's
+    /// pricing, floor and resting remainder.
+    type RefPlan = (
+        &'static str,
+        &'static str,
+        usize,
+        Vec<(&'static str, Option<&'static str>, bool)>,
+    );
+
+    /// What `ref.py`'s `agent_flatten` plans for one equity or crypto position of 10, transcribed
+    /// from its branches in `ref.py`'s own vocabulary and never computed through this crate: the
+    /// mode, the purpose, the deferred count, and each sell's pricing, floor and resting remainder.
+    /// The confirmed bid is 100 and the offset 0.03, so the computed floor is 97 by hand.
+    fn ref_py_agent_flatten(
+        session: &str,
+        initiator: &str,
+        asset_class: &str,
+        confirmed: bool,
+        explicit_floor: Option<&'static str>,
+    ) -> RefPlan {
+        let owner = initiator == "owner";
+        let floor = if owner && confirmed {
+            Some(explicit_floor.unwrap_or("97"))
+        } else {
+            None
+        };
+        let outside = session != "regular";
+        let (sells, deferred) = if asset_class == "us_equity" && outside && !(owner && confirmed) {
+            (Vec::new(), 1)
+        } else if asset_class == "us_equity" && outside {
+            (vec![("exit_price_ladder", floor, true)], 0)
+        } else if outside {
+            (vec![("exit_price_ladder", None, false)], 0)
+        } else {
+            (vec![("market_or_ladder", None, false)], 0)
+        };
+        (
+            if owner { "stopped" } else { "paused" },
+            if owner { "owner_exit" } else { "risk_exit" },
+            deferred,
+            sells,
+        )
+    }
+
+    /// Every session × initiator × asset class × confirmed bid × explicit floor, 80 rows, each
+    /// against the transcribed `ref.py` above, so no branch of the plan (the session test, the
+    /// floor's owner-only scope, the explicit floor's precedence) goes unpinned.
+    #[test]
+    fn every_flatten_branch_matches_ref_py() -> Result<(), GateError> {
+        let sessions = [
+            (Session::Overnight, "overnight"),
+            (Session::PreMarket, "pre_market"),
+            (Session::Regular, "regular"),
+            (Session::AfterHours, "after_hours"),
+            (Session::Continuous, "continuous"),
+        ];
+        let initiators = [
+            (FlattenInitiator::RiskLimit, "risk_limit"),
+            (FlattenInitiator::Owner, "owner"),
+        ];
+        let classes = [
+            (AssetClass::UsEquity, "us_equity"),
+            (AssetClass::Crypto, "crypto"),
+        ];
+        let orders = BTreeMap::new();
+        let broker = BTreeMap::new();
+        let mut rows = 0;
+        let mut mismatches = Vec::new();
+        for (session, session_name) in sessions {
+            for (initiator, initiator_name) in initiators {
+                for (class, class_name) in classes {
+                    for confirmed in [false, true] {
+                        for explicit in [None, Some("98.5")] {
+                            let positions = vec![AgentPosition {
+                                agent: AgentId(1),
+                                instrument: AssetId::new("a")
+                                    .map_err(|_| GateError::InstrumentUnknown)?,
+                                asset_class: class,
+                                qty: Qty::parse("10")?,
+                            }];
+                            let plan = agent_flatten(&FlattenInput {
+                                agent: AgentId(1),
+                                open_orders: &orders,
+                                agent_positions: &positions,
+                                broker_positions: &broker,
+                                session,
+                                initiator,
+                                owner_confirmed_bid: if confirmed {
+                                    Some(Price::parse("100")?)
+                                } else {
+                                    None
+                                },
+                                max_exit_offset: Fraction::parse("0.03")?,
+                                owner_floor_price: explicit.map(Price::parse).transpose()?,
+                            })?;
+                            let (mode, purpose, deferred, sells) = ref_py_agent_flatten(
+                                session_name,
+                                initiator_name,
+                                class_name,
+                                confirmed,
+                                explicit,
+                            );
+                            let want_sells = sells
+                                .into_iter()
+                                .map(|(pricing, floor, rests)| {
+                                    Ok((pricing, floor.map(Price::parse).transpose()?, rests))
+                                })
+                                .collect::<Result<Vec<_>, GateError>>()?;
+                            let got = (
+                                match plan.mode_applied_first {
+                                    AgentMode::Stopped => "stopped",
+                                    AgentMode::Paused => "paused",
+                                    _ => "other",
+                                },
+                                match plan.purpose {
+                                    Purpose::OwnerExit => "owner_exit",
+                                    Purpose::RiskExit => "risk_exit",
+                                    _ => "other",
+                                },
+                                plan.deferred_sells.len(),
+                                plan.sells
+                                    .iter()
+                                    .map(|sell| {
+                                        (
+                                            match sell.pricing {
+                                                FlattenPricing::MarketOrLadder => {
+                                                    "market_or_ladder"
+                                                }
+                                                FlattenPricing::ExitPriceLadder => {
+                                                    "exit_price_ladder"
+                                                }
+                                            },
+                                            sell.floor_price,
+                                            sell.rests_at_floor_then_waits_for_open,
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            );
+                            let want = (mode, purpose, deferred, want_sells);
+                            rows += 1;
+                            if got != want {
+                                mismatches.push(format!(
+                                    "{session_name} {initiator_name} {class_name} \
+                                     confirmed={confirmed} explicit={explicit:?}: \
+                                     got {got:?}, ref.py {want:?}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (rows, mismatches),
+            (80, Vec::<String>::new()),
+            "every flatten row matches ref.py's agent_flatten"
+        );
+        Ok(())
+    }
 }
