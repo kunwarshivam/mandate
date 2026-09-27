@@ -8,7 +8,7 @@
 # Mandate
 
 Autonomous trading agents that run on their owner's own brokerage account, inside a mandate the
-owner writes and can enforce. The owner sets the envelope: capital, goal, risk limits, allowed
+owner writes or confirms and can enforce. The owner sets the envelope: capital, goal, risk limits, allowed
 asset classes, how much the agent may do alone, and when it must ask. Inside that envelope a
 research agent proposes theses from market data, news, and filings, and admits instruments into
 the agent's working universe only through an eligibility floor and the owner's autonomy rules.
@@ -21,9 +21,10 @@ Mandate never holds customer funds or any permission that can move them, never c
 or on profits, and trades paper only until securities counsel signs off on live trading
 ([compliance](docs/product/08-compliance-and-regulatory.md)).
 
-> **Where it stands:** the core engine (exact arithmetic, market data, accounting, simulated
-> execution, the journal) is built and verified; the agent runtime, risk gate, order builder,
-> research agent, and the Alpaca paper connector are being built now. Nothing in this repository
+> **Where it stands:** exact arithmetic, market data, accounting, the fill model, and the journal's
+> hash chain and stores are built and verified; the backtest loop, the journal's cold store, the
+> agent runtime, risk gate, order builder, research agent, and the Alpaca paper connector are being
+> built now. Nothing in this repository
 > places a real order ([status](#status)).
 
 ## How it works
@@ -37,10 +38,12 @@ flowchart LR
     universe --> signals["Signal models<br/>opinions, never orders"]
     signals --> builder["Order builder<br/>deterministic sizing"]
     mandate --> builder
-    builder --> gate["Risk gate<br/>limits, US account rules"]
-    gate -->|"within limits"| exec["Executor<br/>journal first,<br/>idempotent"]
-    gate -->|"needs approval"| ask["Ask the owner<br/>deadline, safe default"]
-    ask --> exec
+    builder --> dry["Risk gate dry run<br/>a denial is never<br/>put to the owner"]
+    dry --> autonomy["Autonomy policy<br/>AUTO · ASK · DENY"]
+    autonomy -->|"AUTO"| gate["Risk gate<br/>on current state"]
+    autonomy -->|"ASK"| ask["Ask the owner<br/>deadline, safe default"]
+    ask -->|"approved"| gate
+    gate -->|"allowed"| exec["Executor<br/>journal first,<br/>idempotent"]
     exec --> broker[("Owner's broker<br/>Alpaca paper")]
     exec --> journal[("Hash-chained journal")]
 ```
@@ -63,11 +66,11 @@ merged and the implementation is under way; planned means scheduled in the
 
 | Component | What it does | Milestone | State |
 |---|---|---|---|
-| Exact arithmetic, time, canonical JSON | Decimal money and quantity types, the NYSE calendar and sessions, the hashing format | M0 | Built |
+| Exact arithmetic, time, canonical JSON | Decimal money and quantity types, the NYSE calendar and sessions, the hashing format | M1 to M4 | Built |
 | Market data | Alpaca historical bars, trades, quotes, and corporate actions into verified datasets | M1 | Built |
 | Accounting | Positions, cash and settlement, fees, corporate actions, P&L, buying power | M2 | Built |
 | Simulated execution and backtest | The fill model, the backtest loop, a baseline strategy, an exact metrics report | M3 | Fill model built; backtest in progress |
-| Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store planned |
+| Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store in progress |
 | Mandate document | Parsing, validation, the policy hierarchy, change classification, risk state | M5 | In progress |
 | Risk gate | The ordered checks, US account rules, eligibility, conduct controls, forced flatten | M5 | In progress |
 | Order builder and autonomy | AUTO, ASK, or DENY per decision; deterministic sizing and order construction | M5 | In progress |
@@ -75,6 +78,7 @@ merged and the implementation is under way; planned means scheduled in the
 | Research agent | Theses, corroboration, admission, revision lineages, expiry | M5 | In progress (thin slice) |
 | Executor and Alpaca paper connector | Idempotent intents, reconciliation after restart, protective exits at the broker | M6 | In progress |
 | Escalation | Approval requests with deadlines and safe defaults; email, one chat channel, CLI control | M7 | Planned |
+| Robinhood connector | Agentic trading accounts for retail users, the second connector | M8 | Planned |
 | Control plane and workspace services | Organizations and workspaces, SSO, roles, step-up auth, OAuth broker connections, the policy service | M8 | Planned |
 | Web app | Mandate authoring, backtest and paper views, dashboard, audit explorer | M9 | Planned |
 | Private approvals and channels | Notifications carrying only opaque IDs, details served from the workspace; push, email, chat | M10 | Planned |
@@ -82,9 +86,10 @@ merged and the implementation is under way; planned means scheduled in the
 | Billing | Organization plans and agent counts, with no per-trade or outcome-based pricing | M12 | Planned |
 | Hardening and release | Security review, penetration test, runbooks, terms and disclosures, soak | M13 | Planned |
 
-Phase 1 ends when one agent trades an Alpaca paper account unattended through a soak with forced
-restarts and escalations and no duplicate orders (M5 to M7). Phase 2 is the platform for design
-partners (M8 to M13). Later releases add further brokers and exchanges; options, short sales, and
+Phase 1 ends when one agent trades an Alpaca paper account unattended, on theses it generated,
+through a soak with forced restarts and escalations and no duplicate orders, and its theses beat
+the pre-registered baselines on forward paper (M5 to M7, [DEC-99](docs/project/04-decision-log.md)). Phase 2 is the platform for design
+partners (M8 to M13). Interactive Brokers and Coinbase come in later releases; options, short sales, and
 margin are out of scope for v1 ([PRD](docs/product/04-prd-v1.md)).
 
 ## Repository
@@ -162,7 +167,7 @@ flowchart BT
 | 1 | `mandate-domain` | The shared vocabulary: asset identifiers, the working universe, autonomy decisions, agent modes, purposes, market sessions | yes | yes |
 | 2 | `mandate-accounting` | The account fold: positions, cost basis, cash and settlement, fees with per-order caps, marks, realized and unrealized P&L, corporate actions, buying power | yes | yes |
 | 2 | `mandate-journal` | Drafts, the append protocol (idempotency, fencing, heads), verification, anchoring, the artifact core | yes | yes |
-| 3 | `mandate-spec` | The mandate document as code: parsing against the schema's decimal grammars, validation, the policy hierarchy, change classification, risk state (API and tests merged, implementation in progress) | yes | yes |
+| 3 | `mandate-spec` | The mandate document as code: parsing against the schema's decimal grammars, validation, the policy hierarchy, change classification, risk state (API and the S, V, P tests merged; the remaining families and the implementation in progress) | yes | yes |
 | 6 | `mandate-runtime` | The agent runtime core: one writer per agent, the decision cycle as a pure fold and handler, the startup hold, kill switches (API and tests merged, implementation in progress) | yes | yes |
 | 6 | `mandate-sim` | The backtest fill model as a pure function: eligibility, touch and through, marketable limits, volume caps with square-root impact, stops, stop-limits, OCO, gaps, auctions | yes | yes |
 | 6 | `mandate-marketdata` | Alpaca historical bars, trades, and quotes as exact vendor numbers in idempotent Parquet datasets; corporate actions; sessions; data-quality inspection; header-driven rate limiting | no | no |
@@ -232,9 +237,9 @@ historical endpoints with keys you supply in the environment.
 | M1 Market data | Done: bars, trades, quotes, sessions and early closes, corporate actions, safe concurrent writes, data-quality reporting, proactive rate limiting; exit run on real data passed 2026-09-26 |
 | M2 Accounting | Done: verified against the hand-calculated reference cases including splits, dividends, partial fills, settlement |
 | M3 Simulated execution and backtest | Fill model done (RC-10, RC-12, RC-19 passing); the backtest loop and metrics report have their tests merged, implementation in progress |
-| M4 Journal | Done except the cold store and segment manifests: hash chain, verification, Postgres hot store, artifact store, the verification command |
+| M4 Journal | In progress: done except the cold store and segment manifests, which are next: hash chain, verification, Postgres hot store, artifact store, the verification command |
 | M5 Agent runtime and risk | In progress: the mandate document, risk gate, order builder, runtime, and research thin slice each run as brief, tests, and implementation pull requests. All five briefs are merged; the runtime tests (#134) and the first mandate-document tests (#140) are merged; the risk-gate and research tests are in review |
-| M6 Alpaca connector | In progress: the executor and connector brief is merged (#139); its tests, including recorded Alpaca paper scenarios, are being written |
+| M6 Alpaca connector | In progress: the executor and connector brief is merged (#139); its tests pull request is being written |
 | M7 to M13 | Planned ([milestones](docs/project/02-milestones-and-wbs.md)) |
 
 The [work tracker](docs/project/08-work-tracker.md) records every story, claim, and decision with
