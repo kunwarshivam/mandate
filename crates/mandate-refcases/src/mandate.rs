@@ -12,11 +12,18 @@
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
 //! ignored.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use mandate_canon::Digest;
 use mandate_canon::Value;
-use mandate_spec::{Mandate, MandateVersion};
+use mandate_num::{Price, Qty, Usd};
+use mandate_spec::document::{ModelId, ProvenanceMap};
+use mandate_spec::goal::{self, GoalInputs, GoalStatus};
+use mandate_spec::risk;
+use mandate_spec::validate::{RegisteredModel, ValidatedMandate, ValidationContext};
+use mandate_spec::{Mandate, MandateVersion, SpecError};
+use mandate_time::{Date, UtcNanos};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
@@ -410,13 +417,222 @@ fn risk_state_case(fixture: &Json, case: &Json) -> Result<(), String> {
 }
 
 /// `kind: risk_day` — the risk day containing an instant and its bounds (§5.4).
+///
+/// All four expectations are read. `length_s` is compared as the fixture states it **and** against the
+/// distance between the two bounds, so a day whose `length_s` disagrees with its own bounds fails even
+/// if the fixture were to state the wrong number.
 fn risk_day_case(case: &Json) -> Result<(), String> {
-    let _ = str_at(case, "at")?;
-    Err(not_implemented("`mandate_spec::risk::risk_day`"))
+    let instant_at = instant(at(case, "at")?, "at")?;
+    let day = spec(risk::risk_day(instant_at), "risk_day")?;
+    let expect = at_of(case, "expect")?;
+    expect_eq(
+        "risk_day",
+        day.day.to_string(),
+        str_at(expect, "risk_day")?.to_owned(),
+    )?;
+    expect_eq(
+        "starts_at",
+        day.starts_at,
+        instant(at(expect, "starts_at")?, "starts_at")?,
+    )?;
+    expect_eq(
+        "ends_at",
+        day.ends_at,
+        instant(at(expect, "ends_at")?, "ends_at")?,
+    )?;
+    expect_eq(
+        "length_s",
+        u64::from(day.length_s),
+        u64_at(expect, "length_s")?,
+    )?;
+    let span = day
+        .ends_at
+        .secs()
+        .checked_sub(day.starts_at.secs())
+        .and_then(|d| u64::try_from(d).ok())
+        .ok_or_else(|| "the day's bounds do not run forwards".to_owned())?;
+    expect_eq(
+        "length_s against its own bounds",
+        u64::from(day.length_s),
+        span,
+    )
 }
 
 /// `kind: goal` — goal completion for a state (§3.1).
+///
+/// Every member of `state` is read and every member of `expect` is compared. `reason`, `then`, and
+/// `stop_reason` are absent from a case that is not done (MC-L05), and a `Done` status where the case
+/// expects none fails on `done` before any of them is looked for.
 fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = patched(fixture, case)?;
-    Err(not_implemented("`mandate_spec::goal::status`"))
+    let document = patched(fixture, case)?;
+    let mandate = Mandate::parse(&document).map_err(|e| {
+        if e.code() == "unimplemented" {
+            not_implemented("the mandate parser")
+        } else {
+            format!("the parse rejected this case's document: {}", e.code())
+        }
+    })?;
+    let validated = ValidatedMandate::new(mandate, &context_defaults(fixture)?, &[])
+        .map_err(|e| format!("the mandate is not valid here: {e}"))?;
+    let state = at_of(case, "state")?;
+    let inputs = GoalInputs {
+        now: instant(at(state, "now")?, "now")?,
+        position_qty: num(Qty::parse(str_at(state, "position_qty")?), "position_qty")?,
+        goal_spent_usd: num(
+            Usd::parse(str_at(state, "goal_spent_usd")?),
+            "goal_spent_usd",
+        )?,
+        min_order_usd: num(Usd::parse(str_at(state, "min_order_usd")?), "min_order_usd")?,
+        qty_increment: num(Qty::parse(str_at(state, "qty_increment")?), "qty_increment")?,
+        ask: num(Price::parse(str_at(state, "ask")?), "ask")?,
+    };
+    let status = spec(goal::status(&validated, &inputs), "goal::status")?;
+    let expect = at_of(case, "expect")?;
+    let done = at(expect, "done")?
+        .as_bool()
+        .ok_or("`expect.done` is not a boolean")?;
+    match (&status, done) {
+        (GoalStatus::Done { .. }, false) => {
+            return Err(format!(
+                "the goal is not done here, but it reported {status:?}"
+            ));
+        }
+        (GoalStatus::Running | GoalStatus::ConfirmedInRiskState, true) => {
+            return Err(format!("the goal is done here, but it reported {status:?}"));
+        }
+        _ => {}
+    }
+    let GoalStatus::Done {
+        reason,
+        then,
+        stop_reason,
+    } = status
+    else {
+        return Ok(());
+    };
+    expect_eq(
+        "reason",
+        reason.as_str().to_owned(),
+        str_at(expect, "reason")?.to_owned(),
+    )?;
+    expect_eq(
+        "then",
+        then.as_str().to_owned(),
+        str_at(expect, "then")?.to_owned(),
+    )?;
+    expect_eq(
+        "stop_reason",
+        stop_reason.as_str().to_owned(),
+        str_at(expect, "stop_reason")?.to_owned(),
+    )
+}
+
+/// The validation context, read from the fixture's own `validation_context_defaults`.
+///
+/// Review round 1 found the first version of this hardcoding an equity, a date, and a `None` registry
+/// beside the fixture's stated defaults while claiming to be the values the bases were written against.
+/// It now reads all six: account equity, other allocations, the validation date, the signal-model
+/// registry, and the workspace and approver user counts. Every field is owner-entered and confirmed,
+/// which is what an absent [`ProvenanceMap`] entry means (§2.1), and the remaining fields are the "not
+/// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version.
+fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
+    let defaults = at_of(fixture, "validation_context_defaults")?;
+    Ok(ValidationContext {
+        account_equity_usd: num(
+            Usd::parse(str_at(defaults, "account_equity_usd")?),
+            "account_equity_usd",
+        )?,
+        other_allocations_usd: num(
+            Usd::parse(str_at(defaults, "other_allocations_usd")?),
+            "other_allocations_usd",
+        )?,
+        validation_date: Date::parse(str_at(defaults, "validation_date")?)
+            .map_err(|e| format!("validation_date: {e}"))?,
+        registry: Some(registry(at_of(defaults, "registry")?)?),
+        provenance: ProvenanceMap::default(),
+        workspace_users: u32_of(defaults, "workspace_users")?,
+        approver_users: u32_of(defaults, "approver_users")?,
+        disclosures_accepted: BTreeSet::new(),
+        instrument_groups: BTreeMap::new(),
+        claimed_by_other_agents: BTreeSet::new(),
+        connection_environment: None,
+        connection_loss_carry_usd: Usd::ZERO,
+        eligibility_failures: BTreeSet::new(),
+        previous_version: None,
+    })
+}
+
+/// The fixture's `signal_model_registry` shape, which V-007 compares the document's models against.
+fn registry(value: &Json) -> Result<BTreeMap<ModelId, RegisteredModel>, String> {
+    let members = value
+        .as_object()
+        .ok_or_else(|| "`registry` is not an object".to_owned())?;
+    members
+        .iter()
+        .map(|(id, model)| {
+            let id =
+                ModelId::parse(id).map_err(|e| format!("registry key `{id}`: {}", e.code()))?;
+            let hash = str_at(model, "content_hash")?
+                .strip_prefix("sha256:")
+                .and_then(Digest::from_hex)
+                .ok_or_else(|| format!("`{}`: content_hash is not sha256 hex", id.as_str()))?;
+            Ok((
+                id,
+                RegisteredModel {
+                    version: str_at(model, "version")?.to_owned(),
+                    content_hash: hash,
+                    params: list_at(model, "params")?
+                        .iter()
+                        .map(|p| {
+                            p.as_str()
+                                .map(str::to_owned)
+                                .ok_or_else(|| "a param name is not a string".to_owned())
+                        })
+                        .collect::<Result<_, String>>()?,
+                    admits_instruments: model
+                        .get("admits_instruments")
+                        .and_then(Json::as_bool)
+                        .unwrap_or(false),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn u32_of(value: &Json, key: &str) -> Result<u32, String> {
+    u32::try_from(u64_at(value, key)?).map_err(|_| format!("`{key}` does not fit a u32"))
+}
+
+/// An instant in a case, in the RFC 3339 form the steps use.
+fn instant(value: &Json, what: &str) -> Result<UtcNanos, String> {
+    let text = value
+        .as_str()
+        .ok_or_else(|| format!("`{what}` is not an instant"))?;
+    UtcNanos::parse_rfc3339(text).map_err(|e| format!("`{what}`: {e}"))
+}
+
+/// The member at `key`, which must be an object.
+fn at_of<'a>(value: &'a Json, key: &str) -> Result<&'a Json, String> {
+    let member = at(value, key)?;
+    if member.is_object() {
+        Ok(member)
+    } else {
+        Err(format!("`{key}` is not an object"))
+    }
+}
+
+fn num<T>(parsed: Result<T, mandate_num::NumError>, what: &str) -> Result<T, String> {
+    parsed.map_err(|e| format!("`{what}`: {e}"))
+}
+
+/// A `mandate-spec` result, with `unimplemented` turned into the message DEC-77 requires: a case must
+/// never pass because the rule has not been written.
+fn spec<T>(result: Result<T, SpecError>, what: &str) -> Result<T, String> {
+    result.map_err(|e| {
+        if e.code() == "unimplemented" {
+            not_implemented(&format!("`{what}`"))
+        } else {
+            format!("`{what}`: {e} ({})", e.code())
+        }
+    })
 }

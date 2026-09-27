@@ -244,6 +244,18 @@ pub enum StopReason {
     GoalComplete,
 }
 
+impl StopReason {
+    /// The spelling `AgentStopped` carries (§5.10).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::OwnerStop => "owner_stop",
+            Self::ProfitStopReached => "profit_stop_reached",
+            Self::EndDate => "end_date",
+            Self::GoalComplete => "goal_complete",
+        }
+    }
+}
+
 /// Why a goal ended (§3.1, §5.10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum GoalReason {
@@ -253,12 +265,36 @@ pub enum GoalReason {
     EndDate,
 }
 
+impl GoalReason {
+    /// The spelling `GoalCompleted` carries (§5.10). `profit_stop_reached` is shared with
+    /// [`StopReason`] because §3.1 gives a `profit_stop` both a goal reason and a stop reason.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ProfitStopReached => "profit_stop_reached",
+            Self::TargetQty => "target_qty",
+            Self::MaxSpend => "max_spend",
+            Self::EndDate => "end_date",
+        }
+    }
+}
+
 /// What follows a completed goal: the `on_complete` the owner chose, or the one outcome §3.1 gives a
 /// `profit_stop`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ThenAction {
     Applied(OnComplete),
     DiscretionaryExitAllThenRetire,
+}
+
+impl ThenAction {
+    /// An applied `on_complete` writes that value, so the three §3.1 choices keep one spelling each;
+    /// a `profit_stop` has no `on_complete` to write and names its own outcome instead.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Applied(on_complete) => on_complete.as_str(),
+            Self::DiscretionaryExitAllThenRetire => "discretionary_exit_all_then_retire",
+        }
+    }
 }
 
 /// Why a limit triggered, when it was not plain confirmation (§5.10).

@@ -10,12 +10,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use common::{base, s, with, with_all};
 use mandate_canon::Value;
+use mandate_domain::AssetClass;
 use mandate_domain::Environment;
 use mandate_num::Usd;
 use mandate_spec::document::{Pointer, Provenance, ProvenanceMap, Source};
+use mandate_spec::validate::GroupId;
 use mandate_spec::validate::{
     NEVER_PROPOSED, PlatformProposals, ValidationContext, platform_defaultable, validate,
 };
+use mandate_spec::validate::{ValidationReport, WorstCase, class_allowed};
 use mandate_spec::{Mandate, Violation, Warning};
 use mandate_time::Date;
 
@@ -344,9 +347,6 @@ fn the_platform_defaultable_list_is_exactly_the_nine_paths_section_seven_states(
 /// it carries no violation.
 #[test]
 fn class_membership_and_report_validity_are_the_predicates_they_claim_to_be() {
-    use mandate_domain::AssetClass;
-    use mandate_spec::validate::{ValidationReport, WorstCase, class_allowed};
-
     let equities = BTreeSet::from([AssetClass::UsEquity]);
     assert!(class_allowed(AssetClass::UsEquity, &equities));
     assert!(!class_allowed(AssetClass::Crypto, &equities));
@@ -375,8 +375,6 @@ fn class_membership_and_report_validity_are_the_predicates_they_claim_to_be() {
 /// A group id keeps the text it was given, which is what V-035's comparison reads.
 #[test]
 fn a_group_id_is_the_text_it_was_given() {
-    use mandate_spec::validate::GroupId;
-
     assert_eq!(GroupId::new("earnings-week").as_str(), "earnings-week");
     assert_ne!(GroupId::new("a"), GroupId::new("b"));
 }

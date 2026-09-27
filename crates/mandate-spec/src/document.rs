@@ -268,6 +268,30 @@ pub struct SignalModel {
 pub struct ModelId(String);
 
 impl ModelId {
+    /// The schema's form: `fast.`, `llm.`, or `quant.` and one to 48 of `[a-z0-9_]`.
+    ///
+    /// A grammar check with no rule logic (DEC-128 item 22). It exists because a caller has to be able
+    /// to name a registered model: V-007 compares the document's models against a registry the caller
+    /// supplies, and a registry keyed by a type nothing can construct cannot be supplied at all — which
+    /// is what the `mandate` harness ran into when it came to read the reference fixture's own registry.
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        let off_pattern = || ParseError::OffPattern {
+            path: Pointer::new("/behavior/signal_models/id"),
+        };
+        let (kind, name) = text.split_once('.').ok_or_else(off_pattern)?;
+        if !matches!(kind, "fast" | "llm" | "quant") {
+            return Err(off_pattern());
+        }
+        if !(1..=48).contains(&name.len())
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        {
+            return Err(off_pattern());
+        }
+        Ok(Self(text.to_owned()))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
