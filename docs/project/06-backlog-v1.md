@@ -749,3 +749,17 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+
+From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
+
+- **§8.3 step 2's "whole position (minus working exits)" has no input (stream H, with stream I).**
+  `AccountSnapshot` carries no working exit quantity, so `propose` sells the whole position, as
+  `reference/mandate/ref.py` does. A second discretionary exit while one is working is therefore
+  proposed at the full quantity, and only the account ledger's sell reservation stops it from
+  over-selling. Add the field in a tests correction (every `AccountSnapshot` literal in
+  `crates/mandate-builder/tests/` names it) and subtract it in `discretionary_exit`, holding when
+  nothing is left to sell.
+- **`BuilderError::Unimplemented` and `NumError::Unimplemented` are now constructed by nothing.**
+  Both stay because `tests/vocabulary.rs` and `num::error_codes_are_stable` pin their codes, and an
+  implementation PR may not edit a test. Drop each variant with its row in the next tests correction
+  that touches those files (E6-2; the `NumError` half is the E4-2 row above).

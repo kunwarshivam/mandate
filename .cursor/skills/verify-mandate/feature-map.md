@@ -132,8 +132,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
 DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
 `autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
-(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. The builder's tests stay pending until
-slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
+(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. Slice 2 (the builder) implements §8.1 to
+§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B
+(the 28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No test in
+the crate is pending.
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -168,8 +170,7 @@ slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
   harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
   family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder`; the pending tests with
-  `cargo nextest run -p mandate-builder --run-ignored all`.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`.
 
 ## Agent runtime and kill switches
 
