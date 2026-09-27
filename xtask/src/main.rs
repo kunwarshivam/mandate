@@ -1434,9 +1434,10 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
     let mut stale: Vec<String> = BEHAVIOUR_ONLY_TESTS
         .iter()
         .filter(|(file, name)| {
-            !tests
-                .iter()
-                .any(|t| t.file == *file && t.test.path == *name)
+            root.join(file).exists()
+                && !tests
+                    .iter()
+                    .any(|t| t.file == *file && t.test.path == *name)
         })
         .map(|(file, name)| {
             format!(
