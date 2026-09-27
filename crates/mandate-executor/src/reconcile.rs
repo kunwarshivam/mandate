@@ -5,18 +5,18 @@ use std::collections::BTreeSet;
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::Value;
-use mandate_num::SignedQty;
+use mandate_num::{Fraction, Qty, SignedQty};
 
 use crate::batch::Batch;
 use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
-use crate::orders::{EXTERNAL, every_agent_alerted, fill, status_mapping};
+use crate::orders::{EXTERNAL, account_fields, every_agent_alerted, fill, status_mapping};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
-    AgentId, BrokerRequest, BrokerSnapshot, Difference, DifferenceKind, EventId, Mode, OrderState,
+    BrokerRequest, BrokerSnapshot, Difference, DifferenceKind, EventId, Mode, OrderState,
     ReconcileReason, Reconciliation, ReconciliationVerdict, StatusMapping,
 };
 
@@ -85,8 +85,9 @@ pub(crate) fn run(
         }
     }
     positions(batch, snapshot, &mut differences)?;
-    if cash_or_fees_to_compare(&batch.view, snapshot) {
-        return incomplete(batch, differences);
+    let recorded = cash(batch, snapshot, &mut differences)?;
+    if snapshot.reason == ReconcileReason::FeePosting {
+        fees(batch, snapshot, recorded, &mut differences)?;
     }
     let unexplained = differences.iter().any(|difference| !difference.adopted);
     let verdict = if unexplained {
@@ -275,10 +276,11 @@ fn adopt(
 }
 
 /// Step 3: the model's net position, after the missing fills, against the broker's, exactly
-/// (§11). A difference is a mismatch: the agents holding the instrument are paused and the owner is
-/// alerted, and nothing is written away. The two explanations §11 allows, a pending corporate
-/// action and a crypto asset fee the broker has not yet posted, come with the slices that fold
-/// them; until then either shows as a mismatch, which pauses rather than trades.
+/// (§11), except that a crypto asset fee the broker has not yet posted is still in the broker's
+/// quantity (§6.3, RC-07). A difference is a mismatch: the agents holding the instrument are
+/// paused and the owner is alerted, and nothing is written away. A pending corporate action, §11's
+/// other explanation, comes with the slice that folds corporate actions; until then it shows as a
+/// mismatch, which pauses rather than trades.
 fn positions(
     batch: &mut Batch<'_, '_>,
     snapshot: &BrokerSnapshot,
@@ -303,19 +305,26 @@ fn positions(
             .get(&instrument)
             .copied()
             .unwrap_or(SignedQty::ZERO);
+        let unposted = batch
+            .view
+            .asset_fees
+            .get(&instrument)
+            .copied()
+            .unwrap_or(Qty::ZERO);
+        let expected = model.checked_add(SignedQty::from(unposted))?;
         let broker = snapshot
             .positions
             .iter()
             .find(|held| held.instrument == instrument)
             .map_or(SignedQty::ZERO, |held| held.qty);
-        let mismatch = broker != model;
+        let mismatch = broker != expected;
         let observed = batch.journal(
             "BrokerPositionObserved",
             None,
             vec![
                 ("instrument", text(instrument.as_str())),
                 ("broker_qty", text(broker.to_string())),
-                ("model_qty", text(model.to_string())),
+                ("model_qty", text(expected.to_string())),
                 ("mismatch", Value::Bool(mismatch)),
             ],
         )?;
@@ -333,40 +342,86 @@ fn positions(
     Ok(())
 }
 
-/// Whether a run has cash or fees to compare: once the broker has reported an account there is a
-/// cash figure, and a fee posting always has fees (§11 steps 4 and 5). Before any account is
-/// reported there is no base to compare the broker's cash with, as in the full comparison.
-fn cash_or_fees_to_compare(state: &ExecutorState, snapshot: &BrokerSnapshot) -> bool {
-    state.observed.is_some() || snapshot.reason == ReconcileReason::FeePosting
-}
-
-/// The subject and alert key of a run that could not complete.
-const INCOMPLETE: &str = "incomplete";
-
-/// Steps 4 and 5, cash and fees, are the cash slice's (DEC-140's slice-5 amendment). A run that
-/// would compare either is not completed: no `ReconciliationRun` is published as covering a
-/// comparison it skipped, so `reconciled_through` does not advance. Instead every agent goes
-/// `exits_only` under `reconciliation:incomplete` and the owner is alerted by the restriction's
-/// own event id, once, through `every_agent_alerted`: openings stop, and rule 13's exits stay open
-/// (`AGENTS.md` rule 3). Until the cash slice lands, every account that has reported disables
-/// openings after its first reconciliation; the cash slice's owner acknowledgment lifts it.
-fn incomplete(
+/// Step 4: the broker's cash against the model's, within 0.01 × the fills since the last broker
+/// cash snapshot plus the accrued unposted fees (§11). Paper's simulated fees are not in the
+/// model's cash at all (§10, interpretation 25). Above the band, every agent is paused and the owner
+/// alerted until the owner acknowledges `cash`. The snapshot is journaled as
+/// `AccountSnapshotRecorded`, whole, and becomes the base the next comparison is measured from.
+/// Before any account was reported there is no base to compare with, and nothing is recorded.
+fn cash(
     batch: &mut Batch<'_, '_>,
-    differences: Vec<Difference>,
-) -> Result<(ReconciliationVerdict, Vec<Difference>), ExecutorError> {
-    let restriction = restriction_for(INCOMPLETE);
-    let every = (AgentId(EVERY_AGENT.to_owned()), restriction.clone());
-    if !batch.view.restrictions.contains_key(&every) {
-        let subject = batch.next_id();
+    snapshot: &BrokerSnapshot,
+    differences: &mut Vec<Difference>,
+) -> Result<Option<EventId>, ExecutorError> {
+    let Some(base) = batch.view.observed.clone() else {
+        return Ok(None);
+    };
+    let model = base
+        .cash
+        .checked_add(batch.view.cash_flow)?
+        .checked_sub(batch.view.unposted_fees)?;
+    let band = batch
+        .view
+        .fill_notional
+        .times_fraction(Fraction::parse(CASH_BAND)?)?
+        .checked_add(batch.view.unposted_fees.abs())?;
+    let drift = snapshot.account.cash.checked_sub(model)?.abs();
+    let mut fields = account_fields(&snapshot.account)?;
+    fields.push(("model_cash", text(model.to_string())));
+    let recorded = batch.journal("AccountSnapshotRecorded", None, fields)?;
+    if drift > band {
         every_agent_alerted(
             batch,
-            Mode::ExitsOnly,
-            &restriction,
-            subject,
-            "reconciliation_incomplete",
+            Mode::Paused,
+            &restriction_for("cash"),
+            recorded.clone(),
+            "reconciliation_cash",
         )?;
+        differences.push(Difference {
+            kind: DifferenceKind::Cash,
+            subject: "cash".to_owned(),
+            adopted: false,
+        });
     }
-    Ok((ReconciliationVerdict::Mismatch, differences))
+    Ok(Some(recorded))
+}
+
+/// The cash tolerance per unit of fill notional (§11).
+const CASH_BAND: &str = "0.01";
+
+/// Step 5, at a fee posting: fees are exact once posted. A difference pauses every agent and alerts
+/// the owner, naming the recorded snapshot (recorded here if step 4 had no base to record it
+/// against), until the owner acknowledges `fees`; it is never silently adjusted (§11).
+fn fees(
+    batch: &mut Batch<'_, '_>,
+    snapshot: &BrokerSnapshot,
+    recorded: Option<EventId>,
+    differences: &mut Vec<Difference>,
+) -> Result<(), ExecutorError> {
+    if snapshot.account.accrued_fees == batch.view.unposted_fees {
+        return Ok(());
+    }
+    let recorded = match recorded {
+        Some(recorded) => recorded,
+        None => batch.journal(
+            "AccountSnapshotRecorded",
+            None,
+            account_fields(&snapshot.account)?,
+        )?,
+    };
+    every_agent_alerted(
+        batch,
+        Mode::Paused,
+        &restriction_for("fees"),
+        recorded,
+        "reconciliation_fees",
+    )?;
+    differences.push(Difference {
+        kind: DifferenceKind::Fee,
+        subject: "fees".to_owned(),
+        adopted: false,
+    });
+    Ok(())
 }
 
 /// The agents a restriction reaches: those with an order in the instrument, or every agent the
@@ -431,7 +486,7 @@ mod tests {
     };
     use mandate_time::{Date, TradingCalendar};
 
-    use super::{cash_or_fees_to_compare, reconcile};
+    use super::reconcile;
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::object;
@@ -440,9 +495,10 @@ mod tests {
     use crate::step::handle;
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
-        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, Effect, EventId,
-        ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff, MandateVersion,
-        Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId, WriterEpoch,
+        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, DifferenceKind, Effect,
+        EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff,
+        MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId,
+        WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
@@ -659,18 +715,6 @@ mod tests {
             Ok(next)
         }
 
-        /// A scheduled snapshot in which the broker holds the ten `AAPL` the model holds.
-        fn holding_ten(&self) -> Result<BrokerSnapshot, ExecutorError> {
-            Ok(BrokerSnapshot {
-                positions: vec![BrokerPosition {
-                    instrument: aapl()?,
-                    qty: SignedQty::parse("10")?,
-                    avg_entry_price: Price::parse("150")?,
-                }],
-                ..self.snapshot(ReconcileReason::Scheduled)?
-            })
-        }
-
         fn snapshot(&self, reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
             Ok(BrokerSnapshot {
                 taken_at_head: self.state.account_head(),
@@ -797,21 +841,25 @@ mod tests {
         Ok(())
     }
 
+    /// §11 steps 4 and 5: once an account is reported, a run compares cash within its band and
+    /// fees exactly at a fee posting, records the snapshot as the next base, and is published; a
+    /// difference pauses every agent and alerts the owner, and neither is written away.
     #[test]
-    fn cash_or_fees_are_to_compare_once_an_account_is_reported_or_at_a_fee_posting()
-    -> Result<(), ExecutorError> {
+    fn a_run_compares_cash_and_fees_and_records_the_snapshot() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
         let mut state = ExecutorState::new(AccountScope {
             account: AccountRef("acct-1".to_owned()),
             workspace: WorkspaceId("ws1".to_owned()),
         });
-        assert!(!cash_or_fees_to_compare(
-            &state,
-            &snapshot(ReconcileReason::Scheduled)?
-        ));
-        assert!(cash_or_fees_to_compare(
-            &state,
-            &snapshot(ReconcileReason::FeePosting)?
-        ));
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
         state.observed = Some(ObservedAccount {
             state: AccountState::Active,
             multiplier: 1,
@@ -822,19 +870,96 @@ mod tests {
             accrued_fees: Usd::ZERO,
             complete: true,
         });
-        assert!(cash_or_fees_to_compare(
-            &state,
-            &snapshot(ReconcileReason::Scheduled)?
-        ));
+        let agreeing = reconcile(&state, &snapshot(ReconcileReason::FeePosting)?, &ports)?;
+        assert_eq!(
+            drafted(&agreeing.effects),
+            vec!["AccountSnapshotRecorded", "ReconciliationRun"],
+            "the broker agrees on cash and fees: the snapshot is recorded and the run published"
+        );
+
+        let mut drifted = snapshot(ReconcileReason::FeePosting)?;
+        drifted.account.cash = Usd::parse("1")?;
+        drifted.account.accrued_fees = Usd::parse("3")?;
+        let run = reconcile(&state, &drifted, &ports)?;
+        let restrictions: Vec<_> = run
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => {
+                    draft.payload.get("restriction").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            restrictions,
+            vec!["reconciliation:cash", "reconciliation:fees"],
+            "a cash drift beyond the band and a fee difference each pause every agent"
+        );
+        let alerts: Vec<_> = run
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Notify(reference) => Some(reference.message_key),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(alerts, vec!["reconciliation_cash", "reconciliation_fees"]);
         Ok(())
     }
 
-    /// DEC-140's slice-5 amendment, rule 3: a run with cash to compare is not completed. It
-    /// publishes no `ReconciliationRun`, puts every agent `exits_only` under
-    /// `reconciliation:incomplete` and alerts the owner by the restriction's id, once. After it an
-    /// opening is not submitted, an exit still is (rule 13), and a second agent is held too.
+    /// §11's band includes the accrued unposted fees: the model's cash is already lowered by them
+    /// and the broker's is not until they post, so a broker still holding exactly that much agrees,
+    /// and one cent more differs.
     #[test]
-    fn an_incomplete_run_holds_openings_loudly_and_keeps_exits_open() -> Result<(), ExecutorError> {
+    fn the_cash_band_includes_the_unposted_fees() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        state.observed = Some(ObservedAccount {
+            state: AccountState::Active,
+            multiplier: 1,
+            equity: Usd::ZERO,
+            cash: Usd::ZERO,
+            buying_power: Usd::ZERO,
+            non_marginable_buying_power: Usd::ZERO,
+            accrued_fees: Usd::ZERO,
+            complete: true,
+        });
+        state.unposted_fees = Usd::parse("3")?;
+        for (cash, differs) in [("0", false), ("0.01", true)] {
+            let mut taken = snapshot(ReconcileReason::Scheduled)?;
+            taken.account.cash = Usd::parse(cash)?;
+            let run = reconcile(&state, &taken, &ports)?;
+            assert_eq!(
+                run.differences
+                    .iter()
+                    .any(|difference| difference.kind == DifferenceKind::Cash),
+                differs,
+                "the model is 0 − 3 and the band 0.01 × 0 + 3: {cash}"
+            );
+        }
+        Ok(())
+    }
+
+    /// DEC-140's slice-5 amendment: a stream slice 5 wrote may hold every agent `exits_only` under
+    /// `reconciliation:incomplete`. The cash slice completes those runs, and the owner's
+    /// acknowledgment of `incomplete`, with step-up evidence, lifts the hold (§11, interpretation
+    /// 14): openings are submitted again. A run that now completes lifts nothing by itself, and an
+    /// acknowledgment without step-up evidence lifts nothing either.
+    #[test]
+    fn an_acknowledgment_of_incomplete_lifts_the_slice_5_hold() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -844,78 +969,39 @@ mod tests {
             fees: &fees,
         };
         let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
         executor.commit_one(
-            "FillApplied",
+            "AgentModeApplied",
             object(vec![
-                ("fill_id", Value::Str("f-0".to_owned())),
-                ("instrument", Value::Str("AAPL".to_owned())),
-                ("side", Value::Str("buy".to_owned())),
-                ("qty_gross", Value::Str("10".to_owned())),
-                ("price", Value::Str("150".to_owned())),
+                ("agent", Value::Str("*".to_owned())),
+                ("to", Value::Str("exits_only".to_owned())),
+                (
+                    "restriction",
+                    Value::Str("reconciliation:incomplete".to_owned()),
+                ),
+                ("originated", Value::Bool(true)),
                 (
                     "risk_clock",
                     crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
                 ),
             ])?,
         )?;
-        executor.run(
-            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+        let completed = executor.run(
+            Input::BrokerSnapshot(BrokerSnapshot {
+                account: account("100000")?,
+                ..executor.snapshot(ReconcileReason::Scheduled)?
+            }),
             &ports,
         )?;
-        let refused = executor.run(Input::BrokerSnapshot(executor.holding_ten()?), &ports)?;
         assert_eq!(
-            drafted(&refused),
-            vec!["BrokerPositionObserved", "AgentModeApplied"],
-            "the position agrees, and no `ReconciliationRun` is published as covering the cash it \
-             did not compare"
+            drafted(&completed),
+            vec!["AccountSnapshotRecorded", "ReconciliationRun"],
+            "the cash agrees, so the run completes"
         );
-        let restricted = refused.iter().find_map(|effect| match effect {
-            Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => Some(draft),
-            _ => None,
-        });
-        let field = |name: &str| {
-            restricted
-                .and_then(|draft| draft.payload.get(name))
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        };
-        assert_eq!(
-            (field("agent"), field("to"), field("restriction")),
-            (
-                Some("*".to_owned()),
-                Some("exits_only".to_owned()),
-                Some("reconciliation:incomplete".to_owned())
-            )
-        );
-        let alerts: Vec<_> = refused
-            .iter()
-            .filter_map(|effect| match effect {
-                Effect::Notify(reference) => {
-                    Some((reference.subject_event.clone(), reference.message_key))
-                }
-                _ => None,
-            })
-            .collect();
-        assert_eq!(
-            alerts,
-            vec![(
-                restricted
-                    .map(|draft| draft.event_id.clone())
-                    .unwrap_or(EventId(String::new())),
-                "reconciliation_incomplete"
-            )],
-            "the owner is alerted once, by the restriction's own event id"
-        );
-        assert_eq!(executor.state.reconciled_through(), None);
-        assert_eq!(
-            executor
-                .state
-                .effective_mode(&AgentId("agent-b".to_owned())),
-            Mode::ExitsOnly,
-            "every agent, including one that placed nothing"
-        );
-
-        let opening = executor.run(
+        let held = executor.run(
             intent(
                 "01JABCDEFGHJKMNPQRSTVWXYZ0",
                 "agent-a",
@@ -924,31 +1010,44 @@ mod tests {
             )?,
             &ports,
         )?;
-        assert_eq!(submitted(&opening), 0, "an opening is not submitted");
-        let exit = executor.run(
+        assert_eq!(submitted(&held), 0, "the hold outlives a completed run");
+
+        let acknowledged = |step_up: &str| -> Result<Value, ExecutorError> {
+            object(vec![
+                ("subject", Value::Str("incomplete".to_owned())),
+                ("user", Value::Str("user-1".to_owned())),
+                ("step_up", Value::Str(step_up.to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])
+        };
+        executor.commit_one("OwnerAcknowledged", acknowledged("")?)?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::ExitsOnly,
+            "no step-up evidence, no lift"
+        );
+        executor.commit_one("OwnerAcknowledged", acknowledged("assertion-1")?)?;
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Normal
+        );
+        let opening = executor.run(
             intent(
                 "01JABCDEFGHJKMNPQRSTVWXYZ1",
                 "agent-a",
-                Side::Sell,
-                Purpose::RiskExit,
+                Side::Buy,
+                Purpose::Open,
             )?,
             &ports,
         )?;
-        assert_eq!(submitted(&exit), 1, "while an exit still is (rule 13)");
-
-        let again = executor.run(Input::BrokerSnapshot(executor.holding_ten()?), &ports)?;
-        assert!(
-            !drafted(&again).contains(&"AgentModeApplied")
-                && !drafted(&again).contains(&"ReconciliationRun"),
-            "a later incomplete run restricts nothing new and is not published either: {:?}",
-            drafted(&again)
-        );
-        assert!(
-            !again
-                .iter()
-                .any(|effect| matches!(effect, Effect::Notify(_))),
-            "and alerts no more"
-        );
+        assert_eq!(submitted(&opening), 1, "an opening is submitted again");
         Ok(())
     }
 
@@ -1035,22 +1134,24 @@ mod tests {
             avg_entry_price: Price::parse("150")?,
         }];
         let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
-        let observed = run
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "BrokerPositionObserved" => {
-                    Some(draft)
-                }
-                _ => None,
-            })
-            .ok_or(ExecutorError::Unimplemented { story: "E7-3" })?;
-        let field = |name: &str| observed.payload.get(name).and_then(Value::as_str);
+        let observed = run.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "BrokerPositionObserved" => Some(draft),
+            _ => None,
+        });
+        let field = |name: &str| {
+            observed
+                .and_then(|draft| draft.payload.get(name))
+                .and_then(Value::as_str)
+        };
         assert_eq!(
             (field("broker_qty"), field("model_qty")),
             (Some("7"), Some("10")),
-            "each quantity under its own key"
+            "a `BrokerPositionObserved` is drafted, each quantity under its own key"
         );
-        assert_eq!(observed.payload.get("mismatch"), Some(&Value::Bool(true)));
+        assert_eq!(
+            observed.and_then(|draft| draft.payload.get("mismatch")),
+            Some(&Value::Bool(true))
+        );
         Ok(())
     }
 

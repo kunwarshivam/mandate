@@ -2166,7 +2166,6 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_fee_difference_is_alerted_and_never_adjusted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2351,7 +2350,6 @@ fn the_executor_never_lifts_a_reconciliation_pause_itself() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4662,7 +4660,6 @@ fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_power() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
