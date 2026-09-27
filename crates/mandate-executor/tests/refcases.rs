@@ -29,16 +29,10 @@
 //!
 //! A gate `decision` is **never** asserted: it is stream I's and stream J's (`mandate-risk`), and
 //! a case whose only expectations are decisions or accounting values is not driven here at all.
-//! The dropped cases, each with its reason:
-//!
-//! - `RC-08`, `RC-18`: settlement and buying power, stream F's and the gate's values only;
-//! - `RC-09`, `RC-09B`: the day-trade budget, gate decisions and counts only;
-//! - `RC-11`: trade and settlement dates and a mode, stream F's calendar only;
-//! - `RC-14::plain_add_blocked`: one gate decision;
-//! - `RC-17`: instrument claims and shared buying power, gate decisions only;
-//! - `RC-23`: a fractionable split residual, stream F's arithmetic only (coordinator ruling 6);
-//! - `RC-25`: close-window and session decisions only; steps 0–1 are one second apart and only
-//!   the gate's close-window rule tells them apart (PR #152, Decisions needed).
+//! The dropped cases, each with its reason, are [`DROPPED`], and
+//! `the_fixture_partition_is_driven_plus_dropped` checks that [`DRIVEN`] and [`DROPPED`] together
+//! cover every executor- or reconciliation-scoped case and variant in the fixture, so a case added
+//! to or renamed in the YAML fails here rather than leaving this suite silently.
 //!
 //! # How the steps become inputs
 //!
@@ -128,11 +122,16 @@ fn case(id: &str, variant: Option<&str>) -> Case {
             .cloned()
             .or(steps);
     }
+    let named = match variant {
+        Some(name) => format!("{id}::{name}"),
+        None => id.to_owned(),
+    };
+    assert!(
+        DRIVEN.contains(&named.as_str()),
+        "{named} is driven here but missing from `DRIVEN`, so the partition check cannot see it"
+    );
     Case {
-        id: match variant {
-            Some(name) => format!("{id}::{name}"),
-            None => id.to_owned(),
-        },
+        id: named,
         instruments: found.get("instruments").cloned().unwrap_or(Json::Null),
         initial,
         steps: steps.unwrap_or_else(|| panic!("{id} has no steps")),
@@ -1300,6 +1299,149 @@ impl Drive<'_> {
         );
         true
     }
+}
+
+/// Every case and variant this file drives, one test each, named as `case` names them.
+const DRIVEN: [&str; 16] = [
+    "RC-04",
+    "RC-06::protective_orders_kept_through_dividend",
+    "RC-07",
+    "RC-14",
+    "RC-14::add_via_bracket",
+    "RC-14::kill_switch",
+    "RC-14::passive_exit_becomes_oco_take_profit",
+    "RC-15",
+    "RC-15::external_order_detected",
+    "RC-15::status_not_active",
+    "RC-15::unexplained_403s",
+    "RC-20",
+    "RC-21",
+    "RC-22",
+    "RC-24",
+    "RC-24::presumed_halt_regular_session",
+];
+
+/// The cases the task brief assigned to this stream that are not driven, each with its reason:
+/// none of them expects a key this stream owns (coordinator ruling 7).
+const DROPPED: [(&str, &str); 9] = [
+    (
+        "RC-08",
+        "settlement and buying power: stream F's and the gate's values only",
+    ),
+    (
+        "RC-09",
+        "the day-trade budget: gate decisions and counts only",
+    ),
+    (
+        "RC-09B",
+        "the day-trade budget: gate decisions and counts only",
+    ),
+    (
+        "RC-11",
+        "trade and settlement dates and a mode: stream F's calendar only",
+    ),
+    ("RC-14::plain_add_blocked", "one gate decision"),
+    (
+        "RC-17",
+        "instrument claims and shared buying power: gate decisions only",
+    ),
+    (
+        "RC-18",
+        "settlement and buying power: stream F's and the gate's values only",
+    ),
+    (
+        "RC-23",
+        "a fractionable split residual: stream F's arithmetic only (coordinator ruling 6)",
+    ),
+    (
+        "RC-25",
+        "close-window and session decisions only; steps 0-1 are one second apart and only the \
+         gate's close-window rule tells them apart",
+    ),
+];
+
+/// The fixture's cases and variants as `case` names them, with each case's `scope` list.
+fn fixture_entries() -> BTreeMap<String, Vec<String>> {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../fixtures/refcases/trading-domain.json"
+    );
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let document: Json = serde_json::from_str(&text).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let mut entries = BTreeMap::new();
+    for found in document
+        .get("cases")
+        .and_then(Json::as_array)
+        .unwrap_or_else(|| panic!("{path} has no `cases` array"))
+    {
+        let id = text_of(found, "id").unwrap_or_else(|| panic!("a case in {path} has no id"));
+        let scope: Vec<String> = found
+            .get("scope")
+            .and_then(Json::as_array)
+            .map(|s| {
+                s.iter()
+                    .filter_map(Json::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default();
+        entries.insert(id.to_owned(), scope.clone());
+        for variant in found
+            .get("variants")
+            .and_then(Json::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            if let Some(name) = text_of(&variant, "name") {
+                entries.insert(format!("{id}::{name}"), scope.clone());
+            }
+        }
+    }
+    entries
+}
+
+/// The driven and dropped sets partition this stream's share of the fixture: each names a case or
+/// variant the fixture carries, no entry is both, and every executor- or reconciliation-scoped
+/// case and variant is one or the other. Not pending: it reads the fixture only.
+#[test]
+fn the_fixture_partition_is_driven_plus_dropped() {
+    let entries = fixture_entries();
+    let driven: BTreeSet<&str> = DRIVEN.iter().copied().collect();
+    let dropped: BTreeSet<&str> = DROPPED.iter().map(|(id, _)| *id).collect();
+    assert_eq!(driven.len(), DRIVEN.len(), "no case is driven twice");
+    assert_eq!(dropped.len(), DROPPED.len(), "no case is dropped twice");
+    assert!(
+        driven.is_disjoint(&dropped),
+        "a case is driven or dropped, never both: {:?}",
+        driven.intersection(&dropped).collect::<Vec<_>>()
+    );
+    for (id, reason) in DROPPED {
+        assert!(!reason.is_empty(), "{id} is dropped without a reason");
+    }
+    for id in driven.iter().chain(dropped.iter()) {
+        assert!(
+            entries.contains_key(*id),
+            "{id} is named here and the fixture does not carry it"
+        );
+    }
+    let owned: BTreeSet<&str> = entries
+        .iter()
+        .filter(|(_, scope)| {
+            scope
+                .iter()
+                .any(|s| s == "executor" || s == "reconciliation")
+        })
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let missing: Vec<&&str> = owned
+        .iter()
+        .filter(|id| !driven.contains(**id) && !dropped.contains(**id))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "the fixture carries executor or reconciliation cases this suite neither drives nor \
+         drops: {missing:?}"
+    );
 }
 
 /// Drives one case's steps against a fresh executor and asserts the keys this stream owns.

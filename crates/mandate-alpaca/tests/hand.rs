@@ -392,10 +392,16 @@ fn the_parser_accepts_unknown_extra_fields() {
         );
     }
     let text = serde_json::to_vec(&body).expect("re-serialises");
-    wire::order(&text).expect(
+    let parsed = wire::order(&text).expect(
         "a later recording carries more than a hand-built body, and the permissiveness is \
          exactly where it is safe: an unknown **status** still fails loudly",
     );
+    assert_eq!(
+        parsed.broker_order_id, "e02fc2d2-0ff3-444f-a0ab-6253613302fe",
+        "the extra field is ignored and the recording's own fields still arrive"
+    );
+    assert_eq!(parsed.qty.to_string(), "1");
+    assert_eq!(parsed.status, "accepted");
 }
 
 #[tokio::test]
