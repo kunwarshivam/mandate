@@ -2049,7 +2049,6 @@ proptest! {
     /// the band is zero: the same 20000 is no difference and pauses nobody, and any cent more is a
     /// difference that alerts.
     #[test]
-    #[ignore = "pending E7-3"]
     fn cash_within_the_band_never_pauses_and_outside_it_always_alerts(
         cents in 0u64..500,
     ) {
@@ -2325,7 +2324,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 19] = [
+        const INTERPRETED: [&str; 21] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2345,6 +2344,8 @@ proptest! {
             "CompensatingEvent",
             "BrokerPositionObserved",
             "ReconciliationRun",
+            "AccountSnapshotRecorded",
+            "OwnerAcknowledged",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)
