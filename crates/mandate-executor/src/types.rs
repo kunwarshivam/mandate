@@ -373,10 +373,76 @@ pub struct Difference {
     /// The client order id, fill id, or instrument the difference is about, as text, so a payload
     /// can carry it without the type.
     pub subject: String,
+    /// Whether the broker's value was adopted, read through [`Difference::adopted`]. Private, so
+    /// nothing outside this module writes a `Difference` literal or assigns the flag: every one is
+    /// made by [`Difference::unexplained`] or [`Difference::adopting`], whose kinds hold §11's
+    /// on-mismatch column in their types (#205 review, round 1, finding 3, and round 2, major 2).
+    adopted: bool,
+}
+
+/// The rows §11 never adopts: a difference of one of these kinds is recorded and alerted, and the
+/// ledger keeps its own value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Unexplained {
+    ExternalActivity,
+    Position,
+    Cash,
+    Fee,
+}
+
+/// The rows §11 adopts: the broker's order state, and a fill the ledger had not seen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Adopted {
+    OrderState,
+    MissingFill,
+}
+
+impl From<Unexplained> for DifferenceKind {
+    fn from(kind: Unexplained) -> Self {
+        match kind {
+            Unexplained::ExternalActivity => Self::ExternalActivity,
+            Unexplained::Position => Self::Position,
+            Unexplained::Cash => Self::Cash,
+            Unexplained::Fee => Self::Fee,
+        }
+    }
+}
+
+impl From<Adopted> for DifferenceKind {
+    fn from(kind: Adopted) -> Self {
+        match kind {
+            Adopted::OrderState => Self::OrderState,
+            Adopted::MissingFill => Self::MissingFill,
+        }
+    }
+}
+
+impl Difference {
+    /// A difference the ledger keeps: an adoptable kind has no [`Unexplained`] variant, so this
+    /// constructor cannot be handed one.
+    pub(crate) fn unexplained(kind: Unexplained, subject: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            subject: subject.into(),
+            adopted: false,
+        }
+    }
+
+    /// A difference whose broker value was adopted, of a kind §11 adopts.
+    pub(crate) fn adopting(kind: Adopted, subject: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            subject: subject.into(),
+            adopted: true,
+        }
+    }
+
     /// Whether the broker's value was adopted. Only [`DifferenceKind::OrderState`] and
     /// [`DifferenceKind::MissingFill`] are ever adopted (trading-domain spec §11's on-mismatch
-    /// column, task brief interpretation 13).
-    pub adopted: bool,
+    /// column, task brief interpretation 13), and no assignment can change it.
+    pub fn adopted(&self) -> bool {
+        self.adopted
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -827,4 +893,37 @@ pub struct ExecutorConfig {
     pub stop_watchdog_s: i64,
     pub exit_step_s: i64,
     pub gtc_expiry_days: u32,
+}
+
+/// §11's on-mismatch column, held by the constructors: every [`Unexplained`] kind is one
+/// [`DifferenceKind::adoptable`] refuses, every [`Adopted`] kind one it accepts, and each
+/// constructor records what its kind says.
+#[cfg(test)]
+mod difference_tests {
+    use super::{Adopted, Difference, DifferenceKind, Unexplained};
+
+    #[test]
+    fn a_difference_is_adopted_exactly_when_its_kind_is_adoptable() {
+        for kind in [
+            Unexplained::ExternalActivity,
+            Unexplained::Position,
+            Unexplained::Cash,
+            Unexplained::Fee,
+        ] {
+            let difference = Difference::unexplained(kind, "s");
+            assert!(!DifferenceKind::from(kind).adoptable(), "{kind:?}");
+            assert_eq!(
+                (difference.kind, difference.adopted()),
+                (DifferenceKind::from(kind), false)
+            );
+        }
+        for kind in [Adopted::OrderState, Adopted::MissingFill] {
+            let difference = Difference::adopting(kind, "s");
+            assert!(DifferenceKind::from(kind).adoptable(), "{kind:?}");
+            assert_eq!(
+                (difference.kind, difference.adopted()),
+                (DifferenceKind::from(kind), true)
+            );
+        }
+    }
 }
