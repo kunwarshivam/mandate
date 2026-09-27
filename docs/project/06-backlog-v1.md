@@ -371,6 +371,28 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
 
+From the independent review of stream H's tests PR (`mandate-builder`, [#175](https://github.com/kunwarshivam/mandate/pull/175)
+round 2, verdict approve), each deferred by the freeze rule and none of them a gap in what the tests
+assert:
+
+- **Floor the accumulate goal clip per bound, not as a whole.** `properties::accumulate_coverage_reached`
+  requires a goal clip; it does not require each of §8.3 step 4's three bounds to have been the binding
+  one. The review measured them over 256 cases: the remaining quantity bound 151 times, the spend 7 and
+  the average price 2. A floor at 2 in 256 would be flaky across seeds, so the fix is not a counter on
+  its own — the `Accumulate` shape has to make each bound bind reliably first, which today it cannot,
+  because it always sets `max_avg_price` to the ask and so leaves `a − max_avg × β` at zero and the
+  average-price **clip** off (only its guard runs). Each bound is pinned exactly by
+  `hand::accumulate_clipped_to_the_remaining_target_quantity`, `hand::accumulate_clipped_by_max_spend`
+  and `hand::accumulate_clipped_by_max_avg_price`, so this buys explicit fuzz evidence, not new coverage.
+- **Carry fees in the rational sizing oracle.** It takes `a = ask` and `β = 1`, so the fee arithmetic of
+  §8.3 step 4 is pinned by `hand::accumulate_with_fees_counts_the_spend_and_the_quantity_received` and
+  `MC-B28` rather than by the oracle. Widening the oracle means widening the generator to fee rates,
+  which changes the rational magnitudes the `i128` oracle carries; worth doing deliberately.
+- **The coverage counters are process-global statics.** Under `cargo test`'s shared process another
+  property's cases could feed the gate. `cargo nextest` gives each test its own process and is what
+  both `cargo xtask check` and CI run, so the gate is sound as used; a per-run counter would make it
+  sound under either runner.
+
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
 
