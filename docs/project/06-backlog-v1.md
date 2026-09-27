@@ -745,3 +745,25 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
   asserts only times inside the window, so it passes against a `close_window` that is always true
   (#228 review, round 1, minor 3; E6-6's bug list when it lands).
+
+From E6-2's builder slice (stream H; found while implementing §8.3, not by a review):
+
+- **§8.3 step 2's "whole position (minus working exits)" has no input (stream H, with stream I).**
+  `AccountSnapshot` carries no working exit quantity, so `propose` sells the whole position, as
+  `reference/mandate/ref.py` does, and a second discretionary exit while one is working is proposed at
+  the full quantity. Until the field lands, the backstop is the risk gate's trading spec §5.3 rule 4
+  (`sell_exceeds_available`, merged in #221), which binds every reduction and denies the over-sell,
+  so the builder cannot turn a position short on its own. The field arrives by a DEC-77 tests
+  correction ahead of the slice that consumes it (every `AccountSnapshot` literal in
+  `crates/mandate-builder/tests/` names it); that slice then subtracts working exits in
+  `discretionary_exit` and holds when nothing is left to sell (#234 review, round 1, M1).
+- **The runtime filters model outputs by instrument before `combine` (stream I).** `combine` refuses
+  the whole call on an output for another instrument (`output_instrument_mismatch`, DEC-130), the exit
+  branch included, so handing it a tick's unfiltered output buffer would stop a discretionary exit
+  the way a crossed quote did before #234 moved that refusal to the buy path. E6-1's evaluation loop
+  passes only the outputs whose `instrument_id` is the instrument being sized, with a test that a
+  foreign output in the buffer never blocks an exit (#234 review, round 1, m2).
+- **`BuilderError::Unimplemented` and `NumError::Unimplemented` are now constructed by nothing.**
+  Both stay because `tests/vocabulary.rs` and `num::error_codes_are_stable` pin their codes, and an
+  implementation PR may not edit a test. Drop each variant with its row in the next tests correction
+  that touches those files (E6-2; the `NumError` half is the E4-2 row above).
