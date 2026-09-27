@@ -141,10 +141,10 @@ code, re-check all of them, not only the one a finding named.
 | EI-5 | **Re-validation only skips.** A grant acts only in states where the version equals the bound version, the effective mode is `normal`, the instrument is unrestricted and in the working universe, the re-classification is not `deny` and not an `ask` by a different trigger, the gate dry run allows the bound order, and the price drift is inside the band |
 | EI-6 | **Terminal is terminal.** Every approval ends in exactly one of an admitted skip (`ApprovalResponded`, `verdict: skipped`, `result: admitted`), `ApprovalTimedOut`, `ApprovalCanceled`, or `ApprovalRevalidated` (`act` or `skip`); a `refused` response and a `counted` grant are not terminal; nothing after the terminal event changes the outcome |
 | EI-7 | No approval outlives the mode or the version that permitted it: after exits-only or stricter, or any `MandateVersionApplied`, no approval is pending (DEC-131 items 23 and 25(b)), and a response processed in the same step or batch as the cancelling tightening, version, or kill switch is never admitted (closing DEC-131 item 25(j)) |
-| EI-8 | **Risk reduction is never behind an approval.** No exit, protective order, owner exit, risk exit, flatten, or kill switch waits on, is ordered after, or is cancelled by any approval state; no grant is acted on after a kill switch in any input order; pause needs no step-up (PX-4); and a kill switch committed with fresh evidence is applied however late it is processed (rules 2 and 13; DEC-158) |
+| EI-8 | **Risk reduction is never behind an approval.** No exit, protective order, owner exit, risk exit, flatten, or kill switch waits on, is ordered after, or is cancelled by any approval state; no grant is acted on after a kill switch in any input order; pause needs no step-up (PX-4); and a kill switch is applied however late it is processed, with or without valid step-up evidence: without it, it still stops the agent and flattens as an automated flatten does (waiting for the regular session for equities, MC-F04) (rules 2 and 13; DEC-158 option (c)) |
 | EI-9 | Every notification payload is an opaque approval ID plus one text from a closed set; it holds no instrument, side, quantity, price, order value, score, thesis, agent name, rule name, or deadline (rule 6, PX-6, PX-7) |
 | EI-10 | **Only a human approves.** A response is admitted only from a control-stream event whose `actor.kind` is `user`, whose responder is in the mandate's `autonomy.approval.approvers`, and, once M8's connected clients can propose (E10-6), which does not come from a connected client at all. The runtime never constructs a grant, and no agent, system, broker, platform-operator, or connected-client identity can (DEC-141 item (2), DEC-148). **Pinned for E10-6:** a connected client's control-stream events must carry an actor that is not `user` (a `client` kind added to journal §3 by E10-6's spec change) or a `client_id` that admission refuses; either keeps this check sufficient |
-| EI-11 | Every admitted grant, resume, Stop, acknowledgment, owner exit, and kill switch carries step-up evidence; for a grant, resume, Stop, and acknowledgment it was authenticated within the 300 s before the moment the runtime processes it, and for an owner exit and a kill switch within the 300 s before the moment the owner committed it; an assertion id is used once per workspace; evidence of method `cli_confirm` is refused for a `live` environment by type |
+| EI-11 | Every admitted grant, resume, Stop, acknowledgment, and owner exit, and every kill-switch privilege beyond the stop, carries step-up evidence; for a grant, resume, Stop, and acknowledgment it was authenticated within the 300 s before the moment the runtime processes it, and for an owner exit and a kill-switch privilege within the 300 s before the moment the owner committed it; a kill switch without valid evidence is never refused, and applies as the stop and flatten of DEC-158 option (c); an assertion id is used once per workspace; evidence of method `cli_confirm` is refused for a `live` environment by type |
 | EI-12 | Replay: the same journal gives the same approval outcomes, and folding the control stream twice acts once |
 | EI-13 | **Asking is bounded.** At most one pending risk-adding approval per agent; at most `ASK_BUDGET_PER_RISK_DAY` requests per agent per risk day; after a skip by the owner, the same instrument is not asked again until the next risk day or the next applied version; after a timeout, not within the next `timeout_s` |
 | EI-14 | **What the owner saw is what is bound.** A response is admitted only if it repeats the canonical content hash of the request it answers |
@@ -438,13 +438,15 @@ pub enum StepUpMethod {
 ```
 
 - **Needs step-up:** approve (one assertion per approval, PX-7 (b), never one gesture for several),
-  resume, the owner Stop, acknowledge (mandate §5.8, trading §11), owner exit, and **the kill switch
-  in every scope**. The kill switch's step-up is mandate spec §6.1's: its `owner_exit` row covers
+  resume, the owner Stop, acknowledge (mandate §5.8, trading §11), owner exit, and the kill switch's **privileges beyond the stop**. Under DEC-158 option (c), accepted by
+  the founder, a kill switch in any scope applies **with or without valid step-up**: without it, it
+  still stops the agent and flattens as an automated flatten does (waiting for the regular session for equities, MC-F04); only the owner-exit privileges (selling equities outside the regular session at a
+  confirmed bid, DEC-58 and DEC-66) need valid step-up. The requirement it relaxes is mandate spec §6.1's: its `owner_exit` row covers
   "The owner closes a position or triggers a kill switch" with "The owner's instruction (step-up)",
   and PX-4 (DEC-135) opens with "The spec requires step-up for an owner exit (so for the kill
   switch)". An earlier draft of this brief exempted it on rule 13 alone; that would weaken an
-  authentication requirement, which DEC-79 reserves for the founder, so the trade-off is **DEC-158,
-  Proposed**, and until the founder answers the design uses step-up.
+  authentication requirement, which DEC-79 reserves for the founder, so the trade-off went to the founder as
+  **DEC-158**, answered with option (c).
 - **Which reading of PX-4 the owner Stop gets:** PX-4 (b) as accepted, "Pause needs none; resume and
   Stop need step-up", with Stop read as DEC-136's owner Stop (terminal, flat or release), which PX-4
   says "gets the same check as the kill switch". Both need `CliConfirm`.
@@ -452,7 +454,7 @@ pub enum StepUpMethod {
   always-available brake: it needs nothing, cancels every pending approval, and stops every new
   risk-adding proposal (DEC-131 items 10 and 23).
 - **How the kill switch keeps rule 13's "always available" while it needs step-up** (the
-  mitigations DEC-158 keeps whichever way the founder decides):
+  mitigations DEC-158 keeps alongside option (c)):
   1. `CliConfirm` is **local and cannot fail except by a mistyped code**: the kill switch's code is
      derived on the owner's host from the scope typed and the control stream's head, with no network,
      no identity provider, no runtime, and no model state (rule 13: "does not depend on model state").
@@ -497,7 +499,7 @@ channel"). If the runtime is down, the event waits in the journal and is judged 
 | `mandate agent pause <agent>` | `OwnerCommandIssued { command: pause }` | none | PX-4 |
 | `mandate agent resume <agent>` | `OwnerCommandIssued { command: resume }` | `CliConfirm` | Lifts only the owner's own pause; never a latched limit or a hold (MI-3) |
 | `mandate agent stop <agent> [--release]` | `OwnerCommandIssued { command: stop }` | `CliConfirm` | DEC-136's flat-or-release precondition is the runtime's; the CLI shows the warning and records that it did |
-| `mandate agent kill (<agent> \| --connection <c> \| --workspace) --code <code> [--yes]` | `OwnerCommandIssued { command: kill_switch, scope, step_up }` | `CliConfirm`, computed locally (DEC-158, Proposed) | Always available: the code needs no network, runtime, or model; freshness is judged at commit, so a late read still applies; each runtime honours its own scope from folded state (E6-5); `--yes` skips the scope prompt, never the code |
+| `mandate agent kill (<agent> \| --connection <c> \| --workspace) --code <code> [--yes]` | `OwnerCommandIssued { command: kill_switch, scope, step_up }` | `CliConfirm`, computed locally; without valid evidence it still stops and flattens (DEC-158 option (c)) | Always available: the code needs no network, runtime, or model; freshness is judged at commit, so a late read still applies; each runtime honours its own scope from folded state (E6-5); `--yes` skips the scope prompt, never the code |
 | `mandate agent exit <agent> <instrument> [--confirm-bid <bid> --bid-size <n> --floor <p>]` | `OwnerCommandIssued { command: owner_exit, confirmation }` | `CliConfirm` | Outside the regular session the displayed bid, bid size, and floor must be confirmed (DEC-58, DEC-66); the runtime journals `OwnerExitRequested` |
 | `mandate agent acknowledge <agent> <event>` | `OwnerAcknowledged` (already catalogued on the control stream) with the step-up evidence | `CliConfirm` | The executor copies it into the account stream (#205); the semantics of each acknowledgment stay with the stream that owns it, and M7 adds no event for it |
 
@@ -685,7 +687,7 @@ results table.
 
 | Stage | Branch | Contents |
 |---|---|---|
-| 1. **Brief** (this PR) | `agent/m7-brief` | This document, DEC-155 and DEC-156, the Proposed DEC-158, their Reserved-identifiers row, the backlog's E8 rows, and the tracker's Claims row. No code, no spec, no schema; CI takes the documentation-only short path (DEC-112) |
+| 1. **Brief** (this PR) | `agent/m7-brief` | This document, DEC-155 and DEC-156, DEC-158 (accepted by the founder as option (c)), their Reserved-identifiers row, the backlog's E8 rows, and the tracker's Claims row. No code, no spec, no schema; CI takes the documentation-only short path (DEC-112) |
 | 2. **Spec** (ES-22) | `agent/m7-spec` | Mandate spec §6.4 (the content list's three factual additions, the admission and re-validation order, drift, lateness, the ask budget and suppression, quiet hours as push-only, step-up v0), mandate spec §6.1 (the sentence reconciling "never denied" with the refusal of an owner exit whose step-up evidence is stale, and the kill switch's step-up line PX-4 asked for, as DEC-158 leaves it), journal spec §9 (the events of "Journal events"), the MC-E family through the reference implementation with its fuzz and mutants, and no `status.toml` row, because a case absent from `status.toml` is pending (DEC-77 item 1). Cites DEC-155 and DEC-156; no code. The case files say a new case needs the founder's approval; like Track C's cases (DEC-117 to DEC-126), they land under DEC-79 with the founder's veto after the fact (Decisions needed 4) |
 | 3. **Tests** | `agent/m7-tests` | The `mandate-approval` skeleton with every function returning its `Unimplemented` error, its `layers.toml` entry and CODEOWNERS line, the MC-E harness, the property tests with their oracles, the runtime tests for the grant path (retiring `Input::ApprovalResponse`), the CLI tests, and the planted-bug report. Pending tests carry `#[ignore = "pending E8-3"]` (or E8-1, E8-2) and fail on the stubs |
 | 4. **Implementation**, split | `agent/m7-impl-approval`, `agent/m7-impl-runtime`, `agent/m7-impl-cli` | (a) `mandate-approval`; (b) the runtime's grant path and the control-stream tail; (c) the CLI commands and the shell's notifier driver (with stream L). Test files change only by deleting `#[ignore]` lines (DEC-77 item 2) |
@@ -776,8 +778,8 @@ and v0 proceeds with the most conservative option of each; the others are for th
    is a separate M7 shell module in the same crate under stream L's review.
 6. **DEC-158, accepted by the founder (option (c)): should the kill switch need step-up?** Mandate spec §6.1 and
    PX-4 say yes; rule 13 says the kill switch "is always available", and a step-up that fails would
-   block it. Until the founder answers, v0 uses step-up, with the four mitigations of "Step-up
-   authentication" kept whichever way the answer goes. The options are in the DEC-158 row.
+   block it. The founder chose option (c): the kill switch fails open for the stop and flatten and
+   closed for the owner-exit privileges, with the four mitigations of "Step-up authentication" kept.
 
 `xtask/layers.toml` and `CODEOWNERS` are founder-owned: the tests PR adds `mandate-approval`'s
 entry and line under DEC-79, open to the founder's veto (DEC-144's pattern).
@@ -833,7 +835,7 @@ Stop and ask the coordinator rather than working around any of these:
 
 ## Definition of done
 
-The **brief PR** is done when this document, DEC-155, DEC-156, the Proposed DEC-158, their
+The **brief PR** is done when this document, DEC-155, DEC-156, DEC-158 (accepted, option (c)), their
 Reserved-identifiers row, the backlog's E8 annotation, and the tracker's Claims row are in; the docs checks are green;
 no `crates/`, `schemas/`, `docs/specs/`, `reference/`, `fixtures/`, or `Cargo.*` path is touched;
 and an independent review on a different model has passed it.
