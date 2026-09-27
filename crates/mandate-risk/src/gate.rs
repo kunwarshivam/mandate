@@ -10,9 +10,9 @@
 //! purpose passes a check that does not exist yet (`AGENTS.md` rule 13: the broker is the
 //! backstop), exactly as it will pass most of them once they do.
 
-use mandate_num::Qty;
-
 use std::collections::BTreeSet;
+
+use mandate_num::Qty;
 
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
@@ -279,7 +279,8 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
 /// crypto account denying an opening, a protective leg above the position crossing zero, the
 /// partial gate failing closed, a value exactly at each limit passing, and the account's own 1×
-/// bound; and, for E6-9, every row of the halt and market-order table.
+/// bound; for E6-9, every row of the halt and market-order table; and for E6-7, every row of the
+/// eligibility floor and where it sits in check 2.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -289,6 +290,7 @@ mod tests {
 
     use super::*;
     use crate::spec_types::{GoalState, RiskLimits, RiskSnapshot, ValidatedMandate};
+    use crate::floor;
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
         ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass, GroupId,
@@ -310,7 +312,12 @@ mod tests {
 
     impl Owned {
         fn decide(&self) -> Result<Decision, GateError> {
-            evaluate(&GateInput {
+            self.with_input(evaluate)?
+        }
+
+        /// `f` over this scenario's inputs, at the fixture's `now`.
+        fn with_input<T>(&self, f: impl FnOnce(&GateInput<'_>) -> T) -> Result<T, GateError> {
+            Ok(f(&GateInput {
                 now: UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?,
                 pass: GatePass::First,
                 config: &self.config,
@@ -323,7 +330,7 @@ mod tests {
                 conduct: &ConductState::default(),
                 universe: &self.universe,
                 proposed: &self.proposed,
-            })
+            }))
         }
 
         /// A sell of the whole position of 10, from the origin given.
@@ -341,8 +348,8 @@ mod tests {
         AssetId::new(text).map_err(|_| GateError::InstrumentUnknown)
     }
 
-    /// An opening buy of 10 × 100 in instrument `a`, in the universe, that every check this PR
-    /// implements allows.
+    /// An opening buy of 10 × 100 in instrument `a`, in the universe, of an instrument that passes
+    /// the whole eligibility floor, that every check this PR implements allows.
     fn allowing() -> Result<Owned, GateError> {
         let usd = Usd::parse;
         let fraction = Fraction::parse;
@@ -424,16 +431,16 @@ mod tests {
         let instrument = InstrumentSnapshot {
             instrument: a.clone(),
             asset_class: AssetClass::UsEquity,
-            exchange: None,
+            exchange: Some(crate::Exchange::Nasdaq),
             status_active: true,
             tradable: true,
             fractionable: false,
             ipo: false,
             ptp_no_exception: false,
             etp: EtpClass::Plain,
-            etp_classified_at: None,
-            prior_close: None,
-            median_dollar_volume_20d: None,
+            etp_classified_at: Some(UtcNanos::parse_rfc3339("2026-09-21T00:00:00Z")?),
+            prior_close: Some(Price::parse("100")?),
+            median_dollar_volume_20d: Some(usd("90000000")?),
             median_dollar_volume_30d: None,
             min_order_size: Qty::parse("1")?,
             halted: false,
@@ -519,7 +526,7 @@ mod tests {
             d.checks,
             [
                 CheckOutcome::Passed(Check::AccountAndMode),
-                CheckOutcome::NotReached(Check::UniverseAndLimits),
+                CheckOutcome::Passed(Check::UniverseAndLimits),
                 CheckOutcome::NotReached(Check::SessionAndHalt),
                 CheckOutcome::NotReached(Check::OrderConstraints),
                 CheckOutcome::NotReached(Check::MarkAndCollar),
@@ -1028,6 +1035,222 @@ mod tests {
             }
         }
         assert_eq!(rows, 480, "every row of the table ran");
+        Ok(())
+    }
+
+    /// One §3.2 row: every input the floor reads, each over the values that sit on, just past and
+    /// well inside its bound, and absent.
+    #[derive(Debug, Clone, Copy)]
+    struct FloorRow {
+        crypto: bool,
+        status: u8,
+        exchange: u8,
+        item3: u8,
+        price: u8,
+        volume_20d: u8,
+        etp: EtpClass,
+        permission: u8,
+        classified: u8,
+        volume_30d: u8,
+    }
+
+    /// 0 comfortably passes, 1 sits exactly on the floor (passes), 2 is one unit under it, 3 is
+    /// absent.
+    fn figure(level: u8, ok: &str, exact: &str, under: &str) -> Result<Option<Usd>, GateError> {
+        Ok(match level {
+            0 => Some(Usd::parse(ok)?),
+            1 => Some(Usd::parse(exact)?),
+            2 => Some(Usd::parse(under)?),
+            _ => None,
+        })
+    }
+
+    /// The floor's oracle, transcribed from §3.2's list and the three readings the PR raises:
+    /// `status`/`tradable` report `not_in_working_universe`, `ptp_no_exception` reports
+    /// `ipo_not_tradable`, the price and 20-day volume floors bind US equities and the 30-day one
+    /// crypto; and item 6 fails closed on an unclassified ETP and on a stale or undated
+    /// classification.
+    fn floor_oracle(r: FloorRow) -> Option<ReasonCode> {
+        let fails = |level: u8| level >= 2;
+        if r.status != 0 {
+            return Some(ReasonCode::NotInWorkingUniverse);
+        }
+        if !r.crypto && r.exchange != 0 {
+            return Some(ReasonCode::IneligibleExchange);
+        }
+        if r.item3 != 0 {
+            return Some(ReasonCode::IpoNotTradable);
+        }
+        if r.crypto {
+            return fails(r.volume_30d).then_some(ReasonCode::BelowLiquidityFloor);
+        }
+        if fails(r.price) {
+            return Some(ReasonCode::BelowPriceFloor);
+        }
+        if fails(r.volume_20d) {
+            return Some(ReasonCode::BelowLiquidityFloor);
+        }
+        let permitted = r.permission == 0;
+        let complex = matches!(r.etp, EtpClass::Complex | EtpClass::Unclassified);
+        (fails(r.classified) || (complex && !permitted))
+            .then_some(ReasonCode::LeveragedEtpNotEnabled)
+    }
+
+    fn floor_of(o: &mut Owned, r: FloorRow) -> Result<Option<ReasonCode>, GateError> {
+        let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
+        let i = &mut o.instrument;
+        i.asset_class = if r.crypto {
+            AssetClass::Crypto
+        } else {
+            AssetClass::UsEquity
+        };
+        i.status_active = r.status != 1;
+        i.tradable = r.status != 2;
+        i.exchange = match r.exchange {
+            0 => Some(crate::Exchange::Nasdaq),
+            1 => Some(crate::Exchange::Otc),
+            _ => None,
+        };
+        i.ipo = r.item3 == 1;
+        i.ptp_no_exception = r.item3 == 2;
+        i.prior_close = match r.price {
+            0 => Some(Price::parse("100")?),
+            1 => Some(Price::parse("5")?),
+            2 => Some(Price::parse("4.999999999")?),
+            _ => None,
+        };
+        i.median_dollar_volume_20d =
+            figure(r.volume_20d, "90000000", "1000000", "999999.999999999")?;
+        i.median_dollar_volume_30d =
+            figure(r.volume_30d, "90000000", "1000000", "999999.999999999")?;
+        i.etp = r.etp;
+        let age = match r.classified {
+            0 => Some(1),
+            1 => Some(604_800),
+            2 => Some(604_801),
+            _ => None,
+        };
+        i.etp_classified_at = age
+            .map(|secs| UtcNanos::from_parts(now.secs() - secs, 0))
+            .transpose()?;
+        o.mandate = ValidatedMandate::from_validated_parts(
+            o.mandate.risk().clone(),
+            GoalState::Running,
+            matches!(r.permission, 0 | 1),
+            matches!(r.permission, 0 | 2),
+        );
+        o.with_input(floor::eligibility)?
+            .map(|stop| stop.map(|(verdict, code)| {
+                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                code
+            }))
+    }
+
+    /// Every row of §3.2 against [`floor_oracle`]: 2 asset classes × 3 statuses × 3 exchanges × 3
+    /// item-3 states × 4 prices × 4 20-day volumes × 3 ETP classes × 4 permissions × 4
+    /// classification ages × 4 30-day volumes = 165888 rows. It pins the list order, `≥` at every
+    /// floor, an absent figure failing, the ETP rule needing both the mandate's switch and the
+    /// disclosure, the classification age failing closed only when strictly older, and which items
+    /// bind which asset class.
+    #[test]
+    fn the_floor_matches_the_oracle_on_every_row() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        let mut rows = 0_u32;
+        let mut denied = BTreeSet::new();
+        for crypto in [false, true] {
+            for status in 0..3 {
+                for exchange in 0..3 {
+                    for item3 in 0..3 {
+                        for price in 0..4 {
+                            for volume_20d in 0..4 {
+                                for etp in [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified] {
+                                    for permission in 0..4 {
+                                        for classified in 0..4 {
+                                            for volume_30d in 0..4 {
+                                                let r = FloorRow {
+                                                    crypto,
+                                                    status,
+                                                    exchange,
+                                                    item3,
+                                                    price,
+                                                    volume_20d,
+                                                    etp,
+                                                    permission,
+                                                    classified,
+                                                    volume_30d,
+                                                };
+                                                let got = floor_of(&mut o, r)?;
+                                                assert_eq!(got, floor_oracle(r), "{r:?}");
+                                                denied.extend(got);
+                                                rows = rows.saturating_add(1);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (rows, denied.len()),
+            (165_888, 6),
+            "every row ran, and every floor code was reached"
+        );
+        Ok(())
+    }
+
+    /// The floor sits inside check 2, after the working universe and before concentration, and
+    /// never touches an exit: outside the universe on an OTC listing reports the universe; an OTC
+    /// listing over the cap reports the exchange; and a risk exit in an instrument failing every
+    /// item is allowed.
+    #[test]
+    fn the_floor_runs_after_the_universe_before_concentration_and_never_on_an_exit()
+    -> Result<(), GateError> {
+        let otc = |mut o: Owned| {
+            o.instrument.exchange = Some(crate::Exchange::Otc);
+            o.instrument.status_active = false;
+            o.instrument.prior_close = None;
+            o
+        };
+        let outside = otc(outside_the_universe(allowing()?)).decide()?;
+        let mut over_cap = otc(allowing()?);
+        over_cap.instrument.status_active = true;
+        over_cap.proposed.qty = Qty::parse("100")?;
+        let over_cap = over_cap.decide()?;
+        let exit = otc(allowing()?.selling(Origin::RiskEngine)?).decide()?;
+        assert_eq!(
+            [
+                (outside.verdict, outside.reason, outside.checks.get(1).cloned()),
+                (over_cap.verdict, over_cap.reason, over_cap.checks.get(1).cloned()),
+                (exit.verdict, exit.reason, None),
+            ],
+            [
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::NotInWorkingUniverse),
+                    Some(CheckOutcome::Failed(
+                        Check::UniverseAndLimits,
+                        ReasonCode::NotInWorkingUniverse
+                    ))
+                ),
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::IneligibleExchange),
+                    Some(CheckOutcome::Failed(
+                        Check::UniverseAndLimits,
+                        ReasonCode::IneligibleExchange
+                    ))
+                ),
+                (Verdict::Allow, None, None),
+            ],
+            "universe, then floor, then concentration; an exit is allowed regardless of the floor"
+        );
+        assert_eq!(
+            over_cap.computed.cap, None,
+            "the floor denied before concentration computed its cap"
+        );
         Ok(())
     }
 
