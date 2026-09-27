@@ -85,18 +85,16 @@ fn started(
     state.epoch = Some(epoch);
     state.started = true;
     let mut batch = Batch::new(state, ports)?;
-    let unresolved: Vec<_> = batch
-        .view
-        .orders
-        .values()
-        .filter(|order| {
-            matches!(
-                order.state,
-                OrderState::Submitting | OrderState::Unknown | OrderState::PendingCancel
-            )
-        })
-        .map(|order| order.client_order_id.clone())
-        .collect();
+    let unresolved: Vec<_> =
+        batch
+            .view
+            .unacknowledged()
+            .into_iter()
+            .chain(batch.view.orders.values().filter(|order| {
+                matches!(order.state, OrderState::Unknown | OrderState::PendingCancel)
+            }))
+            .map(|order| order.client_order_id.clone())
+            .collect();
     for id in unresolved {
         batch.broker(BrokerRequest::GetOrderByClientId(id));
     }

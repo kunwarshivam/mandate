@@ -191,7 +191,10 @@ impl ExecutorState {
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
-        vec![]
+        self.orders
+            .values()
+            .filter(|order| order.state == crate::types::OrderState::Submitting)
+            .collect()
     }
 
     /// Reservations by client order id. An `Unknown` order reserves its maximum cost, and only
