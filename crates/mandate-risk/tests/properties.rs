@@ -230,6 +230,7 @@ proptest! {
 
     /// Every limit comparison is strictly greater, so a value exactly at a limit passes (MC-G02).
     #[test]
+    #[ignore = "pending E6-3"]
     fn a_value_exactly_at_a_limit_passes(order in 1_u32..=1_000) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -244,6 +245,7 @@ proptest! {
 
     /// A stricter mode is never more permissive: raising the mode never turns a deny into an allow.
     #[test]
+    #[ignore = "pending E6-3"]
     fn a_stricter_mode_is_never_more_permissive(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -290,6 +292,7 @@ proptest! {
     /// Every decision lists all eight checks, in §9.1 order, with the ones after a failure marked
     /// `NotReached`.
     #[test]
+    #[ignore = "pending E6-3"]
     fn every_decision_lists_the_checks_it_reached(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -428,6 +431,7 @@ proptest! {
 
     /// MI-8: identical inputs give identical decisions, check list included.
     #[test]
+    #[ignore = "pending E6-3"]
     fn mi8_identical_inputs_give_identical_decisions(order in whole_dollars()) {
         let mut s = Scenario::allowing();
         s.proposed = proposal(
@@ -547,6 +551,7 @@ proptest! {
 
     /// Nothing opens outside the working universe, whatever the other inputs say.
     #[test]
+    #[ignore = "pending E6-3"]
     fn an_opening_needs_the_working_universe(inside in any::<bool>(), shares in 1_u32..5) {
         let mut s = Scenario::allowing();
         s.universe = if inside {

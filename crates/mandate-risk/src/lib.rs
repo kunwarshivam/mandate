@@ -37,9 +37,13 @@
 //! exemption by describing its own order.
 //!
 //! E6-3 lands in three stacked PRs. This one is [`evaluate`]'s spine: the eight checks in order,
-//! purpose assignment, check 1's blocked account and mode rule, the working universe, and §5.3
-//! rules 3 and 9. Every check a later PR or story owns passes, and every other entry point returns
-//! [`GateError::Unimplemented`], until the story named in its doc comment lands (DEC-77, DEC-83).
+//! purpose assignment, check 1 whole (the account's state, then the mode rule), the working
+//! universe, and §5.3 rules 3 and 9. **Until every check exists the gate fails closed for adding
+//! risk** (DEC-129 item 29): an opening or increasing order the implemented checks would allow
+//! returns [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an
+//! implemented check reports first, and a reducing purpose passes a check that does not exist yet.
+//! Every other entry point returns [`GateError::Unimplemented`] until the story named in its doc
+//! comment lands (DEC-77, DEC-83).
 
 use core::fmt::Display;
 use std::collections::{BTreeMap, BTreeSet};

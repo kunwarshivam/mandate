@@ -1,14 +1,20 @@
 //! [`evaluate`]: §9.1's eight checks in order, stopping at the first that fails.
 //!
 //! Each check is one function returning `Ok(None)` when it passes and `Ok(Some(stop))` when it
-//! decides, so the loop in [`evaluate`] is the only place the order lives. A check a later story
-//! owns passes here until that story lands; the task brief's evaluation-order table names which.
+//! decides, so the loop in [`evaluate`] is the only place the order lives.
+//!
+//! **A partial gate fails closed for adding risk** (DEC-129 item 29). While a check, or part of
+//! one, is still owed by a later PR or story, an opening or increasing order the implemented checks
+//! would allow is refused with [`GateError::Unimplemented`], naming the story that completes the
+//! first missing check; a denial or hold from an implemented check still reports first. A reducing
+//! purpose passes a check that does not exist yet (`AGENTS.md` rule 13: the broker is the
+//! backstop), exactly as it will pass most of them once they do.
 
 use mandate_num::Qty;
 
 use crate::{
-    AccountState, AgentMode, Check, CheckOutcome, Computed, Decision, GateError, GateInput,
-    InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse,
+    AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
+    GateInput, InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse,
 };
 
 /// The eight checks, in §9.1's order.
@@ -26,7 +32,23 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// §9.1: the first failing check decides, and every check after it is listed as not reached.
+/// The story that completes a check for an opening or an increase, while any part of it is owed.
+/// Check 1 is whole here; check 2 still lacks the floor (E6-7) and the §5.3 limits, check 4 its
+/// rules 1, 2 and 4 to 8, and checks 3 and 5 to 8 are not written yet.
+fn owed_for_openings(check: Check) -> Option<&'static str> {
+    match check {
+        Check::AccountAndMode => None,
+        Check::UniverseAndLimits => Some("E6-7"),
+        Check::SessionAndHalt
+        | Check::OrderConstraints
+        | Check::BuyingPowerAndExposure
+        | Check::DayTradeBudget => Some("E6-6"),
+        Check::MarkAndCollar | Check::ConductControls => Some("E6-8"),
+    }
+}
+
+/// §9.1: the first failing check decides, and every check after it is listed as not reached. A
+/// check owed for an opening is listed as not reached too: the gate did not look.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let held = input
         .agent
@@ -36,23 +58,35 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
         .unwrap_or(Qty::ZERO);
     let p = &input.proposed;
     let purpose = assign_purpose(p.origin, p.side, p.qty, held);
+    let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
     let mut computed = Computed::default();
     let mut checks = Vec::with_capacity(ORDER.len());
     let mut stop: Option<Stop> = None;
+    let mut owed: Option<&'static str> = None;
     for check in ORDER {
         if stop.is_some() {
             checks.push(CheckOutcome::NotReached(check));
             continue;
         }
-        match run(check, input, purpose, &mut computed)? {
-            None => checks.push(CheckOutcome::Passed(check)),
+        match run(check, input, purpose, opening, &mut computed)? {
             Some((verdict, reason)) => {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
+            None => match owed_for_openings(check).filter(|_| opening) {
+                Some(story) => {
+                    checks.push(CheckOutcome::NotReached(check));
+                    owed = owed.or(Some(story));
+                }
+                None => checks.push(CheckOutcome::Passed(check)),
+            },
         }
     }
-    let (verdict, reason) = stop.map_or((Verdict::Allow, None), |(v, r)| (v, Some(r)));
+    let (verdict, reason) = match (stop, owed) {
+        (Some((verdict, reason)), _) => (verdict, Some(reason)),
+        (None, Some(story)) => return Err(GateError::Unimplemented("evaluate", story)),
+        (None, None) => (Verdict::Allow, None),
+    };
     Ok(Decision {
         verdict,
         reason,
@@ -67,9 +101,9 @@ fn run(
     check: Check,
     input: &GateInput<'_>,
     purpose: Purpose,
+    opening: bool,
     computed: &mut Computed,
 ) -> Result<Option<Stop>, GateError> {
-    let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
         Check::UniverseAndLimits if opening => working_universe(input, computed),
@@ -78,12 +112,21 @@ fn run(
     }
 }
 
-/// Check 1. A blocked account is the broker arm of MI-1's list, so it denies every purpose; then
-/// the mode rule of the brief's "exemptions, in one place", on the stricter of the two modes the
-/// gate is handed, so neither snapshot can soften the other (MI-6).
+/// Check 1: the account (§7.3), then the agent's mode (§7.4). A blocked account is the broker arm
+/// of MI-1's list, so it denies every purpose; a `closing_only` account and an inactive crypto
+/// account deny an opening only. Then the mode rule of the brief's "exemptions, in one place", on
+/// the stricter of the two modes the gate is handed, so neither snapshot can soften the other
+/// (MI-6).
 fn account_and_mode(input: &GateInput<'_>, purpose: Purpose, opening: bool) -> Option<Stop> {
-    if input.account.state == AccountState::Blocked {
+    let account = input.account;
+    if account.state == AccountState::Blocked {
         return Some((Verdict::Deny, ReasonCode::AccountTradingBlocked));
+    }
+    if opening && account.state == AccountState::ClosingOnly {
+        return Some((Verdict::Deny, ReasonCode::AccountRestricted));
+    }
+    if opening && input.instrument.asset_class == AssetClass::Crypto && !account.crypto_active {
+        return Some((Verdict::Deny, ReasonCode::CryptoAccountInactive));
     }
     let exempt_from_paused = purpose == Purpose::Protective
         || (matches!(purpose, Purpose::RiskExit | Purpose::OwnerExit)
@@ -118,9 +161,10 @@ fn working_universe(
     Ok(None)
 }
 
-/// Check 4, the rules this story owns: rule 3 (a sell above the position is typed an opening by
-/// [`crate::assign_purpose`], so it is the only sell that reaches here as one), then rule 9, which
-/// denies an opening and holds a reduction under one code (DEC-129 item 22).
+/// Check 4, the rules this story owns: rule 3 (every sell above the position, a protective leg's
+/// included, is typed an opening by [`assign_purpose`], so it is the only sell that reaches here as
+/// one), then rule 9, which denies an opening and holds a reduction under one code (DEC-129 item
+/// 22).
 fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
     if opening && input.proposed.side == Side::Sell {
         return Some((Verdict::Deny, ReasonCode::WouldCrossZero));
@@ -140,18 +184,21 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
     None
 }
 
-/// §9.1's purpose table. A sell above the agent's position would open a short, which v1 does not
-/// hold (DEC-32), so it is typed an opening and check 4 denies it `would_cross_zero`: no reducing
-/// purpose is ever what a zero crossing is denied under, which keeps MI-1 true as stated. Typed an
-/// opening, it meets check 1 before check 4, so under `paused` or `stopped` it is held (and under
-/// `exits_only` denied `agent_exits_only`) rather than denied `would_cross_zero`: §9.1's order
-/// applied as written, and deliberate.
+/// §9.1's purpose table, with the two rows v1's long-only book decides (DEC-129 item 30). Every
+/// buy adds risk, a protective leg's included, since v1 holds no short for a buy to protect
+/// (DEC-32). Every sell above the agent's position would open a short, so it is typed an opening
+/// whatever its origin — a protective leg's too, which §5.3 checks against the position — and
+/// check 4 denies it `would_cross_zero`: no reducing purpose is ever what a zero crossing is
+/// denied under, which keeps MI-1 true as stated. Typed an opening, it meets check 1 before check
+/// 4, so under `paused` or `stopped` it is held (and under `exits_only` denied
+/// `agent_exits_only`) rather than denied `would_cross_zero`: §9.1's order applied as written, and
+/// deliberate.
 pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty) -> Purpose {
     match (origin, side) {
-        (Origin::ProtectiveLeg, _) => Purpose::Protective,
         (_, Side::Buy) if position.is_zero() => Purpose::Open,
         (_, Side::Buy) => Purpose::Increase,
         (_, Side::Sell) if qty > position => Purpose::Open,
+        (Origin::ProtectiveLeg, Side::Sell) => Purpose::Protective,
         (
             Origin::RiskEngine
             | Origin::TrimToTarget
@@ -167,8 +214,10 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 }
 
 /// What the tests PR's files cannot pin on this PR's code, each shown by a planted bug that every
-/// live test passed: the eight check ids in §9.1's order, the order in which two failing checks
-/// report, the stricter of the two mode snapshots, and `exits_only` denying an opening.
+/// live test passed (the #157 reviews): the eight check ids in §9.1's order, the order in which two
+/// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
+/// crypto account denying an opening, a protective leg above the position crossing zero, and the
+/// partial gate failing closed.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -230,7 +279,8 @@ mod tests {
         AssetId::new(text).map_err(|_| GateError::InstrumentUnknown)
     }
 
-    /// An opening buy of 10 × 100 in instrument `a`, in the universe, that every check allows.
+    /// An opening buy of 10 × 100 in instrument `a`, in the universe, that every check this PR
+    /// implements allows.
     fn allowing() -> Result<Owned, GateError> {
         let usd = Usd::parse;
         let fraction = Fraction::parse;
@@ -371,10 +421,11 @@ mod tests {
     }
 
     /// The journal's check list carries §9.1's eight ids in §9.1's order, spelled out here rather
-    /// than read from the crate's own `ORDER`, which is the thing under test.
+    /// than read from the crate's own `ORDER`, which is the thing under test. A risk exit, because
+    /// it passes every check this PR has, where an opening is refused until the gate is whole.
     #[test]
     fn the_checks_are_listed_in_section_9_1_order() -> Result<(), GateError> {
-        let d = allowing()?.decide()?;
+        let d = allowing()?.selling(Origin::RiskEngine)?.decide()?;
         let ids: Vec<Check> = d
             .checks
             .iter()
@@ -436,21 +487,34 @@ mod tests {
     }
 
     /// The mode read is the stricter of the two snapshots, so neither softens the other (MI-6):
-    /// each arm puts `paused` in one snapshot only.
+    /// every arm leaves `AgentSnapshot::mode` at `normal` and puts the stricter mode in the risk
+    /// snapshot only, and the last puts `paused` in the agent snapshot only.
     #[test]
-    fn the_stricter_of_the_two_modes_holds() -> Result<(), GateError> {
+    fn the_stricter_of_the_two_modes_decides() -> Result<(), GateError> {
+        let outcome = |o: Owned| o.decide().map(|d| (d.verdict, d.reason));
         let mut risk_paused = allowing()?.selling(Origin::RiskEngine)?;
         risk_paused.risk.agent_mode = AgentMode::Paused;
+        let mut risk_stopped = allowing()?.selling(Origin::RiskEngine)?;
+        risk_stopped.risk.agent_mode = AgentMode::Stopped;
+        let mut risk_exits_only = allowing()?;
+        risk_exits_only.risk.agent_mode = AgentMode::ExitsOnly;
         let mut agent_paused = allowing()?.selling(Origin::RiskEngine)?;
         agent_paused.agent.mode = AgentMode::Paused;
-        let held = |d: Decision| (d.verdict, d.reason);
         assert_eq!(
-            (held(risk_paused.decide()?), held(agent_paused.decide()?)),
-            (
+            [
+                outcome(risk_paused)?,
+                outcome(risk_stopped)?,
+                outcome(risk_exits_only)?,
+                outcome(agent_paused)?,
+            ],
+            [
                 (Verdict::Hold, Some(ReasonCode::AgentPaused)),
-                (Verdict::Hold, Some(ReasonCode::AgentPaused))
-            ),
-            "a plain risk exit is held by paused whichever snapshot carries it"
+                (Verdict::Hold, Some(ReasonCode::AgentStopped)),
+                (Verdict::Deny, Some(ReasonCode::AgentExitsOnly)),
+                (Verdict::Hold, Some(ReasonCode::AgentPaused)),
+            ],
+            "paused holds a plain risk exit, stopped holds every order, and exits_only denies an \
+             opening, whichever snapshot carries the mode"
         );
         Ok(())
     }
@@ -464,6 +528,66 @@ mod tests {
             (d.verdict, d.reason),
             (Verdict::Deny, Some(ReasonCode::AgentExitsOnly)),
             "exits_only allows risk-reducing and protective orders only (trading spec §7.4)"
+        );
+        Ok(())
+    }
+
+    /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
+    /// that completes the first check still owed (check 2's eligibility floor, E6-7).
+    #[test]
+    fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
+        let refused = allowing()?.decide();
+        assert!(
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            "a partial gate fails closed for adding risk, not open: {refused:?}"
+        );
+        Ok(())
+    }
+
+    /// §7.3: an inactive crypto account denies a crypto opening and leaves a crypto exit alone.
+    #[test]
+    fn an_inactive_crypto_account_denies_a_crypto_opening() -> Result<(), GateError> {
+        let mut opening = allowing()?;
+        opening.instrument.asset_class = AssetClass::Crypto;
+        opening.account.crypto_active = false;
+        let mut exit = allowing()?.selling(Origin::RiskEngine)?;
+        exit.instrument.asset_class = AssetClass::Crypto;
+        exit.account.crypto_active = false;
+        let (d, e) = (opening.decide()?, exit.decide()?);
+        assert_eq!(
+            ((d.verdict, d.reason), (e.verdict, e.reason)),
+            (
+                (Verdict::Deny, Some(ReasonCode::CryptoAccountInactive)),
+                (Verdict::Allow, None)
+            ),
+            "the gate requires crypto_status ACTIVE to open crypto; an exit is never denied by it"
+        );
+        Ok(())
+    }
+
+    /// §5.3 rule 3 for a protective leg: a stop that sells 1000 against a position of 10 would
+    /// open a short if it triggered, so it is typed an opening and denied `would_cross_zero`; and a
+    /// protective "buy" adds risk in a long-only book, so it is an opening too (DEC-129 item 30).
+    #[test]
+    fn a_protective_leg_above_the_position_crosses_zero() -> Result<(), GateError> {
+        let mut o = allowing()?.selling(Origin::ProtectiveLeg)?;
+        o.proposed.qty = Qty::parse("1000")?;
+        let d = o.decide()?;
+        let buy = assign_purpose(
+            Origin::ProtectiveLeg,
+            Side::Buy,
+            Qty::parse("1")?,
+            Qty::ZERO,
+        );
+        assert_eq!(
+            (d.verdict, d.reason, d.purpose, buy),
+            (
+                Verdict::Deny,
+                Some(ReasonCode::WouldCrossZero),
+                Purpose::Open,
+                Purpose::Open
+            ),
+            "a protective leg is checked against the position; only a sell within it protects"
         );
         Ok(())
     }

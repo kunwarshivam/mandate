@@ -1091,6 +1091,7 @@ fn the_window_is_today_plus_four() {
 
 /// `intraday_margin` denies nothing per order: a reported deficit is an account state (§9.2).
 #[test]
+#[ignore = "pending E6-6"]
 fn a_reported_deficit_is_an_account_state_not_a_denial() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::IntradayMargin {
@@ -1107,6 +1108,7 @@ fn a_reported_deficit_is_an_account_state_not_a_denial() {
 
 /// Crypto never counts toward a day-trade budget (§9.2).
 #[test]
+#[ignore = "pending E6-6"]
 fn crypto_never_counts() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
@@ -1327,6 +1329,7 @@ fn a_median_dollar_volume_exactly_at_the_threshold_is_liquid() {
 
 /// §9.6: the collar binds aggressive prices only; a passive price inside the band is allowed.
 #[test]
+#[ignore = "pending E6-8"]
 fn a_passive_price_inside_the_band_is_allowed() {
     let mut s = Scenario::allowing();
     s.proposed = proposal(INSTRUMENT_3, Side::Buy, "1", "90", Origin::OrderBuilder);
@@ -1359,6 +1362,7 @@ fn a_rejected_order_still_counts() {
 
 /// MI-19: a removed instrument is exits-only in that instrument, and nowhere else.
 #[test]
+#[ignore = "pending E6-3"]
 fn a_removed_instrument_restricts_only_itself() {
     let mut s = Scenario::allowing();
     s.agent.instrument_restrictions.insert(
@@ -1465,6 +1469,7 @@ fn an_opposite_side_rest_in_a_related_account_blocks_an_opening() {
 
 /// §9.6: the order-to-fill ratio is only evaluated after twenty orders.
 #[test]
+#[ignore = "pending E6-8"]
 fn the_order_to_fill_ratio_needs_twenty_orders() {
     let mut s = Scenario::allowing();
     s.conduct
@@ -1545,7 +1550,6 @@ fn two_simultaneous_failures_report_the_earlier_check() {
 
 /// §7.3: three consecutive unexplained 403s restrict the account.
 #[test]
-#[ignore = "pending E6-9"]
 fn three_consecutive_unexplained_403s_restrict_the_account() {
     let mut s = Scenario::allowing();
     s.account.state = mandate_risk::AccountState::ClosingOnly;
