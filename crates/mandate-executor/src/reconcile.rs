@@ -1053,4 +1053,200 @@ mod tests {
         assert_eq!(observed.payload.get("mismatch"), Some(&Value::Bool(true)));
         Ok(())
     }
+
+    fn gate_decision(effects: &[Effect]) -> Option<(String, String)> {
+        effects.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                let field = |name: &str| {
+                    draft
+                        .payload
+                        .get(name)
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                };
+                field("verdict").zip(field("reason_code"))
+            }
+            _ => None,
+        })
+    }
+
+    fn filled_ten(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", Value::Str("f-0".to_owned())),
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("side", Value::Str("buy".to_owned())),
+                ("qty_gross", Value::Str("10".to_owned())),
+                ("price", Value::Str("150".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )
+    }
+
+    fn run_completed(executor: &mut Executor) -> Result<(), ExecutorError> {
+        executor.commit_one(
+            "ReconciliationRun",
+            object(vec![(
+                "risk_clock",
+                crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+            )])?,
+        )
+    }
+
+    /// The coordinator's ruling on #174 (comment 5857742391), rule 3: on a stream that has
+    /// journaled an account, an opening is held, never denied, until a reconciliation has run since
+    /// the process started; an exit is not held (rule 13); and once a run has completed, the first
+    /// tick releases the held opening.
+    #[test]
+    fn an_opening_is_held_until_a_reconciliation_has_run_since_the_start()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = Executor::opened(&ports)?;
+        filled_ten(&mut executor)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        let opening = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            (submitted(&opening), gate_decision(&opening)),
+            (
+                0,
+                Some((
+                    "hold".to_owned(),
+                    "startup_reconciliation_pending".to_owned()
+                ))
+            ),
+            "the opening is held, not denied"
+        );
+        let exit = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ1",
+                "agent-a",
+                Side::Sell,
+                Purpose::RiskExit,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            submitted(&exit),
+            1,
+            "an exit is never held for it (rule 13)"
+        );
+        let early = executor.run(Input::Tick(crate::types::RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(
+            submitted(&early),
+            0,
+            "no run yet, so the tick releases nothing"
+        );
+
+        run_completed(&mut executor)?;
+        let released = executor.run(Input::Tick(crate::types::RiskClock::from_secs(2)), &ports)?;
+        assert_eq!(
+            submitted(&released),
+            1,
+            "a run since the start releases the held opening at the next tick"
+        );
+        Ok(())
+    }
+
+    /// A run an earlier process appended does not count: after a restart the opening waits for the
+    /// new process's own run. A stream that has never journaled an account is not held yet (the
+    /// backlog's never-observed row, which blocks E7-7).
+    #[test]
+    fn a_run_from_before_the_restart_does_not_release_an_opening() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut unreported = Executor::opened(&ports)?;
+        let open = unreported.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ0",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&open), 1, "no account journaled, so not held yet");
+
+        let mut executor = Executor::opened(&ports)?;
+        executor.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        run_completed(&mut executor)?;
+        let mut at_once = executor.restarted(&ports)?;
+        let restarted_on_the_run = at_once.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ3",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            submitted(&restarted_on_the_run),
+            0,
+            "a restart right after the last process's run still waits for its own"
+        );
+        let before = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ1",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(submitted(&before), 1, "this process's own run releases it");
+
+        let mut executor = executor.restarted(&ports)?;
+        let after = executor.run(
+            intent(
+                "01JABCDEFGHJKMNPQRSTVWXYZ2",
+                "agent-a",
+                Side::Buy,
+                Purpose::Open,
+            )?,
+            &ports,
+        )?;
+        assert_eq!(
+            (submitted(&after), gate_decision(&after)),
+            (
+                0,
+                Some((
+                    "hold".to_owned(),
+                    "startup_reconciliation_pending".to_owned()
+                ))
+            ),
+            "the earlier process's run does not count after the restart"
+        );
+        Ok(())
+    }
 }

@@ -92,9 +92,10 @@ fn superseded(unresolved: &Input, input: &Input) -> bool {
 
 /// `Input::Started`: the process folded the stream and took an epoch. Every order whose outcome
 /// the journal does not know is queried, a received intent too old to submit is abandoned, and
-/// the startup reconciliation is requested. The intents waiting at the start are not submitted
-/// until it has run; a new intent received before it runs is gated and submitted at once (see
-/// `resume`).
+/// the startup reconciliation is requested. The intents waiting at the start resume after it has
+/// run, and on a stream that has journaled an account the gate holds a new opening until then
+/// (`ExecutorState::reconciled_since_start`); on one that never has, the window is a backlog row
+/// that blocks E7-7.
 fn started(
     state: &mut ExecutorState,
     epoch: WriterEpoch,
@@ -105,6 +106,7 @@ fn started(
     }
     state.epoch = Some(epoch);
     state.started = true;
+    state.started_at = Some(state.account_head());
     let mut batch = Batch::new(state, ports)?;
     let unresolved: Vec<_> =
         batch
