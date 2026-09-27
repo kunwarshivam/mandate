@@ -1009,6 +1009,27 @@ fn leads(script: &[Step]) -> bool {
         == Some(&PROTECTED_LEAD[..])
 }
 
+/// The exit intents a script hands over that no `GateDecided` names: an intent id whose first
+/// handoff is an exit, which the executor must gate (allow, hold, or deny) rather than drop.
+fn ungated_exits(script: &[Step], drafts: &[EventDraft]) -> Vec<String> {
+    let mut first: BTreeMap<u8, bool> = BTreeMap::new();
+    for one in script {
+        if let Step::Intent { which, exiting, .. } = one {
+            first.entry(*which).or_insert(*exiting);
+        }
+    }
+    first
+        .into_iter()
+        .filter(|(_, exiting)| *exiting)
+        .map(|(which, _)| intent_named(which))
+        .filter(|intent| {
+            !drafts.iter().any(|d| {
+                d.event_type == "GateDecided" && field(d, "intent_id") == Some(intent.as_str())
+            })
+        })
+        .collect()
+}
+
 proptest! {
     #![proptest_config(ProptestConfig {
         max_global_rejects: 16_384,
@@ -1800,6 +1821,13 @@ proptest! {
             denials <= run.drafts.len(),
             "the denial count comes from the same draft list"
         );
+        let ungated = ungated_exits(&script, &run.drafts);
+        prop_assert!(
+            ungated.is_empty(),
+            "every exit the script hands over is gated, so there are exit verdicts for this \
+             property to judge: {:?}",
+            ungated
+        );
     }
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
@@ -1828,6 +1856,13 @@ proptest! {
             }
         }
         prop_assert!(holds <= run.drafts.len());
+        let ungated = ungated_exits(&script, &run.drafts);
+        prop_assert!(
+            ungated.is_empty(),
+            "every exit the script hands over is gated, so there are exit verdicts for this \
+             property to judge: {:?}",
+            ungated
+        );
     }
 
     /// §5.7: the status map is total and never silently ignores.
