@@ -293,7 +293,12 @@ fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Execu
 /// Received intents with no order yet. With `stale_only`, the ones past their age are abandoned
 /// and the rest are left for later; otherwise every one is gated now. `Input::Started` abandons
 /// the stale at once and resumes the rest only once the startup reconciliation has run, so a
-/// restart never submits on state it has not reconciled.
+/// restart never submits a waiting intent on state it has not reconciled.
+///
+/// That covers only the intents waiting at `Input::Started`. A new opening is gated and submitted
+/// before any reconciliation in two windows: on a fresh stream after `BrokerUpdate::Account`, and
+/// after a restart before the startup `BrokerSnapshot`. The hold that closes both, from
+/// `Input::Started` until the startup reconciliation completes, is a backlog row that blocks E7-7.
 pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), ExecutorError> {
     let waiting: Vec<IntentId> = batch
         .view

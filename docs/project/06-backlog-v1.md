@@ -372,6 +372,20 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
 fully on-prem control plane; shared data plane; strategy marketplace.
 
+## Later (wanted after v1)
+
+- **Custom signals for power users** ([DEC-20](04-decision-log.md#decisions)). Today a mandate chooses the
+  platform's registered signal models, their declared parameters, fixed weights, thresholds, universe,
+  autonomy, protection and cadence, but it cannot define a new signal formula, combine signals other than
+  by fixed linear weights, or change sizing. Two steps, in order:
+  1. A **declarative signal-expression layer**: arithmetic and comparisons over the platform's indicators
+     and data, stored in the mandate, validated, bounded, and replayed deterministically. It keeps the
+     mandate checkable.
+  2. **WebAssembly plug-ins**, only if step 1 falls short: sandboxed, resource-limited, versioned by content
+     hash, with every output journaled. A plug-in emits only an opinion (a signal or a thesis), which enters
+     through the eligibility floor, the autonomy rules and the risk gate like the platform's own ideas. It
+     never sizes or places an order (rule 4).
+
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
 From the final review of mandate spec v0.3:
@@ -458,6 +472,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **Blocks E7-7 (the tracer bullet, [DEC-138](04-decision-log.md#decisions)).** `mandate-executor` gates and submits a new opening before any reconciliation: on a fresh stream after `BrokerUpdate::Account`, and after a restart before the startup `BrokerSnapshot`. `resume` holds back only the intents waiting at `Input::Started`. Hold (never deny) openings from `Input::Started` until the startup reconciliation completes, on a per-process flag, with exits open (`AGENTS.md` rule 13) and held openings released or abandoned by the existing hold rules; if that does not cover the fresh stream, add the `observed && reconciled_through.is_none()` guard in the same change. A separate reviewed tests-correction PR first makes `hand::a_reservation_lowers_buying_power_by_its_amount` run the startup snapshot before its opening, with its assertions byte-identical. No paper order may go through this executor until the hold lands (#202 review, the coordinator's ruling, comment 5857629810).
+- **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).

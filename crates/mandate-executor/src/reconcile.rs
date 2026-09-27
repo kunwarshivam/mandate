@@ -1088,22 +1088,24 @@ mod tests {
             avg_entry_price: Price::parse("150")?,
         }];
         let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
-        let observed = run
-            .iter()
-            .find_map(|effect| match effect {
-                Effect::Journal(draft) if draft.event_type == "BrokerPositionObserved" => {
-                    Some(draft)
-                }
-                _ => None,
-            })
-            .ok_or(ExecutorError::Unimplemented { story: "E7-3" })?;
-        let field = |name: &str| observed.payload.get(name).and_then(Value::as_str);
+        let observed = run.iter().find_map(|effect| match effect {
+            Effect::Journal(draft) if draft.event_type == "BrokerPositionObserved" => Some(draft),
+            _ => None,
+        });
+        let field = |name: &str| {
+            observed
+                .and_then(|draft| draft.payload.get(name))
+                .and_then(Value::as_str)
+        };
         assert_eq!(
             (field("broker_qty"), field("model_qty")),
             (Some("7"), Some("10")),
-            "each quantity under its own key"
+            "a `BrokerPositionObserved` is drafted, each quantity under its own key"
         );
-        assert_eq!(observed.payload.get("mismatch"), Some(&Value::Bool(true)));
+        assert_eq!(
+            observed.and_then(|draft| draft.payload.get("mismatch")),
+            Some(&Value::Bool(true))
+        );
         Ok(())
     }
 }

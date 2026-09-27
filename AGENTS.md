@@ -60,7 +60,9 @@ stop and ask; do not silently pick one.
     mandate version. Signal models, their fixed weights, thresholds, protection, and cadence are
     envelope fields too. Only the working universe and its theses come from the research agent at
     runtime, within the envelope, journaled, and admitted through the eligibility floor and the
-    autonomy rules. Bring-your-own-strategy pins the universe. No calibration in v1.
+    autonomy rules. Requests from an owner-connected agent (DEC-141) are owner input: they pass
+    the same builder, gate, and autonomy rules, and never change the envelope.
+    Bring-your-own-strategy pins the universe. No calibration in v1.
 12. **All account-level actions go through the account ledger.** Agents never call the broker
     directly; opening orders are limit orders in the regular session; no short sales in v1.
 13. **Risk reduction is never denied by conduct controls, eligibility, day-trade budgets, buying

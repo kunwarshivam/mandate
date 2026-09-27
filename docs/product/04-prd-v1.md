@@ -32,7 +32,7 @@ all-or-nothing, and decisions cannot be explained or audited. See
   ([DEC-30, DEC-32](../project/04-decision-log.md#decisions)).
 - Interactive Brokers and Coinbase connectors (later releases).
 - Fully on-prem / air-gapped control plane.
-- Native mobile apps (web push, email, SMS, and chat cover approvals in v1).
+- Native mobile apps (web push, email, and one chat app cover approvals in v1; SMS and phone calls come next, per [DEC-19](../project/04-decision-log.md#decisions)).
 - User-supplied code (WebAssembly plug-ins).
 - Strategy marketplace or copy trading.
 - Shared data plane.
@@ -243,7 +243,7 @@ See [Quality and release plan](../project/07-quality-and-release.md).
 
 ## 10. Open questions
 
-1. Whether options join v1 or wait ([DEC-24](../project/04-decision-log.md#decisions), proposed: wait).
+1. ~~Whether options join v1 or wait~~: they wait ([DEC-24](../project/04-decision-log.md#decisions), accepted 2026-09-27).
 2. Which fast decision model ships first: Laya (self-hosted) or Jev (hosted, early access).
 3. Minimum paper-trading duration before live.
 4. Whether LLM research is P0 for design partners or can follow.
