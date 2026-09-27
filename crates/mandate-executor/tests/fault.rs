@@ -239,7 +239,7 @@ fn assert_recovered(shell: &Shell, ports: &Ports<'_>, truth: &Truth, point: Cras
 fn opened(ports: &Ports<'_>) -> Shell {
     let mut shell = Shell::new(1);
     shell.fold_one(&stream_opened()).expect("the stream opens");
-    let (mut shell, _) = shell.restart(ports);
+    let mut shell = shell.restart_ready(ports);
     shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), ports);
     shell
 }
