@@ -542,6 +542,32 @@ fn scripted() -> impl Strategy<Value = Vec<Step>> {
     })
 }
 
+/// Every script with the protected lead, for the properties about the protection it produces: a
+/// protected position is then an input, so its protection is asserted rather than assumed, and an
+/// executor that places none fails them instead of skipping every case.
+fn scripted_protected() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.extend(random);
+        script
+    })
+}
+
+/// Every script with the protected lead followed by the `Fill` that completes its entry: the second
+/// of the bracket's two `CPHC` shares. §5.4 holds the bracket legs until the entry is completely
+/// filled, so after this fill they are active and the position is protected before the random
+/// steps begin, which is what lets the protected quantity be asserted rather than assumed.
+fn scripted_protected_complete() -> impl Strategy<Value = Vec<Step>> {
+    prop::collection::vec(step(), 1..14).prop_map(|random| {
+        let mut script = PREFIX.to_vec();
+        script.extend(PROTECTED_LEAD);
+        script.push(Step::Fill);
+        script.extend(random);
+        script
+    })
+}
+
 /// What one scripted run produced: every effect, in order, the shell it ended in, and the
 /// broker's own picture of what it holds.
 struct Run {
@@ -1444,14 +1470,41 @@ proptest! {
         }
     }
 
-    /// §5.4: Σ protective sell quantity never exceeds the position.
+    /// §5.4: Σ protective sell quantity never exceeds the position, in every script, whether or
+    /// not it reaches a protected position.
     #[test]
-    #[ignore = "pending E7-4"]
-    fn protective_sell_quantity_never_exceeds_the_position(script in scripted()) {
+    #[ignore = "pending E7-2"]
+    fn protective_sell_quantity_never_exceeds_the_position_in_any_script(script in scripted()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
         let ledger = ShadowLedger::of(&run.drafts);
-        prop_assume!(!accountant.covered.is_empty());
+        for (name, covered) in &accountant.covered {
+            let held = ledger.positions.get(name).copied().unwrap_or(0);
+            prop_assert!(
+                *covered <= held.max(0),
+                "{} is protected for {} against a position of {}",
+                name,
+                covered,
+                held
+            );
+        }
+    }
+
+    /// §5.4: a completely filled bracket entry activates its legs, and Σ protective sell quantity
+    /// never exceeds the position.
+    #[test]
+    #[ignore = "pending E7-4"]
+    fn protective_sell_quantity_never_exceeds_the_position(
+        script in scripted_protected_complete()
+    ) {
+        let run = play(&script);
+        let accountant = ProtectionAccountant::of(&run.drafts);
+        let ledger = ShadowLedger::of(&run.drafts);
+        prop_assert!(
+            !accountant.covered.is_empty(),
+            "the protected lead's entry completed, so its bracket legs are active and protect it \
+             (§5.4: legs are held until the entry is completely filled)"
+        );
         for (name, covered) in &accountant.covered {
             let held = ledger.positions.get(name).copied().unwrap_or(0);
             prop_assert!(
@@ -1467,10 +1520,13 @@ proptest! {
     /// §5.4, E7-4: every unprotected interval is journaled from start to end.
     #[test]
     #[ignore = "pending E7-4"]
-    fn every_unprotected_interval_has_a_journaled_start_and_end(script in scripted()) {
+    fn every_unprotected_interval_has_a_journaled_start_and_end(script in scripted_protected()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
-        prop_assume!(!accountant.intervals.is_empty());
+        prop_assert!(
+            !accountant.intervals.is_empty(),
+            "the protected lead's partly filled bracket journals an unprotected interval (§5.4)"
+        );
         let protected: Vec<_> = accountant
             .covered
             .iter()
@@ -1488,10 +1544,13 @@ proptest! {
     /// §5.4, E7-4: no interval exceeds `max_unprotected_s` without an alert.
     #[test]
     #[ignore = "pending E7-4"]
-    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted()) {
+    fn no_interval_exceeds_the_limit_without_an_alert(script in scripted_protected()) {
         let run = play(&script);
         let accountant = ProtectionAccountant::of(&run.drafts);
-        prop_assume!(!accountant.intervals.is_empty());
+        prop_assert!(
+            !accountant.intervals.is_empty(),
+            "the protected lead's partly filled bracket journals an unprotected interval (§5.4)"
+        );
         let alerts = run
             .effects
             .iter()
