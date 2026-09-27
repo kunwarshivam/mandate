@@ -7,6 +7,10 @@
 use mandate_backtest::{BacktestError, Signal};
 use mandate_builder::BuilderError;
 use mandate_executor::{ConnectorError, ExecutorError};
+use mandate_marketdata::dataset::DatasetError;
+use mandate_marketdata::inspect::InspectError;
+use mandate_marketdata::model::ModelError;
+use mandate_num::NumError;
 use mandate_risk::GateError;
 use mandate_runtime::{RuntimeError, SinkError};
 use mandate_spec::SpecError;
@@ -37,6 +41,17 @@ pub enum Cause {
     Connector(#[from] ConnectorError),
     #[error(transparent)]
     Sink(#[from] SinkError),
+    #[error(transparent)]
+    Inspect(#[from] InspectError),
+    #[error(transparent)]
+    Dataset(#[from] DatasetError),
+    #[error(transparent)]
+    Model(#[from] ModelError),
+    #[error(transparent)]
+    Num(#[from] NumError),
+    /// The stored data answered, and the answer is not one to decide on.
+    #[error("the stored data cannot be trusted: {what}")]
+    Untrusted { what: &'static str },
     /// An append answered neither `Committed` nor `AlreadyCommitted` (journal spec §5.1).
     #[error("the journal answered {outcome}")]
     Append { outcome: &'static str },
@@ -69,6 +84,11 @@ impl Cause {
             Self::Executor(e) => e.code(),
             Self::Connector(e) => connector_code(e),
             Self::Sink(e) => sink_code(e),
+            Self::Inspect(e) => e.code(),
+            Self::Dataset(e) => e.code(),
+            Self::Model(e) => e.code(),
+            Self::Num(e) => e.code(),
+            Self::Untrusted { .. } => "untrusted",
             Self::Append { .. } => "append_refused",
             Self::NotLong(_) => "not_long",
             Self::NotAuto { .. } => "not_auto",
@@ -212,6 +232,7 @@ mod tests {
             ),
             (Cause::Append { outcome: "Fenced" }, "append_refused"),
             (Cause::Absent { what: "gap" }, "absent"),
+            (Cause::Untrusted { what: "gap" }, "untrusted"),
         ];
         for (cause, code) in cases {
             assert_eq!(cause.code(), code, "{cause:?}");

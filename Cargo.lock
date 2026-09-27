@@ -1524,6 +1524,7 @@ dependencies = [
  "mandate-time",
  "proptest",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

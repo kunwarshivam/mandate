@@ -25,7 +25,7 @@ use super::doubles::{
     agent_stream, passed_checks, setup, stub,
 };
 use super::{ExitPath, MandateSource, Protection, Stage};
-use crate::adapters::{Sources, production};
+use crate::adapters::{Disconnected, Sources, over};
 use crate::error::{Cause, ShellError};
 use crate::tracer::{Report, Session, run};
 
@@ -251,12 +251,12 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
 /// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
 fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
-    let mut stages = production(Sources {
+    let mut stages = over(Sources {
         mandate: PathBuf::from("no-such-mandate.json"),
         dataset: PathBuf::from("no-such-dataset"),
         journal: None,
         agent: AgentId("tracer-aapl".to_owned()),
-        transport: (),
+        transport: Box::new(Disconnected),
     });
     let error = refusal(run_with(&mut stages)?)?;
     let stage = error.stage().ok_or(format!("{error}"))?;
