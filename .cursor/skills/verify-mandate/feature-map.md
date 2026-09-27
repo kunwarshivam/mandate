@@ -260,8 +260,8 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 
 ## Risk gate
 
-Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129; the
-paths arrive with the tests PR, which updates this entry.
+Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
+crate exists as stubs and tests; the implementation PRs fill it in story by story.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -271,18 +271,21 @@ paths arrive with the tests PR, which updates this entry.
   exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
   (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
   §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
-- **Code:** `mandate-risk` (new; the pure gate over a mandate, a risk state, an account snapshot, a
-  working universe, a market context and one proposed order, returning allow, deny, defer or hold
-  with the first failing check's stable code and the whole check list for the journal; the
-  §9.2 day-trade ledger; the drawdown ladder's size factor and trim proposals; the
-  agent-scoped flatten plan), with the exact arithmetic added to `mandate-num`. It reads
-  `mandate-accounting`'s account figures and `mandate-time`'s calendar and sessions, and changes
-  neither.
-- **Tests:** the hand-calculated cases of the brief's reference-case table, one property per
-  invariant and per "never" or "always" in trading-domain spec §9 against an independent
-  `i128` oracle, and the E6-3 fuzz over random mandates, market paths and proposal sequences whose
-  shadow ledger is accumulated separately from the gate's own figures. Planted bugs per test: the
-  task brief.
+- **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
+  checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
+  and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
+  `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
+  `surveillance`), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
+  implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
+  `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
+- **Tests:** `crates/mandate-risk/tests/hand.rs` (every MC-G and MC-F figure recomputed from the
+  spec, the mode rule, the `Unknown`-order rule, the account states, the eligibility floor, and a
+  check that every reason code the gate can emit is registered in the founder-owned case file),
+  `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
+  in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
+  property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
+  oracle, which never calls the crate's arithmetic). Planted bugs per test: the task brief.
 - **Reference cases:** `mandate::MC-G01` to `MC-G16` and `MC-F01` to `MC-F04` in
   `fixtures/refcases/mandate.json`; `trading_domain::RC-09`, `RC-09B`, `RC-15`, `RC-16`, `RC-22`
   and `RC-25` with their variants, and the `propose_order` steps of `RC-03`, `RC-08` and `RC-18`,
@@ -373,8 +376,8 @@ paths arrive with the tests PR, which updates this entry.
 
 ## Mandate document, validation, risk state, and change classification
 
-Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128;
-the paths arrive with the tests PR, which updates this entry.
+Planned by [the stream-F task brief](../../../docs/project/tasks/M5-F-mandate-spec.md) and DEC-128.
+The crates exist; the rules above `SchemaDec` are stubs until their implementation PRs (DEC-77).
 
 - **Spec:** `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2 (lifecycle, provenance, the working
   universe), §3 (structure and goals), §4 (validation, warnings, the policy hierarchy), §5 (the risk
@@ -383,27 +386,41 @@ the paths arrive with the tests PR, which updates this entry.
   change classification), §11 (the reference cases); `docs/specs/trading-domain.md` §8.1 and §8.2
   (cost-basis reduction, risk marks); `docs/specs/journal.md` §4 (the canonical form the version
   hashes) and §9; ADR-0001 ES-02, ES-04, ES-09, ES-21, ES-22.
-- **Code:** `mandate-spec` (new; the mandate document parsed from canonical JSON with its decimals
-  kept as `SchemaDec`, the text checked against the field's whole schema `$def` before it is wrapped,
-  the V-rules and warnings, the policy hierarchy and its runtime
-  overlay, the risk-state fold, risk days, goals, the condition language, and change classification)
-  and `mandate-domain` (new; the vocabulary `mandate-risk`, `mandate-builder`, and the research
-  agent share), with the exact arithmetic in `mandate-num` as ES-04 requires.
-- **Tests:** per the brief: one named test per V-code and per §9.2 classification row, hand-checked
-  fixture figures, and property tests whose oracles rebuild the risk state from the emitted journal
-  events, accumulate breach time from the input list, scan the policy chain in the opposite
-  direction, and prove MI-11 by evaluating generated actions under both rule sets. Planted bugs per
-  test: the task brief.
+- **Code:** `mandate-spec`: `crates/mandate-spec/src/dec.rs` (`SchemaDec`, a decimal checked against
+  its field's whole schema `$def` — the pattern and, for `decimal`, the `-0` exclusion — so the text is
+  already the journal form and a version hash reproduces the confirmed document),
+  `crates/mandate-spec/src/document.rs` (the hashed envelope document and the strict parse),
+  `crates/mandate-spec/src/validate.rs` (the V-rules, the warnings, the closed platform-default list,
+  `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
+  `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
+  `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
+  classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
+  else); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
+  `mandate-builder`, and the research agent share). The exact arithmetic stays in `mandate-num`
+  (ES-04).
+- **Tests:** `crates/mandate-spec/tests/dec.rs` (live: every grammar's own values, the four things
+  `DecStr` normalises pinned as rejections, an integer oracle for the ordering, and the normal-form
+  identity the version hash rests on), `crates/mandate-spec/tests/document.rs` (the code and pointer
+  each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
+  rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
+  broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
+  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
+  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through a new `mandate` suite in `mandate-refcases`; families G, A, B, and N stay with streams G,
-  H, and J and fail as "not interpreted until" their owning story.
+  through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
+  and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
+  fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
+  refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
   `cargo test -p mandate-refcases -- --include-ignored mandate::`.
 
 ## Research-agent contract, admission, and lineages
 
 Planned by [the stream-J task brief](../../../docs/project/tasks/M5-J-research-thin-slice.md) and
-DEC-132; the paths arrive with the tests PR, which updates this entry.
+DEC-132. The crate is **stubs and pending tests** until the E17-3, E17-7, and E17-9 implementation
+PRs land: every entry point returns `ResearchError::Unimplemented`, and `cargo xtask ci pending`
+proves each pending test fails on them (DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §1.1 (MI-15 to MI-20), §2.3 (the working universe at runtime),
   §4.3 (the internal research profile and the keys the overlay supplies), §8.1 (the signal model
@@ -414,17 +431,28 @@ DEC-132; the paths arrive with the tests PR, which updates this entry.
   instrument-group claims, whose verdicts arrive as facts), §9.6 (the conduct controls the stagger
   sits inside); `docs/specs/journal.md` §9 (`ThesisProposed`, `ThesisRevised`, `UniverseChanged`);
   `docs/adr/0002-autonomous-ideation-and-retail.md`; ADR-0001 ES-02, ES-09, ES-21.
-- **Code:** `mandate-research` (new; the thesis as typed data, the §8.5 checks as one pure function,
-  the §8.6 lineage fold with the revision cap and retirement, thesis expiry, the deterministic §8.4
-  stagger offset hashed through `mandate-canon`, and the three journal entries the crate produces).
-  It **never calls a model:** a model output arrives as a typed value, and the platform boundary that
-  produces it is E17-2's shell story. The spike that found the shape is
-  `python/research_spike/` (E17-0, a spike, not product code).
-- **Tests:** per the brief: one named test per §8.5 check and per removal reason, the family-N
-  figures recomputed by hand, and property tests whose oracles rebuild the working universe from the
-  emitted `UniverseChanged` entries, compute the failing-check set unordered and take its minimum,
-  count lineage revisions in their own accumulator, and reduce the stagger digest
-  least-significant-first. Planted bugs per test: the task brief.
+- **Code:** `mandate-research`: `crates/mandate-research/src/lib.rs` (the thesis and its platform facts as typed data,
+  `checks` and `admit` for the §8.5 decision, `fold_theses` for the §8.6 lineages, `expire_theses`
+  for the three removals, `stagger_offset`, `stagger_release_at` and `next_proposal_at` for §8.4's
+  timing, and the `ResearchEvent` entries the crate produces) and
+  `crates/mandate-research/src/spec_types.rs` (the narrow stream-F views the first implementation PR
+  after F's tests PR deletes). It **never calls a model:** a model output arrives as a typed value,
+  and the platform boundary that produces it is E17-2's shell story. The spike that found the shape
+  is `python/research_spike/` (E17-0, a spike, not product code).
+- **Tests:** `crates/mandate-research/tests/admission.rs` (one case per §8.5 check, plus MC-N01,
+  MC-N02, MC-N08, MC-N14, MC-N16, MC-N25 and MC-N26 by hand),
+  `crates/mandate-research/tests/lineage.rs` (MC-N17 to MC-N19, MC-N24, MC-N27, MC-N28),
+  `crates/mandate-research/tests/expiry.rs` (MC-N20 to MC-N22 and the horizon boundary),
+  `crates/mandate-research/tests/stagger.rs` (MC-N23's three offsets and the anchor rules, with the
+  least-significant-first reduction oracle),
+  `crates/mandate-research/tests/properties.rs` (the four oracles: the universe replayed from the
+  emitted events, the failing-check set computed unordered, an independent lineage counter, and the
+  oracle self-checks that fail on a seeded bug),
+  `crates/mandate-research/tests/refcases.rs` (25 of the 28 family-N cases loaded from
+  `fixtures/refcases/mandate.json` rather than typed out; the three that state `first_order_autonomy`
+  wait for stream H's `classify`), and `crates/mandate-research/tests/rules.rs` (the rule logic this
+  crate carries live, pinned unignored so `cargo mutants` reaches it). Planted bugs per test: the task
+  brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
   with streams F, G, and H.

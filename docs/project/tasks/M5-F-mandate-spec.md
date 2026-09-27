@@ -760,6 +760,15 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
   goals; `pending E17-1` for the field-split tests (V-034 to V-039 and `platform_proposed`
   provenance). `cargo xtask markers` accepts only `pending E<n>-<n>`, so `pending F` — a stream, not
   a story — is not a marker the workspace can carry (interpretation 2).
+- **A pending marker names the story that owns the rule, not the story that can un-pend the test.**
+  The goal tests are `pending E6-4`, and every one of them stops at `Mandate::parse`, which is
+  E10-1's: a goal needs a validated mandate to be a goal of. So **E6-4 cannot remove those
+  `#[ignore]` lines until E10-1's implementation has landed**, and an implementation PR for E6-4 that
+  found them still failing would be seeing the parser, not its own rule. The same holds for every
+  family whose tests build a document: only `risk_day` is free of it, taking an instant and nothing
+  else. Sequencing, not a defect, and named here because the alternative — marking them `pending
+  E10-1` — would file the goal rules under the story that does not own them (review round 1 of
+  the tests PR for T and L).
 
 ## Interpretations (recorded as DEC-128)
 
@@ -901,6 +910,22 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     predicates, `Usd::times_ratio`, `Usd::scaled_by` (one rounding), and `Ratio::{times, complement}`.
     Stream G's claim also names `Usd × Fraction`; the coordinator sequences so that one stream lands
     each operation and the other consumes it.
+
+20b. **Three names the code settles differently from this brief's sketch**, recorded because the
+    sibling briefs read them (DEC-128 items 23 and 24). `mandate_domain::MarketSession`, not
+    `Session`, and it keeps an `Overnight` variant: a bar or a risk input can be overnight even though
+    §6.3's condition form has no name for it, because no order may trade there (DEC-30).
+    `goal::status`, not `goal_status`, since the module is already called `goal`. And
+    `RiskState::open` takes a `&dyn SessionClock`, which the sketch omitted: §5.2 and §5.5 count an
+    equity's staleness and scale-lift timers in regular-session seconds, this crate holds no calendar,
+    and taking the clock as a parameter is what keeps "nothing reads a clock" (ES-21) true rather than
+    hiding a calendar behind a pure crate. Two further shapes moved under review: `SchemaDec`
+    compares **by value**, with `PartialEq` and `Eq` hand-written so they agree with `Ord` (the
+    grammar is a witness, not identity) and with **no `Hash` at all**: ES-21 bans `HashMap` and
+    `HashSet`, so a hash of a document value has no legitimate caller, and a hand-written one only
+    added a mutant nothing could catch. `ParseError::OffGrammar` carries the
+    `Pointer` every other variant carries, with `SchemaDec::parse` returning a path-less
+    `GrammarMismatch` the document parser wraps.
 
 21. **Shared types have one home, named here, because three streams read them.** The review of this
     brief found the same type in two briefs three times, so each is settled, and each of the two
