@@ -201,6 +201,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   ([task brief](tasks/M7-escalation-v0.md), [DEC-155](04-decision-log.md#decisions)). "Alternatives"
   means the owner's choices (approve or skip, with the default stated), never platform-authored
   alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
+  *Follow-up (DEC-165 item 3, #236):* the content's Trigger row still lacks "the rule as the owner
+  wrote it". It joins the content object once the M7 spec PR fixes §6.4's list, with a test that
+  scans owner-written text apart from the platform's own in
+  `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
+  written and never read as platform advice.
 - **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
   adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
