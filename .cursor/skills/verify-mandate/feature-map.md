@@ -223,13 +223,15 @@ paths arrive with the tests PR, which updates this entry.
   `OrderSubmitted` drafts, zero submissions, and the stage's stable error code; an all-stubs case for
   the state the repository is in; an all-doubles case that proves the harness can place an order at
   all. Then `tests/tracer.rs`, the end-to-end run over recorded Alpaca paper scenarios (`happy`,
-  `gate_denies`, `gate_check_unenforced`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
+  `gate_denies`, `gate_allow_with_not_reached_refused`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
   `oversized_proposal`, `outlier_close`, `duplicate_after_restart`,
   `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, `reconcile_mismatch_pauses`) with
   a golden journal and an injected clock and `IdGen`; the refusal of a configured host and the host
   scanner; the environment scanner over every committed draft, which `verify_events` does not cover;
-  and property tests that no mapping of any source error can permit an order and that an `Allow` with
-  an unenforced §9.1 check is refused. `AlpacaPaperHttp` is never constructed in a test, so no test can
+  and property tests that no mapping of any source error can permit an order and that an opening
+  `Allow` carrying a `NotReached` check is refused. The gate itself already refuses an opening while
+  any §9.1 check is owed (`Err(GateError::Unimplemented)`, DEC-129 item 29), so the shell only declines
+  to soften that and holds no list of its own of which story owns which check. `AlpacaPaperHttp` is never constructed in a test, so no test can
   reach a network (ES-19). Planted bugs per test (16): the task brief.
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
@@ -260,8 +262,7 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
   account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
-  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-8 shell
-  (`mandate-shell`; DEC-138 amends DEC-133 item 1), since
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
   the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and

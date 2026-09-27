@@ -121,13 +121,13 @@ prompted a finding.
 | TI-2 | If **any** stage of the path fails to answer — its crate's `Unimplemented` error, any other error, an absence, or an ambiguity — no order reaches the connector, no intent is handed to the sink, and no `IntentProposed` or `OrderSubmitted` is journaled. The assertion is made at the **furthest boundary the failing stage could have reached**, never only at the connector, because a stubbed executor makes "zero submissions" true of every bug (finding 1) |
 | TI-3 | No adapter in the shell can map a failure, an absence, an ambiguity, or a timeout to a verdict that permits an order. The mapping functions are total and have no permitting arm |
 | TI-4 | A **risk-reducing** stage that cannot answer (the flatten planner, the protective sequence) stops the tracer **before** it opens a position, and never yields an empty or invented plan. The tracer never opens what it cannot exit. Because `FlattenPlanner::plan` is infallible, this is held by a startup probe and a poisoned adapter, not by a `Result` (finding 2, and Decisions needed 5) |
-| TI-5 | Every request goes to `mandate_alpaca::http::PAPER_HOST` and passes `is_paper_trading_path`, because that is the only URL `AlpacaPaperHttp` can build. `mandate-shell` cannot reach any host of its own: no host literal appears in it, and its `allowed_external` has no HTTP client, so it cannot implement `TradingTransport` itself. No environment variable, argument, or configuration file introduces a host |
+| TI-5 | Every request goes to `mandate_alpaca::http::PAPER_HOST` and passes `is_paper_trading_path`, because that is the only URL `AlpacaPaperHttp` can build. `mandate-shell` holds no host literal outside `#[cfg(test)]`, and its `allowed_external` names no HTTP or TLS crate, so it **cannot make a TLS connection** of its own — it could write a plaintext `TradingTransport`, which no Alpaca host serves. No environment variable, argument, or configuration file introduces a host |
 | TI-6 | A restart at any point sends **zero** further `POST /v2/orders`, and the whole run holds exactly one submission and one `IntentProposed`. `Input::Started` queries and never resubmits (DEC-133 item 2), so the broker's `DuplicateClientOrderId` dedupe is the **backstop**, never the assertion — an assertion that tolerates a second POST cannot see an `IdGen` reset, which reproduces the same id (finding 6) |
 | TI-7 | Every journaled draft carries `environment = paper`. A draft with any other environment is a refusal, not a warning |
 | TI-8 | No credential, account number, or account id appears in any journal draft, log line, error message, fixture, or file the tracer writes |
 | TI-9 | `Autonomy::Ask` and `Autonomy::Deny` send no order. The tracer has no escalation, so ask resolves to the safe default (skip), journaled |
 | TI-10 | The tracer is deterministic: the same fixtures, mandate, and injected clock produce byte-identical journal drafts |
-| TI-11 | A gate verdict counts only when every check of [trading-domain §9.1](../../specs/trading-domain.md#9-risk-gate)'s order is **enforced by a landed story**. `gate::evaluate` records a check no story owns yet as `CheckOutcome::Passed` and returns `Verdict::Allow` (`mandate-risk/src/gate.rs`, the `_ => Ok(None)` arm on #160), so `Allow` is not evidence on a half-built gate. The shell refuses on any check that passed because it is unowned |
+| TI-11 | The shell never treats an opening `Verdict::Allow` as gated when `Decision.checks` contains any `CheckOutcome::NotReached`. This is **defence in depth, not the mechanism**: `mandate-risk` already fails closed for adding risk — an owed check is recorded `NotReached`, and an opening the implemented checks would allow returns `Err(GateError::Unimplemented("evaluate", story))` (DEC-129 item 29; `gate.rs`'s `owed()` and its `first_owed` arm, on #160's head `9ae15c2`), which the shell's existing error mapping already denies. The shell holds **no list of its own** of which story owns which check: that would be gating knowledge in the shell, against DEC-138 item 3, and it would drift from `owed()` |
 | TI-12 | Running the tracer twice never buys a second share: it refuses when the agent stream already carries an open order or a position in the instrument, unless the operator asks for a new cycle, and a journal that has lost the record of a position the broker holds is a reconciliation mismatch that pauses and alerts |
 
 ### Oracles
@@ -143,9 +143,9 @@ seeded bug before it is trusted ([AGENTS.md](../../../AGENTS.md) "Independent or
 | **Shadow order book from the drafts' canonical bytes** | Rebuilds the intended order set from the same parsed drafts | TI-1, TI-10: a draft that does not say what the code did |
 | **Environment scanner over the drafts** | Parses every committed draft and asserts `Draft::environment() == Environment::Paper`. This is **not** `verify_events`'s job: `columns_match` only checks that the stored column equals the body's field (`mandate-journal/src/verify.rs`), so a consistently `Live` journal verifies (finding 5) | TI-7 |
 | **Journal verifier** | The end-to-end test exports the journal and runs `mandate_journal::verify_events` with a `TrustedStart` over it — separate code, for the chain and the artifact references | TI-1: a broken chain |
-| **Host scanner** | Reads `crates/mandate-shell/src/**` as text and asserts no host literal appears, and that nothing in the crate implements `TradingTransport` | TI-5 |
+| **Host scanner** | Reads `crates/mandate-shell/src/**` as text and asserts no host literal appears outside a `#[cfg(test)]` block, and that every `impl TradingTransport` in the crate is inside one. The exemption is necessary, not cosmetic: the shell's own submission counter **needs** a scripted transport, and #152's `FakeTransport` lives in `mandate-alpaca/tests/common`, which another crate cannot import (review finding 4). The alternative is to ask stream K to export a scripted transport — Decisions needed 5 | TI-5 |
 | **Stage enumerator** | An exhaustive `match` over the `Stage` enum builds the fail-closed suite's case list, so a new stage fails to compile until it has a case | TI-2, TI-3 |
-| **Enforced-check list** | A shell-owned list of the §9.1 checks a landed story enforces, compared against `Decision.checks`; the test fails if the list and the gate disagree | TI-11 (finding 3) |
+| **`NotReached` scanner over the gate's own output** | Reads `Decision.checks` and fails an opening `Allow` carrying any `NotReached`. It holds **no list** of which story owns which check, so it cannot drift from `owed()` | TI-11 |
 
 ### Crates
 
@@ -187,18 +187,18 @@ the stage can be real; until then the stage is a stub and the path sends no orde
 | 3 | The signal at the last period's close | `mandate_backtest::Strategy::MovingAverageCrossover(StrategyConfig { fast_periods: 5, slow_periods: 20, collar, target_notional }).signal(&closes) -> Result<Signal, BacktestError>` | **#163** (E4-2 implementation) |
 | 4 | Wrap the signal as a signal-model output with an explicit expiry, and feed it in | the shell builds `mandate_runtime::ModelOutput { model: "ma-crossover", version, instrument, as_of, expires_at, content }` and calls `handle` with `Input::ModelOutput(..)` | this stream |
 | 5 | Size the order and classify its autonomy | `mandate_runtime::OrderPlan::plan(&MandateView, &SignalInputs) -> Option<Proposal>` and `classify(..) -> Autonomy`, the shell's adapter over `mandate-builder` | stream **H** (tests, then implementation) |
-| 6 | The gate's **advisory** pass inside the runtime, which can only narrow | `mandate_runtime::GateDryRun::check(&Proposal) -> DryRunVerdict`, the shell's adapter over `mandate_risk::evaluate(&GateInput) -> Result<Decision, GateError>`. The adapter permits only when every §9.1 check is enforced (TI-11) | **#157**, **#160**, E6-3's third PR, **and E6-6** (`SessionAndHalt`, `DayTradeBudget`), **E6-7** (the eligibility floor inside `UniverseAndLimits`), **E6-8** (`MarkAndCollar`, `ConductControls`) |
+| 6 | The gate's **advisory** pass inside the runtime, which can only narrow | `mandate_runtime::GateDryRun::check(&Proposal) -> DryRunVerdict`, the shell's adapter over `mandate_risk::evaluate(&GateInput) -> Result<Decision, GateError>`. The adapter carries the gate's answer through unsoftened, and additionally refuses an opening `Allow` carrying a `NotReached` (TI-11) | **#157**, **#160**, E6-3's third PR, **and E6-6** (`SessionAndHalt`, `OrderConstraints`, `BuyingPowerAndExposure`, `DayTradeBudget`), **E6-7** (`UniverseAndLimits`), **E6-8** (`MarkAndCollar`, `ConductControls`) — the assignment is `gate.rs`'s own `owed()`. Until all three land the **gate refuses every opening**, so these are prerequisites for the tracer placing its order, not follow-ups |
 | 7 | The decision cycle: one `handle` call returns an ordered effect list; the runner appends each `Effect::Journal` and hands `Effect::Intent` **only after** its draft answered `Committed` or `AlreadyCommitted` | `mandate_runtime::handle(&mut RuntimeState, Input, &Ports) -> Result<Vec<Effect>, RuntimeError>`; the runner is the shell's | merged (**#151**) |
 | 8 | Append the agent-stream drafts | the shell's `JournalWriter` port: `mandate-journal-pg` for the manual run, an in-crate writer that answers the same append protocol for CI; drafts validated with `mandate_journal::Draft::parse` | merged (E5-1, E5-3) |
 | 9 | Hand the intent across, converting between the **two distinct** `IntentHandoff` types | the shell's `IntentSink` adapter: `mandate_runtime::IntentSink::hand(&mandate_runtime::IntentHandoff)` → `mandate_executor::Input::Intent(mandate_executor::IntentHandoff)`. The runtime's carries `{ intent_id: EventId, body }`; the executor's carries `{ intent_id: IntentId, agent: AgentId, body }`, so the **shell supplies the `AgentId`** and wraps the `EventId` — the one place the two crates are joined, and a conversion the shell owns rather than either crate | **#152**, then stream K's implementation |
-| 10 | The **binding** gate, on fresh folded account state | `mandate_executor::gate::decide(..)` — crate-private inside the executor, a direct dependency on `mandate-risk`, not injected and not replaceable (AGENTS.md rules 1 and 12) | stream **K** implementation, with **#157**, **#160**, **E6-6**, **E6-7**, **E6-8** (the same checks step 6 needs; a binding gate on unenforced checks is TI-11's hazard, not a safeguard) |
+| 10 | The **binding** gate, on fresh folded account state | `mandate_executor::gate::decide(..)` — crate-private inside the executor, a direct dependency on `mandate-risk`, not injected and not replaceable (AGENTS.md rules 1 and 12) | stream **K** implementation, with **#157**, **#160**, **E6-6**, **E6-7**, **E6-8** — the same checks step 6 needs, for the same reason: the binding gate calls the same `evaluate`, which refuses an opening while any check is owed |
 | 11 | The idempotency key, derived from journaled facts alone | `mandate_executor::ClientOrderId::for_intent(&IntentId) -> Result<ClientOrderId, ExecutorError>` | **#152** |
 | 12 | Journal `OrderSubmitted`, then request the submission | `mandate_executor::handle(..) -> Result<Vec<Effect>, ExecutorError>` returning `Effect::Journal(OrderSubmitted)` before `Effect::Broker(BrokerRequest::Submit(..))`; the shell's runner preserves that order and stops at the first append that is neither `Committed` nor `AlreadyCommitted` | **#152**, then stream K implementation |
-| 13 | The paper connector sends it | `mandate_alpaca::TradingClient::new(transport, pause, retry)` implementing `mandate_executor::BrokerConnector::call(&BrokerRequest)`, which is **async** (`-> impl Future<Output = Result<BrokerOutcome, BrokerUnknown>>`), so the shell owns the runtime that drives it. CI: the scripted transport over recorded fixtures. Manual run: `mandate_alpaca::AlpacaPaperHttp::new(Credentials::from_env()?)`, which builds every URL as `format!("{PAPER_HOST}{path}")` and holds no base to override | **#152**, then stream K implementation |
+| 13 | The paper connector sends it | `mandate_alpaca::TradingClient::new(transport, pause, retry)` implementing `mandate_executor::BrokerConnector::call(&BrokerRequest)`, which is **async** and, on #152's head `4a1a2ca`, returns `-> impl Future<Output = Result<BrokerOutcome, ConnectorError>>` — `ConnectorError`, not `BrokerUnknown` (review finding 6) — so the shell owns the runtime that drives it. CI: the scripted transport over recorded fixtures. Manual run: `mandate_alpaca::AlpacaPaperHttp::new(Credentials::from_env()?)`, which builds every URL as `format!("{PAPER_HOST}{path}")` and holds no base to override | **#152**, then stream K implementation |
 | 14 | Fold the answer | `Input::Broker(Ok(BrokerOutcome::Submitted(order)))` → `OrderAcknowledged`; `DuplicateClientOrderId` folds as already submitted; `Err(BrokerUnknown)` **queries and never resubmits** | stream **K** implementation |
 | 15 | The journal record, verified | the test exports both streams and runs `mandate_journal::verify_events` with a `TrustedStart` over them | merged (E5-1, E5-4) |
 | 16 | Restart and reconcile | `Input::Started(epoch)` on both cores, `mandate_runtime::fold` replaying the agent stream, then `mandate_executor::reconcile(&state, &snapshot, &ports)`; a mismatch pauses and alerts and nothing in the tracer lifts it. `Started` queries and never resubmits, so the bar is **zero** further submissions (TI-6) | stream **K** implementation |
-| 17 | **Before any of the above**: probe that the exit path can be planned, and refuse to start if it cannot (TI-4) | `mandate_risk::agent_flatten(..)` once against a synthetic request built from the mandate fixture, and the executor's `protection` sequence, both checked for `Err(Unimplemented)` before the tracer arms anything | `agent_flatten` (**E6-3**, still `Unimplemented("agent_flatten", "E6-3")` on #160) and `mandate_executor::protection` (**E7-4**, still `Unimplemented { story: "E7-4" }` on #152) |
+| 17 | **Before any of the above**: probe that the exit path can be planned, and refuse to start if it cannot (TI-4) | `mandate_risk::agent_flatten(..)` once against a synthetic request built from the mandate fixture — a public function, so the flatten probe is direct. **Protection is not directly probeable:** in #152 `mod protection` is private and `ladder_price`, `is_protected` and `exit_hold` are `pub(crate)`, with only `LadderPrice` and `LadderReference` exported (review finding 3). The probe therefore goes **through the public API**: one `mandate_executor::handle` call on a synthetic protective input, whose `Err(ExecutorError::Unimplemented { story: "E7-4" })` is the answer the probe reads. If that proves too indirect to be meaningful, the alternative is a public probe from stream K — Decisions needed 4 | `agent_flatten` (**E6-3**, `Unimplemented("agent_flatten", "E6-3")` on #160's head `9ae15c2`) and `mandate_executor::protection` (**E7-4**, `Unimplemented { story: "E7-4" }` on #152's head `4a1a2ca`) |
 
 Steps **2, 7, 8, and 15** are real on `main` today. Every other step is a stub or does not exist:
 steps **1, 3, 5, 6, 17** are stubs in merged or open crates, and steps **9, 10, 11, 12, 13, 14, 16**
@@ -228,7 +228,8 @@ default — it is an unprotected position (AGENTS.md rule 13, TI-4).
 | Signal | `Err(BacktestError::Unimplemented)`; also `Signal::Undecided` and `Signal::Flat` while flat | no model output is produced | no order |
 | Order builder — sizing | `Unimplemented` | `OrderPlan::plan` returns `None` | no proposal, so no order |
 | Order builder — classification | `Unimplemented` | `classify` returns `Autonomy::Deny` | no order |
-| Risk gate, advisory | `Err(GateError::Unimplemented)`, or `Verdict::Deny`, or `Verdict::Allow` **with any §9.1 check `Passed` because no story owns it yet** | `DryRunVerdict::Deny { reason_code }`, the code carried through, or `gate_check_unenforced` naming the check | no order. This is the stage's real hazard: `gate::evaluate`'s `_ => Ok(None)` arm passes an unowned check, so `Allow` is not evidence (TI-11) |
+| Risk gate, advisory | `Err(GateError::Unimplemented("evaluate", story))`, which is what an opening gets while any §9.1 check is still owed, or `Verdict::Deny` | `DryRunVerdict::Deny { reason_code }`, the code carried through. The gate does this work itself (DEC-129 item 29), so the shell's only job is not to soften it | no order |
+| Risk gate, advisory — belt and braces | an opening `Verdict::Allow` whose `checks` carry a `NotReached` | `DryRunVerdict::Deny { reason_code: "check_not_reached" }`, derived from the gate's own output with no list in the shell | no order (TI-11) |
 | Risk gate, binding | `Err(ExecutorError::Unimplemented)` | the executor emits no `Effect::Broker` | no order |
 | Journal append | anything but `Committed` / `AlreadyCommitted` | the runner stops and discards the rest of the effect list | no order (this is rule 5, mechanically) |
 | Flatten planner, at startup | `mandate_risk::agent_flatten` answers `Err(Unimplemented)` to the probe | **refuse to start**, `exit_path_unavailable` | the tracer never opens a position it cannot flatten |
@@ -291,6 +292,31 @@ for stage in Stage::ALL:
     if stage runs after the runtime started:
         assert the last committed draft names the stage
 ```
+
+**The `Stage` enum**, which is the suite's contract and the thing an exhaustive match is taken over:
+
+```
+Validate, MarketData, Signal, Size, Classify, GateDryRun, Journal, Sink, Executor, Connector,
+FlattenProbe, ProtectionProbe, Reconcile
+```
+
+Thirteen variants for seventeen steps, because **steps 10, 11, 12, 14 and 16 are internal to
+`mandate_executor::handle`** and are deliberately not replaceable: the binding gate is a
+crate-private direct dependency, `ClientOrderId::for_intent` is a pure function of the intent, and
+the journal-then-broker ordering is the executor's own. There is no shell trait to stub them one at a
+time, and inventing one would put the executor's decisions behind something a caller can substitute —
+exactly what `AGENTS.md` rule 1 forbids (review finding 5). So one `Stage::Executor` covers them, and
+its double produces the failure modes those steps can have:
+
+| `Stage::Executor` double | Which step it stands for | What the case asserts |
+|---|---|---|
+| `Err(ExecutorError::Unimplemented)` | 10 and 11: the binding gate, or the id derivation, cannot answer | zero submissions, no `OrderSubmitted` draft |
+| `Effect::Broker` **before** its `Effect::Journal` | 12: the write-ahead ordering inverted | the runner refuses to hand the broker effect, and TI-1's property fails on the recorded order |
+| `Err(ConnectorError)` on the first call, then `Absent` | 14: the answer is unknown, then the order is not there | one submission and one query; a single `Absent` never resubmits |
+| a `BrokerSnapshot` that disagrees with the fold | 16: reconciliation finds a mismatch | the agent is paused, the alert is emitted, nothing lifts it |
+
+`Stage::Connector` is separate from `Stage::Executor` because it is the one part of steps 13 and 14
+the shell really does inject: the `TradingTransport`.
 
 **How each case is shown to bite today**, with #152's executor still a stub. A case bites when the
 permissive doubles carry the path to the stubbed stage, so the stub is what stops the run and its
@@ -410,7 +436,7 @@ from a build that ships (see "How the mapping is made unrepresentable" item 5).
   ([AGENTS.md](../../../AGENTS.md) "Validate fixtures against the rules").
 - **An injected clock and an injected `IdGen`**, so the run is deterministic and the golden journal
   is byte-stable (ES-21, TI-10).
-- Scenarios: `happy` (one order, acknowledged), `gate_denies`, `gate_check_unenforced`,
+- Scenarios: `happy` (one order, acknowledged), `gate_denies`, `gate_allow_with_not_reached_refused`,
   `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,
   `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, and
   `reconcile_mismatch_pauses`.
@@ -438,9 +464,12 @@ cargo run -p mandate-shell --bin mandate-tracer -- \
   1. **The type.** `mandate-alpaca` compiles no host but `PAPER_HOST`, has no `live` feature, has no
      deposit, withdrawal, or transfer endpoint, builds its client `https_only(true)` with
      `redirect::Policy::none()`, and runs `is_paper_trading_path` before anything is sent.
-  2. **The dependency list.** `mandate-shell`'s `allowed_external` names no HTTP client, so the shell
-     cannot implement `TradingTransport` or open a connection of its own, and `cargo xtask layers`
-     fails if the list grows. This is the rung-1 control that replaces the comparison.
+  2. **The dependency list, stated exactly.** `mandate-shell`'s `allowed_external` names no HTTP client
+     and no TLS crate, so the shell **cannot make a TLS connection**, and `cargo xtask layers` fails
+     if the list grows. It is *not* true that the shell cannot implement `TradingTransport`:
+     that is a plain trait and `std::net` and `tokio::net` are reachable (review finding 4). What the
+     allowlist buys is that any transport the shell could write would be plaintext to a host Alpaca
+     does not serve — not nothing, but a narrower claim than the first draft made.
   3. **The refusal of any attempt to configure a host.** There is no `--host` argument, no host
      environment variable, and no config file. Any environment variable whose name contains `ALPACA`
      and whose value looks like a URL is itself a refusal with exit code `non_paper_host`, so an
@@ -463,13 +492,18 @@ cargo run -p mandate-shell --bin mandate-tracer -- \
 | Stage | Branch | Contents |
 |---|---|---|
 | 1. **Brief** (this PR) | `agent/tracer-brief` | This document, the DEC-138 row and its Reserved-identifiers row, the E7-7 backlog story, the tracker's stream L row and Claims row, and the feature-map entry. No `crates/`, `schemas/`, `docs/specs/`, `reference/`, `fixtures/`, or `Cargo.*`, so CI takes the documentation-only short path (DEC-112) |
-| 2. **Tests** | `agent/tracer-tests` | The `mandate-shell` skeleton (safety-critical lint header, module docs, every adapter and the effect runner as stubs returning `ShellError::Unimplemented`), the `xtask/layers.toml` entry and the CODEOWNERS line, all fixtures, the fail-closed suite and its permissive doubles in a `#[cfg(test)]` module inside `src/`, the property tests, the host and environment scanners, the golden journal, green `cargo xtask check` including the pending gate, and the planted-bug report in the PR body. Only the end-to-end happy path carries `#[ignore = "pending E7-7"]`; the fail-closed cases pass on this PR's code, because today every stage really does refuse |
+| 2. **Tests**, after **#152** merges | `agent/tracer-tests` | The `mandate-shell` skeleton (safety-critical lint header, module docs, every adapter and the effect runner as stubs returning `ShellError::Unimplemented`), the `xtask/layers.toml` entry and the CODEOWNERS line, all fixtures, the fail-closed suite and its permissive doubles in a `#[cfg(test)]` module inside `src/`, the property tests, the host and environment scanners, the golden journal, green `cargo xtask check` including the pending gate, and the planted-bug report in the PR body. Only the end-to-end happy path carries `#[ignore = "pending E7-7"]`; the fail-closed cases pass on this PR's code, because today every stage really does refuse |
 | 3. **Implementation** | `agent/tracer-impl` | The adapters filled in, on the coordinator's signal, once the upstream streams have landed. Test files change **only** by deleting `#[ignore = "pending E7-7"]` lines |
 
 There is **no status PR**: this story moves no reference case.
 
-Unlike the other streams, the tests PR here is useful on its own, because the state it asserts — all
-stages stubbed, zero orders — is the state the repository is actually in. The implementation PR
+The tests PR **waits for #152**, which is the one hard prerequisite: the executor and connector
+adapters, the scripted transport, `BrokerConnector`, and the executor's `Effect` and `IntentHandoff`
+exist only there, and `Stage::Executor`'s double has nothing to double without them (review
+finding 2). Nothing after #152 blocks it.
+
+Beyond that, the tests PR is useful on its own, because the state it asserts — all stages stubbed,
+zero orders — is the state the repository is actually in. The implementation PR
 follows each upstream merge; the coordinator may split it per stage, one flipped adapter at a time,
 which is the cheapest way to find out which merge broke the integration.
 
@@ -504,8 +538,8 @@ which is how review findings 1 to 4 got in.
 | Adversary | The attack | What blocks it |
 |---|---|---|
 | **A careless user** | Runs `--place-one-order` twice and buys two shares; or points it at a fresh journal DSN so the journal forgets the position the broker holds; or runs it during a halt | TI-12: a refusal (`cycle_already_open`) when the agent stream carries an open order or a position, overridable only by an explicit `--new-cycle`; a fresh journal against an existing broker position is a reconciliation mismatch that pauses and alerts, never a clean start; a halt is `SessionAndHalt`'s business once E6-6 lands, and until then TI-11 refuses the whole opening because that check is unenforced |
-| **A bad model or a bad builder** | Returns a `Proposal` with `qty` zero, a quantity above the mandate's cap, a limit far from the mark, or the wrong side | The shell refuses an impossible proposal rather than correcting it (PB-14), the advisory gate narrows, and the binding gate inside the executor denies. The shell does no sizing, so it cannot enlarge one |
-| **A half-built gate** | Answers `Verdict::Allow` for an opening while four of §9.1's eight checks are `Passed` only because no story owns them — which is what `gate::evaluate` does today | TI-11 and PB-13: the shell's enforced-check list, and a refusal naming the unenforced check. This is the attack the first draft missed entirely, because it assumed a half-built gate would fail with `Unimplemented` rather than allow |
+| **A bad model or a bad builder** | Returns a `Proposal` with `qty` zero, a quantity above the mandate's cap, a limit far from the mark, or the wrong side | The shell refuses only the structurally impossible (`qty > 0`), because a cap or a mark is the gate's comparison to make, not the shell's; the advisory gate narrows and the binding gate denies the rest. The shell does no sizing, so it cannot enlarge one |
+| **A half-built gate** | Lets an opening through while some of §9.1's eight checks are still owed | `mandate-risk` blocks it at source: an owed check is `NotReached` and an opening returns `Err(GateError::Unimplemented)` (DEC-129 item 29), which the shell's mapping denies. TI-11 and PB-13 are the shell's belt and braces, and they add nothing the gate does not already know. **An earlier draft of this brief claimed the opposite** — that the gate passes an unowned check and answers `Allow` — read off a superseded head (`eca4af4`, before `267a5f6`) and false on the current one. It is recorded because the mistake is the instructive kind: a stale read of a safety-critical crate produced a confident, wrong claim of a fail-open, and the remedy it motivated would have moved gating into the shell |
 | **A malicious insider** | Adds an HTTP client to the shell to reach a live host; adds a `_ =>` arm that permits; widens `is_paper_trading_path`; puts a credential in a draft | `allowed_external` plus `cargo xtask layers` (rung 1), the source scan and the clippy lint, CODEOWNERS on the founder-owned files, the host scanner, and the credential scan (PB-9). None of these depends on a reviewer noticing |
 | **A bad market tick** | One outlier close moves the moving average or the collar, so the tracer opens at a price nothing supports | PB-15: the market-data stage refuses coverage it cannot trust, and mark-and-collar refuses the limit. E4-2's baseline compares window sums without dividing, so one tick cannot round the signal either |
 | **The platform itself** | The tracer's single paper order gets read as evidence that the strategy works | The brief says it is not: one order is not forward-paper evidence (DEC-99), the tracer emits no scorecard and no metrics, and its instrument is internal test data, never a recommendation (rule 11, DEC-90) |
@@ -522,7 +556,7 @@ its results.
 | PB-1 | **An order sent before its intent is journaled.** The effect runner sorts effects by variant, or hands `Effect::Intent` before awaiting the append's answer | `tracer::happy` golden-journal ordering assertion, and the TI-1 property: every `Submit` the transport saw is preceded in the same run by a committed draft with the matching `client_order_id`. The shadow order book is rebuilt from the drafts, so in-memory state cannot cover for the missing draft |
 | PB-2 | **A gate denial ignored.** The `GateDryRun` adapter maps `Verdict::Deny` to `DryRunVerdict::Allow`, or drops the reason code | `tracer::gate_denies` asserts zero submissions; the TI-3 property fails for every `Deny` value, not just the fixture's |
 | PB-3 | **A duplicate order after a restart**, planted in the **shell** where this stream can plant it: (a) the restart skips folding the journal before `Input::Started`, so the run forgets the submitted order; (b) the `IdGen` is reset to its seed, which re-derives the *same* `event_id` | `tracer::duplicate_after_restart` asserts **zero** submissions after the restart and exactly one submission and one `IntentProposed` across the whole run. (b) is why the bar is zero rather than "the broker deduped it": a seed reset reproduces the id, so `DuplicateClientOrderId` would hide the bug from any assertion that tolerates a second POST (finding 6). Deriving `ClientOrderId` from a fresh id is `mandate-executor`'s own planted bug, not this stream's |
-| PB-4 | **A live host reached**, replanted as a bug that can actually exist: a shell-local `TradingTransport` implementation that sends somewhere else, or `reqwest` added to the shell's `allowed_external` to make one possible | `cargo xtask layers` fails on the `allowed_external` change; the host-scanner oracle fails on the host literal and on any `impl TradingTransport` inside `mandate-shell`. Separately, `shell::host::refuses_configured_host` feeds `ALPACA_HOST=https://api.alpaca.markets` and `https://paper-api.alpaca.markets.evil.example` and asserts `non_paper_host` before any request — a check on an *input*, not on a constant |
+| PB-4 | **A live host reached**, replanted as a bug that can actually exist: a `TradingTransport` implementation that escapes the `#[cfg(test)]` boundary into the shipping path, or a TLS client added to the shell's `allowed_external` to make a real connection possible | `cargo xtask layers` fails on the `allowed_external` change; the host scanner fails on a host literal or an `impl TradingTransport` outside `#[cfg(test)]`. Separately, `shell::host::refuses_configured_host` feeds `ALPACA_HOST=https://api.alpaca.markets` and `https://paper-api.alpaca.markets.evil.example` and asserts `non_paper_host` before any request — a check on an *input*, not on a constant |
 | PB-5 | **An unimplemented stage treated as allow.** One adapter gains `_ => Allow` or `.unwrap_or(Allow)` | `fail_closed::stage[..]` for that stage asserts zero submissions and the stage's error code; the TI-3 property fails for the whole error type |
 | PB-6 | **Escalation silently auto-approved.** `Autonomy::Ask` is mapped to `Auto` because there is no escalation to send it to | `tracer::autonomy_ask` asserts zero submissions and one journaled `ApprovalRequested` with no submission following it (TI-9) |
 | PB-7 | **`Undecided` treated as `Long`.** The signal adapter treats "not enough periods" as a buy | `tracer::signal_undecided`, with a fixture holding fewer than `slow_periods` closes, asserts zero submissions |
@@ -531,8 +565,8 @@ its results.
 | PB-10 | **A non-paper environment journaled.** A draft is built with `Environment::Live` | the **environment scanner** over the parsed drafts. Not `verify_events`: its `columns_match` only checks the stored column against the body's field, so a consistently `Live` journal verifies cleanly (finding 5) |
 | PB-11 | **A second submission after `Unknown`.** `Err(BrokerUnknown)` resubmits instead of querying | `tracer::broker_unknown_then_absent` asserts one submission and one query, and that a single `Absent` does not resubmit |
 | PB-12 | **A reconciliation mismatch written away.** The shell resumes after a position mismatch | `tracer::reconcile_mismatch_pauses` asserts the agent is paused, the alert is emitted, and nothing lifts it |
-| PB-13 | **A gate `Allow` trusted while checks are unenforced.** The adapter permits on `Verdict::Allow` without consulting the enforced-check list, so an opening passes with `SessionAndHalt`, `MarkAndCollar`, `ConductControls` and `DayTradeBudget` merely `Passed` | `fail_closed::gate_check_unenforced` and the TI-11 property. This is the "half-built gate" row of the attack table, and it is not hypothetical: on #160 the gate really does answer `Allow` here |
-| PB-14 | **A bad builder trusted.** The shell passes through a `Proposal` with `qty` zero, or above the mandate's per-order cap, instead of refusing before the sink | `shell::proposal_sanity` asserts a refusal, and the binding gate denies it in `tracer::oversized_proposal`. The shell does no sizing, so its job is to refuse an impossible proposal, not to correct it |
+| PB-13 | **A gate answer softened in the shell.** The adapter maps `Err(GateError::Unimplemented)` to `Allow` "because the gate is still being built", or permits an opening `Allow` whose `checks` carry a `NotReached` | `fail_closed::stage[GateDryRun]` for the first; `gate_allow_with_not_reached_refused` and the TI-11 property for the second. The gate already fails closed for openings, so the only way this stage fails open is if the **shell** softens it — which is the bug worth planting |
+| PB-14 | **A bad builder trusted.** The shell passes through a `Proposal` with `qty` zero | `shell::proposal_sanity` asserts a refusal. Only the **structural** `qty > 0` is the shell's: a quantity above the mandate's per-order cap is a *limit* comparison and belongs to the binding gate, not to a layer-8 shell holding no gating knowledge (DEC-138 item 3, review finding 6). `tracer::oversized_proposal` asserts the gate denies that one |
 | PB-15 | **A bad tick trusted.** One outlier close in the bar fixture drives the collar, so the limit is priced far from the market | `tracer::outlier_close` asserts the mark-and-collar check refuses, and the market-data stage refuses coverage it cannot trust |
 | PB-16 | **A careless second run.** `--place-one-order` is run twice, or once against a fresh journal DSN while the broker already holds the position, and buys a second share | `shell::repeat_run_refused` asserts `cycle_already_open` when the agent stream carries an open order or a position; `tracer::fresh_journal_with_broker_position` asserts the startup reconciliation treats it as a mismatch, pauses, and alerts (TI-12) |
 
@@ -569,18 +603,30 @@ Two items need the founder, neither of which is a new decision about spending or
    could forget to check it. `shell::flatten_poison_halts` and PB-8 are what hold it, and a fallible
    `plan` stays available to stream I as an improvement rather than an ask from this stream.
 
-Two questions for the merge coordinator, not the founder, and one item it has already ruled on:
+**Two requests to stream K**, either of which this brief works without:
 
-4. **Whether the implementation PR is split per stage.** One PR per flipped adapter finds the
+4. **A public way to probe the protective sequence.** `mod protection` is private and its functions
+   are `pub(crate)`, so the tracer's startup probe reads `Err(ExecutorError::Unimplemented { story:
+   "E7-4" })` back from a `mandate_executor::handle` call on a synthetic protective input. That works
+   but is indirect. A small public probe, or a documented synthetic input that is guaranteed to reach
+   the sequence, would make TI-4's protection half as direct as its flatten half.
+5. **A scripted `TradingTransport` exported from `mandate-alpaca`.** #152's `FakeTransport` is in
+   `mandate-alpaca/tests/common`, which another crate cannot import, so the shell writes its own inside
+   `#[cfg(test)]` and the host scanner exempts that block. If stream K exports one, the shell needs no
+   `impl TradingTransport` at all and the scanner's exemption goes away — a strictly better rung-1
+   position.
+
+**Two questions for the merge coordinator, not the founder, and one item now settled:**
+
+6. **Whether the implementation PR is split per stage.** One PR per flipped adapter finds the
    breaking merge faster; one PR is less queue traffic. The coordinator's go comment decides.
-5. **Whether `mandate-shell` also becomes M7's soak harness now or later.** This brief builds it so
+7. **Whether `mandate-shell` also becomes M7's soak harness now or later.** This brief builds it so
    it can, and scopes it so it does not have to.
-6. ~~Whether this PR may correct stream K's stale layer-7 wording.~~ **Ruled: yes.** The
-   [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md) §4 keeps
-   agents out of another stream's rows, so this PR asked first; the coordinator directed the alignment
-   here. DEC-138 amends DEC-133 item 1, and the tracker's K rows, the M6-K brief's `IntentSink`
-   paragraph, and the feature map's executor entry now say layer 8 with the amendment cited. Nothing
-   else of stream K's changes.
+8. ~~Whether this PR may correct stream K's stale layer-7 wording.~~ **Settled: not here.** DEC-138
+   amends DEC-133 item 1, and the coordinator will align the tracker's K row and
+   [the M6-K brief](M6-K-executor-and-connector.md) in a coordinator change after this merges. This PR
+   touches neither, which is also what the
+   [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md) §4 asks.
 
 ## Not done
 
@@ -645,6 +691,12 @@ Stop and ask the coordinator rather than working around any of these:
 - An upstream crate answers `Allow`, `Passed`, or an empty plan where the brief expected an error.
   Say so: a stage that fails open is a finding for that stream, and the shell's refusal is a
   containment measure, never the fix.
+- **Before citing any upstream crate, re-fetch the branch.** This brief claimed a fail-open in the
+  risk gate on the strength of a read that was current when it was made and superseded by the time it
+  was written down (`eca4af4` → `267a5f6`), and the wrong claim reached a decision-log row and a
+  notification before round 2 caught it. A citation of a safety-critical crate is only as good as the
+  head it was read from, so name the commit, as the tables in this brief now do, and re-read it before
+  each round.
 
 ## Definition of done
 
