@@ -4570,6 +4570,8 @@ fn a_reservation_lowers_buying_power_by_its_amount() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = reconciling(&ports);
+    let startup = snapshot(shell.head().0, ReconcileReason::Startup);
+    shell.run(Input::BrokerSnapshot(startup), &ports);
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Account(mandate_executor::BrokerAccount {
             cash: usd("20000"),
