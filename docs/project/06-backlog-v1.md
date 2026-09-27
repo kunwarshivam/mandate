@@ -234,18 +234,24 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
-- **E10-6 (Should)** As an owner who already runs my own agent (for example Claude), I want to
-  connect it through a Mandate MCP server that exposes the same API Mandate uses to take my input,
-  so that my agent can work inside my mandate without a separate path around it
-  ([DEC-141](04-decision-log.md#decisions)). Follows the owner-input API work, after the tracer
-  bullet (E7-7); no change to milestone order. *Accepted when:* every client request passes through
-  the same order builder, autonomy rules, risk gate, account ledger, and journal as the owner's own
-  input; the client cannot change an envelope field (it may only propose a mandate version that the
-  human confirms with step-up); ASK approvals go only to the human owner, and a client cannot approve
-  its own proposal; owner-only privileges (owner exits outside the regular session at a confirmed
-  bid, Stop and release, the kill switch) stay with the human; the client authenticates with its own
-  scoped, revocable token and no broker credential crosses MCP; every client call is journaled with
-  the client's identity; and the owner can revoke the client at any time.
+- **E10-6 (Should, M8, pulled forward)** As an owner who already runs my own agent (for example
+  Claude), I want to connect it through a Mandate MCP server that exposes the same API Mandate uses
+  to take my input, so that my agent can work inside my mandate without a separate path around it
+  ([DEC-141](04-decision-log.md#decisions), [DEC-148](04-decision-log.md#decisions)). An optional
+  channel and an adoption on-ramp, never the only or the main path: the complete product leads, and
+  the platform's research agent brings the ideas. **Placement (DEC-148):** the first M8 story after
+  the owner-input API (M8's mandate registry, approval service, and owner controls), E9-1, E9-2,
+  E9-4, and E10-3, ahead of M8's other Should stories (E9-5, E10-5); it does not wait for M9 or M10,
+  and its earlier dependencies (E5, E6-2, E6-3, E7-2, E7-3, E7-5, and the tracer bullet E7-7) land
+  before the Phase 1 gate. No change to milestone order. *Accepted when:* every client request
+  passes through the same order builder, autonomy rules, risk gate, account ledger, and journal as
+  the owner's own input; the client cannot change an envelope field (it may only propose a mandate
+  version that the human confirms with step-up); ASK approvals go only to the human owner, and a
+  client cannot approve its own proposal; owner-only privileges (owner exits outside the regular
+  session at a confirmed bid, Stop and release, the kill switch) stay with the human; the client
+  authenticates with its own scoped, revocable token and no broker credential crosses MCP; every
+  client call is journaled with the client's identity; and the owner can revoke the client at any
+  time.
 
 ### E11 Web app: dashboard and controls
 
