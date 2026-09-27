@@ -1545,4 +1545,76 @@ mod tests {
         );
         Ok(())
     }
+
+    fn broker_fee(accrued: &str, charged: &str) -> Result<Value, ExecutorError> {
+        object(vec![
+            ("family", Value::Str("equities".to_owned())),
+            ("day", Value::Str("2026-09-22".to_owned())),
+            ("accrued", Value::Str(accrued.to_owned())),
+            ("charged", Value::Str(charged.to_owned())),
+            ("simulated", Value::Bool(false)),
+            (
+                "risk_clock",
+                crate::payload::clock(crate::types::RiskClock::from_secs(0))?,
+            ),
+        ])
+    }
+
+    fn posting_run(
+        executor: &mut Executor,
+        cash: &str,
+        ports: &Ports<'_>,
+    ) -> Result<Vec<Effect>, ExecutorError> {
+        let taken = BrokerSnapshot {
+            account: account(cash)?,
+            ..executor.snapshot(ReconcileReason::FeePosting)?
+        };
+        executor.run(Input::BrokerSnapshot(taken), ports)
+    }
+
+    /// §11's cash row is exact after posting (§8.3): a broker whose cash fell by exactly the posted
+    /// charge agrees at the posting run, once and twice in a row, so a correct broker never
+    /// alerts or pauses (#205 review, round 2, blocking 1).
+    #[test]
+    fn a_correct_posting_is_no_cash_difference() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = reporting(&ports)?;
+        executor.commit_one("FeesCharged", broker_fee("5", "0")?)?;
+        executor.commit_one("FeesCharged", broker_fee("0", "5")?)?;
+        let first = posting_run(&mut executor, "99995", &ports)?;
+        assert_eq!(
+            (
+                alerts(&first),
+                drafted(&first).contains(&"AgentModeApplied")
+            ),
+            (Vec::<&str>::new(), false),
+            "one posting with the broker's cash down by the charge: {:?}",
+            drafted(&first)
+        );
+        executor.commit_one("FeesCharged", broker_fee("3", "3")?)?;
+        let second = posting_run(&mut executor, "99992", &ports)?;
+        assert_eq!(
+            (
+                alerts(&second),
+                drafted(&second).contains(&"AgentModeApplied")
+            ),
+            (Vec::<&str>::new(), false),
+            "and a second in a row: {:?}",
+            drafted(&second)
+        );
+        assert_eq!(
+            executor
+                .state
+                .effective_mode(&AgentId("agent-a".to_owned())),
+            Mode::Normal
+        );
+        Ok(())
+    }
 }

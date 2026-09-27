@@ -669,11 +669,11 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         return Ok(());
     }
     if !flag(payload, "simulated") {
-        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
-        state.unposted_fees = state
-            .unposted_fees
-            .checked_add(usd(payload, "accrued")?)?
-            .checked_sub(charged)?;
+        posted(
+            state,
+            usd(payload, "accrued")?,
+            optional_usd(payload, "charged")?,
+        )?;
         return Ok(());
     }
     {
@@ -684,6 +684,26 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         let accrued = state.simulated_fees.entry(bucket).or_insert(Usd::ZERO);
         *accrued = accrued.checked_add(usd(payload, "accrued")?)?;
     }
+    Ok(())
+}
+
+/// The broker's own fee, §8.3's `FeesCharged` row: the accrual grows by `accrued`, and a posted
+/// `charged` leaves settled cash (the model's cash flow) and clears that much of the accrual. The
+/// accrual never goes below zero: a charge above what was accrued clears it and still takes the
+/// whole charge from cash, so neither the cash band nor buying power ever reads a negative accrual
+/// as spare cash (§11 "exact after posting", `AGENTS.md` rule 3; #205 review, round 2).
+fn posted(
+    state: &mut ExecutorState,
+    accrued: Usd,
+    charged: Option<Usd>,
+) -> Result<(), ExecutorError> {
+    let charged = charged.unwrap_or(Usd::ZERO);
+    state.cash_flow = state.cash_flow.checked_sub(charged)?;
+    state.unposted_fees = state
+        .unposted_fees
+        .checked_add(accrued)?
+        .checked_sub(charged)?
+        .max(Usd::ZERO);
     Ok(())
 }
 
@@ -991,6 +1011,50 @@ mod buying_power_tests {
             Some(usd("950")?),
             "a later report is the new base: the fills before it are in the broker's cash"
         );
+        Ok(())
+    }
+
+    /// §8.3's `FeesCharged` row: a posting takes the charge from settled cash as it clears the
+    /// accrual, and a charge above the accrual clears it to zero and still takes the whole charge.
+    /// Buying power is right between the posting and the next account read (#205 review, round 2).
+    #[test]
+    fn a_posted_fee_leaves_cash_and_clears_the_accrual_never_below_zero()
+    -> Result<(), ExecutorError> {
+        let broker = |accrued: &str, charged: &str| {
+            vec![
+                ("family", text("equities")),
+                ("day", text("2026-09-22")),
+                ("accrued", text(accrued)),
+                ("charged", text(charged)),
+                ("simulated", Value::Bool(false)),
+            ]
+        };
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        stream.fold("FeesCharged", broker("5", "0"))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("995")?),
+            "the accrual is reserved"
+        );
+        stream.fold("FeesCharged", broker("0", "5"))?;
+        assert_eq!(
+            (stream.state.unposted_fees, stream.state.cash_flow),
+            (Usd::ZERO, usd("-5")?),
+            "the posting clears the accrual and leaves cash"
+        );
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("995")?),
+            "and buying power is right before the next account read"
+        );
+        stream.fold("FeesCharged", broker("2", "5"))?;
+        assert_eq!(
+            (stream.state.unposted_fees, stream.state.cash_flow),
+            (Usd::ZERO, usd("-10")?),
+            "a charge above the accrual floors it at zero and takes the whole charge"
+        );
+        assert_eq!(stream.state.buying_power(), Some(usd("990")?));
         Ok(())
     }
 
