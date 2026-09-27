@@ -269,7 +269,7 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
         Some((path, query)) => (path, query),
         None => (path_and_query, ""),
     };
-    if path.contains("..") || !safe(query, b"-._~%&=:,") {
+    if path.split('/').any(is_dot_segment) || !safe(query, b"-._~%&=:,") {
         return false;
     }
     match endpoint.split_once('{') {
@@ -277,6 +277,33 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
         Some((prefix, _)) => path
             .strip_prefix(prefix)
             .is_some_and(|segment| !segment.is_empty() && safe(segment, b"-._~%")),
+    }
+}
+
+/// Whether `segment` is a dot segment, `.` or `..`, in any spelling a URL parser decodes: each dot
+/// may be written `%2e` or `%2E` (the WHATWG URL standard, which `url` implements). A parser
+/// removes such a segment, and `..` the one before it too, so `DELETE /v2/orders/%2e` would be sent
+/// as `DELETE /v2/orders/`, the account-wide cancel-all. `A..B` is not one and is sent unchanged.
+fn is_dot_segment(segment: &str) -> bool {
+    let decoded = segment.to_ascii_lowercase().replace("%2e", ".");
+    decoded == "." || decoded == ".."
+}
+
+/// The URL `path_and_query` is sent to, when a parser leaves the path and the query exactly as
+/// they were built, and [`TransportError::RefusedPath`] otherwise. The allowlist judges the text
+/// it was handed; this is what makes the text judged the text sent, so no normalisation, of a dot
+/// segment or of anything a later parser version decodes, can move a request to another endpoint.
+fn sent_as_built(path_and_query: &str) -> Result<Url, TransportError> {
+    let url = Url::parse(&format!("{PAPER_HOST}{path_and_query}"))
+        .map_err(|_| TransportError::Request)?;
+    let sent = match url.query() {
+        Some(query) => format!("{}?{query}", url.path()),
+        None => url.path().to_owned(),
+    };
+    if sent == path_and_query {
+        Ok(url)
+    } else {
+        Err(TransportError::RefusedPath)
     }
 }
 
@@ -317,7 +344,7 @@ impl TradingTransport for AlpacaPaperHttp {
     /// The request is one of [`ENDPOINTS`] by construction, so nothing here decides what may be
     /// sent: this only dials [`PAPER_HOST`] with the credentials as sensitive headers.
     async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
-        let url = Url::parse(&request.url()).map_err(|_| TransportError::Request)?;
+        let url = sent_as_built(request.path_and_query())?;
         let method = match request.method {
             Method::Get => reqwest::Method::GET,
             Method::Post => reqwest::Method::POST,
@@ -354,5 +381,90 @@ fn classify(error: reqwest::Error) -> TransportError {
         TransportError::Connect
     } else {
         TransportError::Request
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AlpacaPaperHttp, Credentials, HttpRequest, Method, TradingTransport, TransportError,
+        is_dot_segment, sent_as_built,
+    };
+
+    /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
+    /// which the allowlist never sees, so only the transport's own check stands between a hostile
+    /// symbol and the URL a parser would make of it.
+    fn built_directly(method: Method, path_and_query: &str) -> HttpRequest {
+        HttpRequest {
+            method,
+            path_and_query: path_and_query.to_owned(),
+            body: None,
+        }
+    }
+
+    fn transport() -> Result<AlpacaPaperHttp, String> {
+        let credentials = Credentials::from_lookup(|name| Some(format!("unit-test-{name}")))
+            .map_err(|e| e.to_string())?;
+        AlpacaPaperHttp::new(credentials).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn a_dot_segment_is_one_in_every_spelling_a_parser_decodes() {
+        for segment in [".", "..", "%2e", "%2E", ".%2e", "%2e.", "%2E%2e", "%2e%2E"] {
+            assert!(is_dot_segment(segment), "{segment} is a dot segment");
+        }
+        for segment in [
+            "",
+            "A..B",
+            "...",
+            "%2e%2e%2e",
+            "a.",
+            ".a",
+            "%2f",
+            "AAPL",
+            "BRK.B",
+        ] {
+            assert!(!is_dot_segment(segment), "{segment} is an ordinary segment");
+        }
+    }
+
+    #[test]
+    fn a_path_a_parser_leaves_alone_is_sent_as_built() {
+        for path in [
+            "/v2/orders/A..B",
+            "/v2/orders?status=open&limit=50",
+            "/v2/positions/BRK.B",
+            "/v2/orders:by_client_order_id?client_order_id=md-abc",
+        ] {
+            let sent = sent_as_built(path).map(|url| url.to_string());
+            assert_eq!(
+                sent,
+                Ok(format!("https://paper-api.alpaca.markets{path}")),
+                "{path} is sent byte for byte as it was built"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_request_a_parser_would_move_is_refused_and_never_sent() -> Result<(), String> {
+        let transport = transport()?;
+        for (method, path) in [
+            (Method::Delete, "/v2/positions/."),
+            (Method::Delete, "/v2/positions/%2e"),
+            (Method::Delete, "/v2/positions/%2E%2e"),
+            (Method::Delete, "/v2/positions/AAPL/.."),
+            (Method::Delete, "/v2/orders/.%2e"),
+            (Method::Get, "/v2/orders/%2e"),
+        ] {
+            let request = built_directly(method, path);
+            assert_eq!(
+                transport.send(&request).await.err(),
+                Some(TransportError::RefusedPath),
+                "{} {path} would be sent to another endpoint once parsed, so it is refused \
+                 before anything leaves (DEC-133 item 18a)",
+                method.as_str()
+            );
+        }
+        Ok(())
     }
 }
