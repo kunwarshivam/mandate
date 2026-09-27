@@ -1604,7 +1604,10 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         "    pending: {} pending test(s) must fail on this change's code, at their story's stub",
         tests.len()
     );
-    eprintln!("    $ cargo {}", args.join(" "));
+    eprintln!(
+        "    $ PROPTEST_RNG_SEED={PENDING_PROPTEST_SEED} cargo {}",
+        args.join(" ")
+    );
     let out = Command::new("cargo")
         .current_dir(root)
         .args(args)
@@ -1673,6 +1676,25 @@ impl PendingTestRun {
     }
 }
 
+/// The seed every pending property draws its cases from in `ci pending`, so the gate gives one
+/// verdict for one tree. A pending property's failure can depend on which cases it draws: #196's
+/// review and #199's measured three `mandate-executor` properties pending E7-4
+/// (`protective_sell_quantity_never_exceeds_the_position`,
+/// `every_unprotected_interval_has_a_journaled_start_and_end`,
+/// `no_interval_exceeds_the_limit_without_an_alert`) putting a later slice's stub report in their
+/// output on some seeds and none on others, which turned the required `fast` check red and green on
+/// the same code. Live properties keep drawing a fresh seed in `ci test`, where variety finds bugs;
+/// only the pending verdict is pinned. A pinned seed cannot hide a pending test that passes: #199's
+/// review planted one passing on every case and one failing on one input in 100,000, and the gate
+/// reported both as passing.
+///
+/// Those three are not in [`BEHAVIOUR_ONLY_TESTS`], although their shrunk failure is their own E7-4
+/// assertion. Under this seed their output always carries a stub report from a case discarded
+/// before shrinking, and [`names_a_stub`] reads the whole output, so a row for them would be
+/// reported as not needed. They pass on that incidental evidence, which is the whole-output reading
+/// E1-3 replaces with the failure's own cause; when it lands, they need rows (backlog).
+const PENDING_PROPTEST_SEED: &str = "20260927";
+
 /// How a stub reports itself, and the only evidence the gate accepts: `Unimplemented` is the
 /// `Debug` of the variant every stub error carries, `unimplemented` its `code()`, "is not
 /// implemented yet" and "<story> has not been implemented yet" the two `Display` forms in use, and
@@ -1681,14 +1703,6 @@ impl PendingTestRun {
 /// test) is still a stub. A crate whose stubs report none of these is fixed, not excused: that is
 /// why `mandate-num`'s E4-2 stubs and `mandate-spec`'s `Confirmation::update` are `todo!()`
 /// (DEC-137).
-/// The seed every pending property draws its cases from in `ci pending`, so the gate gives one
-/// verdict for one tree. A pending property's failure can depend on which cases it draws: #196's
-/// review measured three `mandate-executor` properties stopping at a later slice's stub on some
-/// seeds and shrinking to their own E7-4 assertion on others, which turned the required `fast`
-/// check red and green on the same code. Live properties keep drawing a fresh seed in `ci test`,
-/// where variety finds bugs; only the pending verdict is pinned.
-const PENDING_PROPTEST_SEED: &str = "20260927";
-
 const STUB_MARKERS: [&str; 5] = [
     "Unimplemented",
     "unimplemented",
