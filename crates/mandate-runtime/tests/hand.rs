@@ -2374,10 +2374,13 @@ fn a_clean_reconciliation_lifts_the_startup_hold_with_an_intent_still_outstandin
     );
 }
 
-/// Round-1 review finding 6: a `RiskLimit` flatten's restriction lifts through the account stream
-/// and nowhere else (brief item 21, mandate spec §5.4, §5.7, §5.8), while an owner or operator stop
-/// is terminal and lifts for no one (DEC-131 item 12). The resume at the end also pins DEC-131 item
-/// 25(h): a command that moves neither the lifecycle nor the effective mode journals nothing.
+/// Round-1 review finding 6 and round-3 findings 1 and 2: a `RiskLimit` flatten's restriction lifts
+/// through the account stream **by the owner's acknowledgment** and nowhere else (brief item 21,
+/// mandate spec §5.4, §5.7, §5.8), while an owner or operator stop is terminal (DEC-131 item 12).
+/// Every step is keyed on event identity: the copy of this switch's own `AgentModeChanged` confirms
+/// it, and only a looser copy caused by an acknowledgment lifts it. The resume at the end also pins
+/// DEC-131 item 25(h): a command that moves neither the lifecycle nor the effective mode journals
+/// nothing.
 #[test]
 fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
     let ids = TestIds;
@@ -2387,24 +2390,85 @@ fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
     let ports = ports(&ids, &gate, &plan, &view);
 
     let mut shell = armed_shell(&ports);
-    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let pulled = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let mode_event = pulled
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the switch journals its own mode change first");
     assert_eq!(
         shell.state.effective_mode(),
         Mode::Paused,
         "a mandate limit's flatten pauses"
     );
-    let the_accounts_own_pause = mode_applied(2, "paused", 110);
-    shell.fold_one(&the_accounts_own_pause).expect("folds");
-    shell.run(Input::Journal(the_accounts_own_pause), &ports);
-    let lifted = mode_applied(3, "normal", 120);
-    shell.fold_one(&lifted).expect("folds");
-    shell.run(Input::Journal(lifted), &ports);
+
+    let the_executors_copy_of_this_switch = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &mode_event,
+    );
+    shell
+        .fold_one(&the_executors_copy_of_this_switch)
+        .expect("folds");
+    shell.run(Input::Journal(the_executors_copy_of_this_switch), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the copy of the switch's own mode confirms it, never lifts it"
+    );
+
+    let acknowledged = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("daily_loss")), ("user", text("user-1"))]),
+    );
+    shell.fold_one(&acknowledged).expect("folds");
+    shell.run(Input::Journal(acknowledged.clone()), &ports);
+
+    let a_pause_the_acknowledgment_caused = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            115,
+        ),
+        &acknowledged.event_id,
+    );
+    shell
+        .fold_one(&a_pause_the_acknowledgment_caused)
+        .expect("folds");
+    shell.run(Input::Journal(a_pause_the_acknowledgment_caused), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "an acknowledgment that restates the pause is not a clearance: only a **looser** mode lifts"
+    );
+
+    let cleared = common::copied(
+        ACCOUNT_STREAM,
+        5,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged.event_id,
+    );
+    shell.fold_one(&cleared).expect("folds");
+    shell.run(Input::Journal(cleared), &ports);
     let resumed = shell.run(Input::Command(Command::Resume), &ports);
     assert_eq!(
         shell.state.effective_mode(),
         Mode::Normal,
-        "and the account stream is what lifts it, or the agent is paused for ever by a limit that \
-         has already cleared"
+        "and the owner's acknowledgment is what lifts it, or the agent is paused for ever by a limit \
+         that has already cleared"
     );
     assert!(
         resumed.draft_types().is_empty(),
@@ -2414,32 +2478,48 @@ fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
     );
 
     let mut terminal = armed_shell(&ports);
-    terminal.run(kill(this_agent(), Initiator::Owner, None), &ports);
-    let ignored = mode_applied(2, "paused", 110);
-    terminal.fold_one(&ignored).expect("folds");
-    terminal.run(Input::Journal(ignored), &ports);
-    let also_ignored = mode_applied(3, "normal", 120);
-    terminal.fold_one(&also_ignored).expect("folds");
-    terminal.run(Input::Journal(also_ignored), &ports);
+    let stopped = terminal.run(kill(this_agent(), Initiator::Owner, None), &ports);
+    let stop_mode_event = stopped
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the stop journals its own mode change first");
+    let confirming = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("stopped")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &stop_mode_event,
+    );
+    terminal.fold_one(&confirming).expect("folds");
+    terminal.run(Input::Journal(confirming), &ports);
+    let acknowledged_stop = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("owner_stop")), ("user", text("user-1"))]),
+    );
+    terminal.fold_one(&acknowledged_stop).expect("folds");
+    terminal.run(Input::Journal(acknowledged_stop.clone()), &ports);
+    let would_lift_anything_else = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged_stop.event_id,
+    );
+    terminal.fold_one(&would_lift_anything_else).expect("folds");
+    terminal.run(Input::Journal(would_lift_anything_else), &ports);
     assert_eq!(
         terminal.state.effective_mode(),
         Mode::Stopped,
-        "an owner stop is terminal and lifts for no one, the account stream included"
-    );
-
-    let mut stricter = armed_shell(&ports);
-    stricter.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
-    let harsher_than_the_switch = mode_applied(2, "stopped", 110);
-    stricter.fold_one(&harsher_than_the_switch).expect("folds");
-    stricter.run(Input::Journal(harsher_than_the_switch), &ports);
-    let cleared = mode_applied(3, "normal", 120);
-    stricter.fold_one(&cleared).expect("folds");
-    stricter.run(Input::Journal(cleared), &ports);
-    assert_eq!(
-        stricter.state.effective_mode(),
-        Mode::Normal,
-        "a copied mode **stricter** than the switch's own confirms it just as its own mode does, so \
-         the clearance that follows still lifts it"
+        "an owner stop is terminal and lifts for no one, an acknowledged clearance included"
     );
 }
 
@@ -2540,5 +2620,194 @@ fn an_exit_is_not_held_behind_a_pending_opening_approval() {
     assert!(
         shell.state.pending_approvals().contains_key(&approval),
         "and the opening approval is untouched, still waiting on its approver"
+    );
+}
+
+/// Round-3 review finding 1: the lift rule must not depend on fold order. A replay folds the agent
+/// stream ahead of the account stream (journal spec §8), so a rule that confirms a switch by "some
+/// copy at or above my mode" lets the **first** switch's echo confirm the **second** and the first
+/// switch's acknowledgment lift it. The live run and the replay then disagree, and the replay is the
+/// one that ends `normal` with the breach unaddressed. Identity, not order, is what ties a copy to a
+/// switch.
+#[test]
+fn a_second_switch_is_not_confirmed_by_the_first_ones_echo() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+
+    let first = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let first_mode = first
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the first switch journals its mode change");
+    let echo = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &first_mode,
+    );
+    shell.fold_one(&echo).expect("folds");
+    shell.run(Input::Journal(echo), &ports);
+    let acknowledged = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("daily_loss")), ("user", text("user-1"))]),
+    );
+    shell.fold_one(&acknowledged).expect("folds");
+    shell.run(Input::Journal(acknowledged.clone()), &ports);
+    let cleared = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged.event_id,
+    );
+    shell.fold_one(&cleared).expect("folds");
+    shell.run(Input::Journal(cleared), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "the first switch's own cycle completes"
+    );
+
+    shell.run(Input::ModelOutput(fresh_output(130)), &ports);
+    shell.run(Input::Tick(clock(130)), &ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let a_stale_clearance = event(
+        ACCOUNT_STREAM,
+        5,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            140,
+        ),
+    );
+    shell.fold_one(&a_stale_clearance).expect("folds");
+    shell.run(Input::Journal(a_stale_clearance), &ports);
+    let live = shell.state.effective_mode();
+    assert_eq!(
+        live,
+        Mode::Paused,
+        "the second switch holds: nothing on the account stream has confirmed or cleared it"
+    );
+
+    let (after, started) = shell.restart(&ports);
+    assert_eq!(
+        after.state.effective_mode(),
+        live,
+        "and the replay agrees with the live run, which is the whole of ES-21: the agent stream \
+         folds ahead of the account stream, so a rule that read arrival order would let the first \
+         switch's echo confirm this one and its acknowledgment lift it"
+    );
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "so the second switch's flatten is still re-handed: {:?}",
+        started.handed
+    );
+}
+
+/// Round-3 review finding 2: a pause and a clearance that both predate the breach, folded after the
+/// switch command because the streams have no global order (journal spec §2), must neither confirm
+/// nor lift it. Neither cites this switch's own mode change, so under the identity rule neither can.
+#[test]
+fn a_pre_breach_pause_and_clearance_pair_does_not_lift_a_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let acknowledged_before_the_breach = event(
+        ACCOUNT_STREAM,
+        2,
+        "OwnerAcknowledged",
+        object(&[
+            ("subject", text("external_activity")),
+            ("user", text("user-1")),
+        ]),
+    );
+    shell
+        .fold_one(&acknowledged_before_the_breach)
+        .expect("folds");
+    shell.run(
+        Input::Journal(acknowledged_before_the_breach.clone()),
+        &ports,
+    );
+    let paused_before_the_breach = event(
+        ACCOUNT_STREAM,
+        3,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("to", text("paused")),
+                ("restriction", text("external_activity")),
+            ],
+            110,
+        ),
+    );
+    shell.fold_one(&paused_before_the_breach).expect("folds");
+    shell.run(Input::Journal(paused_before_the_breach), &ports);
+    let cleared_before_the_breach = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("to", text("normal")),
+                ("restriction", text("external_activity")),
+            ],
+            120,
+        ),
+        &acknowledged_before_the_breach.event_id,
+    );
+    shell.fold_one(&cleared_before_the_breach).expect("folds");
+    shell.run(Input::Journal(cleared_before_the_breach), &ports);
+
+    let live = shell.state.effective_mode();
+    assert_eq!(
+        live,
+        Mode::Paused,
+        "a pause the switch never caused cannot confirm it, so the clearance that follows cannot \
+         lift it: both may predate the breach entirely"
+    );
+    let ran = shell.run(Input::Tick(clock(130)), &ports);
+    assert!(
+        !ran.draft_types().contains(&"IntentProposed"),
+        "and nothing that adds risk follows: {:?}",
+        ran.draft_types()
+    );
+
+    let (after, started) = shell.restart(&ports);
+    assert_eq!(
+        after.state.effective_mode(),
+        live,
+        "the replay agrees with the live run"
+    );
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "and the flatten is still re-handed: {:?}",
+        started.handed
     );
 }

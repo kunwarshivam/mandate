@@ -288,7 +288,7 @@ fn switched(
     if !state.deployment().in_scope(scope) {
         return Ok(());
     }
-    mode_change(
+    let mode_event = mode_change(
         state,
         None,
         payload::REASON_KILL_SWITCH,
@@ -299,7 +299,11 @@ fn switched(
     if matches!(initiator, Initiator::Owner) {
         batch.journal("OwnerExitRequested", None, owner_exit(scope, confirmation)?)?;
     }
-    let switch = batch.journal("KillSwitchActivated", None, activated(scope, initiator)?)?;
+    let switch = batch.journal(
+        "KillSwitchActivated",
+        None,
+        activated(scope, initiator, mode_event.as_ref())?,
+    )?;
     cancel_approvals(state, batch, payload::REASON_KILL_SWITCH)?;
     batch.hand(IntentHandoff {
         intent_id: switch,
@@ -349,7 +353,7 @@ fn mode_change(
     effective: Mode,
     lifecycle: Mode,
     batch: &mut Batch<'_>,
-) -> Result<(), RuntimeError> {
+) -> Result<Option<EventId>, RuntimeError> {
     if effective != state.journaled_mode() {
         let body = payload::object(vec![
             (
@@ -360,9 +364,11 @@ fn mode_change(
             ("reason", payload::text(reason)),
             ("lifecycle", payload::text(payload::mode_name(lifecycle))),
         ])?;
-        batch.journal("AgentModeChanged", origin.cloned(), body)?;
+        return batch
+            .journal("AgentModeChanged", origin.cloned(), body)
+            .map(Some);
     }
-    Ok(())
+    Ok(None)
 }
 
 /// An approval that outlives a tightening is an order after the stop, so the runtime cancels every
@@ -627,7 +633,14 @@ fn owner_exit(
     ])
 }
 
-fn activated(scope: &KillScope, initiator: Initiator) -> Result<Value, RuntimeError> {
+/// `mode_event` names the `AgentModeChanged` this switch wrote, so the fold can tell the executor's
+/// copy of **this** switch's mode from any other copy on the account stream (journal spec §2). It is
+/// `Null` when the switch changed no mode, in which case no copy can confirm it.
+fn activated(
+    scope: &KillScope,
+    initiator: Initiator,
+    mode_event: Option<&EventId>,
+) -> Result<Value, RuntimeError> {
     let (kind, subject) = match scope {
         KillScope::Agent(agent) => ("agent", agent.0.clone()),
         KillScope::Connection(connection) => ("connection", connection.0.clone()),
@@ -639,6 +652,13 @@ fn activated(scope: &KillScope, initiator: Initiator) -> Result<Value, RuntimeEr
         (
             "initiator",
             payload::text(payload::initiator_name(initiator)),
+        ),
+        (
+            "mode_event",
+            match mode_event {
+                Some(event) => payload::text(&event.0),
+                None => Value::Null,
+            },
         ),
     ])
 }

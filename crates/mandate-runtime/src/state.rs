@@ -40,6 +40,7 @@ pub struct RuntimeState {
     pending_approvals: BTreeMap<EventId, PendingApproval>,
     outstanding: BTreeMap<EventId, Outstanding>,
     bodies: BTreeMap<EventId, IntentBody>,
+    acknowledged: BTreeMap<EventId, Seq>,
     outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
 }
 
@@ -52,10 +53,15 @@ pub(crate) struct Switch {
     pub(crate) event: EventId,
     pub(crate) initiator: Initiator,
     pub(crate) confirmation: Option<OwnerConfirmation>,
-    /// Whether the account stream has taken the switch's own mode yet. Until it has, nothing on that
-    /// stream can lift the switch: the streams have no global order (journal spec §2), so a `normal`
-    /// written before the breach can fold after the command, and lifting on it would add risk.
-    pub(crate) confirmed: bool,
+    /// The `AgentModeChanged` this switch wrote, which the executor copies back as
+    /// `AgentModeApplied` carrying this id as its `causation_id` (journal spec §2). Identity, not
+    /// arrival order, is what ties that copy to **this** switch: a flag set by whichever copy
+    /// happened to fold first answers differently on a replay, where the agent stream folds ahead of
+    /// the account stream (journal spec §8). `None` when the switch changed no mode, in which case
+    /// there is no copy to confirm it and nothing can lift it.
+    pub(crate) mode_event: Option<EventId>,
+    /// The account-stream `seq` of the copy that confirmed this switch, or `None` while unconfirmed.
+    pub(crate) confirmed_at: Option<Seq>,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -102,6 +108,7 @@ impl RuntimeState {
             pending_approvals: BTreeMap::new(),
             outstanding: BTreeMap::new(),
             bodies: BTreeMap::new(),
+            acknowledged: BTreeMap::new(),
             outputs: BTreeMap::new(),
         }
     }
@@ -404,7 +411,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 event: event.event_id.clone(),
                 initiator,
                 confirmation: state.shown.take(),
-                confirmed: false,
+                mode_event: payload::str_of(&event.payload, "mode_event")
+                    .map(|id| EventId(id.to_owned())),
+                confirmed_at: None,
             });
         }
         "OwnerExitRequested" => state.shown = payload::owner_confirmation_of(&event.payload)?,
@@ -447,7 +456,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             if addressed_here(state, &event.payload) {
                 let to = mode_field(event)?;
                 state.copied_mode = to;
-                state.switch = retired(state.switch.take(), to);
+                state.switch = retired(state.switch.take(), to, event, &state.acknowledged);
             }
         }
         "ReconciliationRun" => {
@@ -457,6 +466,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
             }
         }
         "OrderSubmitted" => state.submission_unreconciled = true,
+        "OwnerAcknowledged" => {
+            state.acknowledged.insert(event.event_id.clone(), event.seq);
+        }
         "IntentReceived" => {
             if let Some(intent) = payload::str_of(&event.payload, "intent_id") {
                 let intent = EventId(intent.to_owned());
@@ -496,7 +508,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "RelatedAccountsCoordination"
         | "ConductBreachDetected"
         | "TradingDayStarted"
-        | "OwnerAcknowledged"
         | "MandateVersionApplied"
         | "RiskDayStarted"
         | "RiskLimitTriggered"
@@ -523,32 +534,56 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
 
 /// What an account-stream mode change does to a kill switch the runtime still holds.
 ///
-/// A `RiskLimit` flatten's restriction lifts through the account stream and nowhere else (brief item
-/// 21, mandate spec §5.4, §5.7, §5.8), but two things on that stream must never lift it. The
-/// executor **copies the runtime's own `AgentModeChanged` back as `AgentModeApplied`** (journal spec
-/// §2), so the switch's own `paused` returns as an account-stream fact: lifting on it would retire
-/// the switch the moment it was pulled, and a restart would then have no flatten to hand. And the
-/// streams have **no global order** (journal spec §2), so a `normal` written before the breach can
-/// fold after the command: lifting on that would hand the agent back to `normal` with the breach
-/// unaddressed, which adds risk (`AGENTS.md` rules 1 and 3).
+/// A `RiskLimit` flatten's restriction lifts through the account stream by the owner's
+/// acknowledgment and nowhere else (brief item 21, mandate spec §5.4, §5.7, §5.8). Every step of that
+/// is keyed on **event identity**, never on what folded first, because a rule that reads arrival
+/// order answers differently on a replay: journal spec §8 replays the agent stream ahead of the
+/// account stream, so a flag set by "some copy at or above my mode" lets one switch's echo confirm a
+/// later switch and one switch's acknowledgment lift it.
 ///
-/// So a mode at or above the switch's own is the account stream *confirming* it, never lifting it,
-/// and only a looser mode that arrives **after** that confirmation lifts it. An owner or operator
-/// stop is terminal and lifts for no one (DEC-131 item 12).
-fn retired(switch: Option<Switch>, to: Mode) -> Option<Switch> {
+/// - **Confirmed** only by the copy whose `causation_id` is this switch's own `AgentModeChanged`
+///   (journal spec §2 makes the executor write exactly that). The switch's own `paused` returning as
+///   an account-stream fact is therefore a confirmation and never a lift; lifting on it would retire
+///   the switch the instant it was pulled and leave a restart with no flatten to hand.
+/// - **Lifted** only by a later copy to a looser mode whose `causation_id` names an
+///   `OwnerAcknowledged` this fold has seen on the account stream. A `normal` written before the
+///   breach cites no such acknowledgment, so it cannot lift, however the streams interleave — and the
+///   streams have no global order at all (journal spec §2).
+/// - Never by anything, once the initiator's final mode is `stopped` (DEC-131 item 12).
+///
+/// The ruling also asked for the lifting copy's `seq` to exceed the confirming one. That comparison
+/// is omitted because it can never be false where it would be read: a stream folds gaplessly in `seq`
+/// order, so any copy folded after the confirmation already has the greater `seq`. An unreachable
+/// branch is one the mutation gate cannot cover, and `confirmed_at` records the confirming `seq` for
+/// a reader either way.
+fn retired(
+    switch: Option<Switch>,
+    to: Mode,
+    event: &FoldedEvent,
+    acknowledged: &BTreeMap<EventId, Seq>,
+) -> Option<Switch> {
     let mut switch = switch?;
     let final_mode = switch.initiator.final_mode();
     if final_mode == Mode::Stopped {
         return Some(switch);
     }
-    if to >= final_mode {
-        switch.confirmed = true;
+    if let Some(mode_event) = &switch.mode_event
+        && event.causation_id.as_ref() == Some(mode_event)
+    {
+        switch.confirmed_at = Some(event.seq);
         return Some(switch);
     }
-    if switch.confirmed {
-        return None;
+    if switch.confirmed_at.is_none() {
+        return Some(switch);
     }
-    Some(switch)
+    if to >= final_mode {
+        return Some(switch);
+    }
+    let lifts = event
+        .causation_id
+        .as_ref()
+        .is_some_and(|cause| acknowledged.contains_key(cause));
+    if lifts { None } else { Some(switch) }
 }
 
 /// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
