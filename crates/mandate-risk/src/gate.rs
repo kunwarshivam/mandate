@@ -1069,6 +1069,10 @@ mod tests {
     /// well inside its bound, and absent.
     #[derive(Debug, Clone, Copy)]
     struct FloorRow {
+        /// Whether the organization's floors are set **below** §3.2's platform minimums. The
+        /// levels below are read against whichever floor binds, so a row means the same thing
+        /// either way: level 1 sits exactly on the binding floor and level 2 one unit under it.
+        weak_config: bool,
         crypto: bool,
         status: u8,
         exchange: u8,
@@ -1150,16 +1154,30 @@ mod tests {
         };
         i.ipo = r.item3 == 1;
         i.ptp_no_exception = r.item3 == 2;
-        i.prior_close = match r.price {
-            0 => Some(Price::parse("100")?),
-            1 => Some(Price::parse("5")?),
-            2 => Some(Price::parse("4.999999999")?),
+        let (price_floor, equity_floor, crypto_floor) = if r.weak_config {
+            ("0.5", "1", "1")
+        } else {
+            ("5", "1000000", "2000000")
+        };
+        o.config.price_floor = Usd::parse(price_floor)?;
+        o.config.liquidity_floor_usd = Usd::parse(equity_floor)?;
+        o.config.crypto_liquidity_floor_usd = Usd::parse(crypto_floor)?;
+        let i = &mut o.instrument;
+        i.prior_close = match (r.price, r.weak_config) {
+            (0, _) => Some(Price::parse("100")?),
+            (1, false) => Some(Price::parse("5")?),
+            (2, false) => Some(Price::parse("4.999999999")?),
+            (1, true) => Some(Price::parse("1")?),
+            (2, true) => Some(Price::parse("0.999999999")?),
             _ => None,
         };
         i.median_dollar_volume_20d =
             figure(r.volume_20d, "90000000", "1000000", "999999.999999999")?;
-        i.median_dollar_volume_30d =
-            figure(r.volume_30d, "90000000", "2000000", "1999999.999999999")?;
+        i.median_dollar_volume_30d = if r.weak_config {
+            figure(r.volume_30d, "90000000", "1000000", "999999.999999999")?
+        } else {
+            figure(r.volume_30d, "90000000", "2000000", "1999999.999999999")?
+        };
         i.etp = r.etp;
         let age = match r.classified {
             0 => Some(1),
@@ -1201,34 +1219,37 @@ mod tests {
         let mut o = allowing()?;
         let mut rows = 0_u32;
         let mut denied = BTreeSet::new();
-        for crypto in [false, true] {
-            for status in 0..3 {
-                for exchange in 0..3 {
-                    for item3 in 0..3 {
-                        for price in 0..4 {
-                            for volume_20d in 0..4 {
-                                for etp in
-                                    [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified]
-                                {
-                                    for permission in 0..4 {
-                                        for classified in 0..4 {
-                                            for volume_30d in 0..4 {
-                                                let r = FloorRow {
-                                                    crypto,
-                                                    status,
-                                                    exchange,
-                                                    item3,
-                                                    price,
-                                                    volume_20d,
-                                                    etp,
-                                                    permission,
-                                                    classified,
-                                                    volume_30d,
-                                                };
-                                                let got = floor_of(&mut o, r)?;
-                                                assert_eq!(got, floor_oracle(r), "{r:?}");
-                                                denied.extend(got);
-                                                rows = rows.saturating_add(1);
+        for weak_config in [false, true] {
+            for crypto in [false, true] {
+                for status in 0..3 {
+                    for exchange in 0..3 {
+                        for item3 in 0..3 {
+                            for price in 0..4 {
+                                for volume_20d in 0..4 {
+                                    for etp in
+                                        [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified]
+                                    {
+                                        for permission in 0..4 {
+                                            for classified in 0..4 {
+                                                for volume_30d in 0..4 {
+                                                    let r = FloorRow {
+                                                        weak_config,
+                                                        crypto,
+                                                        status,
+                                                        exchange,
+                                                        item3,
+                                                        price,
+                                                        volume_20d,
+                                                        etp,
+                                                        permission,
+                                                        classified,
+                                                        volume_30d,
+                                                    };
+                                                    let got = floor_of(&mut o, r)?;
+                                                    assert_eq!(got, floor_oracle(r), "{r:?}");
+                                                    denied.extend(got);
+                                                    rows = rows.saturating_add(1);
+                                                }
                                             }
                                         }
                                     }
@@ -1241,8 +1262,9 @@ mod tests {
         }
         assert_eq!(
             (rows, denied.len()),
-            (165_888, 6),
-            "every row ran, and every floor code was reached"
+            (331_776, 6),
+            "every row ran under both a compliant and a below-minimum config, and every floor \
+             code was reached"
         );
         Ok(())
     }
