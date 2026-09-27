@@ -156,6 +156,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
+- **E7-7 (Must, M6)** As the founder, I want one order placed end to end on my Alpaca paper account
+  through the real crates, so that integration defects appear before the Phase 1 soak
+  ([task brief](tasks/E7-7-tracer-bullet.md), [DEC-138](04-decision-log.md#decisions)).
+  *Accepted when:* the whole path — validated mandate, stored market data, the E4-2 moving-average
+  baseline as the signal, the order builder's sizing, the risk gate, the runtime's decision cycle with
+  journal-before-acting, the executor's idempotent intent, the Alpaca paper connector, the journal
+  record, and a reconciliation after a restart — runs in CI against recorded Alpaca paper fixtures and
+  touches no network; with any one stage replaced by a stub returning its crate's `Unimplemented`
+  error, zero orders reach the connector and nothing is journaled as submitted; and a manual paper run
+  places exactly one order, journals its intent before sending it, and refuses any host that is not
+  Alpaca's paper host.
 
 ### E8 Escalation and approvals
 
@@ -374,3 +385,16 @@ a coordinator ruling rather than left undone (DEC-131 item 25):
   action adds risk, and carries no order body, so the runtime records a response and re-proposes at
   the next evaluation rather than placing the bound order; the bound content is M7's (DEC-131 item
   25(a)).
+
+From the independent review of stream G's mandate limits (`mandate-risk`, #160):
+
+- Give `Computed` the account's own figures (`account_gross`, `account_equity`), so an account-1×
+  `gross_exposure_limit` denial journals the figures it compared; today it carries none and is told
+  apart from the agent-limit denial only by `computed.gross` being unset. It is an addition to
+  #136's public API, so it needs its own ruling.
+- Settle what DEC-129 item 2's "`computed` blocks included" means: `ref.py`'s keys only, or every
+  figure the gate computed. The flat `Computed` also reports `order_usd`, `instrument_total` and
+  `cap` on branches whose reference block omits them, and `compare_computed` checks only the keys a
+  case states, so nothing asserts either reading.
+- Give §3.3's "organization ceiling" on the per-instrument cap a `GateConfig` field and an owning
+  story; check 2 has no value to bound the mandate's cap with today.
