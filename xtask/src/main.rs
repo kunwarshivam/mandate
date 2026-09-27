@@ -3068,6 +3068,11 @@ mod tests {
     /// review of #180 asked for (finding 2). `probe` has a live function and only a pending test, so
     /// the gate must refuse before it runs; `covered` has a live test, so a run would pass its
     /// baseline and report `probe`'s mutants caught while nothing ran, which is the whole defect.
+    ///
+    /// Four verdicts, in order: a refusal before the run for a crate no live test judges; a pass
+    /// once one live test covers that crate's function, so the refusal is precise rather than a
+    /// blanket one; a failure on the run's own missed-mutant status once a live, non-stub mutant
+    /// survives; and nothing to do without a base.
     #[test]
     fn the_job_refuses_a_crate_whose_mutants_no_live_test_would_judge() -> Result<()> {
         let fx = Fixture::gated("mutants-job")?;
@@ -3094,6 +3099,18 @@ mod tests {
             "with one live test over `code`, the same diff passes: the pre-flight is precise, not a \
              refusal of every crate whose tests are pending",
         )?;
+        fx.write(
+            "crates/covered/tests/covered.rs",
+            "#[test]\nfn the_flag_is_negated() {\n    assert!(covered::negate(false));\n}\n",
+        )?;
+        fx.commit()?;
+        let missed = mutants(&fx.0, Some(base)).expect_err(
+            "a live mutant no live test catches is the run's own missed-mutant status, and the \
+             function it mutates is not a stub",
+        );
+        let missed = format!("{missed:#}");
+        assert!(missed.contains("mutants"), "{missed}");
+
         assert!(
             mutants(&fx.0, None).is_ok(),
             "with no base there is no diff to judge, so the job has nothing to do"
