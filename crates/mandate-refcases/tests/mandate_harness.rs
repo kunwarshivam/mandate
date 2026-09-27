@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use mandate_num::Usd;
 use mandate_refcases::{Json, mandate, read_fixture};
-use mandate_spec::document::LimitAction;
+use mandate_spec::document::LadderAction;
 use mandate_spec::risk::{LimitKey, RiskEvent, TriggerReason};
 use serde_json::json;
 
@@ -384,9 +384,9 @@ type Perturbation = (&'static str, fn(&mut Json));
 /// Exercised directly rather than through a case, because every `risk_state` case stops at the mandate
 /// parser while that is a stub — a test that went through one could not tell this comparison from the stub
 /// it never reached. It is the function the two shapes under this change's Decisions needed rest on:
-/// `MC-R21` states a `max_loss_from_allocation` that `ApplyResult::Applied` does not carry, and every
-/// `scale_sizes` rung states an `action` that `LimitAction` cannot spell, and both must **fail** rather
-/// than be skipped.
+/// A member the fixture states and no `RiskEvent` carries must **fail** rather than be skipped: that is
+/// what turned up the two shapes DEC-128 item 29 added to the API, and it is what would turn up the next
+/// one.
 #[test]
 fn the_journal_comparison_fails_on_any_difference() {
     let events = vec![
@@ -395,7 +395,7 @@ fn the_journal_comparison_fails_on_any_difference() {
         },
         RiskEvent::RiskLimitTriggered {
             limit: LimitKey::MaxDailyLoss,
-            action: LimitAction::ExitsOnly,
+            action: LadderAction::ExitsOnly,
             reason: Some(TriggerReason::ResolvedAtRollover),
         },
     ];

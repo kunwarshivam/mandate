@@ -13,13 +13,6 @@
 //! time, an `i128` accumulator at 10⁻¹² for equity and the high-water mark, and a journal reader that
 //! rebuilds the latches, the restrictions, and the mode from the events a step emitted.
 //!
-//! **What these tests deliberately do not assert.** `RiskEvent::RiskLimitTriggered` types its `action` as
-//! [`LimitAction`], which has only `exits_only` and `flatten_and_pause`, so a `scale_sizes` rung's
-//! trigger cannot be written down at all; the reference-case harness compares the member and reports the
-//! mismatch, and the PR names the correction under Decisions needed. Nothing is lost here, because a
-//! rung's action is fixed by the mandate and its effect — the restriction set, the mode, and the size
-//! factor — is asserted on every step.
-//!
 //! [§5]: ../../../docs/specs/mandate.md#5-risk-state-and-limits
 
 mod common;
@@ -349,22 +342,38 @@ fn trace(journal: &[RiskEvent]) -> Vec<String> {
         .iter()
         .map(|event| match event {
             RiskEvent::MandateVersionApplied { result } => match result {
-                ApplyResult::Applied { allocation_change } => match allocation_change {
-                    Some(delta) => format!("version applied, allocation {delta}"),
-                    None => "version applied".to_owned(),
+                ApplyResult::Applied {
+                    allocation_change,
+                    max_loss_from_allocation,
+                } => match (allocation_change, max_loss_from_allocation) {
+                    (Some(delta), _) => format!("version applied, allocation {delta}"),
+                    (None, Some(floor)) => format!("version applied, floor {}", floor.as_str()),
+                    (None, None) => "version applied".to_owned(),
                 },
                 ApplyResult::Rejected { reason } => format!("version refused: {}", reason.code()),
             },
             RiskEvent::RiskDayStarted { day_start_equity } => {
                 format!("day starts at {day_start_equity}")
             }
-            RiskEvent::RiskLimitTriggered { limit, reason, .. } => match reason {
-                Some(reason) => format!("triggered {limit:?} because {reason:?}"),
-                None => format!("triggered {limit:?}"),
+            RiskEvent::RiskLimitTriggered {
+                limit,
+                action,
+                reason,
+            } => match reason {
+                Some(reason) => format!("triggered {limit:?} {action:?} because {reason:?}"),
+                None => format!("triggered {limit:?} {action:?}"),
             },
-            RiskEvent::RiskLimitLifted { limit, reason, .. } => match reason {
-                Some(reason) => format!("lifted {limit:?} because {reason:?}"),
-                None => format!("lifted {limit:?}"),
+            RiskEvent::RiskLimitLifted {
+                limit,
+                action,
+                reason,
+            } => match (action, reason) {
+                (Some(action), Some(reason)) => {
+                    format!("lifted {limit:?} {action:?} because {reason:?}")
+                }
+                (Some(action), None) => format!("lifted {limit:?} {action:?}"),
+                (None, Some(reason)) => format!("lifted {limit:?} because {reason:?}"),
+                (None, None) => format!("lifted {limit:?}"),
             },
             RiskEvent::HighWaterMarkReset { from, to } => format!("high water {from} -> {to}"),
             RiskEvent::AgentModeApplied { from, to } => format!("mode {from:?} -> {to:?}"),
@@ -477,7 +486,10 @@ fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_b
         "the rung breaches exactly at its `at`, because the rule is `>=`"
     );
     assert_eq!(active(&breached.snapshot), vec![0]);
-    assert_eq!(trace(&breached.journal), vec!["triggered DrawdownRung(0)"]);
+    assert_eq!(
+        trace(&breached.journal),
+        vec!["triggered DrawdownRung(0) ScaleSizes"]
+    );
 
     let on_the_boundary = step_of(&outcomes, 3)?;
     assert_eq!(
@@ -497,7 +509,10 @@ fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_b
         "200 < 210 lifts it"
     );
     assert_eq!(active(&lifted.snapshot), Vec::<u8>::new());
-    assert_eq!(trace(&lifted.journal), vec!["lifted DrawdownRung(0)"]);
+    assert_eq!(
+        trace(&lifted.journal),
+        vec!["lifted DrawdownRung(0) ScaleSizes"]
+    );
 
     let exits_only = step_of(&outcomes, 5)?;
     assert_eq!(exits_only.snapshot.drawdown, ratio("0.06"));
@@ -513,8 +528,8 @@ fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_b
     assert_eq!(
         trace(&exits_only.journal),
         vec![
-            "triggered DrawdownRung(0)",
-            "triggered DrawdownRung(1)",
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered DrawdownRung(1) ExitsOnly",
             "mode Normal -> ExitsOnly",
         ]
     );
@@ -529,7 +544,7 @@ fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_b
     assert_eq!(
         trace(&flatten.journal),
         vec![
-            "triggered DrawdownRung(2)",
+            "triggered DrawdownRung(2) FlattenAndPause",
             "kill switch Agent for DrawdownRung(2)",
             "mode ExitsOnly -> Paused",
         ],
@@ -628,7 +643,10 @@ fn a_short_recovery_does_not_restart_confirmation() -> Result<(), String> {
     let triggered = step_of(&outcomes, 5)?;
     assert_eq!(
         trace(&triggered.journal),
-        vec!["triggered DrawdownRung(1)", "mode Normal -> ExitsOnly",],
+        vec![
+            "triggered DrawdownRung(1) ExitsOnly",
+            "mode Normal -> ExitsOnly",
+        ],
         "45 s + 20 s reaches the 60 s window, and plain confirmation carries no reason"
     );
     assert!(
@@ -679,7 +697,10 @@ fn a_recovery_longer_than_the_window_restarts_confirmation() -> Result<(), Strin
     let triggered = step_of(&outcomes, 7)?;
     assert_eq!(
         trace(&triggered.journal),
-        vec!["triggered DrawdownRung(1)", "mode Normal -> ExitsOnly",],
+        vec![
+            "triggered DrawdownRung(1) ExitsOnly",
+            "mode Normal -> ExitsOnly",
+        ],
         "the full 60 s is needed again, counted from the re-entry"
     );
     Ok(())
@@ -730,9 +751,9 @@ fn a_single_flash_print_latches_nothing_and_a_sane_quote_clears_the_hard_breach(
     assert_eq!(
         trace(&flash.journal),
         vec![
-            "triggered DrawdownRung(0)",
-            "triggered DrawdownRung(1) because HardBreachPending",
-            "triggered DrawdownRung(2) because HardBreachPending",
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered DrawdownRung(1) ExitsOnly because HardBreachPending",
+            "triggered DrawdownRung(2) ExitsOnly because HardBreachPending",
             "mode Normal -> ExitsOnly",
         ],
         "two rungs journal the pending hard breach under a single restriction"
@@ -747,7 +768,7 @@ fn a_single_flash_print_latches_nothing_and_a_sane_quote_clears_the_hard_breach(
     assert_eq!(
         trace(&recovered.journal),
         vec![
-            "lifted DrawdownRung(0)",
+            "lifted DrawdownRung(0) ScaleSizes",
             "lifted DrawdownRung(1) because HardBreachCleared",
             "lifted DrawdownRung(2) because HardBreachCleared",
             "mode ExitsOnly -> Normal",
@@ -771,9 +792,10 @@ fn a_single_flash_print_latches_nothing_and_a_sane_quote_clears_the_hard_breach(
 /// A hard breach latches only on a second sane quote at least min(`breach_confirm_s`, 10) s later
 /// (§5.6, DEC-63, planted bug 2).
 ///
-/// `breach_confirm_s` is 60, so the wait is 10 s. A second quote 9 s after the first is still below the
-/// levels and still latches nothing, and the whole step journals nothing at all; the quote at exactly
-/// 10 s latches both rungs with `hard_trigger`, flattens, and pauses.
+/// `breach_confirm_s` is 60, so the wait is 10 s. A second quote 9 s after the first is still **at** the
+/// hard level — a bid of 94.3 is further past it than 94.4 was — and still latches nothing, and the whole
+/// step journals nothing at all; the quote at exactly 10 s latches both rungs with `hard_trigger`,
+/// flattens, and pauses.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_hard_breach_latches_only_on_a_second_quote_at_the_hard_wait() -> Result<(), String> {
@@ -809,8 +831,8 @@ fn a_hard_breach_latches_only_on_a_second_quote_at_the_hard_wait() -> Result<(),
     assert_eq!(
         trace(&latched_now.journal),
         vec![
-            "triggered DrawdownRung(1) because HardTrigger",
-            "triggered DrawdownRung(2) because HardTrigger",
+            "triggered DrawdownRung(1) ExitsOnly because HardTrigger",
+            "triggered DrawdownRung(2) FlattenAndPause because HardTrigger",
             "kill switch Agent for DrawdownRung(2)",
             "mode ExitsOnly -> Paused",
         ],
@@ -863,7 +885,10 @@ fn the_strictest_restriction_holds_the_mode_and_only_a_change_is_journalled() ->
     assert_eq!(daily.snapshot.daily_pnl_fraction, ratio("-0.02"));
     assert_eq!(
         trace(&daily.journal),
-        vec!["triggered MaxDailyLoss", "mode Normal -> ExitsOnly"]
+        vec![
+            "triggered MaxDailyLoss ExitsOnly",
+            "mode Normal -> ExitsOnly"
+        ]
     );
 
     let both = step_of(&outcomes, 3)?;
@@ -873,7 +898,10 @@ fn the_strictest_restriction_holds_the_mode_and_only_a_change_is_journalled() ->
     );
     assert_eq!(
         trace(&both.journal),
-        vec!["triggered DrawdownRung(0)", "triggered DrawdownRung(1)"],
+        vec![
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered DrawdownRung(1) ExitsOnly"
+        ],
         "two restrictions asking for the same mode change nothing, so no mode event"
     );
 
@@ -1052,7 +1080,7 @@ fn a_breach_pending_at_the_rollover_is_measured_against_the_day_it_began_in() ->
     assert_eq!(
         trace(&resolved.journal),
         vec![
-            "triggered MaxDailyLoss because ResolvedAtRollover",
+            "triggered MaxDailyLoss ExitsOnly because ResolvedAtRollover",
             "mode Normal -> ExitsOnly",
         ],
         "so the 30 s before midnight plus 40 s after it can only be the previous day's breach"
@@ -1157,7 +1185,10 @@ fn the_daily_lift_waits_for_the_minimum_as_well_as_the_new_day() -> Result<(), S
     )?;
     assert_eq!(
         trace(&step_of(&outcomes, 2)?.journal),
-        vec!["triggered MaxDailyLoss", "mode Normal -> ExitsOnly"]
+        vec![
+            "triggered MaxDailyLoss ExitsOnly",
+            "mode Normal -> ExitsOnly"
+        ]
     );
     assert_eq!(
         restrictions(&step_of(&outcomes, 3)?.snapshot),
@@ -1218,8 +1249,8 @@ fn a_confirmed_new_day_breach_renews_the_latch() -> Result<(), String> {
     assert_eq!(
         trace(&renewed.journal),
         vec![
-            "triggered DrawdownRung(0)",
-            "triggered MaxDailyLoss because NewDayBreach",
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered MaxDailyLoss ExitsOnly because NewDayBreach",
         ],
         "the ladder is evaluated before the daily loss, and the mode does not move"
     );
@@ -1266,7 +1297,7 @@ fn a_daily_flatten_acknowledged_after_flat_leaves_exits_only_until_the_next_day(
     assert_eq!(
         trace(&flattened.journal),
         vec![
-            "triggered MaxDailyLoss",
+            "triggered MaxDailyLoss FlattenAndPause",
             "kill switch Agent for MaxDailyLoss",
             "mode Normal -> Paused",
         ]
@@ -1348,10 +1379,10 @@ fn acknowledgment_waits_for_flat_then_resets_the_high_water_mark_and_lifts_rungs
     assert_eq!(
         trace(&all_four.journal),
         vec![
-            "triggered DrawdownRung(0)",
-            "triggered DrawdownRung(1)",
-            "triggered DrawdownRung(2)",
-            "triggered DrawdownRung(3)",
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered DrawdownRung(1) ScaleSizes",
+            "triggered DrawdownRung(2) ExitsOnly",
+            "triggered DrawdownRung(3) FlattenAndPause",
             "kill switch Agent for DrawdownRung(3)",
             "mode Normal -> Paused",
         ]
@@ -1397,7 +1428,10 @@ fn acknowledgment_waits_for_flat_then_resets_the_high_water_mark_and_lifts_rungs
         "the 0.04 rung lifts first, leaving the 0.02 rung's 0.75"
     );
     assert_eq!(active(&first_lift.snapshot), vec![0]);
-    assert_eq!(trace(&first_lift.journal), vec!["lifted DrawdownRung(1)"]);
+    assert_eq!(
+        trace(&first_lift.journal),
+        vec!["lifted DrawdownRung(1) ScaleSizes"]
+    );
 
     let halfway = step_of(&outcomes, 7)?;
     assert_eq!(
@@ -1409,7 +1443,10 @@ fn acknowledgment_waits_for_flat_then_resets_the_high_water_mark_and_lifts_rungs
 
     let second_lift = step_of(&outcomes, 8)?;
     assert_eq!(second_lift.snapshot.size_factor, ratio("1"));
-    assert_eq!(trace(&second_lift.journal), vec!["lifted DrawdownRung(0)"]);
+    assert_eq!(
+        trace(&second_lift.journal),
+        vec!["lifted DrawdownRung(0) ScaleSizes"]
+    );
     Ok(())
 }
 
@@ -1448,8 +1485,8 @@ fn the_floor_is_raised_by_the_inherited_loss_and_cannot_be_acknowledged() -> Res
     assert_eq!(
         trace(&at_the_floor.journal),
         vec![
-            "triggered DrawdownRung(1)",
-            "triggered LifetimeFloor",
+            "triggered DrawdownRung(1) ExitsOnly",
+            "triggered LifetimeFloor FlattenAndPause",
             "kill switch Agent for LifetimeFloor",
             "mode Normal -> Paused",
         ],
@@ -1549,7 +1586,7 @@ fn loosening_a_latched_floor_waits_a_full_risk_day_and_must_actually_loosen() ->
     assert_eq!(
         trace(&lifted.journal),
         vec![
-            "version applied",
+            "version applied, floor 0.2",
             "lifted LifetimeFloor because VersionLoosened",
         ]
     );
@@ -1599,6 +1636,73 @@ fn a_version_that_leaves_equity_below_the_new_floor_is_refused() -> Result<(), S
     let lifted = step_of(&outcomes, 3)?;
     assert_eq!(rejection_code(lifted), None);
     assert!(!lifted.snapshot.latched.contains(&LimitKey::LifetimeFloor));
+    Ok(())
+}
+
+/// The floor a loosening version must clear is C × (1 − f′) **+ L**, so the inherited loss decides the
+/// answer (§5.7, MI-14, planted bug 14).
+///
+/// C = 10000 and L = 500, so the floor starts at 9000 + 500 = 9500 and a bid of 85 latches it at E = 8500.
+/// Raising f to 0.2 moves C × (1 − f′) to 8000 — which E clears — but the floor to 8500, which it does not,
+/// so the version is `still_below_new_floor`. An implementation that dropped L would have lifted the floor
+/// there, which is the one direction §5.7 never allows. 0.25 moves the floor to 8000 and does lift it.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_loosening_version_must_clear_the_floor_the_inherited_loss_raises() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let clock = RegularSessionClock::new();
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "500"),
+        &clock,
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "85"),
+            loosen(
+                "2026-09-21T14:02:00.000000000Z",
+                "0.2",
+                "2026-09-21T14:01:00.000000000Z",
+                true,
+            ),
+            loosen(
+                "2026-09-21T14:03:00.000000000Z",
+                "0.25",
+                "2026-09-21T14:01:00.000000000Z",
+                true,
+            ),
+        ],
+    )?;
+    let latched_floor = step_of(&outcomes, 1)?;
+    assert_eq!(latched_floor.snapshot.agent_equity, usd("8500"));
+    assert_eq!(latched_floor.snapshot.inherited_loss, usd("500"));
+    assert!(
+        latched_floor
+            .snapshot
+            .latched
+            .contains(&LimitKey::LifetimeFloor),
+        "8500 is below the 9500 that C x (1 - 0.1) + L allows"
+    );
+    assert_eq!(
+        rejection_code(step_of(&outcomes, 2)?),
+        Some("still_below_new_floor"),
+        "f' of 0.2 puts C x (1 - f') at 8000, which E clears, and the floor at 8500, which it does not"
+    );
+    assert!(
+        step_of(&outcomes, 2)?
+            .snapshot
+            .latched
+            .contains(&LimitKey::LifetimeFloor),
+        "and a refused version lifts nothing"
+    );
+    let lifted = step_of(&outcomes, 3)?;
+    assert_eq!(rejection_code(lifted), None);
+    assert!(!lifted.snapshot.latched.contains(&LimitKey::LifetimeFloor));
+    assert_eq!(
+        trace(&lifted.journal),
+        vec![
+            "version applied, floor 0.25",
+            "lifted LifetimeFloor because VersionLoosened",
+        ]
+    );
     Ok(())
 }
 
@@ -1664,6 +1768,61 @@ fn a_withdrawal_cannot_shrink_the_loss_carried_to_the_connection() -> Result<(),
             .contains(&Restriction::Retired)
     );
     assert_eq!(stopped.snapshot.agent_mode, AgentMode::Stopped);
+    Ok(())
+}
+
+/// `would_trigger_limit` tests the 1.25× hard levels as well as the soft ones (§5.1, planted bug 5).
+///
+/// The guard only ever bites within 10⁻¹² of a threshold, because §5.1 scales H, E₀, C, and L by exactly
+/// k = (E + Δ) ÷ E and the only thing that can make a condition newly true is the ceiling's residue. This
+/// is a position that reaches it. 74.999999985 shares bought at 100 marked at 89.999999998 give
+/// E = 9250.00000000000000003 against H = 10000, so H − E = 749.99999999999999997: rung 1's soft level
+/// (0.06 × 10000 = 600) is true and its **hard** level (1.25 × 0.06 × 10000 = 750) is false by three parts
+/// in 10²⁰. Withdrawing a single dollar makes H′ = ceil(10000 × 9249.00000000000000003 ÷
+/// 9250.00000000000000003, 12) = 9998.918918918919, whose hard level 749.918918918918925 the scaled gap
+/// 749.91891891891899997 does reach — so the answer is `would_trigger_limit`, and an implementation that
+/// checked only the soft levels would apply the change. `reference/mandate/ref.py` returns
+/// `would_trigger_limit` here, and the same port with the hard levels dropped applies it.
+#[test]
+#[ignore = "pending E6-4"]
+fn would_trigger_limit_tests_the_hard_levels_and_not_only_the_soft_ones() -> Result<(), String> {
+    let mandate = swing(&[("/risk/max_daily_loss", Some(s("0.5")))])?;
+    let clock = RegularSessionClock::new();
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "74.999999985", "100", "0"),
+        &clock,
+        &[
+            mark("2026-09-21T14:01:00.000000000Z", "89.999999998"),
+            allocate("2026-09-21T14:01:10.000000000Z", "-1"),
+        ],
+    )?;
+    let marked = step_of(&outcomes, 1)?;
+    assert_eq!(
+        marked.snapshot.agent_equity,
+        usd("9250.00000000000000003"),
+        "the position is chosen so that the gap sits just inside the hard level"
+    );
+    assert_eq!(marked.snapshot.high_water_mark, usd("10000"));
+    assert!(
+        latched(&marked.snapshot).is_empty(),
+        "breach_confirm_s is 60 here, so the soft breach has not confirmed and nothing is latched"
+    );
+    let refused = step_of(&outcomes, 2)?;
+    assert_eq!(
+        rejection_code(refused),
+        Some("would_trigger_limit"),
+        "the soft level was already true, so only the hard level can have become newly true"
+    );
+    assert_eq!(
+        refused.snapshot.high_water_mark,
+        usd("10000"),
+        "and the refused change scaled nothing: 9998.918918918919 is what applying it would have given"
+    );
+    assert_eq!(
+        trace(&refused.journal),
+        vec!["version refused: would_trigger_limit"]
+    );
     Ok(())
 }
 
@@ -2024,6 +2183,85 @@ fn a_profit_stop_confirms_by_time_in_breach_and_is_not_a_limit() -> Result<(), S
     Ok(())
 }
 
+/// `on_complete: disarm_ladder` stops the ladder and the daily loss and leaves the floor armed (§3.1,
+/// planted bug 30).
+///
+/// C = 10000, so the floor is at C × (1 − 0.1) = 9000. A bid of 93.4 puts E at 9340: a drawdown of 0.066,
+/// past the 0.06 rung, and a daily loss of 6.6%, more than three times `max_daily_loss` — both of which
+/// would latch here with `breach_confirm_s` of 0, and neither of which may, because the goal disarmed them.
+/// A bid of 89.5 then reaches the floor, which `disarm_ladder` does not touch.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_disarmed_ladder_stops_the_rungs_and_the_daily_loss_while_the_floor_stays_armed()
+-> Result<(), String> {
+    let mandate = swing(&[
+        ("/goal/on_complete", Some(s("disarm_ladder"))),
+        ("/risk/breach_confirm_s", Some(common::i(0))),
+    ])?;
+    let clock = RegularSessionClock::new();
+    let outcomes = walk(
+        &mandate,
+        &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+        &clock,
+        &[
+            Step {
+                at: at("2026-09-21T14:01:00.000000000Z"),
+                session: MarketSession::Regular,
+                input: Input::GoalComplete,
+            },
+            mark("2026-09-21T14:02:00.000000000Z", "93.4"),
+            mark("2026-09-21T14:03:00.000000000Z", "89.5"),
+        ],
+    )?;
+    let completed = step_of(&outcomes, 1)?;
+    assert_eq!(
+        trace(&completed.journal),
+        vec![
+            "goal done None None Some(DisarmLadder)",
+            "mode Normal -> ExitsOnly",
+        ]
+    );
+    assert_eq!(
+        restrictions(&completed.snapshot),
+        vec![Restriction::GoalComplete]
+    );
+
+    let disarmed = step_of(&outcomes, 2)?;
+    assert_eq!(disarmed.snapshot.drawdown, ratio("0.066"));
+    assert_eq!(disarmed.snapshot.daily_pnl_fraction, ratio("-0.066"));
+    assert!(
+        latched(&disarmed.snapshot).is_empty(),
+        "a drawdown past the exits_only rung and a daily loss past its limit both latch nothing"
+    );
+    assert_eq!(
+        disarmed.snapshot.size_factor,
+        ratio("1"),
+        "and no scale rung arms either"
+    );
+    assert!(
+        trace(&disarmed.journal).is_empty(),
+        "a disarmed ladder journals nothing, so nothing has to be lifted later"
+    );
+
+    let floored = step_of(&outcomes, 3)?;
+    assert_eq!(floored.snapshot.agent_equity, usd("8950"));
+    assert_eq!(
+        restrictions(&floored.snapshot),
+        vec![Restriction::LifetimeFloor, Restriction::GoalComplete],
+        "the floor is not disarmed by any `on_complete`"
+    );
+    assert_eq!(floored.snapshot.agent_mode, AgentMode::Paused);
+    assert_eq!(
+        trace(&floored.journal),
+        vec![
+            "triggered LifetimeFloor FlattenAndPause",
+            "kill switch Agent for LifetimeFloor",
+            "mode ExitsOnly -> Paused",
+        ]
+    );
+    Ok(())
+}
+
 /// The journal follows §5.2's evaluation order: the ladder's rungs in ascending `at`, then the daily loss,
 /// then the lifetime floor, with each flatten's kill switch beside its own trigger and the mode last.
 ///
@@ -2043,11 +2281,11 @@ fn the_journal_follows_the_evaluation_order() -> Result<(), String> {
     assert_eq!(
         trace(&everything.journal),
         vec![
-            "triggered DrawdownRung(0)",
-            "triggered DrawdownRung(1)",
-            "triggered DrawdownRung(2)",
+            "triggered DrawdownRung(0) ScaleSizes",
+            "triggered DrawdownRung(1) ExitsOnly",
+            "triggered DrawdownRung(2) FlattenAndPause",
             "kill switch Agent for DrawdownRung(2)",
-            "triggered LifetimeFloor",
+            "triggered LifetimeFloor FlattenAndPause",
             "kill switch Agent for LifetimeFloor",
             "mode Normal -> Paused",
         ]
@@ -2115,7 +2353,7 @@ fn crypto_counts_every_second_for_equity_for_confirmation_and_for_staleness() ->
     assert_eq!(
         trace(&later.journal),
         vec![
-            "triggered MaxDailyLoss",
+            "triggered MaxDailyLoss ExitsOnly",
             "instrument StaleMark true because NoSaneMark",
             "mode Normal -> ExitsOnly",
         ],
@@ -2162,6 +2400,28 @@ fn half_even_at_twelve(numerator: i128, denominator: i128) -> Ratio {
     ratio(&format!("{sign}{magnitude}"))
 }
 
+/// `ceil(numerator ÷ denominator, 12)` in `i128`, which is the rounding §5.1 scales H, E₀, C, and L by —
+/// one rounding, upward, so no scaled quantity ever falls below its exact value (MI-2).
+fn ceil_at_twelve(numerator: i128, denominator: i128) -> Usd {
+    let scaled = numerator * 1_000_000_000_000;
+    let quotient = scaled / denominator;
+    let quotient = if scaled % denominator == 0 {
+        quotient
+    } else {
+        quotient + 1
+    };
+    let whole = quotient / 1_000_000_000_000;
+    let fraction = quotient % 1_000_000_000_000;
+    let text = if fraction == 0 {
+        whole.to_string()
+    } else {
+        format!("{whole}.{fraction:012}")
+            .trim_end_matches('0')
+            .to_owned()
+    };
+    usd(&text)
+}
+
 /// The first input at which a limit confirms, derived the other way round from [`Confirmation`]: find the
 /// last point at which the condition had been false for a whole window, then add up the intervals since
 /// that began in breach (§5.6). The incremental accumulator and this scan share no code.
@@ -2194,6 +2454,18 @@ fn first_confirmation(inputs: &[(bool, u64)], need: u64) -> Option<usize> {
     None
 }
 
+/// Where §5.2 evaluates each limit: the ladder's rungs in ascending `at`, then the daily loss, then the
+/// lifetime floor. Written out here so the order the journal is asserted to be in is this file's reading of
+/// §5.2 rather than the crate's.
+fn evaluation_rank(limit: LimitKey) -> u32 {
+    match limit {
+        LimitKey::DrawdownRung(index) => u32::from(index),
+        LimitKey::MaxDailyLoss => 100,
+        LimitKey::LifetimeFloor => 200,
+        LimitKey::ProfitStop => 250,
+    }
+}
+
 /// The mode the §5.9 severity order gives a set of restrictions, written out here rather than read from
 /// the crate, so the two can disagree.
 ///
@@ -2223,10 +2495,31 @@ fn bid_walk() -> impl Strategy<Value = Vec<(i64, u64)>> {
     prop::collection::vec((60_i64..140, 30_u64..300), 1..10)
 }
 
-/// The steps a [`bid_walk`] describes, starting inside the regular session so every gap is session time.
+/// The bid every walk ends on, so that no property can be satisfied by a fold that does nothing.
+///
+/// H never falls below the 10000 the walk opens at and never rises above 14000 (the generator's ceiling of
+/// 140 × 100 shares), so an equity of 9000 is at least 0.08 × H below it — past the `exits_only` rung, the
+/// `flatten_and_pause` rung, and the lifetime floor at C × (1 − 0.1) = 9000, all three of which confirm at
+/// once because `ladder_only` sets `breach_confirm_s` to 0. Every property below asserts the consequence
+/// **from the bids**, never from the snapshot it is checking: review round 1 found seven of them satisfied
+/// by a `step` that returned its opening snapshot with an empty journal.
+const ANCHOR_BID: i64 = 90;
+
+/// The latches an [`ANCHOR_BID`] step must leave behind.
+fn anchor_latches() -> BTreeSet<LimitKey> {
+    BTreeSet::from([
+        LimitKey::DrawdownRung(1),
+        LimitKey::DrawdownRung(2),
+        LimitKey::LifetimeFloor,
+    ])
+}
+
+/// The steps a [`bid_walk`] describes, starting inside the regular session so every gap is session time,
+/// and closing on [`ANCHOR_BID`].
 fn bid_steps(walk: &[(i64, u64)]) -> Vec<Step> {
     let mut when = at("2026-09-21T14:00:00.000000000Z").secs();
-    walk.iter()
+    let mut steps: Vec<Step> = walk
+        .iter()
         .map(|(bid, gap)| {
             when += i64::try_from(*gap).unwrap_or(1);
             Step {
@@ -2238,7 +2531,77 @@ fn bid_steps(walk: &[(i64, u64)]) -> Vec<Step> {
                 },
             }
         })
+        .collect();
+    when += 300;
+    steps.push(Step {
+        at: UtcNanos::from_parts(when, 0).expect("an instant"),
+        session: MarketSession::Regular,
+        input: Input::Mark {
+            bid: price(&ANCHOR_BID.to_string()),
+            sane: true,
+        },
+    });
+    steps
+}
+
+/// Every equity a [`bid_steps`] walk passes through, in `i128` and exactly: 100 shares bought at 100 on a
+/// 10000 allocation is an equity of 100 × the bid.
+fn bid_equities(walk: &[(i64, u64)]) -> Vec<i128> {
+    walk.iter()
+        .map(|(bid, _)| i128::from(*bid) * 100)
+        .chain([i128::from(ANCHOR_BID) * 100])
         .collect()
+}
+
+/// Which `scale_sizes` rungs of [`two_scale_rungs`] are active after each step, derived from the bids
+/// alone: a rung arms at `at` × H and stays armed until H − E falls below (`at` − `hysteresis`) × H, which
+/// `ladder_only`'s `scale_lift_after_s` of 0 makes immediate. Integer cross-multiplication throughout, so
+/// the oracle shares no arithmetic with the crate.
+fn active_scale_rungs(walk: &[(i64, u64)]) -> Vec<BTreeSet<u8>> {
+    let mut high_water: i128 = 10_000;
+    let mut active = [false, false];
+    let mut out = Vec::new();
+    for equity in bid_equities(walk) {
+        high_water = high_water.max(equity);
+        let below = high_water - equity;
+        for (index, hundredths_at) in [(0_usize, 2_i128), (1, 4)] {
+            let armed = below * 100 >= hundredths_at * high_water;
+            let held = below * 100 >= (hundredths_at - 1) * high_water;
+            active[index] = armed || (active[index] && held);
+        }
+        out.push(
+            active
+                .iter()
+                .enumerate()
+                .filter(|(_, on)| **on)
+                .map(|(index, _)| u8::try_from(index).unwrap_or(0))
+                .collect(),
+        );
+    }
+    out
+}
+
+fn quote_at(when: UtcNanos, bid: &str, session: MarketSession, sane: bool) -> Step {
+    Step {
+        at: when,
+        session,
+        input: Input::Mark {
+            bid: price(bid),
+            sane,
+        },
+    }
+}
+
+fn universe_at(when: UtcNanos, change: UniverseChange, reason: RemovalReason) -> Step {
+    Step {
+        at: when,
+        session: MarketSession::Regular,
+        input: Input::UniverseChanged {
+            instrument: AssetId::parse(ASSET_A).expect("an asset id"),
+            change,
+            reason,
+        },
+    }
 }
 
 fn tick_utc(when: UtcNanos, session: MarketSession) -> Step {
@@ -2274,8 +2637,8 @@ proptest! {
             &bid_steps(&bids),
         ))?;
         let mut high_water: i128 = 10_000;
-        for ((bid, _), outcome) in bids.iter().zip(&outcomes) {
-            let equity = i128::from(*bid) * 100;
+        prop_assert_eq!(outcomes.len(), bids.len() + 1, "the anchor step is the last one");
+        for (equity, outcome) in bid_equities(&bids).into_iter().zip(&outcomes) {
             high_water = high_water.max(equity);
             prop_assert_eq!(
                 outcome.snapshot.agent_equity,
@@ -2384,6 +2747,18 @@ proptest! {
                 "step {}: the journal alone accounts for the mode", number + 1
             );
         }
+        prop_assert_eq!(
+            outcomes.last().map(|o| o.snapshot.agent_mode),
+            Some(AgentMode::Paused),
+            "the anchor bid latches a flatten rung and the floor, so the walk cannot end normal"
+        );
+        prop_assert!(
+            outcomes
+                .iter()
+                .flat_map(|o| o.journal.iter())
+                .any(|e| matches!(e, RiskEvent::AgentModeApplied { .. })),
+            "and the mode moved at least once, so the journal is not empty"
+        );
     }
 
     /// The latched set and the high-water mark are exactly what the journal says they are (oracle 1), and a
@@ -2444,6 +2819,11 @@ proptest! {
                 "step {}: MI-3, no latch lifts on a mark alone", number + 1
             );
         }
+        prop_assert_eq!(
+            from_events,
+            anchor_latches(),
+            "the anchor bid latches both stricter rungs and the floor, and the journal says so"
+        );
     }
 
     /// The size factor is the product of the active rungs' factors, is never above one, and is never zero
@@ -2461,10 +2841,17 @@ proptest! {
             &clock,
             &bid_steps(&bids),
         ))?;
+        let expected = active_scale_rungs(&bids);
         for (number, outcome) in outcomes.iter().enumerate() {
+            let armed = expected.get(number).cloned().unwrap_or_default();
+            prop_assert_eq!(
+                outcome.snapshot.active_rungs.keys().copied().collect::<BTreeSet<u8>>(),
+                armed.clone(),
+                "step {}: which rungs are armed follows from the bids, not from the snapshot", number + 1
+            );
             let mut numerator: i128 = 1;
             let mut denominator: i128 = 1;
-            for index in outcome.snapshot.active_rungs.keys() {
+            for index in &armed {
                 match index {
                     0 => { numerator *= 75; denominator *= 100; }
                     1 => { numerator *= 5; denominator *= 10; }
@@ -2481,6 +2868,11 @@ proptest! {
                 "step {}: a size factor above one would enlarge orders, and zero would stop them", number + 1
             );
         }
+        prop_assert_eq!(
+            outcomes.last().map(|o| o.snapshot.size_factor),
+            Some(ratio("0.375")),
+            "the anchor bid is past both scale rungs, so the walk ends at 0.75 x 0.5"
+        );
     }
 
     /// A mark that is not a regular-session sane quote never moves an equity's E, so it can never latch a
@@ -2493,7 +2885,7 @@ proptest! {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
         let mut when = at("2026-09-21T12:00:00.000000000Z").secs();
-        let steps: Vec<Step> = marks
+        let mut steps: Vec<Step> = marks
             .iter()
             .map(|(bid, extended, gap)| {
                 when += i64::try_from(*gap).unwrap_or(1);
@@ -2509,6 +2901,13 @@ proptest! {
                 }
             })
             .collect();
+        when += 30;
+        steps.push(quote_at(
+            UtcNanos::from_parts(when, 0).expect("an instant"),
+            "100",
+            MarketSession::Regular,
+            false,
+        ));
         let outcomes = ok(walk(
             &mandate,
             &opening("2026-09-21T11:59:00.000000000Z", "100", "100", "0"),
@@ -2543,6 +2942,12 @@ proptest! {
                 "step {}: the only restriction a mark can raise is its own instrument's", number + 1
             );
         }
+        prop_assert_eq!(
+            outcomes.last().map(|o| o.snapshot.instrument_restrictions.clone()),
+            Some(BTreeSet::from([InstrumentRestriction::StaleMark])),
+            "the walk closes on a regular-session mark that failed its checks while the position is held, \
+             which §5.2 makes a stale mark whatever the timer says"
+        );
     }
 
     /// Dropping a clock tick that emitted no events changes nothing later (MI-13).
@@ -2574,6 +2979,16 @@ proptest! {
                 .iter()
                 .all(|index| with.get(*index).is_some_and(|o| o.journal.is_empty()))
         );
+        let expected = usd(&(i128::from(ANCHOR_BID) * 100).to_string());
+        prop_assert_eq!(
+            without.last().map(|o| o.snapshot.agent_equity),
+            Some(expected),
+            "the walk closes on the anchor bid, so the fold must have moved at all"
+        );
+        prop_assert_eq!(
+            without.last().map(|o| o.snapshot.latched.clone()),
+            Some(anchor_latches())
+        );
         prop_assert_eq!(
             without.last().map(|o| o.snapshot.clone()),
             with.last().map(|o| o.snapshot.clone()),
@@ -2591,6 +3006,15 @@ proptest! {
         let steps = bid_steps(&bids);
         let once = ok(walk(&mandate, &open, &clock, &steps))?;
         let twice = ok(walk(&mandate, &open, &clock, &steps))?;
+        prop_assert_eq!(
+            once.last().map(|o| o.snapshot.agent_equity),
+            Some(usd(&(i128::from(ANCHOR_BID) * 100).to_string())),
+            "the walk closes on the anchor bid, so two identical runs are not two empty ones"
+        );
+        prop_assert_eq!(
+            once.last().map(|o| o.snapshot.latched.clone()),
+            Some(anchor_latches())
+        );
         prop_assert_eq!(once, twice, "two runs of one input list disagreed");
     }
 
@@ -2607,7 +3031,7 @@ proptest! {
         let clock = RegularSessionClock::new();
         let outcomes = ok(walk(
             &mandate,
-            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "500"),
             &clock,
             &[
                 mark("2026-09-21T14:01:00.000000000Z", &bid.to_string()),
@@ -2626,6 +3050,11 @@ proptest! {
             prop_assert_eq!(after.net_contributed, before.net_contributed);
             prop_assert_eq!(&after.latched, &before.latched);
             prop_assert_eq!(&after.restrictions, &before.restrictions);
+            prop_assert_eq!(
+                after.inherited_loss,
+                before.inherited_loss,
+                "a refused change scales the inherited loss no more than anything else"
+            );
             return Ok(());
         }
         prop_assert!(
@@ -2659,6 +3088,17 @@ proptest! {
         prop_assert!(
             after.net_contributed != before.net_contributed,
             "an applied change moves net contributed, which the loss carry is measured from"
+        );
+        let equity = i128::from(bid) * 100;
+        prop_assert_eq!(
+            before.inherited_loss,
+            usd("500"),
+            "the agent opened with a connection loss carry, which §5.1 scales like C"
+        );
+        prop_assert_eq!(
+            after.inherited_loss,
+            ceil_at_twelve(500 * (equity + i128::from(delta)), equity),
+            "L' is ceil(L x (E + delta) / E, 12), which a fold that dropped L would report as zero"
         );
     }
 
@@ -2715,6 +3155,176 @@ proptest! {
         }
     }
 
+    /// A completed goal never adds risk, whichever `on_complete` the owner chose (§3.1).
+    ///
+    /// The mode may only tighten and no limit may lift: `hold_protected` holds everything armed,
+    /// `disarm_ladder` disarms the ladder and the daily loss, and `release` retires the agent — and none of
+    /// the three is a path by which a latched limit goes away.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn a_completed_goal_never_adds_risk(
+        on_complete in prop::sample::select(vec!["hold_protected", "disarm_ladder", "release"]),
+        bid in 60_i64..140,
+    ) {
+        let mandate = ok(ladder_only(&[("/goal/on_complete", Some(s(on_complete)))]))?;
+        let clock = RegularSessionClock::new();
+        let outcomes = ok(walk(
+            &mandate,
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &clock,
+            &[
+                mark("2026-09-21T14:01:00.000000000Z", &bid.to_string()),
+                Step {
+                    at: at("2026-09-21T14:02:00.000000000Z"),
+                    session: MarketSession::Regular,
+                    input: Input::GoalComplete,
+                },
+            ],
+        ))?;
+        let before = &ok(step_of(&outcomes, 1))?.snapshot;
+        let completed = ok(step_of(&outcomes, 2))?;
+        prop_assert!(
+            completed.snapshot.agent_mode >= before.agent_mode,
+            "`{}` loosened the mode from {:?} to {:?}",
+            on_complete,
+            before.agent_mode,
+            completed.snapshot.agent_mode
+        );
+        prop_assert!(
+            before.latched.is_subset(&completed.snapshot.latched),
+            "`{}` lifted a latch that completing a goal is not a path out of",
+            on_complete
+        );
+        prop_assert!(
+            completed.journal.iter().all(|event| !matches!(
+                event,
+                RiskEvent::RiskLimitLifted { .. }
+            )),
+            "`{}` journalled a lift: {:?}",
+            on_complete,
+            completed.journal
+        );
+        prop_assert!(
+            completed.snapshot.size_factor <= before.size_factor,
+            "`{}` raised the size factor",
+            on_complete
+        );
+    }
+
+    /// One bad print never latches a limit or flattens anything (§5.6, MI-4, DEC-63, planted bug 2).
+    ///
+    /// A healthy mark, then one wild print at any depth, then a sane quote back above it less than the hard
+    /// wait later. Soft confirmation needs the whole 60 s window and the hard path needs a second quote at
+    /// min(`breach_confirm_s`, 10) s, so neither can have completed: whatever the print said, nothing may be
+    /// latched and no kill switch may have fired.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn one_bad_print_never_latches_a_limit(wild in 1_i64..96, gap_s in 1_i64..10) {
+        let mandate = ok(swing(&[("/risk/max_daily_loss", Some(s("0.5")))]))?;
+        let clock = RegularSessionClock::new();
+        let base = at("2026-09-21T14:01:00.000000000Z").secs();
+        let outcomes = ok(walk(
+            &mandate,
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &clock,
+            &[
+                mark("2026-09-21T14:01:00.000000000Z", "105"),
+                quote_at(
+                    UtcNanos::from_parts(base + 60, 0).expect("an instant"),
+                    &wild.to_string(),
+                    MarketSession::Regular,
+                    true,
+                ),
+                quote_at(
+                    UtcNanos::from_parts(base + 60 + gap_s, 0).expect("an instant"),
+                    "130",
+                    MarketSession::Regular,
+                    true,
+                ),
+            ],
+        ))?;
+        for (number, outcome) in outcomes.iter().enumerate() {
+            prop_assert!(
+                outcome.snapshot.latched.is_empty(),
+                "step {}: a bid of {} for {} s latched {:?}",
+                number + 1,
+                wild,
+                gap_s,
+                outcome.snapshot.latched
+            );
+            prop_assert!(
+                outcome.journal.iter().all(|event| !matches!(
+                    event,
+                    RiskEvent::KillSwitchActivated { .. }
+                )),
+                "step {}: a bid of {} for {} s flattened the agent",
+                number + 1,
+                wild,
+                gap_s
+            );
+        }
+        prop_assert_eq!(
+            outcomes.last().map(|o| o.snapshot.agent_mode),
+            Some(AgentMode::Normal),
+            "and the print's temporary `exits_only` is cleared by the quote above the level"
+        );
+    }
+
+    /// Every step's journal is in §5.2's evaluation order: the rungs in ascending `at`, then the daily loss,
+    /// then the lifetime floor, each flatten's kill switch beside its own trigger, and the mode last.
+    #[test]
+    #[ignore = "pending E6-4"]
+    fn emitted_events_are_in_the_spec_order(bids in bid_walk()) {
+        let mandate = ok(ladder_only(&[]))?;
+        let clock = RegularSessionClock::new();
+        let outcomes = ok(walk(
+            &mandate,
+            &patient_opening("2026-09-21T14:00:00.000000000Z", "100", "100", "0"),
+            &clock,
+            &bid_steps(&bids),
+        ))?;
+        let mut ordered = 0;
+        for (number, outcome) in outcomes.iter().enumerate() {
+            let mut previous = 0_u32;
+            let mut last_limit: Option<LimitKey> = None;
+            for event in &outcome.journal {
+                let rank = match event {
+                    RiskEvent::RiskLimitTriggered { limit, .. }
+                    | RiskEvent::RiskLimitLifted { limit, .. } => evaluation_rank(*limit),
+                    RiskEvent::KillSwitchActivated { initiator, .. } => {
+                        prop_assert_eq!(
+                            last_limit,
+                            Some(*initiator),
+                            "step {}: a kill switch must follow its own trigger", number + 1
+                        );
+                        evaluation_rank(*initiator)
+                    }
+                    RiskEvent::InstrumentRestrictionChanged { .. } => 300,
+                    RiskEvent::AgentModeApplied { .. } => 400,
+                    _ => previous,
+                };
+                prop_assert!(
+                    rank >= previous,
+                    "step {}: {:?} came after rank {}, which §5.2 orders the other way",
+                    number + 1,
+                    event,
+                    previous
+                );
+                previous = rank;
+                last_limit = match event {
+                    RiskEvent::RiskLimitTriggered { limit, .. } => Some(*limit),
+                    _ => last_limit,
+                };
+                ordered += 1;
+            }
+        }
+        prop_assert!(
+            ordered >= 4,
+            "the anchor bid latches two rungs and the floor with their kill switches, so there is an order \
+             to be in: only {ordered} events were journalled"
+        );
+    }
+
     /// One `InstrumentRestrictionChanged` per restriction that changed, never one standing for another
     /// (§5.9, §5.10).
     #[test]
@@ -2725,7 +3335,7 @@ proptest! {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
         let mut when = at("2026-09-21T14:00:00.000000000Z").secs();
-        let steps: Vec<Step> = changes
+        let mut steps: Vec<Step> = changes
             .iter()
             .map(|(removed, gap)| {
                 when += i64::try_from(*gap).unwrap_or(1);
@@ -2745,6 +3355,12 @@ proptest! {
                 }
             })
             .collect();
+        when += 30;
+        steps.push(universe_at(
+            UtcNanos::from_parts(when, 0).expect("an instant"),
+            UniverseChange::Removed,
+            RemovalReason::ThesisExpired,
+        ));
         let outcomes = ok(walk(
             &mandate,
             &patient_opening("2026-09-21T13:59:00.000000000Z", "100", "100", "0"),
@@ -2786,5 +3402,10 @@ proptest! {
             }
             held = outcome.snapshot.instrument_restrictions.clone();
         }
+        prop_assert_eq!(
+            held,
+            BTreeSet::from([InstrumentRestriction::RemovedInstrument]),
+            "the walk closes on a removal, so the instrument is restricted and nothing else is"
+        );
     }
 }

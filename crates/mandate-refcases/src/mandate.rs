@@ -769,10 +769,19 @@ fn event_members(event: &risk::RiskEvent) -> BTreeMap<String, String> {
         RiskEvent::MandateVersionApplied { result } => {
             out.insert("type".to_owned(), "MandateVersionApplied".to_owned());
             match result {
-                ApplyResult::Applied { allocation_change } => {
+                ApplyResult::Applied {
+                    allocation_change,
+                    max_loss_from_allocation,
+                } => {
                     out.insert("result".to_owned(), "applied".to_owned());
                     if let Some(delta) = allocation_change {
                         out.insert("allocation_change".to_owned(), delta.to_string());
+                    }
+                    if let Some(floor) = max_loss_from_allocation {
+                        out.insert(
+                            "max_loss_from_allocation".to_owned(),
+                            floor.as_str().to_owned(),
+                        );
                     }
                 }
                 ApplyResult::Rejected { reason } => {
