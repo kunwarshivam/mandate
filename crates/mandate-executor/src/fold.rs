@@ -94,7 +94,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "FeesCharged" | "ExternalActivityIngested" => Ok(()),
+        "FeesCharged" => fees_charged(state, payload),
+        "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -119,9 +120,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
 
 /// Corporate actions, reconciliation's records and snapshot, conduct breaches, recorded broker
 /// exchanges, the owner acknowledgment, the trading and risk days, protection and the kill switch
-/// (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this stack. Until the fee
-/// balances land with the cash slice, a `FeesCharged` folds as a record only, and an
-/// `ExternalActivityIngested` always does: the restriction it causes is its own `AgentModeApplied`.
+/// (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this stack. An
+/// `ExternalActivityIngested` folds as a record only: the restriction it causes is its own
+/// `AgentModeApplied`.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
@@ -559,12 +560,25 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
     Ok(())
 }
 
+/// Paper's simulated fee lowers the model's cash at once, so buying power never overstates what
+/// live would leave (trading-domain spec §10, R-22). The broker's own fees, posted or unposted, are
+/// the cash slice's; until then they fold as records only.
+fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if flag(payload, "simulated") {
+        state.simulated_fees = state.simulated_fees.checked_add(usd(payload, "accrued")?)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
+    use mandate_canon::Value;
+    use mandate_num::Usd;
+
     use super::fold;
     use crate::error::ExecutorError;
     use crate::payload::{clock, object, text};
-    use crate::state::ExecutorState;
+    use crate::state::{ExecutorState, ObservedAccount};
     use crate::types::{
         AccountRef, AccountScope, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
     };
@@ -624,5 +638,58 @@ mod tests {
                 "without `replaces` the event reaches the lookup of its own order ({extra:?})"
             );
         }
+    }
+
+    #[test]
+    fn a_simulated_fee_lowers_buying_power_and_a_broker_fee_waits_for_the_cash_slice()
+    -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let stream = state.account_stream();
+        let usd = |raw: &str| Usd::parse(raw).map_err(ExecutorError::from);
+        state.observed = Some(ObservedAccount {
+            state: crate::types::AccountState::Active,
+            multiplier: 1,
+            equity: usd("1000")?,
+            cash: usd("1000")?,
+            buying_power: usd("5000")?,
+            non_marginable_buying_power: usd("1000")?,
+            accrued_fees: Usd::ZERO,
+        });
+        let mut seq = 0;
+        let mut charge = |state: &mut ExecutorState, simulated: bool| {
+            seq += 1;
+            fold(
+                state,
+                &FoldedEvent {
+                    stream: stream.clone(),
+                    seq: Seq(seq),
+                    event_id: EventId(format!("e-{seq}")),
+                    event_type: "FeesCharged".to_owned(),
+                    causation_id: None,
+                    payload: object(vec![
+                        ("family", text("regulatory")),
+                        ("accrued", text("0.0471")),
+                        ("simulated", Value::Bool(simulated)),
+                        ("risk_clock", clock(RiskClock::from_secs(10))?),
+                    ])?,
+                },
+            )
+        };
+        charge(&mut state, true)?;
+        assert_eq!(
+            state.buying_power(),
+            Some(usd("999.9529")?),
+            "paper's simulated fee comes off the model's cash, the lower of the two, at once (§10)"
+        );
+        charge(&mut state, false)?;
+        assert_eq!(
+            state.buying_power(),
+            Some(usd("999.9529")?),
+            "and a broker fee is the cash slice's: it is not subtracted here"
+        );
+        Ok(())
     }
 }

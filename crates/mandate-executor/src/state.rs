@@ -53,6 +53,7 @@ pub struct ExecutorState {
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     pub(crate) cash_flow: Usd,
+    pub(crate) simulated_fees: Usd,
     pub(crate) mismatched: BTreeSet<InstrumentId>,
     pub(crate) checkpoint: Option<ActivityCursor>,
     pub(crate) reconciled_through: Option<Seq>,
@@ -144,6 +145,7 @@ impl ExecutorState {
             consecutive_403s: 0,
             observed: None,
             cash_flow: Usd::ZERO,
+            simulated_fees: Usd::ZERO,
             mismatched: BTreeSet::new(),
             checkpoint: None,
             reconciled_through: None,
@@ -278,14 +280,18 @@ impl ExecutorState {
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
     ///
-    /// The model is the broker's last reported cash moved by every fill since. The cash slice also
-    /// lowers it by unposted fees, paper's simulated ones included (§10, R-22: paper must not look
-    /// flatter than live); until then it can overstate paper's buying power by those fees, which is
-    /// why the gate does not read it yet. `None` until the broker has reported an account, or if
-    /// the arithmetic overflows: no buying power is ever guessed.
+    /// The model is the broker's last reported cash moved by every fill since, less paper's
+    /// simulated fees (§10, R-22: paper must not look flatter than live), so it never overstates
+    /// what a paper account could spend on live. The cash slice adds the broker's own unposted
+    /// fees. `None` until the broker has reported an account, or if the arithmetic overflows: no
+    /// buying power is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
         let observed = self.observed.as_ref()?;
-        let model = observed.cash.checked_add(self.cash_flow).ok()?;
+        let model = observed
+            .cash
+            .checked_add(self.cash_flow)
+            .and_then(|cash| cash.checked_sub(self.simulated_fees))
+            .ok()?;
         let reserved = self
             .reservations
             .values()

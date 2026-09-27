@@ -437,6 +437,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **Blocks the gate port reading `buying_power`:** subtract the broker's own unposted fees in
+  `ExecutorState::buying_power`. Since slice 4 it is the lower of the broker's figure and the model
+  (reported cash moved by every fill since, less paper's simulated fees), less reservations, but a
+  broker fee accrued and not yet posted is not subtracted, so it can overstate what the account can
+  spend, the less conservative direction (`AGENTS.md` rule 3). Nothing reads it yet; the gate port
+  and every other caller must not until the cash slice folds those fees (slice 4 review).
 - **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
   `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
   `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that
