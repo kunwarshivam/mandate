@@ -63,3 +63,32 @@
 'RC-10' = { status = "passing", story = "E4-1" }
 'RC-12' = { status = "passing", story = "E4-1" }
 'RC-19' = { status = "passing", story = "E4-1" }
+
+# Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 stay pending until
+# E6-2's classify decides their first_order_autonomy.
+[mandate]
+'MC-N02' = { status = "passing", story = "E17-3" }
+'MC-N03' = { status = "passing", story = "E17-3" }
+'MC-N04' = { status = "passing", story = "E17-3" }
+'MC-N05' = { status = "passing", story = "E17-3" }
+'MC-N06' = { status = "passing", story = "E17-7" }
+'MC-N07' = { status = "passing", story = "E17-7" }
+'MC-N08' = { status = "passing", story = "E17-3" }
+'MC-N09' = { status = "passing", story = "E17-3" }
+'MC-N10' = { status = "passing", story = "E17-3" }
+'MC-N11' = { status = "passing", story = "E17-3" }
+'MC-N12' = { status = "passing", story = "E17-3" }
+'MC-N13' = { status = "passing", story = "E17-3" }
+'MC-N15' = { status = "passing", story = "E17-3" }
+'MC-N16' = { status = "passing", story = "E17-3" }
+'MC-N17' = { status = "passing", story = "E17-9" }
+'MC-N18' = { status = "passing", story = "E17-9" }
+'MC-N19' = { status = "passing", story = "E17-9" }
+'MC-N20' = { status = "passing", story = "E17-3" }
+'MC-N21' = { status = "passing", story = "E17-3" }
+'MC-N22' = { status = "passing", story = "E17-3" }
+'MC-N23' = { status = "passing", story = "E17-3" }
+'MC-N24' = { status = "passing", story = "E17-9" }
+'MC-N25' = { status = "passing", story = "E17-3" }
+'MC-N27' = { status = "passing", story = "E17-9" }
+'MC-N28' = { status = "passing", story = "E17-9" }

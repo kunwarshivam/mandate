@@ -130,8 +130,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Autonomy and the order builder (E6-2)
 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
-DEC-130. The crate holds stubs until the implementation PR; the 125 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
+`autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
+(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. The builder's tests stay pending until
+slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -140,10 +142,12 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
   pacing of a discretionary exit).
 - **Code:** `mandate-builder`: `crates/mandate-builder/src/lib.rs` (the crate's contract and
-  `BuilderError`'s fourteen refusals with their stable codes),
+  `BuilderError`'s refusals with their stable codes),
   `crates/mandate-builder/src/autonomy.rs` (§6.2's order, the built-in AUTO purposes, the first
   match, the default, the admission ceiling, the approver count, and the `Facts` a proposed action
-  presents to a §6.3 rule), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
+  presents to a §6.3 rule, with in-module tests of the rule walk, the re-check and `decide`),
+  `crates/mandate-spec/src/condition.rs` (`Condition::matches`, with in-module tests of every
+  operator and combinator), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
   and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
   arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
   `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
@@ -492,8 +496,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
   PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
-  and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
+  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -538,8 +542,10 @@ proves each pending test fails on them (DEC-110).
   crate carries live, pinned unignored so `cargo mutants` reaches it). Planted bugs per test: the task
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
-  thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
-  with streams F, G, and H.
+  thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
+  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
+  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
+  case and require it to fail.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
@@ -552,7 +558,9 @@ proves each pending test fails on them (DEC-110).
   power; every other step type and expectation key fails as "not interpreted until" its owning
   story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
-  without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
+  without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
+  (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).
