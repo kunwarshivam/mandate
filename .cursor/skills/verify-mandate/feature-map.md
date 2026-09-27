@@ -675,7 +675,7 @@ proves each pending test fails on them (DEC-110).
   git repository in
   which committed, uncommitted, and untracked pending tests pass on the stubs or fail away from
   them.
-- **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
+- **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`; `cargo xtask ci mutants`.
 
 ## Repository automation
 
@@ -684,7 +684,9 @@ proves each pending test fails on them (DEC-110).
   with pending tests, on a missed-mutant exit status, and nothing else, and
   `live_tests_judge_every_mutant` with `listed_mutant_counts`, `live_test_counts` and
   `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
-  run, since `cargo mutants` would report every one of them caught, DEC-139),
+  run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
+  repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
+  pre-flight can be deleted without a test failing),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
