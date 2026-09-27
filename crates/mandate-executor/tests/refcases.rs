@@ -1170,6 +1170,7 @@ impl Drive<'_> {
                     self.shell
                         .state
                         .protection(&instrument)
+                        .expect("the protection accessor answers")
                         .is_some_and(|p| p.resting.contains(&client))
                 });
             match wanted {
@@ -1292,7 +1293,10 @@ impl Drive<'_> {
                 ))
             });
         assert_eq!(
-            self.shell.state.protective_sell_qty(&instrument),
+            self.shell
+                .state
+                .protective_sell_qty(&instrument)
+                .expect("the protective-quantity accessor answers"),
             qty(expected),
             "{} step {index}: the protective sell quantity (§5.4)",
             self.case.id

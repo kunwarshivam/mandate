@@ -1385,7 +1385,11 @@ fn the_state_answers_what_the_fold_carries() {
             placed,
         ))
         .expect("folds");
-    let protection = shell.state.protection(&instrument(AAPL)).expect("placed");
+    let protection = shell
+        .state
+        .protection(&instrument(AAPL))
+        .expect("the protection accessor answers")
+        .expect("placed");
     assert_eq!(protection.covered_qty, qty("10"));
     let origin = EventId(format!("{AGENT_STREAM}-3"));
     let mode = copied(
@@ -1397,9 +1401,18 @@ fn the_state_answers_what_the_fold_carries() {
     );
     let copied_id = mode.event_id.clone();
     shell.fold_one(&mode).expect("folds");
-    assert_eq!(shell.state.copied_origin(&copied_id), Some(&origin));
     assert_eq!(
-        shell.state.copied_origin(&EventId("nothing".to_owned())),
+        shell
+            .state
+            .copied_origin(&copied_id)
+            .expect("the copied-origin accessor answers"),
+        Some(&origin)
+    );
+    assert_eq!(
+        shell
+            .state
+            .copied_origin(&EventId("nothing".to_owned()))
+            .expect("the copied-origin accessor answers"),
         None
     );
 }
