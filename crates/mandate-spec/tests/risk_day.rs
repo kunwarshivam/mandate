@@ -67,7 +67,9 @@ fn the_five_reference_days_are_midnight_to_midnight_in_new_york() {
 /// The boundary is the start of the day it opens, never the end of the one it closes.
 ///
 /// MC-T01 and MC-T02 are one second apart across 2026-03-08T05:00:00Z, so the pair already pins this;
-/// stated as its own test because an off-by-one here dates every daily-loss breach to the wrong day.
+/// stated as its own test because an off-by-one here dates every daily-loss breach to the wrong day. All
+/// four boundaries are covered: the midnight that opens the short day and the one that closes it, and the
+/// midnight that opens the long day and the one that closes it.
 #[test]
 #[ignore = "pending E6-4"]
 fn midnight_belongs_to_the_day_it_opens() {
@@ -81,6 +83,11 @@ fn midnight_belongs_to_the_day_it_opens() {
             "2026-03-09T03:59:59.999999999Z",
             "2026-03-09T04:00:00.000000000Z",
             "2026-03-09",
+        ),
+        (
+            "2026-11-01T03:59:59.999999999Z",
+            "2026-11-01T04:00:00.000000000Z",
+            "2026-11-01",
         ),
         (
             "2026-11-02T04:59:59.999999999Z",

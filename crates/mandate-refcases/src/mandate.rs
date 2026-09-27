@@ -15,12 +15,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use mandate_canon::Digest;
 use mandate_canon::Value;
 use mandate_num::{Price, Qty, Usd};
-use mandate_spec::document::ProvenanceMap;
+use mandate_spec::document::{ModelId, ProvenanceMap};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
 use mandate_spec::risk;
-use mandate_spec::validate::{ValidatedMandate, ValidationContext};
+use mandate_spec::validate::{RegisteredModel, ValidatedMandate, ValidationContext};
 use mandate_spec::{Mandate, MandateVersion, SpecError};
 use mandate_time::{Date, UtcNanos};
 
@@ -471,7 +472,7 @@ fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
             format!("the parse rejected this case's document: {}", e.code())
         }
     })?;
-    let validated = ValidatedMandate::new(mandate, &goal_context()?, &[])
+    let validated = ValidatedMandate::new(mandate, &context_defaults(fixture)?, &[])
         .map_err(|e| format!("the mandate is not valid here: {e}"))?;
     let state = at_of(case, "state")?;
     let inputs = GoalInputs {
@@ -526,21 +527,31 @@ fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
     )
 }
 
-/// The validation context the goal cases need: a workspace wide enough that no V-rule about approvers
-/// or account equity is what decides a goal case, and every field owner-entered and confirmed.
+/// The validation context, read from the fixture's own `validation_context_defaults`.
 ///
-/// A goal case says nothing about validation, so any context that makes the base valid would do; these
-/// are the values `two_stock_swing` and `btc_accumulator` are written against.
-fn goal_context() -> Result<ValidationContext, String> {
+/// Review round 1 found the first version of this hardcoding an equity, a date, and a `None` registry
+/// beside the fixture's stated defaults while claiming to be the values the bases were written against.
+/// It now reads all six: account equity, other allocations, the validation date, the signal-model
+/// registry, and the workspace and approver user counts. Every field is owner-entered and confirmed,
+/// which is what an absent [`ProvenanceMap`] entry means (§2.1), and the remaining fields are the "not
+/// stated" of the cases — no group map, nothing claimed elsewhere, no disclosure, no previous version.
+fn context_defaults(fixture: &Json) -> Result<ValidationContext, String> {
+    let defaults = at_of(fixture, "validation_context_defaults")?;
     Ok(ValidationContext {
-        account_equity_usd: num(Usd::parse("1000000"), "the context's account equity")?,
-        other_allocations_usd: Usd::ZERO,
-        validation_date: Date::parse("2026-09-20")
-            .map_err(|e| format!("the context's validation date: {e}"))?,
-        registry: None,
+        account_equity_usd: num(
+            Usd::parse(str_at(defaults, "account_equity_usd")?),
+            "account_equity_usd",
+        )?,
+        other_allocations_usd: num(
+            Usd::parse(str_at(defaults, "other_allocations_usd")?),
+            "other_allocations_usd",
+        )?,
+        validation_date: Date::parse(str_at(defaults, "validation_date")?)
+            .map_err(|e| format!("validation_date: {e}"))?,
+        registry: Some(registry(at_of(defaults, "registry")?)?),
         provenance: ProvenanceMap::default(),
-        workspace_users: 1,
-        approver_users: 1,
+        workspace_users: u32_of(defaults, "workspace_users")?,
+        approver_users: u32_of(defaults, "approver_users")?,
         disclosures_accepted: BTreeSet::new(),
         instrument_groups: BTreeMap::new(),
         claimed_by_other_agents: BTreeSet::new(),
@@ -549,6 +560,47 @@ fn goal_context() -> Result<ValidationContext, String> {
         eligibility_failures: BTreeSet::new(),
         previous_version: None,
     })
+}
+
+/// The fixture's `signal_model_registry` shape, which V-007 compares the document's models against.
+fn registry(value: &Json) -> Result<BTreeMap<ModelId, RegisteredModel>, String> {
+    let members = value
+        .as_object()
+        .ok_or_else(|| "`registry` is not an object".to_owned())?;
+    members
+        .iter()
+        .map(|(id, model)| {
+            let id =
+                ModelId::parse(id).map_err(|e| format!("registry key `{id}`: {}", e.code()))?;
+            let hash = str_at(model, "content_hash")?
+                .strip_prefix("sha256:")
+                .and_then(Digest::from_hex)
+                .ok_or_else(|| format!("`{}`: content_hash is not sha256 hex", id.as_str()))?;
+            Ok((
+                id,
+                RegisteredModel {
+                    version: str_at(model, "version")?.to_owned(),
+                    content_hash: hash,
+                    params: list_at(model, "params")?
+                        .iter()
+                        .map(|p| {
+                            p.as_str()
+                                .map(str::to_owned)
+                                .ok_or_else(|| "a param name is not a string".to_owned())
+                        })
+                        .collect::<Result<_, String>>()?,
+                    admits_instruments: model
+                        .get("admits_instruments")
+                        .and_then(Json::as_bool)
+                        .unwrap_or(false),
+                },
+            ))
+        })
+        .collect()
+}
+
+fn u32_of(value: &Json, key: &str) -> Result<u32, String> {
+    u32::try_from(u64_at(value, key)?).map_err(|_| format!("`{key}` does not fit a u32"))
 }
 
 /// An instant in a case, in the RFC 3339 form the steps use.

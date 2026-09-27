@@ -224,9 +224,9 @@ fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
 /// The remaining quantity is also done when what is left is worth less than the minimum order.
 ///
 /// §3.1 gives two quantity conditions, "below one increment" **or** "below the minimum order", and the
-/// second needs the ask to evaluate: 0.00001 of BTC at 55000 is 0.55, under the 1.00 minimum, even
-/// though the remainder is above zero. With a 1-cent ask the same remainder is worth nothing and the
-/// goal is done for the same reason, so the test also pins that the ask is read at all.
+/// second needs the ask to evaluate. Here 0.0000001 BTC at 55000 is 0.0055, under the 1.00 minimum,
+/// while the increment is set small enough that the first condition does not fire — so the goal can only
+/// be done by the second, and only by reading the ask.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
@@ -339,19 +339,57 @@ fn a_profit_stop_is_the_risk_states_to_confirm_but_its_end_date_is_not() {
 }
 
 /// Out of arithmetic range is a typed error, never a silent "not done" (DEC-128 item 4).
+///
+/// Review round 1 was right that the first version of this test pinned nothing: its figures fit in every
+/// type, and item 5's 256-bit intermediates do not overflow, so a correct implementation returned
+/// `Running` and the test passed either way. The value that cannot be held is a **`target_qty` with more
+/// places than `Qty`**: the schema admits 28 fractional digits on a `positive_decimal` and `Qty` holds
+/// nine, so the document is schema-valid and the comparison §3.1 asks for cannot be made exactly. That is
+/// item 4's case exactly — the mandate breaks no rule, and no rule defines an answer — so the only honest
+/// result is `out_of_range` naming the path, never a goal quietly reported as running.
 #[test]
 #[ignore = "pending E6-4"]
-fn a_quantity_no_type_can_hold_is_an_error_and_not_a_running_goal() {
+fn a_target_quantity_no_type_can_hold_is_out_of_range_and_never_a_running_goal() {
+    let goal = accumulator(&[("/goal/target_qty", Some(s("0.1234567891")))]);
+    let answer = status(
+        &goal,
+        &inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000"),
+    );
+    let Err(SpecError::OutOfRange { path, .. }) = &answer else {
+        panic!(
+            "a ten-place target_qty cannot be compared exactly against a nine-place Qty, so §3.1 has no answer: {answer:?}"
+        );
+    };
+    assert_eq!(
+        path.as_str(),
+        "/goal/target_qty",
+        "the error names the field that could not be held"
+    );
+}
+
+/// A zero quantity increment is [`SpecError::InvalidInput`], not a guess (DEC-128 item 27).
+///
+/// Neither answer is safe, which is why it is an error rather than a default: nothing is ever below a
+/// zero increment, so "not done" would keep buying forever, while "done" would stop a goal that is not
+/// done. Review round 1 found item 27 introducing this rule with nothing exercising it.
+#[test]
+#[ignore = "pending E6-4"]
+fn a_zero_quantity_increment_is_rejected_rather_than_guessed() {
     let goal = accumulator(&[]);
-    let mut huge = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
-    huge.ask = Price::parse("999999999.999999999").expect("a price");
-    huge.position_qty = Qty::parse("0.0001").expect("a quantity");
-    let answer = status(&goal, &huge);
+    let mut zero = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
+    zero.qty_increment = Qty::ZERO;
     assert!(
         matches!(
-            answer,
-            Ok(GoalStatus::Running) | Err(SpecError::OutOfRange { .. })
+            status(&goal, &zero),
+            Err(SpecError::InvalidInput { what }) if what.contains("increment")
         ),
-        "either the product fits and the goal runs, or it is reported as out of range: {answer:?}"
+        "a zero increment names itself rather than deciding the goal either way"
+    );
+
+    let mut smallest = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
+    smallest.qty_increment = Qty::parse("0.000000001").expect("one unit of the ninth place");
+    assert!(
+        status(&goal, &smallest).is_ok(),
+        "the smallest increment a Qty can hold is usable, so only zero is rejected"
     );
 }
