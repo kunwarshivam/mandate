@@ -583,6 +583,10 @@ struct Run {
     /// The effects of each kill-switch command's own batch, in order, so a property can see what
     /// the switch did before it journaled anything.
     kill_batches: Vec<Vec<Effect>>,
+    /// For each kill-switch command, in order, whether the broker was then holding a working order
+    /// it had acknowledged: one the switch must cancel (§5.5), read from the broker model rather
+    /// than the executor.
+    kill_working: Vec<bool>,
 }
 
 /// The broker's side of a run, kept by the script rather than read from the executor: every order
@@ -728,6 +732,7 @@ fn play(script: &[Step]) -> Run {
     let mut fills: u32 = 0;
     let mut prefix_head = Seq(0);
     let mut kill_batches: Vec<Vec<Effect>> = Vec::new();
+    let mut kill_working: Vec<bool> = Vec::new();
 
     let record = |ran: Ran,
                   drafts: &mut Vec<EventDraft>,
@@ -923,6 +928,9 @@ fn play(script: &[Step]) -> Run {
                 );
             }
             Step::KillSwitch => {
+                kill_working.push(broker.order_of_arrival.iter().any(|id| {
+                    broker.working(id) && broker.orders.get(id).is_some_and(|o| o.acknowledged)
+                }));
                 let ran = record(
                     shell.run(
                         Input::Command(Command::KillSwitch {
@@ -991,7 +999,14 @@ fn play(script: &[Step]) -> Run {
         prefix_head,
         broker,
         kill_batches,
+        kill_working,
     }
+}
+
+/// Whether a script runs the protected lead: its entry is then a partly filled GTC bracket.
+fn leads(script: &[Step]) -> bool {
+    script.get(PREFIX.len()..PREFIX.len().saturating_add(PROTECTED_LEAD.len()))
+        == Some(&PROTECTED_LEAD[..])
 }
 
 proptest! {
@@ -1467,6 +1482,13 @@ proptest! {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
         prop_assert!(!run.kill_batches.is_empty());
+        prop_assert!(
+            run.kill_batches.first().is_some_and(|batch| batch
+                .iter()
+                .any(|e| matches!(e, Effect::Journal(d) if d.event_type == "AgentModeApplied"))),
+            "the first kill switch journals the agent's final mode (§5.5): a switch that does \
+             nothing orders nothing before it"
+        );
         for batch in &run.kill_batches {
             let mode_at = batch
                 .iter()
@@ -1500,6 +1522,24 @@ proptest! {
     #[ignore = "pending E7-2"]
     fn protective_sell_quantity_never_exceeds_the_position_in_any_script(script in scripted()) {
         let run = play(&script);
+        let entry = ClientOrderId::for_intent(&IntentId(EventId(intent_named(1))))
+            .map(|id| id.as_str().to_owned())
+            .unwrap_or_default();
+        let completed = run.drafts.iter().position(|d| {
+            d.event_type == "OrderStateChanged"
+                && field(d, "client_order_id") == Some(entry.as_str())
+                && field(d, "state") == Some("filled")
+        });
+        prop_assert!(
+            !leads(&script)
+                || completed.is_none_or(|at| run.drafts.iter().skip(at).any(|d| {
+                    d.event_type == "ProtectionChanged"
+                        && field(d, "action") == Some("placed")
+                        && field(d, "instrument") == Some(CPHC)
+                })),
+            "the protected lead's entry filled completely, so its bracket legs are placed (§5.4), \
+             and there is protection for this property to judge"
+        );
         let accountant = ProtectionAccountant::of(&run.drafts);
         let ledger = ShadowLedger::of(&run.drafts);
         for (name, covered) in &accountant.covered {
@@ -1597,6 +1637,16 @@ proptest! {
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
+        for (batch, working) in run.kill_batches.iter().zip(&run.kill_working) {
+            prop_assert!(
+                !*working
+                    || batch
+                        .iter()
+                        .any(|e| matches!(e, Effect::Broker(BrokerRequest::Cancel { .. }))),
+                "a kill switch with the agent's order working at the broker cancels it (§5.5), \
+                 so cancels are on the table for this property to judge"
+            );
+        }
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
         for effect in &run.effects {
@@ -1668,6 +1718,13 @@ proptest! {
     #[ignore = "pending E7-4"]
     fn no_resting_order_is_submitted_inside_an_unprotected_interval(script in scripted()) {
         let run = play(&script);
+        prop_assert!(
+            !leads(&script)
+                || run.drafts.iter().any(|d| d.event_type == "ProtectionChanged"
+                    && field(d, "action") == Some("unprotected_start")),
+            "the protected lead's partly filled bracket opens an unprotected interval (§5.4), so \
+             there is an interval for this property to judge"
+        );
         let mut unprotected: BTreeSet<String> = BTreeSet::new();
         let mut submissions = 0usize;
         for effect in &run.effects {
