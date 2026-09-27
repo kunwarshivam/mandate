@@ -22,7 +22,13 @@
 //! `mandate_builder::classify` over the facts admission reports (DEC-132 item 3). Until E6-2 ships
 //! `classify`, those cases compare everything else and then fail naming E6-2. Where the expectation
 //! is `null`, the admission must report no first-order facts, which is why `admission_action`, the
-//! input only `classify` reads, has nothing to decide there; its members are still swept.
+//! input only `classify` reads, has nothing to decide there. Its members are swept, but no passing
+//! case reads their values, so the E6-2 change must wire `classify` to them rather than count the
+//! sweep as coverage.
+//!
+//! **One invented value.** The source allowlist's version is `AllowlistVersion(1)`: no case states
+//! one and no check reads it; it reaches only the thesis entry's `allowlist_version`, which the
+//! fixture's journal rows do not state.
 
 use std::collections::{BTreeMap, BTreeSet};
 
