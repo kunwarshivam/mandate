@@ -342,6 +342,7 @@ impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
 mod tests {
     use std::cell::RefCell;
 
+    use mandate_accounting::InstrumentId;
     use mandate_executor::{
         ActivityCursor, BrokerOutcome, BrokerRequest, BrokerUnknown, ConnectorError,
     };
@@ -444,8 +445,8 @@ mod tests {
             Err(ConnectorError::NotSent {
                 code: "refused_path"
             }),
-            "`BTC/USD` is two path segments, so the close is our unbuildable URL, never the \
-             broker refusing to reduce risk (rule 13, DEC-133 item 32)"
+            "a two-segment path is our unbuildable URL, never the broker refusing to reduce \
+             risk (rule 13, DEC-133 item 32)"
         );
         assert!(
             client.transport.sent.borrow().is_empty(),
@@ -465,6 +466,25 @@ mod tests {
             "nor does the account-wide constructor build an ordinary endpoint's request"
         );
         assert!(client.transport.sent.borrow().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_crypto_close_is_sent_to_the_pair_without_its_slash() -> Result<(), String> {
+        let client = Answering::with(200);
+        let btc = InstrumentId::new("BTC/USD").map_err(|e| format!("{e:?}"))?;
+        let answer = client
+            .account_wide(HttpRequest::close_position_for_tests(&btc))
+            .await;
+        assert!(
+            matches!(answer, Ok(BrokerOutcome::AccountWideAccepted)),
+            "a kill switch closes a crypto position like any other: {answer:?}"
+        );
+        assert_eq!(
+            *client.transport.sent.borrow(),
+            vec!["/v2/positions/BTCUSD".to_owned()],
+            "once, on the one path Alpaca answers for the pair (#195 finding 1)"
+        );
+        Ok(())
     }
 
     #[tokio::test]

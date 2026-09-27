@@ -541,29 +541,17 @@ pub(crate) fn account(
     batch: &mut Batch<'_, '_>,
     account: &BrokerAccount,
 ) -> Result<(), ExecutorError> {
-    batch.journal(
-        "AccountStateObserved",
-        None,
-        vec![
-            ("status", text(account.status.clone())),
-            ("crypto_status", text(account.crypto_status.clone())),
-            ("trading_blocked", Value::Bool(account.trading_blocked)),
-            ("account_blocked", Value::Bool(account.account_blocked)),
-            (
-                "trade_suspended_by_user",
-                Value::Bool(account.trade_suspended_by_user),
-            ),
-            ("multiplier", int(u64::from(account.multiplier))?),
-            ("equity", text(account.equity.to_string())),
-            ("cash", text(account.cash.to_string())),
-            ("buying_power", text(account.buying_power.to_string())),
-            (
-                "non_marginable_buying_power",
-                text(account.non_marginable_buying_power.to_string()),
-            ),
-            ("accrued_fees", text(account.accrued_fees.to_string())),
-        ],
-    )?;
+    batch.journal("AccountStateObserved", None, account_fields(account)?)?;
+    account_restriction(batch, account)
+}
+
+/// §7.3's first row, read on any account the broker reports, pushed or read by a reconciliation:
+/// a status other than `ACTIVE`, or any blocking flag, restricts the account as blocked and pauses
+/// every agent, once.
+pub(crate) fn account_restriction(
+    batch: &mut Batch<'_, '_>,
+    account: &BrokerAccount,
+) -> Result<(), ExecutorError> {
     let blocked = account.status != "ACTIVE"
         || account.trading_blocked
         || account.account_blocked
@@ -572,6 +560,32 @@ pub(crate) fn account(
         restrict(batch, Restriction::Blocked, "account_trading_blocked")?;
     }
     Ok(())
+}
+
+/// Every account field §7.2 and §7.3 name, as journaled: never the account number or id, which
+/// [`BrokerAccount`] has nowhere to hold (journal spec §6.4).
+pub(crate) fn account_fields(
+    account: &BrokerAccount,
+) -> Result<Vec<(&'static str, Value)>, ExecutorError> {
+    Ok(vec![
+        ("status", text(account.status.clone())),
+        ("crypto_status", text(account.crypto_status.clone())),
+        ("trading_blocked", Value::Bool(account.trading_blocked)),
+        ("account_blocked", Value::Bool(account.account_blocked)),
+        (
+            "trade_suspended_by_user",
+            Value::Bool(account.trade_suspended_by_user),
+        ),
+        ("multiplier", int(u64::from(account.multiplier))?),
+        ("equity", text(account.equity.to_string())),
+        ("cash", text(account.cash.to_string())),
+        ("buying_power", text(account.buying_power.to_string())),
+        (
+            "non_marginable_buying_power",
+            text(account.non_marginable_buying_power.to_string()),
+        ),
+        ("accrued_fees", text(account.accrued_fees.to_string())),
+    ])
 }
 
 /// The two restrictions §7.3 detects. There is no variant for an active account, so a restriction
