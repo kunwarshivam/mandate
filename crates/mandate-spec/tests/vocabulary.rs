@@ -8,13 +8,21 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_domain::AgentMode;
+use mandate_num::NumError;
+use mandate_spec::change::ChangeClass;
 use mandate_spec::condition::{
     Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
 };
-use mandate_spec::document::{OnComplete, Pointer, Provenance, ProvenanceMap, Source};
-use mandate_spec::policy::{KeyKind, PolicyKey};
-use mandate_spec::risk::{LimitKey, Restriction};
-use mandate_spec::{DecGrammar, SchemaDec};
+use mandate_spec::document::{
+    Goal, LadderAction, LimitAction, ModelId, OnComplete, Pointer, Provenance, ProvenanceMap,
+    Source,
+};
+use mandate_spec::policy::{KeyKind, LevelName, PolicyKey};
+use mandate_spec::risk::{
+    Confirmation, GoalReason, InstrumentRestriction, LimitKey, MAX_BREACH_CONFIRM_S, Rejection,
+    Restriction, StopReason, ThenAction, hard_wait_s,
+};
+use mandate_spec::{DecGrammar, ParseError, SchemaDec, SpecError};
 
 #[test]
 fn a_path_provenance_does_not_mention_is_entered_and_confirmed() {
@@ -266,7 +274,6 @@ fn the_two_keys_where_absence_is_the_violation_are_the_only_two() {
 
 #[test]
 fn a_profit_stop_has_no_on_complete_to_choose() {
-    use mandate_spec::document::Goal;
     let continuous = Goal::Continuous {
         end_date: None,
         on_complete: OnComplete::HoldProtected,
@@ -299,8 +306,6 @@ fn a_profit_stop_has_no_on_complete_to_choose() {
 /// wrong code is a defect a reader cannot see and a script cannot key on.
 #[test]
 fn every_error_variant_has_its_own_stable_code() {
-    use mandate_num::NumError;
-    use mandate_spec::{ParseError, SpecError};
     let path = || Pointer::new("/risk/max_drawdown");
     let parse_errors = [
         (ParseError::UnknownMember { path: path() }, "unknown_member"),
@@ -359,8 +364,6 @@ fn every_error_variant_has_its_own_stable_code() {
 /// Every text form a journal payload, a report, or a policy violation carries.
 #[test]
 fn every_enum_writes_the_text_its_section_gives_it() {
-    use mandate_spec::change::ChangeClass;
-    use mandate_spec::document::{LadderAction, LimitAction};
     for (class, text) in [
         (ChangeClass::RiskIncreasing, "risk_increasing"),
         (ChangeClass::RiskReducing, "risk_reducing"),
@@ -424,7 +427,6 @@ fn a_pointer_keeps_the_path_it_was_given() {
 /// An `end_date` is read back, not dropped: it is the last risk day of the goal (§3.1, §5.4).
 #[test]
 fn a_goals_end_date_is_the_one_it_was_given() {
-    use mandate_spec::document::Goal;
     let date = mandate_time::Date::parse("2026-12-31").expect("a date");
     let goal = Goal::Continuous {
         end_date: Some(date),
@@ -450,9 +452,6 @@ fn a_goals_end_date_is_the_one_it_was_given() {
 /// files; `dec.rs` is the one fully real module, and it was run through the gate by hand at zero.
 #[test]
 fn the_reachable_accessors_return_what_they_were_given() {
-    use mandate_spec::policy::LevelName;
-    use mandate_spec::risk::{Confirmation, InstrumentRestriction, Rejection};
-
     for (level, text) in [
         (LevelName::Platform, "platform"),
         (LevelName::Organization, "organization"),
@@ -521,8 +520,6 @@ fn the_reachable_accessors_return_what_they_were_given() {
 /// zero would have made a single bad tick a hard trigger, which is exactly what the wait prevents.
 #[test]
 fn a_hard_breach_waits_the_shorter_of_the_confirm_window_and_ten_seconds() {
-    use mandate_spec::risk::{Confirmation, MAX_BREACH_CONFIRM_S, hard_wait_s};
-
     assert_eq!(hard_wait_s(300), 10, "a long window still waits only 10s");
     assert_eq!(hard_wait_s(MAX_BREACH_CONFIRM_S), 10);
     assert_eq!(hard_wait_s(5), 5, "a shorter window is the whole wait");
@@ -537,4 +534,129 @@ fn a_hard_breach_waits_the_shorter_of_the_confirm_window_and_ten_seconds() {
         "a fresh confirmation has accumulated nothing"
     );
     assert_eq!(Confirmation::default().accumulated_s(), 0);
+}
+
+/// A completed goal's three spellings: the reason `GoalCompleted` carries, the `then` beside it, and
+/// the reason `AgentStopped` carries (§3.1, §5.10).
+///
+/// Live, and a total map over each enum, so DEC-128 item 22's fourth admitted case covers it: a wrong
+/// spelling here is a journal event no replay could read back, and the reference cases compare these
+/// as text.
+///
+/// Every expectation is a literal from §5.10 and §3.1. Review round 1 found the `ThenAction::Applied`
+/// row comparing against `OnComplete::as_str`, which is this crate's own answer to the same question —
+/// a map checked against itself passes however wrong both halves are.
+#[test]
+fn a_completed_goal_writes_the_three_spellings_section_five_ten_gives_it() {
+    for (reason, text) in [
+        (GoalReason::ProfitStopReached, "profit_stop_reached"),
+        (GoalReason::TargetQty, "target_qty"),
+        (GoalReason::MaxSpend, "max_spend"),
+        (GoalReason::EndDate, "end_date"),
+    ] {
+        assert_eq!(reason.as_str(), text, "§5.10 names this goal reason");
+    }
+    for (reason, text) in [
+        (StopReason::OwnerStop, "owner_stop"),
+        (StopReason::ProfitStopReached, "profit_stop_reached"),
+        (StopReason::EndDate, "end_date"),
+        (StopReason::GoalComplete, "goal_complete"),
+    ] {
+        assert_eq!(reason.as_str(), text, "§5.10 names this stop reason");
+    }
+    for (on_complete, text) in [
+        (OnComplete::HoldProtected, "hold_protected"),
+        (OnComplete::DisarmLadder, "disarm_ladder"),
+        (OnComplete::Release, "release"),
+    ] {
+        assert_eq!(
+            ThenAction::Applied(on_complete).as_str(),
+            text,
+            "§3.1 names this on_complete, and an applied one writes that value"
+        );
+    }
+    assert_eq!(
+        ThenAction::DiscretionaryExitAllThenRetire.as_str(),
+        "discretionary_exit_all_then_retire",
+        "a profit_stop has no on_complete to write, so §3.1's outcome is the then (MC-R22)"
+    );
+    assert_eq!(
+        GoalReason::ProfitStopReached.as_str(),
+        "profit_stop_reached",
+        "§3.1 gives a profit_stop one spelling in both roles, and this is it"
+    );
+    assert_eq!(
+        StopReason::ProfitStopReached.as_str(),
+        "profit_stop_reached"
+    );
+}
+
+/// `ModelId::parse` admits exactly the schema's `^(fast|llm|quant)\.[a-z0-9_]{1,48}$` and nothing else.
+///
+/// Live, a grammar check with no rule logic (DEC-128 item 22). It exists because V-007 compares the
+/// document's models against a registry the caller supplies, and a registry keyed by a type nothing can
+/// construct cannot be supplied — which is what the `mandate` harness hit when review round 1 asked it to
+/// read the fixture's own `validation_context_defaults`. Pinning it also closes `as_str` and `model_type`,
+/// which #140 had to list as accessors no test could reach.
+#[test]
+fn a_model_id_is_one_of_the_three_prefixes_and_a_lowercase_name() {
+    for text in [
+        "quant.mean_reversion",
+        "quant.momentum",
+        "llm.news_research",
+        "llm.research_agent",
+        "fast.a",
+        "quant.x9_0",
+        "llm.0",
+        "fast._",
+    ] {
+        let id =
+            ModelId::parse(text).unwrap_or_else(|e| panic!("{text} is a model id: {}", e.code()));
+        assert_eq!(id.as_str(), text, "the id keeps the text it was given");
+    }
+    let longest = format!("quant.{}", "a".repeat(48));
+    assert!(
+        ModelId::parse(&longest).is_ok(),
+        "48 characters is the longest name the schema allows"
+    );
+
+    for text in [
+        "quant",
+        "quantmean_reversion",
+        "bogus.name",
+        "Quant.name",
+        "QUANT.name",
+        "slow.name",
+        "quant.",
+        "quant.Abc",
+        "quant.a-b",
+        "quant.a.b",
+        "quant.a b",
+        "quant.á",
+        ".name",
+        "",
+    ] {
+        assert!(
+            ModelId::parse(text).is_err(),
+            "{text:?} is not a model id the schema admits"
+        );
+    }
+    let too_long = format!("quant.{}", "a".repeat(49));
+    assert!(
+        ModelId::parse(&too_long).is_err(),
+        "49 characters is one past the schema's limit"
+    );
+
+    for (text, kind) in [
+        ("quant.momentum", "quant"),
+        ("llm.news_research", "llm"),
+        ("fast.a", "fast"),
+    ] {
+        let id = ModelId::parse(text).expect("a model id");
+        assert_eq!(
+            id.model_type(),
+            Some(kind),
+            "the policy hierarchy's signal_model_types reads this prefix (§4.3)"
+        );
+    }
 }

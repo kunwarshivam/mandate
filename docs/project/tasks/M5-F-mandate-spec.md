@@ -760,6 +760,15 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
   goals; `pending E17-1` for the field-split tests (V-034 to V-039 and `platform_proposed`
   provenance). `cargo xtask markers` accepts only `pending E<n>-<n>`, so `pending F` — a stream, not
   a story — is not a marker the workspace can carry (interpretation 2).
+- **A pending marker names the story that owns the rule, not the story that can un-pend the test.**
+  The goal tests are `pending E6-4`, and every one of them stops at `Mandate::parse`, which is
+  E10-1's: a goal needs a validated mandate to be a goal of. So **E6-4 cannot remove those
+  `#[ignore]` lines until E10-1's implementation has landed**, and an implementation PR for E6-4 that
+  found them still failing would be seeing the parser, not its own rule. The same holds for every
+  family whose tests build a document: only `risk_day` is free of it, taking an instant and nothing
+  else. Sequencing, not a defect, and named here because the alternative — marking them `pending
+  E10-1` — would file the goal rules under the story that does not own them (review round 1 of
+  the tests PR for T and L).
 
 ## Interpretations (recorded as DEC-128)
 

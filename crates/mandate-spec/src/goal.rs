@@ -4,7 +4,7 @@
 //! (§5.6), so [`status`] returns [`GoalStatus::ConfirmedInRiskState`] rather than `Running`. Returning
 //! `Running` would invite a caller to decide the same condition twice, in two places, with two answers.
 
-use mandate_num::{Price, Qty, ShareIncrement, Usd};
+use mandate_num::{Price, Qty, Usd};
 use mandate_time::UtcNanos;
 
 use crate::SpecError;
@@ -21,7 +21,11 @@ pub struct GoalInputs {
     /// (§3.1).
     pub goal_spent_usd: Usd,
     pub min_order_usd: Usd,
-    pub qty_increment: ShareIncrement,
+    /// The instrument's quantity increment, as the reference cases carry it: a decimal (`1` for whole
+    /// shares, `0.0001` for BTC), not the whole-or-fractional grid `mandate_num::ShareIncrement`
+    /// describes, which cannot express `0.0001` and would make MC-L02's dust remainder look tradable.
+    /// Zero is [`SpecError::InvalidInput`].
+    pub qty_increment: Qty,
     pub ask: Price,
 }
 

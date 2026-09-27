@@ -247,3 +247,34 @@ fn every_owned_expectation_member_is_read() {
         "both sweeps must have been exercised over every expectation the owned cases carry"
     );
 }
+
+/// The risk-day and goal arms fail with the DEC-77 message while their rules are stubs, and name the
+/// stub rather than a comparison.
+///
+/// The `trading_domain` suite proves its arms read each key by editing an expectation and requiring the
+/// case to fail. That test cannot be written for these two families yet: every MC-T and MC-L case fails
+/// on the stub regardless of what its expectations say, so an edited value would fail for the same
+/// reason as an unedited one and prove nothing. What is checkable now is the other half — that a stub
+/// is never mistaken for a pass — and the read-every-key half arrives with the implementation PR, where
+/// an edited `starts_at` or `then` must change the outcome.
+#[test]
+fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
+    let fixture = fixture();
+    for (kind, stub) in [("risk_day", "risk_day"), ("goal", "parser")] {
+        let ids: Vec<String> = fixture["cases"]
+            .as_array()
+            .expect("a case list")
+            .iter()
+            .filter(|c| c["kind"] == kind)
+            .map(|c| c["id"].as_str().expect("an id").to_owned())
+            .collect();
+        assert!(!ids.is_empty(), "the fixture carries {kind} cases");
+        for id in ids {
+            let failure = run(fixture.clone(), &id).expect_err("a stub is never a pass");
+            assert!(
+                failure.contains("not implemented yet") && failure.contains(stub),
+                "{id}: the failure must name the stub it stopped at, got: {failure}"
+            );
+        }
+    }
+}
