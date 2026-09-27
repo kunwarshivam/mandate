@@ -1,0 +1,27 @@
+[package]
+name = "mandate-alpaca"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The Alpaca paper trading connector: the BrokerConnector mandate-executor declares, behind an injected transport and clock (backlog E7-2, E7-3, E7-4)"
+
+[lints]
+workspace = true
+
+[dependencies]
+mandate-executor.workspace = true
+mandate-num.workspace = true
+mandate-time.workspace = true
+reqwest.workspace = true
+rustls.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+
+[dev-dependencies]
+mandate-accounting.workspace = true
+proptest.workspace = true
+tokio = { workspace = true, features = ["macros", "rt", "time"] }

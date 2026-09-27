@@ -1,0 +1,1 @@
+POST /v2/orders {"client_order_id":"md-c7c0b6a5d2e14f8b9a3c5d7e11","limit_price":"53730","order_class":"simple","qty":"0.5","side":"sell","stop_price":"54000","symbol":"BTC/USD","time_in_force":"gtc","type":"stop_limit"}
