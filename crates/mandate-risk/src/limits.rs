@@ -45,32 +45,40 @@ pub(crate) fn position_order_and_cooldown(
     reentry_cooldown(input, computed)
 }
 
-/// Mandate §5.3: no opening within `reentry_cooldown_s` of an exit fill anywhere in the
-/// instrument's group; an instrument with no group is a group of one.
+/// Mandate §5.3: no opening within `reentry_cooldown_s` of "the agent's last exit fill in any
+/// instrument of the group"; an instrument with no group is a group of one. The latest in-group
+/// exit binds, and it is the one `computed` reports.
 fn reentry_cooldown(
     input: &GateInput<'_>,
     computed: &mut Computed,
 ) -> Result<Option<Stop>, GateError> {
     let instrument = &input.proposed.instrument;
     let groups = &input.agent.instrument_groups;
-    let cooldown = i64::from(input.mandate.risk().reentry_cooldown_s);
-    for (other, last) in &input.agent.last_exit_fill_at {
-        let same_group = match (groups.get(instrument), groups.get(other)) {
-            (Some(mine), Some(theirs)) => mine == theirs,
-            (None, None) => other == instrument,
-            _ => false,
-        };
-        let ends = UtcNanos::from_parts(
-            last.secs()
-                .checked_add(cooldown)
-                .ok_or(GateError::ConfigOutOfRange)?,
-            last.nanos(),
-        )?;
-        if same_group && input.now < ends {
-            computed.last_exit_fill_at = Some(*last);
-            computed.instrument = Some(other.clone());
-            return Ok(Some((Verdict::Deny, ReasonCode::ReentryCooldown)));
-        }
+    let last_in_group = input
+        .agent
+        .last_exit_fill_at
+        .iter()
+        .filter(
+            |(other, _)| match (groups.get(instrument), groups.get(*other)) {
+                (Some(mine), Some(theirs)) => mine == theirs,
+                (None, None) => *other == instrument,
+                _ => false,
+            },
+        )
+        .max_by_key(|(_, last)| **last);
+    let Some((other, last)) = last_in_group else {
+        return Ok(None);
+    };
+    let ends = UtcNanos::from_parts(
+        last.secs()
+            .checked_add(i64::from(input.mandate.risk().reentry_cooldown_s))
+            .ok_or(GateError::ConfigOutOfRange)?,
+        last.nanos(),
+    )?;
+    if input.now < ends {
+        computed.last_exit_fill_at = Some(*last);
+        computed.instrument = Some(other.clone());
+        return Ok(Some((Verdict::Deny, ReasonCode::ReentryCooldown)));
     }
     Ok(None)
 }
@@ -86,6 +94,10 @@ pub(crate) fn orders_per_day(input: &GateInput<'_>, computed: &mut Computed) -> 
 
 /// Check 7's gross exposure (§9.3): the account at 1×, then the agent's mandate limit, each
 /// Σ |MV| + working opening orders + the proposal against min(limit, equity).
+///
+/// An account-1× denial carries no figures: `Computed` has keys for the agent's `gross` and
+/// `gross_limit` only, and #136's API has none for the account's, so the deny is told apart from
+/// the agent-limit one only by `computed.gross` being unset (backlog, #160 review).
 pub(crate) fn gross_exposure(
     input: &GateInput<'_>,
     computed: &mut Computed,
