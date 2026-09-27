@@ -10,8 +10,8 @@ use crate::ports::Ports;
 use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
-    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, OrderState,
-    ReconcileReason, WriterEpoch,
+    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, MarketObservation,
+    OrderState, ReconcileReason, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -128,7 +128,8 @@ fn started(
 fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
-        Input::Journal(_) | Input::Market(_) => Ok(()),
+        Input::Journal(_) => Ok(()),
+        Input::Market(observation) => watched(batch, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
             release_held(batch)
@@ -162,7 +163,7 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
             duplicate(batch, &client_order_id)
         }
         BrokerOutcome::Absent { client_order_id } => absent(batch, &client_order_id),
-        BrokerOutcome::CancelAccepted { .. } => cancelled(),
+        BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
         BrokerOutcome::Rejected(refused) => reject(batch, &refused),
         BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
         BrokerOutcome::OpenOrders(_)
@@ -172,8 +173,19 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
     }
 }
 
-/// The cancel's confirmation, reconciliation, and the agent kill switch (trading-domain spec §5.4,
-/// §5.5, §11): the later slices of this stack.
+/// A market observation in an instrument whose protection rests is the input of the triggered-stop
+/// watchdog and of crypto's watched take-profit (trading-domain spec §5.4, E7-4 slices 4 and 5).
+/// Until those land it answers their stub rather than letting a stop at its trigger go unwatched.
+/// Elsewhere a quote carries nothing the account stream folds.
+fn watched(batch: &Batch<'_, '_>, observation: &MarketObservation) -> Result<(), ExecutorError> {
+    if batch.view.protection.contains_key(&observation.instrument) {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
+    Ok(())
+}
+
+/// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
+/// slices of this stack.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }

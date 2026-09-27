@@ -1,8 +1,11 @@
 //! The replay: one journaled event into the state, effect-free (journal spec §8).
 
+use std::collections::BTreeSet;
+
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
 use mandate_num::{Qty, SignedQty, Usd};
+use mandate_time::Date;
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
@@ -16,7 +19,8 @@ use crate::state::{
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
-    OrderState, OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -86,6 +90,9 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             event_type: event.event_type.clone(),
         });
     }
+    if let (true, Some(origin)) = (COPIED.contains(&kind), &event.causation_id) {
+        state.copied.insert(event.event_id.clone(), origin.clone());
+    }
     state.risk_clock = Some(at);
     match kind {
         "IntentReceived" => intent_received(state, payload, at),
@@ -112,6 +119,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
+            state.unattributed.clear();
             if let Some(cursor) = optional_text(payload, "checkpoint") {
                 state.checkpoint = Some(ActivityCursor(cursor.to_owned()));
             }
@@ -132,6 +140,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
+        "ProtectionChanged" => protection_changed(state, payload, at),
         "AccountStateObserved" => account_observed(state, payload),
         "AccountSnapshotRecorded" => {
             account_observed(state, payload)?;
@@ -445,6 +454,12 @@ fn order_state_changed(
         detail.last_absence = None;
     }
     order.state = next;
+    if flag(payload, "cancel_requested") {
+        order.cancel_unconfirmed = true;
+    }
+    if next.is_terminal() || flag(payload, "cancel_confirmed") {
+        order.cancel_unconfirmed = false;
+    }
     if next.is_terminal() {
         let amount = state.reservations.remove(&id);
         if let Some(new) = optional_text(payload, "replaced_by") {
@@ -645,6 +660,163 @@ fn cash_compared(state: &mut ExecutorState, payload: &Value) {
         }
         _ => {}
     }
+}
+
+/// §5.4's protective orders and unprotected intervals, as `ProtectionChanged` journals them
+/// (journal spec §9: instrument, action, orders, the interval's start or end). `placed` adds the
+/// resting protective orders it names and the quantity they cover, as a tranche beside any already
+/// resting; `cancelled` takes the named orders off, and the quantity they covered with them.
+/// `unprotected_start` opens an interval for the instrument and `unprotected_end` closes that
+/// instrument's open one, so an interval can only end by being journaled as ended. Any other
+/// action is refused rather than skipped.
+fn protection_changed(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
+    let instrument = instrument(payload)?;
+    match required_text(payload, "action")? {
+        "placed" => {
+            let orders = protective_orders(payload)?;
+            let covered = qty(payload, "qty")?;
+            legs(state, &instrument, &orders, covered, created_on(payload)?);
+            let protection = state
+                .protection
+                .entry(instrument.clone())
+                .or_insert_with(|| Protection {
+                    instrument,
+                    resting: Vec::new(),
+                    covered_qty: Qty::ZERO,
+                });
+            protection.resting.extend(orders);
+            protection.covered_qty = protection.covered_qty.checked_add(covered)?;
+        }
+        "cancelled" => {
+            let orders = protective_orders(payload)?;
+            let uncovered = optional_qty(payload, "qty")?;
+            if let Some(protection) = state.protection.get_mut(&instrument) {
+                protection.resting.retain(|id| !orders.contains(id));
+                protection.covered_qty = match uncovered {
+                    Some(uncovered) if !protection.resting.is_empty() => protection
+                        .covered_qty
+                        .checked_sub(uncovered)
+                        .unwrap_or(Qty::ZERO),
+                    _ if protection.resting.is_empty() => Qty::ZERO,
+                    _ => protection.covered_qty,
+                };
+                if protection.resting.is_empty() {
+                    state.protection.remove(&instrument);
+                }
+            }
+        }
+        "unprotected_start" => state.unprotected.push(UnprotectedInterval {
+            instrument,
+            started_at: at,
+            ended_at: None,
+            alerted: false,
+        }),
+        "unprotected_end" => {
+            if let Some(open) = state
+                .unprotected
+                .iter_mut()
+                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
+            {
+                open.ended_at = Some(at);
+            }
+        }
+        _ => return Err(refused("action")),
+    }
+    Ok(())
+}
+
+/// DEC-160's leg-agent rule: a protective order the broker created, which no `OrderSubmitted`
+/// recorded, joins the order set as a live sell of the covered quantity with a zero reservation,
+/// owned by the agent that holds the position. That is the entry order's agent when the leg's id
+/// names its entry (`md-<entry>-p…`), otherwise the position's single holder: the one agent whose
+/// own orders bought into the instrument. With no holder or several, it fails closed: the leg is
+/// attributed to no one and the instrument takes no new opening until a reconciliation has run.
+fn legs(
+    state: &mut ExecutorState,
+    instrument: &InstrumentId,
+    orders: &[ClientOrderId],
+    covered: Qty,
+    created_on: Option<Date>,
+) {
+    for id in orders {
+        if state.orders.contains_key(id) {
+            continue;
+        }
+        let Some(agent) = leg_agent(state, instrument, id) else {
+            state.unattributed.insert(instrument.clone());
+            continue;
+        };
+        state.orders.insert(
+            id.clone(),
+            Order {
+                client_order_id: id.clone(),
+                intent_id: None,
+                agent,
+                instrument: instrument.clone(),
+                side: Side::Sell,
+                qty: covered,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Protective,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on,
+            },
+        );
+        state.reservations.insert(id.clone(), Usd::ZERO);
+    }
+}
+
+/// The agent a broker-created leg belongs to, or `None` when DEC-160's rule cannot name one.
+fn leg_agent(
+    state: &ExecutorState,
+    instrument: &InstrumentId,
+    leg: &ClientOrderId,
+) -> Option<AgentId> {
+    let entry = leg
+        .as_str()
+        .rsplit_once("-p")
+        .and_then(|(entry, _)| ClientOrderId::parse(entry).ok())
+        .and_then(|entry| state.orders.get(&entry));
+    if let Some(entry) = entry {
+        return Some(entry.agent.clone());
+    }
+    let holders: BTreeSet<&AgentId> = state
+        .orders
+        .values()
+        .filter(|order| {
+            &order.instrument == instrument
+                && order.side == Side::Buy
+                && order.filled_qty > Qty::ZERO
+        })
+        .map(|order| &order.agent)
+        .collect();
+    match holders.into_iter().collect::<Vec<_>>().as_slice() {
+        [only] => Some((*only).clone()),
+        _ => None,
+    }
+}
+
+fn created_on(payload: &Value) -> Result<Option<Date>, ExecutorError> {
+    optional_text(payload, "created_on")
+        .map(|raw| Date::parse(raw).map_err(ExecutorError::from))
+        .transpose()
+}
+
+/// The protective orders a `ProtectionChanged` names, space- or comma-separated.
+fn protective_orders(payload: &Value) -> Result<Vec<ClientOrderId>, ExecutorError> {
+    required_text(payload, "orders")?
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|raw| !raw.is_empty())
+        .map(ClientOrderId::parse)
+        .collect()
 }
 
 /// Paper's simulated fee accrues in its `(family, day)` bucket, which buying power charges at
@@ -1336,6 +1508,276 @@ mod buying_power_tests {
             Some(ledger.buying_power(Reservations::NONE)?),
             "the same fills and fees give the executor the figure `mandate-accounting` gives, one \
              ceiling cent per (family, day) bucket included"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod protection_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::Value;
+    use mandate_num::{Qty, Usd};
+    use mandate_time::Date;
+
+    use super::fold;
+    use crate::error::ExecutorError;
+    use crate::ids::ClientOrderId;
+    use crate::payload::{clock, object, text};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OrderState, Purpose, RiskClock,
+        Seq, WorkspaceId,
+    };
+
+    /// One paper account stream, folded event by event.
+    struct Stream {
+        state: ExecutorState,
+        seq: u64,
+    }
+
+    impl Stream {
+        fn opened() -> Result<Self, ExecutorError> {
+            let mut stream = Self {
+                state: ExecutorState::new(AccountScope {
+                    account: AccountRef("acct-1".to_owned()),
+                    workspace: WorkspaceId("ws1".to_owned()),
+                }),
+                seq: 0,
+            };
+            stream.fold("StreamOpened", vec![("environment", text("paper"))], None)?;
+            Ok(stream)
+        }
+
+        fn fold(
+            &mut self,
+            event_type: &str,
+            mut pairs: Vec<(&str, Value)>,
+            causation: Option<&str>,
+        ) -> Result<(), ExecutorError> {
+            self.seq = self.seq.saturating_add(1);
+            if event_type != "StreamOpened" {
+                pairs.push(("risk_clock", clock(RiskClock::from_secs(10))?));
+            }
+            let event = FoldedEvent {
+                stream: self.state.account_stream(),
+                seq: Seq(self.seq),
+                event_id: EventId(format!("e-{}", self.seq)),
+                event_type: event_type.to_owned(),
+                causation_id: causation.map(|origin| EventId(origin.to_owned())),
+                payload: object(pairs)?,
+            };
+            fold(&mut self.state, &event)
+        }
+
+        /// `agent`'s own buy of `qty` AAPL, submitted and filled at 150.
+        fn bought(&mut self, agent: &str, id: &str, qty: &str) -> Result<(), ExecutorError> {
+            self.fold(
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text(agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text(qty)),
+                    ("limit", text("150")),
+                ],
+                None,
+            )?;
+            self.fold(
+                "FillApplied",
+                vec![
+                    ("fill_id", text(format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty_gross", text(qty)),
+                    ("price", text("150")),
+                ],
+                None,
+            )
+        }
+
+        fn protection(
+            &mut self,
+            action: &str,
+            orders: &str,
+            qty: &str,
+        ) -> Result<(), ExecutorError> {
+            self.fold(
+                "ProtectionChanged",
+                vec![
+                    ("instrument", text("AAPL")),
+                    ("action", text(action)),
+                    ("orders", text(orders)),
+                    ("qty", text(qty)),
+                    ("created_on", text("2026-09-22")),
+                ],
+                None,
+            )
+        }
+    }
+
+    fn aapl() -> Result<InstrumentId, ExecutorError> {
+        Ok(InstrumentId::new("AAPL")?)
+    }
+
+    fn id(raw: &str) -> Result<ClientOrderId, ExecutorError> {
+        ClientOrderId::parse(raw)
+    }
+
+    fn qty(raw: &str) -> Result<Qty, ExecutorError> {
+        Ok(Qty::parse(raw)?)
+    }
+
+    fn missing(what: &'static str) -> ExecutorError {
+        ExecutorError::Unimplemented { story: what }
+    }
+
+    #[test]
+    fn a_placed_oco_is_the_instruments_protection_and_its_legs_join_the_order_set()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let aapl = aapl()?;
+        assert_eq!(stream.state.protection(&aapl)?, None);
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, Qty::ZERO);
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.protection("placed", "md-oco-1 md-oco-2", "10")?;
+        let protection = stream
+            .state
+            .protection(&aapl)?
+            .ok_or_else(|| missing("the placed protection"))?;
+        assert_eq!(protection.resting, vec![id("md-oco-1")?, id("md-oco-2")?]);
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, qty("10")?);
+        for leg in ["md-oco-1", "md-oco-2"] {
+            let order = stream
+                .state
+                .orders
+                .get(&id(leg)?)
+                .ok_or_else(|| missing("the leg in the order set"))?;
+            assert_eq!(
+                order.agent,
+                AgentId("agent-a".to_owned()),
+                "{leg} has the single holder"
+            );
+            assert_eq!(order.side, Side::Sell);
+            assert_eq!(order.purpose, Purpose::Protective);
+            assert_eq!(order.state, OrderState::Accepted);
+            assert_eq!(order.qty, qty("10")?);
+            assert_eq!(order.created_on, Some(Date::parse("2026-09-22")?));
+            assert_eq!(stream.state.reservations.get(&id(leg)?), Some(&Usd::ZERO));
+        }
+        assert!(stream.state.unattributed.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_leg_named_for_its_entry_takes_that_entrys_agent_whoever_else_holds()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "4")?;
+        stream.bought("agent-b", "md-buy-2", "6")?;
+        stream.protection("placed", "md-buy-2-p1", "6")?;
+        let order = stream
+            .state
+            .orders
+            .get(&id("md-buy-2-p1")?)
+            .ok_or_else(|| missing("the named leg"))?;
+        assert_eq!(order.agent, AgentId("agent-b".to_owned()));
+        assert!(stream.state.unattributed.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_leg_with_no_holder_or_several_is_attributed_to_no_one_until_a_reconciliation()
+    -> Result<(), ExecutorError> {
+        for holders in [&[][..], &["agent-a", "agent-b"][..]] {
+            let mut stream = Stream::opened()?;
+            for (n, agent) in holders.iter().enumerate() {
+                stream.bought(agent, &format!("md-buy-{n}"), "5")?;
+            }
+            stream.protection("placed", "md-oco-1", "10")?;
+            assert!(
+                !stream.state.orders.contains_key(&id("md-oco-1")?),
+                "{holders:?}: the leg is never guessed onto an agent"
+            );
+            assert!(stream.state.unattributed.contains(&aapl()?), "{holders:?}");
+            assert_eq!(
+                stream.state.protective_sell_qty(&aapl()?)?,
+                qty("10")?,
+                "{holders:?}: the protection itself still counts"
+            );
+            stream.fold("ReconciliationRun", vec![], None)?;
+            assert!(stream.state.unattributed.is_empty(), "{holders:?}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn a_leg_already_in_the_order_set_keeps_its_own_record() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.fold(
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text("md-stop-1")),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("140")),
+                ("purpose", text("protective")),
+            ],
+            None,
+        )?;
+        stream.protection("placed", "md-stop-1", "4")?;
+        let order = stream
+            .state
+            .orders
+            .get(&id("md-stop-1")?)
+            .ok_or_else(|| missing("the submitted leg"))?;
+        assert_eq!(
+            order.state,
+            OrderState::Submitting,
+            "the submission's record stands"
+        );
+        assert_eq!(order.qty, qty("4")?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_cancelled_leg_uncovers_its_quantity_and_the_last_one_clears_the_protection()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let aapl = aapl()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.protection("placed", "md-oco-1", "6")?;
+        stream.protection("placed", "md-oco-2", "4")?;
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, qty("10")?);
+        stream.protection("cancelled", "md-oco-1", "6")?;
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, qty("4")?);
+        stream.protection("cancelled", "md-oco-2", "4")?;
+        assert_eq!(stream.state.protection(&aapl)?, None);
+        assert_eq!(stream.state.protective_sell_qty(&aapl)?, Qty::ZERO);
+        Ok(())
+    }
+
+    #[test]
+    fn a_copied_fact_records_the_origin_it_cites() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold("ClockAdvanced", vec![], Some("origin-1"))?;
+        stream.fold(
+            "ClockAdvanced",
+            vec![("originated", Value::Bool(true))],
+            None,
+        )?;
+        assert_eq!(
+            stream.state.copied_origin(&EventId("e-2".to_owned()))?,
+            Some(&EventId("origin-1".to_owned()))
+        );
+        assert_eq!(
+            stream.state.copied_origin(&EventId("e-3".to_owned()))?,
+            None
         );
         Ok(())
     }

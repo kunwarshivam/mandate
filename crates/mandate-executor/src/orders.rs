@@ -260,10 +260,22 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     Ok(())
 }
 
-/// A cancel the broker confirmed, which only the kill switch's and E7-4's cancels ask for: a later
-/// slice of this stack.
-pub(crate) fn cancelled() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
+/// A cancel the broker confirmed (§5.7): the order it names becomes `Canceled`, which releases its
+/// reservation and clears the unconfirmed cancel that held its instrument (§5.4). An id this
+/// executor did not derive, or does not carry, asks for a reconciliation rather than being
+/// dropped.
+pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
+    let Some(id) = known(batch, Some(raw)) else {
+        batch.request_reconciliation();
+        return Ok(());
+    };
+    transition(
+        batch,
+        &id,
+        OrderState::Canceled,
+        vec![("cancel_confirmed", Value::Bool(true))],
+    )?;
+    Ok(())
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded

@@ -123,6 +123,11 @@ pub(crate) fn account_stream_checks(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
     );
+    let unattributed = unattributed_opening(state, proposal.instrument, adds);
+    record(
+        "protection_attributed",
+        unattributed.then_some(("protection_unattributed", true)),
+    );
     let unreconciled = unreconciled_opening(state, adds);
     record(
         "startup_reconciliation",
@@ -142,6 +147,13 @@ pub(crate) fn account_stream_checks(
         checks,
         held,
     })
+}
+
+/// DEC-160's leg-agent rule fails closed: a broker-created protective leg whose position has no
+/// single holder leaves its instrument **held** for openings, never denied, until a reconciliation
+/// has run. Exits pass (`AGENTS.md` rule 13).
+fn unattributed_opening(state: &ExecutorState, instrument: &InstrumentId, adds: bool) -> bool {
+    adds && state.unattributed.contains(instrument)
 }
 
 /// The startup reconciliation, last so a check that denies is reported first: an opening is
@@ -214,4 +226,42 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
         })
         .try_fold(Qty::ZERO, |total, order| total.checked_add(order.qty))?;
     Ok(long.checked_sub(selling).unwrap_or(Qty::ZERO))
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use mandate_accounting::InstrumentId;
+
+    use super::unattributed_opening;
+    use crate::error::ExecutorError;
+    use crate::state::ExecutorState;
+    use crate::types::{AccountRef, AccountScope, WorkspaceId};
+
+    #[test]
+    fn only_an_opening_in_an_unattributed_instrument_is_held() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let aapl = InstrumentId::new("AAPL")?;
+        let msft = InstrumentId::new("MSFT")?;
+        assert!(
+            !unattributed_opening(&state, &aapl, true),
+            "nothing unattributed holds nothing"
+        );
+        state.unattributed.insert(aapl.clone());
+        assert!(
+            unattributed_opening(&state, &aapl, true),
+            "an opening in the unattributed instrument is held"
+        );
+        assert!(
+            !unattributed_opening(&state, &aapl, false),
+            "an exit is never held for attribution (rule 13)"
+        );
+        assert!(
+            !unattributed_opening(&state, &msft, true),
+            "another instrument is untouched"
+        );
+        Ok(())
+    }
 }

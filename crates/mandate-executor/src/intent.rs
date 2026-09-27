@@ -12,7 +12,7 @@ use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
+    AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, Purpose, SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -55,6 +55,14 @@ pub(crate) fn received(
 /// A flatten plan handed over as an intent: the agent-scoped flatten's sells are the protective
 /// sequence's (E7-4, the coordinator's ruling (d) on #174).
 fn flatten_plan() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
+/// An order in an instrument whose protection rests goes through §5.4's sequence: cancel the
+/// protection, confirm, re-gate, submit, re-place (E7-4 slices 2, 3 and 5). Until those slices
+/// land, it answers their stub rather than sending an order beside the resting legs, which could
+/// oversell the position or leave it unprotected.
+fn protective_sequence() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
@@ -164,6 +172,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
+    if purpose != Purpose::Protective && batch.view.protection.contains_key(&instrument) {
+        return protective_sequence();
+    }
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
         _ => TimeInForce::Day,
