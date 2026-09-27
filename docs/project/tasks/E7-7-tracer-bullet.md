@@ -235,7 +235,8 @@ default — it is an unprotected position (AGENTS.md rule 13, TI-4).
 | Flatten planner, at startup | `mandate_risk::agent_flatten` answers `Err(Unimplemented)` to the probe | **refuse to start**, `exit_path_unavailable` | the tracer never opens a position it cannot flatten |
 | Flatten planner, mid-run | `FlattenPlanner::plan` is **infallible** (`mandate-runtime/src/ports.rs`), so the adapter has no `Err` to return | the adapter records the failure, sets a poison flag, and the effect runner **halts and alerts**. It never returns an empty plan and never invents one | the run stops; the position keeps whatever protection already rests at the broker (finding 2) |
 | Protective sequence | `Unimplemented` | **refuse to start**, `protection_unavailable` | same |
-| Connector transport | `Err(BrokerUnknown)` | query by `client_order_id`; one absence never resubmits | no duplicate |
+| Connector transport, unknown outcome | `Err(ConnectorError::Unknown(u))` | `ConnectorError::as_unknown()` gives `Some(u)`, handed on as `Input::Broker(Err(u))` | the executor queries by `client_order_id`; one absence never resubmits, so no duplicate |
+| Connector transport, uninterpretable | `Err(ConnectorError::Unreadable { .. })` or `NotSent { .. }` | `as_unknown()` gives `None`, which is **not** an unknown outcome: the shell stops the executor and alerts, naming the `code` | no order, and nothing is handed to the executor that it cannot interpret (DEC-85: an uninterpreted input fails loudly, never a guess) |
 | Repeat run | the agent stream already carries an open order or a position in the instrument | refuse, `cycle_already_open`, unless the operator passes `--new-cycle` | no second share (TI-12) |
 
 ### How the mapping is made unrepresentable, not remembered
@@ -312,8 +313,22 @@ its double produces the failure modes those steps can have:
 |---|---|---|
 | `Err(ExecutorError::Unimplemented)` | 10 and 11: the binding gate, or the id derivation, cannot answer | zero submissions, no `OrderSubmitted` draft |
 | `Effect::Broker` **before** its `Effect::Journal` | 12: the write-ahead ordering inverted | the runner refuses to hand the broker effect, and TI-1's property fails on the recorded order |
-| `Err(ConnectorError)` on the first call, then `Absent` | 14: the answer is unknown, then the order is not there | one submission and one query; a single `Absent` never resubmits |
-| a `BrokerSnapshot` that disagrees with the fold | 16: reconciliation finds a mismatch | the agent is paused, the alert is emitted, nothing lifts it |
+| `Input::Broker(Err(BrokerUnknown))`, then an `Absent` answer | 14: the outcome is unknown, then the order is not there | one submission and one query; a single `Absent` never resubmits |
+
+`Stage::Executor`'s third mode names the **executor's** input, not the connector's output, because
+the two differ and the shell is what converts between them. `BrokerConnector::call` returns
+`Result<BrokerOutcome, ConnectorError>` while `Input::Broker` takes
+`Result<BrokerOutcome, BrokerUnknown>`, and `ConnectorError::as_unknown()` is the conversion (#152's
+head `4a1a2ca`):
+
+- `ConnectorError::Unknown(u)` → `Some(u)`, handed to the executor as `Input::Broker(Err(u))`, which
+  makes recovery query rather than resubmit.
+- `ConnectorError::Unreadable { code }` and `NotSent { code }` → `None`, and **`None` is not an
+  unknown outcome**: the shell stops the executor and alerts, rather than handing it something it
+  cannot interpret (DEC-85, an uninterpreted input fails loudly and never guesses). This is a
+  fail-closed branch the shell owns, so it belongs in the table below and in `Stage::Connector`'s case.
+
+Step 16's mismatch mode is not listed here: it belongs to `Stage::Reconcile`, per the bite table.
 
 `Stage::Connector` is separate from `Stage::Executor` because it is the one part of steps 13 and 14
 the shell really does inject: the `TradingTransport`.
@@ -330,8 +345,9 @@ the zero:
 | `Size`, `Classify`, `GateDryRun` | doubled validation, data, signal | `hands() == 1` and one `IntentProposed` |
 | `Journal` | doubled stages 1 to 6 | an intent handed with no committed draft — the TI-1 violation |
 | `Sink` | doubled stages 1 to 8 | a doubled executor's `Effect::Broker`, so `submissions() == 1` |
-| `BindingGate`, `Idempotency`, `Submit`, `Connector` | a **doubled executor**, which is what makes these cases bite while `mandate_executor::handle` returns `Unimplemented` — without the double there is no path past step 9 and the case proves nothing | `submissions() == 1` |
-| `Reconcile` | doubled stages 1 to 14, then a restart | a second submission, which TI-6 forbids |
+| `Executor` | doubled stages 1 to 8; this is the variant that stands for steps 10, 11, 12 and 14, and its double is what makes the case bite at all while `mandate_executor::handle` returns `Unimplemented` — without it there is no path past step 9 and the case proves nothing | `submissions() == 1` |
+| `Connector` | doubled stages 1 to 9 and a doubled executor | `submissions() == 1` |
+| `Reconcile` | doubled stages 1 to 9, a doubled executor, then a restart. **This case owns step 16**: the executor double's "snapshot disagrees" mode belongs to the `Reconcile` case and appears nowhere else | a second submission, which TI-6 forbids |
 | `FlattenProbe`, `ProtectionProbe` | nothing upstream; they run first | the opening proceeds with no exit plan — PB-8 |
 
 Each row's right-hand column is what the **all-doubles** case actually produces, which is why that
@@ -372,9 +388,10 @@ Three more cases sit beside the per-stage ones:
 
 And two property tests. For TI-3: for every value of each source error type, and for every `Verdict`
 and `Decision` the gate can return, the mapped verdict is never permitting — the mapping functions
-are under test, so it holds even for errors no fixture produces. For TI-11: for every subset of
-enforced checks, an `Allow` whose `checks` list contains a `Passed` check outside that subset is
-refused.
+are under test, so it holds even for errors no fixture produces. For TI-11: for every `Decision` carrying an
+opening `Verdict::Allow`, any `CheckOutcome::NotReached` in `checks` maps to a refusal. The property
+is over the gate's own output and knows nothing about which story owns which check, so there is no
+subset to quantify over and nothing that can drift from `owed()`.
 
 ### What "no regression" also rules out
 
@@ -537,7 +554,7 @@ which is how review findings 1 to 4 got in.
 
 | Adversary | The attack | What blocks it |
 |---|---|---|
-| **A careless user** | Runs `--place-one-order` twice and buys two shares; or points it at a fresh journal DSN so the journal forgets the position the broker holds; or runs it during a halt | TI-12: a refusal (`cycle_already_open`) when the agent stream carries an open order or a position, overridable only by an explicit `--new-cycle`; a fresh journal against an existing broker position is a reconciliation mismatch that pauses and alerts, never a clean start; a halt is `SessionAndHalt`'s business once E6-6 lands, and until then TI-11 refuses the whole opening because that check is unenforced |
+| **A careless user** | Runs `--place-one-order` twice and buys two shares; or points it at a fresh journal DSN so the journal forgets the position the broker holds; or runs it during a halt | TI-12: a refusal (`cycle_already_open`) when the agent stream carries an open order or a position, overridable only by an explicit `--new-cycle`; a fresh journal against an existing broker position is a reconciliation mismatch that pauses and alerts, never a clean start; a halt is `SessionAndHalt`'s business once E6-6 lands, and until then **the gate itself** refuses the opening with `Err(GateError::Unimplemented("evaluate", "E6-6"))` because that check is owed — the tracer never decides it, and TI-11 is not what holds this |
 | **A bad model or a bad builder** | Returns a `Proposal` with `qty` zero, a quantity above the mandate's cap, a limit far from the mark, or the wrong side | The shell refuses only the structurally impossible (`qty > 0`), because a cap or a mark is the gate's comparison to make, not the shell's; the advisory gate narrows and the binding gate denies the rest. The shell does no sizing, so it cannot enlarge one |
 | **A half-built gate** | Lets an opening through while some of §9.1's eight checks are still owed | `mandate-risk` blocks it at source: an owed check is `NotReached` and an opening returns `Err(GateError::Unimplemented)` (DEC-129 item 29), which the shell's mapping denies. TI-11 and PB-13 are the shell's belt and braces, and they add nothing the gate does not already know. **An earlier draft of this brief claimed the opposite** — that the gate passes an unowned check and answers `Allow` — read off a superseded head (`eca4af4`, before `267a5f6`) and false on the current one. It is recorded because the mistake is the instructive kind: a stale read of a safety-critical crate produced a confident, wrong claim of a fail-open, and the remedy it motivated would have moved gating into the shell |
 | **A malicious insider** | Adds an HTTP client to the shell to reach a live host; adds a `_ =>` arm that permits; widens `is_paper_trading_path`; puts a credential in a draft | `allowed_external` plus `cargo xtask layers` (rung 1), the source scan and the clippy lint, CODEOWNERS on the founder-owned files, the host scanner, and the credential scan (PB-9). None of these depends on a reviewer noticing |
