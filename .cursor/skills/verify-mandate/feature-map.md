@@ -216,7 +216,8 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 ## The tracer bullet: one order end to end on Alpaca paper
 
 Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
-paths arrive with the tests PR, which updates this entry.
+tests PR (DEC-157) has landed the crate with every production adapter a stub and the fail-closed
+suite live. The implementation PR fills the adapters in and deletes the pending markers only.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
   intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
@@ -225,39 +226,42 @@ paths arrive with the tests PR, which updates this entry.
   events); `docs/specs/mandate.md` section 5.3, 6, 8; `docs/specs/journal.md` section 5.1 (append,
   idempotency, fencing), 5.2 (write before acting), 8 (replay), 11 (verification); ADR-0001 ES-02,
   ES-06, ES-09, ES-19, ES-20, ES-21, ES-23; backlog E7-7.
-- **Code:** `mandate-shell` (new, layer 8, safety-critical, impure): the process shell, one adapter per
-  stage of the path, the effect runner that appends every journal draft before it hands an intent, the
-  host controls, and the `mandate-tracer` binary. It holds no trading logic — no sizing, no gating,
-  no pricing, no state machine, and no arithmetic on money or quantity. It binds
-  `mandate-spec` (`validate`), `mandate-marketdata` (`dataset::read_manifest`,
-  `dataset::partition::read`), `mandate-backtest` (`Strategy::signal`, E4-2's moving-average baseline),
-  `mandate-builder` (sizing and autonomy, behind `OrderPlan`), `mandate-risk` (`evaluate`, behind
-  `GateDryRun`; the binding call stays inside the executor), `mandate-runtime` (`handle`, `fold`,
-  `IntentSink`), `mandate-executor` (`handle`, `reconcile`, `ClientOrderId::for_intent`),
-  `mandate-alpaca` (`TradingClient`, `AlpacaPaperHttp`, `PAPER_HOST`), and the journal, all unchanged.
-- **Tests:** the fail-closed suite in a `#[cfg(test)]` module inside `src/`, one case per `Stage` built
-  from an exhaustive match, each built with the **other** stages as permissive doubles so the path
-  reaches the stubbed stage, asserting zero `IntentSink::hand` calls, zero `IntentProposed` and
-  `OrderSubmitted` drafts, zero submissions, and the stage's stable error code; an all-stubs case for
-  the state the repository is in; an all-doubles case that proves the harness can place an order at
-  all. Then `tests/tracer.rs`, the end-to-end run over recorded Alpaca paper scenarios (`happy`,
-  `gate_denies`, `gate_allow_with_not_reached_refused`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
-  `oversized_proposal`, `outlier_close`, `duplicate_after_restart`,
-  `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, `reconcile_mismatch_pauses`) with
-  a golden journal and an injected clock and `IdGen`; the refusal of a configured host and the host
-  scanner; the environment scanner over every committed draft, which `verify_events` does not cover;
-  and property tests that no mapping of any source error can permit an order and that an opening
-  `Allow` carrying a `NotReached` check is refused. The gate itself already refuses an opening while
-  any §9.1 check is owed (`Err(GateError::Unimplemented)`, DEC-129 item 29), so the shell only declines
-  to soften that and holds no list of its own of which story owns which check. `AlpacaPaperHttp` is never constructed in a test, so no test can
-  reach a network (ES-19). Planted bugs per test (16): the task brief.
+- **Code:** `crates/mandate-shell/` (layer 8, safety-critical, impure). `src/stages.rs` holds the
+  `Stage` enum (the suite's contract) and one trait per stage; `src/tracer.rs` the one pass and the
+  effect runner, which appends every draft before it hands an intent and lets a submission out only
+  after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
+  permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
+  deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
+  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters, every one a stub
+  in the tests PR. It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
+  no arithmetic on money or quantity — and binds `mandate-runtime` (`handle`, `fold`) for real today.
+- **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
+  case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
+  zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
+  `Executor`; the stub reached, nothing downstream of it), the all-stubs case, the all-doubles
+  keystone that places exactly one order, and the named scenarios (`flatten_poison_halts`,
+  `refuses_to_start_while_protection_is_unimplemented`, `reconcile_mismatch_pauses`,
+  `a_restart_sends_nothing_and_a_repeat_run_is_refused`, `ask_journals_the_request_and_sends_nothing`,
+  `gate_allow_with_not_reached_refused`, `proposal_sanity`, and more), the environment scanner and the
+  shadow order book over the committed bytes, and the host, transport, and defaulting-combinator
+  source scans; `src/map.rs`'s properties that no source error or gate answer maps to a permitting
+  verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11). Then
+  `tests/tracer.rs`, pending on E7-7: the production path over recorded Alpaca paper responses and a
+  bar dataset written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`,
+  `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,
+  `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
+  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). The mandate
+  fixtures are generated and checked against `reference/mandate/ref.py` by
+  `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
+  can reach a network (ES-19).
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
-- **Run:** `cargo nextest run -p mandate-shell`; the manual paper run is
-  `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset <dir> --journal <dsn>
-  --confirm-paper --place-one-order`, which needs both flags, refuses any attempt to configure a host,
-  and cannot reach one of its own because the crate's `allowed_external` names no HTTP client.
+- **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases; the
+  manual paper run is `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset
+  <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both flags, refuses any attempt
+  to configure a host, and cannot reach one of its own because the crate's `allowed_external` names no
+  HTTP client.
 
 ## Idempotent executor and broker connector
 
