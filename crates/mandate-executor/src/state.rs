@@ -7,46 +7,93 @@ use mandate_num::{Qty, SignedQty, Usd};
 
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, Mode, Order, Protection,
-    RiskClock, Seq, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
+    OrderState, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
+
+pub use crate::fold::fold;
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
 /// journal regenerated in the same change.
 pub const FOLD_VERSION: u32 = 1;
 
-pub use crate::fold::fold;
+/// The agent name an account-wide restriction is recorded under: a restriction for every agent on
+/// the account, including one the executor has not yet seen (trading-domain spec §7.3).
+pub(crate) const EVERY_AGENT: &str = "*";
+
+/// The restriction a reconciliation places for one subject — an instrument, or external activity
+/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+pub(crate) fn restriction_for(subject: &str) -> String {
+    format!("reconciliation:{subject}")
+}
 
 /// Everything the executor knows about one broker account, derived from journaled events and
 /// nothing else.
 ///
 /// Every field is private and every collection is ordered (ES-21). The folded position of each
 /// followed stream lives here and is re-derived by replay, so nothing durable exists outside the
-/// journal and a restart cannot mistake an old event for a new one.
+/// journal and a restart cannot mistake an old event for a new one. Two fields are the running
+/// process's own and are never folded: the writer epoch and the latest tick, neither of which a
+/// replay could know or needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorState {
     pub(crate) scope: AccountScope,
     pub(crate) heads: BTreeMap<String, Seq>,
-    epoch: Option<WriterEpoch>,
-    started: bool,
+    pub(crate) epoch: Option<WriterEpoch>,
+    pub(crate) started: bool,
     pub(crate) environment: Option<String>,
-    unresolved: Option<UnresolvedAppend>,
-    risk_clock: Option<RiskClock>,
-    intents: BTreeMap<IntentId, IntentRecord>,
-    orders: BTreeMap<ClientOrderId, Order>,
-    reservations: BTreeMap<ClientOrderId, Usd>,
-    protection: BTreeMap<InstrumentId, Protection>,
-    unprotected: Vec<UnprotectedInterval>,
-    positions: BTreeMap<InstrumentId, SignedQty>,
-    fills: BTreeSet<FillId>,
-    modes: BTreeMap<AgentId, Mode>,
-    account_state: AccountState,
-    consecutive_403s: u32,
-    observed: Option<ObservedAccount>,
-    mismatched: BTreeSet<InstrumentId>,
-    checkpoint: Option<ActivityCursor>,
-    reconciled_through: Option<Seq>,
-    last_submission: Option<Seq>,
+    pub(crate) unresolved: Option<UnresolvedAppend>,
+    pub(crate) risk_clock: Option<RiskClock>,
+    pub(crate) intents: BTreeMap<IntentId, IntentRecord>,
+    pub(crate) orders: BTreeMap<ClientOrderId, Order>,
+    pub(crate) reservations: BTreeMap<ClientOrderId, Usd>,
+    pub(crate) protection: BTreeMap<InstrumentId, Protection>,
+    pub(crate) unprotected: Vec<UnprotectedInterval>,
+    pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
+    pub(crate) fills: BTreeSet<FillId>,
+    pub(crate) modes: BTreeMap<AgentId, Mode>,
+    pub(crate) account_state: AccountState,
+    pub(crate) consecutive_403s: u32,
+    pub(crate) observed: Option<ObservedAccount>,
+    pub(crate) mismatched: BTreeSet<InstrumentId>,
+    pub(crate) checkpoint: Option<ActivityCursor>,
+    pub(crate) reconciled_through: Option<Seq>,
+    pub(crate) last_submission: Option<Seq>,
+    pub(crate) bodies: BTreeMap<IntentId, IntentBody>,
+    pub(crate) held: BTreeSet<IntentId>,
+    pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
+    pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
+    pub(crate) copied: BTreeMap<EventId, EventId>,
+    pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
+    pub(crate) pending_actions: BTreeSet<InstrumentId>,
+    pub(crate) asset_fees: BTreeMap<InstrumentId, Qty>,
+    pub(crate) unposted_fees: Usd,
+    pub(crate) simulated_fees: Usd,
+    pub(crate) cash_flow: Usd,
+    pub(crate) fill_notional: Usd,
+    pub(crate) now: Option<RiskClock>,
+}
+
+/// What the fold knows about one order beyond [`Order`]: the exact request, so a resubmission
+/// after a confirmed absence sends the same body; where it was journaled, so a reconciliation can
+/// tell which submissions its snapshot covered; and the broker's cumulative filled quantity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct OrderDetail {
+    pub(crate) request: Option<SubmitOrder>,
+    pub(crate) submitted_seq: Option<Seq>,
+    pub(crate) unknown_since: Option<RiskClock>,
+    pub(crate) last_absence: Option<RiskClock>,
+    pub(crate) broker_filled: Option<Qty>,
+}
+
+/// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
+/// not been folded yet: a crash between the two leaves one here, and the next reconciliation
+/// journals the missing compensation before anything else, so no adoption stays silent (§11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Adoption {
+    pub(crate) subject: ClientOrderId,
+    pub(crate) from: OrderState,
+    pub(crate) to: OrderState,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -122,6 +169,19 @@ impl ExecutorState {
             checkpoint: None,
             reconciled_through: None,
             last_submission: None,
+            bodies: BTreeMap::new(),
+            held: BTreeSet::new(),
+            details: BTreeMap::new(),
+            restrictions: BTreeMap::new(),
+            copied: BTreeMap::new(),
+            uncompensated: BTreeMap::new(),
+            pending_actions: BTreeSet::new(),
+            asset_fees: BTreeMap::new(),
+            unposted_fees: Usd::ZERO,
+            simulated_fees: Usd::ZERO,
+            cash_flow: Usd::ZERO,
+            fill_notional: Usd::ZERO,
+            now: None,
         }
     }
 
@@ -148,8 +208,8 @@ impl ExecutorState {
 
     /// What the fold knows about one intent. `Some` is the whole of the deduplication: the
     /// handoff is at-least-once by design, and an intent already here costs an empty effect list.
-    pub fn intent(&self, _intent: &IntentId) -> Option<&IntentRecord> {
-        None
+    pub fn intent(&self, intent: &IntentId) -> Option<&IntentRecord> {
+        self.intents.get(intent)
     }
 
     /// Every order the fold carries, by client order id.
@@ -158,14 +218,17 @@ impl ExecutorState {
     }
 
     /// One order, or `None` for an id this executor never derived.
-    pub fn order(&self, _client_order_id: &ClientOrderId) -> Option<&Order> {
-        None
+    pub fn order(&self, client_order_id: &ClientOrderId) -> Option<&Order> {
+        self.orders.get(client_order_id)
     }
 
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
-        vec![]
+        self.orders
+            .values()
+            .filter(|order| order.state == crate::types::OrderState::Submitting)
+            .collect()
     }
 
     /// Reservations by client order id. An `Unknown` order reserves its maximum cost, and only
@@ -175,15 +238,16 @@ impl ExecutorState {
     }
 
     /// One instrument's resting protection and the quantity it covers.
-    pub fn protection(&self, _instrument: &InstrumentId) -> Option<&Protection> {
-        None
+    pub fn protection(&self, instrument: &InstrumentId) -> Option<&Protection> {
+        self.protection.get(instrument)
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
     /// position.
-    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Qty {
-        let _ = &self.protection;
-        Qty::ZERO
+    pub fn protective_sell_qty(&self, instrument: &InstrumentId) -> Qty {
+        self.protection
+            .get(instrument)
+            .map_or(Qty::ZERO, |protection| protection.covered_qty)
     }
 
     /// Every unprotected interval the fold has seen, open and closed.
@@ -201,15 +265,28 @@ impl ExecutorState {
         &self.fills
     }
 
-    /// Each agent's mode on this account, as `AgentModeApplied` set it.
+    /// Each agent's mode on this account, as `AgentModeApplied` set it: the strictest of its
+    /// active restrictions, each lifting independently (mandate spec §5.9).
     pub fn modes(&self) -> &BTreeMap<AgentId, Mode> {
         &self.modes
     }
 
-    /// One agent's effective mode: the strictest of the account state and its own mode
-    /// (trading-domain spec §7.3 evaluates account state **before** agent mode).
-    pub fn effective_mode(&self, _agent: &AgentId) -> Mode {
-        Default::default()
+    /// One agent's effective mode: the strictest of the account state, the restrictions on every
+    /// agent of the account, and its own mode (trading-domain spec §7.3 evaluates account state
+    /// **before** agent mode).
+    pub fn effective_mode(&self, agent: &AgentId) -> Mode {
+        let account = match self.account_state {
+            AccountState::Active => Mode::Normal,
+            AccountState::ClosingOnly => Mode::ExitsOnly,
+            AccountState::Blocked => Mode::Paused,
+        };
+        let every = self
+            .modes
+            .get(&AgentId(EVERY_AGENT.to_owned()))
+            .copied()
+            .unwrap_or_default();
+        let own = self.modes.get(agent).copied().unwrap_or_default();
+        account.max(every).max(own)
     }
 
     /// The account state detected from statuses and rejects (§7.3).
@@ -230,8 +307,25 @@ impl ExecutorState {
 
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
+    ///
+    /// The model is the broker's last reported cash moved by every fill since, less unposted fees,
+    /// paper's simulated ones included (§10, R-22: paper must not look flatter than live). `None`
+    /// until the broker has reported an account, or if the arithmetic overflows: no buying power
+    /// is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
-        None
+        let observed = self.observed.as_ref()?;
+        let model = observed
+            .cash
+            .checked_add(self.cash_flow)
+            .and_then(|cash| cash.checked_sub(self.unposted_fees))
+            .and_then(|cash| cash.checked_sub(self.simulated_fees))
+            .ok()?;
+        let reserved = self
+            .reservations
+            .values()
+            .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
+            .ok()?;
+        model.min(observed.buying_power).checked_sub(reserved).ok()
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner
@@ -274,8 +368,8 @@ impl ExecutorState {
     }
 
     /// Whether the causation chain of a copied fact is recorded for `event`.
-    pub fn copied_origin(&self, _event: &EventId) -> Option<&EventId> {
-        None
+    pub fn copied_origin(&self, event: &EventId) -> Option<&EventId> {
+        self.copied.get(event)
     }
 
     /// The account stream this state is the single writer of, named by its opaque ids alone
@@ -283,121 +377,17 @@ impl ExecutorState {
     pub(crate) fn account_stream(&self) -> String {
         format!("acct:{}:{}", self.scope.workspace.0, self.scope.account.0)
     }
-}
 
-/// The accessors read their own fields. Only a stubbed `fold` can move a state off fresh, so these
-/// cases set the private fields directly: without them a mutant that answers the fresh value would
-/// be equivalent on every state a test outside the crate can reach (DEC-137).
-#[cfg(test)]
-mod tests {
-    use mandate_accounting::Side;
-    use mandate_time::Date;
-
-    use super::*;
-    use crate::types::{AccountRef, Input, OrderState, Purpose, WorkspaceId};
-
-    fn id(raw: &str) -> ClientOrderId {
-        ClientOrderId::seeded_for_tests(raw)
+    /// The account stream's folded head, zero before anything is folded.
+    pub(crate) fn account_head(&self) -> Seq {
+        self.head(&self.account_stream()).unwrap_or(Seq(0))
     }
 
-    fn apple() -> Option<InstrumentId> {
-        InstrumentId::new("AAPL").ok()
-    }
-
-    fn held() -> Option<ExecutorState> {
-        let instrument = apple()?;
-        let mut state = ExecutorState::new(AccountScope {
-            account: AccountRef("acct-1".to_owned()),
-            workspace: WorkspaceId("ws1".to_owned()),
-        });
-        state.epoch = Some(WriterEpoch(7));
-        state.started = true;
-        state.environment = Some("paper".to_owned());
-        state.risk_clock = Some(RiskClock::from_secs(42));
-        state.unresolved = Some(UnresolvedAppend {
-            head: Seq(3),
-            input: Input::Tick(RiskClock::from_secs(42)),
-            drafts: Vec::new(),
-        });
-        state.orders.insert(
-            id("md-a"),
-            Order {
-                client_order_id: id("md-a"),
-                intent_id: None,
-                agent: AgentId("agent-a".to_owned()),
-                instrument: instrument.clone(),
-                side: Side::Buy,
-                qty: Qty::parse("1").ok()?,
-                filled_qty: Qty::ZERO,
-                state: OrderState::Accepted,
-                attempt: 1,
-                purpose: Purpose::Open,
-                absent_lookups: 0,
-                first_absence_at: None,
-                cancel_unconfirmed: false,
-                replaced_by: None,
-                created_on: Date::parse("2026-09-22").ok(),
-            },
-        );
-        state
-            .reservations
-            .insert(id("md-a"), Usd::parse("150").ok()?);
-        state.unprotected.push(UnprotectedInterval {
-            instrument: instrument.clone(),
-            started_at: RiskClock::from_secs(40),
-            ended_at: None,
-            alerted: false,
-        });
-        state
-            .positions
-            .insert(instrument.clone(), SignedQty::parse("10").ok()?);
-        state.fills.insert(FillId("f-1".to_owned()));
-        state
-            .modes
-            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
-        state.account_state = AccountState::ClosingOnly;
-        state.consecutive_403s = 2;
-        state.observed = Some(ObservedAccount {
-            state: AccountState::ClosingOnly,
-            multiplier: 2,
-            equity: Usd::parse("1").ok()?,
-            cash: Usd::parse("1").ok()?,
-            buying_power: Usd::parse("1").ok()?,
-            non_marginable_buying_power: Usd::parse("1").ok()?,
-            accrued_fees: Usd::ZERO,
-        });
-        state.mismatched.insert(instrument);
-        state.checkpoint = Some(ActivityCursor("cursor-9".to_owned()));
-        state.reconciled_through = Some(Seq(5));
-        state.last_submission = Some(Seq(4));
-        Some(state)
-    }
-
-    #[test]
-    fn every_field_accessor_answers_its_own_field() {
-        let state = held();
-        assert!(state.is_some(), "the held state builds");
-        let Some(state) = state else { return };
-        assert_eq!(state.epoch(), Some(WriterEpoch(7)));
-        assert!(state.started());
-        assert_eq!(state.environment(), Some("paper"));
-        assert_eq!(state.risk_clock(), Some(RiskClock::from_secs(42)));
-        assert_eq!(state.unresolved().map(|u| u.head), Some(Seq(3)));
-        assert_eq!(state.orders().len(), 1);
-        assert_eq!(state.reservations().len(), 1);
-        assert_eq!(state.unprotected_intervals().len(), 1);
-        assert_eq!(state.positions().len(), 1);
-        assert_eq!(state.fills().len(), 1);
-        assert_eq!(state.modes().len(), 1);
-        assert_eq!(state.account_state(), AccountState::ClosingOnly);
-        assert_eq!(state.consecutive_403s(), 2);
-        assert_eq!(state.observed_account().map(|a| a.multiplier), Some(2));
-        assert_eq!(state.mismatched().len(), 1);
-        assert_eq!(
-            state.checkpoint(),
-            Some(&ActivityCursor("cursor-9".to_owned()))
-        );
-        assert_eq!(state.reconciled_through(), Some(Seq(5)));
-        assert_eq!(state.last_submission(), Some(Seq(4)));
+    /// The time the core acts at: the later of the folded risk clock and the scheduler's latest
+    /// tick, or zero before either exists. Never a wall clock (ES-21).
+    pub(crate) fn clock(&self) -> RiskClock {
+        self.risk_clock
+            .max(self.now)
+            .unwrap_or(RiskClock::from_secs(0))
     }
 }

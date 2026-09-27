@@ -1,11 +1,34 @@
 //! The replay: one journaled event into the state, effect-free (journal spec §8).
 
+use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
+use mandate_num::{Qty, ShareIncrement, SignedQty, SplitRatio, Usd};
 
+use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
-use crate::payload::required_text;
-use crate::state::ExecutorState;
-use crate::types::FoldedEvent;
+use crate::ids::{ClientOrderId, IntentId};
+use crate::payload::{
+    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    required_text, usd,
+};
+use crate::state::{
+    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
+};
+use crate::types::{
+    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
+    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    UnprotectedInterval,
+};
+
+/// The copied cross-stream facts of journal spec §2. Each carries a `causation_id` naming its
+/// origin, unless the executor originated it itself and says so with `originated`.
+const COPIED: [&str; 5] = [
+    "AgentModeApplied",
+    "TradingDayStarted",
+    "ClockAdvanced",
+    "OwnerAcknowledged",
+    "UniverseChanged",
+];
 
 /// Replays one journaled event into the state.
 ///
@@ -34,6 +57,13 @@ pub fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), Execut
         account_event(state, event)?;
     }
     state.heads.insert(event.stream.clone(), event.seq);
+    let head = state.account_head().0;
+    if state.unresolved.as_ref().is_some_and(|batch| {
+        let drafted = u64::try_from(batch.drafts.len()).unwrap_or(u64::MAX);
+        head >= batch.head.0.saturating_add(drafted)
+    }) {
+        state.unresolved = None;
+    }
     Ok(())
 }
 
@@ -46,72 +76,151 @@ fn follows(state: &ExecutorState, stream: &str) -> bool {
         || stream == format!("clock:{workspace}")
 }
 
-/// The account-stream catalogue events this crate interprets in a later slice, each with the story
-/// that interprets it. Until then an event here answers that story's stub (DEC-137); an event
-/// another stream owns, or a name nobody wrote, is not interpreted at all.
-const LATER: [(&str, &str); 31] = [
-    ("IntentReceived", "E7-2"),
-    ("GateDecided", "E7-2"),
-    ("OrderSubmitted", "E7-2"),
-    ("OrderStateChanged", "E7-2"),
-    ("OrderAbandoned", "E7-2"),
-    ("AgentModeApplied", "E7-2"),
-    ("TradingDayStarted", "E7-2"),
-    ("ClockAdvanced", "E7-2"),
-    ("RiskDayStarted", "E7-2"),
-    ("MarkUpdated", "E7-2"),
-    ("FillApplied", "E7-3"),
-    ("LateFillApplied", "E7-3"),
-    ("FeesCharged", "E7-3"),
-    ("SettlementPosted", "E7-3"),
-    ("DividendPaid", "E7-3"),
-    ("CashInLieuPosted", "E7-3"),
-    ("CorporateActionPrepared", "E7-3"),
-    ("CorporateActionApplied", "E7-3"),
-    ("ExternalActivityIngested", "E7-3"),
-    ("AccountStateObserved", "E7-3"),
-    ("AccountSnapshotRecorded", "E7-3"),
-    ("AccountRestrictionChanged", "E7-3"),
-    ("RejectObserved", "E7-3"),
-    ("BrokerExchangeRecorded", "E7-3"),
-    ("ConductBreachDetected", "E7-3"),
-    ("CompensatingEvent", "E7-3"),
-    ("ReconciliationRun", "E7-3"),
-    ("BrokerPositionObserved", "E7-3"),
-    ("OwnerAcknowledged", "E7-3"),
-    ("ProtectionChanged", "E7-4"),
-    ("KillSwitchActivated", "E7-4"),
-];
-
 fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
     let kind = event.event_type.as_str();
     if kind == "StreamOpened" {
-        return stream_opened(state, &event.payload);
+        return stream_opened(state, payload);
     }
-    if let Some((_, story)) = LATER.iter().find(|(name, _)| *name == kind) {
-        return Err(ExecutorError::Unimplemented { story });
+    if let Some(story) = owner_elsewhere(kind) {
+        return not_interpreted(kind, story);
     }
-    Err(ExecutorError::NotInterpreted {
-        what: kind.to_owned(),
-        story: elsewhere(kind),
-    })
+    let at = risk_clock(state, event)?;
+    if COPIED.contains(&kind) {
+        match &event.causation_id {
+            Some(origin) => {
+                state.copied.insert(event.event_id.clone(), origin.clone());
+            }
+            None if flag(payload, "originated") => {}
+            None => {
+                return Err(ExecutorError::CopyWithoutCausation {
+                    event_type: event.event_type.clone(),
+                });
+            }
+        }
+    }
+    state.risk_clock = Some(at);
+    match kind {
+        "IntentReceived" => intent_received(state, payload, at),
+        "GateDecided" => gate_decided(state, payload),
+        "OrderSubmitted" => order_submitted(state, event),
+        "OrderStateChanged" => {
+            adoption(state, event)?;
+            order_state_changed(state, payload, at)
+        }
+        "CompensatingEvent" => {
+            if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
+                for id in corrected.iter().filter_map(Value::as_str) {
+                    state.uncompensated.remove(&EventId(id.to_owned()));
+                }
+            }
+            Ok(())
+        }
+        "OrderAbandoned" => order_abandoned(state, payload),
+        "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
+        "FeesCharged" => fees_charged(state, payload),
+        "CorporateActionPrepared" => {
+            state.pending_actions.insert(instrument(payload)?);
+            Ok(())
+        }
+        "CorporateActionApplied" => corporate_action_applied(state, payload),
+        "ProtectionChanged" => protection_changed(state, payload, at),
+        "BrokerPositionObserved" => {
+            if flag(payload, "mismatch") {
+                state.mismatched.insert(instrument(payload)?);
+            }
+            Ok(())
+        }
+        "ReconciliationRun" => {
+            state.reconciled_through = Some(event.seq);
+            if let Some(cursor) = optional_text(payload, "checkpoint") {
+                state.checkpoint = Some(ActivityCursor(cursor.to_owned()));
+            }
+            Ok(())
+        }
+        "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
+        "AccountRestrictionChanged" => {
+            state.account_state = match required_text(payload, "restriction")? {
+                "closing_only" => AccountState::ClosingOnly,
+                "blocked" => AccountState::Blocked,
+                _ => return Err(refused("restriction")),
+            };
+            state.consecutive_403s = 0;
+            Ok(())
+        }
+        "RejectObserved" => {
+            state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
+                state.consecutive_403s.saturating_add(1)
+            } else {
+                0
+            };
+            Ok(())
+        }
+        "AgentModeApplied" => agent_mode_applied(state, payload),
+        "OwnerAcknowledged" => owner_acknowledged(state, payload),
+        _ => Ok(()),
+    }
 }
 
-/// The story that interprets an event this crate does not. Answered before anything else is read,
-/// so an uninterpreted event fails as uninterpreted rather than on a field it was never going to
-/// be read for (DEC-85).
-fn elsewhere(kind: &str) -> &'static str {
+/// The story that interprets an event this crate does not, or `None` for one it does. Answered
+/// before anything else is read, so an uninterpreted event fails as uninterpreted rather than on
+/// a field it was never going to be read for (DEC-85).
+fn owner_elsewhere(kind: &str) -> Option<&'static str> {
     match kind {
-        "RelatedAccountsCoordination" => "E7-5",
+        "IntentReceived"
+        | "GateDecided"
+        | "OrderSubmitted"
+        | "OrderStateChanged"
+        | "OrderAbandoned"
+        | "FillApplied"
+        | "LateFillApplied"
+        | "FeesCharged"
+        | "CorporateActionPrepared"
+        | "CorporateActionApplied"
+        | "ProtectionChanged"
+        | "BrokerPositionObserved"
+        | "ReconciliationRun"
+        | "AccountStateObserved"
+        | "AccountSnapshotRecorded"
+        | "AccountRestrictionChanged"
+        | "RejectObserved"
+        | "AgentModeApplied"
+        | "OwnerAcknowledged"
+        | "TradingDayStarted"
+        | "ClockAdvanced"
+        | "RiskDayStarted"
+        | "MarkUpdated"
+        | "SettlementPosted"
+        | "DividendPaid"
+        | "CashInLieuPosted"
+        | "CompensatingEvent"
+        | "BrokerExchangeRecorded"
+        | "ExternalActivityIngested"
+        | "ConductBreachDetected"
+        | "KillSwitchActivated" => None,
+        "RelatedAccountsCoordination" => Some("E7-5"),
         "MandateVersionApplied"
         | "RiskLimitTriggered"
         | "RiskLimitLifted"
         | "HighWaterMarkReset"
         | "PositionReleased"
         | "InstrumentRestrictionChanged"
-        | "GoalCompleted" => "E6-4",
-        "UniverseChanged" => "E17-3",
-        _ => "E7-2",
+        | "GoalCompleted" => Some("E6-4"),
+        "UniverseChanged" => Some("E17-3"),
+        _ => Some("E7-2"),
+    }
+}
+
+fn not_interpreted(kind: &str, story: &'static str) -> Result<(), ExecutorError> {
+    Err(ExecutorError::NotInterpreted {
+        what: kind.to_owned(),
+        story,
+    })
+}
+
+fn refused(field: &str) -> ExecutorError {
+    ExecutorError::NonCanonicalPayload {
+        field: field.to_owned(),
     }
 }
 
@@ -125,5 +234,532 @@ fn stream_opened(state: &mut ExecutorState, payload: &Value) -> Result<(), Execu
         });
     }
     state.environment = Some(found.to_owned());
+    Ok(())
+}
+
+/// Every account-stream risk input carries `risk_clock`, and it never decreases (journal spec §2,
+/// mandate spec §5.2).
+fn risk_clock(state: &ExecutorState, event: &FoldedEvent) -> Result<RiskClock, ExecutorError> {
+    let secs = optional_int(&event.payload, "risk_clock")
+        .and_then(|secs| i64::try_from(secs).ok())
+        .ok_or_else(|| ExecutorError::RiskClockMissing {
+            event_type: event.event_type.clone(),
+        })?;
+    if let Some(last) = state.risk_clock
+        && secs < last.secs()
+    {
+        return Err(ExecutorError::RiskClockWentBackwards {
+            last: last.secs(),
+            found: secs,
+        });
+    }
+    Ok(RiskClock::from_secs(secs))
+}
+
+fn instrument(payload: &Value) -> Result<InstrumentId, ExecutorError> {
+    Ok(InstrumentId::new(required_text(payload, "instrument")?)?)
+}
+
+fn intent_id(payload: &Value) -> Result<IntentId, ExecutorError> {
+    Ok(IntentId(EventId(
+        required_text(payload, "intent_id")?.to_owned(),
+    )))
+}
+
+fn client_order_id(payload: &Value) -> Result<ClientOrderId, ExecutorError> {
+    ClientOrderId::parse(required_text(payload, "client_order_id")?)
+}
+
+fn intent_received(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
+    let id = intent_id(payload)?;
+    if optional_text(payload, "kind").is_some_and(|kind| kind != "order") {
+        return not_interpreted("IntentReceived of a flatten plan", "E7-4");
+    }
+    let body = IntentBody::Order {
+        instrument: instrument(payload)?,
+        side: side_of(required_text(payload, "side")?)?,
+        qty: qty(payload, "qty")?,
+        limit: optional_price(payload, "limit")?.ok_or_else(|| refused("limit"))?,
+        purpose: purpose_of(required_text(payload, "purpose")?)?,
+        protection: None,
+    };
+    state.intents.insert(
+        id.clone(),
+        IntentRecord {
+            intent_id: id.clone(),
+            agent: AgentId(required_text(payload, "agent")?.to_owned()),
+            received_at: at,
+            outcome: IntentOutcome::Received,
+        },
+    );
+    state.bodies.insert(id, body);
+    Ok(())
+}
+
+fn gate_decided(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let id = intent_id(payload)?;
+    match required_text(payload, "verdict")? {
+        "allow" => {}
+        "deny" => {
+            if let Some(record) = state.intents.get_mut(&id) {
+                record.outcome = IntentOutcome::Denied;
+            }
+        }
+        "hold" | "defer" => {
+            state.held.insert(id);
+            return Ok(());
+        }
+        _ => return Err(refused("verdict")),
+    }
+    state.held.remove(&id);
+    Ok(())
+}
+
+/// The exact request an `OrderSubmitted` names, rebuilt from its payload, so a resubmission after
+/// a confirmed absence sends the same body with the same id (trading-domain spec §5.7). A field an
+/// older draft left out takes the value this crate's own drafts would have written: a buy, a limit
+/// order, day, and an opening.
+fn request_of(
+    payload: &Value,
+    client_order_id: ClientOrderId,
+) -> Result<SubmitOrder, ExecutorError> {
+    Ok(SubmitOrder {
+        client_order_id,
+        instrument: instrument(payload)?,
+        side: optional_text(payload, "side").map_or(Ok(Side::Buy), side_of)?,
+        qty: optional_qty(payload, "qty")?.unwrap_or(Qty::ZERO),
+        order_type: optional_text(payload, "order_type")
+            .map_or(Ok(OrderType::Limit), order_type_of)?,
+        tif: optional_text(payload, "tif").map_or(Ok(TimeInForce::Day), tif_of)?,
+        limit_price: optional_price(payload, "limit")?,
+        stop_price: optional_price(payload, "stop_price")?,
+        bracket: None,
+        oco: None,
+        extended_hours: flag(payload, "extended_hours"),
+        purpose: optional_text(payload, "purpose").map_or(Ok(Purpose::Open), purpose_of)?,
+    })
+}
+
+fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    let payload = &event.payload;
+    let id = client_order_id(payload)?;
+    let intent = optional_text(payload, "intent_id").map(|raw| IntentId(EventId(raw.to_owned())));
+    let request = request_of(payload, id.clone())?;
+    let attempt = optional_int(payload, "attempt")
+        .and_then(|attempt| u32::try_from(attempt).ok())
+        .unwrap_or(1);
+    let reserved = match request.side {
+        Side::Buy => request
+            .limit_price
+            .map_or(Ok(Usd::ZERO), |limit| request.qty.notional(limit))?,
+        Side::Sell => Usd::ZERO,
+    };
+    let agent = AgentId(required_text(payload, "agent")?.to_owned());
+    let created_on = None;
+    let order = state.orders.entry(id.clone()).or_insert_with(|| Order {
+        client_order_id: id.clone(),
+        intent_id: intent.clone(),
+        agent,
+        instrument: request.instrument.clone(),
+        side: request.side,
+        qty: request.qty,
+        filled_qty: Qty::ZERO,
+        state: OrderState::Submitting,
+        attempt,
+        purpose: request.purpose,
+        absent_lookups: 0,
+        first_absence_at: None,
+        cancel_unconfirmed: false,
+        replaced_by: None,
+        created_on,
+    });
+    order.state = OrderState::Submitting;
+    order.attempt = attempt;
+    order.absent_lookups = 0;
+    order.first_absence_at = None;
+    state.reservations.insert(id.clone(), reserved);
+    state.details.insert(
+        id,
+        OrderDetail {
+            request: Some(request),
+            submitted_seq: Some(event.seq),
+            ..OrderDetail::default()
+        },
+    );
+    if let Some(record) = intent.and_then(|intent| state.intents.get_mut(&intent)) {
+        record.outcome = IntentOutcome::Submitted;
+    }
+    state.last_submission = Some(event.seq);
+    Ok(())
+}
+
+/// Records an adoption as owed a `CompensatingEvent` until one names it (§11).
+fn adoption(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if !flag(&event.payload, "adopted") {
+        return Ok(());
+    }
+    let subject = client_order_id(&event.payload)?;
+    let from = state
+        .orders
+        .get(&subject)
+        .map(|order| order.state)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: subject.as_str().to_owned(),
+        })?;
+    let to = state_of(required_text(&event.payload, "state")?)?;
+    state
+        .uncompensated
+        .insert(event.event_id.clone(), Adoption { subject, from, to });
+    Ok(())
+}
+
+fn order_state_changed(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
+    let id = client_order_id(payload)?;
+    let next = state_of(required_text(payload, "state")?)?;
+    if let Some(old) = optional_text(payload, "replaces") {
+        replacement(state, &id, &ClientOrderId::parse(old)?)?;
+    }
+    let order = state
+        .orders
+        .get_mut(&id)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: id.as_str().to_owned(),
+        })?;
+    let detail = state.details.entry(id.clone()).or_default();
+    if let Some(filled) = optional_qty(payload, "filled_qty")? {
+        detail.broker_filled = Some(detail.broker_filled.map_or(filled, |was| was.max(filled)));
+    }
+    if flag(payload, "ignored") {
+        return Ok(());
+    }
+    if optional_text(payload, "lookup") == Some("absent") {
+        order.absent_lookups = order.absent_lookups.saturating_add(1);
+        order.first_absence_at = order.first_absence_at.or(Some(at));
+        detail.last_absence = Some(at);
+    } else if next == OrderState::Unknown {
+        order.absent_lookups = 0;
+        order.first_absence_at = None;
+        detail.unknown_since = Some(at);
+        detail.last_absence = None;
+    }
+    order.state = next;
+    order.cancel_unconfirmed = next == OrderState::PendingCancel;
+    if next.is_terminal() {
+        let amount = state.reservations.remove(&id);
+        if let Some(new) = optional_text(payload, "replaced_by") {
+            let new = ClientOrderId::parse(new)?;
+            order.replaced_by = Some(new.clone());
+            state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
+        }
+    }
+    Ok(())
+}
+
+/// The order a broker-initiated replacement created, linked to the one it replaced and carrying
+/// the reservation the old one passed on (trading-domain spec §5.7, interpretation 26).
+fn replacement(
+    state: &mut ExecutorState,
+    id: &ClientOrderId,
+    old: &ClientOrderId,
+) -> Result<(), ExecutorError> {
+    let original = state
+        .orders
+        .get(old)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: old.as_str().to_owned(),
+        })?;
+    let linked = Order {
+        client_order_id: id.clone(),
+        filled_qty: Qty::ZERO,
+        replaced_by: None,
+        ..original.clone()
+    };
+    state.orders.insert(id.clone(), linked);
+    Ok(())
+}
+
+/// `OrderAbandoned` ends an intent. An intent abandoned before it was ever submitted has no order
+/// yet, so the order is recorded from the intent, in its terminal state.
+fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let id = client_order_id(payload)?;
+    let intent = intent_id(payload)?;
+    if let Some(order) = state.orders.get_mut(&id) {
+        order.state = OrderState::Abandoned;
+    } else {
+        let (
+            Some(IntentBody::Order {
+                instrument,
+                side,
+                qty,
+                purpose,
+                ..
+            }),
+            Some(record),
+        ) = (state.bodies.get(&intent), state.intents.get(&intent))
+        else {
+            return Err(ExecutorError::UnknownOrder {
+                client_order_id: id.as_str().to_owned(),
+            });
+        };
+        let order = Order {
+            client_order_id: id.clone(),
+            intent_id: Some(intent.clone()),
+            agent: record.agent.clone(),
+            instrument: instrument.clone(),
+            side: *side,
+            qty: *qty,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Abandoned,
+            attempt: 0,
+            purpose: *purpose,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        };
+        state.orders.insert(id.clone(), order);
+    }
+    state.reservations.remove(&id);
+    if let Some(record) = state.intents.get_mut(&intent) {
+        record.outcome = IntentOutcome::Abandoned;
+    }
+    state.held.remove(&intent);
+    Ok(())
+}
+
+/// A fill is applied by its broker fill id, once: a re-ingested fill changes nothing
+/// (trading-domain spec §5.7, journal spec §5.2).
+fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let fill = FillId(required_text(payload, "fill_id")?.to_owned());
+    if state.fills.contains(&fill) {
+        return Ok(());
+    }
+    let instrument = instrument(payload)?;
+    let side = side_of(required_text(payload, "side")?)?;
+    let quantity = qty(payload, "qty_gross")?;
+    let notional =
+        quantity.notional(optional_price(payload, "price")?.ok_or_else(|| refused("price"))?)?;
+    let (signed, cash) = match side {
+        Side::Buy => (SignedQty::from(quantity), notional.negated()),
+        Side::Sell => (SignedQty::from(quantity).negated(), notional),
+    };
+    let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
+    *position = position.checked_add(signed)?;
+    state.cash_flow = state.cash_flow.checked_add(cash)?;
+    state.fill_notional = state.fill_notional.checked_add(notional)?;
+    if let Some(order) = optional_text(payload, "client_order_id")
+        .and_then(|raw| ClientOrderId::parse(raw).ok())
+        .and_then(|id| state.orders.get_mut(&id))
+    {
+        order.filled_qty = order.filled_qty.checked_add(quantity)?;
+    }
+    state.fills.insert(fill);
+    Ok(())
+}
+
+/// A crypto asset fee is paid in the asset: its accrual reduces the model's net position at once,
+/// and until the broker posts it the broker still shows it, so the unposted part explains a
+/// position difference rather than a cash one; paper's simulated fees are kept apart from the
+/// cash comparison (trading-domain spec §6.3, §10, §11).
+fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if required_text(payload, "family")? == "crypto_asset" {
+        let instrument = instrument(payload)?;
+        let accrued = qty(payload, "accrued")?;
+        let charged = optional_qty(payload, "charged")?.unwrap_or(Qty::ZERO);
+        let position = state
+            .positions
+            .entry(instrument.clone())
+            .or_insert(SignedQty::ZERO);
+        *position = position.checked_add(SignedQty::from(accrued).negated())?;
+        let unposted = state.asset_fees.entry(instrument).or_insert(Qty::ZERO);
+        *unposted = unposted
+            .checked_add(accrued)?
+            .checked_sub(charged)
+            .unwrap_or(Qty::ZERO);
+        return Ok(());
+    }
+    let accrued = usd(payload, "accrued")?;
+    if flag(payload, "simulated") {
+        state.simulated_fees = state.simulated_fees.checked_add(accrued)?;
+    } else {
+        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
+        state.unposted_fees = state
+            .unposted_fees
+            .checked_add(accrued)?
+            .checked_sub(charged)?;
+    }
+    Ok(())
+}
+
+fn corporate_action_applied(
+    state: &mut ExecutorState,
+    payload: &Value,
+) -> Result<(), ExecutorError> {
+    let instrument = instrument(payload)?;
+    let ratio: u64 = required_text(payload, "ratio")?
+        .parse()
+        .map_err(|_| refused("ratio"))?;
+    let split = SplitRatio::new(ratio, 1)?;
+    if let Some(position) = state.positions.get_mut(&instrument) {
+        *position = split.split(*position, ShareIncrement::Fractional)?.after();
+    }
+    state.pending_actions.remove(&instrument);
+    Ok(())
+}
+
+/// `ProtectionChanged` records protection placed and cancelled, and every unprotected interval
+/// from its start to its end (trading-domain spec §5.4, interpretation 21).
+fn protection_changed(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
+    let instrument = instrument(payload)?;
+    match required_text(payload, "action")? {
+        "placed" => {
+            let covered = qty(payload, "qty")?;
+            let agent = AgentId(
+                optional_text(payload, "agent")
+                    .unwrap_or_default()
+                    .to_owned(),
+            );
+            let mut resting = Vec::new();
+            for raw in required_text(payload, "orders")?.split(',') {
+                let id = ClientOrderId::parse(raw)?;
+                state.orders.entry(id.clone()).or_insert_with(|| Order {
+                    client_order_id: id.clone(),
+                    intent_id: None,
+                    agent: agent.clone(),
+                    instrument: instrument.clone(),
+                    side: Side::Sell,
+                    qty: covered,
+                    filled_qty: Qty::ZERO,
+                    state: OrderState::Accepted,
+                    attempt: 1,
+                    purpose: Purpose::Protective,
+                    absent_lookups: 0,
+                    first_absence_at: None,
+                    cancel_unconfirmed: false,
+                    replaced_by: None,
+                    created_on: None,
+                });
+                state.reservations.entry(id.clone()).or_insert(Usd::ZERO);
+                resting.push(id);
+            }
+            state.protection.insert(
+                instrument.clone(),
+                Protection {
+                    instrument,
+                    resting,
+                    covered_qty: covered,
+                },
+            );
+        }
+        "unprotected_start" => state.unprotected.push(UnprotectedInterval {
+            instrument,
+            started_at: at,
+            ended_at: None,
+            alerted: false,
+        }),
+        "unprotected_end" => {
+            if let Some(open) =
+                state.unprotected.iter_mut().rev().find(|interval| {
+                    interval.instrument == instrument && interval.ended_at.is_none()
+                })
+            {
+                open.ended_at = Some(at);
+            }
+        }
+        _ => return Err(refused("action")),
+    }
+    Ok(())
+}
+
+/// The broker's account as last reported: the base the model's cash is moved from by every fill
+/// since, so the cash comparison and buying power start from the broker's own figure
+/// (trading-domain spec §7.2, §11).
+fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let buying_power = usd(payload, "buying_power")?;
+    state.observed = Some(ObservedAccount {
+        state: if required_text(payload, "status")? == "ACTIVE" {
+            AccountState::Active
+        } else {
+            AccountState::Blocked
+        },
+        multiplier: optional_int(payload, "multiplier")
+            .and_then(|multiplier| u32::try_from(multiplier).ok())
+            .unwrap_or(1),
+        equity: usd(payload, "equity")?,
+        cash: usd(payload, "cash")?,
+        buying_power,
+        non_marginable_buying_power: optional_usd(payload, "non_marginable_buying_power")?
+            .unwrap_or(buying_power),
+        accrued_fees: optional_usd(payload, "accrued_fees")?.unwrap_or(Usd::ZERO),
+    });
+    state.cash_flow = Usd::ZERO;
+    state.fill_notional = Usd::ZERO;
+    Ok(())
+}
+
+/// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
+/// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
+fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let agent = AgentId(required_text(payload, "agent")?.to_owned());
+    let mode = mode_of(required_text(payload, "to")?)?;
+    let restriction = optional_text(payload, "restriction")
+        .unwrap_or_default()
+        .to_owned();
+    if mode == Mode::Normal {
+        state.restrictions.remove(&(agent.clone(), restriction));
+    } else {
+        state
+            .restrictions
+            .insert((agent.clone(), restriction), mode);
+    }
+    recompute(state, &agent);
+    Ok(())
+}
+
+fn recompute(state: &mut ExecutorState, agent: &AgentId) {
+    let mode = state
+        .restrictions
+        .iter()
+        .filter(|((who, _), _)| who == agent)
+        .map(|(_, mode)| *mode)
+        .max()
+        .unwrap_or_default();
+    state.modes.insert(agent.clone(), mode);
+}
+
+/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
+/// pause it caused (trading-domain spec §11, interpretation 14).
+fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let subject = required_text(payload, "subject")?;
+    if required_text(payload, "step_up")?.is_empty() {
+        return Ok(());
+    }
+    if let Ok(instrument) = InstrumentId::new(subject) {
+        state.mismatched.remove(&instrument);
+    }
+    let lifted = crate::state::restriction_for(subject);
+    let agents: Vec<AgentId> = state
+        .restrictions
+        .keys()
+        .filter(|(_, name)| *name == lifted)
+        .map(|(agent, _)| agent.clone())
+        .collect();
+    for agent in agents {
+        state.restrictions.remove(&(agent.clone(), lifted.clone()));
+        recompute(state, &agent);
+    }
     Ok(())
 }
