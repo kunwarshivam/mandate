@@ -47,7 +47,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
   `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
   message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
-  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate.
+  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate;
+  and `mandate-executor`'s three E7-4 properties that pass today only on a discarded case's stub
+  report get their rows in the same change (see the row under #196's reviews).
 
 ### E2 Market data
 
@@ -474,16 +476,17 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   TAF cap. Since #196 the executor books one only for a fill attributed to one of its orders,
   stated in `orders::simulated_fee`'s doc; booking it too would lower paper buying power, the
   conservative side (#196 review, round 1, finding 7).
-- Make the pending gate's verdict on `mandate-executor`'s three E7-4 properties reproducible
+- With E1-3, give `mandate-executor`'s three E7-4 properties `BEHAVIOUR_ONLY_TESTS` rows
   (`protective_sell_quantity_never_exceeds_the_position`,
   `every_unprotected_interval_has_a_journaled_start_and_end`,
-  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their minimal case fails on its own
-  assertion (the protected lead has no bracket, which is E7-4's), and the gate accepts them only
-  because other generated cases stop at a later E7-3 slice's stub first and put its report in the
-  output. proptest draws a fresh seed per run, so the verdict depends on the seed: the review
-  measured three problems at `6d58c94`, and two local runs there and on the merged head measured
-  none. A fixed seed for pending properties, or a script that stops at E7-4's own entry point,
-  would make it one answer (#196 review, round 1, finding 5).
+  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their shrunk failure is their own
+  E7-4 assertion (the protected lead has no bracket). The gate accepts them only because cases
+  discarded before shrinking stop at a later E7-3 slice's stub, and `names_a_stub` reads the whole
+  output. Since #199, `ci pending` pins their seed (`PENDING_PROPTEST_SEED`), so that verdict is one
+  answer rather than red on some runs, but it still rests on incidental evidence. A row now would be
+  reported as not needed, because the output names a stub. When E1-3 reads the failure's own
+  cause, these three fail away from the stub and need their rows, expiring with E7-4 (#196 review,
+  round 1, finding 5; #199 review, round 1, finding 4).
 - Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
   hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
@@ -499,6 +502,10 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   suggests that path should not journal a `FeesCharged` at all. Settle the event first (the
   coordinator's call, with a decision-log row), then correct both tests in one reviewed
   tests-correction PR so E7-3's implementer isn't blocked (#197 review, round 1, finding 1).
+- Make the reproduction line `ci pending` prints runnable as printed: quote the `-E` filterset
+  (it contains parentheses, so a shell refuses it) and add `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
+  which the gate sets and nextest requires for libtest JSON. Both fail loudly today rather than
+  giving a different verdict (#199 review, round 2, minor).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
