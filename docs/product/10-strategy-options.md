@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.2, 2026-09-27. Research input for the founder, updated for the founder's decision on DEC-141. Not a PRD change, and not legal advice |
+| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141 and DEC-145 and for option 16. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -117,7 +117,8 @@ the owner's own agent pays its own model costs.
 
 ## 5. Strategy options
 
-Options 0 to 12 come from the strategy research; options 13 to 15 are those in issue #177. Every
+Options 0 to 12 come from the strategy research; options 13 to 15 are those in issue #177; option 16
+is the founder's, from 2026-09-27. Every
 experiment is paper only, spends nothing, and contacts no one without the founder's authorization.
 "Kill" means stop the option, not the product.
 
@@ -141,6 +142,7 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 | 13 | Bring-your-own-strategy as the lead and as a diagnostic (#177) | C, D | Per live agent | Question 34 |
 | 14 | Small systematic trading teams (#177) | E | Per organization | Depends on who owns the ideas |
 | 15 | Customer-side deployment and private models (#177) | D, E | Hybrid and on-prem licence | As 0 or 13 |
+| 16 | Mandate experiments: multi-variant shadow mode (founder, 2026-09-27) | A, C, D | Part of the plan; model cost per variant | Hypothetical performance (questions 10, 35) |
 
 ### Option 0: Baseline, platform-originated theses (DEC-97)
 
@@ -293,7 +295,8 @@ owner-input API. The evidence below is unchanged.
   raises compensation and licensing questions for counsel.
 - **Experiment.** A desk comparison of one published underwriting standard's controls with Mandate's.
   No contact. **Kill.** Investment-decision losses are excluded, or no partner is reachable within six
-  months. A later option.
+  months. A later option. Mandate paying losses itself, insured or self-funded, is ruled out by
+  [DEC-145](../project/04-decision-log.md#decisions); this option is about records, not cover.
 
 ### Option 8: Public forward-paper research league
 
@@ -381,6 +384,44 @@ owner-input API. The evidence below is unchanged.
 - **Plan impact.** M11 hybrid as planned; no change until a paying partner asks (#177).
 - **Experiment.** None beyond asking in discovery. **Kill.** No paying design partner requests it.
 
+### Option 16: Mandate experiments, multi-variant shadow mode (founder, 2026-09-27)
+
+- **Target.** Segments A, C, and D: owners who want to test strategy changes before risking money.
+  **Value.** "Test up to three versions of your strategy against each other on the same market, with
+  the hypothesis written down before the run, and promote the one you choose."
+- **Shape.** A mandate (the owner's envelope) holds at most three variants: one live and the
+  others in shadow. Each variant is its own owner-confirmed mandate version that differs only in
+  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants see
+  the same market data and pass the same gate, evaluated against their own simulated account state;
+  each keeps a simulated book, never consumes or holds the live account's buying power, day-trade
+  budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis and success criterion are journaled before it runs
+  (pre-registration), so neither the user nor the platform can cherry-pick results afterwards.
+- **Promotion.** Always an owner action that creates a new confirmed mandate version. No automatic
+  winner-picking: v1 has no calibration, and the platform does not recommend trades.
+- **Why now.** It extends the roadmap's Phase 3 shadow mode for new mandate versions (E15-4) from one
+  candidate to a small set, on the journal, gate, and simulated execution that are already built or
+  in review.
+- **For.** It turns the pre-registered track record into a per-user habit. The hash chain makes the
+  journal tamper-evident, and its stream heads are anchored externally with an RFC 3161 timestamp
+  every 5 minutes and at each end of day ([journal spec §10](../specs/journal.md#10-anchoring)), so
+  "we recorded it before it happened" is provable to within the anchor interval, and best-effort
+  while timestamping is unavailable (E5-1 to E5-4).
+  Stateless competitors would have to rebuild their core to match it, and the accumulated experiment
+  history is a switching cost.
+- **Against.** Model cost grows with the number of variants, hence the cap of three. Shadow fills are
+  simulated and must be labelled as simulated, like paper, and any comparison between variants is
+  labelled as hypothetical performance. It is scope growth.
+- **Plan impact.** The v1 build is unchanged. Story E15-5 is scheduled right after the Phase 1 exit
+  (M5 to M7, one autonomous agent on Alpaca paper), pulled forward from roadmap Phase 3.
+- **Regulatory exposure.** Flag: comparisons of simulated results are hypothetical performance
+  (questions 10 and 35); owner-chosen promotion keeps the platform from recommending a variant.
+- **Revenue.** Part of the plan; model cost scales with variants.
+- **Experiment (paper only, no build).** Run two or three paper mandates side by side on Alpaca paper
+  and, with the founder's authorization, show the comparison in the ten discovery calls. Ask: "would
+  you pay to test variants against each other before risking money?"
+- **Kill.** Fewer than 4 of 10 discovery interviewees say they would pay to test variants before
+  risking money. E15-5 then returns to Phase 3 with E15-4.
+
 ## 6. Ranking
 
 Each criterion is scored 1 to 5, where 5 is best; for regulatory exposure, 5 means lowest exposure.
@@ -394,17 +435,18 @@ decide it.
 | 2 | 6 | Conformance suite | 3 | 5 | 5 | 5 | 3 | 1 | **22** |
 | 4 | 13 | Bring-your-own-strategy lead | 3 | 5 | 4 | 4 | 2 | 2 | **20** |
 | 4 | 14 | Small systematic teams | 2 | 4 | 3 | 4 | 3 | 4 | **20** |
-| 6 | 4 | Broker supervision layer | 3 | 3 | 1 | 3 | 4 | 5 | **19** |
-| 6 | 5 | Open-core | 2 | 4 | 4 | 5 | 2 | 2 | **19** |
-| 8 | 10 | Register first | 3 | 3 | 2 | 2 | 4 | 4 | **18** |
-| 9 | 2 | Read-only monitor | 3 | 3 | 4 | 5 | 1 | 1 | **17** |
-| 10 | 0 | Baseline, platform ideas first | 2 | 4 | 2 | 1 | 3 | 4 | **16** |
-| 10 | 7 | Insurance and audit | 1 | 4 | 2 | 4 | 3 | 2 | **16** |
-| 10 | 8 | Research league | 2 | 4 | 3 | 3 | 3 | 1 | **16** |
-| 10 | 11 | Embedded for Alpaca fintechs | 2 | 3 | 2 | 3 | 3 | 3 | **16** |
-| 14 | 9 | Crypto first | 3 | 3 | 3 | 1 | 2 | 3 | **15** |
-| 14 | 15 | Customer-side deployment | 1 | 2 | 1 | 4 | 4 | 3 | **15** |
-| 16 | 12 | Prediction markets | 2 | 1 | 1 | 2 | 1 | 2 | **9** |
+| 4 | 16 | Mandate experiments | 1 | 4 | 4 | 3 | 5 | 3 | **20** |
+| 7 | 4 | Broker supervision layer | 3 | 3 | 1 | 3 | 4 | 5 | **19** |
+| 7 | 5 | Open-core | 2 | 4 | 4 | 5 | 2 | 2 | **19** |
+| 9 | 10 | Register first | 3 | 3 | 2 | 2 | 4 | 4 | **18** |
+| 10 | 2 | Read-only monitor | 3 | 3 | 4 | 5 | 1 | 1 | **17** |
+| 11 | 0 | Baseline, platform ideas first | 2 | 4 | 2 | 1 | 3 | 4 | **16** |
+| 11 | 7 | Insurance and audit | 1 | 4 | 2 | 4 | 3 | 2 | **16** |
+| 11 | 8 | Research league | 2 | 4 | 3 | 3 | 3 | 1 | **16** |
+| 11 | 11 | Embedded for Alpaca fintechs | 2 | 3 | 2 | 3 | 3 | 3 | **16** |
+| 15 | 9 | Crypto first | 3 | 3 | 3 | 1 | 2 | 3 | **15** |
+| 15 | 15 | Customer-side deployment | 1 | 2 | 1 | 4 | 4 | 3 | **15** |
+| 17 | 12 | Prediction markets | 2 | 1 | 1 | 2 | 1 | 2 | **9** |
 
 The baseline scores low on time to first value and regulatory exposure because users see no research
 until DEC-99 passes and counsel answers. That is a statement about go-to-market order, not about
@@ -414,6 +456,7 @@ whether DEC-97 is the right destination.
 decided that the complete product (option 0, with option 13 as its pre-DEC-99 mode) leads, and that
 option 1 is an optional channel inside it rather than a competing lead. Option 1's high score now
 reads as "a cheap, well-evidenced on-ramp", not "the lead product". The rest of the ranking stands.
+Option 16 was scored when the founder added it; its demand score is 1 until discovery tests it.
 
 ## 7. Recommendation
 
@@ -454,6 +497,9 @@ product and the channel, and is the only credible opening to option 4 later.
 
 **Keep as planned:** option 15 (M11), and option 0's forward-paper experiment, run now.
 
+**Scheduled after the Phase 1 exit: option 16** (mandate experiments, story E15-5), with its paper
+experiment run now ([DEC-145](../project/04-decision-log.md#decisions) rules out a loss guarantee).
+
 **Deprioritize:** option 9 (CTA exposure, leverage), option 12 (out of scope), option 4 as a lead
 motion (revisit after option 6 has outside users).
 
@@ -477,6 +523,23 @@ proposed.
 P1 items from #177 map to accepted work too: the forward-paper evidence page to E17-8 (DEC-99,
 DEC-111); portable mandates with a broker capability check to E7-6 (DEC-98); the daily owner briefing
 to E12 and E8. None needs a new story yet.
+
+### Defensible differentiators
+
+The P0 differentiators above are what a user sees. What a competitor would find hardest to copy, in
+the founder's order (2026-09-27):
+
+1. **The provable, pre-registered track record.** Every decision is journaled before acting, and its
+   existence at a time is provable to within the anchor interval (journal spec §10). A monthly breach
+   record for each owner is proposed (story E12-4, not yet planned); publishing it beyond the owner
+   needs counsel's answer and the founder (DEC-79).
+2. **Mandate experiments** (option 16), which make the first one per-user.
+3. **Distribution through brokers** as a supervision layer (option 4).
+4. **Owning the conformance standard:** the journal spec and verifier (options 5 and 6).
+5. **Regulatory position** (option 10 and counsel's answers).
+
+A guarantee against losses or breaches, paid by Mandate and insured or self-funded, is ruled out
+([DEC-145](../project/04-decision-log.md#decisions)).
 
 ## 9. Broker plan
 
