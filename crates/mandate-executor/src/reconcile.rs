@@ -1273,12 +1273,35 @@ mod tests {
             1,
             "a run since the start releases the held opening at the next tick"
         );
+
+        for purpose in [
+            Purpose::Protective,
+            Purpose::OwnerExit,
+            Purpose::DiscretionaryExit,
+            Purpose::Flatten,
+            Purpose::RiskExit,
+        ] {
+            let mut unreported = Executor::opened(&ports)?;
+            filled_ten(&mut unreported)?;
+            let reducing = unreported.run(
+                intent("01JABCDEFGHJKMNPQRSTVWXYZ2", "agent-a", Side::Sell, purpose)?,
+                &ports,
+            )?;
+            assert_eq!(
+                (
+                    submitted(&reducing),
+                    gate_decision(&reducing).map(|(verdict, _)| verdict)
+                ),
+                (1, Some("allow".to_owned())),
+                "on a stream with no account and no run, a {purpose:?} still goes (rule 13)"
+            );
+        }
         Ok(())
     }
 
     /// A run an earlier process appended does not count: after a restart the opening waits for the
-    /// new process's own run. A stream that has never journaled an account is not held yet (the
-    /// backlog's never-observed row, which blocks E7-7).
+    /// new process's own run. A stream that has never journaled an account holds its opening until
+    /// one is journaled and a run has completed, whatever order they come in.
     #[test]
     fn a_run_from_before_the_restart_does_not_release_an_opening() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -1299,7 +1322,31 @@ mod tests {
             )?,
             &ports,
         )?;
-        assert_eq!(submitted(&open), 1, "no account journaled, so not held yet");
+        assert_eq!(
+            (submitted(&open), gate_decision(&open)),
+            (
+                0,
+                Some((
+                    "hold".to_owned(),
+                    "startup_reconciliation_pending".to_owned()
+                ))
+            ),
+            "no account journaled: held, not denied, whatever the shell does"
+        );
+        run_completed(&mut unreported)?;
+        let run_only =
+            unreported.run(Input::Tick(crate::types::RiskClock::from_secs(1)), &ports)?;
+        assert_eq!(submitted(&run_only), 0, "a run alone does not release it");
+        unreported.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(account("100000")?)),
+            &ports,
+        )?;
+        let both = unreported.run(Input::Tick(crate::types::RiskClock::from_secs(2)), &ports)?;
+        assert_eq!(
+            submitted(&both),
+            1,
+            "an account and a run since the start release it"
+        );
 
         let mut executor = Executor::opened(&ports)?;
         executor.run(
@@ -1615,6 +1662,71 @@ mod tests {
                 .effective_mode(&AgentId("agent-a".to_owned())),
             Mode::Normal
         );
+        Ok(())
+    }
+
+    /// The never-observed hold on its own, not through any test harness's startup: an opening is
+    /// held while no account has been journaled, however many runs complete, and released once an
+    /// account is journaled and a run has completed since the start, whichever comes first: by the
+    /// startup run's resume when the account came first, at the next tick when the run did (#222
+    /// review, minor 3).
+    #[test]
+    fn the_hold_lifts_on_an_account_and_a_run_in_either_order() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let opening = |id: &str| intent(id, "agent-a", Side::Buy, Purpose::Open);
+        let tick = |at: i64| Input::Tick(crate::types::RiskClock::from_secs(at));
+        let report = || -> Result<Input, ExecutorError> {
+            Ok(Input::BrokerUpdate(BrokerUpdate::Account(account(
+                "100000",
+            )?)))
+        };
+
+        let mut never = Executor::opened(&ports)?;
+        let held = never.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ0")?, &ports)?;
+        assert_eq!(submitted(&held), 0, "no account reported: held");
+        for at in 1..=3 {
+            let taken = never.snapshot(ReconcileReason::Scheduled)?;
+            never.run(Input::BrokerSnapshot(taken), &ports)?;
+            let still = never.run(tick(at), &ports)?;
+            assert_eq!(
+                submitted(&still),
+                0,
+                "runs complete, but with no account reported the opening stays held"
+            );
+        }
+
+        let mut account_first = Executor::opened(&ports)?;
+        account_first.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ1")?, &ports)?;
+        account_first.run(report()?, &ports)?;
+        let reported_only = account_first.run(tick(1), &ports)?;
+        assert_eq!(submitted(&reported_only), 0, "an account alone: held");
+        let taken = BrokerSnapshot {
+            account: account("100000")?,
+            ..account_first.snapshot(ReconcileReason::Startup)?
+        };
+        let startup = account_first.run(Input::BrokerSnapshot(taken), &ports)?;
+        assert_eq!(
+            submitted(&startup),
+            1,
+            "account, then run: the startup run's resume releases it at once"
+        );
+
+        let mut run_first = Executor::opened(&ports)?;
+        run_first.run(opening("01JABCDEFGHJKMNPQRSTVWXYZ2")?, &ports)?;
+        let taken = run_first.snapshot(ReconcileReason::Startup)?;
+        run_first.run(Input::BrokerSnapshot(taken), &ports)?;
+        let run_only = run_first.run(tick(1), &ports)?;
+        assert_eq!(submitted(&run_only), 0, "a run alone: held");
+        run_first.run(report()?, &ports)?;
+        let released = run_first.run(tick(2), &ports)?;
+        assert_eq!(submitted(&released), 1, "run, then account: released");
         Ok(())
     }
 }

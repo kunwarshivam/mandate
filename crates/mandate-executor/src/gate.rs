@@ -26,9 +26,11 @@ use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderSta
 pub struct PartialGateDecision {
     pub verdict: GateVerdict,
     pub checks: Vec<GateCheck>,
-    /// Whether the first failing check is one of the holds `AGENTS.md` rule 13 names — agent mode
-    /// `paused` or `stopped`, or an `Unknown` order in the instrument — which keep an exit
-    /// waiting and never deny it.
+    /// Whether the first failing check holds rather than denies: one of the holds `AGENTS.md`
+    /// rule 13 names for an exit (agent mode `paused` or `stopped`, an `Unknown` order in the
+    /// instrument, or `broker` on a blocked account), or `startup_reconciliation_pending` on an
+    /// opening until an account has been journaled, at any time, and a reconciliation has run
+    /// since this process started (#206 review; #230 review, minor 1).
     held: bool,
 }
 
@@ -142,13 +144,13 @@ pub(crate) fn account_stream_checks(
     })
 }
 
-/// The startup reconciliation, last so a check that denies is reported first: on a stream that has
-/// journaled an account, an opening is **held**, never denied, until a reconciliation has run since
-/// this process started (§11, the coordinator's ruling on #174). Exits pass (`AGENTS.md` rule 13).
-/// A stream that has never journaled an account is not held yet; the backlog carries that window,
-/// which blocks E7-7.
+/// The startup reconciliation, last so a check that denies is reported first: an opening is
+/// **held**, never denied, until the broker's account has been journaled and a reconciliation has
+/// run since this process started, in either order (§11, the coordinator's ruling on #174). The
+/// executor enforces it, never the shell's habit of reporting the account first. Exits pass
+/// (`AGENTS.md` rule 13).
 fn unreconciled_opening(state: &ExecutorState, adds: bool) -> bool {
-    adds && state.observed.is_some() && !state.reconciled_since_start()
+    adds && !(state.observed.is_some() && state.reconciled_since_start())
 }
 
 /// §9.1 check 1: account state is evaluated before agent mode (§7.3). A blocked account denies a
