@@ -94,7 +94,8 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "FeesCharged" | "ExternalActivityIngested" => Ok(()),
+        "FeesCharged" => fees_charged(state, payload),
+        "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -117,12 +118,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     }
 }
 
-/// Cash and fee balances, corporate actions, reconciliation's records and snapshot, conduct
-/// breaches, recorded broker exchanges, the owner acknowledgment, the trading and risk days,
-/// protection and the kill switch (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later
-/// slices of this stack. Until
-/// the cash slice folds the balances, a `FeesCharged` and an `ExternalActivityIngested` fold as
-/// records only: nothing this crate reads yet depends on either.
+/// Crypto asset fees, corporate actions, reconciliation's records and snapshot, conduct breaches,
+/// recorded broker exchanges, the owner acknowledgment, the trading and risk days, protection and
+/// the kill switch (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this
+/// stack. An `ExternalActivityIngested` folds as a record only: the restriction it causes is its
+/// own `AgentModeApplied`.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
@@ -463,12 +463,15 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     }
     let instrument = instrument(payload)?;
     let quantity = qty(payload, "qty_gross")?;
-    let signed = match side_of(required_text(payload, "side")?)? {
-        Side::Buy => SignedQty::from(quantity),
-        Side::Sell => SignedQty::from(quantity).negated(),
+    let notional =
+        quantity.notional(optional_price(payload, "price")?.ok_or_else(|| refused("price"))?)?;
+    let (signed, cash) = match side_of(required_text(payload, "side")?)? {
+        Side::Buy => (SignedQty::from(quantity), notional.negated()),
+        Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
+    state.cash_flow = state.cash_flow.checked_add(cash)?;
     if let Some(order) = optional_text(payload, "client_order_id")
         .and_then(|raw| ClientOrderId::parse(raw).ok())
         .and_then(|id| state.orders.get_mut(&id))
@@ -553,6 +556,28 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
             .unwrap_or(buying_power),
         accrued_fees: optional_usd(payload, "accrued_fees")?.unwrap_or(Usd::ZERO),
     });
+    state.cash_flow = Usd::ZERO;
+    Ok(())
+}
+
+/// A fee in dollars: paper's simulated fees are kept apart from the ones the broker posts, which
+/// is what keeps them out of the cash comparison while both lower buying power (trading-domain
+/// spec §10, R-22). A crypto asset fee, paid in the asset, moves the position and is the
+/// reconciliation slice's (§6.3, RC-07).
+fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    if required_text(payload, "family")? == "crypto_asset" {
+        return later_slice();
+    }
+    let accrued = usd(payload, "accrued")?;
+    if flag(payload, "simulated") {
+        state.simulated_fees = state.simulated_fees.checked_add(accrued)?;
+    } else {
+        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
+        state.unposted_fees = state
+            .unposted_fees
+            .checked_add(accrued)?
+            .checked_sub(charged)?;
+    }
     Ok(())
 }
 

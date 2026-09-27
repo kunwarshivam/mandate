@@ -4551,7 +4551,6 @@ fn a_blocked_account_status_pauses_every_agent() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn buying_power_is_the_lower_of_model_and_broker() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4577,7 +4576,6 @@ fn buying_power_is_the_lower_of_model_and_broker() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reservation_lowers_buying_power_by_its_amount() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

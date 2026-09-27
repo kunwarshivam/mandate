@@ -52,6 +52,9 @@ pub struct ExecutorState {
     pub(crate) account_state: AccountState,
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
+    pub(crate) cash_flow: Usd,
+    pub(crate) unposted_fees: Usd,
+    pub(crate) simulated_fees: Usd,
     pub(crate) mismatched: BTreeSet<InstrumentId>,
     pub(crate) checkpoint: Option<ActivityCursor>,
     pub(crate) reconciled_through: Option<Seq>,
@@ -142,6 +145,9 @@ impl ExecutorState {
             account_state: AccountState::Active,
             consecutive_403s: 0,
             observed: None,
+            cash_flow: Usd::ZERO,
+            unposted_fees: Usd::ZERO,
+            simulated_fees: Usd::ZERO,
             mismatched: BTreeSet::new(),
             checkpoint: None,
             reconciled_through: None,
@@ -281,7 +287,19 @@ impl ExecutorState {
     /// until the broker has reported an account, or if the arithmetic overflows: no buying power
     /// is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
-        None
+        let observed = self.observed.as_ref()?;
+        let model = observed
+            .cash
+            .checked_add(self.cash_flow)
+            .and_then(|cash| cash.checked_sub(self.unposted_fees))
+            .and_then(|cash| cash.checked_sub(self.simulated_fees))
+            .ok()?;
+        let reserved = self
+            .reservations
+            .values()
+            .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
+            .ok()?;
+        model.min(observed.buying_power).checked_sub(reserved).ok()
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner
