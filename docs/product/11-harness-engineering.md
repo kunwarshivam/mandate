@@ -146,7 +146,7 @@ it says it did not check one. A dash means the research recorded nothing beyond 
   Invariant's sequence rules. **[inference]** The common gap: rules are stateless and per call; none
   models positions, P&L, drawdown, settlement, or budgets.
 - **MCP security best practices:** MCP servers "MUST only accept tokens that are valid for use with
-  their own resource" and "MUST NOT accept or transit any other tokens"; progressive least-privilege scopes with "incremental elevation"; a
+  their own resources" and "MUST NOT accept or transit any other tokens"; progressive least-privilege scopes with "incremental elevation"; a
   warning against "wildcard or omnibus scopes". Alpaca's MCP server offers only coarse
   `ALPACA_TOOLSETS` filtering.
 - **Approval gates:** Claude Code's PreToolUse ask, Codex's prompt, AGT's `require_approval`, and

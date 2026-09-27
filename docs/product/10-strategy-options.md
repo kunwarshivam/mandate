@@ -402,23 +402,25 @@ evidence below is unchanged.
   the hypothesis written down before the run, and promote the one you choose."
 - **Shape.** A mandate (the owner's envelope) holds at most three variants: one live and the
   others in shadow. Each variant is its own owner-confirmed mandate version that differs only in
-  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants see
-  the same market data and pass the same gate, evaluated against their own simulated account state;
-  each keeps a simulated book, never consumes or holds the live account's buying power, day-trade
-  budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis and success criterion are journaled before it runs
-  (pre-registration), so neither the user nor the platform can cherry-pick results afterwards.
+  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants
+  see the same market data and pass the same gate, evaluated against their own simulated account
+  state; each keeps a simulated book, never consumes or holds the live account's buying power,
+  day-trade budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis
+  and success criterion are journaled before it runs (pre-registration), so neither the user nor the
+  platform can cherry-pick results afterwards.
 - **Promotion.** Always an owner action that creates a new confirmed mandate version. No automatic
   winner-picking: v1 has no calibration, and the platform does not recommend trades.
 - **Why now.** It extends the roadmap's Phase 3 shadow mode for new mandate versions (E15-4) from one
   candidate to a small set, on the journal, gate, and simulated execution that are already built or
   in review.
 - **For.** It turns the pre-registered track record into a per-user habit. The hash chain makes the
-  journal tamper-evident, and its stream heads are anchored externally with an RFC 3161 timestamp
-  every 5 minutes and at each end of day ([journal spec §10](../specs/journal.md#10-anchoring)), so
-  "we recorded it before it happened" is provable to within the anchor interval, and best-effort
-  while timestamping is unavailable (E5-1 to E5-4).
-  Stateless competitors would have to rebuild their core to match it, and the accumulated experiment
-  history is a switching cost.
+  journal tamper-evident, and the [journal spec §10](../specs/journal.md#10-anchoring) specifies
+  anchoring its stream heads externally with an RFC 3161 timestamp every 5 minutes and at each end
+  of day, so that "we recorded it before it happened" becomes provable to within the anchor
+  interval, and best-effort while timestamping is unavailable. The chain and `journal verify` are
+  built (E5-1 to E5-4); the RFC 3161 token check is an E5 follow-up, so the timing proof is
+  specified, not yet checked. Stateless competitors would have to rebuild their core to match it,
+  and the accumulated experiment history is a switching cost.
 - **Against.** Model cost grows with the number of variants, hence the cap of three. Shadow fills are
   simulated and must be labelled as simulated, like paper, and any comparison between variants is
   labelled as hypothetical performance. It is scope growth.
@@ -509,7 +511,7 @@ people with their own agents into the complete product, not for replacing it. Re
 disclaiming supervision. Per the broker's announcement, Robinhood's agentic trading (beta from
 2026-05-27) "does not control, supervise, monitor, recommend, or audit these AI agents" [RH1]. Per
 the broker's announcement as reported, Coinbase for Agents (2026-06-11) will add custom limits such
-as maximum trade size and spend later [CB1]. Hobby projects add their own safety layers.
+as maximum trade size and spend later [CB1].
 
 **Hedge A: option 3.** Run discovery in parallel; change no engineering until 2 of 5 name a budget
 and a reachable custodian.
@@ -589,10 +591,12 @@ to E12 and E8. None needs a new story yet.
 The P0 differentiators above are what a user sees. What a competitor would find hardest to copy, in
 the founder's order (2026-09-27):
 
-1. **The provable, pre-registered track record.** Every decision is journaled before acting, and its
-   existence at a time is provable to within the anchor interval (journal spec §10). A monthly breach
-   record for each owner is proposed (story E12-4, not yet planned); publishing it beyond the owner
-   needs counsel's answer and the founder (DEC-79).
+1. **The provable, pre-registered track record.** Every decision is journaled before acting in a
+   hash chain that `journal verify` checks (E5-1 to E5-4). Journal spec §10 specifies the anchoring
+   that makes its existence at a time provable to within the anchor interval; the RFC 3161 token
+   check is an E5 follow-up, not yet built. A monthly breach record for each owner is proposed
+   (story E12-4, not yet planned); publishing it beyond the owner needs counsel's answer and the
+   founder (DEC-79).
 2. **Mandate experiments** (option 16), which make the first one per-user.
 3. **Distribution through brokers** as a supervision layer (option 4).
 4. **Owning the conformance standard:** the journal spec and verifier (options 5 and 6).
@@ -662,7 +666,7 @@ These are discovery targets, not proof of product-market fit.
 | If we observe | Then |
 |---|---|
 | Robinhood or Alpaca ship enforced per-agent limits, approvals, and exportable records | The channel's value shrinks; the complete product competes on ideas, portability, and verification; lean on option 3 |
-| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | Move E10-6 to the back of the backlog |
+| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | E10-6 loses its DEC-148 placement and goes back behind the other Should stories |
 | The DEC-103 thin slice beats its pre-registered baselines net of costs | Platform ideas are a real differentiator, as the lead assumes; consider option 10 |
 | The thin slice fails its baselines | Keep ideation gated; the product rests on control and evidence (options 13, 3, 6), with the channel as an on-ramp; the founder may revisit what leads |
 | Counsel says the optional channel carries different exposure from owner input | Change the channel's terms or scope with counsel before E10-6 ships |
