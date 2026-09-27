@@ -260,7 +260,8 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
   account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
-  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-8 shell
+  (`mandate-shell`; DEC-138 amends DEC-133 item 1), since
   the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and

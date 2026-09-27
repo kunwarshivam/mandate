@@ -292,8 +292,29 @@ for stage in Stage::ALL:
         assert the last committed draft names the stage
 ```
 
-The last assertion is conditional because validation, market data, the flatten probe, and the
-protection probe all refuse **before any stream exists**, so there is no draft to name them
+**How each case is shown to bite today**, with #152's executor still a stub. A case bites when the
+permissive doubles carry the path to the stubbed stage, so the stub is what stops the run and its
+error code is what the run reports. The suite therefore asserts the *reason* for the zero, not only
+the zero:
+
+| Case | What carries the path to it | What the case would see if the stub leaked |
+|---|---|---|
+| `Validate` | nothing upstream of it | the double-supplied view reaches the sink: `hands() == 1` |
+| `MarketData`, `Signal` | a doubled validation | `hands() == 1` and one `IntentProposed` |
+| `Size`, `Classify`, `GateDryRun` | doubled validation, data, signal | `hands() == 1` and one `IntentProposed` |
+| `Journal` | doubled stages 1 to 6 | an intent handed with no committed draft — the TI-1 violation |
+| `Sink` | doubled stages 1 to 8 | a doubled executor's `Effect::Broker`, so `submissions() == 1` |
+| `BindingGate`, `Idempotency`, `Submit`, `Connector` | a **doubled executor**, which is what makes these cases bite while `mandate_executor::handle` returns `Unimplemented` — without the double there is no path past step 9 and the case proves nothing | `submissions() == 1` |
+| `Reconcile` | doubled stages 1 to 14, then a restart | a second submission, which TI-6 forbids |
+| `FlattenProbe`, `ProtectionProbe` | nothing upstream; they run first | the opening proceeds with no exit plan — PB-8 |
+
+Each row's right-hand column is what the **all-doubles** case actually produces, which is why that
+case is the suite's keystone: it is the same harness with nothing stubbed, and it must place exactly
+one order. If it cannot, every zero in the table above is meaningless and the suite is the vacuous
+one review finding 1 caught.
+
+The last assertion of the loop is conditional because validation, market data, the flatten probe, and
+the protection probe all refuse **before any stream exists**, so there is no draft to name them
 (finding 10). For those stages the refusal is the process's typed exit code and one line on stderr;
 inventing an event type for them would touch `docs/specs/`, which this stream does not.
 
@@ -306,9 +327,22 @@ Three more cases sit beside the per-stage ones:
   cases means nothing.
 - **No stubs and no doubles** — the real end-to-end happy path in `tests/tracer.rs`, asserting the
   journal order of TI-1 and the golden journal byte for byte. It carries `#[ignore = "pending E7-7"]`
-  until every upstream stage is real. Its failure while pending must be the **upstream
-  `Unimplemented` surfacing**, not an assertion on a value the shell invented, so that #172's
-  stricter pending gate accepts it (finding 10).
+  until every upstream stage is real.
+
+  Three requirements come from **#172's stricter gate**, which this brief takes as binding because
+  #172 merges first:
+  1. The pending test's failure output must show a stub marker — `Unimplemented`, `unimplemented`,
+     `not implemented`, `implemented yet`, `not yet implemented` — or name its own story, or name an
+     error its own crate's stubs return. So the test must **fail by the upstream error propagating**,
+     with `ShellError` carrying the source error's `Display` and `code()`, not by an `assert_eq!` on a
+     value the shell invented. A bespoke "expected one order, saw none" assertion would fail the gate.
+  2. The pending marker must be on a **plain written-out function**, because the gate reads the
+     source and a macro-generated marker is never gated. The happy path is therefore written longhand.
+     The per-stage fail-closed cases are generated from the exhaustive match, which is allowed
+     precisely because none of them is pending: they pass today.
+  3. `mandate-shell` is safety-critical **with** a pending test, so under #172 it runs the mutation
+     gate rather than being skipped, and only stub bodies are exempt. The tests PR must expect
+     `cargo xtask ci mutants` to run on it and to fail on any missed mutant outside a stub body.
 
 And two property tests. For TI-3: for every value of each source error type, and for every `Verdict`
 and `Decision` the gate can return, the mapped verdict is never permitting — the mapping functions
@@ -522,28 +556,31 @@ Two items need the founder, neither of which is a new decision about spending or
    host, no spending, and no real order is involved** (rule 8), so there is nothing here for DEC-79
    to reserve.
 
-One ask of stream I:
+**Settled by the coordinator, recorded here for the record:**
 
-3. **Make `FlattenPlanner::plan` fallible.** `mandate_runtime::ports::FlattenPlanner::plan` returns
-   `FlattenPlan`, not `Result<FlattenPlan, _>`, so an adapter over `mandate_risk::agent_flatten` has
-   no way to report that it could not plan (review finding 2). The interim answer in this brief — a
-   startup probe plus a poisoned adapter that halts the effect runner — holds TI-4, but it hides a
-   failure inside an infallible signature, which is the shape that produced PB-8. `ports.rs` belongs
-   to stream I and this stream does not edit it, so the ask is that stream I make `plan` fallible, or
-   that the coordinator rule that the interim answer stands.
+3. **The flatten planner: the probe and the halt, no port change.** `FlattenPlanner::plan` returns
+   `FlattenPlan`, not `Result`, so an adapter over `mandate_risk::agent_flatten` cannot report that it
+   could not plan (review finding 2). The coordinator ruled for the startup probe plus the poisoned
+   adapter over a change to `mandate-runtime`'s port, and this brief takes that. It **can** be made
+   safe: the probe runs before the tracer arms anything, so a planner that cannot answer stops the run
+   before a position exists, and mid-run the poison flag makes the effect runner halt and alert rather
+   than act on a plan nobody computed. What it cannot do is make the failure *unrepresentable*: the
+   poison flag is rung-3 enforcement (a rule in this brief and a test), not rung 1, so a later edit
+   could forget to check it. `shell::flatten_poison_halts` and PB-8 are what hold it, and a fallible
+   `plan` stays available to stream I as an improvement rather than an ask from this stream.
 
-Three questions for the merge coordinator, not the founder:
+Two questions for the merge coordinator, not the founder, and one item it has already ruled on:
 
 4. **Whether the implementation PR is split per stage.** One PR per flipped adapter finds the
    breaking merge faster; one PR is less queue traffic. The coordinator's go comment decides.
 5. **Whether `mandate-shell` also becomes M7's soak harness now or later.** This brief builds it so
    it can, and scopes it so it does not have to.
-6. **Stale wording in stream K's documents.** DEC-138 amends DEC-133 item 1, which places the
-   `IntentSink` adapter "in the layer-7 shell"; the tracker's K row and
-   [the M6-K brief](M6-K-executor-and-connector.md) still say layer 7. Those are stream K's rows, and
-   the [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md) §4
-   forbids rewriting another stream's rows, so the correction belongs to stream K or to a coordinator
-   ruling, not to this PR.
+6. ~~Whether this PR may correct stream K's stale layer-7 wording.~~ **Ruled: yes.** The
+   [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md) §4 keeps
+   agents out of another stream's rows, so this PR asked first; the coordinator directed the alignment
+   here. DEC-138 amends DEC-133 item 1, and the tracker's K rows, the M6-K brief's `IntentSink`
+   paragraph, and the feature map's executor entry now say layer 8 with the amendment cited. Nothing
+   else of stream K's changes.
 
 ## Not done
 
