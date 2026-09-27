@@ -913,7 +913,8 @@ mod tests {
 
     /// What the halt table expects of one row: the verdict, the code, the check that failed, and
     /// the pacing, or the story a fail-closed opening is refused for.
-    type HaltRow = Result<(Verdict, Option<ReasonCode>, Option<Check>, Option<Pacing>), &'static str>;
+    type HaltRow =
+        Result<(Verdict, Option<ReasonCode>, Option<Check>, Option<Pacing>), &'static str>;
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
     /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
@@ -987,9 +988,9 @@ mod tests {
         for side in [Side::Buy, Side::Sell] {
             for origin in origins {
                 for mode in [AgentMode::Normal, AgentMode::Paused, AgentMode::Stopped] {
-                    for (halted, feed_current, market) in (0..8_u8).map(|bits| {
-                        (bits & 1 == 1, bits & 2 == 2, bits & 4 == 4)
-                    }) {
+                    for (halted, feed_current, market) in
+                        (0..8_u8).map(|bits| (bits & 1 == 1, bits & 2 == 2, bits & 4 == 4))
+                    {
                         let mut o = match side {
                             Side::Buy => allowing()?,
                             Side::Sell => allowing()?.selling(origin)?,
