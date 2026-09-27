@@ -245,18 +245,17 @@ says "lost a tonne of money on this janky platform"; a 5-star review of July 202
 robinhood to polymarket, can trade everything"; the third, from 2024, concerns hiring assessments
 [SF20].
 
-**What it does not document.** As of 2026-09-27, the full docs were not found to describe a
-drawdown limit, a loss limit, per-trade approval, or an account-wide kill switch. Drawdown
-thresholds, a kill switch, and max-loss limits appear only as guidance in the AI disclosure and the
-blog guide [SF16] [SF19] [SF5]. Also not
-documented: order types and paper availability for its Robinhood path, cross-strategy capital
-arbitration, and export or integrity of logs.
+**What it does not document.** As of 2026-09-27, the full docs were not found to describe a drawdown
+limit, a loss limit, per-trade approval, or an account-wide kill switch [SF19]. Drawdown thresholds,
+a kill switch, and max-loss limits appear only as guidance in the AI disclosure and the blog guide
+[SF16] [SF5]. Also not documented: order types and paper availability for its Robinhood path,
+cross-strategy capital arbitration, and export or integrity of logs.
 
 **Overlap with Mandate.** The closest shipped competitor. Multi-broker execution, isolation between
 strategies, idempotent execution, reconciliation, activation approval, and pause and flatten are not
-unique to Mandate. Its public positioning moved from a research assistant to an agentic trading
-desk between March and June 2026 (inference, from the snapshots) [SF11]. Compare exact authority boundaries and
-recovery behavior on identical scenarios, not feature lists.
+unique to Mandate. Its public positioning moved from a research assistant to an agentic trading desk
+between March and June 2026 (inference, from the snapshots) [SF11]. Compare exact authority
+boundaries and recovery behavior on identical scenarios, not feature lists.
 
 ### Conviction (YC S25)
 

@@ -391,23 +391,25 @@ owner-input API. The evidence below is unchanged.
   the hypothesis written down before the run, and promote the one you choose."
 - **Shape.** A mandate (the owner's envelope) holds at most three variants: one live and the
   others in shadow. Each variant is its own owner-confirmed mandate version that differs only in
-  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants see
-  the same market data and pass the same gate, evaluated against their own simulated account state;
-  each keeps a simulated book, never consumes or holds the live account's buying power, day-trade
-  budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis and success criterion are journaled before it runs
-  (pre-registration), so neither the user nor the platform can cherry-pick results afterwards.
+  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants
+  see the same market data and pass the same gate, evaluated against their own simulated account
+  state; each keeps a simulated book, never consumes or holds the live account's buying power,
+  day-trade budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis
+  and success criterion are journaled before it runs (pre-registration), so neither the user nor the
+  platform can cherry-pick results afterwards.
 - **Promotion.** Always an owner action that creates a new confirmed mandate version. No automatic
   winner-picking: v1 has no calibration, and the platform does not recommend trades.
 - **Why now.** It extends the roadmap's Phase 3 shadow mode for new mandate versions (E15-4) from one
   candidate to a small set, on the journal, gate, and simulated execution that are already built or
   in review.
 - **For.** It turns the pre-registered track record into a per-user habit. The hash chain makes the
-  journal tamper-evident, and its stream heads are anchored externally with an RFC 3161 timestamp
-  every 5 minutes and at each end of day ([journal spec §10](../specs/journal.md#10-anchoring)), so
-  "we recorded it before it happened" is provable to within the anchor interval, and best-effort
-  while timestamping is unavailable (E5-1 to E5-4).
-  Stateless competitors would have to rebuild their core to match it, and the accumulated experiment
-  history is a switching cost.
+  journal tamper-evident, and the [journal spec §10](../specs/journal.md#10-anchoring) specifies
+  anchoring its stream heads externally with an RFC 3161 timestamp every 5 minutes and at each end
+  of day, so that "we recorded it before it happened" becomes provable to within the anchor
+  interval, and best-effort while timestamping is unavailable. The chain and `journal verify` are
+  built (E5-1 to E5-4); the RFC 3161 token check is an E5 follow-up, so the timing proof is
+  specified, not yet checked. Stateless competitors would have to rebuild their core to match it,
+  and the accumulated experiment history is a switching cost.
 - **Against.** Model cost grows with the number of variants, hence the cap of three. Shadow fills are
   simulated and must be labelled as simulated, like paper, and any comparison between variants is
   labelled as hypothetical performance. It is scope growth.
@@ -529,10 +531,12 @@ to E12 and E8. None needs a new story yet.
 The P0 differentiators above are what a user sees. What a competitor would find hardest to copy, in
 the founder's order (2026-09-27):
 
-1. **The provable, pre-registered track record.** Every decision is journaled before acting, and its
-   existence at a time is provable to within the anchor interval (journal spec §10). A monthly breach
-   record for each owner is proposed (story E12-4, not yet planned); publishing it beyond the owner
-   needs counsel's answer and the founder (DEC-79).
+1. **The provable, pre-registered track record.** Every decision is journaled before acting in a
+   hash chain that `journal verify` checks (E5-1 to E5-4). Journal spec §10 specifies the anchoring
+   that makes its existence at a time provable to within the anchor interval; the RFC 3161 token
+   check is an E5 follow-up, not yet built. A monthly breach record for each owner is proposed
+   (story E12-4, not yet planned); publishing it beyond the owner needs counsel's answer and the
+   founder (DEC-79).
 2. **Mandate experiments** (option 16), which make the first one per-user.
 3. **Distribution through brokers** as a supervision layer (option 4).
 4. **Owning the conformance standard:** the journal spec and verifier (options 5 and 6).
