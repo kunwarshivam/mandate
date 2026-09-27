@@ -195,14 +195,18 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
         .then_some((Verdict::Deny, ReasonCode::InstrumentHalted))
 }
 
+/// §4.4's "no market orders" applies under a halt, real or presumed: a halted instrument, or a
+/// dropped status feed. The stale-quote arm of a presumed halt reads the mark's freshness, which is
+/// check 5's (E6-8).
+fn market_orders_barred(input: &GateInput<'_>) -> bool {
+    input.instrument.halted || !input.instrument.status_feed_current
+}
+
 /// §4.4 and §5.6 (DEC-129 item 28): an allowed market order under a halt, real or presumed, is sent
 /// as a marketable limit at its proposed quantity and price, never as a market order. Only a
-/// reduction gets here with a market kind, since check 4 denies a market opening; the stale-quote
-/// arm of a presumed halt reads the mark's freshness, which is check 5's (E6-8).
+/// reduction gets here with a market kind under a halt, since checks 3 and 4 deny such an opening.
 fn presumed_halt_repricing(input: &GateInput<'_>) -> Option<Pacing> {
-    let instrument = input.instrument;
-    let presumed = instrument.halted || !instrument.status_feed_current;
-    (presumed && input.proposed.kind == ProposedKind::Market).then(|| Pacing {
+    (market_orders_barred(input) && input.proposed.kind == ProposedKind::Market).then(|| Pacing {
         qty: input.proposed.qty,
         limit_price: input.proposed.limit_price,
         marketable_limit_required: true,
@@ -213,8 +217,10 @@ fn presumed_halt_repricing(input: &GateInput<'_>) -> Option<Pacing> {
 /// Check 4, the rules this story owns: rule 3 (every sell above the position, a protective leg's
 /// included, is typed an opening by [`assign_purpose`], so it is the only sell that reaches here as
 /// one), then rule 9, which denies an opening and holds a reduction under one code (DEC-129 item
-/// 22), then §5.1's order policy: every opening is a limit order, so a market opening is denied
-/// `market_order_not_allowed`, halt or no halt (DEC-129 item 24). §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
+/// 22), then §4.4's presumed halt: a market order to open or increase is denied
+/// `market_order_not_allowed` (DEC-129 items 24 and 28). §5.1's wider rule, that every opening is a
+/// limit order in any state of the feed, is the v1 order policy's, which E6-6 completes; until then
+/// such an opening is refused by the fail-closed rule (DEC-129 item 29), never allowed. §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
 /// rules 4 to 6 (`sell_exceeds_available`, E6-6), not to rule 3.
 fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
     if opening && input.proposed.side == Side::Sell {
@@ -232,7 +238,7 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
         };
         return Some((verdict, ReasonCode::UnknownOrderInFlight));
     }
-    if opening && input.proposed.kind == ProposedKind::Market {
+    if opening && input.proposed.kind == ProposedKind::Market && market_orders_barred(input) {
         return Some((Verdict::Deny, ReasonCode::MarketOrderNotAllowed));
     }
     None
@@ -904,7 +910,8 @@ mod tests {
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
     /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
-    /// then §5.1's limit-only openings at check 4, then the fail-closed refusal of DEC-129 item 29;
+    /// then §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal
+    /// of DEC-129 item 29;
     /// an exit is allowed, and re-priced as a marketable limit when it is a market order under a
     /// halt or a dropped status feed (§4.4, §5.6, DEC-129 item 28).
     fn halt_oracle(
@@ -934,7 +941,7 @@ mod tests {
             if halted {
                 return deny(ReasonCode::InstrumentHalted, Check::SessionAndHalt);
             }
-            if market {
+            if market && !feed_current {
                 return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
             }
             return Err("E6-6");
@@ -951,7 +958,7 @@ mod tests {
 
     /// Every side, origin, mode, halt, status feed and order kind against [`halt_oracle`]: 2 × 10 ×
     /// 3 × 2 × 2 × 2 = 480 rows. It pins that a halt denies only an opening and only at check 3,
-    /// that a market opening is denied at check 4 whether or not anything is halted, that a market
+    /// that a market opening is denied at check 4 under a dropped feed and nowhere else, that a market
     /// exit under a real or presumed halt is allowed and re-priced at its own quantity and price,
     /// that a limit exit and a market exit with a current feed are not paced, and that a held exit
     /// carries no pacing.
