@@ -422,6 +422,7 @@ fn error_codes_are_stable() {
         (NumError::NotPositive, "not_positive"),
         (NumError::DivisionByZero, "division_by_zero"),
         (NumError::AboveOne, "above_one"),
+        (NumError::Unimplemented, "unimplemented"),
     ];
     for (error, code) in all {
         assert_eq!(error.code(), code);

@@ -40,6 +40,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* CI runs build, tests, and lint on every push; main is protected.
 - **E1-2 (Must)** As an engineer, I want an ADR template and coding conventions so that
   decisions and code stay consistent.
+- **E1-3 (Should)** As an engineer, I want the pending-test gate to read a failure's *cause* rather
+  than its text, so that no wording in a test can stand in for the stub it is meant to reach
+  (DEC-137, gap 1's remainder; the coordinator's round-2 ruling item 4).
+  *Accepted when:* `cargo xtask ci pending` accepts only the `Err` value printed after
+  `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
+  `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
+  message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
+  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate.
 
 ### E2 Market data
 
@@ -156,6 +164,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
+- **E7-7 (Must, M6)** As the founder, I want one order placed end to end on my Alpaca paper account
+  through the real crates, so that integration defects appear before the Phase 1 soak
+  ([task brief](tasks/E7-7-tracer-bullet.md), [DEC-138](04-decision-log.md#decisions)).
+  *Accepted when:* the whole path — validated mandate, stored market data, the E4-2 moving-average
+  baseline as the signal, the order builder's sizing, the risk gate, the runtime's decision cycle with
+  journal-before-acting, the executor's idempotent intent, the Alpaca paper connector, the journal
+  record, and a reconciliation after a restart — runs in CI against recorded Alpaca paper fixtures and
+  touches no network; with any one stage replaced by a stub returning its crate's `Unimplemented`
+  error, zero orders reach the connector and nothing is journaled as submitted; and a manual paper run
+  places exactly one order, journals its intent before sending it, and refuses any host that is not
+  Alpaca's paper host.
 
 ### E8 Escalation and approvals
 
@@ -339,3 +358,38 @@ From the final review of mandate spec v0.3:
 - Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
 - Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
 - Add fuzz coverage for multiple agents, trims, and owner exits.
+
+From the independent reviews of stream J's implementation (`mandate-research`, #158 and #159):
+
+- `reference/mandate/ref.py`'s `lineage_fold` starts from an empty lineage map and ignores the
+  `lineages` input, while `fold_theses` continues from the `LineageState` it is given. No case
+  exercises the difference; align `ref.py` or record the continuation in DEC-132.
+- `ref.py`'s `T()` reads instants to whole seconds while the crate compares nanoseconds, so the two
+  differ one nanosecond past a horizon. The crate is right; every fixture uses whole seconds.
+- `ref.py`'s `_group_claimed` defaults an ungrouped instrument's group to its asset id, so a group id
+  spelling that asset id claims it; DEC-132 item 12 and the merged test admit it. Align `ref.py`.
+- `ResearchError::Unimplemented` is returned by no entry point, but stays until
+  `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
+
+From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
+a coordinator ruling rather than left undone (DEC-131 item 25):
+
+- Match a kill switch's lift to the acknowledgment **of that switch**. A confirmed `RiskLimit` switch
+  is lifted today by a looser account-stream copy caused by any `OwnerAcknowledged` the fold has
+  seen, because `KillSwitchActivated` does not name the limit that pulled it. When it carries its
+  limit, the lift must match the acknowledgment's subject to the switch (round-4 review finding 1).
+- Give a kill switch pulled while the agent is already `paused` a way to lift. It writes no
+  `AgentModeChanged`, so it has no `mode_event`, nothing on the account stream can confirm it, and
+  only a new deployment clears it. It fails closed, but two limits in one cycle then keep the agent
+  paused until a redeploy (round-4 review finding 2).
+- Shrink `outstanding` on a terminal account-stream outcome (`GateDecided` denial, `OrderAbandoned`,
+  a terminal order state), which needs the executor's `client_order_id`-to-intent mapping from M6.
+  Until then a restart after any order waits one clean `ReconciliationRun` before the agent can trade
+  or propose a discretionary exit (DEC-131 item 25(d), round-2 review minor 3).
+- Record an approval response that arrives in the same step as the tightening which cancels its
+  approval as `refused` rather than `recorded`; nothing is handed either way, so it is record
+  accuracy (DEC-131 item 25(j), round-1 review finding 9).
+- Act on a granted ASK. `PendingApproval` binds the instrument, version, deadline, and whether the
+  action adds risk, and carries no order body, so the runtime records a response and re-proposes at
+  the next evaluation rather than placing the bound order; the bound content is M7's (DEC-131 item
+  25(a)).

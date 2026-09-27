@@ -16,7 +16,7 @@ use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{Price, Qty, Ratio, Usd};
 use mandate_time::{Date, UtcNanos};
 
-use crate::document::{LimitAction, OnComplete};
+use crate::document::{LadderAction, OnComplete};
 use crate::validate::ValidatedMandate;
 use crate::{SchemaDec, SpecError};
 
@@ -343,12 +343,16 @@ pub enum RiskEvent {
     },
     RiskLimitTriggered {
         limit: LimitKey,
-        action: LimitAction,
+        /// The action the limit took, which for a rung is the rung's own — `scale_sizes` included, so
+        /// this is a [`LadderAction`] and not the two-valued [`LimitAction`](crate::document::LimitAction)
+        /// of `daily_loss_action`
+        /// (DEC-128 item 29). A daily-loss trigger converts, which is total and loses nothing.
+        action: LadderAction,
         reason: Option<TriggerReason>,
     },
     RiskLimitLifted {
         limit: LimitKey,
-        action: Option<LimitAction>,
+        action: Option<LadderAction>,
         reason: Option<LiftReason>,
     },
     HighWaterMarkReset {
@@ -392,8 +396,15 @@ pub enum RiskEvent {
 /// Whether a version or an allocation change took effect (§5.10).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApplyResult {
-    Applied { allocation_change: Option<Usd> },
-    Rejected { reason: Rejection },
+    Applied {
+        allocation_change: Option<Usd>,
+        /// The fraction a floor-loosening version raised `max_loss_from_allocation` to, which §5.10's
+        /// payload carries beside the classification and MC-R21 step 5 states (DEC-128 item 29).
+        max_loss_from_allocation: Option<SchemaDec>,
+    },
+    Rejected {
+        reason: Rejection,
+    },
 }
 
 /// The scope a kill switch touches. An agent-scoped flatten touches only that agent, and never the
@@ -528,10 +539,20 @@ pub struct Confirmation {
 
 impl Confirmation {
     /// Credits `elapsed_s` by the condition at the interval's start, then takes this input's
-    /// condition. True when the limit triggers here.
-    pub fn update(&mut self, breached: bool, elapsed_s: u64, need_s: u32) -> bool {
+    /// condition. `Ok(true)` when the limit triggers here.
+    ///
+    /// # Errors
+    /// A step that cannot be decided is an error, not a silent `false`: the breach clock a rung
+    /// reads cannot be allowed to stand still because the sum did not fit or because E6-4 has not
+    /// been implemented yet (DEC-137).
+    pub fn update(
+        &mut self,
+        breached: bool,
+        elapsed_s: u64,
+        need_s: u32,
+    ) -> Result<bool, SpecError> {
         let _ = (breached, elapsed_s, need_s);
-        false
+        Err(SpecError::Unimplemented)
     }
 
     /// True while breach time is accumulating, which is what a step reports as `pending`.

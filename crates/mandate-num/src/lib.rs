@@ -53,6 +53,11 @@ pub enum NumError {
     DivisionByZero,
     #[error("the value must not exceed one")]
     AboveOne,
+    /// The story named in the pending tests has not been implemented yet, so the call cannot be
+    /// answered at all. A stub says so rather than returning a figure or another error a caller
+    /// could mistake for arithmetic (DEC-137).
+    #[error("this arithmetic is not implemented yet")]
+    Unimplemented,
 }
 
 impl NumError {
@@ -66,6 +71,7 @@ impl NumError {
             Self::NotPositive => "not_positive",
             Self::DivisionByZero => "division_by_zero",
             Self::AboveOne => "above_one",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }

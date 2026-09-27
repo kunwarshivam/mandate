@@ -19,7 +19,6 @@ use mandate_research::{
 /// so each journals only its `ThesisRevised`; revision 4 is over the cap of 3, so it is refused with
 /// `lineage_retired` and the retirement removes the instrument in the same step.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n17_revisions_one_to_three_are_admitted_and_the_fourth_retires_the_lineage() {
     let f = FoldScenario::new(
         3,
@@ -80,7 +79,6 @@ fn mc_n17_revisions_one_to_three_are_admitted_and_the_fourth_retires_the_lineage
 
 /// The retiring step's second event is the removal, with the size counted after it.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n17_the_retiring_step_journals_the_removal_with_the_size_after() {
     let f = FoldScenario::new(
         1,
@@ -115,7 +113,6 @@ fn mc_n17_the_retiring_step_journals_the_removal_with_the_size_after() {
 
 /// MC-N24: the cap-one base, where revision 2 retires and removes.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n24_retirement_removes_the_instrument_it_holds() {
     let f = FoldScenario::new(
         1,
@@ -146,7 +143,6 @@ fn mc_n24_retirement_removes_the_instrument_it_holds() {
 /// MC-N27: the over-cap revision also has a forbidden direction, so check 1 decides and retirement
 /// never happens. Retirement follows the journaled reason, never the revision number.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n27_an_over_cap_revision_an_earlier_check_refuses_retires_nothing() {
     let mut f = FoldScenario::new(
         1,
@@ -191,7 +187,6 @@ fn mc_n27_an_over_cap_revision_an_earlier_check_refuses_retires_nothing() {
 /// MC-N28: another lineage renews the same instrument before the first one retires, so the retirement
 /// has nothing to remove.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n28_retirement_never_removes_an_instrument_another_lineage_now_holds() {
     let f = FoldScenario::new(
         1,
@@ -246,7 +241,6 @@ fn mc_n28_retirement_never_removes_an_instrument_another_lineage_now_holds() {
 
 /// MC-N18: two admissions in one lineage, and no step ever carries a score forward (MI-18).
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n18_a_revision_never_carries_its_predecessor_score_forward() {
     let f = FoldScenario::new(
         3,
@@ -275,7 +269,6 @@ fn mc_n18_a_revision_never_carries_its_predecessor_score_forward() {
 /// MC-N19: a revision with no predecessor is ignored, and the lineage still appears in the fold's
 /// state at zero — the step ran, so the lineage is known, but nothing was admitted.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n19_a_revision_without_a_predecessor_id_is_ignored_and_admits_nothing() {
     let mut f = FoldScenario::new(
         3,
@@ -311,7 +304,6 @@ fn mc_n19_a_revision_without_a_predecessor_id_is_ignored_and_admits_nothing() {
 
 /// A lineage that retires twice in one fold removes once: `retired` is already true the second time.
 #[test]
-#[ignore = "pending E17-9"]
 fn a_lineage_retires_and_removes_only_once() {
     let f = FoldScenario::new(
         1,
@@ -342,7 +334,6 @@ fn a_lineage_retires_and_removes_only_once() {
 
 /// A fold naming one thesis twice is an input error, not a silent double admission.
 #[test]
-#[ignore = "pending E17-9"]
 fn a_fold_that_names_one_thesis_twice_is_an_error() {
     let f = FoldScenario::new(
         3,

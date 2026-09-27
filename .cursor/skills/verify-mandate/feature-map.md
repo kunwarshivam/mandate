@@ -156,8 +156,9 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+and DEC-131, and implemented in the DEC-77 stage-3 PR: every stub carries its real logic, the 88
+pending markers are gone, and all 101 tests run live: the round-3 sanctioned case plus the twelve the
+implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -173,10 +174,13 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   `FlattenPlan` — which has no account-wide variant, so `cancel-all` and `close-position` are
   unrepresentable), `crates/mandate-runtime/src/ports.rs` (the pure `IdGen`, `GateDryRun`, and
   `OrderPlan` in `Ports`, and the shell-driven `IntentSink` and `TimerSource`),
-  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
+  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant), and
+  `crates/mandate-runtime/src/payload.rs` (the one place a journaled payload becomes a core value and
+  a core value becomes a canonical payload again, so every draft the runtime writes is one its own
+  fold can rebuild state from). Over
   `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (75 hand cases: the fold's sequencing and loud
   refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
   approvals, version application, recovery, and the kill switches),
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
@@ -188,8 +192,54 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
-- **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
-  `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
+- **Run:** `cargo nextest run -p mandate-runtime`, and the mutation gate the implementation PR must
+  pass, `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants`.
+
+## The tracer bullet: one order end to end on Alpaca paper
+
+Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
+paths arrive with the tests PR, which updates this entry.
+
+- **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
+  intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
+  `docs/specs/trading-domain.md` section 5.1 (limit openings in the regular session), 5.7 (the order
+  lifecycle), 9.1 (the binding gate), 10 (paper mode), 11 (reconciliation), 12 (the account-stream
+  events); `docs/specs/mandate.md` section 5.3, 6, 8; `docs/specs/journal.md` section 5.1 (append,
+  idempotency, fencing), 5.2 (write before acting), 8 (replay), 11 (verification); ADR-0001 ES-02,
+  ES-06, ES-09, ES-19, ES-20, ES-21, ES-23; backlog E7-7.
+- **Code:** `mandate-shell` (new, layer 8, safety-critical, impure): the process shell, one adapter per
+  stage of the path, the effect runner that appends every journal draft before it hands an intent, the
+  host controls, and the `mandate-tracer` binary. It holds no trading logic — no sizing, no gating,
+  no pricing, no state machine, and no arithmetic on money or quantity. It binds
+  `mandate-spec` (`validate`), `mandate-marketdata` (`dataset::read_manifest`,
+  `dataset::partition::read`), `mandate-backtest` (`Strategy::signal`, E4-2's moving-average baseline),
+  `mandate-builder` (sizing and autonomy, behind `OrderPlan`), `mandate-risk` (`evaluate`, behind
+  `GateDryRun`; the binding call stays inside the executor), `mandate-runtime` (`handle`, `fold`,
+  `IntentSink`), `mandate-executor` (`handle`, `reconcile`, `ClientOrderId::for_intent`),
+  `mandate-alpaca` (`TradingClient`, `AlpacaPaperHttp`, `PAPER_HOST`), and the journal, all unchanged.
+- **Tests:** the fail-closed suite in a `#[cfg(test)]` module inside `src/`, one case per `Stage` built
+  from an exhaustive match, each built with the **other** stages as permissive doubles so the path
+  reaches the stubbed stage, asserting zero `IntentSink::hand` calls, zero `IntentProposed` and
+  `OrderSubmitted` drafts, zero submissions, and the stage's stable error code; an all-stubs case for
+  the state the repository is in; an all-doubles case that proves the harness can place an order at
+  all. Then `tests/tracer.rs`, the end-to-end run over recorded Alpaca paper scenarios (`happy`,
+  `gate_denies`, `gate_allow_with_not_reached_refused`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
+  `oversized_proposal`, `outlier_close`, `duplicate_after_restart`,
+  `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, `reconcile_mismatch_pauses`) with
+  a golden journal and an injected clock and `IdGen`; the refusal of a configured host and the host
+  scanner; the environment scanner over every committed draft, which `verify_events` does not cover;
+  and property tests that no mapping of any source error can permit an order and that an opening
+  `Allow` carrying a `NotReached` check is refused. The gate itself already refuses an opening while
+  any §9.1 check is owed (`Err(GateError::Unimplemented)`, DEC-129 item 29), so the shell only declines
+  to soften that and holds no list of its own of which story owns which check. `AlpacaPaperHttp` is never constructed in a test, so no test can
+  reach a network (ES-19). Planted bugs per test (16): the task brief.
+- **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
+  this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
+  `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
+- **Run:** `cargo nextest run -p mandate-shell`; the manual paper run is
+  `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset <dir> --journal <dsn>
+  --confirm-paper --place-one-order`, which needs both flags, refuses any attempt to configure a host,
+  and cannot reach one of its own because the crate's `allowed_external` names no HTTP client.
 
 ## Idempotent executor and broker connector
 
@@ -212,7 +262,8 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
   account-wide variants need an `AccountWideScope`, plus the `BrokerConnector` trait; an intent enters as
-  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-7 shell, since
+  `Input::Intent` and the adapter implementing stream I's `IntentSink` lives in the layer-8 shell
+  (`mandate-shell`; DEC-138 amends DEC-133 item 1), since
   the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
@@ -239,7 +290,10 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-crate exists as stubs and tests; the implementation PRs fill it in story by story.
+implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine.
+Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
+implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
+check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -253,7 +307,10 @@ crate exists as stubs and tests; the implementation PRs fill it in story by stor
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
-  `surveillance`), `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
+  `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
+  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
+  refusal of an opening while a check is owed),
+  `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
   `AccountType`, `AssetClass` and `Side` and changes neither them nor `mandate-time`.
@@ -382,9 +439,16 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
   broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
+  `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
+  state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
+  breach confirmation either side of the window, the two-quote hard trigger, the rollover, the daily
+  lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
+  carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
+  `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
-  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
+  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
+  PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
   and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
@@ -582,17 +646,27 @@ proves each pending test fails on them (DEC-110).
 
 ## Pending tests fail on the stubs
 
-- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110; the story playbook step 8.
-- **Code:** `pending_problems` and `pending_tests` in `xtask/src/main.rs` (markers found on tokens
-  in every tracked or untracked `.rs` file, run in one nextest `--run-ignored ignored-only`).
+- **Spec:** DEC-77 (tests PR, implementation PR, status PR), DEC-110, DEC-137; the story playbook
+  step 8. Gap 1 is closed only in part: the gate reads a failure's text, not its cause (E1-3).
+- **Code:** `pending_problems`, `pending_tests`, `STUB_MARKERS`, `names_a_stub` and
+  `generated_pending_markers` in `xtask/src/main.rs` (markers found on tokens in every tracked or
+  untracked `.rs` file, run in one nextest `--run-ignored ignored-only`; each failure must carry
+  its stub's own report, and a marker the scan cannot attach to a named function is a `markers`
+  failure).
 - **Tests:** the `xtask` unit tests (markers in comments, doc comments, strings, raw strings, split
-  across lines; result matching) and a fixture workspace in a temporary git repository in which
-  committed, uncommitted, and untracked pending tests pass on the stubs.
+  across lines; a marker inside a `macro_rules!` body, on a `$`-named function, or on no named
+  function at all; which bodies are stubs; result matching) and a fixture workspace in a temporary
+  git repository in
+  which committed, uncommitted, and untracked pending tests pass on the stubs or fail away from
+  them.
 - **Run:** `cargo nextest run -p xtask`; `cargo xtask ci pending`.
 
 ## Repository automation
 
-- **Code:** `xtask`: `xtask/src/main.rs` (every CI job), `xtask/layers.toml` (crate layers and
-  safety-critical policy), `.cargo/mutants.toml` (approved equivalent mutants).
+- **Code:** `xtask`: `xtask/src/main.rs` (every CI job, including `mutants_outcome`,
+  `mutant_verdicts` and `is_stub_function`, which exempt an `Unimplemented` stub body of a crate
+  with pending tests, on a missed-mutant exit status, and nothing else),
+  `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
+  equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
 - **Run:** `cargo xtask check`.
