@@ -212,8 +212,15 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   (replay and `fold_version`), 9 (the account-stream catalogue); `docs/HLD.md` section 5 ("Durability")
   and 6.D (crash recovery); ADR-0001 ES-02, ES-06, ES-09, ES-19, ES-20, ES-21, ES-23, ES-24; backlog
   E7-2, E7-3, E7-4.
-- **Code:** `crates/mandate-executor/src/state.rs` (`ExecutorState` and `fold`),
+- **Code:** `crates/mandate-executor/src/state.rs` (`ExecutorState`),
+  `crates/mandate-executor/src/fold.rs` (`fold`, the effect-free replay),
   `crates/mandate-executor/src/step.rs` (`handle`, the only producer of effects),
+  `crates/mandate-executor/src/batch.rs` (one step's drafts, folded as they are drafted),
+  `crates/mandate-executor/src/intent.rs` (the intent protocol),
+  `crates/mandate-executor/src/orders.rs` (the section 5.7 state machine, fills, restrictions),
+  `crates/mandate-executor/src/kill.rs` (the agent-scoped kill switch),
+  `crates/mandate-executor/src/codec.rs` and `crates/mandate-executor/src/payload.rs` (journal
+  names and canonical payload fields),
   `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
   parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
   `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
@@ -231,7 +238,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   the two crates share a layer) and `mandate-alpaca` (new; the paper
   trading client behind an injected transport and clock, the endpoint allowlist, `secrecy`-held
   credentials from an injected lookup, raw-text numbers into `mandate-num`, and the broker status and
-  reject mappings). It calls `mandate-risk` directly as the binding gate and reads
+  reject mappings). Until the gate port lands, `gate.rs` runs only the account-stream checks and
+  journals every verdict as `evaluation: account_stream_only`, a partial gate that no caller outside
+  tests may drive; it reads
   `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
   connector is not here.
 - **Tests:** `crates/mandate-executor/tests/hand.rs`,

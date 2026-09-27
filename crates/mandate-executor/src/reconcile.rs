@@ -411,7 +411,8 @@ fn fees(
 
 /// The agents a restriction reaches: those with an order in the instrument, or every agent the
 /// executor knows of, and always the account-wide `*` when none is attributable, so a mismatch
-/// never pauses nobody.
+/// never pauses nobody. The set holds `*` at most once: it is a mode key only once a restriction
+/// for every agent is folded, and an account-wide call inserts it anyway.
 fn agents(state: &ExecutorState, instrument: Option<&InstrumentId>) -> Vec<String> {
     let mut named: BTreeSet<String> = state
         .orders
@@ -425,7 +426,6 @@ fn agents(state: &ExecutorState, instrument: Option<&InstrumentId>) -> Vec<Strin
                 .into_iter()
                 .flatten(),
         )
-        .filter(|agent| !agent.is_empty() && agent != EVERY_AGENT)
         .collect();
     if named.is_empty() || instrument.is_none() {
         named.insert(EVERY_AGENT.to_owned());
