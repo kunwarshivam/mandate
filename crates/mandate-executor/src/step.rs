@@ -92,7 +92,9 @@ fn superseded(unresolved: &Input, input: &Input) -> bool {
 
 /// `Input::Started`: the process folded the stream and took an epoch. Every order whose outcome
 /// the journal does not know is queried, a received intent too old to submit is abandoned, and
-/// the startup reconciliation is requested; nothing is submitted until it has run.
+/// the startup reconciliation is requested. The intents waiting at the start are not submitted
+/// until it has run; a new intent received before it runs is gated and submitted at once (see
+/// `resume`).
 fn started(
     state: &mut ExecutorState,
     epoch: WriterEpoch,
