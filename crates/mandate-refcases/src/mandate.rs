@@ -17,13 +17,18 @@ use std::sync::Arc;
 
 use mandate_canon::Digest;
 use mandate_canon::Value;
+use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{Price, Qty, Usd};
 use mandate_spec::document::{ModelId, ProvenanceMap};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
-use mandate_spec::risk;
+use mandate_spec::risk::LiftReason;
+use mandate_spec::risk::{
+    self, ApplyResult, Input, KillScope, Latch, Opening, RemovalReason, RestrictionReason,
+    RiskEvent, StopReason, TriggerReason, UniverseChange,
+};
 use mandate_spec::validate::{RegisteredModel, ValidatedMandate, ValidationContext};
-use mandate_spec::{Mandate, MandateVersion, SpecError};
-use mandate_time::{Date, UtcNanos};
+use mandate_spec::{DecGrammar, Mandate, MandateVersion, SchemaDec, SpecError};
+use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
@@ -174,6 +179,43 @@ const STEP_EXPECT_KEYS: &[&str] = &[
     "error",
 ];
 
+/// The members every `risk_state` step carries, whatever its kind.
+const STEP_COMMON_KEYS: &[&str] = &["event", "at", "session", "expect"];
+
+/// The ten §5.2 input kinds and the fields the harness reads for each. A field the fixture adds and
+/// `risk_step` would ignore fails its case, the DEC-85 rule one level below `expect`: a `mark` that
+/// grew an `ask`, or a `fill` that grew a `fee`, would otherwise change nothing and be believed.
+const STEP_KEYS: &[(&str, &[&str])] = &[
+    ("mark", &["bid", "sane"]),
+    ("fill", &["side", "qty", "price"]),
+    ("risk_day_started", &[]),
+    ("owner_acknowledged", &["restriction"]),
+    ("allocation_change", &["delta_usd"]),
+    ("clock", &[]),
+    ("universe_changed", &["instrument", "change", "reason"]),
+    (
+        "floor_loosened",
+        &[
+            "new_max_loss_from_allocation",
+            "confirmed_at",
+            "independent_approval",
+        ],
+    ),
+    ("agent_stopped", &["reason"]),
+    ("goal_complete", &[]),
+];
+
+/// What the agent held when a `risk_state` case opened (§5.2). `mark_max_age_s` is the data profile's
+/// staleness limit, which every case takes from `harness_defaults` instead of stating.
+const INITIAL_KEYS: &[&str] = &[
+    "position_qty",
+    "avg_cost",
+    "asset_class",
+    "at",
+    "inherited_loss_usd",
+    "mark_max_age_s",
+];
+
 /// Fails the case for any key the harness does not know, at the top level and inside every `expect`,
 /// so a key added to the fixture cannot be silently ignored (DEC-85).
 fn unread_keys(case: &Json) -> Result<(), String> {
@@ -196,6 +238,10 @@ fn unread_keys(case: &Json) -> Result<(), String> {
 fn unread_expect_keys(case: &Json) -> Result<(), String> {
     let kind = str_at(case, "kind")?;
     if kind == "risk_state" {
+        if let Some(initial) = case.get("initial") {
+            unknown_members(initial, INITIAL_KEYS)
+                .map_err(|unknown| format!("`initial` fields not interpreted: {unknown}"))?;
+        }
         for (index, step) in case
             .get("steps")
             .and_then(Json::as_array)
@@ -204,12 +250,12 @@ fn unread_expect_keys(case: &Json) -> Result<(), String> {
             .iter()
             .enumerate()
         {
+            let number = index.saturating_add(1);
+            unread_step_fields(step)
+                .map_err(|unknown| format!("step {number}: fields not interpreted: {unknown}"))?;
             if let Some(expect) = step.get("expect") {
                 unknown_members(expect, STEP_EXPECT_KEYS).map_err(|unknown| {
-                    format!(
-                        "step {}: expectations not interpreted: {unknown}",
-                        index.saturating_add(1)
-                    )
+                    format!("step {number}: expectations not interpreted: {unknown}")
                 })?;
             }
         }
@@ -223,6 +269,18 @@ fn unread_expect_keys(case: &Json) -> Result<(), String> {
             .map_err(|unknown| format!("expectations not interpreted: {unknown}")),
         None => Ok(()),
     }
+}
+
+/// One step's own fields: the four every step carries plus the ones its `event` kind declares. An
+/// unknown kind fails here rather than at [`risk_step`], so the message names the kind once.
+fn unread_step_fields(step: &Json) -> Result<(), String> {
+    let kind = str_at(step, "event").map_err(|_| "an `event` name".to_owned())?;
+    let (_, own) = STEP_KEYS
+        .iter()
+        .find(|(name, _)| *name == kind)
+        .ok_or_else(|| format!("`{kind}` is not a risk input the harness applies"))?;
+    let known: Vec<&str> = STEP_COMMON_KEYS.iter().chain(own.iter()).copied().collect();
+    unknown_members(step, &known)
 }
 
 /// The members of `value` that are not in `known`, joined, or `Ok` when there are none.
@@ -411,9 +469,528 @@ fn change_case(fixture: &Json, case: &Json) -> Result<(), String> {
 
 /// `kind: risk_state` — the fold of §5.2's inputs, each step's snapshot, its journal in order, and the
 /// limits with breach time accumulating.
+///
+/// Every step is applied to one state, in order, and every member of every step's `expect` is compared:
+/// the ten reported figures, the three name sets, the journal list position by position and member by
+/// member, and the refusal a rejected input carries. A step that states no `error` requires
+/// `rejection: None`, so a refusal cannot slip past by being ignored.
 fn risk_state_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = patched(fixture, case)?;
-    Err(not_implemented("`mandate_spec::risk::RiskState`"))
+    let validated = validated_mandate(fixture, case)?;
+    let initial = at_of(case, "initial")?;
+    let asset_class = AssetClass::parse(str_at(initial, "asset_class")?)
+        .map_err(|e| format!("`initial.asset_class`: {}", e.code()))?;
+    let opening = Opening {
+        position_qty: num(Qty::parse(str_at(initial, "position_qty")?), "position_qty")?,
+        avg_cost: num(Price::parse(str_at(initial, "avg_cost")?), "avg_cost")?,
+        asset_class,
+        at: instant(at(initial, "at")?, "initial.at")?,
+        inherited_loss_usd: num(
+            Usd::parse(str_at(initial, "inherited_loss_usd")?),
+            "inherited_loss_usd",
+        )?,
+        mark_max_age_s: match initial.get("mark_max_age_s") {
+            Some(_) => u32_of(initial, "mark_max_age_s")?,
+            None => u32_of(at_of(fixture, "harness_defaults")?, "mark_max_age_s")?,
+        },
+    };
+    let clock = HarnessSessionClock::for_class(asset_class)?;
+    let mut state = spec(
+        risk::RiskState::open(&validated, &opening, &clock),
+        "RiskState::open",
+    )?;
+    for (index, step) in list_at(case, "steps")?.iter().enumerate() {
+        let number = index.saturating_add(1);
+        let outcome = spec(state.step(&risk_step(step)?), "RiskState::step")
+            .map_err(|e| format!("step {number}: {e}"))?;
+        check_step(at_of(step, "expect")?, &outcome).map_err(|e| format!("step {number}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// The case's patched document, parsed and validated. Every `risk_state` case's mandate must be a
+/// [`ValidatedMandate`], because that is the only thing [`risk::RiskState::open`] takes: a risk state is
+/// a state *of a mandate nobody may bypass* (DEC-128 item 8).
+fn validated_mandate(fixture: &Json, case: &Json) -> Result<ValidatedMandate, String> {
+    let mandate = must_parse(&patched(fixture, case)?)?;
+    ValidatedMandate::new(mandate, &context_defaults(fixture)?, &[])
+        .map_err(|e| format!("the mandate is not valid here: {e}"))
+}
+
+/// The strict parse, with the DEC-77 message when the parser is still a stub.
+fn must_parse(document: &Value) -> Result<Mandate, String> {
+    Mandate::parse(document).map_err(|e| {
+        if e.code() == "unimplemented" {
+            not_implemented("the mandate parser")
+        } else {
+            format!("the parse rejected this case's document: {}", e.code())
+        }
+    })
+}
+
+/// One step as a [`risk::Step`]: the risk clock, the session it arrived in, and the input itself.
+///
+/// The event names are the fixture's, and every field each event kind carries is read — [`STEP_KEYS`]
+/// is the same list, swept for keys this function would ignore.
+///
+/// An `agent_stopped` step that names no reason is an owner stop: the one such case states none and
+/// journals `owner_stop`, and §5.10's other three stop reasons come from a goal or an end date rather
+/// than from an input.
+fn risk_step(step: &Json) -> Result<risk::Step, String> {
+    let kind = str_at(step, "event")?;
+    let input = match kind {
+        "mark" => Input::Mark {
+            bid: num(Price::parse(str_at(step, "bid")?), "bid")?,
+            sane: at(step, "sane")?
+                .as_bool()
+                .ok_or("`sane` is not a boolean")?,
+        },
+        "fill" => Input::Fill {
+            side: match str_at(step, "side")? {
+                "buy" => Side::Buy,
+                "sell" => Side::Sell,
+                other => return Err(format!("`side` is not a side: `{other}`")),
+            },
+            qty: num(Qty::parse(str_at(step, "qty")?), "qty")?,
+            price: num(Price::parse(str_at(step, "price")?), "price")?,
+        },
+        "risk_day_started" => Input::RiskDayStarted,
+        "owner_acknowledged" => Input::OwnerAcknowledged {
+            restriction: match str_at(step, "restriction")? {
+                "daily_loss" => Latch::DailyLoss,
+                "drawdown_ladder" => Latch::DrawdownLadder,
+                "lifetime_floor" => Latch::LifetimeFloor,
+                other => return Err(format!("`restriction` is not a latch: `{other}`")),
+            },
+        },
+        "allocation_change" => Input::AllocationChange {
+            delta_usd: num(Usd::parse(str_at(step, "delta_usd")?), "delta_usd")?,
+        },
+        "clock" => Input::Clock,
+        "universe_changed" => Input::UniverseChanged {
+            instrument: AssetId::parse(str_at(step, "instrument")?)
+                .map_err(|e| format!("`instrument`: {}", e.code()))?,
+            change: match str_at(step, "change")? {
+                "admitted" => UniverseChange::Admitted,
+                "removed" => UniverseChange::Removed,
+                other => return Err(format!("`change` is not a universe change: `{other}`")),
+            },
+            reason: removal_reason(str_at(step, "reason")?)?,
+        },
+        "floor_loosened" => Input::FloorLoosened {
+            new_max_loss_from_allocation: SchemaDec::parse(
+                str_at(step, "new_max_loss_from_allocation")?,
+                DecGrammar::OpenFraction,
+            )
+            .map_err(|e| format!("`new_max_loss_from_allocation`: {e}"))?,
+            confirmed_at: instant(at(step, "confirmed_at")?, "confirmed_at")?,
+            independent_approval: at(step, "independent_approval")?
+                .as_bool()
+                .ok_or("`independent_approval` is not a boolean")?,
+        },
+        "agent_stopped" => Input::AgentStopped {
+            reason: match step.get("reason").and_then(Json::as_str) {
+                None | Some("owner_stop") => StopReason::OwnerStop,
+                Some("profit_stop_reached") => StopReason::ProfitStopReached,
+                Some("end_date") => StopReason::EndDate,
+                Some("goal_complete") => StopReason::GoalComplete,
+                Some(other) => return Err(format!("`reason` is not a stop reason: `{other}`")),
+            },
+        },
+        "goal_complete" => Input::GoalComplete,
+        other => return Err(format!("`{other}` is not a risk input the harness applies")),
+    };
+    Ok(risk::Step {
+        at: instant(at(step, "at")?, "at")?,
+        session: MarketSession::parse_condition_form(str_at(step, "session")?)
+            .map_err(|e| format!("`session`: {}", e.code()))?,
+        input,
+    })
+}
+
+fn removal_reason(text: &str) -> Result<RemovalReason, String> {
+    match text {
+        "thesis_admitted" => Ok(RemovalReason::ThesisAdmitted),
+        "thesis_expired" => Ok(RemovalReason::ThesisExpired),
+        "thesis_invalidated" => Ok(RemovalReason::ThesisInvalidated),
+        "lineage_retired" => Ok(RemovalReason::LineageRetired),
+        "eligibility_lost" => Ok(RemovalReason::EligibilityLost),
+        "operator_halt" => Ok(RemovalReason::OperatorHalt),
+        "version_applied" => Ok(RemovalReason::VersionApplied),
+        other => Err(format!("`{other}` is not a §5.10 universe-change reason")),
+    }
+}
+
+/// Every member of one step's `expect`, compared against the outcome.
+fn check_step(expect: &Json, outcome: &risk::Outcome) -> Result<(), String> {
+    let snapshot = &outcome.snapshot;
+    for (key, actual) in [
+        ("agent_equity", snapshot.agent_equity.to_string()),
+        ("high_water_mark", snapshot.high_water_mark.to_string()),
+        ("drawdown", snapshot.drawdown.to_string()),
+        ("day_start_equity", snapshot.day_start_equity.to_string()),
+        ("daily_pnl", snapshot.daily_pnl.to_string()),
+        (
+            "daily_pnl_fraction",
+            snapshot.daily_pnl_fraction.to_string(),
+        ),
+        ("capital_base", snapshot.capital_base.to_string()),
+        ("size_factor", snapshot.size_factor.to_string()),
+        ("net_contributed", snapshot.net_contributed.to_string()),
+        (
+            "agent_mode",
+            agent_mode_name(snapshot.agent_mode).to_owned(),
+        ),
+    ] {
+        expect_eq(key, actual, str_at(expect, key)?.to_owned())?;
+    }
+    expect_set(
+        expect,
+        "restrictions",
+        snapshot
+            .restrictions
+            .iter()
+            .map(|r| r.as_str().to_owned())
+            .collect(),
+    )?;
+    expect_set(
+        expect,
+        "instrument_restrictions",
+        snapshot
+            .instrument_restrictions
+            .iter()
+            .map(|r| r.as_str().to_owned())
+            .collect(),
+    )?;
+    expect_set(
+        expect,
+        "pending",
+        outcome
+            .pending
+            .iter()
+            .map(|limit| limit.journal_name())
+            .collect(),
+    )?;
+    expect_rejection(expect, outcome.rejection)?;
+    expect_journal(expect, &outcome.journal)
+}
+
+/// A set of names, compared as a set: §5.6 and §5.9 fix which names are present, not the order a
+/// reader lists them in. A name listed twice fails rather than collapsing into the set.
+fn expect_set(expect: &Json, key: &str, actual: BTreeSet<String>) -> Result<(), String> {
+    let listed = list_at(expect, key)?;
+    let wanted = listed
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("`{key}` holds something that is not a name"))
+        })
+        .collect::<Result<BTreeSet<String>, String>>()?;
+    ensure(wanted.len() == listed.len(), || {
+        format!("`{key}` names the same thing twice")
+    })?;
+    expect_eq(key, actual, wanted)
+}
+
+/// The refusal, if the step states one. A step with no `error` requires no rejection, which is what
+/// stops a refused input from passing as an applied one (DEC-128 item 16).
+fn expect_rejection(expect: &Json, rejection: Option<risk::Rejection>) -> Result<(), String> {
+    let wanted = match expect.get("error") {
+        Some(value) => Some(
+            value
+                .as_str()
+                .ok_or("`error` is not a reason code")?
+                .to_owned(),
+        ),
+        None => None,
+    };
+    expect_eq("error", rejection.map(|r| r.code().to_owned()), wanted)
+}
+
+/// The journal, position by position and member by member.
+///
+/// Both sides are compared as complete member maps, so an event that carries a member the case does not
+/// state fails as surely as one that is missing a member it does state: §5.10's shapes are the
+/// expectation, and a `reason` appearing where plain confirmation is meant is a different event.
+fn expect_journal(expect: &Json, journal: &[risk::RiskEvent]) -> Result<(), String> {
+    let listed = list_at(expect, "journal")?;
+    ensure(journal.len() == listed.len(), || {
+        format!(
+            "journal: expected {} event(s) {:?}, got {} {:?}",
+            listed.len(),
+            listed
+                .iter()
+                .map(|e| e.get("type").and_then(Json::as_str).unwrap_or("?"))
+                .collect::<Vec<_>>(),
+            journal.len(),
+            journal
+                .iter()
+                .map(|e| event_members(e).get("type").cloned().unwrap_or_default())
+                .collect::<Vec<_>>()
+        )
+    })?;
+    for (index, (event, wanted)) in journal.iter().zip(listed).enumerate() {
+        let members = wanted
+            .as_object()
+            .ok_or_else(|| format!("journal event {index} is not an object"))?
+            .iter()
+            .map(|(k, v)| Ok((k.clone(), scalar(v, k)?)))
+            .collect::<Result<BTreeMap<String, String>, String>>()?;
+        expect_eq(
+            &format!("journal event {}", index.saturating_add(1)),
+            event_members(event),
+            members,
+        )?;
+    }
+    Ok(())
+}
+
+/// A fixture scalar as the text the harness compares.
+fn scalar(value: &Json, what: &str) -> Result<String, String> {
+    match value {
+        Json::String(text) => Ok(text.clone()),
+        Json::Bool(flag) => Ok(flag.to_string()),
+        Json::Number(number) => Ok(number.to_string()),
+        _ => Err(format!("`{what}` is not a value this harness compares")),
+    }
+}
+
+/// One event as the members §5.10 gives it, `type` included, with an absent optional member omitted
+/// rather than written as a null — which is how the fixture states them.
+fn event_members(event: &risk::RiskEvent) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    match event {
+        RiskEvent::MandateVersionApplied { result } => {
+            out.insert("type".to_owned(), "MandateVersionApplied".to_owned());
+            match result {
+                ApplyResult::Applied { allocation_change } => {
+                    out.insert("result".to_owned(), "applied".to_owned());
+                    if let Some(delta) = allocation_change {
+                        out.insert("allocation_change".to_owned(), delta.to_string());
+                    }
+                }
+                ApplyResult::Rejected { reason } => {
+                    out.insert("result".to_owned(), "rejected".to_owned());
+                    out.insert("reason".to_owned(), reason.code().to_owned());
+                }
+            }
+        }
+        RiskEvent::RiskDayStarted { day_start_equity } => {
+            out.insert("type".to_owned(), "RiskDayStarted".to_owned());
+            out.insert("day_start_equity".to_owned(), day_start_equity.to_string());
+        }
+        RiskEvent::RiskLimitTriggered {
+            limit,
+            action,
+            reason,
+        } => {
+            out.insert("type".to_owned(), "RiskLimitTriggered".to_owned());
+            out.insert("limit".to_owned(), limit.journal_name());
+            out.insert("action".to_owned(), action.as_str().to_owned());
+            if let Some(reason) = reason {
+                out.insert("reason".to_owned(), trigger_reason_name(*reason).to_owned());
+            }
+        }
+        RiskEvent::RiskLimitLifted {
+            limit,
+            action,
+            reason,
+        } => {
+            out.insert("type".to_owned(), "RiskLimitLifted".to_owned());
+            out.insert("limit".to_owned(), limit.journal_name());
+            if let Some(action) = action {
+                out.insert("action".to_owned(), action.as_str().to_owned());
+            }
+            if let Some(reason) = reason {
+                out.insert("reason".to_owned(), lift_reason_name(*reason).to_owned());
+            }
+        }
+        RiskEvent::HighWaterMarkReset { from, to } => {
+            out.insert("type".to_owned(), "HighWaterMarkReset".to_owned());
+            out.insert("from".to_owned(), from.to_string());
+            out.insert("to".to_owned(), to.to_string());
+        }
+        RiskEvent::AgentModeApplied { from, to } => {
+            out.insert("type".to_owned(), "AgentModeApplied".to_owned());
+            out.insert("from".to_owned(), agent_mode_name(*from).to_owned());
+            out.insert("to".to_owned(), agent_mode_name(*to).to_owned());
+        }
+        RiskEvent::KillSwitchActivated { scope, initiator } => {
+            out.insert("type".to_owned(), "KillSwitchActivated".to_owned());
+            out.insert("scope".to_owned(), kill_scope_name(*scope).to_owned());
+            out.insert("initiator".to_owned(), initiator.journal_name());
+        }
+        RiskEvent::UniverseChanged {
+            instrument,
+            change,
+            reason,
+        } => {
+            out.insert("type".to_owned(), "UniverseChanged".to_owned());
+            out.insert("instrument".to_owned(), instrument.as_str().to_owned());
+            out.insert(
+                "change".to_owned(),
+                universe_change_name(*change).to_owned(),
+            );
+            out.insert("reason".to_owned(), removal_reason_name(*reason).to_owned());
+        }
+        RiskEvent::InstrumentRestrictionChanged {
+            restriction,
+            reason,
+            active,
+        } => {
+            out.insert("type".to_owned(), "InstrumentRestrictionChanged".to_owned());
+            out.insert("restriction".to_owned(), restriction.as_str().to_owned());
+            out.insert("reason".to_owned(), restriction_reason_name(*reason));
+            out.insert("active".to_owned(), active.to_string());
+        }
+        RiskEvent::GoalCompleted {
+            reason,
+            then,
+            on_complete,
+        } => {
+            out.insert("type".to_owned(), "GoalCompleted".to_owned());
+            if let Some(reason) = reason {
+                out.insert("reason".to_owned(), reason.as_str().to_owned());
+            }
+            if let Some(then) = then {
+                out.insert("then".to_owned(), then.as_str().to_owned());
+            }
+            if let Some(on_complete) = on_complete {
+                out.insert("on_complete".to_owned(), on_complete.as_str().to_owned());
+            }
+        }
+        RiskEvent::PositionReleased { qty } => {
+            out.insert("type".to_owned(), "PositionReleased".to_owned());
+            out.insert("qty".to_owned(), qty.to_string());
+        }
+        RiskEvent::AgentStopped {
+            reason,
+            loss_carry_usd,
+        } => {
+            out.insert("type".to_owned(), "AgentStopped".to_owned());
+            out.insert("reason".to_owned(), reason.as_str().to_owned());
+            out.insert("loss_carry_usd".to_owned(), loss_carry_usd.to_string());
+        }
+    }
+    out
+}
+
+/// The §5.9 spelling of a mode. Written here rather than taken from `mandate-domain`, which has none:
+/// the fixture's word is the expectation, so the harness must know it independently.
+fn agent_mode_name(mode: AgentMode) -> &'static str {
+    match mode {
+        AgentMode::Normal => "normal",
+        AgentMode::ExitsOnly => "exits_only",
+        AgentMode::Paused => "paused",
+        AgentMode::Stopped => "stopped",
+    }
+}
+
+fn trigger_reason_name(reason: TriggerReason) -> &'static str {
+    match reason {
+        TriggerReason::HardTrigger => "hard_trigger",
+        TriggerReason::HardBreachPending => "hard_breach_pending",
+        TriggerReason::ResolvedAtRollover => "resolved_at_rollover",
+        TriggerReason::NewDayBreach => "new_day_breach",
+        TriggerReason::AfterReset => "after_reset",
+    }
+}
+
+fn lift_reason_name(reason: LiftReason) -> &'static str {
+    match reason {
+        LiftReason::OwnerAcknowledged => "owner_acknowledged",
+        LiftReason::VersionLoosened => "version_loosened",
+        LiftReason::HardBreachCleared => "hard_breach_cleared",
+    }
+}
+
+fn restriction_reason_name(reason: RestrictionReason) -> String {
+    match reason {
+        RestrictionReason::NoSaneMark => "no_sane_mark".to_owned(),
+        RestrictionReason::SaneMark => "sane_mark".to_owned(),
+        RestrictionReason::Removal(removal) => removal_reason_name(removal).to_owned(),
+    }
+}
+
+fn universe_change_name(change: UniverseChange) -> &'static str {
+    match change {
+        UniverseChange::Admitted => "admitted",
+        UniverseChange::Removed => "removed",
+    }
+}
+
+fn removal_reason_name(reason: RemovalReason) -> &'static str {
+    match reason {
+        RemovalReason::ThesisAdmitted => "thesis_admitted",
+        RemovalReason::ThesisExpired => "thesis_expired",
+        RemovalReason::ThesisInvalidated => "thesis_invalidated",
+        RemovalReason::LineageRetired => "lineage_retired",
+        RemovalReason::EligibilityLost => "eligibility_lost",
+        RemovalReason::OperatorHalt => "operator_halt",
+        RemovalReason::VersionApplied => "version_applied",
+    }
+}
+
+fn kill_scope_name(scope: KillScope) -> &'static str {
+    match scope {
+        KillScope::Agent => "agent",
+    }
+}
+
+/// The clock §5.2 and §5.5 count staleness and scale-lift delays on: regular-session seconds for an
+/// equity, every second for crypto.
+///
+/// The calendar is `mandate-time`'s NYSE data, which is where the platform's own regular session comes
+/// from; `mandate-spec` holds none, which is why [`risk::SessionClock`] is a parameter (DEC-128 item 23).
+struct HarnessSessionClock {
+    calendar: Option<ExchangeCalendar>,
+}
+
+impl HarnessSessionClock {
+    fn for_class(asset_class: AssetClass) -> Result<Self, String> {
+        Ok(Self {
+            calendar: match asset_class {
+                AssetClass::Crypto => None,
+                AssetClass::UsEquity => Some(
+                    ExchangeCalendar::us_equities()
+                        .map_err(|e| format!("the US equities calendar: {}", e.code()))?,
+                ),
+            },
+        })
+    }
+}
+
+impl risk::SessionClock for HarnessSessionClock {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        let Some(calendar) = self.calendar.as_ref() else {
+            return whole_seconds(from, to);
+        };
+        let mut total: u64 = 0;
+        let mut date = from.date();
+        while date <= to.date() {
+            for span in calendar.sessions(date)? {
+                if span.session() != Session::Regular {
+                    continue;
+                }
+                let start = span.start().max(from);
+                let end = span.end().min(to);
+                if start < end {
+                    total = total.saturating_add(whole_seconds(start, end)?);
+                }
+            }
+            date = date.next()?;
+        }
+        Ok(total)
+    }
+}
+
+/// Whole seconds from `from` to `to`, and [`SpecError::ClockWentBackwards`] if that is negative —
+/// the same answer the risk state gives a step that goes back in time.
+fn whole_seconds(from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+    to.secs()
+        .checked_sub(from.secs())
+        .and_then(|seconds| u64::try_from(seconds).ok())
+        .ok_or(SpecError::ClockWentBackwards)
 }
 
 /// `kind: risk_day` — the risk day containing an instant and its bounds (§5.4).
@@ -464,16 +1041,7 @@ fn risk_day_case(case: &Json) -> Result<(), String> {
 /// `stop_reason` are absent from a case that is not done (MC-L05), and a `Done` status where the case
 /// expects none fails on `done` before any of them is looked for.
 fn goal_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let document = patched(fixture, case)?;
-    let mandate = Mandate::parse(&document).map_err(|e| {
-        if e.code() == "unimplemented" {
-            not_implemented("the mandate parser")
-        } else {
-            format!("the parse rejected this case's document: {}", e.code())
-        }
-    })?;
-    let validated = ValidatedMandate::new(mandate, &context_defaults(fixture)?, &[])
-        .map_err(|e| format!("the mandate is not valid here: {e}"))?;
+    let validated = validated_mandate(fixture, case)?;
     let state = at_of(case, "state")?;
     let inputs = GoalInputs {
         now: instant(at(state, "now")?, "now")?,

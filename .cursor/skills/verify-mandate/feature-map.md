@@ -382,9 +382,16 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
   broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
+  `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
+  state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
+  breach confirmation either side of the window, the two-quote hard trigger, the rollover, the daily
+  lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
+  carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
+  `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
-  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
+  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
+  PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
   and J and fail as "not interpreted until" their owning story. A rejection that carries no reason

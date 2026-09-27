@@ -260,7 +260,11 @@ fn every_owned_expectation_member_is_read() {
 #[test]
 fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
     let fixture = fixture();
-    for (kind, stub) in [("risk_day", "risk_day"), ("goal", "parser")] {
+    for (kind, stub) in [
+        ("risk_day", "risk_day"),
+        ("goal", "parser"),
+        ("risk_state", "parser"),
+    ] {
         let ids: Vec<String> = fixture["cases"]
             .as_array()
             .expect("a case list")
@@ -277,4 +281,92 @@ fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
             );
         }
     }
+}
+
+/// Every field of every `risk_state` step is one the harness reads, and so is every field of `initial`.
+///
+/// The `expect` sweep is one level down from the case; a step's own fields are another, and a `mark` that
+/// grew an `ask` or a `fill` that grew a `fee` would otherwise change nothing and be believed. The same
+/// holds for `initial`, which is what `RiskState::open` is built from.
+#[test]
+fn every_risk_state_step_field_and_initial_field_is_read() {
+    let fixture = fixture();
+    let ids: Vec<String> = fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .filter(|c| c["kind"] == "risk_state")
+        .map(|c| c["id"].as_str().expect("an id").to_owned())
+        .collect();
+    assert_eq!(ids.len(), 24, "family R is 24 cases");
+    let planted = "a_field_the_harness_does_not_read".to_owned();
+    let mut steps_planted = 0;
+    for id in &ids {
+        for (where_, plant) in [("step", true), ("initial", false)] {
+            let mut doctored = fixture.clone();
+            let slot = doctored["cases"]
+                .as_array_mut()
+                .expect("a case list")
+                .iter_mut()
+                .find(|c| c["id"] == id.as_str())
+                .expect("the case");
+            if plant {
+                let first = slot["steps"]
+                    .as_array_mut()
+                    .expect("a step list")
+                    .first_mut()
+                    .expect("at least one step");
+                first
+                    .as_object_mut()
+                    .expect("a step object")
+                    .insert(planted.clone(), Json::Null);
+                steps_planted += 1;
+            } else {
+                slot["initial"]
+                    .as_object_mut()
+                    .expect("an initial object")
+                    .insert(planted.clone(), Json::Null);
+            }
+            let failure = run(doctored, id).expect_err("an unread field must fail the case");
+            assert!(
+                failure.contains(&planted),
+                "{id}: the {where_} failure must name the field it did not read, got: {failure}"
+            );
+        }
+    }
+    assert_eq!(steps_planted, 24, "every case's first step was doctored");
+}
+
+/// A step whose `event` the harness does not apply fails its case, naming the kind.
+///
+/// Ten input kinds is the whole of §5.2's list; an eleventh would be a rule nothing folds, and a harness
+/// that quietly skipped it would report a pass over a shorter walk than the case states.
+#[test]
+fn a_step_whose_event_the_harness_does_not_apply_fails_the_case() {
+    let fixture = fixture();
+    let id = fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .find(|c| c["kind"] == "risk_state")
+        .and_then(|c| c["id"].as_str())
+        .expect("a risk_state case")
+        .to_owned();
+    let mut doctored = fixture.clone();
+    let slot = doctored["cases"]
+        .as_array_mut()
+        .expect("a case list")
+        .iter_mut()
+        .find(|c| c["id"] == id.as_str())
+        .expect("the case");
+    slot["steps"]
+        .as_array_mut()
+        .expect("a step list")
+        .first_mut()
+        .expect("at least one step")["event"] = Json::String("teleported".to_owned());
+    let failure = run(doctored, &id).expect_err("an unknown input kind must fail the case");
+    assert!(
+        failure.contains("teleported"),
+        "{id}: the failure must name the kind it could not apply, got: {failure}"
+    );
 }
