@@ -4115,7 +4115,7 @@ fn a_protective_order_submits_with_no_buying_power() {
             .fold_one(&event)
             .expect("the protected position folds");
     }
-    let mut shell = shell.restart_ready(&ports);
+    let (mut shell, _) = shell.restart(&ports);
     assert!(
         shell
             .state
