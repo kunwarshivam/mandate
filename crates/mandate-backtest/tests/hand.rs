@@ -279,6 +279,81 @@ fn a_negative_sharpe_rounds_away_from_zero() {
     );
 }
 
+/// A non-zero risk-free rate is subtracted from the mean **before** the Sharpe, and from nothing
+/// else (DEC-127 item 6, FR-4.2). On the series 100000 → 102000 → 103020 the period returns are
+/// exactly 0.02 and 0.01, so `return_sum` is 0.03, `return_sum_of_squares` is 0.0005, the mean is
+/// 0.015, and the sample variance is (2 × 0.0005 − 0.03²) ÷ (2 × 1) = 0.0001 ÷ 2 = 0.00005, whose
+/// ceiling root is 0.007071067812. At `risk_free_per_period` 0.005 the excess mean is
+/// 0.015 − 0.005 = 0.01 and the squared Sharpe is 0.01² ÷ 0.00005 = **2** exactly, whose floor root
+/// is 1.414213562373; annualized, 2 × 252 = 504 with a floor root of 22.449944320643. Ignoring the
+/// rate would report 0.015² ÷ 0.00005 = 4.5 and a Sharpe of 2.121320343559, and the rate touches
+/// neither the variance nor the returns, so both are asserted at their risk-free-free values.
+#[test]
+fn a_non_zero_risk_free_rate_is_subtracted_before_the_sharpe() {
+    let metrics = Metrics::of(
+        usd("100000"),
+        &observations(&["102000", "103020"]),
+        &no_trades(),
+        &MetricsConfig {
+            periods_per_year: 252,
+            risk_free_per_period: ratio("0.005"),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(metrics.risk_free_per_period, ratio("0.005"));
+    assert_eq!(metrics.return_sum, ratio("0.03"));
+    assert_eq!(metrics.return_sum_of_squares, ratio("0.0005"));
+    assert_eq!(metrics.mean_return, ratio("0.015"));
+    assert_eq!(
+        metrics.variance,
+        Some(ratio("0.00005")),
+        "the rate is not part of the dispersion"
+    );
+    assert_eq!(metrics.volatility, Some(ratio("0.007071067812")));
+    assert_eq!(metrics.sharpe_sign, Sign::Positive);
+    assert_eq!(metrics.sharpe_squared, Some(ratio("2")));
+    assert_eq!(metrics.sharpe, Some(ratio("1.414213562373")));
+    assert_eq!(metrics.sharpe_squared_annualized, Some(ratio("504")));
+    assert_eq!(metrics.sharpe_annualized, Some(ratio("22.449944320643")));
+    assert_eq!(
+        metrics.total_return,
+        ratio("0.0302"),
+        "the reported return is the run's, never net of the rate"
+    );
+}
+
+/// A risk-free rate above the mean makes the excess negative, so the Sharpe is negative although
+/// every period return and the run itself are positive: on the same series, at
+/// `risk_free_per_period` 0.02, the excess mean is 0.015 − 0.02 = −0.005, the squared Sharpe is
+/// 0.000025 ÷ 0.00005 = 0.5, and the figure is rounded towards minus infinity, so its magnitude is
+/// the ceiling root: −0.707106781187, and annualized −11.224972160322 from 0.5 × 252 = 126. A Sharpe
+/// that read the mean instead of the excess would report a positive sign here.
+#[test]
+fn a_risk_free_rate_above_the_mean_makes_the_sharpe_negative() {
+    let metrics = Metrics::of(
+        usd("100000"),
+        &observations(&["102000", "103020"]),
+        &no_trades(),
+        &MetricsConfig {
+            periods_per_year: 252,
+            risk_free_per_period: ratio("0.02"),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        metrics.mean_return > Ratio::ZERO && metrics.total_return > Ratio::ZERO,
+        "the run made money at every period"
+    );
+    assert_eq!(metrics.sharpe_sign, Sign::Negative);
+    assert_eq!(metrics.sharpe_squared, Some(ratio("0.5")));
+    assert_eq!(metrics.sharpe, Some(ratio("-0.707106781187")));
+    assert_eq!(metrics.sharpe_squared_annualized, Some(ratio("126")));
+    assert_eq!(metrics.sharpe_annualized, Some(ratio("-11.224972160322")));
+    assert_eq!(metrics.absent, None);
+}
+
 /// Annualizing multiplies the variance and the squared Sharpe by the period count, exactly, and the
 /// annualized roots are taken from those products: 0.000906221436 × 252 = 0.228367801872 with a
 /// ceiling root of 0.477878438384, and 0.11482183684 × 252 = 28.93510288368 with a floor root of
@@ -1083,6 +1158,69 @@ fn a_bar_later_than_the_charge_hour_still_charges_its_day() {
 
     assert_eq!(run.report.strategy.fees_charged, usd("0.01"));
     assert_eq!(run.report.strategy.fees_accrued, Usd::ZERO);
+}
+
+/// One standard-time trading day of two regular bars, on 2026-11-16: the Monday eight weeks after
+/// [`seven_days`]' first day, which falls after daylight time ends on 2026-11-01, so its New York
+/// offset is −05:00 and not the −04:00 every other fixture here is written at. The price series is
+/// [`seven_days`]' first day, and `extra` is the bar that ends the run.
+fn standard_time_day(extra: Vec<mandate_sim::SimBar>) -> Vec<mandate_sim::SimBar> {
+    let mut bars = vec![
+        standard_auction(
+            "2026-11-16",
+            "09:30",
+            ["100", "100.2", "99.8", "100.1", "8000"],
+        ),
+        standard_bar(
+            "2026-11-16",
+            "15:59",
+            ["100.1", "100.2", "99.9", "100", "9000"],
+        ),
+    ];
+    bars.extend(extra);
+    bars
+}
+
+/// The charging instant is 20:00 **America/New_York**, not 20:00 at a fixed offset (spec §6.2,
+/// DEC-127 item 17): in standard time the instant is 01:00 UTC of the next date, so a bar at 19:30
+/// EST — 00:30 UTC, which a fixed −04:00 offset would read as 20:30 and charge — charges nothing,
+/// while a bar at exactly 20:00 EST charges the day.
+///
+/// The strategy is buy-and-hold, which orders at the first bar, so the case needs one trading day
+/// rather than the crossover's four: 10,000 USD buys at 100.10 × (1 + 25 bps) = 100.350250, put on
+/// the penny grid against the order at 100.35, and 10,000 ÷ 100.35 truncates to 99 whole shares,
+/// which accrue CAT 0.00001 × 99 = 0.00099 on 2026-11-16 and are charged
+/// `round(0.00099, 2, ceiling)` = 0.01. Every other charging case here sits in daylight time, where
+/// a fixed −04:00 offset and the zone agree, so this is the one that tells them apart.
+#[test]
+fn a_standard_time_charge_follows_new_york_and_not_a_fixed_offset() {
+    let config = run_config(equity(), buy_and_hold(), "10000");
+
+    let before = run(
+        &config,
+        &standard_time_day(vec![standard_after_hours(
+            "2026-11-16",
+            "19:30",
+            ["100", "100.1", "99.9", "100", "500"],
+        )]),
+    )
+    .unwrap();
+    assert_eq!(before.report.strategy.filled_qty, qty("99"));
+    assert_eq!(before.report.strategy.fees_charged, Usd::ZERO);
+    assert_eq!(before.report.strategy.fees_accrued, usd("0.00099"));
+
+    let after = run(
+        &config,
+        &standard_time_day(vec![standard_overnight(
+            "2026-11-16",
+            "20:00",
+            ["100", "100.1", "99.9", "100", "500"],
+        )]),
+    )
+    .unwrap();
+    assert_eq!(after.report.strategy.filled_qty, qty("99"));
+    assert_eq!(after.report.strategy.fees_charged, usd("0.01"));
+    assert_eq!(after.report.strategy.fees_accrued, Usd::ZERO);
 }
 
 /// A crypto fee accrued on a run's **last** UTC date stays accrued, because its charge is 00:00 UTC of
