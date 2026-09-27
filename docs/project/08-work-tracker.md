@@ -120,6 +120,11 @@ issues are the record; this table is the summary
 
 - **Counsel**: engage securities counsel on the adviser question (compliance questions 31 to 35)
   now, during Phase 0 (DEC-102). Nothing trades live until this is answered.
+- **Strategy (issue #177)**: decided 2026-09-27. [DEC-141](04-decision-log.md#decisions) accepts the
+  owner's own agent as an optional MCP channel over the owner-input API (story E10-6, after the
+  tracer); the complete product and DEC-97 lead. See the
+  [competitive landscape](../product/03-competitive-landscape.md) and the
+  [strategy options](../product/10-strategy-options.md).
 - **Design questions**: answer the [design questions](09-mandate-rewrite-questions.md) (universe
   size, thesis lifetime, research weight and cost cap, the DEC-99 evaluation, the DEC-100 values, the
   Robinhood paper stage, retail `auto`, how theses are shown) before the mandate spec rewrite starts.
