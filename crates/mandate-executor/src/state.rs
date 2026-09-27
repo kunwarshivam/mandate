@@ -304,14 +304,10 @@ impl ExecutorState {
     /// The model is §7.2's margin row, since an Alpaca account is always a margin account: the
     /// broker's last reported cash moved by every fill since (a buy lowers it by quantity × price,
     /// and a sell's proceeds count, unsettled or not), less paper's simulated fees charged per
-    /// `(family, day)` bucket at `round(bucket, 2, ceiling)` (§6.2, §10, DEC-104). The cash slice
-    /// adds the broker's own unposted fees. `None` until the broker has reported a complete
-    /// account, or if the arithmetic overflows: no buying power is ever guessed.
-    ///
-    /// It stays `pub` because this crate's integration tests, a separate crate, read it. Until the
-    /// cash slice (slice 6) subtracts the broker's unposted fees, nothing may read it for a
-    /// decision: the backlog row "Blocks the gate port reading `buying_power`" says so, and the gate
-    /// port that would read it is not wired.
+    /// `(family, day)` bucket at `round(bucket, 2, ceiling)`, and less the broker's own unposted
+    /// fees at their ceiling cent (§6.2, §7.2, §10, DEC-104). `None` until the broker has reported
+    /// a complete account, or if the arithmetic overflows: no buying power is ever guessed. This is
+    /// §7.2's equities row; a crypto order reads [`Self::crypto_buying_power`].
     pub fn buying_power(&self) -> Option<Usd> {
         let observed = self
             .observed
@@ -336,6 +332,16 @@ impl ExecutorState {
             .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
             .ok()?;
         model.min(observed.buying_power).checked_sub(reserved).ok()
+    }
+
+    /// §7.2's crypto row: the equities figure, no more than the broker's
+    /// `non_marginable_buying_power`, since a crypto buy cannot use margin.
+    pub fn crypto_buying_power(&self) -> Option<Usd> {
+        let observed = self.observed.as_ref()?;
+        Some(
+            self.buying_power()?
+                .min(observed.non_marginable_buying_power),
+        )
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner

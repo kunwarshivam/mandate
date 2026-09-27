@@ -1041,6 +1041,31 @@ mod buying_power_tests {
     }
 
     #[test]
+    fn a_crypto_order_reads_no_more_than_the_non_marginable_figure() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let mut report = account("1000", "5000");
+        for pair in &mut report {
+            if pair.0 == "non_marginable_buying_power" {
+                pair.1 = text("600");
+            }
+        }
+        stream.fold("AccountStateObserved", report)?;
+        assert_eq!(stream.state.buying_power(), Some(usd("1000")?));
+        assert_eq!(
+            stream.state.crypto_buying_power(),
+            Some(usd("600")?),
+            "§7.2's crypto row: the equities figure, capped by the broker's non-marginable one"
+        );
+        stream.fold("AccountStateObserved", account("400", "5000"))?;
+        assert_eq!(
+            stream.state.crypto_buying_power(),
+            Some(usd("400")?),
+            "and never more than the equities figure"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn a_blocking_flag_folds_the_observed_account_as_blocked() -> Result<(), ExecutorError> {
         for flag in [
             "trading_blocked",
