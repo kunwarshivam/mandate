@@ -3209,6 +3209,42 @@ proptest! {
             "`{}` raised the size factor",
             on_complete
         );
+        let expected = match on_complete {
+            "release" => Restriction::Retired,
+            _ => Restriction::GoalComplete,
+        };
+        prop_assert!(
+            completed.snapshot.restrictions.contains(&expected),
+            "`{}` must leave {:?} behind, and left {:?}",
+            on_complete,
+            expected,
+            completed.snapshot.restrictions
+        );
+        let applied = match on_complete {
+            "hold_protected" => "HoldProtected",
+            "disarm_ladder" => "DisarmLadder",
+            _ => "Release",
+        };
+        prop_assert_eq!(
+            trace(&completed.journal).first().cloned(),
+            Some(format!("goal done None None Some({applied})")),
+            "`{}`: the completion is journalled first, with the `on_complete` the owner chose",
+            on_complete
+        );
+        if on_complete == "release" {
+            prop_assert_eq!(
+                completed.snapshot.agent_mode,
+                AgentMode::Stopped,
+                "`release` retires the agent"
+            );
+            prop_assert!(
+                completed
+                    .journal
+                    .iter()
+                    .any(|event| matches!(event, RiskEvent::PositionReleased { .. })),
+                "and hands the position to the owner"
+            );
+        }
     }
 
     /// One bad print never latches a limit or flattens anything (§5.6, MI-4, DEC-63, planted bug 2).
@@ -3263,10 +3299,29 @@ proptest! {
                 gap_s
             );
         }
+        let printed = ok(step_of(&outcomes, 2))?;
         prop_assert_eq!(
-            outcomes.last().map(|o| o.snapshot.agent_mode),
-            Some(AgentMode::Normal),
-            "and the print's temporary `exits_only` is cleared by the quote above the level"
+            printed.snapshot.agent_equity,
+            usd(&(i128::from(wild) * 100).to_string()),
+            "the print moved equity, so the fold did something with it"
+        );
+        prop_assert_eq!(
+            printed.snapshot.restrictions.clone(),
+            BTreeSet::from([Restriction::HardBreach]),
+            "every bid under 96 is past the 1.25 x 0.06 x 10500 = 787.5 hard level, which §5.6 escalates \
+             to `exits_only` at once and latches nothing"
+        );
+        prop_assert_eq!(printed.snapshot.agent_mode, AgentMode::ExitsOnly);
+        let recovered = ok(step_of(&outcomes, 3))?;
+        prop_assert_eq!(recovered.snapshot.agent_equity, usd("13000"));
+        prop_assert!(
+            recovered.snapshot.restrictions.is_empty(),
+            "and the quote above the level clears it"
+        );
+        prop_assert_eq!(
+            recovered.snapshot.agent_mode,
+            AgentMode::Normal,
+            "the print's temporary `exits_only` is cleared by the quote above the level"
         );
     }
 
