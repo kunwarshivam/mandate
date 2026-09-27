@@ -552,7 +552,6 @@ proptest! {
     /// §8.5: the journaled reason is the **lowest-numbered** failing check, against an oracle that
     /// computes the failing set unordered and takes its minimum (oracle 2).
     #[test]
-    #[ignore = "pending E17-3"]
     fn the_reason_is_the_lowest_numbered_failing_check(d in dials()) {
         let s = scenario_from(&d);
         let expected = oracle::failing_checks(&d);
@@ -583,7 +582,6 @@ proptest! {
 
     /// §8.2: `ignored` is exactly a refusal by one of checks 1 to 3, never any other.
     #[test]
-    #[ignore = "pending E17-3"]
     fn ignored_is_exactly_the_first_three_checks(d in dials()) {
         let s = scenario_from(&d);
         let a = admit(&s.input()).expect("the crate decides");
@@ -602,7 +600,6 @@ proptest! {
     /// §8.5: a refusal admits nothing, and a single admission changes the universe by exactly one
     /// instrument, rebuilt from the events alone (oracle 1).
     #[test]
-    #[ignore = "pending E17-3"]
     fn a_refusal_never_grows_the_universe(d in dials()) {
         let s = scenario_from(&d);
         let WorkingUniverse::Known { instruments: before, .. } = s.universe.clone() else {
@@ -638,7 +635,6 @@ proptest! {
 
     /// MI-15: the universe never exceeds the effective ceiling and never repeats an instrument.
     #[test]
-    #[ignore = "pending E17-3"]
     fn the_universe_never_exceeds_its_ceiling_or_repeats(d in dials()) {
         let s = scenario_from(&d);
         let ceiling = usize::try_from(d.max_instruments).unwrap_or(usize::MAX);
@@ -662,7 +658,6 @@ proptest! {
 
     /// MI-16: admission never changes an envelope field, and never loosens an effective ceiling.
     #[test]
-    #[ignore = "pending E17-3"]
     fn admission_changes_no_envelope_field(d in dials()) {
         let s = scenario_from(&d);
         let before = s.mandate.clone();
@@ -684,7 +679,6 @@ proptest! {
     /// MI-17: an admitted thesis always reports the effective admission ceiling and
     /// `new_instrument`, which stream H's classify then applies. A refusal reports neither.
     #[test]
-    #[ignore = "pending E17-3"]
     fn first_order_facts_always_carry_new_instrument_and_the_ceiling(d in dials()) {
         let s = scenario_from(&d);
         let expected = s
@@ -716,7 +710,6 @@ proptest! {
 
     /// MI-20: no pinned mandate ever admits, whichever of checks 4 and 5 fires.
     #[test]
-    #[ignore = "pending E17-3"]
     fn no_pinned_mandate_ever_admits(d in dials()) {
         let mut pinned = d.clone();
         pinned.pinned = true;
@@ -736,7 +729,6 @@ proptest! {
     /// A thesis citing **no** source passes check 14 vacuously and is carried by check 15 instead,
     /// which is why the property is stated over theses with at least one source.
     #[test]
-    #[ignore = "pending E17-7"]
     fn a_source_off_the_allowlist_never_admits(d in dials()) {
         let mut off = d.clone();
         off.source_allowlisted = false;
@@ -752,7 +744,6 @@ proptest! {
 
     /// DEC-101: an uncorroborated thesis never admits.
     #[test]
-    #[ignore = "pending E17-7"]
     fn an_uncorroborated_thesis_never_admits(d in dials()) {
         let mut bare = d.clone();
         bare.corroborated = false;
@@ -764,7 +755,6 @@ proptest! {
 
     /// DEC-103: every admission is inside a pinned data universe.
     #[test]
-    #[ignore = "pending E17-3"]
     fn a_pinned_data_universe_is_a_superset_of_every_admission(d in dials()) {
         let mut outside = d.clone();
         outside.data_universe_excludes = true;
@@ -789,7 +779,6 @@ proptest! {
     /// that would hide a retired one from check 16. Each of those three, left unhandled, makes the
     /// property fail on a **correct** implementation — verified at 20,000 cases against one.
     #[test]
-    #[ignore = "pending E17-3"]
     fn text_never_changes_a_verdict(d in dials(), injection in "[a-zA-Z0-9 .,:_-]{1,120}") {
         let plain = scenario_from(&d);
         let before = admit(&plain.input()).expect("the crate decides").decision;
@@ -886,7 +875,6 @@ proptest! {
 
     /// MI-8, ES-21: the same inputs give the same decision, the same universe, and the same events.
     #[test]
-    #[ignore = "pending E17-3"]
     fn identical_inputs_give_identical_admissions_and_events(d in dials()) {
         let s = scenario_from(&d);
         let once = admit(&s.input()).expect("the crate decides");
@@ -897,7 +885,6 @@ proptest! {
 
     /// §8.5: a renewal and a first admission differ in exactly check 17.
     #[test]
-    #[ignore = "pending E17-3"]
     fn a_renewal_and_a_first_admission_differ_only_in_check_17(d in dials()) {
         let mut fresh = d.clone();
         fresh.already_active = false;
@@ -921,7 +908,6 @@ proptest! {
 
     /// §8.4, DEC-123: an offset is always inside its window, and is exact for every window.
     #[test]
-    #[ignore = "pending E17-3"]
     fn an_offset_is_below_its_window(ws in "[a-z_0-9]{1,24}", th in "[a-z_0-9-]{1,24}", window in 0_u32..100_000) {
         let offset = stagger_offset(&common::workspace(&ws), &thesis_id(&th), StaggerWindow(window))
             .expect("the offset is exact");
@@ -936,7 +922,6 @@ proptest! {
     /// MI-19: exactly the theses that ended remove their instrument, against a set computed from the
     /// entries' own predicates rather than from the crate's walk.
     #[test]
-    #[ignore = "pending E17-3"]
     fn exactly_the_ended_theses_remove_their_instrument(plan in expiry_plan()) {
         let (now, entries, lineages, retired_ids) = plan;
         let e = expire_theses(now, &entries, &lineages).expect("the removal is decided");
@@ -978,7 +963,6 @@ proptest! {
     /// §8.6: the journaled reason is the **first** that holds — invalidated, then a retired lineage,
     /// then the horizon — computed here in that order from the entry itself.
     #[test]
-    #[ignore = "pending E17-9"]
     fn the_removal_reason_is_the_first_that_holds(plan in expiry_plan()) {
         let (now, entries, lineages, retired_ids) = plan;
         let e = expire_theses(now, &entries, &lineages).expect("the removal is decided");
@@ -1011,7 +995,6 @@ proptest! {
     /// MI-19: a removal restricts that instrument only. Nothing that stayed gains a restriction, and
     /// no instrument outside the entry list is mentioned at all.
     #[test]
-    #[ignore = "pending E17-3"]
     fn a_removal_touches_no_other_instruments_restriction(plan in expiry_plan()) {
         let (now, entries, lineages, _) = plan;
         let e = expire_theses(now, &entries, &lineages).expect("the removal is decided");
@@ -1038,7 +1021,6 @@ proptest! {
     /// ES-21: no output depends on the order the inputs arrive in. The same entries shuffled give the
     /// same universe, the same removals, the same restrictions and the same events.
     #[test]
-    #[ignore = "pending E17-3"]
     fn no_output_depends_on_iteration_order(plan in expiry_plan(), rotation in 0_usize..8) {
         let (now, entries, lineages, _) = plan;
         let forwards = expire_theses(now, &entries, &lineages).expect("the removal is decided");
@@ -1059,7 +1041,6 @@ proptest! {
 
     /// §8.4: a release is never before its anchor, and never further than one window past it.
     #[test]
-    #[ignore = "pending E17-3"]
     fn a_release_is_never_before_its_anchor(
         admitted_secs in 1_000_000_000_i64..2_000_000_000,
         open_delta in -86_400_i64..86_400,
@@ -1089,7 +1070,6 @@ proptest! {
     /// DEC-120: the cost cap refuses **new** theses only. It never removes an instrument, never
     /// changes the universe, and a renewal is refused for the cap just as a first admission is.
     #[test]
-    #[ignore = "pending E17-3"]
     fn the_cost_cap_never_touches_an_existing_entry(d in dials()) {
         let mut over = d.clone();
         over.spend_at_cap = true;
@@ -1122,7 +1102,6 @@ proptest! {
     /// MI-15: every instrument in the universe after an admission is one that passed every check, and
     /// the only member that can be new is the subject.
     #[test]
-    #[ignore = "pending E17-3"]
     fn every_member_was_admitted_by_a_passing_check_set(d in dials()) {
         let s = scenario_from(&d);
         let WorkingUniverse::Known { instruments: before, .. } = s.universe.clone() else {
