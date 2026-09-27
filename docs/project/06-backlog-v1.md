@@ -194,12 +194,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 ### E8 Escalation and approvals
 
-- **E8-1 (Must)** As an approver, I want requests with the proposed action, alternatives,
-  evidence, risk impact, deadline, and default so that I can decide quickly.
-- **E8-2 (Must)** As an owner, I want timeouts to apply the safe default so that silence never
-  adds risk.
-- **E8-3 (Must)** As an owner, I want approved actions re-validated for drift so that stale
-  approvals are not executed blindly.
+- **E8-1 (Must, M7)** As an approver, I want requests with the proposed action, alternatives,
+  evidence, risk impact, deadline, and default so that I can decide quickly
+  ([task brief](tasks/M7-escalation-v0.md), [DEC-155](04-decision-log.md#decisions)). "Alternatives"
+  means the owner's choices (approve or skip, with the default stated), never platform-authored
+  alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
+- **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
+  adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
+- **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
+  approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
+  [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
