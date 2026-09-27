@@ -2,7 +2,7 @@
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_num::{Qty, Usd};
+use mandate_num::{Qty, SignedQty, Usd};
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
@@ -12,8 +12,8 @@ use crate::payload::{
 };
 use crate::state::{ExecutorState, IntentOutcome, IntentRecord, OrderDetail};
 use crate::types::{
-    AgentId, EventId, FoldedEvent, IntentBody, Mode, Order, OrderState, OrderType, Purpose,
-    RiskClock, SubmitOrder, TimeInForce,
+    AccountState, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order, OrderState,
+    OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// The copied cross-stream facts of journal spec §2. Each carries a `causation_id` naming its
@@ -105,9 +105,16 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "TradingDayStarted" | "ClockAdvanced" | "RiskDayStarted" | "MarkUpdated" => Ok(()),
-        "FillApplied"
-        | "LateFillApplied"
-        | "FeesCharged"
+        "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
+        "AccountRestrictionChanged" => {
+            state.account_state = match required_text(payload, "restriction")? {
+                "closing_only" => AccountState::ClosingOnly,
+                "blocked" => AccountState::Blocked,
+                _ => return Err(refused("restriction")),
+            };
+            Ok(())
+        }
+        "FeesCharged"
         | "CorporateActionPrepared"
         | "CorporateActionApplied"
         | "SettlementPosted"
@@ -116,7 +123,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         | "ExternalActivityIngested" => fill_events(),
         "AccountStateObserved"
         | "AccountSnapshotRecorded"
-        | "AccountRestrictionChanged"
         | "RejectObserved"
         | "ConductBreachDetected"
         | "BrokerExchangeRecorded" => account_events(),
@@ -503,6 +509,32 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
         record.outcome = IntentOutcome::Abandoned;
     }
     state.held.remove(&intent);
+    Ok(())
+}
+
+/// A fill is applied by its broker fill id, once: a re-ingested fill changes nothing
+/// (trading-domain spec §5.7, journal spec §5.2). It moves the position the gate's
+/// `sell_exceeds_available` reads, and the filled quantity of the order it names.
+fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let fill = FillId(required_text(payload, "fill_id")?.to_owned());
+    if state.fills.contains(&fill) {
+        return Ok(());
+    }
+    let instrument = instrument(payload)?;
+    let quantity = qty(payload, "qty_gross")?;
+    let signed = match side_of(required_text(payload, "side")?)? {
+        Side::Buy => SignedQty::from(quantity),
+        Side::Sell => SignedQty::from(quantity).negated(),
+    };
+    let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
+    *position = position.checked_add(signed)?;
+    if let Some(order) = optional_text(payload, "client_order_id")
+        .and_then(|raw| ClientOrderId::parse(raw).ok())
+        .and_then(|id| state.orders.get_mut(&id))
+    {
+        order.filled_qty = order.filled_qty.checked_add(quantity)?;
+    }
+    state.fills.insert(fill);
     Ok(())
 }
 

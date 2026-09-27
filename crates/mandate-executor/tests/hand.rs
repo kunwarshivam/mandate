@@ -889,7 +889,6 @@ fn a_gate_denial_on_re_check_abandons_the_intent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

@@ -334,7 +334,6 @@ fn an_observed_account_is_carried_field_for_field() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_first_pass_deny_is_recorded_with_its_reason_and_ends_the_intent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -389,7 +388,6 @@ fn an_opening_outside_the_working_universe_is_denied() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_sell_may_take_the_position_and_no_more() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -427,7 +425,6 @@ fn a_sell_may_take_the_position_and_no_more() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_filled_sell_no_longer_holds_quantity_back() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -504,7 +501,6 @@ fn a_confirmed_absent_sell_is_resubmitted_against_its_own_quantity() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn closing_only_denies_an_opening_and_lets_an_exit_through() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -540,7 +536,6 @@ fn closing_only_denies_an_opening_and_lets_an_exit_through() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn exits_only_denies_an_opening_and_holds_no_exit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1478,7 +1473,6 @@ fn the_client_order_id_grammar_is_the_derivations_and_nothing_else() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_blocked_account_holds_an_exit_for_the_broker_and_never_denies_it() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
