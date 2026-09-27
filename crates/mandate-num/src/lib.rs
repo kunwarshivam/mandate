@@ -52,6 +52,11 @@ pub enum NumError {
     DivisionByZero,
     #[error("the value must not exceed one")]
     AboveOne,
+    /// The story named in the pending tests has not been implemented yet, so the call cannot be
+    /// answered at all. A stub says so rather than returning a figure or another error a caller
+    /// could mistake for arithmetic (DEC-137).
+    #[error("this arithmetic is not implemented yet")]
+    Unimplemented,
 }
 
 impl NumError {
@@ -65,6 +70,7 @@ impl NumError {
             Self::NotPositive => "not_positive",
             Self::DivisionByZero => "division_by_zero",
             Self::AboveOne => "above_one",
+            Self::Unimplemented => "unimplemented",
         }
     }
 }
@@ -355,7 +361,7 @@ impl Price {
     /// reaches zero, and `division_by_zero` for an increment of zero.
     pub fn on_tick(self, tick: TickRule, adverse: Adverse) -> Result<Self, NumError> {
         let _ = (tick, adverse);
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 }
 
@@ -603,7 +609,7 @@ impl Usd {
     /// checking that the equity it divides by is positive.
     pub fn ratio_to(self, denominator: Usd, scale: u32, mode: Rounding) -> Result<Ratio, NumError> {
         let _ = (denominator, scale, mode);
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `truncate(self ÷ price, increment)`: the shares this amount of money buys at `price`, never
@@ -611,7 +617,7 @@ impl Usd {
     /// happen, because a [`Price`] is positive.
     pub fn shares_at(self, price: Price, increment: ShareIncrement) -> Result<Qty, NumError> {
         let _ = (price, increment);
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 }
 
@@ -724,40 +730,40 @@ impl Ratio {
     /// `self + other`, exact.
     pub fn checked_add(self, other: Self) -> Result<Self, NumError> {
         let _ = (self.exact(), other.exact());
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `self − other`, exact: a backtest report's excess return over its benchmark (DEC-127).
     pub fn checked_sub(self, other: Self) -> Result<Self, NumError> {
         let _ = other;
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `self × factor`, exact: annualizing a variance or a squared Sharpe by the period count
     /// (DEC-127 items 6 and 7), which is exact because the factor is an integer.
     pub fn times_int(self, factor: u32) -> Result<Self, NumError> {
         let _ = factor;
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `Σ values`, exact: a backtest report's `return_sum`.
     pub fn sum(values: &[Self]) -> Result<Self, NumError> {
         let _ = values;
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `Σ values²`, exact: a backtest report's `return_sum_of_squares`, which needs 24 places when
     /// the values hold 12.
     pub fn sum_of_squares(values: &[Self]) -> Result<Self, NumError> {
         let _ = values;
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `round(Σ values ÷ n, 12, half_even)`: the mean of a period-return series (DEC-127 item 4).
     /// `division_by_zero` for an empty series.
     pub fn mean(values: &[Self]) -> Result<Self, NumError> {
         let _ = values;
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `round((n × Σr² − (Σr)²) ÷ (n × (n − 1)), 12, half_even)`, the sample variance of a period
@@ -766,7 +772,7 @@ impl Ratio {
     /// which the caller reports as absent instead.
     pub fn sample_variance(sum: Self, sum_of_squares: Self, count: u32) -> Result<Self, NumError> {
         let _ = (sum, sum_of_squares, count);
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// `round(numerator² ÷ denominator, 12, half_even)`: a squared Sharpe from an excess mean and a
@@ -774,21 +780,21 @@ impl Ratio {
     /// reports as absent instead.
     pub fn squared_quotient(numerator: Self, denominator: Self) -> Result<Self, NumError> {
         let _ = (numerator, denominator);
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// The greatest value with 12 fractional digits whose square is at or below `self`, so a root
     /// taken this way never overstates the figure it stands for: a report's Sharpe with a
     /// non-negative sign (DEC-127 item 7). `negative` below zero.
     pub fn root_floor(self) -> Result<Self, NumError> {
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 
     /// The least value with 12 fractional digits whose square is at or above `self`, so a root taken
     /// this way never understates the figure it stands for: a report's volatility, and the magnitude
     /// of a negative Sharpe (DEC-127 items 6 and 7). `negative` below zero.
     pub fn root_ceiling(self) -> Result<Self, NumError> {
-        Err(NumError::Overflow)
+        Err(NumError::Unimplemented)
     }
 }
 
