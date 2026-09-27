@@ -864,3 +864,32 @@ fn an_unsorted_set_like_array_keeps_its_order_in_the_canonical_form() -> Result<
     }
     Ok(())
 }
+
+/// A condition string is a decimal only on a decimal field and only in the `decimal` grammar;
+/// anything else stays text for V-023 to judge.
+#[test]
+fn a_condition_string_is_a_decimal_only_on_a_decimal_field() -> Result<(), String> {
+    let value_of = |field: &str, value: &str| -> Result<ConditionValue, String> {
+        let when = json(&format!(
+            r#"{{"field": "{field}", "op": "eq", "value": "{value}"}}"#
+        ))?;
+        let document = with("/autonomy/rules/0/when", Some(when))?;
+        let mandate = Mandate::parse(&document).map_err(|e| e.code().to_owned())?;
+        match mandate.autonomy.rules.first().map(|r| &r.when) {
+            Some(Condition::Compare { value, .. }) => Ok(value.clone()),
+            other => Err(format!("{other:?}")),
+        }
+    };
+    assert!(
+        matches!(value_of("order_usd", "900")?, ConditionValue::Decimal(d) if d.as_str() == "900")
+    );
+    assert_eq!(
+        value_of("instrument", "900")?,
+        ConditionValue::Text("900".to_owned())
+    );
+    assert_eq!(
+        value_of("order_usd", "0.90")?,
+        ConditionValue::Text("0.90".to_owned())
+    );
+    Ok(())
+}
