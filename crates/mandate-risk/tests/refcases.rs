@@ -332,7 +332,7 @@ fn gate_scenario(id: &str) -> GateCase {
 
 /// The `kind: gate` cases whose `expect` the full gate cannot give, each with the one check outside
 /// `ref.py`'s `gate` subset that decides it and the `computed` keys it stops the gate before
-/// reaching (DEC-77 tests correction; the MC-G02 finding on claim #123).
+/// reaching (DEC-150 item 1, amending DEC-129 item 19; the MC-G02 finding on claim #123).
 ///
 /// DEC-129 item 19 says a `kind: gate` case pins `ref.py`'s `gate`: the working universe,
 /// concentration, order size, the cooldown, orders per day and gross exposure. This harness drives
@@ -343,7 +343,10 @@ fn gate_scenario(id: &str) -> GateCase {
 /// its gross exposure. For a listed case the harness asserts that checks 1 and 2 pass, that the
 /// named check is the only failure and decides the verdict, that the `computed` figures the gate
 /// reached match the case, and that the listed keys were never reached. What the entry gives up is
-/// `MC-G02`'s own `gross` and `gross_limit`, which `MC-G04` and `MC-G06` pin at check 7. A listed
+/// `MC-G02`'s own `gross` and `gross_limit`. `MC-G04` and `MC-G06` pin gross exposure at check 7
+/// only on a denial, and `MC-G13`, the other allow case that states `gross`, stays pending on
+/// E6-8's stub, so until E6-8 lands no live reference case pins `gross` on an allow path (DEC-150
+/// item 1; `gate.rs`'s in-module tests hold it meanwhile). A listed
 /// case whose full verdict already matches its `expect` fails, so no entry outlives its reason, and
 /// every case is named one by one: a rule such as "skip the verdict when check 2 passes" would also
 /// exempt `MC-G04`, `MC-G06` and `MC-G07`, whose own denials sit at checks 6 and 7.
