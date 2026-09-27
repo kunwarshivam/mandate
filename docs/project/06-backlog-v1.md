@@ -437,6 +437,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
+  `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
+  `Unimplemented` stub, so the first day rollover stops the executor, failing closed. The slice that
+  owns the day fold (protection re-placement at the GTC buffer day, §5.4) must interpret both, move
+  them back into `properties::INTERPRETED` with live tests that fail when either arm is stubbed, and
+  land before the executor runs across a session boundary (#194 review, round 2).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
