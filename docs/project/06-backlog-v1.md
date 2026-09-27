@@ -703,3 +703,14 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
   fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
   misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+
+From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
+round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
+
+- **V-023 at load must bound a decimal's precision (stream F).** The schema's `decimal` admits 28
+  fractional digits and `Ratio` holds 24, so a rule comparing `order_usd` against a 26-digit value
+  passes `mandate-builder`'s `check_rules`/`well_typed` re-check and is refused mid-walk by
+  `Condition::matches` with `too_precise`. It is still refused, so rule 3 holds, but DEC-152 (1)
+  promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
+  `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
+  the same bound so both report it by name.
