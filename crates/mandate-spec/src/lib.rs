@@ -112,6 +112,11 @@ pub enum SpecError {
     ClockWentBackwards,
     #[error("no such restriction")]
     UnknownRestriction,
+    /// An input that is not a market fact but a caller's mistake: a quantity increment of zero, where
+    /// neither answer is safe (nothing is ever below a zero increment, so the goal would buy forever;
+    /// treating it as done would stop a goal that is not done).
+    #[error("`{what}` is not a usable value")]
+    InvalidInput { what: &'static str },
     /// The stubs of this story's tests PR return this, so every pending test fails on them
     /// (DEC-77, DEC-83); the implementation PR replaces the stubs and removes the variant.
     #[error("this rule is not implemented yet")]
@@ -133,6 +138,7 @@ impl SpecError {
             Self::OutOfRange { .. } => "out_of_range",
             Self::ClockWentBackwards => "clock_went_backwards",
             Self::UnknownRestriction => "unknown_restriction",
+            Self::InvalidInput { .. } => "invalid_input",
             Self::Unimplemented => "unimplemented",
             Self::Parse(e) => e.code(),
             Self::Num(e) => e.code(),
