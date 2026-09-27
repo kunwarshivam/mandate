@@ -31,6 +31,7 @@ fn pointer_of(value: &Value) -> String {
             | ParseError::NotInEnum { path }
             | ParseError::OffPattern { path }
             | ParseError::OutOfBounds { path }
+            | ParseError::NotUnique { path }
             | ParseError::TooDeep { path }
             | ParseError::OffGrammar { path, .. },
         ) => path.as_str().to_owned(),

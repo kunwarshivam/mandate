@@ -130,8 +130,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 ## Autonomy and the order builder (E6-2)
 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
-DEC-130. The crate holds stubs until the implementation PR; the 125 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
+`autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
+(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. The builder's tests stay pending until
+slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -140,10 +142,12 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   and §5.3 (the v1 order policy), §8.2 (the risk mark), §9.1 and §9.6 (the gate's verdicts and the
   pacing of a discretionary exit).
 - **Code:** `mandate-builder`: `crates/mandate-builder/src/lib.rs` (the crate's contract and
-  `BuilderError`'s fourteen refusals with their stable codes),
+  `BuilderError`'s refusals with their stable codes),
   `crates/mandate-builder/src/autonomy.rs` (§6.2's order, the built-in AUTO purposes, the first
   match, the default, the admission ceiling, the approver count, and the `Facts` a proposed action
-  presents to a §6.3 rule), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
+  presents to a §6.3 rule, with in-module tests of the rule walk, the re-check and `decide`),
+  `crates/mandate-spec/src/condition.rs` (`Condition::matches`, with in-module tests of every
+  operator and combinator), `crates/mandate-builder/src/builder.rs` (§8.1 and §8.2's pinned triple
   and freshness, and §8.3's combine, decide, size, accumulate clips and minimum order). The exact
   arithmetic is `mandate-num`'s (ES-04): `crates/mandate-num/src/sizing.rs` (`SizeFraction`, `Unit`,
   `Conviction`, `Signed`, the two `weighted_ratio` quotients, and `UsdExact`). The gate's dry-run
@@ -212,7 +216,8 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 ## The tracer bullet: one order end to end on Alpaca paper
 
 Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
-paths arrive with the tests PR, which updates this entry.
+tests PR (DEC-157) has landed the crate with every production adapter a stub and the fail-closed
+suite live. The implementation PR fills the adapters in and deletes the pending markers only.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
   intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
@@ -221,39 +226,42 @@ paths arrive with the tests PR, which updates this entry.
   events); `docs/specs/mandate.md` section 5.3, 6, 8; `docs/specs/journal.md` section 5.1 (append,
   idempotency, fencing), 5.2 (write before acting), 8 (replay), 11 (verification); ADR-0001 ES-02,
   ES-06, ES-09, ES-19, ES-20, ES-21, ES-23; backlog E7-7.
-- **Code:** `mandate-shell` (new, layer 8, safety-critical, impure): the process shell, one adapter per
-  stage of the path, the effect runner that appends every journal draft before it hands an intent, the
-  host controls, and the `mandate-tracer` binary. It holds no trading logic — no sizing, no gating,
-  no pricing, no state machine, and no arithmetic on money or quantity. It binds
-  `mandate-spec` (`validate`), `mandate-marketdata` (`dataset::read_manifest`,
-  `dataset::partition::read`), `mandate-backtest` (`Strategy::signal`, E4-2's moving-average baseline),
-  `mandate-builder` (sizing and autonomy, behind `OrderPlan`), `mandate-risk` (`evaluate`, behind
-  `GateDryRun`; the binding call stays inside the executor), `mandate-runtime` (`handle`, `fold`,
-  `IntentSink`), `mandate-executor` (`handle`, `reconcile`, `ClientOrderId::for_intent`),
-  `mandate-alpaca` (`TradingClient`, `AlpacaPaperHttp`, `PAPER_HOST`), and the journal, all unchanged.
-- **Tests:** the fail-closed suite in a `#[cfg(test)]` module inside `src/`, one case per `Stage` built
-  from an exhaustive match, each built with the **other** stages as permissive doubles so the path
-  reaches the stubbed stage, asserting zero `IntentSink::hand` calls, zero `IntentProposed` and
-  `OrderSubmitted` drafts, zero submissions, and the stage's stable error code; an all-stubs case for
-  the state the repository is in; an all-doubles case that proves the harness can place an order at
-  all. Then `tests/tracer.rs`, the end-to-end run over recorded Alpaca paper scenarios (`happy`,
-  `gate_denies`, `gate_allow_with_not_reached_refused`, `autonomy_ask`, `signal_flat`, `signal_undecided`,
-  `oversized_proposal`, `outlier_close`, `duplicate_after_restart`,
-  `fresh_journal_with_broker_position`, `broker_unknown_then_absent`, `reconcile_mismatch_pauses`) with
-  a golden journal and an injected clock and `IdGen`; the refusal of a configured host and the host
-  scanner; the environment scanner over every committed draft, which `verify_events` does not cover;
-  and property tests that no mapping of any source error can permit an order and that an opening
-  `Allow` carrying a `NotReached` check is refused. The gate itself already refuses an opening while
-  any §9.1 check is owed (`Err(GateError::Unimplemented)`, DEC-129 item 29), so the shell only declines
-  to soften that and holds no list of its own of which story owns which check. `AlpacaPaperHttp` is never constructed in a test, so no test can
-  reach a network (ES-19). Planted bugs per test (16): the task brief.
+- **Code:** `crates/mandate-shell/` (layer 8, safety-critical, impure). `src/stages.rs` holds the
+  `Stage` enum (the suite's contract) and one trait per stage; `src/tracer.rs` the one pass and the
+  effect runner, which appends every draft before it hands an intent and lets a submission out only
+  after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
+  permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
+  deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
+  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters, every one a stub
+  in the tests PR. It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
+  no arithmetic on money or quantity — and binds `mandate-runtime` (`handle`, `fold`) for real today.
+- **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
+  case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
+  zero hands up to `Sink`; zero `IntentProposed` up to `Journal`; zero `OrderSubmitted` up to
+  `Executor`; the stub reached, nothing downstream of it), the all-stubs case, the all-doubles
+  keystone that places exactly one order, and the named scenarios (`flatten_poison_halts`,
+  `refuses_to_start_while_protection_is_unimplemented`, `reconcile_mismatch_pauses`,
+  `a_restart_sends_nothing_and_a_repeat_run_is_refused`, `ask_journals_the_request_and_sends_nothing`,
+  `gate_allow_with_not_reached_refused`, `proposal_sanity`, and more), the environment scanner and the
+  shadow order book over the committed bytes, and the host, transport, and defaulting-combinator
+  source scans; `src/map.rs`'s properties that no source error or gate answer maps to a permitting
+  verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11). Then
+  `tests/tracer.rs`, pending on E7-7: the production path over recorded Alpaca paper responses and a
+  bar dataset written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`,
+  `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,
+  `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
+  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). The mandate
+  fixtures are generated and checked against `reference/mandate/ref.py` by
+  `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
+  can reach a network (ES-19).
 - **Reference cases:** none move, and `crates/mandate-refcases/status.toml` is untouched by every PR of
   this stream. The tracer cites `trading_domain::RC-04`, `RC-09`, `RC-09B`, `RC-11`, `RC-14`, `RC-16`,
   `RC-17`, the mandate gate and autonomy families, and the journal append vectors read-only.
-- **Run:** `cargo nextest run -p mandate-shell`; the manual paper run is
-  `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset <dir> --journal <dsn>
-  --confirm-paper --place-one-order`, which needs both flags, refuses any attempt to configure a host,
-  and cannot reach one of its own because the crate's `allowed_external` names no HTTP client.
+- **Run:** `cargo nextest run -p mandate-shell`; `cargo xtask ci pending` for the pending cases; the
+  manual paper run is `cargo run -p mandate-shell --bin mandate-tracer -- --mandate <path> --dataset
+  <dir> --journal <dsn> --confirm-paper --place-one-order`, which needs both flags, refuses any attempt
+  to configure a host, and cannot reach one of its own because the crate's `allowed_external` names no
+  HTTP client.
 
 ## Idempotent executor and broker connector
 
@@ -327,8 +335,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
 implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`,
-E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced), and
-E6-7 check 2's eligibility floor.
+E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced),
+E6-7 check 2's eligibility floor, and E6-6 `session_at`, check 3's sessions, the rest of check 4,
+check 7's buying power and check 8's `legacy_pdt` budget.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -346,12 +355,16 @@ check still owed.
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
-  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
+  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, §5.1's limit-only
+  openings, the re-pricing of a market exit, and the fail-closed
   refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
   mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
   exposure with the account's own 1×),
   `crates/mandate-risk/src/flatten.rs` (`agent_flatten`, the agent-scoped kill switch's plan),
   `crates/mandate-risk/src/floor.rs` (check 2's eligibility floor, trading spec §3.2),
+  `crates/mandate-risk/src/session.rs` (`session_at` from the committed calendar and check 3's
+  session and auction-window rules), `crates/mandate-risk/src/account_rules.rs` (§5.3 rules 2 and
+  4 to 8, buying power with the fee reservation, and the `legacy_pdt` day-trade budget),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
@@ -492,8 +505,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
   PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
-  through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
-  and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
+  through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
+  and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason
   fails its case, so the thirty cases expecting `schema_valid: false` cannot pass on a parse that
   refuses everything.
 - **Run:** `cargo nextest run -p mandate-spec`, `cargo nextest run -p mandate-domain`, and
@@ -538,8 +551,10 @@ proves each pending test fails on them (DEC-110).
   crate carries live, pinned unignored so `cargo mutants` reaches it). Planted bugs per test: the task
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
-  thesis expiry, stagger), through the `mandate` suite in `mandate-refcases`; the other families stay
-  with streams F, G, and H.
+  thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
+  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
+  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
+  case and require it to fail.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
@@ -552,7 +567,9 @@ proves each pending test fails on them (DEC-110).
   power; every other step type and expectation key fails as "not interpreted until" its owning
   story), `crates/mandate-refcases/tests/refcases.rs`, `crates/mandate-refcases/tests/harness.rs`
   (the harness reads the account type and checks `buying_power`: RC-08 and RC-18's cash variant
-  without their gate step), `crates/mandate-refcases/status.toml` (founder-owned).
+  without their gate step), `crates/mandate-refcases/src/mandate/research.rs` (family N of the
+  mandate suite, through `mandate-research`), `crates/mandate-refcases/status.toml`
+  (founder-owned).
 - **Suites:** `fixtures/refcases/journal.json` (46 cases, all passing),
   `fixtures/refcases/trading-domain.json` (accounting cases from E3-1 and E3-2; the rest
   pending their stories), `fixtures/refcases/mandate.json` (families S, V, P, C, R, T, and L harnessed by stream F; the rest pending their streams).

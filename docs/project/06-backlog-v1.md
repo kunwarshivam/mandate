@@ -194,12 +194,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 
 ### E8 Escalation and approvals
 
-- **E8-1 (Must)** As an approver, I want requests with the proposed action, alternatives,
-  evidence, risk impact, deadline, and default so that I can decide quickly.
-- **E8-2 (Must)** As an owner, I want timeouts to apply the safe default so that silence never
-  adds risk.
-- **E8-3 (Must)** As an owner, I want approved actions re-validated for drift so that stale
-  approvals are not executed blindly.
+- **E8-1 (Must, M7)** As an approver, I want requests with the proposed action, alternatives,
+  evidence, risk impact, deadline, and default so that I can decide quickly
+  ([task brief](tasks/M7-escalation-v0.md), [DEC-155](04-decision-log.md#decisions)). "Alternatives"
+  means the owner's choices (approve or skip, with the default stated), never platform-authored
+  alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
+- **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
+  adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
+- **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
+  approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
+  [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
@@ -583,6 +587,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
 - **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
+- **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
+  committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
+  oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
+  agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
+- **E7-7, when streams F and H land:** a drift check for
+  `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
+  so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
+  (#227 review, round 1, minor 4).
 - Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
   whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
   mode `paused` or `stopped`, an `Unknown` order in the instrument), but `held` is also true when
@@ -706,3 +718,34 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+- Retag `mc_g13` in `crates/mandate-risk/tests/refcases.rs` from `pending E6-3` to `pending E6-8`, in
+  the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
+  fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
+  misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
+  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
+  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
+  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
+  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
+  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
+  undercount the account's day trades (#221 review, round 1, minor).
+
+From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
+round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
+
+- **V-023 at load must bound a decimal's precision (stream F).** The schema's `decimal` admits 28
+  fractional digits and `Ratio` holds 24, so a rule comparing `order_usd` against a 26-digit value
+  passes `mandate-builder`'s `check_rules`/`well_typed` re-check and is refused mid-walk by
+  `Condition::matches` with `too_precise`. It is still refused, so rule 3 holds, but DEC-152 (1)
+  promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
+  `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
+  the same bound so both report it by name.
+- **E6-6:** drop or pin the `at.opening_auction` clause in `mandate-risk`'s `market_orders_barred`.
+  The opening auction is always pre-market, which the clause for a US equity outside the regular
+  session already bars, and crypto never has an auction, so the clause changes no decision and no
+  test can catch its removal (#228 review, round 1, minor 2; E6-6's bug list when it lands).
+- **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
+  `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
+  not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
+  asserts only times inside the window, so it passes against a `close_window` that is always true
+  (#228 review, round 1, minor 3; E6-6's bug list when it lands).

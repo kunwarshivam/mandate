@@ -1460,6 +1460,7 @@ dependencies = [
  "mandate-domain",
  "mandate-journal",
  "mandate-num",
+ "mandate-research",
  "mandate-sim",
  "mandate-spec",
  "mandate-time",
@@ -1499,6 +1500,27 @@ dependencies = [
  "mandate-canon",
  "mandate-journal",
  "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
+name = "mandate-shell"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-executor",
+ "mandate-journal",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
  "mandate-time",
  "proptest",
  "thiserror",

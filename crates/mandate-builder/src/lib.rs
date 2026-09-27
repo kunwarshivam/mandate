@@ -130,6 +130,12 @@ pub enum BuilderError {
     /// and a denied order one outcome on the journal.
     #[error("the proposal holds, so there is nothing to decide")]
     NothingProposed,
+    /// [`decide`] was handed a buy labelled with a purpose other than `open` or `increase`, or with
+    /// two labels that disagree. A buy adds risk whatever it is called, so its label must not be
+    /// the reason it reaches §6.2 step 3's built-in AUTO instead of the owner's rules; the builder
+    /// never proposes one, and refusing it adds no risk (`AGENTS.md` rule 3).
+    #[error("a buy is labelled with a purpose other than open or increase")]
+    MislabelledBuy,
     /// No order may trade in the overnight session (DEC-30), and §6.3's `session` field has no name
     /// for it, so an **opening or increasing** order in that session is refused rather than
     /// classified against a value the condition language cannot express.
@@ -176,6 +182,7 @@ impl BuilderError {
             Self::AccumulateInstrumentMismatch => "accumulate_instrument_mismatch",
             Self::MalformedModelVersion => "malformed_model_version",
             Self::NothingProposed => "nothing_proposed",
+            Self::MislabelledBuy => "mislabelled_buy",
             Self::UntradableSession => "untradable_session",
             Self::OutputInstrumentMismatch => "output_instrument_mismatch",
             Self::Num(e) => e.code(),

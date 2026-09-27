@@ -1,0 +1,33 @@
+[package]
+name = "mandate-shell"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "The process shell that binds the runtime, the executor, and the Alpaca paper connector, and the mandate-tracer binary (backlog E7-7)"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "mandate-tracer"
+path = "src/bin/mandate-tracer.rs"
+
+[dependencies]
+mandate-accounting.workspace = true
+mandate-alpaca.workspace = true
+mandate-backtest.workspace = true
+mandate-builder.workspace = true
+mandate-canon.workspace = true
+mandate-executor.workspace = true
+mandate-journal.workspace = true
+mandate-num.workspace = true
+mandate-risk.workspace = true
+mandate-runtime.workspace = true
+mandate-spec.workspace = true
+mandate-time.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+mandate-marketdata.workspace = true
+proptest.workspace = true

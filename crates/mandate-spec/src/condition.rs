@@ -41,18 +41,91 @@ impl Condition {
     /// True when this condition holds for an action's facts.
     ///
     /// The facts come from the caller, because they are the order path's: `mandate-builder` supplies
-    /// them at §6.2 step 4. A field the facts do not carry is
-    /// [`SpecError::Unimplemented`]-free but still an error, not a silent false: a rule that cannot be
-    /// evaluated must not read as "does not match", which would quietly widen autonomy.
+    /// them at §6.2 step 4. A field the facts do not carry, or an operator the value's type does not
+    /// admit (V-023), is [`SpecError::InvalidInput`] naming the field, not a silent false: a rule that
+    /// cannot be evaluated must not read as "does not match", which would quietly widen autonomy.
+    ///
+    /// `all` and `any` evaluate **every** child rather than stopping at the first that decides, so an
+    /// unevaluatable comparison is an error wherever it sits in the tree and never hides behind a
+    /// sibling. Decimals compare as exact [`Ratio`]s, never as text, so `10` is above `9`; a value
+    /// wider than a `Ratio` holds is [`SpecError::Num`] rather than a rounded comparison.
     pub fn matches(&self, facts: &dyn Facts) -> Result<bool, SpecError> {
-        let _ = facts;
-        Err(SpecError::Unimplemented)
+        match self {
+            Self::All(children) => {
+                let mut held = true;
+                for child in children {
+                    held &= child.matches(facts)?;
+                }
+                Ok(held)
+            }
+            Self::Any(children) => {
+                let mut held = false;
+                for child in children {
+                    held |= child.matches(facts)?;
+                }
+                Ok(held)
+            }
+            Self::Not(child) => child.matches(facts).map(|held| !held),
+            Self::Compare { field, op, value } => compare(*field, *op, value, facts),
+        }
     }
 
     /// True for the catch-all `purpose in [open, increase]` that W-005 warns about when a rule
     /// follows it and can therefore never match.
     pub fn is_catch_all(&self) -> bool {
         false
+    }
+}
+
+/// One §6.3 comparison against the fact the field names.
+fn compare(
+    field: ConditionField,
+    op: Operator,
+    value: &ConditionValue,
+    facts: &dyn Facts,
+) -> Result<bool, SpecError> {
+    let unusable = || SpecError::InvalidInput {
+        what: field.as_str(),
+    };
+    match value {
+        ConditionValue::Decimal(wanted) => {
+            let fact = facts.decimal_field(field).ok_or_else(unusable)?;
+            let wanted = wanted.to_ratio()?;
+            match op {
+                Operator::Eq => Ok(fact == wanted),
+                Operator::Ne => Ok(fact != wanted),
+                Operator::Gt => Ok(fact > wanted),
+                Operator::Gte => Ok(fact >= wanted),
+                Operator::Lt => Ok(fact < wanted),
+                Operator::Lte => Ok(fact <= wanted),
+                Operator::In | Operator::NotIn => Err(unusable()),
+            }
+        }
+        ConditionValue::Bool(wanted) => {
+            let fact = facts.bool_field(field).ok_or_else(unusable)?;
+            match op {
+                Operator::Eq => Ok(fact == *wanted),
+                Operator::Ne => Ok(fact != *wanted),
+                _ => Err(unusable()),
+            }
+        }
+        ConditionValue::Text(wanted) => {
+            let fact = facts.enum_field(field).ok_or_else(unusable)?;
+            match op {
+                Operator::Eq => Ok(fact == wanted),
+                Operator::Ne => Ok(fact != wanted),
+                _ => Err(unusable()),
+            }
+        }
+        ConditionValue::List(members) => {
+            let fact = facts.enum_field(field).ok_or_else(unusable)?;
+            let listed = members.iter().any(|member| member == fact);
+            match op {
+                Operator::In => Ok(listed),
+                Operator::NotIn => Ok(!listed),
+                _ => Err(unusable()),
+            }
+        }
     }
 }
 
@@ -217,4 +290,212 @@ pub trait Facts {
     fn enum_field(&self, field: ConditionField) -> Option<&str>;
     fn decimal_field(&self, field: ConditionField) -> Option<Ratio>;
     fn bool_field(&self, field: ConditionField) -> Option<bool>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::DecGrammar;
+
+    type Checked = Result<(), Box<dyn std::error::Error>>;
+
+    /// Facts from three maps, so a test states exactly the fields it reads and a missing one is
+    /// absent.
+    #[derive(Default)]
+    struct Stated {
+        enums: BTreeMap<ConditionField, &'static str>,
+        decimals: BTreeMap<ConditionField, Ratio>,
+        bools: BTreeMap<ConditionField, bool>,
+    }
+
+    impl Facts for Stated {
+        fn enum_field(&self, field: ConditionField) -> Option<&str> {
+            self.enums.get(&field).copied()
+        }
+        fn decimal_field(&self, field: ConditionField) -> Option<Ratio> {
+            self.decimals.get(&field).copied()
+        }
+        fn bool_field(&self, field: ConditionField) -> Option<bool> {
+            self.bools.get(&field).copied()
+        }
+    }
+
+    fn facts() -> Result<Stated, Box<dyn std::error::Error>> {
+        let mut stated = Stated::default();
+        stated.enums.insert(ConditionField::Purpose, "open");
+        stated
+            .decimals
+            .insert(ConditionField::OrderUsd, Ratio::parse("10")?);
+        stated.bools.insert(ConditionField::NewInstrument, true);
+        Ok(stated)
+    }
+
+    fn order_usd(op: Operator, value: &str) -> Result<Condition, Box<dyn std::error::Error>> {
+        Ok(Condition::Compare {
+            field: ConditionField::OrderUsd,
+            op,
+            value: ConditionValue::Decimal(SchemaDec::parse(value, DecGrammar::Decimal)?),
+        })
+    }
+
+    fn purpose(op: Operator, value: ConditionValue) -> Condition {
+        Condition::Compare {
+            field: ConditionField::Purpose,
+            op,
+            value,
+        }
+    }
+
+    fn new_instrument(op: Operator, value: bool) -> Condition {
+        Condition::Compare {
+            field: ConditionField::NewInstrument,
+            op,
+            value: ConditionValue::Bool(value),
+        }
+    }
+
+    fn unevaluatable() -> Condition {
+        Condition::Compare {
+            field: ConditionField::Drawdown,
+            op: Operator::Gt,
+            value: ConditionValue::Bool(true),
+        }
+    }
+
+    /// Each ordering operator against a value below, at, and above the fact of 10, numerically:
+    /// `9` and `9.5` are below `10` although they sort after it as text.
+    #[test]
+    fn decimals_compare_numerically_with_every_operator() -> Checked {
+        let facts = facts()?;
+        let table = [
+            (Operator::Eq, [false, true, false]),
+            (Operator::Ne, [true, false, true]),
+            (Operator::Gt, [true, false, false]),
+            (Operator::Gte, [true, true, false]),
+            (Operator::Lt, [false, false, true]),
+            (Operator::Lte, [false, true, true]),
+        ];
+        for (op, expected) in table {
+            for (value, held) in ["9.5", "10", "10.5"].into_iter().zip(expected) {
+                assert_eq!(
+                    order_usd(op, value)?.matches(&facts)?,
+                    held,
+                    "10 {} {value}",
+                    op.as_str()
+                );
+            }
+        }
+        assert!(order_usd(Operator::Gt, "9")?.matches(&facts)?);
+        Ok(())
+    }
+
+    #[test]
+    fn booleans_texts_and_lists_compare_as_written() -> Checked {
+        let facts = facts()?;
+        assert!(new_instrument(Operator::Eq, true).matches(&facts)?);
+        assert!(!new_instrument(Operator::Eq, false).matches(&facts)?);
+        assert!(!new_instrument(Operator::Ne, true).matches(&facts)?);
+        assert!(new_instrument(Operator::Ne, false).matches(&facts)?);
+
+        let text = |t: &str| ConditionValue::Text(t.to_owned());
+        assert!(purpose(Operator::Eq, text("open")).matches(&facts)?);
+        assert!(!purpose(Operator::Eq, text("increase")).matches(&facts)?);
+        assert!(!purpose(Operator::Ne, text("open")).matches(&facts)?);
+        assert!(purpose(Operator::Ne, text("increase")).matches(&facts)?);
+
+        let list =
+            |items: &[&str]| ConditionValue::List(items.iter().map(|t| (*t).to_owned()).collect());
+        assert!(purpose(Operator::In, list(&["increase", "open"])).matches(&facts)?);
+        assert!(!purpose(Operator::In, list(&["increase"])).matches(&facts)?);
+        assert!(!purpose(Operator::NotIn, list(&["open"])).matches(&facts)?);
+        assert!(purpose(Operator::NotIn, list(&["increase"])).matches(&facts)?);
+        Ok(())
+    }
+
+    /// An operator the value's type does not admit, or a fact the action does not carry, is an
+    /// error naming the field, never a false.
+    #[test]
+    fn an_unevaluatable_comparison_is_an_error_not_a_false() -> Checked {
+        let facts = facts()?;
+        let invalid = |what| Err(SpecError::InvalidInput { what });
+        let list = ConditionValue::List(vec!["10".to_owned()]);
+        let text = ConditionValue::Text("open".to_owned());
+        let cases = [
+            (order_usd(Operator::In, "10")?, "order_usd"),
+            (order_usd(Operator::NotIn, "10")?, "order_usd"),
+            (new_instrument(Operator::Gt, true), "new_instrument"),
+            (purpose(Operator::Lt, text.clone()), "purpose"),
+            (purpose(Operator::Eq, list.clone()), "purpose"),
+            (unevaluatable(), "drawdown"),
+            (
+                Condition::Compare {
+                    field: ConditionField::CombinedScore,
+                    op: Operator::Gt,
+                    value: ConditionValue::Decimal(SchemaDec::parse("0.5", DecGrammar::Decimal)?),
+                },
+                "combined_score",
+            ),
+            (
+                Condition::Compare {
+                    field: ConditionField::Session,
+                    op: Operator::Eq,
+                    value: text,
+                },
+                "session",
+            ),
+            (
+                Condition::Compare {
+                    field: ConditionField::AssetClass,
+                    op: Operator::In,
+                    value: list,
+                },
+                "asset_class",
+            ),
+        ];
+        for (condition, field) in cases {
+            assert_eq!(condition.matches(&facts), invalid(field), "{condition:?}");
+        }
+        let too_wide = order_usd(Operator::Gt, "0.0000000000000000000000001")?;
+        assert!(
+            matches!(too_wide.matches(&facts), Err(SpecError::Num(_))),
+            "a value wider than a ratio holds is refused, not rounded"
+        );
+        Ok(())
+    }
+
+    /// `all`, `any`, and `not` as written, the empty `all` true and the empty `any` false, and an
+    /// unevaluatable child an error even where a sibling already decided the answer.
+    #[test]
+    fn combinators_evaluate_every_child() -> Checked {
+        let facts = facts()?;
+        let yes = || new_instrument(Operator::Eq, true);
+        let no = || new_instrument(Operator::Eq, false);
+        assert!(Condition::All(vec![yes(), yes()]).matches(&facts)?);
+        assert!(!Condition::All(vec![yes(), no()]).matches(&facts)?);
+        assert!(!Condition::All(vec![no(), yes()]).matches(&facts)?);
+        assert!(Condition::All(Vec::new()).matches(&facts)?);
+        assert!(Condition::Any(vec![no(), yes()]).matches(&facts)?);
+        assert!(Condition::Any(vec![yes(), no()]).matches(&facts)?);
+        assert!(!Condition::Any(vec![no(), no()]).matches(&facts)?);
+        assert!(!Condition::Any(Vec::new()).matches(&facts)?);
+        assert!(!Condition::Not(Box::new(yes())).matches(&facts)?);
+        assert!(Condition::Not(Box::new(no())).matches(&facts)?);
+
+        let broken = Err(SpecError::InvalidInput { what: "drawdown" });
+        assert_eq!(
+            Condition::All(vec![no(), unevaluatable()]).matches(&facts),
+            broken
+        );
+        assert_eq!(
+            Condition::Any(vec![yes(), unevaluatable()]).matches(&facts),
+            broken
+        );
+        assert_eq!(
+            Condition::Not(Box::new(unevaluatable())).matches(&facts),
+            broken
+        );
+        Ok(())
+    }
 }
