@@ -82,7 +82,6 @@ mod fold;
 mod gate;
 mod ids;
 mod intent;
-mod kill;
 mod orders;
 mod payload;
 mod ports;

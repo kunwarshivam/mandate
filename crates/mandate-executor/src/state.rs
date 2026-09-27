@@ -21,12 +21,6 @@ pub const FOLD_VERSION: u32 = 1;
 /// the account, including one the executor has not yet seen (trading-domain spec §7.3).
 pub(crate) const EVERY_AGENT: &str = "*";
 
-/// The restriction a reconciliation places for one subject — an instrument, or external activity
-/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
-pub(crate) fn restriction_for(subject: &str) -> String {
-    format!("reconciliation:{subject}")
-}
-
 /// Everything the executor knows about one broker account, derived from journaled events and
 /// nothing else.
 ///

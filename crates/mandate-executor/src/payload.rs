@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 
 use mandate_canon::{Int, Key, Value};
-use mandate_num::{Price, Qty, Usd};
+use mandate_num::{Price, Qty};
 
 use crate::error::ExecutorError;
 use crate::types::RiskClock;
@@ -71,17 +71,6 @@ pub(crate) fn optional_qty(payload: &Value, field: &str) -> Result<Option<Qty>, 
 pub(crate) fn optional_price(payload: &Value, field: &str) -> Result<Option<Price>, ExecutorError> {
     optional_text(payload, field)
         .map(Price::parse)
-        .transpose()
-        .map_err(ExecutorError::from)
-}
-
-pub(crate) fn usd(payload: &Value, field: &str) -> Result<Usd, ExecutorError> {
-    Ok(Usd::parse(required_text(payload, field)?)?)
-}
-
-pub(crate) fn optional_usd(payload: &Value, field: &str) -> Result<Option<Usd>, ExecutorError> {
-    optional_text(payload, field)
-        .map(Usd::parse)
         .transpose()
         .map_err(ExecutorError::from)
 }

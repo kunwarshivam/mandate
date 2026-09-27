@@ -2,22 +2,18 @@
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
-use mandate_num::{Qty, ShareIncrement, SignedQty, SplitRatio, Usd};
+use mandate_num::{Qty, Usd};
 
 use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
-    required_text, usd,
+    flag, optional_int, optional_price, optional_qty, optional_text, qty, required_text,
 };
-use crate::state::{
-    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
-};
+use crate::state::{ExecutorState, IntentOutcome, IntentRecord, OrderDetail};
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
-    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
-    UnprotectedInterval,
+    AgentId, EventId, FoldedEvent, IntentBody, Mode, Order, OrderState, OrderType, Purpose,
+    RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// The copied cross-stream facts of journal spec §2. Each carries a `causation_id` naming its
@@ -104,62 +100,56 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload),
         "OrderSubmitted" => order_submitted(state, event),
-        "OrderStateChanged" => {
-            adoption(state, event)?;
-            order_state_changed(state, payload, at)
-        }
-        "CompensatingEvent" => {
-            if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
-                for id in corrected.iter().filter_map(Value::as_str) {
-                    state.uncompensated.remove(&EventId(id.to_owned()));
-                }
-            }
-            Ok(())
-        }
+        "OrderStateChanged" if flag(payload, "adopted") => reconciliation_events(),
+        "OrderStateChanged" => order_state_changed(state, payload, at),
         "OrderAbandoned" => order_abandoned(state, payload),
-        "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "FeesCharged" => fees_charged(state, payload),
-        "CorporateActionPrepared" => {
-            state.pending_actions.insert(instrument(payload)?);
-            Ok(())
-        }
-        "CorporateActionApplied" => corporate_action_applied(state, payload),
-        "ProtectionChanged" => protection_changed(state, payload, at),
-        "BrokerPositionObserved" => {
-            if flag(payload, "mismatch") {
-                state.mismatched.insert(instrument(payload)?);
-            }
-            Ok(())
-        }
-        "ReconciliationRun" => {
-            state.reconciled_through = Some(event.seq);
-            if let Some(cursor) = optional_text(payload, "checkpoint") {
-                state.checkpoint = Some(ActivityCursor(cursor.to_owned()));
-            }
-            Ok(())
-        }
-        "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
-        "AccountRestrictionChanged" => {
-            state.account_state = match required_text(payload, "restriction")? {
-                "closing_only" => AccountState::ClosingOnly,
-                "blocked" => AccountState::Blocked,
-                _ => return Err(refused("restriction")),
-            };
-            state.consecutive_403s = 0;
-            Ok(())
-        }
-        "RejectObserved" => {
-            state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
-                state.consecutive_403s.saturating_add(1)
-            } else {
-                0
-            };
-            Ok(())
-        }
         "AgentModeApplied" => agent_mode_applied(state, payload),
-        "OwnerAcknowledged" => owner_acknowledged(state, payload),
-        _ => Ok(()),
+        "TradingDayStarted" | "ClockAdvanced" | "RiskDayStarted" | "MarkUpdated" => Ok(()),
+        "FillApplied"
+        | "LateFillApplied"
+        | "FeesCharged"
+        | "CorporateActionPrepared"
+        | "CorporateActionApplied"
+        | "SettlementPosted"
+        | "DividendPaid"
+        | "CashInLieuPosted"
+        | "ExternalActivityIngested" => fill_events(),
+        "AccountStateObserved"
+        | "AccountSnapshotRecorded"
+        | "AccountRestrictionChanged"
+        | "RejectObserved"
+        | "ConductBreachDetected"
+        | "BrokerExchangeRecorded" => account_events(),
+        "CompensatingEvent"
+        | "ReconciliationRun"
+        | "BrokerPositionObserved"
+        | "OwnerAcknowledged" => reconciliation_events(),
+        _ => protection_events(),
     }
+}
+
+/// Fills, fees, corporate actions and the cash they move (trading-domain spec §5.7, §6, §10), a
+/// later slice of this stack.
+fn fill_events() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-3" })
+}
+
+/// The account, its restrictions, and the broker's rejects (trading-domain spec §7.3), a later
+/// slice of this stack.
+fn account_events() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-3" })
+}
+
+/// Reconciliation's records and the owner acknowledgment that lifts its pause (trading-domain
+/// spec §11), a later slice of this stack.
+fn reconciliation_events() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-3" })
+}
+
+/// Protection and the kill switch (trading-domain spec §5.4, §5.5), the last slice of this stack
+/// and E7-4.
+fn protection_events() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
 /// The story that interprets an event this crate does not, or `None` for one it does. Answered
@@ -397,26 +387,6 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
     Ok(())
 }
 
-/// Records an adoption as owed a `CompensatingEvent` until one names it (§11).
-fn adoption(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
-    if !flag(&event.payload, "adopted") {
-        return Ok(());
-    }
-    let subject = client_order_id(&event.payload)?;
-    let from = state
-        .orders
-        .get(&subject)
-        .map(|order| order.state)
-        .ok_or_else(|| ExecutorError::UnknownOrder {
-            client_order_id: subject.as_str().to_owned(),
-        })?;
-    let to = state_of(required_text(&event.payload, "state")?)?;
-    state
-        .uncompensated
-        .insert(event.event_id.clone(), Adoption { subject, from, to });
-    Ok(())
-}
-
 fn order_state_changed(
     state: &mut ExecutorState,
     payload: &Value,
@@ -536,180 +506,6 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
     Ok(())
 }
 
-/// A fill is applied by its broker fill id, once: a re-ingested fill changes nothing
-/// (trading-domain spec §5.7, journal spec §5.2).
-fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let fill = FillId(required_text(payload, "fill_id")?.to_owned());
-    if state.fills.contains(&fill) {
-        return Ok(());
-    }
-    let instrument = instrument(payload)?;
-    let side = side_of(required_text(payload, "side")?)?;
-    let quantity = qty(payload, "qty_gross")?;
-    let notional =
-        quantity.notional(optional_price(payload, "price")?.ok_or_else(|| refused("price"))?)?;
-    let (signed, cash) = match side {
-        Side::Buy => (SignedQty::from(quantity), notional.negated()),
-        Side::Sell => (SignedQty::from(quantity).negated(), notional),
-    };
-    let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
-    *position = position.checked_add(signed)?;
-    state.cash_flow = state.cash_flow.checked_add(cash)?;
-    state.fill_notional = state.fill_notional.checked_add(notional)?;
-    if let Some(order) = optional_text(payload, "client_order_id")
-        .and_then(|raw| ClientOrderId::parse(raw).ok())
-        .and_then(|id| state.orders.get_mut(&id))
-    {
-        order.filled_qty = order.filled_qty.checked_add(quantity)?;
-    }
-    state.fills.insert(fill);
-    Ok(())
-}
-
-/// A crypto asset fee is paid in the asset: its accrual reduces the model's net position at once,
-/// and until the broker posts it the broker still shows it, so the unposted part explains a
-/// position difference rather than a cash one; paper's simulated fees are kept apart from the
-/// cash comparison (trading-domain spec §6.3, §10, §11).
-fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    if required_text(payload, "family")? == "crypto_asset" {
-        let instrument = instrument(payload)?;
-        let accrued = qty(payload, "accrued")?;
-        let charged = optional_qty(payload, "charged")?.unwrap_or(Qty::ZERO);
-        let position = state
-            .positions
-            .entry(instrument.clone())
-            .or_insert(SignedQty::ZERO);
-        *position = position.checked_add(SignedQty::from(accrued).negated())?;
-        let unposted = state.asset_fees.entry(instrument).or_insert(Qty::ZERO);
-        *unposted = unposted
-            .checked_add(accrued)?
-            .checked_sub(charged)
-            .unwrap_or(Qty::ZERO);
-        return Ok(());
-    }
-    let accrued = usd(payload, "accrued")?;
-    if flag(payload, "simulated") {
-        state.simulated_fees = state.simulated_fees.checked_add(accrued)?;
-    } else {
-        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
-        state.unposted_fees = state
-            .unposted_fees
-            .checked_add(accrued)?
-            .checked_sub(charged)?;
-    }
-    Ok(())
-}
-
-fn corporate_action_applied(
-    state: &mut ExecutorState,
-    payload: &Value,
-) -> Result<(), ExecutorError> {
-    let instrument = instrument(payload)?;
-    let ratio: u64 = required_text(payload, "ratio")?
-        .parse()
-        .map_err(|_| refused("ratio"))?;
-    let split = SplitRatio::new(ratio, 1)?;
-    if let Some(position) = state.positions.get_mut(&instrument) {
-        *position = split.split(*position, ShareIncrement::Fractional)?.after();
-    }
-    state.pending_actions.remove(&instrument);
-    Ok(())
-}
-
-/// `ProtectionChanged` records protection placed and cancelled, and every unprotected interval
-/// from its start to its end (trading-domain spec §5.4, interpretation 21).
-fn protection_changed(
-    state: &mut ExecutorState,
-    payload: &Value,
-    at: RiskClock,
-) -> Result<(), ExecutorError> {
-    let instrument = instrument(payload)?;
-    match required_text(payload, "action")? {
-        "placed" => {
-            let covered = qty(payload, "qty")?;
-            let agent = AgentId(
-                optional_text(payload, "agent")
-                    .unwrap_or_default()
-                    .to_owned(),
-            );
-            let mut resting = Vec::new();
-            for raw in required_text(payload, "orders")?.split(',') {
-                let id = ClientOrderId::parse(raw)?;
-                state.orders.entry(id.clone()).or_insert_with(|| Order {
-                    client_order_id: id.clone(),
-                    intent_id: None,
-                    agent: agent.clone(),
-                    instrument: instrument.clone(),
-                    side: Side::Sell,
-                    qty: covered,
-                    filled_qty: Qty::ZERO,
-                    state: OrderState::Accepted,
-                    attempt: 1,
-                    purpose: Purpose::Protective,
-                    absent_lookups: 0,
-                    first_absence_at: None,
-                    cancel_unconfirmed: false,
-                    replaced_by: None,
-                    created_on: None,
-                });
-                state.reservations.entry(id.clone()).or_insert(Usd::ZERO);
-                resting.push(id);
-            }
-            state.protection.insert(
-                instrument.clone(),
-                Protection {
-                    instrument,
-                    resting,
-                    covered_qty: covered,
-                },
-            );
-        }
-        "unprotected_start" => state.unprotected.push(UnprotectedInterval {
-            instrument,
-            started_at: at,
-            ended_at: None,
-            alerted: false,
-        }),
-        "unprotected_end" => {
-            if let Some(open) =
-                state.unprotected.iter_mut().rev().find(|interval| {
-                    interval.instrument == instrument && interval.ended_at.is_none()
-                })
-            {
-                open.ended_at = Some(at);
-            }
-        }
-        _ => return Err(refused("action")),
-    }
-    Ok(())
-}
-
-/// The broker's account as last reported: the base the model's cash is moved from by every fill
-/// since, so the cash comparison and buying power start from the broker's own figure
-/// (trading-domain spec §7.2, §11).
-fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let buying_power = usd(payload, "buying_power")?;
-    state.observed = Some(ObservedAccount {
-        state: if required_text(payload, "status")? == "ACTIVE" {
-            AccountState::Active
-        } else {
-            AccountState::Blocked
-        },
-        multiplier: optional_int(payload, "multiplier")
-            .and_then(|multiplier| u32::try_from(multiplier).ok())
-            .unwrap_or(1),
-        equity: usd(payload, "equity")?,
-        cash: usd(payload, "cash")?,
-        buying_power,
-        non_marginable_buying_power: optional_usd(payload, "non_marginable_buying_power")?
-            .unwrap_or(buying_power),
-        accrued_fees: optional_usd(payload, "accrued_fees")?.unwrap_or(Usd::ZERO),
-    });
-    state.cash_flow = Usd::ZERO;
-    state.fill_notional = Usd::ZERO;
-    Ok(())
-}
-
 /// One restriction on one agent (or on every agent, as `*`). A mode is the strictest of an
 /// agent's active restrictions, and `normal` lifts the restriction it names (mandate spec §5.9).
 fn agent_mode_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
@@ -738,28 +534,4 @@ fn recompute(state: &mut ExecutorState, agent: &AgentId) {
         .max()
         .unwrap_or_default();
     state.modes.insert(agent.clone(), mode);
-}
-
-/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
-/// pause it caused (trading-domain spec §11, interpretation 14).
-fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    let subject = required_text(payload, "subject")?;
-    if required_text(payload, "step_up")?.is_empty() {
-        return Ok(());
-    }
-    if let Ok(instrument) = InstrumentId::new(subject) {
-        state.mismatched.remove(&instrument);
-    }
-    let lifted = crate::state::restriction_for(subject);
-    let agents: Vec<AgentId> = state
-        .restrictions
-        .keys()
-        .filter(|(_, name)| *name == lifted)
-        .map(|(agent, _)| agent.clone())
-        .collect();
-    for agent in agents {
-        state.restrictions.remove(&(agent.clone(), lifted.clone()));
-        recompute(state, &agent);
-    }
-    Ok(())
 }
