@@ -1788,6 +1788,27 @@ mod tests {
             [
                 pdt(&|_| Ok(()))?,
                 pdt(&elsewhere(false, true, "2026-09-21"))?,
+                pdt(&|o| {
+                    o.agent.day_trades.open_same_day_positions = [id("b")?].into();
+                    Ok(())
+                })?,
+                pdt(&|o| {
+                    o.agent.day_trades.sold_earlier_today = [id("a")?].into();
+                    Ok(())
+                })?,
+                pdt(&|o| {
+                    o.agent.day_trades.sold_earlier_today = [id("b")?].into();
+                    Ok(())
+                })?,
+                pdt(&|o| {
+                    o.agent.day_trades.window_count = 0;
+                    o.agent.day_trades.flagged_pattern_day_trader = true;
+                    Ok(())
+                })?,
+                pdt(&|o| {
+                    o.agent.day_trades.window_count = 3;
+                    Ok(())
+                })?,
                 pdt(&elsewhere(true, true, "2026-09-21"))?,
                 pdt(&elsewhere(false, false, "2026-09-21"))?,
                 pdt(&elsewhere(false, true, "2026-09-18"))?,
@@ -1825,6 +1846,11 @@ mod tests {
             [
                 Err("E6-8"),
                 budget,
+                budget,
+                budget,
+                Err("E6-8"),
+                budget,
+                budget,
                 Err("E6-8"),
                 Err("E6-8"),
                 Err("E6-8"),
@@ -1834,7 +1860,9 @@ mod tests {
                 Err("E6-10"),
                 Ok((Verdict::Allow, None)),
             ],
-            "another agent's same-day opening elsewhere makes required 2; protective, closing and \
+            "another agent's same-day opening elsewhere, an open same-day position and a sale of \
+             this security earlier today each make required 2 (a sale of another does not); a \
+             flagged account has remaining 0 and three day trades leave 0; protective, closing and \
              earlier orders do not count; at the threshold, in a cash account, under \
              intraday_margin and for crypto nothing is counted; an exit is never denied for the \
              count"
