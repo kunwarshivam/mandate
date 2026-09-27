@@ -37,8 +37,8 @@
 //! - `RC-14::plain_add_blocked`: one gate decision;
 //! - `RC-17`: instrument claims and shared buying power, gate decisions only;
 //! - `RC-23`: a fractionable split residual, stream F's arithmetic only (coordinator ruling 6);
-//! - `RC-25`: close-window and session decisions only, and steps 0–1 are undecidable as written
-//!   (PR #152, Decisions needed).
+//! - `RC-25`: close-window and session decisions only; steps 0–1 are one second apart and only
+//!   the gate's close-window rule tells them apart (PR #152, Decisions needed).
 //!
 //! # How the steps become inputs
 //!
