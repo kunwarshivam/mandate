@@ -857,10 +857,8 @@ pub fn fold_theses(input: &FoldInput<'_>) -> Result<Fold, ResearchError> {
         let mut journal = admission.journal;
         let thesis = &proposal.thesis;
         let (lineage, retired_now) = lineages.step(thesis, admission.decision);
-        if retired_now {
-            if let Some(removal) = retire_holder(&mut universe, &lineages, thesis) {
-                journal.push(removal);
-            }
+        if retired_now && let Some(removal) = retire_holder(&mut universe, &lineages, thesis) {
+            journal.push(removal);
         }
         steps.push(FoldStep {
             thesis_id: thesis.thesis_id.clone(),
