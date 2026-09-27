@@ -1247,6 +1247,51 @@ mod tests {
         Ok(())
     }
 
+    /// A crypto opening stays owed at check 2 until E6-10 supplies the quote currency, while a
+    /// crypto exit is untouched (DEC-129 item 34).
+    ///
+    /// §3.2 item 7 admits USD pairs only and nothing in `InstrumentSnapshot` says what a pair is
+    /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open the moment
+    /// E6-6 and E6-8 land. The refusal names E6-10 rather than E6-6, which is what distinguishes
+    /// this from the ordinary fail-closed refusal every opening gets today.
+    #[test]
+    fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        o.instrument.asset_class = AssetClass::Crypto;
+        o.instrument.exchange = None;
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
+        o.account.crypto_active = true;
+        assert!(
+            matches!(
+                o.with_input(evaluate)?,
+                Err(GateError::Unimplemented("evaluate", "E6-10"))
+            ),
+            "a crypto opening past the floor is owed E6-10's USD-pair check, not allowed"
+        );
+
+        let equity = allowing()?;
+        assert!(
+            matches!(
+                equity.with_input(evaluate)?,
+                Err(GateError::Unimplemented("evaluate", story)) if story != "E6-10"
+            ),
+            "a US equity is not owed E6-10: check 2 is whole for it"
+        );
+
+        o.agent
+            .positions
+            .insert(o.proposed.instrument.clone(), Qty::parse("10")?);
+        o.proposed.side = Side::Sell;
+        o.proposed.origin = Origin::RiskEngine;
+        let exit = o.with_input(evaluate)??;
+        assert_eq!(
+            exit.verdict,
+            Verdict::Allow,
+            "a crypto exit is never owed: first_owed accrues only for an opening"
+        );
+        Ok(())
+    }
+
     /// §3.2's platform minimums bind whatever the organization set: price 1.00, and 1,000,000 for
     /// both the 20-day equity volume and the 30-day crypto volume.
     ///

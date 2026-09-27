@@ -57,12 +57,12 @@ fn platform_liquidity_floor() -> Result<Usd, GateError> {
 
 /// The binding floor: the organization's setting, or the platform minimum when the setting is
 /// below it. Never the lower of the two.
+///
+/// `Ord::max` rather than a comparison of its own: at `configured == minimum` both branches of an
+/// `if` return the same value, so a hand-written `>` carries a `>=` mutant no test can tell from
+/// the real code. Reusing the derived ordering leaves none to exclude.
 fn binding(configured: Usd, minimum: Usd) -> Usd {
-    if configured > minimum {
-        configured
-    } else {
-        minimum
-    }
+    configured.max(minimum)
 }
 
 /// Items 4 to 6 for a US equity: the price floor, the 20-day liquidity floor, then the ETP rule.
