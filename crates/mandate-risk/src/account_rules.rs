@@ -116,6 +116,10 @@ pub(crate) fn buying_power(input: &GateInput<'_>) -> Result<Option<Stop>, GateEr
 /// positions, plus the account's working same-day opening orders in other instruments. Crypto never
 /// counts, `intraday_margin` denies nothing per order (DEC-129 item 7), and only an opening reaches
 /// here, since exits are never denied for the day-trade count (`AGENTS.md` rule 13).
+///
+/// The budget is the account's, so `DayTradeLedger` must be too: `AgentSnapshot::day_trades` is
+/// read as the account-wide ledger, which E6-6's second slice folds from every agent's fills on the
+/// account (DEC-129 item 6, DEC-150 item 6).
 pub(crate) fn day_trade_budget(input: &GateInput<'_>) -> Result<Option<Stop>, GateError> {
     let a = input.account;
     let applies = a.regime == DayTradeRegime::LegacyPdt

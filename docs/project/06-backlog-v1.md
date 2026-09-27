@@ -699,3 +699,10 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
+  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
+  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
+  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
+  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
+  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
+  undercount the account's day trades (#221 review, round 1, minor).

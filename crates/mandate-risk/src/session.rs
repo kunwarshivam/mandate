@@ -98,8 +98,9 @@ fn outside(e: TimeError) -> GateError {
 ///   allowed` when it asks for extended hours and `session_not_allowed` otherwise. An opening that
 ///   asks for extended hours inside the regular session is denied the same way, because the broker
 ///   would keep it working into after-hours, where v1 opens nothing (§4.3, DEC-37).
-/// - A market order in the opening auction or the closing ten minutes is `auction_window` for every
-///   purpose (§4.3: "exits in them use limit orders, never market orders"; DEC-129 item 18).
+/// - A market opening in the opening auction or the closing ten minutes is `auction_window`
+///   (§4.3: "no opening orders in either"). A market-order exit there is not denied: it is
+///   re-priced as a marketable limit after the checks (DEC-159, amending DEC-129 item 18).
 /// - Outside the regular session a US-equity discretionary exit is deferred, and an owner exit is
 ///   deferred until the owner confirms the displayed bid (§5.5, §9.6). A defer is never a denial.
 ///
@@ -117,7 +118,8 @@ pub(crate) fn rules(input: &GateInput<'_>, purpose: Purpose, at: &SessionAt) -> 
             return Some((Verdict::Deny, ReasonCode::SessionNotAllowed));
         }
     }
-    if p.kind == ProposedKind::Market && (at.opening_auction || at.close_window) {
+    let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
+    if opening && p.kind == ProposedKind::Market && (at.opening_auction || at.close_window) {
         return Some((Verdict::Deny, ReasonCode::AuctionWindow));
     }
     match purpose {

@@ -211,19 +211,23 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
         .then_some((Verdict::Deny, ReasonCode::InstrumentHalted))
 }
 
-/// §5.1: a market order is allowed only in the regular session with current status data, so it is
-/// barred under a halt, real or presumed (§4.4: a halted instrument or a dropped status feed), and
-/// for a US equity outside the regular session (§9.4: "exits in extended hours as limit orders").
-/// The stale-quote arm of a presumed halt reads the mark's freshness, which is check 5's (E6-8).
+/// §5.1: a market order is allowed only in the regular session outside the auction windows with
+/// current status data, so it is barred under a halt, real or presumed (§4.4: a halted instrument
+/// or a dropped status feed), for a US equity outside the regular session (§9.4: "exits in
+/// extended hours as limit orders"), and in either auction window (§4.3: "exits in them use limit
+/// orders, never market orders"; DEC-159). The stale-quote arm of a presumed halt reads the mark's
+/// freshness, which is check 5's (E6-8).
 fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
     let i = input.instrument;
     i.halted
         || !i.status_feed_current
+        || at.opening_auction
+        || at.close_window
         || (i.asset_class == AssetClass::UsEquity && at.session != Session::Regular)
 }
 
-/// §4.4, §5.6 and §9.4 (DEC-129 items 28 and 31): an allowed market-order exit where market orders
-/// are barred is sent as a marketable limit at its proposed quantity and price, never as a market
+/// §4.3, §4.4, §5.6 and §9.4 (DEC-129 items 28 and 31, DEC-159): an allowed market-order exit
+/// where market orders are barred is sent as a marketable limit at its proposed quantity and price, never as a market
 /// order, and never denied. Only a reduction is allowed with a market kind, since check 4 denies
 /// every market opening.
 fn market_exit_repricing(input: &GateInput<'_>, at: &SessionAt) -> Option<Pacing> {
@@ -1889,7 +1893,9 @@ mod tests {
                 flags("2026-09-21T13:30:00Z")?,
                 flags("2026-09-21T19:49:59Z")?,
                 flags("2026-09-21T19:50:00Z")?,
+                flags("2026-09-21T19:58:00Z")?,
                 flags("2026-09-21T20:00:00Z")?,
+                flags("2026-09-21T23:58:00Z")?,
                 flags("2026-09-22T01:00:00Z")?,
                 flags("2026-09-19T15:00:00Z")?,
             ],
@@ -1899,11 +1905,15 @@ mod tests {
                 (Session::Regular, false, false),
                 (Session::Regular, false, false),
                 (Session::Regular, false, true),
+                (Session::Regular, false, true),
+                (Session::AfterHours, false, false),
                 (Session::AfterHours, false, false),
                 (Session::Overnight, false, false),
                 (Session::Overnight, false, false),
             ],
-            "09:27:59 and 09:28 ET, the open, 15:49:59 and 15:50, the close, 21:00 ET, a Saturday"
+            "09:27:59 and 09:28 ET, the open, 15:49:59, 15:50 and 15:58 (the close window, never \
+             the opening auction), the close, 19:58 (neither, though two minutes from a session's \
+             end), 21:00 ET, a Saturday"
         );
         let regular = equity("2026-09-21T15:00:00Z")?;
         assert_eq!(
@@ -1938,7 +1948,9 @@ mod tests {
     /// Check 3 outside the regular session: every equity opening is denied, an extended-hours one
     /// in the regular session too; a risk exit and a protective order pass; a discretionary exit
     /// defers; an owner exit defers until the bid is confirmed; a market exit is re-priced as a
-    /// marketable limit rather than denied, and a limit exit is not paced.
+    /// marketable limit rather than denied, after hours and in the closing ten minutes alike
+    /// (DEC-159), a limit exit is not paced, and a market opening in the window is
+    /// `auction_window`.
     #[test]
     fn the_session_denies_openings_and_defers_only_exits() -> Result<(), GateError> {
         let after = |mut o: Owned| -> Result<Owned, GateError> {
@@ -1980,26 +1992,41 @@ mod tests {
         let mut market = after(allowing()?.selling(Origin::RiskEngine)?)?;
         market.proposed.kind = ProposedKind::Market;
         let limit = after(allowing()?.selling(Origin::RiskEngine)?)?;
-        let mut in_the_close = allowing()?.selling(Origin::RiskEngine)?;
-        in_the_close.now = at("2026-09-21T19:55:00Z")?;
-        in_the_close.proposed.kind = ProposedKind::Market;
-        let mut limit_in_the_close = allowing()?.selling(Origin::RiskEngine)?;
-        limit_in_the_close.now = at("2026-09-21T19:55:00Z")?;
+        let in_the_close = |origin: Origin, kind: ProposedKind| -> Result<Owned, GateError> {
+            let mut o = allowing()?.selling(origin)?;
+            o.now = at("2026-09-21T19:55:00Z")?;
+            o.proposed.kind = kind;
+            Ok(o)
+        };
+        let mut opening_in_the_close = allowing()?;
+        opening_in_the_close.now = at("2026-09-21T19:55:00Z")?;
+        opening_in_the_close.proposed.kind = ProposedKind::Market;
+        let repriced = |o: Owned| -> Result<_, GateError> {
+            let d = o.decide()?;
+            Ok((d.verdict, d.pacing.map(|p| p.marketable_limit_required)))
+        };
         assert_eq!(
             (
-                market.decide()?.pacing.map(|p| p.marketable_limit_required),
-                limit.decide()?.pacing,
-                row(&in_the_close)?,
-                row(&limit_in_the_close)?,
+                repriced(market)?,
+                repriced(limit)?,
+                repriced(in_the_close(Origin::RiskEngine, ProposedKind::Market)?)?,
+                repriced(in_the_close(Origin::OrderBuilder, ProposedKind::Market)?)?,
+                repriced(in_the_close(Origin::OwnerClose, ProposedKind::Market)?)?,
+                repriced(in_the_close(Origin::RiskEngine, ProposedKind::Plain)?)?,
+                row(&opening_in_the_close)?,
             ),
             (
-                Some(true),
-                None,
+                (Verdict::Allow, Some(true)),
+                (Verdict::Allow, None),
+                (Verdict::Allow, Some(true)),
+                (Verdict::Allow, Some(true)),
+                (Verdict::Allow, Some(true)),
+                (Verdict::Allow, None),
                 Ok((Verdict::Deny, Some(ReasonCode::AuctionWindow))),
-                Ok((Verdict::Allow, None)),
             ),
-            "a market exit after hours is re-priced, not denied; a limit exit is sent as is; in \
-             the closing ten minutes a market order is auction_window and a limit exit passes"
+            "a market exit after hours or in the closing ten minutes is re-priced, never denied, \
+             whatever its purpose (DEC-159); a limit exit is sent as is; a market opening in the \
+             window is auction_window"
         );
         Ok(())
     }
