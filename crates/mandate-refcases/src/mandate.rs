@@ -3,10 +3,11 @@
 //! named test per case id (`mandate::MC-S01`), 298 of them.
 //!
 //! Stream F owns 202: the families `schema` (S), `semantic` (V), `policy` (P), `change` (C),
-//! `risk_state` (R), `risk_day` (T), and `goal` (L). The rest belong to other streams and **fail**
-//! with "not interpreted until `<story>`" rather than passing quietly, the DEC-85 rule: `gate` and
-//! `agent_flatten` to E6-3, `builder` and `autonomy` to E6-2, and `admission`, `lineage`,
-//! `thesis_expiry`, and `stagger` to E17-3.
+//! `risk_state` (R), `risk_day` (T), and `goal` (L). Stream J's family N is interpreted in
+//! [`research`]: `thesis_expiry` and `stagger` now, `admission` and `lineage` in the stacked slices
+//! that follow. The rest **fail** with "not interpreted until `<story>`" rather than passing
+//! quietly, the DEC-85 rule: `gate` and `agent_flatten` to E6-3, `builder` and `autonomy` to E6-2,
+//! and `admission` and `lineage` to E17-3.
 //!
 //! The same rule holds inside an owned family. Every key of every owned case is read, and a case that
 //! carries a key this harness does not know fails naming it, so no case can pass while part of it is
@@ -32,6 +33,8 @@ use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
 use crate::{Case, Json, at, ensure, expect_eq, list_at, str_at, to_canon, u64_at};
 
+mod research;
+
 const SUITE: &str = "mandate";
 /// The fixture version this harness reads (`version: 4`, spec v0.6).
 const FIXTURE_VERSION: u64 = 4;
@@ -44,8 +47,6 @@ const PENDING_KINDS: &[(&str, &str)] = &[
     ("autonomy", "E6-2"),
     ("admission", "E17-3"),
     ("lineage", "E17-3"),
-    ("thesis_expiry", "E17-3"),
-    ("stagger", "E17-3"),
 ];
 
 /// Every key an owned case may carry at its top level.
@@ -132,6 +133,8 @@ fn run_listed(fixture: &Json, index: usize) -> Result<(), String> {
         "risk_state" => risk_state_case(fixture, case),
         "risk_day" => risk_day_case(case),
         "goal" => goal_case(fixture, case),
+        "thesis_expiry" => research::thesis_expiry_case(case),
+        "stagger" => research::stagger_case(case),
         other => Err(format!("unknown case kind `{other}`")),
     }
 }
@@ -158,6 +161,16 @@ const EXPECT_KEYS: &[(&str, &[&str])] = &[
         &["risk_day", "starts_at", "ends_at", "length_s"],
     ),
     ("goal", &["done", "reason", "then", "stop_reason"]),
+    (
+        "thesis_expiry",
+        &[
+            "working_universe",
+            "removed",
+            "instrument_restrictions",
+            "journal",
+        ],
+    ),
+    ("stagger", &["offsets", "window_s"]),
 ];
 
 /// A `risk_state` case expects per step, not once, so its keys are swept on every step's `expect`.
