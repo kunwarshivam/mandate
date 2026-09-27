@@ -22,6 +22,9 @@
 #      mandate-backtest or mandate-alpaca). `mandate-alpaca` is an adapter over the core (ES-02's
 #      "adapters depend on the core, never the reverse"): it implements the `BrokerConnector` that
 #      `mandate-executor` declares, so it must sit strictly above it rather than beside it
+#   8  mandate-shell, the process shell and the `mandate-tracer` binary (E7-7, DEC-138): the lowest
+#      layer that sees both `mandate-backtest` (7, the tracer's signal) and the order path
+#      (`mandate-runtime`, `mandate-executor`, `mandate-alpaca`)
 #   tool  mandate-refcases, xtask
 
 impure_crates = ["tokio", "sqlx", "reqwest", "hyper", "mio", "rand", "getrandom"]
@@ -148,3 +151,9 @@ layer = 6
 safety_critical = true
 pure = true
 allowed_external = ["thiserror"]
+
+[crates.mandate-shell]
+layer = 8
+safety_critical = true
+pure = false
+allowed_external = ["clap", "thiserror", "tokio"]

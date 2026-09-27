@@ -1505,6 +1505,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-shell"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-alpaca",
+ "mandate-backtest",
+ "mandate-builder",
+ "mandate-canon",
+ "mandate-executor",
+ "mandate-journal",
+ "mandate-marketdata",
+ "mandate-num",
+ "mandate-risk",
+ "mandate-runtime",
+ "mandate-spec",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-sim"
 version = "0.0.0"
 dependencies = [
