@@ -1024,6 +1024,10 @@ fn mutants() -> Result<()> {
         .to_str()
         .context("non-UTF-8 temp path")?
         .to_owned();
+    if let Err(unjudged) = live_tests_judge_every_mutant(&diff_path) {
+        fs::remove_file(&diff_file).ok();
+        return Err(unjudged);
+    }
     let args = [
         "mutants",
         "--in-diff",
@@ -1046,6 +1050,121 @@ fn mutants() -> Result<()> {
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     fs::remove_file(&diff_file).ok();
     mutants_outcome(Path::new("."), &crates, status?.code(), started)
+}
+
+/// Every mutant the run is about to test must have at least one live test that can judge it, or the
+/// run's verdict on it is not evidence.
+///
+/// `cargo mutants` tests each mutant with `cargo nextest run --package=<the mutated crate>`, and
+/// nextest answers a package whose every test is `#[ignore]`d with `0 tests run … error: no tests to
+/// run` and a non-zero exit. `cargo mutants` 27.1.0 classifies a mutant on that exit status alone —
+/// it has no outcome for "nothing ran" and no `--no-tests` option — so it records every one of them
+/// as **caught**. A crate with no live test therefore reports a clean gate while nothing ran: on PR
+/// #175 all 30 `mandate-builder` mutants came back caught and `BuilderError::code` returning `""`
+/// survived every live test in the workspace. Counting the live tests here is what replaces that
+/// exit code with evidence, and it fails the crate rather than skipping it, because a tests PR that
+/// adds live code owes the gate something to judge it with (DEC-139).
+///
+/// The count is per package because that is the package `cargo mutants` runs tests from. Were a
+/// workspace-wide test run ever configured, this count could only be stricter than it needs to be,
+/// never looser.
+fn live_tests_judge_every_mutant(diff_path: &str) -> Result<()> {
+    let listed = output(
+        "cargo",
+        &["mutants", "--list", "--json", "--in-diff", diff_path],
+    )?;
+    let mutants = listed_mutant_counts(&listed)?;
+    if mutants.is_empty() {
+        eprintln!("    mutants: the diff generates no mutants");
+        return Ok(());
+    }
+    let packages: Vec<String> = mutants
+        .keys()
+        .map(|package| format!("--package={package}"))
+        .collect();
+    let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
+    args.extend(packages.iter().map(String::as_str));
+    eprintln!("    $ cargo {}", args.join(" "));
+    let listing = output("cargo", &args)?;
+    let live = live_test_counts(&listing)?;
+    report(unjudged_mutants(&mutants, &live), "mutants")
+}
+
+/// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
+/// whose tests the run judges it by.
+#[derive(Deserialize)]
+struct ListedMutant {
+    package: String,
+}
+
+/// How many mutants the run will test in each package.
+fn listed_mutant_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
+    let listed: Vec<ListedMutant> =
+        serde_json::from_str(listing).context("parsing the mutants listing")?;
+    let mut counts = BTreeMap::new();
+    for mutant in listed {
+        let count = counts.entry(mutant.package).or_insert(0usize);
+        *count = count.saturating_add(1);
+    }
+    Ok(counts)
+}
+
+/// `cargo nextest list --message-format json`, read for which tests would actually run.
+#[derive(Deserialize)]
+struct NextestListing {
+    #[serde(rename = "rust-suites")]
+    rust_suites: BTreeMap<String, NextestSuite>,
+}
+
+#[derive(Deserialize)]
+struct NextestSuite {
+    #[serde(rename = "package-name")]
+    package_name: String,
+    testcases: BTreeMap<String, NextestCase>,
+}
+
+#[derive(Deserialize)]
+struct NextestCase {
+    ignored: bool,
+}
+
+/// How many live tests each package has: the tests that run, and so the tests that can fail, when
+/// `cargo mutants` tests a mutant of that package. A package the listing does not mention has none,
+/// which is the same verdict as a package whose every test is `#[ignore]`d.
+fn live_test_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
+    let listing: NextestListing =
+        serde_json::from_str(listing).context("parsing the nextest listing")?;
+    let mut counts = BTreeMap::new();
+    for suite in listing.rust_suites.into_values() {
+        let live = suite
+            .testcases
+            .values()
+            .filter(|case| !case.ignored)
+            .count();
+        let count = counts.entry(suite.package_name).or_insert(0usize);
+        *count = count.saturating_add(live);
+    }
+    Ok(counts)
+}
+
+/// Names every package whose mutants no live test would judge, with what the run would have claimed
+/// about them (DEC-139).
+fn unjudged_mutants(
+    mutants: &BTreeMap<String, usize>,
+    live: &BTreeMap<String, usize>,
+) -> Vec<String> {
+    mutants
+        .iter()
+        .filter(|(package, _)| live.get(package.as_str()).copied().unwrap_or(0) == 0)
+        .map(|(package, count)| {
+            format!(
+                "`{package}`: no live tests to judge {count} mutant(s); add live tests or stub the \
+                 code. `cargo nextest run --package={package}` reports `no tests to run` and exits \
+                 non-zero, which `cargo mutants` reads as every one of them caught, so the run \
+                 would report a clean gate while nothing ran (DEC-139)"
+            )
+        })
+        .collect()
 }
 
 /// Where `--output target` puts the run's outcomes. Removed before every run and required to be
@@ -2165,6 +2284,7 @@ fn report(problems: Vec<String>, check: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::env;
     use std::fs;
     use std::path::PathBuf;
@@ -2175,9 +2295,9 @@ mod tests {
     use super::{
         MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify,
         contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        is_pending_marker, is_stub_function, mutant_verdicts, mutants_outcome, names_a_stub,
-        output_in, pending_problems, pending_tests, plain_comment_lines, repo_root, test_binary,
-        test_outcomes, verdicts,
+        is_pending_marker, is_stub_function, listed_mutant_counts, live_test_counts,
+        mutant_verdicts, mutants_outcome, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, repo_root, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -2838,6 +2958,78 @@ mod tests {
                 .to_string()
                 .contains("older than the diff this run read"),
             "{stale}"
+        );
+        Ok(())
+    }
+
+    /// `cargo mutants --list --json`, trimmed to the one member the gate reads. Two crates have
+    /// mutants: one whose tests all run and one whose only test is `#[ignore]`d.
+    const LISTED_MUTANTS: &str = r#"[
+        {"package": "mandate-domain", "name": "src/lib.rs:268:5: replace probe -> bool with true"},
+        {"package": "mandate-probe", "name": "src/lib.rs:16:5: replace code -> &'static str with \"\""},
+        {"package": "mandate-probe", "name": "src/lib.rs:16:5: replace code -> &'static str with \"xyzzy\""}
+    ]"#;
+
+    /// `cargo nextest list --message-format json`, trimmed the same way: `mandate-probe`'s one test
+    /// is ignored, and `mandate-domain` has a live test beside an ignored one.
+    const NEXTEST_LISTING: &str = r#"{
+        "rust-suites": {
+            "mandate-domain": {
+                "package-name": "mandate-domain",
+                "testcases": {
+                    "the_probe_negates_its_flag": {"ignored": false},
+                    "a_pending_one": {"ignored": true}
+                }
+            },
+            "mandate-probe": {
+                "package-name": "mandate-probe",
+                "testcases": {"the_code_names_the_refusal": {"ignored": true}}
+            }
+        }
+    }"#;
+
+    /// `cargo mutants` tests a mutant with `cargo nextest run --package=<crate>`, and nextest exits
+    /// non-zero on `no tests to run`, which it reads as the mutant being caught. So a crate with no
+    /// live test must fail the gate before the run rather than have that exit code stand in for
+    /// evidence (DEC-139).
+    #[test]
+    fn a_crate_with_no_live_test_cannot_have_its_mutants_counted_as_caught() -> Result<()> {
+        let mutants = listed_mutant_counts(LISTED_MUTANTS)?;
+        let live = live_test_counts(NEXTEST_LISTING)?;
+        assert_eq!(mutants.get("mandate-probe").copied(), Some(2));
+        assert_eq!(mutants.get("mandate-domain").copied(), Some(1));
+        assert_eq!(
+            live.get("mandate-domain").copied(),
+            Some(1),
+            "an ignored test beside a live one does not lower the live count"
+        );
+        assert_eq!(live.get("mandate-probe").copied(), Some(0));
+
+        let problems = unjudged_mutants(&mutants, &live);
+        assert_eq!(
+            problems.len(),
+            1,
+            "only the crate with no live test is named: {problems:?}"
+        );
+        let named = problems.first().context("the one problem")?;
+        assert!(
+            named.contains("`mandate-probe`") && named.contains("2 mutant(s)"),
+            "{named}"
+        );
+
+        assert!(
+            unjudged_mutants(&mutants, &BTreeMap::new()).len() == 2,
+            "a listing that mentions neither crate leaves both unjudged"
+        );
+        assert!(
+            unjudged_mutants(&BTreeMap::new(), &live).is_empty(),
+            "a diff with no mutants has nothing to judge"
+        );
+        let all_live =
+            live_test_counts(&NEXTEST_LISTING.replace("\"ignored\": true", "\"ignored\": false"))?;
+        assert!(
+            unjudged_mutants(&mutants, &all_live).is_empty(),
+            "every crate with a live test is judged"
         );
         Ok(())
     }
