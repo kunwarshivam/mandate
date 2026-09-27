@@ -1604,11 +1604,15 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         "    pending: {} pending test(s) must fail on this change's code, at their story's stub",
         tests.len()
     );
-    eprintln!("    $ cargo {}", args.join(" "));
+    eprintln!(
+        "    $ PROPTEST_RNG_SEED={PENDING_PROPTEST_SEED} cargo {}",
+        args.join(" ")
+    );
     let out = Command::new("cargo")
         .current_dir(root)
         .args(args)
         .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
+        .env("PROPTEST_RNG_SEED", PENDING_PROPTEST_SEED)
         .stderr(Stdio::inherit())
         .output()
         .context("starting `cargo nextest` (is it installed? see AGENTS.md)")?;
@@ -1671,6 +1675,25 @@ impl PendingTestRun {
         }
     }
 }
+
+/// The seed every pending property draws its cases from in `ci pending`, so the gate gives one
+/// verdict for one tree. A pending property's failure can depend on which cases it draws: #196's
+/// review and #199's measured three `mandate-executor` properties pending E7-4
+/// (`protective_sell_quantity_never_exceeds_the_position`,
+/// `every_unprotected_interval_has_a_journaled_start_and_end`,
+/// `no_interval_exceeds_the_limit_without_an_alert`) putting a later slice's stub report in their
+/// output on some seeds and none on others, which turned the required `fast` check red and green on
+/// the same code. Live properties keep drawing a fresh seed in `ci test`, where variety finds bugs;
+/// only the pending verdict is pinned. A pinned seed cannot hide a pending test that passes: #199's
+/// review planted one passing on every case and one failing on one input in 100,000, and the gate
+/// reported both as passing.
+///
+/// Those three are not in [`BEHAVIOUR_ONLY_TESTS`], although their shrunk failure is their own E7-4
+/// assertion. Under this seed their output always carries a stub report from a case discarded
+/// before shrinking, and [`names_a_stub`] reads the whole output, so a row for them would be
+/// reported as not needed. They pass on that incidental evidence, which is the whole-output reading
+/// E1-3 replaces with the failure's own cause; when it lands, they need rows (backlog).
+const PENDING_PROPTEST_SEED: &str = "20260927";
 
 /// How a stub reports itself, and the only evidence the gate accepts: `Unimplemented` is the
 /// `Debug` of the variant every stub error carries, `unimplemented` its `code()`, "is not

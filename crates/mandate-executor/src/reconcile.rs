@@ -11,7 +11,7 @@ use crate::batch::Batch;
 use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
-use crate::orders::{EXTERNAL, fill, status_mapping};
+use crate::orders::{EXTERNAL, every_agent_alerted, fill, status_mapping};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
@@ -159,7 +159,7 @@ fn orders(
             }
         }
     }
-    let mut external = false;
+    let mut external = None;
     for open in &snapshot.open_orders {
         let ours = open
             .client_order_id
@@ -178,18 +178,22 @@ fn orders(
         if let Some(raw) = &open.client_order_id {
             pairs.push(("client_order_id", text(raw.clone())));
         }
-        batch.journal("ExternalActivityIngested", None, pairs)?;
+        let ingested = batch.journal("ExternalActivityIngested", None, pairs)?;
         differences.push(Difference {
             kind: DifferenceKind::ExternalActivity,
             subject: open.broker_order_id.clone(),
             adopted: false,
         });
-        external = true;
+        external = external.or(Some(ingested));
     }
-    if external {
-        let agents = agents(&batch.view, None);
-        let first = restrict(batch, &agents, Mode::ExitsOnly, EXTERNAL)?;
-        batch.notify(first, "external_activity");
+    if let Some(first) = external {
+        every_agent_alerted(
+            batch,
+            Mode::ExitsOnly,
+            &restriction_for(EXTERNAL),
+            first,
+            "external_activity",
+        )?;
     }
     Ok(())
 }
@@ -456,6 +460,7 @@ mod tests {
             buying_power: Usd::ZERO,
             non_marginable_buying_power: Usd::ZERO,
             accrued_fees: Usd::ZERO,
+            complete: true,
         });
         assert_eq!(
             cash_and_fees(&state, &snapshot(ReconcileReason::Scheduled)),
