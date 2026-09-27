@@ -52,6 +52,12 @@ pub(crate) fn received(
     gate_and_submit(batch, &handoff.intent_id)
 }
 
+/// A flatten plan handed over as an intent: the agent-scoped flatten's sells are the protective
+/// sequence's (E7-4, the coordinator's ruling (d) on #174).
+fn flatten_plan() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
 /// Whether an intent is past `max_intent_age`, measured from its `IntentReceived`. Checked at
 /// **every** `Intent → Submitting` transition, the first included (§5.7, interpretation 11).
 fn too_old(batch: &Batch<'_, '_>, intent: &IntentId) -> bool {
@@ -77,6 +83,7 @@ pub(crate) fn gate_and_submit(
 }
 
 const ALLOW: &str = "allow";
+const HOLD: &str = "hold";
 
 /// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
 /// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
@@ -237,6 +244,52 @@ fn abandon(
     Ok(())
 }
 
+/// `Unknown → Intent` after a confirmed absence: the gate re-runs and the order is resubmitted
+/// with the **same** client order id and the next attempt number, or abandoned (§5.7). Only a
+/// re-check that **denies** abandons; one that holds leaves the order in `Intent`, held, for the
+/// first tick its hold clears — an exit is held, never denied (`AGENTS.md` rule 13).
+pub(crate) fn resubmit(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
+    let Some(intent) = batch
+        .view
+        .orders
+        .get(id)
+        .and_then(|order| order.intent_id.clone())
+    else {
+        return send_again(batch, id);
+    };
+    if too_old(batch, &intent) {
+        return abandon(batch, &intent, "intent_too_old");
+    }
+    match gate(batch, &intent, true)? {
+        ALLOW => send_again(batch, id),
+        HOLD => Ok(()),
+        _ => abandon(batch, &intent, "gate_recheck"),
+    }
+}
+
+/// Sends the request an `OrderSubmitted` already named again, under the same id with the next
+/// attempt number.
+fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
+    let unknown = || ExecutorError::UnknownOrder {
+        client_order_id: id.as_str().to_owned(),
+    };
+    let order = batch.view.orders.get(id).cloned().ok_or_else(unknown)?;
+    let request = batch
+        .view
+        .details
+        .get(id)
+        .and_then(|detail| detail.request.clone())
+        .ok_or_else(unknown)?;
+    let attempt = order.attempt.saturating_add(1);
+    send(
+        batch,
+        request,
+        order.intent_id.as_ref(),
+        &order.agent,
+        attempt,
+    )
+}
+
 /// Received intents with no order yet. With `stale_only`, the ones past their age are abandoned
 /// and the rest are left for later; otherwise every one is gated now. `Input::Started` abandons
 /// the stale at once and resumes the rest only once the startup reconciliation has run, so a
@@ -273,23 +326,11 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         } else if gate(batch, &intent, false)? == ALLOW {
             let id = ClientOrderId::for_intent(&intent)?;
             if batch.view.orders.contains_key(&id) {
-                resubmission()?;
+                send_again(batch, &id)?;
             } else {
                 submit(batch, &intent)?;
             }
         }
     }
     Ok(())
-}
-
-/// A flatten plan handed over as an intent: the agent-scoped flatten's sells are the protective
-/// sequence's (E7-4, the coordinator's ruling (d) on #174).
-fn flatten_plan() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
-}
-
-/// The resubmission of an order a confirmed absence returned to `Intent`, under the same client
-/// order id and the next attempt number (trading-domain spec §5.7). The next slice of this stack.
-fn resubmission() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
 }

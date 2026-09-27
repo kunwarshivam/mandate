@@ -82,25 +82,16 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         return not_interpreted(kind, story);
     }
     let at = risk_clock(state, event)?;
-    if COPIED.contains(&kind) {
-        match &event.causation_id {
-            Some(origin) => {
-                state.copied.insert(event.event_id.clone(), origin.clone());
-            }
-            None if flag(payload, "originated") => {}
-            None => {
-                return Err(ExecutorError::CopyWithoutCausation {
-                    event_type: event.event_type.clone(),
-                });
-            }
-        }
+    if COPIED.contains(&kind) && event.causation_id.is_none() && !flag(payload, "originated") {
+        return Err(ExecutorError::CopyWithoutCausation {
+            event_type: event.event_type.clone(),
+        });
     }
     state.risk_clock = Some(at);
     match kind {
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload),
         "OrderSubmitted" => order_submitted(state, event),
-        "OrderStateChanged" if flag(payload, "adopted") => reconciliation_events(),
         "OrderStateChanged" => order_state_changed(state, payload, at),
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
@@ -114,48 +105,15 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             };
             Ok(())
         }
-        "FeesCharged"
-        | "CorporateActionPrepared"
-        | "CorporateActionApplied"
-        | "SettlementPosted"
-        | "DividendPaid"
-        | "CashInLieuPosted"
-        | "ExternalActivityIngested" => fill_events(),
-        "AccountStateObserved"
-        | "AccountSnapshotRecorded"
-        | "RejectObserved"
-        | "ConductBreachDetected"
-        | "BrokerExchangeRecorded" => account_events(),
-        "CompensatingEvent"
-        | "ReconciliationRun"
-        | "BrokerPositionObserved"
-        | "OwnerAcknowledged" => reconciliation_events(),
-        _ => protection_events(),
+        _ => later_slice(),
     }
 }
 
-/// Fills, fees, corporate actions and the cash they move (trading-domain spec §5.7, §6, §10), a
-/// later slice of this stack.
-fn fill_events() -> Result<(), ExecutorError> {
+/// Fees, corporate actions, the account snapshot, rejects, reconciliation's records, the owner
+/// acknowledgment, protection and the kill switch (trading-domain spec §5.4 to §5.7, §6, §7.3, §10,
+/// §11): the later slices of this stack.
+fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// The account, its restrictions, and the broker's rejects (trading-domain spec §7.3), a later
-/// slice of this stack.
-fn account_events() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// Reconciliation's records and the owner acknowledgment that lifts its pause (trading-domain
-/// spec §11), a later slice of this stack.
-fn reconciliation_events() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// Protection and the kill switch (trading-domain spec §5.4, §5.5), the last slice of this stack
-/// and E7-4.
-fn protection_events() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
 /// The story that interprets an event this crate does not, or `None` for one it does. Answered
@@ -382,7 +340,6 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         id,
         OrderDetail {
             request: Some(request),
-            submitted_seq: Some(event.seq),
             ..OrderDetail::default()
         },
     );
@@ -400,8 +357,10 @@ fn order_state_changed(
 ) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
-    if let Some(old) = optional_text(payload, "replaces") {
-        replacement(state, &id, &ClientOrderId::parse(old)?)?;
+    if optional_text(payload, "replaces").is_some()
+        || optional_text(payload, "replaced_by").is_some()
+    {
+        return later_slice();
     }
     let order = state
         .orders
@@ -427,38 +386,9 @@ fn order_state_changed(
         detail.last_absence = None;
     }
     order.state = next;
-    order.cancel_unconfirmed = next == OrderState::PendingCancel;
     if next.is_terminal() {
-        let amount = state.reservations.remove(&id);
-        if let Some(new) = optional_text(payload, "replaced_by") {
-            let new = ClientOrderId::parse(new)?;
-            order.replaced_by = Some(new.clone());
-            state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
-        }
+        state.reservations.remove(&id);
     }
-    Ok(())
-}
-
-/// The order a broker-initiated replacement created, linked to the one it replaced and carrying
-/// the reservation the old one passed on (trading-domain spec §5.7, interpretation 26).
-fn replacement(
-    state: &mut ExecutorState,
-    id: &ClientOrderId,
-    old: &ClientOrderId,
-) -> Result<(), ExecutorError> {
-    let original = state
-        .orders
-        .get(old)
-        .ok_or_else(|| ExecutorError::UnknownOrder {
-            client_order_id: old.as_str().to_owned(),
-        })?;
-    let linked = Order {
-        client_order_id: id.clone(),
-        filled_qty: Qty::ZERO,
-        replaced_by: None,
-        ..original.clone()
-    };
-    state.orders.insert(id.clone(), linked);
     Ok(())
 }
 

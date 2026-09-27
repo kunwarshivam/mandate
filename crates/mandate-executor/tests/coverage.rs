@@ -465,7 +465,6 @@ fn a_filled_sell_no_longer_holds_quantity_back() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_confirmed_absent_sell_is_resubmitted_against_its_own_quantity() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -604,7 +603,6 @@ fn a_paused_agents_exit_is_held_not_denied() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_held_exit_is_released_at_the_first_tick_its_hold_has_cleared() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -653,7 +651,6 @@ fn a_held_exit_is_released_at_the_first_tick_its_hold_has_cleared() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_held_intent_past_its_age_is_abandoned_at_a_tick() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -676,7 +673,6 @@ fn a_held_intent_past_its_age_is_abandoned_at_a_tick() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_age_bound_is_inclusive() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -757,7 +753,6 @@ fn absences_are_counted_afresh_each_time_an_order_goes_unknown() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_order_is_looked_up_again_only_after_the_spacing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1501,7 +1496,6 @@ fn a_blocked_account_holds_an_exit_for_the_broker_and_never_denies_it() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_resubmission_the_recheck_holds_waits_in_intent_and_goes_once_released() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

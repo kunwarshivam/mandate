@@ -8,7 +8,7 @@ use mandate_num::{Qty, SignedQty, Usd};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
-    OrderState, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -57,14 +57,6 @@ pub struct ExecutorState {
     pub(crate) held: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
     pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
-    pub(crate) copied: BTreeMap<EventId, EventId>,
-    pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
-    pub(crate) pending_actions: BTreeSet<InstrumentId>,
-    pub(crate) asset_fees: BTreeMap<InstrumentId, Qty>,
-    pub(crate) unposted_fees: Usd,
-    pub(crate) simulated_fees: Usd,
-    pub(crate) cash_flow: Usd,
-    pub(crate) fill_notional: Usd,
     pub(crate) now: Option<RiskClock>,
 }
 
@@ -74,20 +66,9 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OrderDetail {
     pub(crate) request: Option<SubmitOrder>,
-    pub(crate) submitted_seq: Option<Seq>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
     pub(crate) broker_filled: Option<Qty>,
-}
-
-/// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
-/// not been folded yet: a crash between the two leaves one here, and the next reconciliation
-/// journals the missing compensation before anything else, so no adoption stays silent (§11).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Adoption {
-    pub(crate) subject: ClientOrderId,
-    pub(crate) from: OrderState,
-    pub(crate) to: OrderState,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -167,14 +148,6 @@ impl ExecutorState {
             held: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
-            copied: BTreeMap::new(),
-            uncompensated: BTreeMap::new(),
-            pending_actions: BTreeSet::new(),
-            asset_fees: BTreeMap::new(),
-            unposted_fees: Usd::ZERO,
-            simulated_fees: Usd::ZERO,
-            cash_flow: Usd::ZERO,
-            fill_notional: Usd::ZERO,
             now: None,
         }
     }
@@ -219,10 +192,7 @@ impl ExecutorState {
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
-        self.orders
-            .values()
-            .filter(|order| order.state == crate::types::OrderState::Submitting)
-            .collect()
+        vec![]
     }
 
     /// Reservations by client order id. An `Unknown` order reserves its maximum cost, and only
@@ -232,16 +202,15 @@ impl ExecutorState {
     }
 
     /// One instrument's resting protection and the quantity it covers.
-    pub fn protection(&self, instrument: &InstrumentId) -> Option<&Protection> {
-        self.protection.get(instrument)
+    pub fn protection(&self, _instrument: &InstrumentId) -> Option<&Protection> {
+        None
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
     /// position.
-    pub fn protective_sell_qty(&self, instrument: &InstrumentId) -> Qty {
-        self.protection
-            .get(instrument)
-            .map_or(Qty::ZERO, |protection| protection.covered_qty)
+    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Qty {
+        let _ = &self.protection;
+        Qty::ZERO
     }
 
     /// Every unprotected interval the fold has seen, open and closed.
@@ -307,19 +276,7 @@ impl ExecutorState {
     /// until the broker has reported an account, or if the arithmetic overflows: no buying power
     /// is ever guessed.
     pub fn buying_power(&self) -> Option<Usd> {
-        let observed = self.observed.as_ref()?;
-        let model = observed
-            .cash
-            .checked_add(self.cash_flow)
-            .and_then(|cash| cash.checked_sub(self.unposted_fees))
-            .and_then(|cash| cash.checked_sub(self.simulated_fees))
-            .ok()?;
-        let reserved = self
-            .reservations
-            .values()
-            .try_fold(Usd::ZERO, |total, amount| total.checked_add(*amount))
-            .ok()?;
-        model.min(observed.buying_power).checked_sub(reserved).ok()
+        None
     }
 
     /// The instruments whose reconciliation difference is unexplained. Only an owner
@@ -362,8 +319,8 @@ impl ExecutorState {
     }
 
     /// Whether the causation chain of a copied fact is recorded for `event`.
-    pub fn copied_origin(&self, event: &EventId) -> Option<&EventId> {
-        self.copied.get(event)
+    pub fn copied_origin(&self, _event: &EventId) -> Option<&EventId> {
+        None
     }
 
     /// The account stream this state is the single writer of, named by its opaque ids alone

@@ -466,7 +466,6 @@ fn a_new_intent_after_a_restart_derives_a_fresh_client_order_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_resubmission_after_a_crash_reuses_the_same_client_order_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -598,7 +597,6 @@ fn an_order_the_broker_confirms_present_is_adopted_not_resent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn one_absent_lookup_does_not_resubmit() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -634,7 +632,6 @@ fn one_absent_lookup_does_not_resubmit() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -691,7 +688,6 @@ fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_stale_intent_is_abandoned_rather_than_resubmitted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -837,7 +833,6 @@ fn an_abandoned_intent_is_never_re_sent() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_gate_denial_on_re_check_abandons_the_intent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -925,7 +920,6 @@ fn a_first_pass_gate_denial_produces_no_order_to_abandon() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_timeout_is_not_a_rejection() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -964,7 +958,6 @@ fn a_timeout_is_not_a_rejection() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_duplicate_client_order_id_is_folded_as_already_submitted() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1536,7 +1529,6 @@ fn a_repeated_fill_id_changes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_order_reserves_its_maximum_cost() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1566,7 +1558,6 @@ fn an_unknown_order_reserves_its_maximum_cost() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_order_blocks_new_orders_in_the_instrument() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -1607,7 +1598,6 @@ fn an_unknown_order_blocks_new_orders_in_the_instrument() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_abandoned_order_releases_its_reservation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

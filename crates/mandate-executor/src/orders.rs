@@ -1,5 +1,5 @@
-//! The §5.7 order state machine over what the broker says: acknowledgments, query answers, and
-//! status updates.
+//! The §5.7 order state machine over what the broker says: acknowledgments, query answers,
+//! status updates, and silence.
 
 use mandate_canon::Value;
 use mandate_num::Qty;
@@ -8,8 +8,9 @@ use crate::batch::Batch;
 use crate::codec::state_name;
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
+use crate::intent::resubmit;
 use crate::payload::text;
-use crate::types::{BrokerOrder, EventId, OrderState, StatusMapping};
+use crate::types::{BrokerOrder, BrokerRequest, EventId, OrderState, StatusMapping};
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
 /// maps, and any other value is [`ExecutorError::UnmappedBrokerStatus`], which the step turns into
@@ -146,7 +147,7 @@ pub(crate) fn described(
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
-        Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
+        Ok(StatusMapping::ReplacedPair) => replaced()?,
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {
@@ -189,39 +190,68 @@ fn unmapped(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Executo
     Ok(())
 }
 
-/// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived
-/// from the event that records the replacement, becomes `Accepted` holding the old reservation
-/// (§5.7, interpretation 26).
-fn replaced(
-    batch: &mut Batch<'_, '_>,
-    id: &ClientOrderId,
-    order: &BrokerOrder,
-    mut status: Vec<(&'static str, Value)>,
-) -> Result<(), ExecutorError> {
-    let from = batch
+/// A transport failure or an ambiguous answer: every order whose request was in flight is
+/// `Unknown`, its reservation held, and queried by client order id — never treated as rejected
+/// and never resent (interpretation 10).
+pub(crate) fn silence(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    let in_flight: Vec<ClientOrderId> = batch
         .view
         .orders
-        .get(id)
-        .map_or(OrderState::Unknown, |known| known.state);
-    if !legal(from, OrderState::Replaced) {
-        transition(batch, id, OrderState::Replaced, status)?;
+        .values()
+        .filter(|order| order.state == OrderState::Submitting)
+        .map(|order| order.client_order_id.clone())
+        .collect();
+    for id in in_flight {
+        transition(batch, &id, OrderState::Unknown, Vec::new())?;
+        batch.broker(BrokerRequest::GetOrderByClientId(id));
+    }
+    Ok(())
+}
+
+/// The broker refusing our own `client_order_id` means the order is already there: it is queried,
+/// never failed (E7-2 step 6).
+pub(crate) fn duplicate(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
+    let Some(id) = known(batch, Some(raw)) else {
+        return Ok(());
+    };
+    transition(batch, &id, OrderState::Unknown, Vec::new())?;
+    batch.broker(BrokerRequest::GetOrderByClientId(id));
+    Ok(())
+}
+
+/// One answer that the broker does not have the order. It is counted, never acted on alone: only
+/// `unknown_absent_lookups` absences spanning `unknown_absent_window_s` confirm it, and only then
+/// does the order return to `Intent` for the gate to re-run (§5.7, interpretation 9).
+pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
+    let Some(id) = known(batch, Some(raw)) else {
+        return Ok(());
+    };
+    let state = batch.view.orders.get(&id).map(|order| order.state);
+    if state == Some(OrderState::Submitting) {
+        transition(batch, &id, OrderState::Unknown, Vec::new())?;
+    } else if state != Some(OrderState::Unknown) {
         return Ok(());
     }
-    let linked = ClientOrderId::for_replacement(&batch.next_id())?;
-    status.push(("replaced_by", text(linked.as_str())));
-    if let Some(broker) = &order.replaced_by_broker_order_id {
-        status.push(("replaced_by_broker_order_id", text(broker.clone())));
-    }
-    transition(batch, id, OrderState::Replaced, status)?;
     batch.journal(
         "OrderStateChanged",
         None,
         vec![
-            ("client_order_id", text(linked.as_str())),
-            ("state", text(state_name(OrderState::Accepted))),
-            ("replaces", text(id.as_str())),
+            ("client_order_id", text(id.as_str())),
+            ("state", text(state_name(OrderState::Unknown))),
+            ("lookup", text("absent")),
         ],
     )?;
+    let config = batch.ports.config;
+    let confirmed = batch.view.orders.get(&id).is_some_and(|order| {
+        order.absent_lookups >= config.unknown_absent_lookups
+            && order.first_absence_at.is_some_and(|first| {
+                batch.at().secs().saturating_sub(first.secs()) >= config.unknown_absent_window_s
+            })
+    });
+    if confirmed {
+        transition(batch, &id, OrderState::Intent, Vec::new())?;
+        resubmit(batch, &id)?;
+    }
     Ok(())
 }
 
@@ -231,4 +261,43 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         transition(batch, &id, OrderState::Canceled, Vec::new())?;
     }
     Ok(())
+}
+
+/// `replaced`: the old order becomes `Replaced` and a new one, linked to it, holds its reservation
+/// (§5.7, interpretation 26). A later slice of this stack, with the reconciliation that confirms
+/// it.
+fn replaced() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-3" })
+}
+
+/// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
+/// up) have passed since it went `Unknown` or since its last absence, so N lookups span the whole
+/// window and no faster.
+pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
+    let config = batch.ports.config;
+    let gaps = i64::from(config.unknown_absent_lookups.saturating_sub(1).max(1));
+    let spacing = config
+        .unknown_absent_window_s
+        .saturating_add(gaps.saturating_sub(1))
+        .checked_div(gaps)
+        .unwrap_or(config.unknown_absent_window_s);
+    let now = batch.at().secs();
+    let due: Vec<ClientOrderId> = batch
+        .view
+        .orders
+        .values()
+        .filter(|order| order.state == OrderState::Unknown)
+        .filter(|order| {
+            batch
+                .view
+                .details
+                .get(&order.client_order_id)
+                .and_then(|detail| detail.last_absence.or(detail.unknown_since))
+                .is_some_and(|since| now.saturating_sub(since.secs()) >= spacing)
+        })
+        .map(|order| order.client_order_id.clone())
+        .collect();
+    for id in due {
+        batch.broker(BrokerRequest::GetOrderByClientId(id));
+    }
 }

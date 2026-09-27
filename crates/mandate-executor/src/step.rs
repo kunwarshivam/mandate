@@ -3,11 +3,11 @@
 use crate::batch::Batch;
 use crate::error::ExecutorError;
 use crate::intent::{received, release_held, resume};
-use crate::orders::{cancelled, described};
+use crate::orders::{absent, cancelled, described, duplicate, lookups_due, silence};
 use crate::ports::Ports;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
-    BrokerOutcome, BrokerRequest, BrokerUpdate, Command, Effect, Input, OrderState, WriterEpoch,
+    BrokerOutcome, BrokerRequest, BrokerUpdate, Effect, Input, OrderState, WriterEpoch,
 };
 
 /// One step of the executor (ADR-0001 ES-06).
@@ -125,66 +125,36 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
         Input::Journal(_) | Input::Market(_) => Ok(()),
         Input::Tick(_) => {
-            if batch
-                .view
-                .orders
-                .values()
-                .any(|order| order.state == OrderState::Unknown)
-            {
-                unknown_orders()?;
-            }
+            lookups_due(batch);
             release_held(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
-        Input::Broker(Err(_)) => unknown_orders(),
+        Input::Broker(Err(_)) => silence(batch),
         Input::Broker(Ok(outcome)) => outcome_of(batch, outcome),
         Input::BrokerUpdate(BrokerUpdate::Order(order)) => described(batch, &order),
-        Input::BrokerUpdate(BrokerUpdate::Fill(_)) => fills(),
-        Input::BrokerUpdate(BrokerUpdate::Account(_) | BrokerUpdate::Reject(_)) => {
-            account_and_rejects()
-        }
-        Input::BrokerSnapshot(_) | Input::Command(Command::Reconcile(_)) => reconciliation(),
-        Input::Command(Command::KillSwitch { .. }) => kill_switch(),
+        Input::BrokerUpdate(_) | Input::BrokerSnapshot(_) | Input::Command(_) => later_slice(),
     }
 }
 
 fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), ExecutorError> {
     match outcome {
         BrokerOutcome::Submitted(order) | BrokerOutcome::Order(order) => described(batch, &order),
-        BrokerOutcome::DuplicateClientOrderId { .. } | BrokerOutcome::Absent { .. } => {
-            unknown_orders()
+        BrokerOutcome::DuplicateClientOrderId { client_order_id } => {
+            duplicate(batch, &client_order_id)
         }
-        BrokerOutcome::Rejected(_) | BrokerOutcome::Account(_) => account_and_rejects(),
+        BrokerOutcome::Absent { client_order_id } => absent(batch, &client_order_id),
         BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
-        BrokerOutcome::OpenOrders(_)
+        BrokerOutcome::Rejected(_)
+        | BrokerOutcome::Account(_)
+        | BrokerOutcome::OpenOrders(_)
         | BrokerOutcome::Positions(_)
         | BrokerOutcome::Activities { .. }
-        | BrokerOutcome::AccountWideAccepted => Ok(()),
+        | BrokerOutcome::AccountWideAccepted => later_slice(),
     }
 }
 
-/// An order whose outcome is unknown: silence, a duplicate id, an absence, and the lookups that
-/// resolve them (trading-domain spec §5.7). The next slice of this stack.
-fn unknown_orders() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
-}
-
-/// Fills and fees (trading-domain spec §5.7, §10), a later slice of this stack.
-fn fills() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// The account and its restrictions (trading-domain spec §7.3), a later slice of this stack.
-fn account_and_rejects() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// Reconciliation (trading-domain spec §11), a later slice of this stack.
-fn reconciliation() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
-}
-
-/// The agent-scoped kill switch (trading-domain spec §5.5), a later slice of this stack.
-fn kill_switch() -> Result<(), ExecutorError> {
+/// Fills and fees, the account and its restrictions, reconciliation, and the agent kill switch
+/// (trading-domain spec §5.5, §5.7, §7.3, §10, §11): the later slices of this stack.
+fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
