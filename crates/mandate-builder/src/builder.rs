@@ -13,12 +13,13 @@
 //! (DEC-130 item 5); until it does, a caller builds the view and a value too wide for its type is
 //! refused at that boundary rather than approximated inside the chain (item 8).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_canon::Digest;
 use mandate_domain::{AssetClass, AssetId, MarketSession, Purpose};
 use mandate_num::{
-    Conviction, CostBasis, FeeRate, MarkPrice, Price, Qty, SizeFraction, Unit, Usd, UsdExact,
+    Conviction, CostBasis, FeeRate, MarkPrice, Price, Qty, SignedQty, SizeFraction, Unit, Usd,
+    UsdExact,
 };
 use mandate_spec::document::{ModelId, SizingMethod};
 use mandate_time::UtcNanos;
@@ -139,14 +140,83 @@ pub struct Combined {
 /// every output an `instrument_id`, so nothing else in the chain would notice the mix-up — and
 /// counting a mismatched output would let one instrument's conviction open a position in another.
 /// The parameter is here rather than in [`propose`] alone so that the rule has one home.
+///
+/// The refusal covers the whole call, the exit branch included, so the caller (the runtime, stream
+/// I) must hand this function only the outputs for the instrument being sized. A tick's whole output
+/// buffer passed through unfiltered would stop a discretionary exit the way a crossed quote once did
+/// (#234 review, round 1).
 pub fn combine(
     models: &[SignalModel],
     outputs: &[ModelOutput],
     instrument: &AssetId,
     now: UtcNanos,
 ) -> Result<Combined, BuilderError> {
-    let _ = (models, outputs, instrument, now);
-    Err(BuilderError::Unimplemented)
+    if outputs
+        .iter()
+        .any(|output| output.instrument != *instrument)
+    {
+        return Err(BuilderError::OutputInstrumentMismatch);
+    }
+    if models.is_empty() {
+        return Err(BuilderError::NoSignalModels);
+    }
+    if models.iter().all(|model| model.weight.is_zero()) {
+        return Err(BuilderError::WeightSumZero);
+    }
+    let mut latest: BTreeMap<&ModelId, &ModelOutput> = BTreeMap::new();
+    for output in outputs {
+        let Some(model) = models.iter().find(|model| model.id == output.model_id) else {
+            continue;
+        };
+        if !is_pinned_by(output, model) || !is_fresh(output, model, now) {
+            continue;
+        }
+        let superseded = latest
+            .get(&model.id)
+            .is_none_or(|earlier| earlier.as_of <= output.as_of);
+        if superseded {
+            latest.insert(&model.id, output);
+        }
+    }
+    let weights: Vec<SizeFraction> = models.iter().map(|model| model.weight).collect();
+    let mut terms = Vec::new();
+    let mut confidences = Vec::new();
+    let mut missing = Vec::new();
+    for model in models {
+        match latest.get(&model.id) {
+            Some(output) => {
+                terms.push((model.weight, output.conviction, output.confidence));
+                confidences.push((model.weight, output.confidence));
+            }
+            None => missing.push(model.weight),
+        }
+    }
+    Ok(Combined {
+        outputs_used: latest.into_keys().cloned().collect(),
+        exit_conviction: Conviction::weighted_ratio(&terms, &[], &weights)?,
+        buy_conviction: Conviction::weighted_ratio(&terms, &missing, &weights)?,
+        score: Unit::weighted_ratio(&confidences, &weights)?,
+    })
+}
+
+/// §8.1 and DEC-67: the whole pinned triple, or the output counts as missing (DEC-130 item 11).
+fn is_pinned_by(output: &ModelOutput, model: &SignalModel) -> bool {
+    output.model_version == model.version && output.content_hash == model.content_hash
+}
+
+/// §8.2: `as_of ≤ now < expires_at` and `now − as_of ≤ max_output_age_s`. The age bound is compared
+/// as the instant `as_of + max_output_age_s`, second and nanosecond in turn, so no duration is
+/// subtracted and none can be out of range: an instant is at most 253,402,300,799 seconds, far
+/// inside an `i64` with a `u32` added.
+fn is_fresh(output: &ModelOutput, model: &SignalModel, now: UtcNanos) -> bool {
+    let stale_after = (
+        output
+            .as_of
+            .secs()
+            .saturating_add(i64::from(model.max_output_age_s)),
+        output.as_of.nanos(),
+    );
+    output.as_of <= now && now < output.expires_at && (now.secs(), now.nanos()) <= stale_after
 }
 
 /// The order builder's method and thresholds (§8.3), typed.
@@ -410,15 +480,17 @@ pub struct Proposal {
 /// order.
 ///
 /// Pure: no clock, no I/O, no state between calls, and identical inputs give an identical proposal
-/// (ES-21). A crossed quote is [`BuilderError::CrossedQuote`]; an input too wide for the exact
-/// chain is `too_precise` or `overflow` and nothing is proposed (DEC-130 item 8).
+/// (ES-21). An input too wide for the exact chain is `too_precise` or `overflow` and nothing is
+/// proposed (DEC-130 item 8).
 ///
 /// The step-5 guard is `n ≤ 0` **or** a value below the minimum order, not the minimum alone, so a
 /// zero-quantity buy is impossible even where `min_order_usd` and `rebalance_band` are both zero
 /// (DEC-130 item 21).
 ///
-/// [`BuilderError::UntradableSession`] is reached on the **buy path only**: an exit is paced, never
-/// denied, and reads no session. [`BuilderError::OutputInstrumentMismatch`] is reached first of all,
+/// [`BuilderError::CrossedQuote`] and [`BuilderError::UntradableSession`] are reached on the **buy
+/// path only**: a discretionary exit is paced, never denied (`AGENTS.md` rule 13), so neither a
+/// crossed tick nor the session stops one. The exit goes out at the bid it was given, and the
+/// gate's collar judges that price. [`BuilderError::OutputInstrumentMismatch`] is reached first of all,
 /// because it says an input was not interpreted rather than that an action was refused.
 pub fn propose(
     mandate: &BuilderMandate,
@@ -428,6 +500,407 @@ pub fn propose(
     outputs: &[ModelOutput],
     now: UtcNanos,
 ) -> Result<Proposal, BuilderError> {
-    let _ = (mandate, account, market, risk, outputs, now);
-    Err(BuilderError::Unimplemented)
+    let combined = combine(&mandate.models, outputs, &market.instrument, now)?;
+    let SizingMethod::ConvictionLinear = mandate.sizing.method;
+    if let GoalKind::Accumulate(goal) = &mandate.goal
+        && goal.instrument != market.instrument
+    {
+        return Err(BuilderError::AccumulateInstrumentMismatch);
+    }
+    let limits = &mandate.limits;
+    let equity = UsdExact::of(account.agent_equity);
+    let cap = UsdExact::of(limits.max_position_usd)
+        .min(equity.times_size_fraction(limits.max_position_fraction)?)?;
+    let current_mv =
+        UsdExact::of_qty(account.position_qty).checked_mul(UsdExact::of_mark(account.risk_mark))?;
+    let mut proposal = Proposal {
+        action: Action::Hold {
+            reason: HoldReason::NoFreshOutputs,
+        },
+        combined,
+        sizes: Sizes {
+            cap,
+            current_mv,
+            target_value: None,
+            delta: None,
+        },
+        clipped_by: BTreeSet::new(),
+    };
+    proposal.action = decide_and_size(mandate, account, market, risk, &mut proposal)?;
+    Ok(proposal)
+}
+
+/// §8.3 steps 1 (the hold) to 5, filling in the reported target, Delta and clips as it reaches them.
+fn decide_and_size(
+    mandate: &BuilderMandate,
+    account: &AccountSnapshot,
+    market: &Market,
+    risk: &RiskContext,
+    proposal: &mut Proposal,
+) -> Result<Action, BuilderError> {
+    let hold = |reason| Ok(Action::Hold { reason });
+    let combined = &proposal.combined;
+    if combined.outputs_used.is_empty() {
+        return hold(HoldReason::NoFreshOutputs);
+    }
+    let sizing = &mandate.sizing;
+    let exit_line = UsdExact::zero().checked_sub(fraction(sizing.exit_threshold)?)?;
+    if !exit_line.is_below(conviction(combined.exit_conviction)?)? {
+        return discretionary_exit(mandate, account, market);
+    }
+    if conviction(combined.buy_conviction)?.is_below(fraction(sizing.entry_threshold)?)? {
+        return hold(HoldReason::BetweenThresholds);
+    }
+    let Sizes {
+        cap, current_mv, ..
+    } = proposal.sizes;
+    let working = UsdExact::of(account.working_opening_cost);
+    let target = cap
+        .times_conviction(combined.buy_conviction)?
+        .times_size_fraction(risk.size_factor)?;
+    let delta = target.checked_sub(current_mv)?.checked_sub(working)?;
+    proposal.sizes.target_value = Some(target);
+    proposal.sizes.delta = Some(delta);
+    let band = cap.times_size_fraction(sizing.rebalance_band)?;
+    if !delta.is_positive()? {
+        return hold(HoldReason::AtOrAboveTarget);
+    }
+    if delta.is_below(band)? {
+        return hold(HoldReason::WithinRebalanceBand);
+    }
+    let limits = &mandate.limits;
+    let gross_room = UsdExact::of(limits.max_gross_exposure_usd)
+        .min(UsdExact::of(account.agent_equity))?
+        .checked_sub(UsdExact::of(account.gross_usd))?;
+    let budget = delta
+        .min(UsdExact::of(limits.max_order_usd))?
+        .min(cap.checked_sub(current_mv)?.checked_sub(working)?)?
+        .min(gross_room)?;
+    if budget.is_below(delta)? {
+        proposal.clipped_by.insert(Clip::Limits);
+    }
+    let mut quantity = budget.shares_at(market.ask, market.increment)?;
+    if value_at(quantity, market.ask)?.is_below(band)? {
+        return hold(HoldReason::BelowBandAfterClipping);
+    }
+    if let GoalKind::Accumulate(goal) = &mandate.goal {
+        let bound = accumulate_bound(goal, account, market)?;
+        if bound < quantity {
+            proposal.clipped_by.insert(Clip::Goal);
+            quantity = bound;
+        }
+        if exceeds_max_avg_price(goal, account, market, quantity)? {
+            return hold(HoldReason::WouldExceedMaxAvgPrice);
+        }
+    }
+    if quantity.is_zero()
+        || value_at(quantity, market.ask)?.is_below(UsdExact::of(market.min_order_usd))?
+    {
+        return hold(HoldReason::BelowMinimumAfterClipping);
+    }
+    buy(account, market, risk, proposal, quantity)
+}
+
+/// §8.3 step 2's exit branch: disabled for `accumulate` (§3.1), which is checked **before** the
+/// position (DEC-130 item 21), and otherwise the whole position at the bid. An equity exit inside the
+/// close window goes out marketable (DEC-70); the session rule that defers one is the gate's.
+fn discretionary_exit(
+    mandate: &BuilderMandate,
+    account: &AccountSnapshot,
+    market: &Market,
+) -> Result<Action, BuilderError> {
+    if let GoalKind::Accumulate(_) = mandate.goal {
+        return Ok(Action::Hold {
+            reason: HoldReason::DiscretionaryExitsDisabled,
+        });
+    }
+    if account.position_qty.is_zero() {
+        return Ok(Action::Hold {
+            reason: HoldReason::NoPosition,
+        });
+    }
+    let marketable = market.asset_class == AssetClass::UsEquity && market.in_close_window;
+    Ok(Action::Sell {
+        purpose: Purpose::DiscretionaryExit,
+        qty: account.position_qty,
+        limit_price: market.bid,
+        order_usd: account.position_qty.notional(market.bid)?,
+        shape: if marketable {
+            OrderShape::MarketableLimit
+        } else {
+            OrderShape::Limit
+        },
+    })
+}
+
+/// §8.3 step 4's three bounds, each truncated to the increment, with a = ask × (1 + cash fee rate)
+/// and β = 1 − asset fee rate. The average-price bound applies only where a − `max_avg_price` × β is
+/// positive; elsewhere any quantity keeps the average at or below the bound, and the guard in
+/// [`exceeds_max_avg_price`] still checks it.
+fn accumulate_bound(
+    goal: &AccumulateGoal,
+    account: &AccountSnapshot,
+    market: &Market,
+) -> Result<Qty, BuilderError> {
+    let (per_unit, received) = per_unit_terms(market)?;
+    let remaining =
+        UsdExact::of_qty(goal.target_qty).checked_sub(UsdExact::of_qty(account.position_qty))?;
+    let spend_left =
+        UsdExact::of(goal.max_spend_usd).checked_sub(UsdExact::of(account.goal_spent_usd))?;
+    let mut bound = remaining
+        .truncated_quotient(received, market.increment)?
+        .min(spend_left.truncated_quotient(per_unit, market.increment)?);
+    if let Some(max_avg) = goal.max_avg_price {
+        let max_avg = UsdExact::of_price(max_avg);
+        let denominator = per_unit.checked_sub(max_avg.checked_mul(received)?)?;
+        if denominator.is_positive()? {
+            let headroom = max_avg
+                .checked_mul(UsdExact::of_qty(account.position_qty))?
+                .checked_sub(UsdExact::of(account.cost_basis.to_usd()))?;
+            bound = bound.min(headroom.truncated_quotient(denominator, market.increment)?);
+        }
+    }
+    Ok(bound)
+}
+
+/// §8.3 step 4's guard: (cost basis + n × a) ÷ (position + n × β) above `max_avg_price`, compared by
+/// cross-multiplication so no quotient is taken. Nothing to buy is nothing to guard.
+fn exceeds_max_avg_price(
+    goal: &AccumulateGoal,
+    account: &AccountSnapshot,
+    market: &Market,
+    quantity: Qty,
+) -> Result<bool, BuilderError> {
+    let Some(max_avg) = goal.max_avg_price else {
+        return Ok(false);
+    };
+    if quantity.is_zero() {
+        return Ok(false);
+    }
+    let (per_unit, received) = per_unit_terms(market)?;
+    let n = UsdExact::of_qty(quantity);
+    let cost = UsdExact::of(account.cost_basis.to_usd()).checked_add(n.checked_mul(per_unit)?)?;
+    let held = UsdExact::of_qty(account.position_qty).checked_add(n.checked_mul(received)?)?;
+    Ok(UsdExact::of_price(max_avg)
+        .checked_mul(held)?
+        .is_below(cost)?)
+}
+
+/// a = ask × (1 + cash fee rate) and β = 1 − asset fee rate (§8.3 step 4).
+fn per_unit_terms(market: &Market) -> Result<(UsdExact, UsdExact), BuilderError> {
+    let ask = UsdExact::of_price(market.ask);
+    Ok((
+        ask.checked_add(ask.times_fee_rate(market.fee_rate_cash)?)?,
+        UsdExact::one().checked_sub(UsdExact::of_fee_rate(market.fee_rate_asset))?,
+    ))
+}
+
+/// The buy and the facts §6.2 step 4 reads: the exposure fields are this order's **after** values
+/// (§6.3). A buy is sized off the ask, so a crossed quote prices it against a market that does not
+/// exist (DEC-130 item 17); and an opening order has no session name in the overnight session, where
+/// none may trade (DEC-30). Both refusals are here, on the buy path alone, so that neither can stop an
+/// exit (`AGENTS.md` rule 13).
+fn buy(
+    account: &AccountSnapshot,
+    market: &Market,
+    risk: &RiskContext,
+    proposal: &Proposal,
+    quantity: Qty,
+) -> Result<Action, BuilderError> {
+    if market.bid > market.ask {
+        return Err(BuilderError::CrossedQuote);
+    }
+    if market.session == MarketSession::Overnight {
+        return Err(BuilderError::UntradableSession);
+    }
+    let order_usd = quantity.notional(market.ask)?;
+    let purpose = if account.position_qty.is_zero() {
+        Purpose::Open
+    } else {
+        Purpose::Increase
+    };
+    let position_after = SignedQty::from(account.position_qty)
+        .value_at_mark(account.risk_mark)?
+        .checked_add(account.working_opening_cost)?
+        .checked_add(order_usd)?;
+    Ok(Action::Buy {
+        purpose,
+        qty: quantity,
+        limit_price: market.ask,
+        order_usd,
+        action: ActionContext {
+            purpose,
+            order_usd,
+            combined_score: proposal.combined.score,
+            instrument: market.instrument.clone(),
+            asset_class: market.asset_class,
+            session: market.session,
+            first_trade_in_instrument: !risk.has_prior_fill,
+            new_instrument: risk.new_instrument,
+            thesis_confidence: risk.thesis_confidence,
+            drawdown: risk.drawdown,
+            daily_pnl_fraction: risk.daily_pnl_fraction,
+            position_usd_after: position_after,
+            gross_usd_after: account.gross_usd.checked_add(order_usd)?,
+            bought_today_usd: risk.bought_today_usd.checked_add(order_usd)?,
+            position_pnl_fraction: risk.position_pnl_fraction,
+        },
+    })
+}
+
+fn value_at(quantity: Qty, price: Price) -> Result<UsdExact, BuilderError> {
+    Ok(UsdExact::of_qty(quantity).checked_mul(UsdExact::of_price(price))?)
+}
+
+/// A threshold on the conviction line, carried exactly.
+fn fraction(value: SizeFraction) -> Result<UsdExact, BuilderError> {
+    Ok(UsdExact::one().times_size_fraction(value)?)
+}
+
+fn conviction(value: Conviction) -> Result<UsdExact, BuilderError> {
+    Ok(UsdExact::one().times_conviction(value)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    type Checked = Result<(), Box<dyn Error>>;
+
+    const INSTRUMENT: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
+    const HASH: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+    const NOW_SECS: i64 = 1_790_000_000;
+
+    fn now() -> Result<UtcNanos, Box<dyn Error>> {
+        Ok(UtcNanos::from_parts(NOW_SECS, 0)?)
+    }
+
+    fn model() -> Result<SignalModel, Box<dyn Error>> {
+        Ok(SignalModel {
+            id: ModelId::parse("quant.momentum")?,
+            version: ModelVersion::parse("1.0.0")?,
+            content_hash: Digest::from_hex(HASH).ok_or("a sha256 hex digest")?,
+            weight: SizeFraction::ONE,
+            max_output_age_s: 900,
+        })
+    }
+
+    fn mandate() -> Result<BuilderMandate, Box<dyn Error>> {
+        Ok(BuilderMandate {
+            models: vec![model()?],
+            sizing: Sizing {
+                method: SizingMethod::ConvictionLinear,
+                entry_threshold: SizeFraction::parse("0.3")?,
+                exit_threshold: SizeFraction::parse("0.3")?,
+                rebalance_band: SizeFraction::parse("0.05")?,
+            },
+            limits: Limits {
+                max_position_usd: Usd::parse("1500")?,
+                max_position_fraction: SizeFraction::parse("0.2")?,
+                max_order_usd: Usd::parse("1000")?,
+                max_gross_exposure_usd: Usd::parse("2000")?,
+            },
+            goal: GoalKind::ProfitStop,
+        })
+    }
+
+    fn output(conviction: &str) -> Result<ModelOutput, Box<dyn Error>> {
+        let pinned = model()?;
+        Ok(ModelOutput {
+            model_id: pinned.id,
+            model_version: pinned.version,
+            content_hash: pinned.content_hash,
+            instrument: AssetId::parse(INSTRUMENT)?,
+            as_of: UtcNanos::from_parts(NOW_SECS - 60, 0)?,
+            expires_at: UtcNanos::from_parts(NOW_SECS + 600, 0)?,
+            direction: Direction::Long,
+            conviction: Conviction::parse(conviction)?,
+            confidence: Unit::ONE,
+        })
+    }
+
+    fn account(position: &str) -> Result<AccountSnapshot, Box<dyn Error>> {
+        Ok(AccountSnapshot {
+            agent_equity: Usd::parse("10000")?,
+            position_qty: Qty::parse(position)?,
+            cost_basis: CostBasis::ZERO,
+            risk_mark: MarkPrice::parse("100")?,
+            gross_usd: Usd::ZERO,
+            working_opening_cost: Usd::ZERO,
+            goal_spent_usd: Usd::ZERO,
+        })
+    }
+
+    /// A tick whose bid, 100.01, is above its ask, 100.
+    fn crossed() -> Result<Market, Box<dyn Error>> {
+        Ok(Market {
+            instrument: AssetId::parse(INSTRUMENT)?,
+            asset_class: AssetClass::UsEquity,
+            session: MarketSession::Regular,
+            in_close_window: false,
+            bid: Price::parse("100.01")?,
+            ask: Price::parse("100")?,
+            increment: Qty::parse("1")?,
+            min_order_usd: Usd::parse("1")?,
+            fee_rate_cash: FeeRate::parse("0")?,
+            fee_rate_asset: FeeRate::parse("0")?,
+        })
+    }
+
+    fn quiet() -> RiskContext {
+        RiskContext {
+            size_factor: SizeFraction::ONE,
+            drawdown: Unit::ZERO,
+            daily_pnl_fraction: mandate_num::Signed::ZERO,
+            position_pnl_fraction: mandate_num::Signed::ZERO,
+            bought_today_usd: Usd::ZERO,
+            has_prior_fill: true,
+            new_instrument: false,
+            thesis_confidence: Unit::ZERO,
+        }
+    }
+
+    #[test]
+    fn a_crossed_quote_never_stops_a_discretionary_exit() -> Checked {
+        let proposal = propose(
+            &mandate()?,
+            &account("5")?,
+            &crossed()?,
+            &quiet(),
+            &[output("-1")?],
+            now()?,
+        )?;
+        assert_eq!(
+            proposal.action,
+            Action::Sell {
+                purpose: Purpose::DiscretionaryExit,
+                qty: Qty::parse("5")?,
+                limit_price: Price::parse("100.01")?,
+                order_usd: Usd::parse("500.05")?,
+                shape: OrderShape::Limit,
+            },
+            "rule 13: the exit goes out at the bid it was given, whole, and the collar is the gate's"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_crossed_quote_still_refuses_a_buy() -> Checked {
+        assert_eq!(
+            propose(
+                &mandate()?,
+                &account("0")?,
+                &crossed()?,
+                &quiet(),
+                &[output("1")?],
+                now()?,
+            )
+            .map_err(|e| e.code()),
+            Err("crossed_quote"),
+            "a buy sized off an ask below the bid is priced against a market that does not exist"
+        );
+        Ok(())
+    }
 }
