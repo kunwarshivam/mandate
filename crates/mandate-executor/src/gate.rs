@@ -121,7 +121,7 @@ pub(crate) fn account_stream_checks(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
     );
-    let unreconciled = adds && state.observed.is_some() && !state.reconciled_since_start();
+    let unreconciled = unreconciled_opening(state, adds);
     record(
         "startup_reconciliation",
         unreconciled.then_some(("startup_reconciliation_pending", true)),
@@ -140,6 +140,15 @@ pub(crate) fn account_stream_checks(
         checks,
         held,
     })
+}
+
+/// The startup reconciliation, last so a check that denies is reported first: on a stream that has
+/// journaled an account, an opening is **held**, never denied, until a reconciliation has run since
+/// this process started (§11, the coordinator's ruling on #174). Exits pass (`AGENTS.md` rule 13).
+/// A stream that has never journaled an account is not held yet; the backlog carries that window,
+/// which blocks E7-7.
+fn unreconciled_opening(state: &ExecutorState, adds: bool) -> bool {
+    adds && state.observed.is_some() && !state.reconciled_since_start()
 }
 
 /// §9.1 check 1: account state is evaluated before agent mode (§7.3). A blocked account denies a

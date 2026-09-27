@@ -29,7 +29,8 @@ pub(crate) const EVERY_AGENT: &str = "*";
 /// replay, so nothing durable exists outside the journal and a restart cannot mistake an old event
 /// for a new one. Only `fold.rs` writes folded state. `step.rs` writes only the running process's
 /// own fields, which are never folded: the writer epoch, `started`, the head it started at, the
-/// latest tick, and the unresolved append (which the fold clears once the append's events are folded back). That split
+/// latest tick, and the unresolved append (which the fold clears once the append's events are
+/// folded back). That split
 /// is a convention the review holds (rung 3 of the trust ladder), not a guarantee the types give;
 /// the backlog carries making it one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -356,7 +357,8 @@ impl ExecutorState {
     /// Whether a reconciliation has run since this process started: a `ReconciliationRun` folded
     /// after the head `Input::Started` found. A run an earlier process appended sits at or before
     /// that head, so a restart always waits for its own. Until one runs, the gate holds every
-    /// opening (§11, the coordinator's ruling on #202).
+    /// opening on a stream that has journaled an account (§11, the coordinator's ruling on #174,
+    /// comment 5857742391).
     pub(crate) fn reconciled_since_start(&self) -> bool {
         self.started_at
             .zip(self.reconciled_through)
