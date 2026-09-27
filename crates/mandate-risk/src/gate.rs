@@ -142,7 +142,10 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
 
 /// §9.1's purpose table. A sell above the agent's position would open a short, which v1 does not
 /// hold (DEC-32), so it is typed an opening and check 4 denies it `would_cross_zero`: no reducing
-/// purpose is ever what a zero crossing is denied under, which keeps MI-1 true as stated.
+/// purpose is ever what a zero crossing is denied under, which keeps MI-1 true as stated. Typed an
+/// opening, it meets check 1 before check 4, so under `paused` or `stopped` it is held (and under
+/// `exits_only` denied `agent_exits_only`) rather than denied `would_cross_zero`: §9.1's order
+/// applied as written, and deliberate.
 pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty) -> Purpose {
     match (origin, side) {
         (Origin::ProtectiveLeg, _) => Purpose::Protective,
@@ -163,9 +166,9 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
     }
 }
 
-/// The boundaries the reference cases and the tests PR's properties leave unpinned, each found by
-/// a mutant that survived them: a value exactly at a limit passes (DEC-129 item 15), the account's
-/// own 1× bound binds where the agent's does not, and `exits_only` denies an opening.
+/// What the tests PR's files cannot pin on this PR's code, each shown by a planted bug that every
+/// live test passed: the eight check ids in §9.1's order, the order in which two failing checks
+/// report, the stricter of the two mode snapshots, and `exits_only` denying an opening.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -181,14 +184,54 @@ mod tests {
         InstrumentSnapshot, MarketSnapshot, ProposedKind, ProposedOrder, TimeInForce,
     };
 
+    /// Every input of one decision, owned, so a test changes only the field it is about.
+    struct Owned {
+        config: GateConfig,
+        mandate: ValidatedMandate,
+        risk: RiskSnapshot,
+        account: AccountSnapshot,
+        agent: AgentSnapshot,
+        instrument: InstrumentSnapshot,
+        market: MarketSnapshot,
+        universe: WorkingUniverse,
+        proposed: ProposedOrder,
+    }
+
+    impl Owned {
+        fn decide(&self) -> Result<Decision, GateError> {
+            evaluate(&GateInput {
+                now: UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?,
+                pass: GatePass::First,
+                config: &self.config,
+                mandate: &self.mandate,
+                risk: &self.risk,
+                account: &self.account,
+                agent: &self.agent,
+                instrument: &self.instrument,
+                market: &self.market,
+                conduct: &ConductState::default(),
+                universe: &self.universe,
+                proposed: &self.proposed,
+            })
+        }
+
+        /// A sell of the whole position of 10, from the origin given.
+        fn selling(mut self, origin: Origin) -> Result<Self, GateError> {
+            self.agent
+                .positions
+                .insert(self.proposed.instrument.clone(), Qty::parse("10")?);
+            self.proposed.side = Side::Sell;
+            self.proposed.origin = origin;
+            Ok(self)
+        }
+    }
+
     fn id(text: &str) -> Result<AssetId, GateError> {
         AssetId::new(text).map_err(|_| GateError::InstrumentUnknown)
     }
 
-    /// Order 10 × 100 = `max_order_usd`; the agent also holds 1000 elsewhere, so its gross is
-    /// exactly `max_gross_exposure_usd`; the account's equity is 2000, so the account is exactly
-    /// at 1× too. Every bound is met with equality, and `other_agent_mv` pushes only the account's.
-    fn decide(mode: AgentMode, other_agent_mv: &str) -> Result<Decision, GateError> {
+    /// An opening buy of 10 × 100 in instrument `a`, in the universe, that every check allows.
+    fn allowing() -> Result<Owned, GateError> {
         let usd = Usd::parse;
         let fraction = Fraction::parse;
         let config = GateConfig {
@@ -237,29 +280,29 @@ mod tests {
             size_factor: Ratio::parse("1")?,
             agent_mode: AgentMode::Normal,
         };
-        let (a, b, c) = (id("a")?, id("b")?, id("c")?);
+        let a = id("a")?;
         let account = AccountSnapshot {
             account_type: AccountType::Margin,
             state: AccountState::Active,
             crypto_active: true,
             regime: DayTradeRegime::LegacyPdt,
-            equity: usd("2000")?,
+            equity: usd("10000")?,
             prior_close_equity: usd("30000")?,
             model_buying_power: usd("100000")?,
             broker_buying_power: usd("100000")?,
             broker_non_marginable_buying_power: usd("100000")?,
             positions: BTreeMap::new(),
-            market_values: [(b.clone(), usd("1000")?), (c, usd(other_agent_mv)?)].into(),
+            market_values: BTreeMap::new(),
             working_orders: BTreeMap::new(),
             unknown_orders: BTreeSet::new(),
             related_account_resting: BTreeMap::new(),
         };
         let agent = AgentSnapshot {
             agent: AgentId(1),
-            mode,
+            mode: AgentMode::Normal,
             instrument_restrictions: BTreeMap::new(),
             positions: BTreeMap::new(),
-            market_values: [(b, usd("1000")?)].into(),
+            market_values: BTreeMap::new(),
             working_orders: BTreeSet::new(),
             instrument_groups: BTreeMap::new(),
             last_exit_fill_at: BTreeMap::new(),
@@ -303,28 +346,120 @@ mod tests {
             client_order_id: ClientOrderId(1),
             fee_reservation: Usd::ZERO,
         };
-        evaluate(&GateInput {
-            now: UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?,
-            pass: GatePass::First,
-            config: &config,
-            mandate: &mandate,
-            risk: &risk,
-            account: &account,
-            agent: &agent,
-            instrument: &instrument,
-            market: &market,
-            conduct: &ConductState::default(),
-            universe: &WorkingUniverse::Known {
+        Ok(Owned {
+            config,
+            mandate,
+            risk,
+            account,
+            agent,
+            instrument,
+            market,
+            universe: WorkingUniverse::Known {
                 instruments: [a].into(),
                 pinned: true,
             },
-            proposed: &proposed,
+            proposed,
         })
+    }
+
+    fn outside_the_universe(mut o: Owned) -> Owned {
+        o.universe = WorkingUniverse::Known {
+            instruments: BTreeSet::new(),
+            pinned: true,
+        };
+        o
+    }
+
+    /// The journal's check list carries §9.1's eight ids in §9.1's order, spelled out here rather
+    /// than read from the crate's own `ORDER`, which is the thing under test.
+    #[test]
+    fn the_checks_are_listed_in_section_9_1_order() -> Result<(), GateError> {
+        let d = allowing()?.decide()?;
+        let ids: Vec<Check> = d
+            .checks
+            .iter()
+            .map(|c| match c {
+                CheckOutcome::Passed(id)
+                | CheckOutcome::Failed(id, _)
+                | CheckOutcome::NotReached(id) => *id,
+            })
+            .collect();
+        assert_eq!(
+            (d.verdict, ids),
+            (
+                Verdict::Allow,
+                vec![
+                    Check::AccountAndMode,
+                    Check::UniverseAndLimits,
+                    Check::SessionAndHalt,
+                    Check::OrderConstraints,
+                    Check::MarkAndCollar,
+                    Check::ConductControls,
+                    Check::BuyingPowerAndExposure,
+                    Check::DayTradeBudget,
+                ]
+            ),
+            "§9.1: account and mode, universe and limits, session and halt, order constraints, \
+             mark and collar, conduct, buying power and exposure, day-trade budget"
+        );
+        Ok(())
+    }
+
+    /// Two checks fail at once and the earlier one reports: check 1 before check 2.
+    #[test]
+    fn the_mode_reports_before_the_universe() -> Result<(), GateError> {
+        let mut o = outside_the_universe(allowing()?);
+        o.agent.mode = AgentMode::ExitsOnly;
+        let d = o.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason),
+            (Verdict::Deny, Some(ReasonCode::AgentExitsOnly)),
+            "exits_only (check 1) and an instrument outside the universe (check 2) both fail"
+        );
+        Ok(())
+    }
+
+    /// Two checks fail at once and the earlier one reports: check 2 before check 4.
+    #[test]
+    fn the_universe_reports_before_an_unknown_order() -> Result<(), GateError> {
+        let mut o = outside_the_universe(allowing()?);
+        o.account
+            .unknown_orders
+            .insert(o.proposed.instrument.clone());
+        let d = o.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason),
+            (Verdict::Deny, Some(ReasonCode::NotInWorkingUniverse)),
+            "the universe (check 2) and an Unknown order (check 4, rule 9) both fail"
+        );
+        Ok(())
+    }
+
+    /// The mode read is the stricter of the two snapshots, so neither softens the other (MI-6):
+    /// each arm puts `paused` in one snapshot only.
+    #[test]
+    fn the_stricter_of_the_two_modes_holds() -> Result<(), GateError> {
+        let mut risk_paused = allowing()?.selling(Origin::RiskEngine)?;
+        risk_paused.risk.agent_mode = AgentMode::Paused;
+        let mut agent_paused = allowing()?.selling(Origin::RiskEngine)?;
+        agent_paused.agent.mode = AgentMode::Paused;
+        let held = |d: Decision| (d.verdict, d.reason);
+        assert_eq!(
+            (held(risk_paused.decide()?), held(agent_paused.decide()?)),
+            (
+                (Verdict::Hold, Some(ReasonCode::AgentPaused)),
+                (Verdict::Hold, Some(ReasonCode::AgentPaused))
+            ),
+            "a plain risk exit is held by paused whichever snapshot carries it"
+        );
+        Ok(())
     }
 
     #[test]
     fn exits_only_denies_an_opening() -> Result<(), GateError> {
-        let d = decide(AgentMode::ExitsOnly, "0")?;
+        let mut o = allowing()?;
+        o.agent.mode = AgentMode::ExitsOnly;
+        let d = o.decide()?;
         assert_eq!(
             (d.verdict, d.reason),
             (Verdict::Deny, Some(ReasonCode::AgentExitsOnly)),
