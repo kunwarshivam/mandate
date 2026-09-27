@@ -1232,7 +1232,6 @@ fn a_flatten_prices_by_session_alone() {
 
 /// §4.4: a halted instrument takes no opening order.
 #[test]
-#[ignore = "pending E6-9"]
 fn a_halted_instrument_denies_an_opening() {
     let mut s = Scenario::allowing();
     s.instrument.halted = true;
