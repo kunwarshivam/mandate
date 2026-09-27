@@ -397,12 +397,18 @@ pub(crate) fn fill(
     }
     batch.journal("FillApplied", None, pairs)?;
     if let Some(order) = batch.view.orders.get(&id) {
+        let pending = matches!(
+            order.state,
+            OrderState::PendingCancel | OrderState::PendingReplace
+        );
         let to = if order.filled_qty >= order.qty {
             OrderState::Filled
+        } else if pending {
+            order.state
         } else {
             OrderState::PartiallyFilled
         };
-        if to != order.state && legal(order.state, to) {
+        if to != order.state {
             transition(batch, &id, to, Vec::new())?;
         }
     }
