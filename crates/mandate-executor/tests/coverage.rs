@@ -33,7 +33,7 @@ const OTHER_INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
 fn fresh(ports: &Ports<'_>) -> Shell {
     let mut shell = Shell::new(1);
     shell.fold_one(&stream_opened()).expect("folds");
-    shell.restart(ports).0
+    shell.restart_ready(ports)
 }
 
 /// The same, with a position of ten `AAPL` bought at 150 folded before the start.
@@ -57,7 +57,7 @@ fn holding(ports: &Ports<'_>) -> Shell {
             ),
         ))
         .expect("the position folds");
-    shell.restart(ports).0
+    shell.restart_ready(ports)
 }
 
 /// Submits one intent and answers the client order id it went out under.

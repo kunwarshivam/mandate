@@ -25,8 +25,9 @@ use mandate_executor::{
     AccountRef, AccountScope, AgentId, BrokerAccount, BrokerFill, BrokerOrder, BrokerOutcome,
     BrokerPosition, BrokerReject, BrokerRequest, BrokerSnapshot, BrokerUnknown, Effect, EventDraft,
     EventId, ExecutorConfig, ExecutorError, ExecutorState, ExitTier, FillId, FoldedEvent, IdGen,
-    Input, InstrumentSnapshot, IntentId, MandateVersion, MandateView, MarketObservation, Ports,
-    ReconcileReason, RiskClock, Seq, TimerId, TimerRequest, WorkspaceId, WriterEpoch, fold, handle,
+    Input, InstrumentSnapshot, IntentId, MandateVersion, MandateView, MarketObservation,
+    OrderState, Ports, ReconcileReason, RiskClock, Seq, TimerId, TimerRequest, WorkspaceId,
+    WriterEpoch, fold, handle,
 };
 use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
 use mandate_time::Date;
@@ -907,6 +908,71 @@ impl Shell {
     pub fn restart_keeping_broker(&mut self, ports: &Ports<'_>) -> (Self, Ran) {
         let broker = core::mem::take(&mut self.connector);
         self.restart_with(broker, ports)
+    }
+
+    /// A restart made ready to open, as a production shell starts: `Input::Started`, then the
+    /// startup reconciliation, then the broker's account reported. The executor holds every
+    /// opening until both have happened since the start (§11, the coordinator's ruling on #174,
+    /// comment 5857742391), so a case whose subject is not the startup itself begins here.
+    pub fn restart_ready(&self, ports: &Ports<'_>) -> Self {
+        let (mut next, _) = self.restart(ports);
+        next.ready(ports);
+        next
+    }
+
+    /// The startup reconciliation and the account report, on a process already started, against
+    /// a broker that agrees with the journal: it holds the positions the fold holds and lists every
+    /// order the fold has at the broker under that order's own status, so the run finds nothing to
+    /// adopt or pause and the case's own subject is untouched.
+    pub fn ready(&mut self, ports: &Ports<'_>) {
+        let mut startup = snapshot(self.head().0, ReconcileReason::Startup);
+        startup.positions = self
+            .state
+            .positions()
+            .iter()
+            .filter(|(_, held)| **held != SignedQty::ZERO)
+            .map(|(held, quantity)| BrokerPosition {
+                instrument: held.clone(),
+                qty: *quantity,
+                avg_entry_price: price("150"),
+            })
+            .collect();
+        startup.open_orders = self
+            .state
+            .orders()
+            .values()
+            .filter_map(|order| {
+                let status = match order.state {
+                    OrderState::Submitting | OrderState::Accepted | OrderState::Unknown => {
+                        "accepted"
+                    }
+                    OrderState::PartiallyFilled => "partially_filled",
+                    OrderState::PendingCancel => "pending_cancel",
+                    OrderState::PendingReplace => "pending_replace",
+                    _ => return None,
+                };
+                Some(BrokerOrder {
+                    broker_order_id: format!("b-{}", order.client_order_id.as_str()),
+                    client_order_id: Some(order.client_order_id.as_str().to_owned()),
+                    instrument: order.instrument.clone(),
+                    side: order.side,
+                    qty: order.qty,
+                    filled_qty: order.filled_qty,
+                    limit_price: Some(price("150")),
+                    stop_price: None,
+                    status: status.to_owned(),
+                    reject_code: None,
+                    replaced_by_broker_order_id: None,
+                    legs: Vec::new(),
+                    created_on: Some(date("2026-09-22")),
+                })
+            })
+            .collect();
+        self.run(Input::BrokerSnapshot(startup), ports);
+        self.run(
+            Input::BrokerUpdate(mandate_executor::BrokerUpdate::Account(broker_account())),
+            ports,
+        );
     }
 
     fn restart_with(&self, broker: FakeConnector, ports: &Ports<'_>) -> (Self, Ran) {
