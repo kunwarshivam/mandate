@@ -94,8 +94,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "FeesCharged" => fees_charged(state, payload),
-        "ExternalActivityIngested" => Ok(()),
+        "FeesCharged" | "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -118,11 +117,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     }
 }
 
-/// Crypto asset fees, corporate actions, reconciliation's records and snapshot, conduct breaches,
-/// recorded broker exchanges, the owner acknowledgment, the trading and risk days, protection and
-/// the kill switch (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this
-/// stack. An `ExternalActivityIngested` folds as a record only: the restriction it causes is its
-/// own `AgentModeApplied`.
+/// Corporate actions, reconciliation's records and snapshot, conduct breaches, recorded broker
+/// exchanges, the owner acknowledgment, the trading and risk days, protection and the kill switch
+/// (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later slices of this stack. Until the fee
+/// balances land with the cash slice, a `FeesCharged` folds as a record only, and an
+/// `ExternalActivityIngested` always does: the restriction it causes is its own `AgentModeApplied`.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
@@ -557,27 +556,6 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
         accrued_fees: optional_usd(payload, "accrued_fees")?.unwrap_or(Usd::ZERO),
     });
     state.cash_flow = Usd::ZERO;
-    Ok(())
-}
-
-/// A fee in dollars: paper's simulated fees are kept apart from the ones the broker posts, which
-/// is what keeps them out of the cash comparison while both lower buying power (trading-domain
-/// spec §10, R-22). A crypto asset fee, paid in the asset, moves the position and is the
-/// reconciliation slice's (§6.3, RC-07).
-fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    if required_text(payload, "family")? == "crypto_asset" {
-        return later_slice();
-    }
-    let accrued = usd(payload, "accrued")?;
-    if flag(payload, "simulated") {
-        state.simulated_fees = state.simulated_fees.checked_add(accrued)?;
-    } else {
-        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
-        state.unposted_fees = state
-            .unposted_fees
-            .checked_add(accrued)?
-            .checked_sub(charged)?;
-    }
     Ok(())
 }
 
