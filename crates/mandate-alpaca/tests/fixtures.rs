@@ -53,6 +53,53 @@ fn every_scenario_the_fixture_plan_names_is_present() {
     );
 }
 
+/// The recorded and hand-built scenarios, as the README beside them declares them. A scenario
+/// the table does not name, or names twice, or a row with no directory, is a failure: the
+/// provenance of a fixture is part of what it proves (review round 1, finding 10).
+#[test]
+fn the_provenance_table_names_every_scenario_once() {
+    let readme = fs::read_to_string(fixtures_dir().join("README.md"))
+        .expect("alpaca-trading/README.md declares each scenario's provenance");
+    let mut recorded = BTreeSet::new();
+    let mut hand_built = BTreeSet::new();
+    for row in readme.lines().filter(|line| line.starts_with("| `")) {
+        let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+        let (Some(name), Some(provenance), Some(why)) = (cells.get(1), cells.get(2), cells.get(3))
+        else {
+            panic!("a provenance row has three cells: {row}");
+        };
+        let name = name.trim_matches('`').to_owned();
+        let fresh = match *provenance {
+            "recorded" => {
+                assert!(why.is_empty(), "a recording needs no reason: {row}");
+                recorded.insert(name.clone())
+            }
+            "hand-built" => {
+                assert!(!why.is_empty(), "a hand-built scenario says why: {row}");
+                hand_built.insert(name.clone())
+            }
+            other => panic!("`{other}` is neither `recorded` nor `hand-built`: {row}"),
+        };
+        assert!(fresh, "{name} is named twice");
+    }
+    assert!(
+        recorded.is_disjoint(&hand_built),
+        "a scenario is recorded or hand-built, never both"
+    );
+    let declared: BTreeSet<String> = recorded.union(&hand_built).cloned().collect();
+    let present: BTreeSet<String> = every_scenario().into_iter().collect();
+    assert_eq!(
+        declared, present,
+        "the table and the directory list name the same scenarios"
+    );
+    assert_eq!(recorded.len(), 11, "eleven were recorded against paper");
+    assert_eq!(
+        hand_built.len(),
+        12,
+        "twelve were built by hand from the spec"
+    );
+}
+
 #[test]
 fn recorded_fixtures_contain_no_credential() {
     let secrets: Vec<String> = [KEY_ID_VAR, SECRET_VAR]

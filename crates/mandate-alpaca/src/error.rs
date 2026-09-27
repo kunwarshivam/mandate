@@ -3,6 +3,7 @@
 //! No variant carries a URL, a header, a request body, or a response body, so no credential and
 //! no broker account number can reach an error message (`AGENTS.md` rule 7, ES-09).
 
+use mandate_executor::ConnectorError;
 use mandate_num::NumError;
 use mandate_time::TimeError;
 
@@ -178,6 +179,29 @@ impl ClientError {
                 _ => mandate_executor::BrokerUnknown::Transport,
             }),
             _ => None,
+        }
+    }
+
+    /// The honest mapping onto the executor's connector error, which is what
+    /// [`crate::TradingClient`]'s `BrokerConnector::call` answers:
+    ///
+    /// - a genuinely unknown outcome ([`Self::as_unknown`]) is
+    ///   [`ConnectorError::Unknown`], and only that makes the executor query;
+    /// - a body the broker sent and this crate could not read is
+    ///   [`ConnectorError::Unreadable`] with the wire error's code (DEC-85: fail loudly);
+    /// - a refused path and an unimplemented call never left the process, so they are
+    ///   [`ConnectorError::NotSent`] with this error's code.
+    ///
+    /// None of them is a rejection, and none but the first is an unknown outcome.
+    pub fn to_connector(&self) -> ConnectorError {
+        if let Some(unknown) = self.as_unknown() {
+            return ConnectorError::Unknown(unknown);
+        }
+        match self {
+            Self::Wire(error) => ConnectorError::Unreadable { code: error.code() },
+            Self::Unimplemented { .. } | Self::Unknown(_) | Self::Transport(_) => {
+                ConnectorError::NotSent { code: self.code() }
+            }
         }
     }
 }

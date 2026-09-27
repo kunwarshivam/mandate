@@ -54,7 +54,6 @@ fn owner_confirmation() -> OwnerConfirmation {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_gap_in_seq_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
@@ -76,7 +75,6 @@ fn a_gap_in_seq_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_repeated_seq_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let first = event(ACCOUNT_STREAM, 1, "StreamOpened", object(&[]));
@@ -87,7 +85,6 @@ fn a_repeated_seq_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unknown_event_type_fails_the_fold() {
     let mut state = RuntimeState::new(common::deployment());
     let unknown = event(ACCOUNT_STREAM, 1, "SomethingNobodyWrote", object(&[]));
@@ -100,7 +97,6 @@ fn an_unknown_event_type_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_copied_mode_change_points_at_the_originating_event() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -128,7 +124,6 @@ fn a_copied_mode_change_points_at_the_originating_event() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn the_golden_journal_folds_to_the_committed_state() {
     let committed = include_str!("golden-journal.json");
     let golden =
@@ -227,7 +222,6 @@ fn the_golden_journal_folds_to_the_committed_state() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn the_fold_version_is_pinned_with_the_golden_journal() {
     assert_eq!(
         FOLD_VERSION, 1,
@@ -238,7 +232,6 @@ fn the_fold_version_is_pinned_with_the_golden_journal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unhandled_command_names_its_story() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -257,7 +250,6 @@ fn an_unhandled_command_names_its_story() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn every_error_code_is_stable_and_unique() {
     let codes = [
         RuntimeError::Unimplemented { story: "E6-1" }.code(),
@@ -329,7 +321,6 @@ fn every_error_code_is_stable_and_unique() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_tick_that_changes_nothing_emits_no_effect() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -349,7 +340,6 @@ fn a_tick_that_changes_nothing_emits_no_effect() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_deadline_is_measured_in_whole_seconds_of_risk_clock() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -382,7 +372,6 @@ fn a_deadline_is_measured_in_whole_seconds_of_risk_clock() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn event_time_never_moves_a_deadline() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -423,7 +412,6 @@ fn event_time_never_moves_a_deadline() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_tick_during_an_unresolved_append_does_not_change_the_drafts() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -449,7 +437,6 @@ fn a_tick_during_an_unresolved_append_does_not_change_the_drafts() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_retried_append_derives_the_same_event_id() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -492,7 +479,6 @@ fn a_retried_append_derives_the_same_event_id() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn two_epochs_never_derive_one_event_id() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -526,7 +512,6 @@ fn two_epochs_never_derive_one_event_id() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_fenced_append_stops_the_runtime() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -552,7 +537,6 @@ fn a_fenced_append_stops_the_runtime() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unresolved_append_is_retried_before_any_new_input() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -589,7 +573,6 @@ fn an_unresolved_append_is_retried_before_any_new_input() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unchanged_mode_journals_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -616,7 +599,6 @@ fn an_unchanged_mode_journals_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restriction_that_lifts_while_another_is_active_does_not_restore_normal() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -651,7 +633,6 @@ fn a_restriction_that_lifts_while_another_is_active_does_not_restore_normal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_resume_does_not_lift_the_copied_account_mode() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -674,7 +655,6 @@ fn an_owner_resume_does_not_lift_the_copied_account_mode() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_broker_restriction_arrives_as_a_mode_copy_not_a_flatten() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -712,7 +692,6 @@ fn a_broker_restriction_arrives_as_a_mode_copy_not_a_flatten() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn exits_only_still_proposes_an_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -736,7 +715,6 @@ fn exits_only_still_proposes_an_exit() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_removed_instrument_proposes_no_opening() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -757,7 +735,6 @@ fn a_removed_instrument_proposes_no_opening() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_removed_instrument_still_exits() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -778,7 +755,6 @@ fn a_removed_instrument_still_exits() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_stopped_agent_is_terminal() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -807,7 +783,6 @@ fn a_stopped_agent_is_terminal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_proposal_journals_before_it_reaches_the_sink() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -847,7 +822,6 @@ fn a_proposal_journals_before_it_reaches_the_sink() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_dry_run_deny_skips_the_proposal() {
     let ids = TestIds;
     let gate = DenyGate("position_cap");
@@ -873,7 +847,6 @@ fn a_dry_run_deny_skips_the_proposal() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_stale_model_output_proposes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -905,7 +878,6 @@ fn asked(shell: &mut Shell, ports: &mandate_runtime::Ports<'_>, at: i64) -> Even
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_binds_the_quantity_and_the_version() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -942,7 +914,6 @@ fn an_approval_binds_the_quantity_and_the_version() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_under_a_changed_version_is_skipped() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -989,7 +960,6 @@ fn an_approval_under_a_changed_version_is_skipped() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_approval_deadline_skips_the_action() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1015,7 +985,6 @@ fn an_approval_deadline_skips_the_action() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_copied_exits_only_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1042,7 +1011,6 @@ fn a_copied_exits_only_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_pause_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1063,7 +1031,6 @@ fn an_owner_pause_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_reducing_version_applies_at_once_and_cancels_approvals() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1098,7 +1065,6 @@ fn a_reducing_version_applies_at_once_and_cancels_approvals() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_risk_increasing_version_waits_for_a_safe_point() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1138,7 +1104,6 @@ fn a_risk_increasing_version_waits_for_a_safe_point() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn started_journals_the_startup_hold_before_its_first_handoff() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1171,7 +1136,6 @@ fn started_journals_the_startup_hold_before_its_first_handoff() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_stays_paused_until_the_account_reconciles() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1205,7 +1169,6 @@ fn a_restart_stays_paused_until_the_account_reconciles() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_earlier_reconciliation_does_not_lift_the_startup_hold() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1232,7 +1195,6 @@ fn an_earlier_reconciliation_does_not_lift_the_startup_hold() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_unexplained_position_keeps_the_runtime_paused() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1263,7 +1225,6 @@ fn an_unexplained_position_keeps_the_runtime_paused() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_mid_run_journals_nothing_new() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1295,7 +1256,6 @@ fn a_restart_mid_run_journals_nothing_new() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_after_an_intent_committed_re_hands_it_without_re_journaling() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1331,7 +1291,6 @@ fn a_restart_after_an_intent_committed_re_hands_it_without_re_journaling() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_started_handoff_names_a_draft_the_fold_already_saw() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1358,7 +1317,6 @@ fn a_started_handoff_names_a_draft_the_fold_already_saw() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_under_stopped_re_hands_no_opening_intent() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1381,7 +1339,6 @@ fn a_restart_under_stopped_re_hands_no_opening_intent() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_under_exits_only_still_re_hands_an_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1435,7 +1392,6 @@ fn this_agent() -> KillScope {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_owner_kill_switch_applies_stopped_before_anything_else() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1467,7 +1423,6 @@ fn an_owner_kill_switch_applies_stopped_before_anything_else() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_automated_flatten_applies_paused_first() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1490,7 +1445,6 @@ fn an_automated_flatten_applies_paused_first() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_platform_operator_stop_applies_stopped_as_a_risk_exit() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1534,7 +1488,6 @@ fn a_platform_operator_stop_applies_stopped_as_a_risk_exit() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_owner_kill_switch_journals_the_owner_exit_request_before_the_handoff() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1576,7 +1529,6 @@ fn an_owner_kill_switch_journals_the_owner_exit_request_before_the_handoff() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_unconfirmed_owner_exit_leaves_the_equity_sells_for_the_session() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1615,7 +1567,6 @@ fn an_unconfirmed_owner_exit_leaves_the_equity_sells_for_the_session() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_cancels_every_pending_approval() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1662,7 +1613,6 @@ fn a_kill_switch_cancels_every_pending_approval() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn an_approval_that_arrives_after_a_kill_switch_proposes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1695,7 +1645,6 @@ fn an_approval_that_arrives_after_a_kill_switch_proposes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_hands_one_flatten_plan_to_the_sink() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1724,7 +1673,6 @@ fn a_kill_switch_hands_one_flatten_plan_to_the_sink() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1784,7 +1732,6 @@ fn the_runtime_never_emits_a_cancel_all_or_a_close_position() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_for_another_agent_changes_nothing() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1815,7 +1762,6 @@ fn a_kill_switch_for_another_agent_changes_nothing() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_connection_kill_switch_stops_every_agent_on_that_connection() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1848,7 +1794,6 @@ fn a_connection_kill_switch_stops_every_agent_on_that_connection() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_workspace_kill_switch_stops_every_agent_in_the_workspace() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1873,7 +1818,6 @@ fn a_workspace_kill_switch_stops_every_agent_in_the_workspace() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_with_no_model_output_still_stops_the_agent() {
     let ids = TestIds;
     let gate = DenyGate("everything");
@@ -1897,7 +1841,6 @@ fn a_kill_switch_with_no_model_output_still_stops_the_agent() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn the_runtime_never_lifts_a_risk_limit_restriction_itself() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -1933,7 +1876,6 @@ fn the_runtime_never_lifts_a_risk_limit_restriction_itself() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_notification_carries_only_opaque_ids() {
     let ids = TestIds;
     let gate = DenyGate("position_cap");
@@ -1962,7 +1904,6 @@ fn a_notification_carries_only_opaque_ids() {
 }
 
 #[test]
-#[ignore = "pending E6-5"]
 fn a_kill_switch_cancels_the_working_order_the_fold_knows() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2003,8 +1944,69 @@ fn a_kill_switch_cancels_the_working_order_the_fold_knows() {
     );
 }
 
+/// The half of the contract `a_kill_switch_cancels_the_working_order_the_fold_knows` cannot see,
+/// because it folds no `IntentReceived`: an intent the executor has **taken** is no longer
+/// `Handoff::Pending`, and it must still reach the flatten's cancel list, because an order the
+/// executor is working is exactly the one a kill switch exists to cancel (DEC-131 item 22,
+/// trading-domain spec §5.5). The two states are separate for this reason, so the case that pins
+/// one cannot pin the other.
 #[test]
-#[ignore = "pending E6-1"]
+fn a_taken_and_working_order_is_in_the_flatten_requests_working_orders() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    let proposed = shell.run(Input::Tick(clock(100)), &ports);
+    let working = proposed
+        .handed
+        .first()
+        .map(|handoff| handoff.intent_id.0.clone())
+        .expect("one order is working");
+
+    let taken = event(
+        ACCOUNT_STREAM,
+        2,
+        "IntentReceived",
+        object(&[
+            ("intent_id", text(&working)),
+            ("instrument", text("AAPL")),
+            ("purpose", text("open")),
+        ]),
+    );
+    shell.fold_one(&taken).expect("folds");
+    assert!(
+        shell
+            .state
+            .pending_handoffs()
+            .iter()
+            .all(|live| live.intent_id.0 != working),
+        "the executor holds it, so a restart would not hand it again"
+    );
+
+    let ran = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let handed = ran
+        .handed
+        .iter()
+        .find_map(|handoff| match &handoff.body {
+            IntentBody::Flatten(plan) => Some(plan.clone()),
+            IntentBody::Order { .. } => None,
+        })
+        .expect("the switch hands a flatten");
+    assert!(
+        handed.cancel_client_order_ids.contains(&working),
+        "a taken-and-working order stays in the flatten request's working orders: {working} is not \
+         in {:?}",
+        handed.cancel_client_order_ids
+    );
+}
+
+#[test]
 fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2059,7 +2061,6 @@ fn a_restart_re_hands_nothing_for_an_intent_the_account_already_took() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn a_restart_re_arms_the_deadline_the_fold_carries() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2097,7 +2098,6 @@ fn a_restart_re_arms_the_deadline_the_fold_carries() {
 }
 
 #[test]
-#[ignore = "pending E6-1"]
 fn an_owner_exit_of_one_instrument_names_its_story() {
     let ids = TestIds;
     let gate = AllowGate;
@@ -2125,5 +2125,689 @@ fn an_owner_exit_of_one_instrument_names_its_story() {
     assert!(
         format!("{error}").contains("E7-2"),
         "and the story it names is the executor's: {error}"
+    );
+}
+
+/// Round-1 review finding 1: a kill switch's flatten must not be lost when its append is answered
+/// late or not at all. A retry re-emits the drafts **and** the handoff they authorise, and a restart
+/// hands an unfinished flatten again, which is what `stopped` and `paused` permit a flatten for at
+/// all (`AGENTS.md` rule 13, DEC-131 item 22). The sink is at-least-once by design, so handing one
+/// twice costs nothing and handing none at all is a switch that never reached the executor.
+#[test]
+fn a_kill_switch_flatten_survives_an_unresolved_append_and_a_restart() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+    let switch = || kill(this_agent(), Initiator::Owner, Some(owner_confirmation()));
+
+    shell.next_append = AppendOutcome::Unresolved;
+    let doubted = shell.run(switch(), &ports);
+    assert!(
+        !doubted.drafts.is_empty() && doubted.handed.is_empty(),
+        "the switch drafted, and nothing reached the sink while its append was in doubt: {:?}",
+        doubted.draft_types()
+    );
+
+    shell.next_append = AppendOutcome::Committed;
+    let retry = shell.run(switch(), &ports);
+    assert!(
+        retry
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "the retry hands the flatten its re-emitted KillSwitchActivated authorises, or a switch \
+         whose first append was merely slow would never reach the executor: {:?}",
+        retry.handed
+    );
+
+    let (_after, started) = shell.restart(&ports);
+    let handed = started
+        .handed
+        .iter()
+        .find_map(|handoff| match &handoff.body {
+            IntentBody::Flatten(plan) => Some(plan.clone()),
+            IntentBody::Order { .. } => None,
+        })
+        .expect("a restart hands the unfinished flatten again, which is what `stopped` re-hands");
+    assert_eq!(
+        handed.confirmation.map(|confirmed| confirmed.bid),
+        Some(price("155")),
+        "carrying the bid the owner confirmed, rebuilt from the OwnerExitRequested the fold read: \
+         without it the executor cannot price an after-hours owner exit and the sells wait"
+    );
+}
+
+/// Round-1 review finding 8, the half a mode comparison alone cannot see: an owner pause taken while
+/// the startup hold already has the agent `paused` moves the **lifecycle** without moving the
+/// effective mode, so the draft that records it must still be written. Otherwise the pause lives only
+/// in memory and lifting the hold returns the agent to `normal` — less strict than the owner asked
+/// for (DEC-131 item 25(h)).
+#[test]
+fn an_owner_pause_taken_under_the_startup_hold_outlives_it() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::silent();
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let shell = Shell::new(1);
+    let (mut shell, _) = shell.restart(&ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a replay with nothing reconciled holds awaiting_reconciliation"
+    );
+
+    shell.run(Input::Command(Command::Pause), &ports);
+    let lifts_the_hold = reconciliation(1, 30);
+    shell.fold_one(&lifts_the_hold).expect("folds");
+    shell.run(Input::Journal(lifts_the_hold), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the owner's pause outlives the hold that happened to be stricter when it was given: a \
+         pause recorded nowhere would be lost the moment the hold lifted"
+    );
+}
+
+/// Round-1 review finding 5: the same defect for an ordinary intent. A batch that resolves on its
+/// retry must hand the exit its `IntentProposed` recorded; trading-domain spec §5.5 lets only
+/// `paused`, `stopped`, an `Unknown` order, or the broker hold an exit, and a slow append is none of
+/// those.
+#[test]
+fn a_retried_append_hands_the_exit_its_draft_authorises() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::exiting(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+
+    shell.next_append = AppendOutcome::Unresolved;
+    let doubted = shell.run(Input::Tick(clock(100)), &ports);
+    assert!(
+        doubted.handed.is_empty(),
+        "nothing reaches the sink while the append is in doubt: {:?}",
+        doubted.handed
+    );
+
+    shell.next_append = AppendOutcome::Committed;
+    let retry = shell.run(Input::Tick(clock(100)), &ports);
+    let proposed = retry
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "IntentProposed")
+        .map(|draft| draft.event_id.clone())
+        .expect("the retry re-emits the proposal's draft");
+    assert_eq!(
+        retry
+            .handed
+            .iter()
+            .map(|handoff| handoff.intent_id.clone())
+            .collect::<Vec<_>>(),
+        vec![proposed],
+        "and hands the intent that draft records, by the same id: {:?}",
+        retry.handed
+    );
+}
+
+/// Round-1 review finding 2: `AgentModeApplied` is agent-scoped on a shared account stream (mandate
+/// spec §5.10), so a sibling's `normal` must not lift this agent's restriction. That would be a mode
+/// change that adds risk, which `AGENTS.md` rules 1 and 3 forbid outright.
+#[test]
+fn another_agents_mode_change_does_not_lift_this_agents_restriction() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::silent();
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+
+    let mine = event(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(common::AGENT)),
+                ("to", text("paused")),
+                ("restriction", text("daily_loss")),
+            ],
+            100,
+        ),
+    );
+    shell.fold_one(&mine).expect("folds");
+    shell.run(Input::Journal(mine), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a fact naming this agent is this agent's"
+    );
+
+    let a_siblings = event(
+        ACCOUNT_STREAM,
+        3,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text("agent-b")),
+                ("to", text("normal")),
+                ("restriction", text("daily_loss")),
+            ],
+            110,
+        ),
+    );
+    shell.fold_one(&a_siblings).expect("folds");
+    shell.run(Input::Journal(a_siblings), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "and one naming a sibling is not: a sibling's normal that lifted this agent's restriction \
+         would be a mode change that adds risk"
+    );
+}
+
+/// Round-1 review finding 3: the agent kind of a stream name is this deployment's own stream, not
+/// every agent's in the workspace. A sibling's `IntentProposed` folding here would put its order in
+/// this runtime's outstanding set, and a sibling's `AgentModeChanged` would overwrite this one's
+/// lifecycle.
+#[test]
+fn a_sibling_agents_stream_is_not_one_this_runtime_follows() {
+    let mut state = RuntimeState::new(common::deployment());
+    let a_siblings = event(OTHER_AGENT_STREAM, 1, "StreamOpened", object(&[]));
+    let error =
+        fold(&mut state, &a_siblings).expect_err("a sibling's agent stream is not followed");
+    assert_eq!(error.code(), "foreign_stream", "{error}");
+    fold(
+        &mut state,
+        &event(AGENT_STREAM, 1, "StreamOpened", object(&[])),
+    )
+    .expect("and this deployment's own agent stream is");
+}
+
+/// Round-1 review finding 4: the startup hold **lifts** on a clean reconciliation at or after the
+/// last submission, and wants nothing outstanding only to be **taken** (trading-domain spec §11,
+/// DEC-131 item 13). One predicate for both would hold an agent `paused` for ever after its first
+/// order, because an intent stays outstanding until a terminal outcome the fold treats as inert —
+/// and a permanently paused agent cannot even propose a discretionary exit.
+#[test]
+fn a_clean_reconciliation_lifts_the_startup_hold_with_an_intent_still_outstanding() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    shell.run(Input::Tick(clock(100)), &ports);
+
+    let (mut shell, _) = shell.restart(&ports);
+    assert!(
+        !shell.state.outstanding().is_empty(),
+        "the restart replays an intent that is still outstanding"
+    );
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "so the hold is taken: an outstanding intent is exactly what the runtime cannot ask the \
+         broker about"
+    );
+
+    let clean = reconciliation(2, 200);
+    shell.fold_one(&clean).expect("folds");
+    shell.run(Input::Journal(clean), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "and the reconciliation lifts it, outstanding intent or not: the broker's truth is now \
+         known, which is the whole of what the hold waits for"
+    );
+}
+
+/// Round-1 review finding 6 and round-3 findings 1 and 2: a `RiskLimit` flatten's restriction lifts
+/// through the account stream **by the owner's acknowledgment** and nowhere else (brief item 21,
+/// mandate spec §5.4, §5.7, §5.8), while an owner or operator stop is terminal (DEC-131 item 12).
+/// Every step is keyed on event identity: the copy of this switch's own `AgentModeChanged` confirms
+/// it, and only a looser copy caused by an acknowledgment lifts it. The resume at the end also pins
+/// DEC-131 item 25(h): a command that moves neither the lifecycle nor the effective mode journals
+/// nothing.
+#[test]
+fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+
+    let mut shell = armed_shell(&ports);
+    let pulled = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let mode_event = pulled
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the switch journals its own mode change first");
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a mandate limit's flatten pauses"
+    );
+
+    let the_executors_copy_of_this_switch = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &mode_event,
+    );
+    shell
+        .fold_one(&the_executors_copy_of_this_switch)
+        .expect("folds");
+    shell.run(Input::Journal(the_executors_copy_of_this_switch), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the copy of the switch's own mode confirms it, never lifts it"
+    );
+
+    let acknowledged = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("daily_loss")), ("user", text("user-1"))]),
+    );
+    shell.fold_one(&acknowledged).expect("folds");
+    shell.run(Input::Journal(acknowledged.clone()), &ports);
+
+    let a_pause_the_acknowledgment_caused = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            115,
+        ),
+        &acknowledged.event_id,
+    );
+    shell
+        .fold_one(&a_pause_the_acknowledgment_caused)
+        .expect("folds");
+    shell.run(Input::Journal(a_pause_the_acknowledgment_caused), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "an acknowledgment that restates the pause is not a clearance: only a **looser** mode lifts"
+    );
+
+    let cleared = common::copied(
+        ACCOUNT_STREAM,
+        5,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged.event_id,
+    );
+    shell.fold_one(&cleared).expect("folds");
+    shell.run(Input::Journal(cleared), &ports);
+    let resumed = shell.run(Input::Command(Command::Resume), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "and the owner's acknowledgment is what lifts it, or the agent is paused for ever by a limit \
+         that has already cleared"
+    );
+    assert!(
+        resumed.draft_types().is_empty(),
+        "a resume that moves neither the lifecycle nor the effective mode journals nothing (MI-6): \
+         {:?}",
+        resumed.draft_types()
+    );
+
+    let mut terminal = armed_shell(&ports);
+    let stopped = terminal.run(kill(this_agent(), Initiator::Owner, None), &ports);
+    let stop_mode_event = stopped
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the stop journals its own mode change first");
+    let confirming = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("stopped")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &stop_mode_event,
+    );
+    terminal.fold_one(&confirming).expect("folds");
+    terminal.run(Input::Journal(confirming), &ports);
+    let acknowledged_stop = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("owner_stop")), ("user", text("user-1"))]),
+    );
+    terminal.fold_one(&acknowledged_stop).expect("folds");
+    terminal.run(Input::Journal(acknowledged_stop.clone()), &ports);
+    let would_lift_anything_else = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged_stop.event_id,
+    );
+    terminal.fold_one(&would_lift_anything_else).expect("folds");
+    terminal.run(Input::Journal(would_lift_anything_else), &ports);
+    assert_eq!(
+        terminal.state.effective_mode(),
+        Mode::Stopped,
+        "an owner stop is terminal and lifts for no one, an acknowledged clearance included"
+    );
+}
+
+/// Round-2 review finding 1: the executor copies the runtime's `AgentModeChanged` back as
+/// `AgentModeApplied` (journal spec §2), so a switch's own `paused` returns as an account-stream
+/// fact. Retiring the switch on it would retire it the instant it was pulled, and a restart would
+/// then have no flatten to hand — the round-1 finding 1 fix defeated by its own echo.
+#[test]
+fn an_echo_of_its_own_pause_does_not_retire_the_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let the_executors_copy_of_our_own_mode = mode_applied(2, "paused", 110);
+    shell
+        .fold_one(&the_executors_copy_of_our_own_mode)
+        .expect("folds");
+    shell.run(Input::Journal(the_executors_copy_of_our_own_mode), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the echo of the switch's own mode is the account stream confirming it, never lifting it"
+    );
+
+    let (_after, started) = shell.restart(&ports);
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "so a restart still hands the unfinished flatten: a switch retired by its own echo is a \
+         switch that never reaches the executor at all: {:?}",
+        started.handed
+    );
+}
+
+/// Round-2 review finding 2: the streams have no global order (journal spec §2), so an
+/// `AgentModeApplied{normal}` written before the breach can fold after the switch command. Lifting on
+/// it would hand the agent back to `normal` with the breach unaddressed, and the very next tick would
+/// propose an opening order (`AGENTS.md` rules 1 and 3).
+#[test]
+fn a_stale_account_normal_does_not_lift_an_unconfirmed_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let written_before_the_breach = mode_applied(2, "normal", 110);
+    shell.fold_one(&written_before_the_breach).expect("folds");
+    shell.run(Input::Journal(written_before_the_breach), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a mode the account stream never confirmed the switch with cannot lift it: with no global \
+         order across streams, that `normal` may predate the breach entirely"
+    );
+
+    let ran = shell.run(Input::Tick(clock(200)), &ports);
+    assert!(
+        !ran.draft_types().contains(&"IntentProposed"),
+        "and nothing that adds risk follows: {:?}",
+        ran.draft_types()
+    );
+}
+
+/// Round-1 review finding 7: a pending approval that would add risk holds back a risk-adding
+/// proposal and nothing else. Holding a discretionary exit behind an opening ASK for up to the whole
+/// approval window is a hold trading-domain spec §5.5 gives only `paused`, `stopped`, an `Unknown`
+/// order, or the broker.
+#[test]
+fn an_exit_is_not_held_behind_a_pending_opening_approval() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let asking = FixedPlan::opening(Autonomy::Ask);
+    let exiting = FixedPlan::exiting(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ask_ports = ports(&ids, &gate, &asking, &view);
+    let exit_ports = ports(&ids, &gate, &exiting, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ask_ports);
+    let approval = asked(&mut shell, &ask_ports, 100);
+
+    let ran = shell.run(Input::Tick(clock(200)), &exit_ports);
+    assert!(
+        ran.draft_types().contains(&"IntentProposed"),
+        "the exit is proposed although an opening approval is pending: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        shell.state.pending_approvals().contains_key(&approval),
+        "and the opening approval is untouched, still waiting on its approver"
+    );
+}
+
+/// Round-3 review finding 1: the lift rule must not depend on fold order. A replay folds the agent
+/// stream ahead of the account stream (journal spec §8), so a rule that confirms a switch by "some
+/// copy at or above my mode" lets the **first** switch's echo confirm the **second** and the first
+/// switch's acknowledgment lift it. The live run and the replay then disagree, and the replay is the
+/// one that ends `normal` with the breach unaddressed. Identity, not order, is what ties a copy to a
+/// switch.
+#[test]
+fn a_second_switch_is_not_confirmed_by_the_first_ones_echo() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+
+    let first = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let first_mode = first
+        .drafts
+        .first()
+        .map(|draft| draft.event_id.clone())
+        .expect("the first switch journals its mode change");
+    let echo = common::copied(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("paused")), ("restriction", text("daily_loss"))],
+            110,
+        ),
+        &first_mode,
+    );
+    shell.fold_one(&echo).expect("folds");
+    shell.run(Input::Journal(echo), &ports);
+    let acknowledged = event(
+        ACCOUNT_STREAM,
+        3,
+        "OwnerAcknowledged",
+        object(&[("subject", text("daily_loss")), ("user", text("user-1"))]),
+    );
+    shell.fold_one(&acknowledged).expect("folds");
+    shell.run(Input::Journal(acknowledged.clone()), &ports);
+    let cleared = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            120,
+        ),
+        &acknowledged.event_id,
+    );
+    shell.fold_one(&cleared).expect("folds");
+    shell.run(Input::Journal(cleared), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "the first switch's own cycle completes"
+    );
+
+    shell.run(Input::ModelOutput(fresh_output(130)), &ports);
+    shell.run(Input::Tick(clock(130)), &ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let a_stale_clearance = event(
+        ACCOUNT_STREAM,
+        5,
+        "AgentModeApplied",
+        with_clock(
+            &[("to", text("normal")), ("restriction", text("daily_loss"))],
+            140,
+        ),
+    );
+    shell.fold_one(&a_stale_clearance).expect("folds");
+    shell.run(Input::Journal(a_stale_clearance), &ports);
+    let live = shell.state.effective_mode();
+    assert_eq!(
+        live,
+        Mode::Paused,
+        "the second switch holds: nothing on the account stream has confirmed or cleared it"
+    );
+
+    let (after, started) = shell.restart(&ports);
+    assert_eq!(
+        after.state.effective_mode(),
+        live,
+        "and the replay agrees with the live run, which is the whole of ES-21: the agent stream \
+         folds ahead of the account stream, so a rule that read arrival order would let the first \
+         switch's echo confirm this one and its acknowledgment lift it"
+    );
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "so the second switch's flatten is still re-handed: {:?}",
+        started.handed
+    );
+}
+
+/// Round-3 review finding 2: a pause and a clearance that both predate the breach, folded after the
+/// switch command because the streams have no global order (journal spec §2), must neither confirm
+/// nor lift it. Neither cites this switch's own mode change, so under the identity rule neither can.
+#[test]
+fn a_pre_breach_pause_and_clearance_pair_does_not_lift_a_switch() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+
+    let acknowledged_before_the_breach = event(
+        ACCOUNT_STREAM,
+        2,
+        "OwnerAcknowledged",
+        object(&[
+            ("subject", text("external_activity")),
+            ("user", text("user-1")),
+        ]),
+    );
+    shell
+        .fold_one(&acknowledged_before_the_breach)
+        .expect("folds");
+    shell.run(
+        Input::Journal(acknowledged_before_the_breach.clone()),
+        &ports,
+    );
+    let paused_before_the_breach = event(
+        ACCOUNT_STREAM,
+        3,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("to", text("paused")),
+                ("restriction", text("external_activity")),
+            ],
+            110,
+        ),
+    );
+    shell.fold_one(&paused_before_the_breach).expect("folds");
+    shell.run(Input::Journal(paused_before_the_breach), &ports);
+    let cleared_before_the_breach = common::copied(
+        ACCOUNT_STREAM,
+        4,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("to", text("normal")),
+                ("restriction", text("external_activity")),
+            ],
+            120,
+        ),
+        &acknowledged_before_the_breach.event_id,
+    );
+    shell.fold_one(&cleared_before_the_breach).expect("folds");
+    shell.run(Input::Journal(cleared_before_the_breach), &ports);
+
+    let live = shell.state.effective_mode();
+    assert_eq!(
+        live,
+        Mode::Paused,
+        "a pause the switch never caused cannot confirm it, so the clearance that follows cannot \
+         lift it: both may predate the breach entirely"
+    );
+    let ran = shell.run(Input::Tick(clock(130)), &ports);
+    assert!(
+        !ran.draft_types().contains(&"IntentProposed"),
+        "and nothing that adds risk follows: {:?}",
+        ran.draft_types()
+    );
+
+    let (after, started) = shell.restart(&ports);
+    assert_eq!(
+        after.state.effective_mode(),
+        live,
+        "the replay agrees with the live run"
+    );
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "and the flatten is still re-handed: {:?}",
+        started.handed
     );
 }

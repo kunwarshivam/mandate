@@ -38,9 +38,9 @@ use common::{
 };
 use mandate_canon::Value;
 use mandate_executor::{
-    BrokerOutcome, BrokerRequest, BrokerUnknown, BrokerUpdate, Command, Effect, EventDraft,
-    ExecutorState, Initiator, Input, KillScope, OrderState, Purpose, ReconcileReason,
-    ReconciliationVerdict, RiskClock, Seq,
+    BrokerOutcome, BrokerRequest, BrokerUnknown, BrokerUpdate, ClientOrderId, Command, Effect,
+    EventDraft, EventId, ExecutorState, Initiator, Input, IntentId, KillScope, OrderState, Purpose,
+    ReconcileReason, ReconciliationVerdict, RiskClock, Seq,
 };
 use proptest::prelude::*;
 
@@ -94,6 +94,9 @@ struct ShadowBook {
     /// `OrderSubmitted` per attempt" is read off.
     submissions: BTreeSet<(String, u64)>,
     event_ids: Vec<String>,
+    /// Protective orders the journal names only through `ProtectionChanged`: an executor may
+    /// carry them in its order book or beside it, so the comparison allows them either way.
+    protective: BTreeSet<String>,
 }
 
 /// Reads one text field of a draft payload.
@@ -173,6 +176,11 @@ impl ShadowBook {
                         entry.reserved = false;
                     }
                 }
+                "ProtectionChanged" if field(draft, "action") == Some("placed") => {
+                    for id in field(draft, "orders").unwrap_or_default().split(',') {
+                        book.protective.insert(id.to_owned());
+                    }
+                }
                 "FillApplied" | "LateFillApplied" => {
                     let (Some(id), Some(fill)) =
                         (field(draft, "client_order_id"), field(draft, "fill_id"))
@@ -228,12 +236,18 @@ impl ShadowBook {
     /// Compares only what both sides can know: the state name, the filled units, and whether a
     /// reservation is held. The fill-id set is the shadow's own bookkeeping.
     fn agrees_with(&self, other: &Self) -> Result<(), String> {
-        if self.orders.len() != other.orders.len() {
-            return Err(format!(
-                "the journal carries {} orders and the state {}",
-                self.orders.len(),
-                other.orders.len()
-            ));
+        if self.orders.is_empty() {
+            return Err(
+                "the journal names no order at all, so there is nothing to agree on".into(),
+            );
+        }
+        for extra in other.orders.keys() {
+            if !self.orders.contains_key(extra) && !self.protective.contains(extra) {
+                return Err(format!(
+                    "the state carries {extra}, which no draft names: state the journal does not \
+                     carry"
+                ));
+            }
         }
         for (id, mine) in &self.orders {
             let Some(theirs) = other.orders.get(id) else {
@@ -434,55 +448,240 @@ impl ProtectionAccountant {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Step {
+    /// A fresh or repeated intent. An opening is protected (a GTC bracket at 170 and 140 for two
+    /// shares, so a fill of one is a partial fill) or plain (one share); an exit sells one share.
     Intent {
         which: u8,
         exiting: bool,
         other: bool,
+        protected: bool,
     },
     Acknowledge,
     Timeout,
     Absent,
-    Fill {
-        units: u8,
-    },
+    /// One share of the most recent order the broker holds with anything left to fill.
+    Fill,
     Cancelled,
     Snapshot,
     KillSwitch,
     Restart,
+    /// Thirty seconds with nothing but the clock, which is what lets a bracket's partial-fill
+    /// timeout and `max_unprotected_s` pass inside one script.
+    Wait,
+    /// A reconciliation in which the broker also shows an order nobody on this platform placed:
+    /// external activity, which alerts the owner (§7.1).
+    External,
 }
 
 fn step() -> impl Strategy<Value = Step> {
     prop_oneof![
-        (0u8..4, any::<bool>(), any::<bool>()).prop_map(|(which, exiting, other)| Step::Intent {
-            which,
-            exiting,
-            other,
-        }),
-        Just(Step::Acknowledge),
-        Just(Step::Timeout),
-        Just(Step::Absent),
-        (1u8..9).prop_map(|units| Step::Fill { units }),
-        Just(Step::Cancelled),
-        Just(Step::Snapshot),
-        Just(Step::KillSwitch),
-        Just(Step::Restart),
+        3 => (0u8..4, any::<bool>(), any::<bool>(), any::<bool>()).prop_map(
+            |(which, exiting, other, protected)| Step::Intent {
+                which,
+                exiting,
+                other,
+                protected,
+            }
+        ),
+        2 => Just(Step::Acknowledge),
+        1 => Just(Step::Timeout),
+        1 => Just(Step::Absent),
+        2 => Just(Step::Fill),
+        1 => Just(Step::Cancelled),
+        1 => Just(Step::Snapshot),
+        1 => Just(Step::KillSwitch),
+        1 => Just(Step::Restart),
+        1 => Just(Step::Wait),
+        1 => Just(Step::External),
     ]
 }
 
-fn scripted() -> impl Strategy<Value = Vec<Step>> {
-    prop::collection::vec(step(), 1..14)
+/// The steps every script starts with: a plain opening on `AAPL`, acknowledged by the broker. A
+/// correct executor must submit it — the account is clean, the intent fresh, and the gate has
+/// nothing to deny — so every property below runs against at least one real order, and an
+/// executor that does nothing fails before any property is checked (review round 1, finding 1).
+const PREFIX: [Step; 2] = [
+    Step::Intent {
+        which: 0,
+        exiting: false,
+        other: false,
+        protected: false,
+    },
+    Step::Acknowledge,
+];
+
+/// The intent id the prefix submits, and every other intent id a script uses.
+fn intent_named(which: u8) -> String {
+    format!("01JABCDEFGHJKMNPQRSTVWXY{which:02}")
 }
 
-/// What one scripted run produced: every effect, in order, and the shell it ended in.
+/// The steps half the scripts continue with: the prefix's order fills, then a protected entry of
+/// two `CPHC` shares is acknowledged and one share fills, so a partly filled bracket — and with it
+/// an unprotected interval — is on the table before the random steps begin. Without it a random
+/// script reaches a protected position in about one run in forty.
+const PROTECTED_LEAD: [Step; 4] = [
+    Step::Fill,
+    Step::Intent {
+        which: 1,
+        exiting: false,
+        other: true,
+        protected: true,
+    },
+    Step::Acknowledge,
+    Step::Fill,
+];
+
+fn scripted() -> impl Strategy<Value = Vec<Step>> {
+    (any::<bool>(), prop::collection::vec(step(), 1..14)).prop_map(|(lead, random)| {
+        let mut script = PREFIX.to_vec();
+        if lead {
+            script.extend(PROTECTED_LEAD);
+        }
+        script.extend(random);
+        script
+    })
+}
+
+/// What one scripted run produced: every effect, in order, the shell it ended in, and the
+/// broker's own picture of what it holds.
 struct Run {
     shell: Shell,
     drafts: Vec<EventDraft>,
     effects: Vec<Effect>,
-    submissions: usize,
+    /// The client order id the prefix's intent was submitted under.
+    first_id: String,
+    /// The account stream's head once the prefix had run, which is the head of a snapshot taken
+    /// then and published later.
+    prefix_head: Seq,
+    broker: BrokerModel,
+    /// The effects of each kill-switch command's own batch, in order, so a property can see what
+    /// the switch did before it journaled anything.
+    kill_batches: Vec<Vec<Effect>>,
 }
 
-/// Plays a script. The risk clock only ever advances, by four seconds a step plus whatever a
-/// timeout costs, so no run this generator produces is one the journal would reject.
+/// The broker's side of a run, kept by the script rather than read from the executor: every order
+/// it was sent, whether it acknowledged, filled, or cancelled it, every fill it reported, and the
+/// positions those fills make. A `Snapshot` step shows the executor exactly this.
+#[derive(Debug, Default, Clone)]
+struct BrokerModel {
+    orders: BTreeMap<String, BrokerSide>,
+    order_of_arrival: Vec<String>,
+    fills: Vec<mandate_executor::BrokerFill>,
+    positions: BTreeMap<String, i128>,
+    cancels_asked: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BrokerSide {
+    instrument: String,
+    side: mandate_accounting::Side,
+    qty_units: i128,
+    filled_units: i128,
+    acknowledged: bool,
+    cancelled: bool,
+}
+
+impl BrokerModel {
+    fn sent(&mut self, ran: &Ran) {
+        for order in ran.submissions() {
+            let id = order.client_order_id.as_str().to_owned();
+            if self.orders.contains_key(&id) {
+                continue;
+            }
+            let qty_units = order
+                .oco
+                .as_ref()
+                .map_or(order.qty, |legs| legs.qty)
+                .to_string();
+            self.orders.insert(
+                id.clone(),
+                BrokerSide {
+                    instrument: order.instrument.as_str().to_owned(),
+                    side: order.side,
+                    qty_units: units(&qty_units).unwrap_or(0),
+                    filled_units: 0,
+                    acknowledged: false,
+                    cancelled: false,
+                },
+            );
+            self.order_of_arrival.push(id);
+        }
+        for request in &ran.requests {
+            if let BrokerRequest::Cancel { client_order_id } = request {
+                self.cancels_asked.push(client_order_id.as_str().to_owned());
+            }
+        }
+    }
+
+    fn working(&self, id: &str) -> bool {
+        self.orders
+            .get(id)
+            .is_some_and(|o| !o.cancelled && o.filled_units < o.qty_units)
+    }
+
+    fn broker_order(&self, id: &str, status: &str) -> Option<mandate_executor::BrokerOrder> {
+        let order = self.orders.get(id)?;
+        Some(common::broker_order(
+            &format!("b-{id}"),
+            Some(id),
+            &order.instrument,
+            order.side,
+            &decimal(order.qty_units),
+            &decimal(order.filled_units),
+            status,
+        ))
+    }
+
+    fn snapshot(&self, head: Seq) -> mandate_executor::BrokerSnapshot {
+        let mut taken = snapshot(head.0, ReconcileReason::Scheduled);
+        taken.open_orders = self
+            .order_of_arrival
+            .iter()
+            .filter(|id| self.working(id))
+            .filter(|id| self.orders.get(*id).is_some_and(|o| o.acknowledged))
+            .filter_map(|id| {
+                let partly = self.orders.get(id).is_some_and(|o| o.filled_units > 0);
+                self.broker_order(
+                    id,
+                    if partly {
+                        "partially_filled"
+                    } else {
+                        "accepted"
+                    },
+                )
+            })
+            .collect();
+        taken.fills = self.fills.clone();
+        taken.positions = self
+            .positions
+            .iter()
+            .filter(|(_, held)| **held != 0)
+            .map(|(name, held)| common::broker_position(name, &decimal(*held)))
+            .collect();
+        taken
+    }
+}
+
+/// Integer units at nine places back to canonical decimal text.
+fn decimal(value: i128) -> String {
+    let negative = value < 0;
+    let magnitude = value.unsigned_abs();
+    let whole = magnitude / 1_000_000_000;
+    let fraction = magnitude % 1_000_000_000;
+    let mut text = if fraction == 0 {
+        whole.to_string()
+    } else {
+        let digits = format!("{fraction:09}");
+        format!("{whole}.{}", digits.trim_end_matches('0'))
+    };
+    if negative {
+        text.insert(0, '-');
+    }
+    text
+}
+
+/// Plays a script. The risk clock only ever advances — by four seconds a step, and thirty more
+/// on a `Wait` — so no run this generator produces is one the journal would reject.
 fn play(script: &[Step]) -> Run {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -494,12 +693,18 @@ fn play(script: &[Step]) -> Run {
     let mut drafts = Vec::new();
     let mut effects = Vec::new();
     let mut at: i64 = 10;
-    let mut live: Vec<String> = Vec::new();
+    let mut broker = BrokerModel::default();
     let mut fills: u32 = 0;
+    let mut prefix_head = Seq(0);
+    let mut kill_batches: Vec<Vec<Effect>> = Vec::new();
 
-    let record = |ran: Ran, drafts: &mut Vec<EventDraft>, effects: &mut Vec<Effect>| {
+    let record = |ran: Ran,
+                  drafts: &mut Vec<EventDraft>,
+                  effects: &mut Vec<Effect>,
+                  broker: &mut BrokerModel| {
         drafts.extend(ran.drafts.iter().cloned());
         effects.extend(ran.effects.iter().cloned());
+        broker.sent(&ran);
         ran
     };
 
@@ -507,62 +712,70 @@ fn play(script: &[Step]) -> Run {
         panic!("the stream must open: {e}");
     });
     let (restarted, started_effects) = shell.restart(&ports);
-    record(started_effects, &mut drafts, &mut effects);
+    record(started_effects, &mut drafts, &mut effects, &mut broker);
     shell = restarted;
 
     for (index, one) in script.iter().enumerate() {
-        at = at.saturating_add(4);
-        let tick = record(
+        at = at.saturating_add(if *one == Step::Wait { 34 } else { 4 });
+        record(
             shell.run(Input::Tick(clock(at)), &ports),
             &mut drafts,
             &mut effects,
+            &mut broker,
         );
-        let _ = tick;
         match one {
             Step::Intent {
                 which,
                 exiting,
                 other,
+                protected,
             } => {
                 let name = if *other { CPHC } else { AAPL };
                 record(
                     shell.run(Input::Market(quote(name, "150", "150.2", at)), &ports),
                     &mut drafts,
                     &mut effects,
+                    &mut broker,
                 );
-                let intent = format!("01JABCDEFGHJKMNPQRSTVWXY{:02}", which);
-                let body = if *exiting {
-                    risk_exit(name, "1", "150")
-                } else {
-                    opening(name, "1", "150")
+                let body = match (*exiting, *protected) {
+                    (true, _) => risk_exit(name, "1", "150"),
+                    (false, true) => {
+                        common::protected_opening(name, "2", "150", "140", Some("170"))
+                    }
+                    (false, false) => opening(name, "1", "150"),
                 };
-                let ran = record(
-                    shell.run(handoff(&intent, common::AGENT, body), &ports),
+                record(
+                    shell.run(handoff(&intent_named(*which), common::AGENT, body), &ports),
                     &mut drafts,
                     &mut effects,
+                    &mut broker,
                 );
-                for order in ran.submissions() {
-                    live.push(order.client_order_id.as_str().to_owned());
-                }
             }
             Step::Acknowledge => {
-                if let Some(id) = live.last().cloned() {
-                    record(
-                        shell.run(
-                            Input::Broker(Ok(BrokerOutcome::Submitted(common::broker_order(
-                                &format!("b-{index}"),
-                                Some(&id),
-                                AAPL,
-                                mandate_accounting::Side::Buy,
-                                "1",
-                                "0",
-                                "accepted",
-                            )))),
-                            &ports,
-                        ),
-                        &mut drafts,
-                        &mut effects,
-                    );
+                let waiting = broker
+                    .order_of_arrival
+                    .iter()
+                    .rev()
+                    .find(|id| {
+                        broker.working(id)
+                            && broker.orders.get(*id).is_some_and(|o| !o.acknowledged)
+                    })
+                    .cloned();
+                if let Some(id) = waiting {
+                    if let Some(order) = broker.orders.get_mut(&id) {
+                        order.acknowledged = true;
+                    }
+                    if let Some(described) = broker.broker_order(&id, "accepted") {
+                        record(
+                            shell.run(
+                                Input::Broker(Ok(BrokerOutcome::Submitted(described))),
+                                &ports,
+                            ),
+                            &mut drafts,
+                            &mut effects,
+                            &mut broker,
+                        );
+                    }
                 }
             }
             Step::Timeout => {
@@ -570,10 +783,11 @@ fn play(script: &[Step]) -> Run {
                     shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports),
                     &mut drafts,
                     &mut effects,
+                    &mut broker,
                 );
             }
             Step::Absent => {
-                if let Some(id) = live.last().cloned() {
+                if let Some(id) = broker.order_of_arrival.last().cloned() {
                     record(
                         shell.run(
                             Input::Broker(Ok(BrokerOutcome::Absent {
@@ -583,30 +797,59 @@ fn play(script: &[Step]) -> Run {
                         ),
                         &mut drafts,
                         &mut effects,
+                        &mut broker,
                     );
                 }
             }
-            Step::Fill { units: quantity } => {
-                if let Some(id) = live.last().cloned() {
+            Step::Fill => {
+                let target = broker
+                    .order_of_arrival
+                    .iter()
+                    .rev()
+                    .find(|id| broker.working(id))
+                    .cloned();
+                if let Some(id) = target {
                     fills = fills.saturating_add(1);
-                    let _ = quantity;
+                    let Some(order) = broker.orders.get_mut(&id) else {
+                        continue;
+                    };
+                    order.acknowledged = true;
+                    order.filled_units = order.filled_units.saturating_add(1_000_000_000);
+                    let signed = if order.side == mandate_accounting::Side::Buy {
+                        1_000_000_000
+                    } else {
+                        -1_000_000_000
+                    };
+                    let position = broker
+                        .positions
+                        .entry(order.instrument.clone())
+                        .or_insert(0);
+                    *position = position.saturating_add(signed);
+                    let fill = mandate_executor::BrokerFill {
+                        instrument: common::instrument(&order.instrument),
+                        side: order.side,
+                        ..common::broker_fill(&format!("f-{fills}"), Some(&id), "1", "150")
+                    };
+                    broker.fills.push(fill.clone());
                     record(
-                        shell.run(
-                            Input::BrokerUpdate(BrokerUpdate::Fill(common::broker_fill(
-                                &format!("f-{fills}"),
-                                Some(&id),
-                                "1",
-                                "150",
-                            ))),
-                            &ports,
-                        ),
+                        shell.run(Input::BrokerUpdate(BrokerUpdate::Fill(fill)), &ports),
                         &mut drafts,
                         &mut effects,
+                        &mut broker,
                     );
                 }
             }
             Step::Cancelled => {
-                if let Some(id) = live.last().cloned() {
+                let target = broker
+                    .cancels_asked
+                    .iter()
+                    .rev()
+                    .find(|id| broker.working(id) || !broker.orders.contains_key(*id))
+                    .cloned();
+                if let Some(id) = target {
+                    if let Some(order) = broker.orders.get_mut(&id) {
+                        order.cancelled = true;
+                    }
                     record(
                         shell.run(
                             Input::Broker(Ok(BrokerOutcome::CancelAccepted {
@@ -616,21 +859,21 @@ fn play(script: &[Step]) -> Run {
                         ),
                         &mut drafts,
                         &mut effects,
+                        &mut broker,
                     );
                 }
             }
             Step::Snapshot => {
+                let taken = broker.snapshot(shell.head());
                 record(
-                    shell.run(
-                        Input::BrokerSnapshot(snapshot(shell.head().0, ReconcileReason::Scheduled)),
-                        &ports,
-                    ),
+                    shell.run(Input::BrokerSnapshot(taken), &ports),
                     &mut drafts,
                     &mut effects,
+                    &mut broker,
                 );
             }
             Step::KillSwitch => {
-                record(
+                let ran = record(
                     shell.run(
                         Input::Command(Command::KillSwitch {
                             scope: KillScope::Agent(common::agent(common::AGENT)),
@@ -641,40 +884,108 @@ fn play(script: &[Step]) -> Run {
                     ),
                     &mut drafts,
                     &mut effects,
+                    &mut broker,
                 );
+                kill_batches.push(ran.effects);
             }
             Step::Restart => {
                 let (next, ran) = shell.restart_keeping_broker(&ports);
                 shell = next;
-                record(ran, &mut drafts, &mut effects);
+                record(ran, &mut drafts, &mut effects, &mut broker);
             }
+            Step::Wait => {}
+            Step::External => {
+                let mut taken = broker.snapshot(shell.head());
+                taken.open_orders.push(common::broker_order(
+                    &format!("b-foreign-{index}"),
+                    Some("placed-in-the-broker-app"),
+                    AAPL,
+                    mandate_accounting::Side::Buy,
+                    "1",
+                    "0",
+                    "new",
+                ));
+                record(
+                    shell.run(Input::BrokerSnapshot(taken), &ports),
+                    &mut drafts,
+                    &mut effects,
+                    &mut broker,
+                );
+            }
+        }
+        if index.saturating_add(1) == PREFIX.len() {
+            prefix_head = shell.head();
         }
     }
 
-    let submissions = usize::try_from(shell.connector.total_accepted()).unwrap_or(usize::MAX);
+    let first_id = ClientOrderId::for_intent(&IntentId(EventId(intent_named(0))))
+        .map(|id| id.as_str().to_owned())
+        .unwrap_or_default();
+    assert_eq!(
+        shell.connector.accepted_for(&first_id),
+        1,
+        "the prefix's plain opening on a clean account must reach the broker exactly once, or \
+         nothing below is tested: {:?}",
+        shell.connector.requests
+    );
+    assert!(
+        drafts.iter().any(|d| d.event_type == "OrderSubmitted"
+            && field(d, "client_order_id") == Some(first_id.as_str())),
+        "and the journal names it"
+    );
     Run {
         shell,
         drafts,
         effects,
-        submissions,
+        first_id,
+        prefix_head,
+        broker,
+        kill_batches,
     }
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig {
+        max_global_rejects: 16_384,
+        ..ProptestConfig::default()
+    })]
+
     /// Journal §5.2, `AGENTS.md` rule 5, DEC-07: nothing reaches the broker that the journal did
     /// not name first, in the same effect list.
+    ///
+    /// Both sides are compared as sets of **client order ids**: the broker's are the ids it
+    /// accepted a submission for, and the journal's are the ids its `OrderSubmitted` drafts name.
+    /// A §5.7 resubmission after a confirmed absence legitimately repeats an id and its body at the
+    /// next attempt, so ids — not `(id, attempt)` pairs — are what the two sides share; the
+    /// duplicate guarantee is the separate `accepted_for(id) <= 1`.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_submit_effect_follows_the_order_submitted_draft_that_names_it(script in scripted()) {
         let run = play(&script);
-        let book = ShadowBook::of(&run.drafts);
+        let accepted: BTreeSet<String> = run
+            .shell
+            .connector
+            .accepted
+            .iter()
+            .filter(|(_, count)| **count > 0)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let journaled: BTreeSet<String> = run
+            .drafts
+            .iter()
+            .filter(|d| d.event_type == "OrderSubmitted")
+            .filter_map(|d| field(d, "client_order_id").map(str::to_owned))
+            .collect();
+        prop_assert!(accepted.contains(&run.first_id));
         prop_assert_eq!(
-            run.submissions,
-            book.submissions.len(),
-            "the broker accepted {} submissions and the journal records {}",
-            run.submissions,
-            book.submissions.len()
+            &accepted,
+            &journaled,
+            "the broker accepted {:?} and the journal names {:?}",
+            accepted,
+            journaled
         );
+        for (id, count) in &run.shell.connector.accepted {
+            prop_assert!(*count <= 1, "{} was accepted {} times", id, count);
+        }
         let mut named: BTreeSet<String> = BTreeSet::new();
         for effect in &run.effects {
             match effect {
@@ -686,7 +997,7 @@ proptest! {
                 Effect::Broker(BrokerRequest::Submit(order)) => {
                     prop_assert!(
                         named.contains(order.client_order_id.as_str()),
-                        "{} was sent before any draft named it",
+                        "{} was sent before any draft named it (planted bug 2)",
                         order.client_order_id.as_str()
                     );
                 }
@@ -698,7 +1009,6 @@ proptest! {
     /// E7-2: the id is a function of the intent id alone, so two attempts for one intent carry
     /// one id and two intents never share one.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_client_order_id_is_a_function_of_the_intent_id_alone(script in scripted()) {
         let run = play(&script);
         let mut by_intent: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -733,15 +1043,24 @@ proptest! {
     #[test]
     fn distinct_intents_never_share_a_client_order_id(script in scripted()) {
         let run = play(&script);
+        let book = ShadowBook::of(&run.drafts);
         let mut owner: BTreeMap<String, String> = BTreeMap::new();
         let mut seen = 0usize;
         for draft in &run.drafts {
             if draft.event_type != "OrderSubmitted" {
                 continue;
             }
-            let (Some(intent), Some(id)) =
-                (field(draft, "intent_id"), field(draft, "client_order_id"))
-            else {
+            let Some(id) = field(draft, "client_order_id") else {
+                continue;
+            };
+            let Some(intent) = field(draft, "intent_id") else {
+                prop_assert!(
+                    book.protective.contains(id),
+                    "{} was submitted with no intent and is not a protective order the journal \
+                     placed",
+                    id
+                );
+                seen = seen.saturating_add(1);
                 continue;
             };
             seen = seen.saturating_add(1);
@@ -754,10 +1073,12 @@ proptest! {
                 );
             }
         }
-        prop_assert_eq!(seen, ShadowBook::of(&run.drafts).submissions.len());
+        prop_assert_eq!(seen, book.submissions.len());
     }
 
-    /// E7-3's acceptance clause, read off the broker-side counter rather than the journal.
+    /// E7-3's acceptance clause, read off the broker-side counter rather than the journal: a
+    /// crash at any point of any step, and a restart with the broker carried across, leaves every
+    /// client order id accepted at most once — and the prefix's order still exactly once.
     #[test]
     fn no_crash_point_makes_the_broker_see_two_orders_for_one_intent(
         script in scripted(),
@@ -769,8 +1090,19 @@ proptest! {
         let instruments = FixedInstruments;
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
-        let _ = run.shell.step_crashing(Input::Tick(clock(9_000)), &ports, point);
-        let (after, _) = run.shell.restart_keeping_broker(&ports);
+        let head = run.shell.head();
+        let crashed = run
+            .shell
+            .step_crashing(Input::BrokerSnapshot(run.broker.snapshot(head)), &ports, point);
+        prop_assert!(crashed.is_ok(), "the reconciliation step refused: {:?}", crashed.err());
+        let (mut after, started) = run.shell.restart_keeping_broker(&ports);
+        prop_assert!(
+            started.submissions().is_empty(),
+            "Started never resubmits; it queries (journal §5.2, planted bug 1)"
+        );
+        let mut startup = run.broker.snapshot(after.head());
+        startup.reason = ReconcileReason::Startup;
+        after.run(Input::BrokerSnapshot(startup), &ports);
         for (id, count) in &after.connector.accepted {
             prop_assert!(
                 *count <= 1,
@@ -780,42 +1112,65 @@ proptest! {
                 point
             );
         }
+        prop_assert_eq!(after.connector.accepted_for(&run.first_id), 1);
     }
 
-    /// Journal §5.2, §5.7: recovery queries, and never submits without a confirmed absence.
+    /// Journal §5.2, §5.7: recovery queries, and never resubmits an order it has doubted without
+    /// a confirmed absence. An absence is not a state: it is journaled as `OrderStateChanged` to
+    /// `unknown` with `lookup: "absent"`, so the oracle counts those, per order, since the order
+    /// last went `unknown` (DEC-133's ruling on absences).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_recovery_submits_without_a_confirmed_absence(script in scripted()) {
         let run = play(&script);
-        let mut absences: BTreeMap<String, u32> = BTreeMap::new();
-        let mut unknown: BTreeSet<String> = BTreeSet::new();
-        let mut checked = 0usize;
+        let mut absences: BTreeMap<String, (u32, Option<u64>)> = BTreeMap::new();
+        let mut doubted: BTreeSet<String> = BTreeSet::new();
+        let mut resubmissions = 0usize;
+        let window = u64::try_from(config().unknown_absent_window_s).unwrap_or(u64::MAX);
+        let needed = config().unknown_absent_lookups;
         for draft in &run.drafts {
             let Some(id) = field(draft, "client_order_id") else {
                 continue;
             };
+            let at = number(draft, "risk_clock");
             match draft.event_type.as_str() {
                 "OrderStateChanged" if field(draft, "state") == Some("unknown") => {
-                    unknown.insert(id.to_owned());
+                    if field(draft, "lookup") == Some("absent") {
+                        let entry = absences.entry(id.to_owned()).or_insert((0, at));
+                        entry.0 = entry.0.saturating_add(1);
+                    } else {
+                        doubted.insert(id.to_owned());
+                        absences.remove(id);
+                    }
                 }
-                "OrderStateChanged" if field(draft, "state") == Some("absent_confirmed") => {
-                    *absences.entry(id.to_owned()).or_insert(0) += 1;
-                }
-                "OrderSubmitted" if unknown.contains(id) => {
-                    checked = checked.saturating_add(1);
-                    let confirmed = absences.get(id).copied().unwrap_or(0);
+                "OrderSubmitted" if doubted.contains(id) => {
+                    resubmissions = resubmissions.saturating_add(1);
+                    let (count, first) = absences.get(id).copied().unwrap_or((0, None));
                     prop_assert!(
-                        confirmed >= 3,
-                        "{} was resubmitted after {} absences, below the configured three",
+                        count >= needed,
+                        "{} was resubmitted after {} absences, below the configured {}",
                         id,
-                        confirmed
+                        count,
+                        needed
                     );
+                    let spanned = match (first, at) {
+                        (Some(first), Some(now)) => now.saturating_sub(first),
+                        _ => 0,
+                    };
+                    prop_assert!(
+                        spanned >= window,
+                        "{} was resubmitted after absences spanning {}s, inside the {}s window",
+                        id,
+                        spanned,
+                        window
+                    );
+                    doubted.remove(id);
+                    absences.remove(id);
                 }
                 _ => {}
             }
         }
         prop_assert!(
-            checked <= ShadowBook::of(&run.drafts).submissions.len(),
+            resubmissions <= ShadowBook::of(&run.drafts).submissions.len(),
             "the count cannot exceed the submissions the journal carries"
         );
     }
@@ -823,17 +1178,11 @@ proptest! {
     /// §5.7: filled quantity is non-decreasing, at most the order quantity, and equals the sum of
     /// unique fills.
     #[test]
-    #[ignore = "pending E7-2"]
     fn filled_quantity_equals_the_sum_of_unique_fills(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
-        prop_assume!(!book.orders.is_empty());
         let live = ShadowBook::of_state(&run.shell.state);
-        prop_assert_eq!(
-            book.orders.len(),
-            live.orders.len(),
-            "the journal and the state carry a different number of orders"
-        );
+        prop_assert!(book.orders.contains_key(&run.first_id));
         for (id, shadow) in &book.orders {
             let Some(actual) = live.orders.get(id) else {
                 return Err(TestCaseError::fail(format!("{id} is missing from the state")));
@@ -856,24 +1205,41 @@ proptest! {
                 );
             }
         }
+        let broker_filled: i128 = run
+            .broker
+            .orders
+            .values()
+            .map(|order| order.filled_units)
+            .sum();
+        let applied: i128 = book.orders.values().map(|order| order.filled_units).sum();
+        prop_assert!(
+            applied <= broker_filled,
+            "the journal applied {} units of fills and the broker reported {} for our orders",
+            applied,
+            broker_filled
+        );
     }
 
-    /// §5.7: terminal states are final.
+    /// §5.7: terminal states are final. A state name the oracle does not know is skipped, never
+    /// read as a terminal one (DEC-133's ruling on absences: `unknown` with `lookup: "absent"` is a
+    /// lookup result, not a state change).
     #[test]
     fn no_terminal_order_leaves_its_terminal_state(script in scripted()) {
         let run = play(&script);
         let mut terminal: BTreeMap<String, String> = BTreeMap::new();
         let mut transitions = 0usize;
         for draft in &run.drafts {
-            if draft.event_type != "OrderStateChanged" && draft.event_type != "OrderAbandoned" {
-                continue;
-            }
+            let state = match draft.event_type.as_str() {
+                "OrderStateChanged" => match field(draft, "state").and_then(shadow_state) {
+                    Some(state) => state,
+                    None => continue,
+                },
+                "OrderAbandoned" => "abandoned",
+                _ => continue,
+            };
             let Some(id) = field(draft, "client_order_id") else {
                 continue;
             };
-            let state = field(draft, "state")
-                .and_then(shadow_state)
-                .unwrap_or("abandoned");
             transitions = transitions.saturating_add(1);
             if let Some(was) = terminal.get(id) {
                 prop_assert_eq!(
@@ -890,20 +1256,18 @@ proptest! {
             }
         }
         prop_assert!(
-            transitions >= terminal.len(),
-            "a terminal state is reached by a transition the journal carries"
+            transitions > 0,
+            "the prefix's acknowledged order is at least one transition on the journal"
         );
     }
 
     /// §5.7 and interpretation 26: a reservation outlives everything but a terminal state.
     #[test]
-    #[ignore = "pending E7-2"]
     fn a_reservation_is_never_released_before_a_terminal_state(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
-        prop_assume!(!book.orders.is_empty());
         let live = ShadowBook::of_state(&run.shell.state);
-        prop_assert_eq!(book.orders.len(), live.orders.len());
+        prop_assert!(book.orders.contains_key(&run.first_id));
         for (id, shadow) in &book.orders {
             let Some(actual) = live.orders.get(id) else {
                 return Err(TestCaseError::fail(format!("{id} is missing from the state")));
@@ -923,7 +1287,6 @@ proptest! {
 
     /// §5.7 and interpretation 26: every one of the six terminal states releases the reservation.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_terminal_state_releases_its_reservation(script in scripted()) {
         let run = play(&script);
         let book = ShadowBook::of(&run.drafts);
@@ -961,7 +1324,8 @@ proptest! {
             .map_err(TestCaseError::fail)?;
         book.agrees_with(&ShadowBook::of_state(&run.shell.state))
             .map_err(TestCaseError::fail)?;
-        let ledger = ShadowLedger::of(&run.drafts);
+        let mut ledger = ShadowLedger::of(&run.drafts);
+        ledger.positions.retain(|_, held| *held != 0);
         prop_assert_eq!(
             ledger.positions,
             ShadowLedger::of_state(&replayed).positions,
@@ -1025,7 +1389,7 @@ proptest! {
         for effect in &run.effects {
             if let Effect::Broker(request) = effect {
                 prop_assert!(
-                    !request.is_account_wide(),
+                    !common::is_account_wide(request),
                     "an agent-scoped run reached {:?} (planted bug 12)",
                     request
                 );
@@ -1038,30 +1402,32 @@ proptest! {
     fn the_mode_draft_precedes_every_cancel_and_every_sell(script in scripted()) {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
-        let mut mode_at: Option<usize> = None;
-        let mut switch_seen = false;
-        for (index, effect) in run.effects.iter().enumerate() {
-            match effect {
-                Effect::Journal(draft) if draft.event_type == "AgentModeApplied" => {
-                    mode_at = Some(index);
-                }
-                Effect::Journal(draft) if draft.event_type == "KillSwitchActivated" => {
-                    switch_seen = true;
-                    prop_assert!(
-                        mode_at.is_some(),
-                        "the switch was journaled with no mode applied before it (planted bug 13)"
-                    );
-                }
-                Effect::Broker(BrokerRequest::Cancel { .. }) if switch_seen => {
+        prop_assert!(!run.kill_batches.is_empty());
+        for batch in &run.kill_batches {
+            let mode_at = batch
+                .iter()
+                .position(|e| matches!(e, Effect::Journal(d) if d.event_type == "AgentModeApplied"));
+            for (index, effect) in batch.iter().enumerate() {
+                let acts = match effect {
+                    Effect::Broker(BrokerRequest::Cancel { .. }) => true,
+                    Effect::Broker(BrokerRequest::Submit(order)) => {
+                        order.side == mandate_accounting::Side::Sell
+                    }
+                    Effect::Journal(d) => d.event_type == "KillSwitchActivated",
+                    _ => false,
+                };
+                if acts {
                     prop_assert!(
                         mode_at.is_some_and(|at| at < index),
-                        "a cancel ran before the final mode was applied"
+                        "{:?} at {} in the kill switch's batch came before the final mode {:?} \
+                         (planted bug 13)",
+                        effect,
+                        index,
+                        mode_at
                     );
                 }
-                _ => {}
             }
         }
-        prop_assert!(switch_seen, "the kill switch reached the journal");
     }
 
     /// §5.4: Σ protective sell quantity never exceeds the position.
@@ -1127,40 +1493,76 @@ proptest! {
         }
     }
 
-    /// §5.4: nothing is submitted while an unconfirmed cancel is outstanding.
+    /// §5.4: nothing is submitted in an instrument while a cancel in it is unconfirmed. A cancel is
+    /// resolved by the order's own terminal state on the journal, or, for a protective order, by
+    /// the `ProtectionChanged` that records it cancelled — never by the request being accepted.
     #[test]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
-        let mut outstanding: BTreeSet<String> = BTreeSet::new();
-        let mut cancels = 0usize;
+        let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
+        let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
         for effect in &run.effects {
             match effect {
+                Effect::Journal(draft) if draft.event_type == "OrderSubmitted" => {
+                    if let (Some(id), Some(name)) =
+                        (field(draft, "client_order_id"), field(draft, "instrument"))
+                    {
+                        instrument_of.insert(id.to_owned(), name.to_owned());
+                    }
+                }
+                Effect::Journal(draft)
+                    if draft.event_type == "ProtectionChanged"
+                        && field(draft, "action") == Some("placed") =>
+                {
+                    let name = field(draft, "instrument").unwrap_or_default();
+                    for id in field(draft, "orders").unwrap_or_default().split(',') {
+                        instrument_of.insert(id.to_owned(), name.to_owned());
+                    }
+                }
                 Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
-                    cancels = cancels.saturating_add(1);
-                    outstanding.insert(client_order_id.as_str().to_owned());
+                    let id = client_order_id.as_str().to_owned();
+                    let name = instrument_of.get(&id).cloned().unwrap_or_default();
+                    outstanding.insert(id, name);
                 }
                 Effect::Journal(draft) if draft.event_type == "OrderStateChanged" => {
-                    if field(draft, "state") == Some("canceled")
+                    if field(draft, "state")
+                        .and_then(shadow_state)
+                        .is_some_and(|state| TERMINAL.contains(&state))
                         && let Some(id) = field(draft, "client_order_id")
                     {
                         outstanding.remove(id);
                     }
                 }
+                Effect::Journal(draft) if draft.event_type == "OrderAbandoned" => {
+                    if let Some(id) = field(draft, "client_order_id") {
+                        outstanding.remove(id);
+                    }
+                }
+                Effect::Journal(draft)
+                    if draft.event_type == "ProtectionChanged"
+                        && field(draft, "action") == Some("cancelled") =>
+                {
+                    for id in field(draft, "orders").unwrap_or_default().split(',') {
+                        outstanding.remove(id);
+                    }
+                }
                 Effect::Broker(BrokerRequest::Submit(order)) => {
+                    let blocking: Vec<&String> = outstanding
+                        .iter()
+                        .filter(|(_, name)| name.as_str() == order.instrument.as_str())
+                        .map(|(id, _)| id)
+                        .collect();
                     prop_assert!(
-                        outstanding.is_empty(),
-                        "{} was submitted with {:?} still unconfirmed (planted bug 5)",
+                        blocking.is_empty(),
+                        "{} was submitted with {:?} still unconfirmed in {} (planted bug 5)",
                         order.client_order_id.as_str(),
-                        outstanding
+                        blocking,
+                        order.instrument.as_str()
                     );
                 }
                 _ => {}
             }
         }
-        prop_assert!(
-            cancels <= run.effects.len(),
-            "the cancel count is read off the same effect list"
-        );
     }
 
     /// §5.4: an order submitted inside an unprotected interval is marketable, never resting.
@@ -1319,40 +1721,71 @@ proptest! {
         );
     }
 
-    /// §11: every order-set difference is adopted with a compensating event.
+    /// §11: every order-set difference is adopted with a compensating event. The broker here holds
+    /// no open order at all, so every order the journal shows working — computed from the drafts,
+    /// not from the crate — differs, and each must be adopted with exactly one
+    /// `CompensatingEvent`.
     #[test]
     fn every_order_difference_adopts_the_broker_with_a_compensating_event(script in scripted()) {
         let run = play(&script);
+        let book = ShadowBook::of(&run.drafts);
+        let working: BTreeSet<&String> = book
+            .orders
+            .iter()
+            .filter(|(_, order)| {
+                !TERMINAL.contains(&order.state.as_str())
+                    && order.state != "unknown"
+                    && order.state != "intent"
+            })
+            .map(|(id, _)| id)
+            .collect();
+        prop_assume!(!working.is_empty());
         let ids = TestIds;
         let mandates = FixedMandate::covering(&[AAPL, CPHC]);
         let instruments = FixedInstruments;
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
-        let taken = snapshot(run.shell.head().0, ReconcileReason::Scheduled);
+        let mut taken = run.broker.snapshot(run.shell.head());
+        taken.open_orders = Vec::new();
         let reconciliation = mandate_executor::reconcile(&run.shell.state, &taken, &ports)
             .map_err(|e| TestCaseError::fail(format!("the reconciliation refused: {e}")))?;
+        let compensating: Vec<&EventDraft> = reconciliation
+            .effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Journal(d) if d.event_type == "CompensatingEvent" => Some(d),
+                _ => None,
+            })
+            .collect();
+        for id in &working {
+            let named = compensating
+                .iter()
+                .filter(|d| format!("{:?}", d.payload).contains(id.as_str()))
+                .count();
+            prop_assert_eq!(
+                named,
+                1,
+                "{} is working on the journal and absent at the broker: the difference is adopted \
+                 with exactly one compensating event naming it (planted bug 3)",
+                id
+            );
+        }
         let adopted = reconciliation
             .differences
             .iter()
             .filter(|d| d.kind == mandate_executor::DifferenceKind::OrderState)
             .count();
-        let compensating = reconciliation
-            .effects
-            .iter()
-            .filter(|e| matches!(e, Effect::Journal(d) if d.event_type == "CompensatingEvent"))
-            .count();
-        prop_assert_eq!(
-            adopted,
-            compensating,
-            "{} order differences produced {} compensating events (planted bug 3)",
-            adopted,
-            compensating
-        );
+        prop_assert_eq!(adopted, compensating.len());
     }
 
-    /// §11: nothing outside the order set is ever adopted.
+    /// §11: nothing outside the order set is ever adopted. The broker is the script's own truth,
+    /// except that it holds one more `AAPL` share than the shadow ledger — a quantity no script can
+    /// reach (a ledger position plus one) — so there is always a position difference. Read off the
+    /// effects, never off the crate's own `adopted` flag: every `CompensatingEvent` must name one
+    /// of our orders, and there is exactly one per order difference, so one written for the
+    /// position — which would make the ledger agree with the broker and destroy the evidence —
+    /// is caught (interpretation 13, planted bug 18).
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_position_cash_or_fee_difference_is_ever_adopted(script in scripted()) {
         let run = play(&script);
         let ids = TestIds;
@@ -1360,26 +1793,62 @@ proptest! {
         let instruments = FixedInstruments;
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
-        let mut taken = snapshot(run.shell.head().0, ReconcileReason::Scheduled);
-        taken.positions = vec![common::broker_position(AAPL, "3")];
+        let ledger = ShadowLedger::of(&run.drafts);
+        let held = ledger.positions.get(AAPL).copied().unwrap_or(0);
+        let mut taken = run.broker.snapshot(run.shell.head());
+        taken.positions.retain(|position| position.instrument.as_str() != AAPL);
+        taken.positions.push(common::broker_position(
+            AAPL,
+            &decimal(held.saturating_add(1_000_000_000)),
+        ));
         let reconciliation = mandate_executor::reconcile(&run.shell.state, &taken, &ports)
             .map_err(|e| TestCaseError::fail(format!("the reconciliation refused: {e}")))?;
-        prop_assert!(
-            !reconciliation.differences.is_empty(),
-            "a position the ledger does not have is a difference"
-        );
-        for difference in &reconciliation.differences {
-            if !difference.kind.adoptable() {
-                prop_assert!(
-                    !difference.adopted,
-                    "a {:?} difference was adopted (planted bug 18)",
-                    difference.kind
-                );
-            }
+        let book = ShadowBook::of(&run.drafts);
+        let ours: BTreeSet<&String> = book.orders.keys().chain(book.protective.iter()).collect();
+        let compensating: Vec<&EventDraft> = reconciliation
+            .effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Journal(d) if d.event_type == "CompensatingEvent" => Some(d),
+                _ => None,
+            })
+            .collect();
+        for draft in &compensating {
+            let rendered = format!("{:?}", draft.payload);
+            prop_assert!(
+                ours.iter().any(|id| rendered.contains(id.as_str())),
+                "a compensating event that names none of our orders adopts something outside the \
+                 order set (planted bug 18): {}",
+                rendered
+            );
         }
+        let order_differences = reconciliation
+            .differences
+            .iter()
+            .filter(|d| d.kind == mandate_executor::DifferenceKind::OrderState)
+            .count();
+        prop_assert_eq!(
+            compensating.len(),
+            order_differences,
+            "one compensating event per order difference and none for anything else"
+        );
+        prop_assert!(
+            reconciliation.effects.iter().any(|e| matches!(
+                e,
+                Effect::Journal(d) if d.event_type == "BrokerPositionObserved"
+            )),
+            "the position is compared and recorded"
+        );
+        prop_assert_eq!(
+            reconciliation.verdict,
+            ReconciliationVerdict::Mismatch,
+            "and the extra share is a mismatch, not an adoption"
+        );
     }
 
-    /// E7-3: a reconciliation leaves nothing unexplained and unpaused.
+    /// E7-3: a reconciliation leaves nothing unexplained and unpaused. The broker holds one more
+    /// `AAPL` share than the shadow ledger, a quantity no script reaches, so there is always a
+    /// position difference to pause on (planted bug 9).
     #[test]
     fn a_reconciliation_leaves_nothing_unexplained_and_unpaused(script in scripted()) {
         let run = play(&script);
@@ -1388,35 +1857,46 @@ proptest! {
         let instruments = FixedInstruments;
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
-        let mut taken = snapshot(run.shell.head().0, ReconcileReason::Scheduled);
-        taken.positions = vec![common::broker_position(AAPL, "3")];
+        let held = ShadowLedger::of(&run.drafts)
+            .positions
+            .get(AAPL)
+            .copied()
+            .unwrap_or(0);
+        let mut taken = run.broker.snapshot(run.shell.head());
+        taken.positions.retain(|position| position.instrument.as_str() != AAPL);
+        taken.positions.push(common::broker_position(
+            AAPL,
+            &decimal(held.saturating_add(1_000_000_000)),
+        ));
         let reconciliation = mandate_executor::reconcile(&run.shell.state, &taken, &ports)
             .map_err(|e| TestCaseError::fail(format!("the reconciliation refused: {e}")))?;
-        let unexplained = reconciliation
-            .differences
+        prop_assert_eq!(
+            reconciliation.verdict,
+            ReconciliationVerdict::Mismatch,
+            "a position the ledger does not have is a mismatch"
+        );
+        let paused = reconciliation
+            .effects
             .iter()
-            .filter(|d| !d.adopted && d.kind != mandate_executor::DifferenceKind::MissingFill)
+            .filter(|e| matches!(
+                e,
+                Effect::Journal(d) if d.event_type == "AgentModeApplied"
+                    && field(d, "to") == Some("paused")
+            ))
             .count();
-        if unexplained > 0 {
-            prop_assert_eq!(
-                reconciliation.verdict,
-                ReconciliationVerdict::Mismatch,
-                "{} differences were left unexplained without a mismatch verdict (planted bug 9)",
-                unexplained
-            );
-            let paused = reconciliation
+        prop_assert!(paused > 0, "and pauses the agents holding it (planted bug 9)");
+        prop_assert!(
+            reconciliation
                 .effects
                 .iter()
-                .filter(|e| matches!(
-                    e,
-                    Effect::Journal(d) if d.event_type == "AgentModeApplied"
-                ))
-                .count();
-            prop_assert!(paused > 0, "and no agent was paused");
-        }
+                .any(|e| matches!(e, Effect::Notify(_))),
+            "and alerts the owner"
+        );
     }
 
-    /// §11, interpretation 12: the step order is part of the algorithm.
+    /// §11, interpretation 12: the step order is part of the algorithm. The broker reports a fill
+    /// the journal lacks and the position that fill explains, so the fill must be ingested before
+    /// the position is compared (planted bug 10), and the run closes the batch.
     #[test]
     fn the_reconciliation_order_is_orders_then_fills_then_positions_then_cash_then_fees(
         script in scripted(),
@@ -1427,18 +1907,26 @@ proptest! {
         let instruments = FixedInstruments;
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
-        let mut taken = snapshot(run.shell.head().0, ReconcileReason::Scheduled);
-        taken.open_orders = vec![common::broker_order(
-            "b-x",
-            Some("md-unknown-to-us"),
+        let mut taken = run.broker.snapshot(run.shell.head());
+        let missing = common::broker_fill("f-missing", Some(&run.first_id), "1", "150");
+        let already = run
+            .broker
+            .fills
+            .iter()
+            .any(|fill| fill.client_order_id.as_deref() == Some(run.first_id.as_str()));
+        prop_assume!(!already);
+        taken.fills.push(missing);
+        taken.open_orders.retain(|open| open.client_order_id.as_deref() != Some(run.first_id.as_str()));
+        let held = ShadowLedger::of(&run.drafts)
+            .positions
+            .get(AAPL)
+            .copied()
+            .unwrap_or(0);
+        taken.positions.retain(|position| position.instrument.as_str() != AAPL);
+        taken.positions.push(common::broker_position(
             AAPL,
-            mandate_accounting::Side::Buy,
-            "1",
-            "1",
-            "filled",
-        )];
-        taken.fills = vec![common::broker_fill("f-x", Some("md-unknown-to-us"), "1", "150")];
-        taken.positions = vec![common::broker_position(AAPL, "1")];
+            &decimal(held.saturating_add(1_000_000_000)),
+        ));
         let reconciliation = mandate_executor::reconcile(&run.shell.state, &taken, &ports)
             .map_err(|e| TestCaseError::fail(format!("the reconciliation refused: {e}")))?;
         let position_of = |wanted: &str| {
@@ -1447,25 +1935,38 @@ proptest! {
                 _ => false,
             })
         };
-        let run_at = position_of("ReconciliationRun")
-            .ok_or_else(|| TestCaseError::fail("the run is appended last"))?;
-        for earlier in ["OrderStateChanged", "FillApplied", "BrokerPositionObserved"] {
-            if let Some(at) = position_of(earlier) {
-                prop_assert!(at < run_at, "{earlier} must precede the run");
-            }
+        let fill = position_of("FillApplied")
+            .or_else(|| position_of("LateFillApplied"))
+            .ok_or_else(|| TestCaseError::fail("the missing fill is ingested"))?;
+        let observed = position_of("BrokerPositionObserved")
+            .ok_or_else(|| TestCaseError::fail("the positions are compared"))?;
+        let finished = position_of("ReconciliationRun")
+            .ok_or_else(|| TestCaseError::fail("the run is appended"))?;
+        prop_assert!(
+            fill < observed && observed < finished,
+            "orders, then fills, then positions, then the run: the fill at {}, the position at \
+             {}, the run at {} (planted bug 10)",
+            fill,
+            observed,
+            finished
+        );
+        if let Some(adopted) = position_of("OrderStateChanged") {
+            prop_assert!(adopted < fill, "order adoptions come first");
         }
-        if let (Some(fill), Some(position)) =
-            (position_of("FillApplied"), position_of("BrokerPositionObserved"))
-        {
-            prop_assert!(
-                fill < position,
-                "positions are compared only after the missing fills are ingested \
-                 (planted bug 10)"
-            );
-        }
+        prop_assert!(
+            reconciliation
+                .differences
+                .iter()
+                .all(|d| d.kind != mandate_executor::DifferenceKind::Position),
+            "the ingested fill explains the extra share, so nothing is a position mismatch: {:?}",
+            reconciliation.differences
+        );
     }
 
-    /// §11: the cash band alerts outside it and never pauses inside it.
+    /// §11: cash is compared against the last broker cash snapshot, within 0.01 × fills since it
+    /// plus accrued unposted fees. With no fill and no fee since the broker last reported 20000,
+    /// the band is zero: the same 20000 is no difference and pauses nobody, and any cent more is a
+    /// difference that alerts.
     #[test]
     fn cash_within_the_band_never_pauses_and_outside_it_always_alerts(
         cents in 0u64..500,
@@ -1479,13 +1980,15 @@ proptest! {
         shell
             .fold_one(&stream_opened())
             .map_err(|e| TestCaseError::fail(format!("the stream must open: {e}")))?;
-        let (shell, _) = shell.restart(&ports);
-        let drift = format!("{}.{:02}", cents / 100, cents % 100);
-        let cash = format!("20000.{:02}", cents % 100);
-        let _ = drift;
+        let (mut shell, _) = shell.restart(&ports);
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(common::broker_account())),
+            &ports,
+        );
+        let cash = decimal(i128::from(cents).saturating_mul(10_000_000).saturating_add(20_000_000_000_000));
         let mut taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
         taken.account = mandate_executor::BrokerAccount {
-            cash: common::usd(cash.trim_end_matches('0').trim_end_matches('.')),
+            cash: common::usd(&cash),
             ..common::broker_account()
         };
         let reconciliation = mandate_executor::reconcile(&shell.state, &taken, &ports)
@@ -1499,13 +2002,30 @@ proptest! {
             .differences
             .iter()
             .any(|d| d.kind == mandate_executor::DifferenceKind::Cash);
-        if cash_difference {
+        if cents == 0 {
+            prop_assert!(!cash_difference, "the same 20000 is no difference");
+            prop_assert!(
+                !reconciliation.effects.iter().any(|e| matches!(
+                    e,
+                    Effect::Journal(d) if d.event_type == "AgentModeApplied"
+                )),
+                "and inside the band nobody is paused"
+            );
+        } else {
+            prop_assert!(
+                cash_difference,
+                "{} is {} cents above the 20000 the broker last reported, outside a zero band",
+                cash,
+                cents
+            );
             prop_assert!(alerts > 0, "a cash difference above the band always alerts (§11)");
         }
     }
 
-    /// DEC-131 item 13, interpretation 15: a run is never positioned after a submission it did
-    /// not cover.
+    /// DEC-131 item 13, interpretation 15: a run is never positioned after a submission it did not
+    /// cover. The snapshot is the one taken when the prefix had run and is published only now, so
+    /// the run's expected head must be that older head — never the current one, which would let
+    /// the append land after submissions the snapshot never saw (planted bug 17).
     #[test]
     fn no_reconciliation_run_is_appended_after_a_submission_it_did_not_cover(
         script in scripted(),
@@ -1517,20 +2037,24 @@ proptest! {
         let configuration = config();
         let ports = ports(&ids, &mandates, &instruments, &configuration);
         let head = run.shell.head();
-        let taken = snapshot(head.0, ReconcileReason::Scheduled);
+        prop_assume!(run.prefix_head.0 < head.0);
+        let taken = snapshot(run.prefix_head.0, ReconcileReason::Scheduled);
         let reconciliation = mandate_executor::reconcile(&run.shell.state, &taken, &ports)
             .map_err(|e| TestCaseError::fail(format!("the reconciliation refused: {e}")))?;
         prop_assert_eq!(
             reconciliation.expected_head,
-            head,
-            "the run is appended at the head its snapshot was taken at (planted bug 17)"
+            run.prefix_head,
+            "the run is appended at the head its snapshot was taken at, {:?}, not the current \
+             {:?} (planted bug 17)",
+            run.prefix_head,
+            head
         );
         prop_assert!(
-            run.shell
-                .state
-                .last_submission()
-                .is_none_or(|Seq(at)| at <= head.0),
-            "so any submission after it makes the append answer HeadMismatch"
+            reconciliation.effects.iter().any(|e| matches!(
+                e,
+                Effect::Journal(d) if d.event_type == "ReconciliationRun"
+            )),
+            "and the run is drafted"
         );
     }
 
@@ -1702,7 +2226,31 @@ proptest! {
             common::with_clock(&[], 10),
         );
         match mandate_executor::fold(&mut state, &candidate) {
-            Ok(()) => {}
+            Ok(()) => {
+                prop_assert_ne!(
+                    event_type,
+                    "NobodyEverWroteThis",
+                    "a name nobody wrote folded as if it meant something: the silent no-op DEC-85 \
+                     forbids"
+                );
+                prop_assert!(
+                    ![
+                        "MandateVersionApplied",
+                        "UniverseChanged",
+                        "RiskLimitTriggered",
+                        "RiskLimitLifted",
+                        "HighWaterMarkReset",
+                        "PositionReleased",
+                        "InstrumentRestrictionChanged",
+                        "GoalCompleted",
+                    ]
+                    .contains(&event_type),
+                    "{} carries stream F's or stream J's values, which this crate does not \
+                     interpret yet (task brief, Decisions needed 8), so it must refuse naming the \
+                     owning story rather than fold it",
+                    event_type
+                );
+            }
             Err(error) => {
                 if event_type == "NobodyEverWroteThis" {
                     prop_assert_eq!(
@@ -1751,7 +2299,6 @@ proptest! {
 
     /// `AGENTS.md` rule 6, DEC-11: an alert carries an opaque id and a message key only.
     #[test]
-    #[ignore = "pending E7-2"]
     fn no_alert_payload_holds_an_instrument_a_price_or_a_quantity(script in scripted()) {
         let run = play(&script);
         let alerts: Vec<_> = run

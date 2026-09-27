@@ -56,7 +56,10 @@ pub struct WirePosition {
 /// `account_number` and `id` are named here **so that the redaction pass can replace them**:
 /// journal spec §6.4 keeps both in the personal-data vault and holds them by reference, so
 /// neither ever reaches a draft, a log, or the artifact store (interpretation 24).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` is written by hand and prints neither of them, so a log line or a panic message that
+/// formats the account cannot leak personal data either (`AGENTS.md` rule 7, journal §6.4).
+#[derive(Clone, PartialEq, Eq)]
 pub struct WireAccount {
     pub id: String,
     pub account_number: String,
@@ -72,6 +75,28 @@ pub struct WireAccount {
     pub buying_power: String,
     pub non_marginable_buying_power: String,
     pub accrued_fees: String,
+}
+
+impl core::fmt::Debug for WireAccount {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("WireAccount")
+            .field("status", &self.status)
+            .field("crypto_status", &self.crypto_status)
+            .field("currency", &self.currency)
+            .field("trading_blocked", &self.trading_blocked)
+            .field("account_blocked", &self.account_blocked)
+            .field("trade_suspended_by_user", &self.trade_suspended_by_user)
+            .field("multiplier", &self.multiplier)
+            .field("equity", &self.equity)
+            .field("cash", &self.cash)
+            .field("buying_power", &self.buying_power)
+            .field(
+                "non_marginable_buying_power",
+                &self.non_marginable_buying_power,
+            )
+            .field("accrued_fees", &self.accrued_fees)
+            .finish_non_exhaustive()
+    }
 }
 
 /// One row of `/v2/account/activities`, restricted to the `FILL` activities this stream ingests.

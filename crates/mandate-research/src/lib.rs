@@ -46,8 +46,8 @@
 //! risk (MI-19), and it is the only path by which anything here shrinks the universe: a lowered
 //! `max_instruments` refuses further admissions and never removes (DEC-132 item 14).
 //!
-//! Stubs only: every entry point returns [`ResearchError::Unimplemented`] until the story named in
-//! its doc comment lands (DEC-77, DEC-83).
+//! No entry point returns [`ResearchError::Unimplemented`] any more; the variant stays only because
+//! the tests PR's `rules.rs` pins its code, so removing it is a tests correction (DEC-77).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -463,25 +463,276 @@ pub struct Admission {
 /// Every §8.5 predicate, in the spec's order, each with its own verdict.
 ///
 /// # Errors
-/// Returns [`ResearchError`] when an input makes the decision impossible rather than negative — an
-/// unread working universe above all, which is never an admission.
+/// Returns [`ResearchError::UniverseUnavailable`] for an unread working universe, which is never an
+/// admission, and [`ResearchError::TimeOutOfRange`] when `as_of + horizon_s` leaves `UtcNanos`'s
+/// range, so check 2 has no instant to compare with.
 pub fn checks(input: &AdmissionInput<'_>) -> Result<Vec<Check>, ResearchError> {
-    let _ = input;
-    Err(ResearchError::Unimplemented("checks", "E17-3"))
+    let (active, _) = known_instruments(input.universe)?;
+    let thesis = &input.proposal.thesis;
+    let horizon_end = plus_seconds(thesis.output.as_of, thesis.horizon_s)?;
+    let verdicts = CheckInputs {
+        input,
+        active,
+        horizon_end,
+    };
+    Ok(RefusalReason::all()
+        .into_iter()
+        .map(|reason| Check {
+            number: reason.check_number(),
+            reason,
+            failed: verdicts.fails(reason),
+        })
+        .collect())
 }
 
 /// §8.5: decides one thesis against the envelope. Admission never loosens an envelope field (MI-16).
 ///
+/// The first failing check is the journaled reason. An admitted thesis whose instrument is already
+/// active is a renewal: it journals its thesis entry alone and leaves the universe as it was
+/// (DEC-132 item 11). A first admission adds the instrument and journals `UniverseChanged` with
+/// the size counted after the change.
+///
 /// # Errors
 /// Returns [`ResearchError`] for the same reasons as [`checks`].
 pub fn admit(input: &AdmissionInput<'_>) -> Result<Admission, ResearchError> {
-    let _ = input;
-    Err(ResearchError::Unimplemented("admit", "E17-3"))
+    let verdicts = checks(input)?;
+    let reason = verdicts
+        .iter()
+        .find(|check| check.failed)
+        .map(|check| check.reason);
+    let (active, pinned) = known_instruments(input.universe)?;
+    let proposal = input.proposal;
+    let thesis = &proposal.thesis;
+    let mut instruments = active.clone();
+    let mut journal = vec![thesis_event(proposal, &input.facts.allowlist, reason)];
+    let decision = match reason {
+        Some(reason) => AdmissionDecision::Refused { reason },
+        None if active.contains(&thesis.instrument_id) => AdmissionDecision::Admitted {
+            change: AdmissionChange::Renewed,
+        },
+        None => {
+            instruments.insert(thesis.instrument_id.clone());
+            journal.push(universe_changed(
+                &thesis.instrument_id,
+                UniverseChange::Admitted,
+                UniverseChangeReason::ThesisAdmitted,
+                (&thesis.thesis_id, &thesis.lineage_id),
+                instruments.len(),
+            ));
+            AdmissionDecision::Admitted {
+                change: AdmissionChange::Admitted,
+            }
+        }
+    };
+    let first_order = decision.admitted().then(|| FirstOrderFacts {
+        new_instrument: true,
+        thesis_confidence: thesis.confidence.clone(),
+        admission_ceiling: input
+            .overlay
+            .effective_admission(input.mandate.envelope().admission),
+    });
+    Ok(Admission {
+        decision,
+        universe: WorkingUniverse::Known {
+            instruments,
+            pinned,
+        },
+        journal,
+        first_order,
+    })
+}
+
+/// The members and the pinned flag of a universe that has been read; an unread one is an error,
+/// never an empty set (§2.3, DEC-132 item 18).
+fn known_instruments(
+    universe: &WorkingUniverse,
+) -> Result<(&BTreeSet<AssetId>, bool), ResearchError> {
+    match universe {
+        WorkingUniverse::Known {
+            instruments,
+            pinned,
+        } => Ok((instruments, *pinned)),
+        WorkingUniverse::Unavailable => Err(ResearchError::UniverseUnavailable),
+    }
+}
+
+/// One `UniverseChanged` entry (journal spec §9), naming the thesis and lineage it follows from.
+fn universe_changed(
+    instrument: &AssetId,
+    change: UniverseChange,
+    reason: UniverseChangeReason,
+    (thesis_id, lineage_id): (&ThesisId, &LineageId),
+    universe_size_after: usize,
+) -> ResearchEvent {
+    ResearchEvent::UniverseChanged(UniverseChangedEntry {
+        instrument: instrument.clone(),
+        change,
+        reason,
+        thesis_id: thesis_id.clone(),
+        lineage_id: lineage_id.clone(),
+        universe_size_after,
+    })
+}
+
+/// `at + seconds`, or [`ResearchError::TimeOutOfRange`] past `UtcNanos`'s range.
+fn plus_seconds(at: UtcNanos, seconds: u32) -> Result<UtcNanos, ResearchError> {
+    at.secs()
+        .checked_add(i64::from(seconds))
+        .and_then(|secs| UtcNanos::from_parts(secs, at.nanos()).ok())
+        .ok_or(ResearchError::TimeOutOfRange)
+}
+
+/// What the seventeen predicates read, resolved once so each predicate is one total expression.
+struct CheckInputs<'a> {
+    input: &'a AdmissionInput<'a>,
+    active: &'a BTreeSet<AssetId>,
+    horizon_end: UtcNanos,
+}
+
+impl CheckInputs<'_> {
+    /// One §8.5 predicate: `true` when the check fails. Every one reads typed facts only, so no text
+    /// a model wrote can move a verdict (DEC-101, R-05).
+    ///
+    /// Check 4 asks for a research envelope on a mandate whose model admits instruments, as one
+    /// expression: V-036 makes "no admitting model" and "no research envelope" the same condition
+    /// for a validated mandate, so two separate disjuncts would differ only on inputs validation
+    /// rejects, which no test can reach.
+    ///
+    /// Check 6 reads the overlay's effective `autonomy.admission` although today's overlay only
+    /// tightens `auto` to `ask` and never to `deny`, so the read changes no verdict and no test can
+    /// tell it from the mandate's own value. It stays so that a policy able to deny admission binds
+    /// here without a code change (DEC-132 item 22).
+    ///
+    /// Check 17 refuses if the ceiling does not fit a `usize`, which no supported target reaches:
+    /// an impossible input resolves toward refusal (AGENTS.md rule 3).
+    fn fails(&self, reason: RefusalReason) -> bool {
+        let input = self.input;
+        let envelope = input.mandate.envelope();
+        let overlay = input.overlay;
+        let facts = input.facts;
+        let proposal = input.proposal;
+        let thesis = &proposal.thesis;
+        let instrument = &thesis.instrument_id;
+        match reason {
+            RefusalReason::DirectionNotAllowed => thesis.direction != Direction::Long,
+            RefusalReason::HorizonMismatch => thesis.output.expires_at != self.horizon_end,
+            RefusalReason::RevisionWithoutPredecessor => {
+                (thesis.revision > 0) != thesis.predecessor_thesis_id.is_some()
+            }
+            RefusalReason::ResearchDisabled => {
+                !overlay.research_agent_allowed
+                    || envelope
+                        .research
+                        .as_ref()
+                        .filter(|_| envelope.admits_instruments)
+                        .is_none()
+            }
+            RefusalReason::UniversePinned => envelope.universe_pinned,
+            RefusalReason::AdmissionDenied => {
+                overlay.effective_admission(envelope.admission) == AutonomyDecision::Deny
+            }
+            RefusalReason::CostCapReached => envelope.research.as_ref().is_some_and(|research| {
+                facts.research_spend_usd_today
+                    >= overlay.effective_cost_cap(research.cost_cap_usd_per_day)
+            }),
+            RefusalReason::NotInDataUniverse => facts
+                .data_universe
+                .as_ref()
+                .is_some_and(|basket| !basket.contains(instrument)),
+            RefusalReason::OperatorHalt => facts.halted_instruments.contains(instrument),
+            RefusalReason::NotAllowedAssetClass => !envelope
+                .asset_classes
+                .contains(&proposal.instrument.asset_class),
+            RefusalReason::LeveragedEtpNotEnabled => {
+                proposal.instrument.leveraged_or_inverse_etp
+                    && !(envelope.leveraged_etps_enabled
+                        && envelope
+                            .leveraged_etp_disclosure_version
+                            .as_ref()
+                            .is_some_and(|version| facts.disclosures_accepted.contains(version)))
+            }
+            RefusalReason::EligibilityFloor => facts.eligibility_failures.contains(instrument),
+            RefusalReason::InstrumentGroupClaimed => {
+                let own = group_of(instrument, &facts.instrument_groups);
+                facts
+                    .claimed_by_other_agents
+                    .iter()
+                    .any(|claimed| group_of(claimed, &facts.instrument_groups) == own)
+            }
+            RefusalReason::SourceNotAllowlisted => thesis
+                .evidence_sources
+                .iter()
+                .any(|source| !facts.allowlist.sources.contains(source)),
+            RefusalReason::NoCorroboration => proposal.corroboration.is_none(),
+            RefusalReason::LineageRetired => {
+                input
+                    .lineages
+                    .lineage(&thesis.lineage_id)
+                    .is_some_and(|lineage| lineage.retired)
+                    || thesis.revision > self.revision_cap()
+            }
+            RefusalReason::UniverseFull => {
+                !self.active.contains(instrument)
+                    && usize::try_from(overlay.effective_max_instruments(envelope.max_instruments))
+                        .map_or(true, |ceiling| self.active.len() >= ceiling)
+            }
+        }
+    }
+
+    /// The effective `max_revisions_per_lineage`; with no research envelope nothing may be revised,
+    /// so the cap is 0, as `ref.py` reads it.
+    fn revision_cap(&self) -> u32 {
+        let input = self.input;
+        input
+            .mandate
+            .envelope()
+            .research
+            .as_ref()
+            .map_or(0, |research| {
+                input
+                    .overlay
+                    .effective_max_revisions_per_lineage(research.max_revisions_per_lineage)
+            })
+    }
+}
+
+/// The thesis entry every decision journals, refused or not. Its type follows the revision number,
+/// never the verdict (journal spec §9).
+fn thesis_event(
+    proposal: &ProposedThesis,
+    allowlist: &SourceAllowlist,
+    reason: Option<RefusalReason>,
+) -> ResearchEvent {
+    let thesis = &proposal.thesis;
+    let entry = ThesisEntry {
+        thesis_id: thesis.thesis_id.clone(),
+        lineage_id: thesis.lineage_id.clone(),
+        revision: thesis.revision,
+        predecessor_thesis_id: thesis.predecessor_thesis_id.clone(),
+        instrument: thesis.instrument_id.clone(),
+        asset_class: proposal.instrument.asset_class,
+        direction: thesis.direction,
+        horizon_s: thesis.horizon_s,
+        conviction: thesis.conviction.clone(),
+        confidence: thesis.confidence.clone(),
+        evidence: thesis.evidence,
+        evidence_sources: thesis.evidence_sources.clone(),
+        corroboration: proposal.corroboration,
+        invalidation: thesis.invalidation.clone(),
+        allowlist_version: allowlist.version,
+        admitted: reason.is_none(),
+        reason,
+    };
+    if thesis.revision > 0 {
+        ResearchEvent::ThesisRevised(entry)
+    } else {
+        ResearchEvent::ThesisProposed(entry)
+    }
 }
 
 /// One lineage's folded state: the highest revision it admitted, how many admissions it has, and
-/// whether it retired.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// whether it retired. The default is a lineage the fold has just met.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Lineage {
     pub revisions: u32,
     pub admitted: u32,
@@ -591,8 +842,94 @@ pub struct Fold {
 /// # Errors
 /// Returns [`ResearchError`] for an unread universe, or a proposal sequence naming one thesis twice.
 pub fn fold_theses(input: &FoldInput<'_>) -> Result<Fold, ResearchError> {
-    let _ = input;
-    Err(ResearchError::Unimplemented("fold_theses", "E17-9"))
+    let mut seen = BTreeSet::new();
+    for proposal in input.proposals {
+        if !seen.insert(&proposal.thesis.thesis_id) {
+            return Err(ResearchError::DuplicateThesisId);
+        }
+    }
+    known_instruments(input.universe)?;
+    let mut universe = input.universe.clone();
+    let mut lineages = input.lineages.clone();
+    let mut steps = Vec::with_capacity(input.proposals.len());
+    for proposal in input.proposals {
+        let admission = admit(&AdmissionInput {
+            mandate: input.mandate,
+            overlay: input.overlay,
+            universe: &universe,
+            proposal,
+            facts: input.facts,
+            lineages: &lineages,
+        })?;
+        universe = admission.universe;
+        let mut journal = admission.journal;
+        let thesis = &proposal.thesis;
+        let (lineage, retired_now) = lineages.step(thesis, admission.decision);
+        if retired_now && let Some(removal) = retire_holder(&mut universe, &lineages, thesis) {
+            journal.push(removal);
+        }
+        steps.push(FoldStep {
+            thesis_id: thesis.thesis_id.clone(),
+            decision: admission.decision,
+            lineage_revisions: lineage.revisions,
+            lineage_retired: lineage.retired,
+            journal,
+        });
+    }
+    Ok(Fold {
+        steps,
+        lineages,
+        universe,
+    })
+}
+
+impl LineageState {
+    /// §8.6: folds one decision into its lineage. A `lineage_retired` refusal retires a live lineage;
+    /// an admission raises the highest revision, counts the admission, and moves the instrument's
+    /// holder to this lineage. Every other refusal leaves the lineage as it was, although the lineage
+    /// becomes known (MC-N19). Returns the lineage after the step, and whether this step retired it.
+    fn step(&mut self, thesis: &Thesis, decision: AdmissionDecision) -> (Lineage, bool) {
+        let lineage = self.lineages.entry(thesis.lineage_id.clone()).or_default();
+        let retired_now =
+            decision.reason() == Some(RefusalReason::LineageRetired) && !lineage.retired;
+        if retired_now {
+            lineage.retired = true;
+        }
+        if decision.admitted() {
+            lineage.revisions = lineage.revisions.max(thesis.revision);
+            lineage.admitted = lineage.admitted.saturating_add(1);
+        }
+        let lineage = *lineage;
+        if decision.admitted() {
+            self.holders.retain(|_, held| *held != thesis.instrument_id);
+            self.holders
+                .insert(thesis.lineage_id.clone(), thesis.instrument_id.clone());
+        }
+        (lineage, retired_now)
+    }
+}
+
+/// §8.6 item 4: removes the instrument a retiring lineage holds, if the universe still holds it, and
+/// returns the removal's `UniverseChanged`. A lineage that lost its holder to another lineage's
+/// admission removes nothing (MC-N28).
+fn retire_holder(
+    universe: &mut WorkingUniverse,
+    lineages: &LineageState,
+    thesis: &Thesis,
+) -> Option<ResearchEvent> {
+    let held = lineages.holder_of(&thesis.lineage_id)?;
+    let WorkingUniverse::Known { instruments, .. } = universe else {
+        return None;
+    };
+    instruments.remove(held).then(|| {
+        universe_changed(
+            held,
+            UniverseChange::Removed,
+            UniverseChangeReason::LineageRetired,
+            (&thesis.thesis_id, &thesis.lineage_id),
+            instruments.len(),
+        )
+    })
 }
 
 /// One instrument's current thesis, as the universe fold holds it.
@@ -628,8 +965,71 @@ pub fn expire_theses(
     entries: &[UniverseEntry],
     lineages: &LineageState,
 ) -> Result<Expiry, ResearchError> {
-    let _ = (now, entries, lineages);
-    Err(ResearchError::Unimplemented("expire_theses", "E17-3"))
+    let mut by_instrument: BTreeMap<&AssetId, &UniverseEntry> = BTreeMap::new();
+    for entry in entries {
+        if by_instrument.insert(&entry.instrument, entry).is_some() {
+            return Err(ResearchError::DuplicateInstrument);
+        }
+    }
+    let mut kept = BTreeSet::new();
+    let mut ended = Vec::new();
+    for (instrument, entry) in by_instrument {
+        match removal_reason(now, entry, lineages) {
+            Some(reason) => ended.push((entry, reason)),
+            None => {
+                kept.insert(instrument.clone());
+            }
+        }
+    }
+    let mut remaining = entries.len();
+    let mut journal = Vec::new();
+    for (entry, reason) in &ended {
+        remaining = remaining.saturating_sub(1);
+        journal.push(universe_changed(
+            &entry.instrument,
+            UniverseChange::Removed,
+            *reason,
+            (&entry.thesis_id, &entry.lineage_id),
+            remaining,
+        ));
+    }
+    let removed: Vec<AssetId> = ended
+        .iter()
+        .map(|(entry, _)| entry.instrument.clone())
+        .collect();
+    Ok(Expiry {
+        universe: WorkingUniverse::Known {
+            instruments: kept,
+            pinned: false,
+        },
+        instrument_restrictions: removed
+            .iter()
+            .map(|instrument| (instrument.clone(), InstrumentRestriction::RemovedInstrument))
+            .collect(),
+        removed,
+        journal,
+    })
+}
+
+/// §8.6's removal reasons, first that holds: invalidated, then the lineage retired, then the
+/// horizon reached (`now >= expires_at`). `None` keeps the entry.
+fn removal_reason(
+    now: UtcNanos,
+    entry: &UniverseEntry,
+    lineages: &LineageState,
+) -> Option<UniverseChangeReason> {
+    if entry.invalidated {
+        Some(UniverseChangeReason::ThesisInvalidated)
+    } else if lineages
+        .lineage(&entry.lineage_id)
+        .is_some_and(|lineage| lineage.retired)
+    {
+        Some(UniverseChangeReason::LineageRetired)
+    } else if now >= entry.expires_at {
+        Some(UniverseChangeReason::ThesisExpired)
+    } else {
+        None
+    }
 }
 
 /// §8.4, DEC-123: the stagger window, a policy minimum of 900 s. Zero means no wait.
@@ -644,14 +1044,31 @@ pub struct StaggerWindow(pub u32);
 /// exact and cannot overflow (DEC-132 item 8).
 ///
 /// # Errors
-/// Returns [`ResearchError::Unimplemented`] until E17-3 lands.
+/// Returns [`ResearchError::WindowTooLarge`] if a step of the reduction left `u64`, which the bound
+/// above rules out; the error keeps the arithmetic checked rather than assumed.
 pub fn stagger_offset(
     workspace: &WorkspaceId,
     thesis: &ThesisId,
     window: StaggerWindow,
 ) -> Result<u32, ResearchError> {
-    let _ = (workspace, thesis, window);
-    Err(ResearchError::Unimplemented("stagger_offset", "E17-3"))
+    let modulus = u64::from(window.0);
+    if modulus == 0 {
+        return Ok(0);
+    }
+    let digest = Digest::of_parts(&[
+        workspace.as_str().as_bytes(),
+        &[0x00],
+        thesis.as_str().as_bytes(),
+    ]);
+    let mut acc: u64 = 0;
+    for byte in digest.as_bytes() {
+        acc = acc
+            .checked_mul(256)
+            .and_then(|shifted| shifted.checked_add(u64::from(*byte)))
+            .and_then(|value| value.checked_rem(modulus))
+            .ok_or(ResearchError::WindowTooLarge)?;
+    }
+    u32::try_from(acc).map_err(|_| ResearchError::WindowTooLarge)
 }
 
 /// §8.4: when the first opening order on a newly admitted thesis may go.
@@ -668,8 +1085,13 @@ pub fn stagger_release_at(
     next_regular_open: Option<UtcNanos>,
     offset_s: u32,
 ) -> Result<UtcNanos, ResearchError> {
-    let _ = (asset_class, admitted_at, next_regular_open, offset_s);
-    Err(ResearchError::Unimplemented("stagger_release_at", "E17-3"))
+    let anchor = match asset_class {
+        AssetClass::Crypto => admitted_at,
+        AssetClass::UsEquity => next_regular_open
+            .ok_or(ResearchError::SessionCalendarMissing)?
+            .max(admitted_at),
+    };
+    plus_seconds(anchor, offset_s)
 }
 
 /// §8.4's `behavior.research.interval_s`, a policy minimum: the earliest instant the agent may
@@ -683,8 +1105,9 @@ pub fn next_proposal_at(
     last_proposal: Option<UtcNanos>,
     interval_s: u32,
 ) -> Result<Option<UtcNanos>, ResearchError> {
-    let _ = (last_proposal, interval_s);
-    Err(ResearchError::Unimplemented("next_proposal_at", "E17-3"))
+    last_proposal
+        .map(|last| plus_seconds(last, interval_s))
+        .transpose()
 }
 
 /// journal spec §9. The crate returns values; the executor appends them, to the agent stream for a
@@ -755,6 +1178,8 @@ pub enum ResearchError {
     EmptyId,
     #[error("a thesis states what would invalidate it")]
     EmptyInvalidation,
+    /// Returned by no entry point since the implementation landed; kept for the tests PR's pinned
+    /// code only (DEC-77).
     #[error("{0} is not implemented yet (pending {1})")]
     Unimplemented(&'static str, &'static str),
     #[error(transparent)]
@@ -785,5 +1210,130 @@ impl ResearchError {
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
         }
+    }
+}
+
+/// What the tests PR's files cannot pin on the implementation, each shown by a planted bug every
+/// live test passed (the post-merge review of #158): check 7 compares against the overlay's
+/// `research_cost_cap_usd_per_day` when it is below the mandate's own cap, which is DEC-132
+/// item 22's claim that a lowered ceiling binds at check 7.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MC-N01's admitting inputs, with the mandate's cap at 5 USD and the overlay's at 2.5 USD.
+    struct Owned {
+        mandate: ValidatedMandate,
+        overlay: PolicyOverlay,
+        universe: WorkingUniverse,
+        proposal: ProposedThesis,
+        facts: AdmissionFacts,
+        lineages: LineageState,
+    }
+
+    impl Owned {
+        fn new(spend: &str) -> Result<Self, ResearchError> {
+            let source = SourceId::new("src.filings")?;
+            let thesis = Thesis {
+                thesis_id: ThesisId::new("th-1")?,
+                lineage_id: LineageId::new("th-1")?,
+                revision: 0,
+                predecessor_thesis_id: None,
+                instrument_id: AssetId::new("7b4a1c2e-5555-4a2b-9c3d-000000000005")?,
+                output: OutputEnvelope {
+                    model_id: ModelId::new("llm.research_agent")?,
+                    model_version: ModelVersion::new("0.1.0"),
+                    content_hash: ContentHash::new(Digest::of_parts(&[b"model"])),
+                    as_of: UtcNanos::parse("2026-09-22T14:00:00.000000000Z")?,
+                    expires_at: UtcNanos::parse("2026-09-23T14:00:00.000000000Z")?,
+                },
+                direction: Direction::Long,
+                horizon_s: 86_400,
+                conviction: SchemaDec::from_checked_text("0.7"),
+                confidence: SchemaDec::from_checked_text("0.8"),
+                evidence: None,
+                evidence_sources: vec![source.clone()],
+                invalidation: Invalidation::new("Guidance is cut.")?,
+            };
+            Ok(Self {
+                mandate: ValidatedMandate::from_validated_envelope(MandateEnvelope {
+                    universe_pinned: false,
+                    max_instruments: 5,
+                    asset_classes: BTreeSet::from([AssetClass::UsEquity]),
+                    leveraged_etps_enabled: false,
+                    leveraged_etp_disclosure_version: None,
+                    admits_instruments: true,
+                    research: Some(ResearchEnvelope {
+                        interval_s: 3_600,
+                        cost_cap_usd_per_day: Usd::parse("5")?,
+                        max_revisions_per_lineage: 3,
+                    }),
+                    admission: AutonomyDecision::Ask,
+                }),
+                overlay: PolicyOverlay {
+                    research_cost_cap_usd_per_day: Some(Usd::parse("2.5")?),
+                    ..PolicyOverlay::permissive()
+                },
+                universe: WorkingUniverse::Known {
+                    instruments: BTreeSet::new(),
+                    pinned: false,
+                },
+                proposal: ProposedThesis {
+                    thesis,
+                    instrument: InstrumentFacts {
+                        asset_class: AssetClass::UsEquity,
+                        leveraged_or_inverse_etp: false,
+                    },
+                    corroboration: Some(Corroboration::IndependentSource),
+                },
+                facts: AdmissionFacts {
+                    allowlist: SourceAllowlist {
+                        version: AllowlistVersion(1),
+                        sources: BTreeSet::from([source]),
+                    },
+                    eligibility_failures: BTreeSet::new(),
+                    instrument_groups: BTreeMap::new(),
+                    claimed_by_other_agents: BTreeSet::new(),
+                    halted_instruments: BTreeSet::new(),
+                    disclosures_accepted: BTreeSet::new(),
+                    data_universe: None,
+                    research_spend_usd_today: Usd::parse(spend)?,
+                },
+                lineages: LineageState::default(),
+            })
+        }
+
+        fn decide(&self) -> Result<AdmissionDecision, ResearchError> {
+            admit(&AdmissionInput {
+                mandate: &self.mandate,
+                overlay: &self.overlay,
+                universe: &self.universe,
+                proposal: &self.proposal,
+                facts: &self.facts,
+                lineages: &self.lineages,
+            })
+            .map(|admission| admission.decision)
+        }
+    }
+
+    #[test]
+    fn check_7_a_policy_cap_below_the_mandates_binds_at_equality() -> Result<(), ResearchError> {
+        assert_eq!(
+            Owned::new("2.5")?.decide()?,
+            AdmissionDecision::Refused {
+                reason: RefusalReason::CostCapReached
+            },
+            "the overlay's 2.5 USD is the stricter cap, so a spend of 2.5 has reached it"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn check_7_a_cent_below_the_policy_cap_still_admits() -> Result<(), ResearchError> {
+        assert!(
+            Owned::new("2.49")?.decide()?.admitted(),
+            "below the stricter cap, and the mandate's own 5 USD is further away still"
+        );
+        Ok(())
     }
 }

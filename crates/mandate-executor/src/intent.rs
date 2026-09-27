@@ -30,6 +30,7 @@ pub(crate) fn received(
         qty,
         limit,
         purpose,
+        ..
     } = &handoff.body
     else {
         return Err(ExecutorError::NotInterpreted {
@@ -155,6 +156,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         qty,
         limit,
         purpose,
+        ..
     } = body
     else {
         return Ok(());

@@ -11,7 +11,9 @@ use crate::payload::{
     flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
-use crate::state::{ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail};
+use crate::state::{
+    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
+};
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
     OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
@@ -102,7 +104,18 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload),
         "OrderSubmitted" => order_submitted(state, event),
-        "OrderStateChanged" => order_state_changed(state, payload, at),
+        "OrderStateChanged" => {
+            adoption(state, event)?;
+            order_state_changed(state, payload, at)
+        }
+        "CompensatingEvent" => {
+            if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
+                for id in corrected.iter().filter_map(Value::as_str) {
+                    state.uncompensated.remove(&EventId(id.to_owned()));
+                }
+            }
+            Ok(())
+        }
         "OrderAbandoned" => order_abandoned(state, payload),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
         "FeesCharged" => fees_charged(state, payload),
@@ -272,6 +285,7 @@ fn intent_received(
         qty: qty(payload, "qty")?,
         limit: optional_price(payload, "limit")?.ok_or_else(|| refused("limit"))?,
         purpose: purpose_of(required_text(payload, "purpose")?)?,
+        protection: None,
     };
     state.intents.insert(
         id.clone(),
@@ -380,6 +394,26 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         record.outcome = IntentOutcome::Submitted;
     }
     state.last_submission = Some(event.seq);
+    Ok(())
+}
+
+/// Records an adoption as owed a `CompensatingEvent` until one names it (§11).
+fn adoption(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if !flag(&event.payload, "adopted") {
+        return Ok(());
+    }
+    let subject = client_order_id(&event.payload)?;
+    let from = state
+        .orders
+        .get(&subject)
+        .map(|order| order.state)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: subject.as_str().to_owned(),
+        })?;
+    let to = state_of(required_text(&event.payload, "state")?)?;
+    state
+        .uncompensated
+        .insert(event.event_id.clone(), Adoption { subject, from, to });
     Ok(())
 }
 
@@ -532,17 +566,21 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     Ok(())
 }
 
-/// A crypto asset fee is paid in the asset, so until it posts it explains a position difference
-/// rather than a cash one; paper's simulated fees are kept apart from the cash comparison
-/// (trading-domain spec §10, §11).
+/// A crypto asset fee is paid in the asset: its accrual reduces the model's net position at once,
+/// and until the broker posts it the broker still shows it, so the unposted part explains a
+/// position difference rather than a cash one; paper's simulated fees are kept apart from the
+/// cash comparison (trading-domain spec §6.3, §10, §11).
 fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     if required_text(payload, "family")? == "crypto_asset" {
+        let instrument = instrument(payload)?;
         let accrued = qty(payload, "accrued")?;
         let charged = optional_qty(payload, "charged")?.unwrap_or(Qty::ZERO);
-        let unposted = state
-            .asset_fees
-            .entry(instrument(payload)?)
-            .or_insert(Qty::ZERO);
+        let position = state
+            .positions
+            .entry(instrument.clone())
+            .or_insert(SignedQty::ZERO);
+        *position = position.checked_add(SignedQty::from(accrued).negated())?;
+        let unposted = state.asset_fees.entry(instrument).or_insert(Qty::ZERO);
         *unposted = unposted
             .checked_add(accrued)?
             .checked_sub(charged)

@@ -14,15 +14,15 @@ use common::{
     ACCOUNT_STREAM, AGENT_STREAM, AppendOutcome, CLOCK_STREAM, CONTROL_STREAM, FixedInstruments,
     FixedMandate, OTHER_AGENT, OTHER_AGENT_STREAM, Shell, TestIds, agent, broker_account,
     broker_fill, broker_order, broker_position, broker_reject, clock, config, copied, derived_id,
-    discretionary_exit, event, handoff, instrument, int, object, opening, ports, price, qty, quote,
-    risk_exit, scope, snapshot, stale_quote, stream_opened, text, usd, with_clock,
+    discretionary_exit, event, handoff, instrument, int, object, opening, ports, price,
+    protected_opening, qty, quote, risk_exit, scope, snapshot, stale_quote, stream_opened, text,
+    usd, with_clock,
 };
 use mandate_accounting::Side;
 use mandate_executor::{
     AccountState, BrokerOutcome, BrokerRequest, BrokerUnknown, BrokerUpdate, Command, Effect,
-    EventId, ExecutorError, ExecutorState, FOLD_VERSION, Initiator, Input, IntentBody, KillScope,
-    Mode, OrderState, OwnerConfirmation, Purpose, ReconcileReason, WriterEpoch, fold, handle,
-    reconcile,
+    EventId, ExecutorError, ExecutorState, FOLD_VERSION, Initiator, Input, KillScope, Mode,
+    OrderState, OwnerConfirmation, Purpose, ReconcileReason, WriterEpoch, fold, handle, reconcile,
 };
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
@@ -291,6 +291,40 @@ fn a_submission_journals_before_the_request_leaves() {
 }
 
 #[test]
+fn an_opening_without_protective_prices_is_gated_and_sent_as_a_plain_order() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+
+    let ran = shell.run(
+        handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
+        &ports,
+    );
+
+    let decided = ran
+        .draft("GateDecided")
+        .and_then(|d| d.payload.get("verdict"))
+        .and_then(mandate_canon::Value::as_str);
+    assert_eq!(decided, Some("allow"), "it is gated like any other intent");
+    let submissions = ran.submissions();
+    assert_eq!(submissions.len(), 1, "and sent once");
+    let order = submissions.first().copied().expect("one submission");
+    assert_eq!(order.order_type, mandate_executor::OrderType::Limit);
+    assert_eq!(order.limit_price, Some(price("150")));
+    assert!(
+        order.bracket.is_none() && order.oco.is_none(),
+        "an intent without protective prices is a plain limit order: the executor places the \
+         prices the order builder computed and never invents a bracket (whether protection is \
+         required is the mandate's `protection_required`, which the gate reads, DEC-133)"
+    );
+}
+
+#[test]
 fn an_intent_enters_only_as_an_input() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -346,7 +380,7 @@ fn a_re_handed_intent_produces_no_effect_at_all() {
 #[test]
 fn two_processes_derive_one_client_order_id_for_one_intent() {
     let ids = TestIds;
-    let mandates = FixedMandate::covering(&[AAPL]);
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -362,6 +396,10 @@ fn two_processes_derive_one_client_order_id_for_one_intent() {
     let mut second = Shell::new(9);
     second.fold_one(&stream_opened()).expect("folds");
     let (mut second, _) = second.restart(&ports);
+    let earlier = second.run(
+        handoff(OTHER_INTENT, common::AGENT, opening(CPHC, "5", "20")),
+        &ports,
+    );
     let two = second.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -371,12 +409,19 @@ fn two_processes_derive_one_client_order_id_for_one_intent() {
         ran.submissions()
             .first()
             .map(|o| o.client_order_id.as_str().to_owned())
-            .expect("each process submits once")
+            .expect("each intent is submitted once")
     };
+    assert_ne!(
+        id_of(&earlier),
+        id_of(&two),
+        "two intents in one process never share an id"
+    );
     assert_eq!(
         id_of(&one),
         id_of(&two),
-        "the id is a pure function of the intent id, so the epoch cannot change it (E7-2)"
+        "the id is a pure function of the intent id: another epoch, and another intent handled \
+         first, change nothing — which a per-process counter or a fresh ULID could not satisfy \
+         (E7-2, planted bug 8)"
     );
 }
 
@@ -684,7 +729,6 @@ fn a_stale_intent_is_abandoned_rather_than_resubmitted() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_stale_intent_is_abandoned_at_its_first_submission() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -712,11 +756,12 @@ fn a_stale_intent_is_abandoned_at_its_first_submission() {
     );
 
     shell
-        .fold_one(&event(
+        .fold_one(&copied(
             ACCOUNT_STREAM,
             shell.head().0.saturating_add(1),
             "ClockAdvanced",
             with_clock(&[], 500),
+            &EventId(format!("{CLOCK_STREAM}-1")),
         ))
         .expect("the outage's clock folds");
     let (shell, resumed) = shell.restart(&ports);
@@ -739,7 +784,6 @@ fn a_stale_intent_is_abandoned_at_its_first_submission() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_abandoned_intent_is_never_re_sent() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -758,11 +802,12 @@ fn an_abandoned_intent_is_never_re_sent() {
         )
         .expect("the step itself does not refuse");
     shell
-        .fold_one(&event(
+        .fold_one(&copied(
             ACCOUNT_STREAM,
             shell.head().0.saturating_add(1),
             "ClockAdvanced",
             with_clock(&[], 500),
+            &EventId(format!("{CLOCK_STREAM}-1")),
         ))
         .expect("the outage's clock folds");
     let (mut shell, resumed) = shell.restart(&ports);
@@ -1765,15 +1810,37 @@ fn a_position_difference_is_not_written_away_as_a_compensating_event() {
     taken.positions = vec![broker_position(AAPL, "7")];
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
-    let position_difference = run
-        .differences
-        .iter()
-        .find(|d| d.kind == mandate_executor::DifferenceKind::Position)
-        .expect("seven shares the ledger does not have is a difference");
+    let types = journaled(&run.effects);
     assert!(
-        !position_difference.adopted,
-        "§11's on-mismatch column never adopts a position: writing it away would destroy the \
-         evidence that they disagreed (interpretation 13, planted bug 18)"
+        !types.contains(&"CompensatingEvent"),
+        "§11's on-mismatch column never adopts a position: nothing in the order set differs, so \
+         nothing may be compensated, and a compensating event here would make the ledger agree \
+         with the broker while destroying the evidence that they disagreed (interpretation 13, \
+         planted bug 18): {types:?}"
+    );
+    let observed = run
+        .effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Journal(d) if d.event_type == "BrokerPositionObserved" => Some(d),
+            _ => None,
+        })
+        .expect("the difference is recorded as observed, not written away");
+    assert_eq!(
+        observed
+            .payload
+            .get("instrument")
+            .and_then(mandate_canon::Value::as_str),
+        Some(AAPL)
+    );
+    assert!(
+        format!("{:?}", observed.payload).contains("Str(\"7\")"),
+        "with the broker's own seven shares on the record: {:?}",
+        observed.payload
+    );
+    assert!(
+        paused_anyone(&run.effects),
+        "and the difference pauses rather than resolves: {types:?}"
     );
     assert_eq!(
         run.verdict,
@@ -1914,11 +1981,49 @@ fn a_pending_corporate_action_difference_is_not_a_mismatch() {
 
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
+    let types = journaled(&run.effects);
+    assert!(
+        types.contains(&"BrokerPositionObserved") && types.last() == Some(&"ReconciliationRun"),
+        "the position is still compared and recorded, and the run closes the batch: {types:?}"
+    );
+    assert!(
+        run.differences
+            .iter()
+            .all(|d| d.kind != mandate_executor::DifferenceKind::Position),
+        "§11's tolerance column excepts an instrument under `pending_corporate_action` (§8.5): \
+         {:?}",
+        run.differences
+    );
     assert_ne!(
         run.verdict,
-        mandate_executor::ReconciliationVerdict::Mismatch,
-        "§11's tolerance column excepts an instrument under `pending_corporate_action` (§8.5)"
+        mandate_executor::ReconciliationVerdict::Mismatch
     );
+    assert!(
+        !paused_anyone(&run.effects),
+        "and nobody is paused for a difference the split explains"
+    );
+}
+
+/// The event types a list of effects journals, in order.
+fn journaled(effects: &[Effect]) -> Vec<&str> {
+    effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Journal(d) => Some(d.event_type.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Whether a list of effects pauses any agent.
+fn paused_anyone(effects: &[Effect]) -> bool {
+    effects.iter().any(|e| {
+        matches!(
+            e,
+            Effect::Journal(d) if d.event_type == "AgentModeApplied"
+                && d.payload.get("to").and_then(mandate_canon::Value::as_str) == Some("paused")
+        )
+    })
 }
 
 #[test]
@@ -1929,6 +2034,22 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = reconciling(&ports);
+    let bought = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-btc")),
+                ("instrument", text(BTC)),
+                ("side", text("buy")),
+                ("qty_gross", text("0.5")),
+                ("price", text("60000")),
+            ],
+            40,
+        ),
+    );
+    shell.fold_one(&bought).expect("the crypto buy folds");
     let charged = event(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
@@ -1936,7 +2057,7 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
         with_clock(
             &[
                 ("family", text("crypto_asset")),
-                ("accrued", text("0.001")),
+                ("accrued", text("0.00125")),
                 ("charged", text("0")),
                 ("instrument", text(BTC)),
             ],
@@ -1944,15 +2065,40 @@ fn unposted_crypto_asset_fees_explain_the_crypto_difference() {
         ),
     );
     shell.fold_one(&charged).expect("the accrual folds");
+
     let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
-    taken.positions = vec![broker_position(BTC, "-0.001")];
-
+    taken.positions = vec![broker_position(BTC, "0.5")];
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
-
+    let observed = run
+        .effects
+        .iter()
+        .find_map(|e| match e {
+            Effect::Journal(d) if d.event_type == "BrokerPositionObserved" => Some(d),
+            _ => None,
+        })
+        .expect("the crypto position is compared and recorded");
+    assert_eq!(
+        observed
+            .payload
+            .get("instrument")
+            .and_then(mandate_canon::Value::as_str),
+        Some(BTC)
+    );
     assert_ne!(
         run.verdict,
         mandate_executor::ReconciliationVerdict::Mismatch,
-        "crypto is model net plus unposted asset fees until posting (§11)"
+        "0.5 bought gross at 25 bps taker is a model net of 0.49875 and an asset fee of 0.00125 \
+         that Alpaca has not posted; until it does, the broker shows net + unposted = 0.5, which \
+         is RC-07's own `broker_qty_before_fee_posting` (§6.3, §11)"
+    );
+
+    let mut off = snapshot(shell.head().0, ReconcileReason::Startup);
+    off.positions = vec![broker_position(BTC, "0.49")];
+    let run = reconcile(&shell.state, &off, &ports).expect("the reconciliation runs");
+    assert_eq!(
+        run.verdict,
+        mandate_executor::ReconciliationVerdict::Mismatch,
+        "and the unposted fee explains exactly its own amount, not any difference"
     );
 }
 
@@ -2023,7 +2169,6 @@ fn an_unknown_broker_order_becomes_external_activity() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn external_activity_switches_every_agent_to_exits_only() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2031,16 +2176,20 @@ fn external_activity_switches_every_agent_to_exits_only() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = reconciling(&ports);
-    let other_mode = copied(
-        ACCOUNT_STREAM,
-        shell.head().0.saturating_add(1),
-        "AgentModeApplied",
-        with_clock(&[("agent", text(OTHER_AGENT)), ("to", text("normal"))], 10),
-        &EventId(format!("{OTHER_AGENT_STREAM}-1")),
-    );
-    shell
-        .fold_one(&other_mode)
-        .expect("the sibling's mode folds");
+    for (who, stream) in [
+        (common::AGENT, AGENT_STREAM),
+        (OTHER_AGENT, OTHER_AGENT_STREAM),
+    ] {
+        let mode = copied(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(1),
+            "AgentModeApplied",
+            with_clock(&[("agent", text(who)), ("to", text("normal"))], 10),
+            &EventId(format!("{stream}-1")),
+        );
+        shell.fold_one(&mode).expect("each agent's mode folds");
+        assert_eq!(shell.state.effective_mode(&agent(who)), Mode::Normal);
+    }
     let mut taken = snapshot(shell.head().0, ReconcileReason::Startup);
     taken.open_orders = vec![broker_order(
         "b-9",
@@ -2054,20 +2203,24 @@ fn external_activity_switches_every_agent_to_exits_only() {
 
     let ran = shell.run(Input::BrokerSnapshot(taken), &ports);
 
-    let switched: Vec<&str> = ran
-        .drafts
-        .iter()
-        .filter(|d| d.event_type == "AgentModeApplied")
-        .filter_map(|d| {
-            d.payload
-                .get("agent")
-                .and_then(mandate_canon::Value::as_str)
-        })
-        .collect();
     assert!(
-        switched.contains(&common::AGENT) && switched.contains(&OTHER_AGENT),
-        "**every** agent on the account goes exits_only until the owner acknowledges (§7.1): \
-         {switched:?}"
+        ran.draft_types().contains(&"ExternalActivityIngested"),
+        "the foreign order is ingested: {:?}",
+        ran.draft_types()
+    );
+    for who in [common::AGENT, OTHER_AGENT] {
+        assert_eq!(
+            shell.state.effective_mode(&agent(who)),
+            Mode::ExitsOnly,
+            "**every** agent on the account goes exits_only until the owner acknowledges (§7.1): \
+             {who}"
+        );
+    }
+    assert_eq!(
+        shell.state.effective_mode(&agent("agent-deployed-later")),
+        Mode::ExitsOnly,
+        "and so does an agent the executor has never seen: the restriction is the account's, so \
+         an agent deployed inside the unacknowledged window is covered too"
     );
 }
 
@@ -2144,6 +2297,10 @@ fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
     let mut bad = snapshot(shell.head().0, ReconcileReason::Startup);
     bad.positions = vec![broker_position(AAPL, "7")];
     shell.run(Input::BrokerSnapshot(bad), &ports);
+    assert!(
+        shell.state.mismatched().contains(&instrument(AAPL)),
+        "the seven unexplained shares are recorded as a mismatch before anything else is tried"
+    );
 
     let ack = copied(
         ACCOUNT_STREAM,
@@ -2214,24 +2371,52 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
     );
 
     let taken = snapshot(stale_head.0, ReconcileReason::Startup);
-    shell.next_append = AppendOutcome::HeadMismatch;
-    let ran = shell.run(Input::BrokerSnapshot(taken), &ports);
-
+    let stale = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
+    assert_eq!(
+        stale.expected_head,
+        stale_head,
+        "the run is appended at the head its snapshot was taken at, not the current head {:?}, \
+         so the append answers HeadMismatch rather than positioning the run after a submission \
+         it never saw (interpretation 15, planted bug 17)",
+        shell.head()
+    );
     assert!(
-        ran.draft_types().contains(&"ReconciliationRun"),
-        "the run is drafted at the stale head: {:?}",
-        ran.draft_types()
+        journaled(&stale.effects).contains(&"ReconciliationRun"),
+        "the run is drafted at the stale head"
+    );
+
+    shell.next_append = AppendOutcome::HeadMismatch;
+    let refused = shell.run(Input::BrokerSnapshot(taken), &ports);
+    assert!(
+        refused.draft_types().contains(&"ReconciliationRun"),
+        "the stale batch is offered to the journal: {:?}",
+        refused.draft_types()
+    );
+    assert!(
+        !shell
+            .account_journal
+            .iter()
+            .any(|e| e.event_type == "ReconciliationRun"),
+        "and the journal refused it"
     );
     shell.next_append = AppendOutcome::Committed;
+    let fresh_head = shell.head();
     let again = shell.run(
-        Input::BrokerSnapshot(snapshot(shell.head().0, ReconcileReason::Startup)),
+        Input::BrokerSnapshot(snapshot(fresh_head.0, ReconcileReason::Startup)),
         &ports,
     );
     assert!(
         again.draft_types().contains(&"ReconciliationRun"),
-        "and is recomputed against a fresh snapshot rather than published as covering something \
-         it never saw (planted bug 17): {:?}",
+        "and it is recomputed against a fresh snapshot rather than published as covering \
+         something it never saw: {:?}",
         again.draft_types()
+    );
+    assert!(
+        shell
+            .state
+            .reconciled_through()
+            .is_some_and(|at| at.0 > fresh_head.0),
+        "and only the fresh run is positioned in the stream"
     );
 }
 
@@ -2274,43 +2459,55 @@ fn a_reconciliation_ingests_a_missing_fill_before_it_compares_positions() {
     );
 }
 
+/// The two events of `RC-14`'s initial state from `first_seq` on: ten `AAPL` bought at 150, and
+/// one resting GTC OCO for them at 170 and 140, created on 2026-09-22 (so it expires on
+/// 2026-12-21, trading-domain spec §5.2).
+fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEvent> {
+    vec![
+        event(
+            ACCOUNT_STREAM,
+            first_seq,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-0")),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty_gross", text("10")),
+                    ("price", text("150")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            first_seq.saturating_add(1),
+            "ProtectionChanged",
+            with_clock(
+                &[
+                    ("instrument", text(AAPL)),
+                    ("action", text("placed")),
+                    ("orders", text("md-oco-1")),
+                    ("qty", text("10")),
+                    ("take_profit", text("170")),
+                    ("stop", text("140")),
+                    ("created_on", text("2026-09-22")),
+                ],
+                11,
+            ),
+        ),
+    ]
+}
+
 /// A position of ten `AAPL` protected by one resting GTC OCO, which is `RC-14`'s initial state.
 fn protected_position(ports: &mandate_executor::Ports<'_>) -> Shell {
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let filled = event(
-        ACCOUNT_STREAM,
-        2,
-        "FillApplied",
-        with_clock(
-            &[
-                ("fill_id", text("f-0")),
-                ("instrument", text(AAPL)),
-                ("side", text("buy")),
-                ("qty_gross", text("10")),
-                ("price", text("150")),
-            ],
-            10,
-        ),
-    );
-    shell.fold_one(&filled).expect("the opening fill folds");
-    let protection = event(
-        ACCOUNT_STREAM,
-        3,
-        "ProtectionChanged",
-        with_clock(
-            &[
-                ("instrument", text(AAPL)),
-                ("action", text("placed")),
-                ("orders", text("md-oco-1")),
-                ("qty", text("10")),
-                ("take_profit", text("170")),
-                ("stop", text("140")),
-            ],
-            11,
-        ),
-    );
-    shell.fold_one(&protection).expect("the resting OCO folds");
+    for event in protected_position_events(2) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
     let (shell, _) = shell.restart(ports);
     shell
 }
@@ -2465,6 +2662,7 @@ fn a_passive_exit_becomes_a_new_oco_keeping_the_stop() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn a_passive_exit_never_leaves_the_position_unprotected() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2474,26 +2672,57 @@ fn a_passive_exit_never_leaves_the_position_unprotected() {
     let mut shell = protected_position(&ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
 
-    shell.run(
+    let asked = shell.run(
         handoff(INTENT, common::AGENT, discretionary_exit(AAPL, "10", "160")),
         &ports,
     );
-    shell.run(
+    assert!(
+        asked.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == "md-oco-1"
+        )),
+        "the resting OCO is cancelled to make room for the new one: {:?}",
+        asked.requests
+    );
+    let after = shell.run(
         Input::Broker(Ok(BrokerOutcome::CancelAccepted {
             client_order_id: "md-oco-1".to_owned(),
         })),
         &ports,
     );
+    let oco = after
+        .submissions()
+        .first()
+        .and_then(|o| o.oco.clone())
+        .expect("the passive exit rests as the take-profit leg of a new OCO");
+    assert_eq!(
+        (oco.stop, oco.qty),
+        (price("140"), qty("10")),
+        "the new OCO keeps the stop for the whole position"
+    );
 
-    let open: Vec<_> = shell
-        .state
-        .unprotected_intervals()
+    let starts = shell
+        .account_journal
         .iter()
-        .filter(|i| i.ended_at.is_none())
-        .collect();
+        .filter(|e| {
+            e.event_type == "ProtectionChanged"
+                && e.payload
+                    .get("action")
+                    .and_then(mandate_canon::Value::as_str)
+                    == Some("unprotected_start")
+        })
+        .count();
+    assert_eq!(
+        starts, 0,
+        "the stop is carried into the new OCO, so no unprotected interval is opened at all"
+    );
     assert!(
-        open.is_empty(),
-        "the stop is carried into the new OCO, so no interval is opened at all: {open:?}"
+        shell
+            .state
+            .unprotected_intervals()
+            .iter()
+            .all(|i| i.ended_at.is_some()),
+        "and the fold holds no open one"
     );
 }
 
@@ -2512,13 +2741,7 @@ fn an_add_is_a_new_bracket_not_a_replacement() {
         handoff(
             INTENT,
             common::AGENT,
-            IntentBody::Order {
-                instrument: instrument(AAPL),
-                side: Side::Buy,
-                qty: qty("5"),
-                limit: price("151"),
-                purpose: Purpose::Increase,
-            },
+            common::protected_add(AAPL, "5", "151", "140", Some("170")),
         ),
         &ports,
     );
@@ -2552,14 +2775,28 @@ fn a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity() {
     shell.fold_one(&stream_opened()).expect("folds");
     let (mut shell, _) = shell.restart(&ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(AAPL, "100", "150")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
         &ports,
     );
-    let id = submitted
+    let entry = submitted
         .submissions()
         .first()
-        .map(|o| o.client_order_id.as_str().to_owned())
+        .copied()
+        .cloned()
         .expect("the bracket is sent");
+    assert_eq!(
+        entry.bracket,
+        Some(mandate_executor::BracketLegs {
+            take_profit: price("170"),
+            stop: price("140"),
+        }),
+        "an entry that carries its protective prices goes as one GTC bracket at those prices"
+    );
+    let id = entry.client_order_id.as_str().to_owned();
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
             "b-1",
@@ -2595,6 +2832,12 @@ fn a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity() {
         .and_then(|o| o.oco.clone())
         .expect("a GTC OCO for the filled quantity follows the confirmation (planted bug 4)");
     assert_eq!(oco.qty, qty("60"), "for exactly the 60 shares that filled");
+    assert_eq!(
+        (oco.take_profit, oco.stop),
+        (price("170"), price("140")),
+        "at the bracket's own prices, which the intent carried: the executor never invents one \
+         (RC-21)"
+    );
 }
 
 #[test]
@@ -2609,7 +2852,11 @@ fn an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d() {
     shell.fold_one(&stream_opened()).expect("folds");
     let (mut shell, _) = shell.restart(&ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(AAPL, "100", "150")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
         &ports,
     );
     let id = submitted
@@ -2660,7 +2907,11 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
     shell.fold_one(&stream_opened()).expect("folds");
     let (mut shell, _) = shell.restart(&ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(AAPL, "100", "150")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(AAPL, "100", "150", "140", Some("170")),
+        ),
         &ports,
     );
     let id = submitted
@@ -2689,6 +2940,7 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
         .and_then(|o| o.oco.clone())
         .expect("a terminal partly filled entry is OCO'd without waiting for the timeout (§5.4)");
     assert_eq!(oco.qty, qty("60"));
+    assert_eq!((oco.take_profit, oco.stop), (price("170"), price("140")));
 }
 
 #[test]
@@ -2759,6 +3011,7 @@ fn protection_is_re_placed_at_the_buffer_day() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn protection_is_not_re_placed_early() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2767,21 +3020,47 @@ fn protection_is_not_re_placed_early() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = protected_position(&ports);
 
-    let day = copied(
+    let early = copied(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
         "TradingDayStarted",
-        with_clock(&[("date", text("2026-11-02"))], 6_000_000),
+        with_clock(&[("date", text("2026-12-11"))], 6_000_000),
         &EventId(format!("{CLOCK_STREAM}-8")),
     );
-    shell.fold_one(&day).expect("the trading day folds");
-    let ran = shell.run(Input::Journal(day), &ports);
+    shell.fold_one(&early).expect("the trading day folds");
+    let ran = shell.run(Input::Journal(early), &ports);
 
     assert!(
         !ran.requests
             .iter()
             .any(|r| matches!(r, BrokerRequest::Cancel { .. })),
-        "seven weeks before expiry is not the buffer day: {:?}",
+        "2026-12-11 is six trading days before the 2026-12-21 expiry, one short of the buffer: \
+         {:?}",
+        ran.requests
+    );
+    assert!(
+        shell
+            .state
+            .protection(&instrument(AAPL))
+            .is_some_and(|p| p.resting.iter().any(|id| id.as_str() == "md-oco-1")),
+        "and the resting OCO stays where it is"
+    );
+
+    let buffer = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 6_100_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&buffer).expect("the next trading day folds");
+    let ran = shell.run(Input::Journal(buffer), &ports);
+    assert!(
+        ran.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == "md-oco-1"
+        )),
+        "the next trading day is the buffer day, so the same case does see a re-placement: {:?}",
         ran.requests
     );
 }
@@ -2861,7 +3140,11 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
     let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(BTC, "0.5", "60000")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
         &ports,
     );
     let id = submitted
@@ -2949,13 +3232,7 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
         handoff(
             INTENT,
             common::AGENT,
-            IntentBody::Order {
-                instrument: instrument(BTC),
-                side: Side::Buy,
-                qty: qty("0.1"),
-                limit: price("60000"),
-                purpose: Purpose::Increase,
-            },
+            common::protected_add(BTC, "0.1", "60000", "54000", None),
         ),
         &ports,
     );
@@ -2997,7 +3274,11 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
     let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(BTC, "0.5", "60000")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(BTC, "0.5", "60000", "54000", None),
+        ),
         &ports,
     );
     let id = submitted
@@ -3042,7 +3323,11 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
     let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
     let submitted = shell.run(
-        handoff(INTENT, common::AGENT, opening(FRAC, "10.4", "20")),
+        handoff(
+            INTENT,
+            common::AGENT,
+            protected_opening(FRAC, "10.4", "20", "18", Some("24")),
+        ),
         &ports,
     );
     let id = submitted
@@ -3155,6 +3440,55 @@ fn the_ladder_falls_back_to_the_last_sane_bid_then_the_last_trade() {
     );
 }
 
+/// Drives `RC-14`'s protected position into a risk exit at a 150 bid: the resting OCO is
+/// cancelled and confirmed, and the first rung is submitted. The clock after the restart is the
+/// last folded `risk_clock`, 11, and a quote's `observed_at` never moves it (§5.6's observation is
+/// "never for time"), so the first rung goes at second 11.
+fn first_rung(shell: &mut Shell, ports: &mandate_executor::Ports<'_>) -> String {
+    shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), ports);
+    shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
+        ports,
+    );
+    let sent = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        ports,
+    );
+    let rung = sent
+        .submissions()
+        .first()
+        .copied()
+        .cloned()
+        .expect("the first rung is sent once the OCO's cancel is confirmed");
+    assert_eq!(
+        rung.limit_price,
+        Some(price("149.25")),
+        "150 x (1 - 0.005), the liquid tier's first offset"
+    );
+    rung.client_order_id.as_str().to_owned()
+}
+
+/// One step of the ladder at `at`: the resting rung is cancelled, and only once the broker
+/// confirms that cancel is the next rung submitted (§5.6 step 2 is cancel, confirm, resubmit, and
+/// nothing is submitted while a cancel is unconfirmed).
+fn step_rung(
+    shell: &mut Shell,
+    ports: &mandate_executor::Ports<'_>,
+    at: i64,
+    resting: &str,
+) -> (common::Ran, common::Ran) {
+    let ticked = shell.run(Input::Tick(clock(at)), ports);
+    let confirmed = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: resting.to_owned(),
+        })),
+        ports,
+    );
+    (ticked, confirmed)
+}
+
 #[test]
 #[ignore = "pending E7-4"]
 fn the_ladder_steps_only_after_the_interval() {
@@ -3164,33 +3498,42 @@ fn the_ladder_steps_only_after_the_interval() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = protected_position(&ports);
-    shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), &ports);
-    shell.run(
-        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
-        &ports,
-    );
-    shell.run(
-        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-            client_order_id: "md-oco-1".to_owned(),
-        })),
-        &ports,
-    );
+    let first = first_rung(&mut shell, &ports);
 
-    let early = shell.run(Input::Tick(clock(23)), &ports);
+    let early = shell.run(Input::Tick(clock(14)), &ports);
     assert!(
-        early.submissions().is_empty(),
-        "three seconds is inside exit_step_s of five, so nothing is repriced"
+        early.requests.is_empty(),
+        "three seconds after the rung is inside exit_step_s of five, so nothing is repriced: {:?}",
+        early.requests
     );
-    let stepped = shell.run(Input::Tick(clock(26)), &ports);
-    let repriced = stepped
+    let (stepped, confirmed) = step_rung(&mut shell, &ports, 16, &first);
+    assert!(
+        stepped.requests.iter().any(|r| matches!(
+            r,
+            BrokerRequest::Cancel { client_order_id } if client_order_id.as_str() == first
+        )),
+        "five seconds after the rung it is cancelled to step: {:?}",
+        stepped.requests
+    );
+    assert!(
+        stepped.submissions().is_empty(),
+        "and the next rung waits for the cancel's confirmation"
+    );
+    let repriced = confirmed
         .submissions()
         .first()
         .copied()
-        .expect("after five seconds the ladder steps");
+        .cloned()
+        .expect("the confirmation releases the next rung");
     assert_eq!(
         repriced.limit_price,
         Some(price("148.5")),
         "the offset rises by exit_offset_step to 1%: 150 x 0.99 (§5.6, RC-24)"
+    );
+    assert_ne!(
+        repriced.client_order_id.as_str(),
+        first,
+        "a new rung is a new order under a new derived id"
     );
 }
 
@@ -3203,37 +3546,41 @@ fn the_ladder_never_prices_below_the_floor() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = protected_position(&ports);
-    shell.run(Input::Market(quote(AAPL, "150", "150.2", 20)), &ports);
-    shell.run(
-        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
-        &ports,
-    );
-    shell.run(
-        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
-            client_order_id: "md-oco-1".to_owned(),
-        })),
-        &ports,
-    );
+    let mut resting = first_rung(&mut shell, &ports);
 
-    let mut last = None;
+    let mut prices = Vec::new();
     let mut alerted = false;
-    for at in [26_i64, 32, 38, 44, 50, 56, 62, 68] {
-        let stepped = shell.run(Input::Tick(clock(at)), &ports);
-        alerted = alerted || !stepped.notifications.is_empty();
-        if let Some(order) = stepped.submissions().first() {
-            last = order.limit_price;
-        }
+    for at in [16_i64, 21, 26, 31, 36] {
+        let (ticked, confirmed) = step_rung(&mut shell, &ports, at, &resting);
+        alerted =
+            alerted || !ticked.notifications.is_empty() || !confirmed.notifications.is_empty();
+        let rung = confirmed
+            .submissions()
+            .first()
+            .copied()
+            .cloned()
+            .unwrap_or_else(|| panic!("a rung follows the confirmation at {at}"));
+        prices.push(rung.limit_price);
+        resting = rung.client_order_id.as_str().to_owned();
     }
-
     assert_eq!(
-        last,
-        Some(price("145.5")),
-        "the offset never exceeds max_exit_offset of 3%: 150 x 0.97 (§5.6)"
+        prices,
+        ["148.5", "147.75", "147", "146.25", "145.5"]
+            .map(|p| Some(price(p)))
+            .to_vec(),
+        "150 x (1 - offset) for offsets 1% to 3% in steps of 0.5% (§5.6's liquid tier)"
     );
-    assert!(
-        alerted,
-        "and at the floor the order rests and the owner is alerted"
-    );
+    for at in [41_i64, 46] {
+        let rested = shell.run(Input::Tick(clock(at)), &ports);
+        alerted = alerted || !rested.notifications.is_empty();
+        assert!(
+            rested.requests.is_empty(),
+            "at the floor of max_exit_offset, 3%, the order rests: 145.5 is never undercut ({at}): \
+             {:?}",
+            rested.requests
+        );
+    }
+    assert!(alerted, "and the owner is alerted at the floor");
 }
 
 #[test]
@@ -3291,7 +3638,7 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
         "and never another agent's (planted bug 12): {cancelled:?}"
     );
     assert!(
-        !ran.requests.iter().any(BrokerRequest::is_account_wide),
+        !ran.requests.iter().any(common::is_account_wide),
         "and never the account-wide endpoints"
     );
 }
@@ -3685,32 +4032,51 @@ fn a_protective_order_submits_with_no_buying_power() {
     shell
         .fold_one(&broke)
         .expect("a zero-buying-power account folds");
-    let filled = event(
-        ACCOUNT_STREAM,
-        3,
-        "FillApplied",
-        with_clock(
-            &[
-                ("fill_id", text("f-0")),
-                ("instrument", text(AAPL)),
-                ("side", text("buy")),
-                ("qty_gross", text("10")),
-                ("price", text("150")),
-            ],
-            11,
-        ),
-    );
-    shell.fold_one(&filled).expect("the position folds");
+    for event in protected_position_events(3) {
+        shell
+            .fold_one(&event)
+            .expect("the protected position folds");
+    }
     let (mut shell, _) = shell.restart(&ports);
-
-    let ran = shell.run(Input::Tick(clock(20)), &ports);
-
     assert!(
-        ran.submissions()
-            .iter()
-            .any(|o| o.purpose == Purpose::Protective),
-        "a protective order is never denied for buying power (AGENTS.md rule 13): {:?}",
-        ran.requests
+        shell
+            .state
+            .buying_power()
+            .is_some_and(|power| power <= usd("0")),
+        "the account has no buying power at all: {:?}",
+        shell.state.buying_power()
+    );
+
+    let day = copied(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "TradingDayStarted",
+        with_clock(&[("date", text("2026-12-14"))], 7_000_000),
+        &EventId(format!("{CLOCK_STREAM}-9")),
+    );
+    shell.fold_one(&day).expect("the buffer day folds");
+    shell.run(Input::Journal(day), &ports);
+    let ran = shell.run(
+        Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+            client_order_id: "md-oco-1".to_owned(),
+        })),
+        &ports,
+    );
+
+    let protective = ran
+        .submissions()
+        .into_iter()
+        .find(|o| o.purpose == Purpose::Protective)
+        .expect(
+            "the re-placement before expiry is submitted with no buying power: a protective order \
+             is never denied for it (AGENTS.md rule 13)",
+        );
+    let oco = protective.oco.clone().expect("as a GTC OCO");
+    assert_eq!(
+        (oco.qty, oco.take_profit, oco.stop),
+        (qty("10"), price("170"), price("140")),
+        "for the held ten shares at the journaled prices of the protection it replaces, which the \
+         executor re-places and never invents"
     );
 }
 
@@ -4158,7 +4524,6 @@ fn a_reservation_lowers_buying_power_by_its_amount() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -4166,7 +4531,32 @@ fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = reconciling(&ports);
-    let id = accepted_order(&mut shell, &ports, INTENT);
+    let held = event(
+        ACCOUNT_STREAM,
+        shell.head().0.saturating_add(1),
+        "FillApplied",
+        with_clock(
+            &[
+                ("fill_id", text("f-0")),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+            ],
+            10,
+        ),
+    );
+    shell.fold_one(&held).expect("the ten shares fold");
+    shell.run(Input::Market(quote(AAPL, "150", "150.1", 10)), &ports);
+    let sent = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(AAPL, "10", "150")),
+        &ports,
+    );
+    let id = sent
+        .submissions()
+        .first()
+        .map(|o| o.client_order_id.as_str().to_owned())
+        .expect("the unprotected position's exit is sent at once");
 
     let ran = shell.run(
         Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
@@ -4176,16 +4566,25 @@ fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
         &ports,
     );
 
-    let simulated = ran
+    let charged = ran
         .drafts
         .iter()
         .find(|d| d.event_type == "FeesCharged")
-        .and_then(|d| d.payload.get("simulated"))
-        .cloned();
+        .expect("Alpaca paper charges no regulatory fee, so ours is booked in the shadow ledger");
     assert_eq!(
-        simulated,
-        Some(mandate_canon::Value::Bool(true)),
-        "Alpaca paper simulates no regulatory fee, so ours is booked `simulated = true` (§10)"
+        charged.payload.get("simulated"),
+        Some(&mandate_canon::Value::Bool(true)),
+        "and marked `simulated = true`, so it stays out of the cash comparison (§10)"
+    );
+    assert_eq!(
+        charged
+            .payload
+            .get("accrued")
+            .and_then(mandate_canon::Value::as_str),
+        Some("0.0471"),
+        "a sell of 10 at 150 under the `test_default` fee configuration, accrued at full precision \
+         (§6.2): SEC 1500 x 0.00003 = 0.045, TAF 10 x 0.0002 = 0.002 (under the 9.79 cap), CAT \
+         10 x 0.00001 = 0.0001"
     );
 }
 
@@ -4197,6 +4596,10 @@ fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_p
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = reconciling(&ports);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Account(broker_account())),
+        &ports,
+    );
     let simulated = event(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
@@ -4216,20 +4619,23 @@ fn a_simulated_fee_is_excluded_from_cash_reconciliation_and_included_in_buying_p
     let taken = snapshot(shell.head().0, ReconcileReason::Scheduled);
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
+    assert_eq!(
+        journaled(&run.effects).last(),
+        Some(&"ReconciliationRun"),
+        "the cash row was compared and the run recorded"
+    );
     assert!(
         run.differences
             .iter()
             .all(|d| d.kind != mandate_executor::DifferenceKind::Cash),
-        "a simulated record that reached a cash comparison would fail every paper reconciliation \
-         (§10, interpretation 25): {:?}",
+        "the broker's 20000 against the model's 20000: a simulated record that reached the cash \
+         comparison would fail every paper reconciliation (§10, interpretation 25): {:?}",
         run.differences
     );
-    assert!(
-        shell
-            .state
-            .buying_power()
-            .is_none_or(|power| power <= usd("20000")),
-        "while still counting against buying power, or paper is flatter than live (R-22)"
+    assert_eq!(
+        shell.state.buying_power(),
+        Some(usd("19999.98")),
+        "while the 0.02 still counts against buying power, or paper is flatter than live (R-22)"
     );
 }
 

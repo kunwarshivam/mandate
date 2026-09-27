@@ -10,6 +10,7 @@ description = "The Alpaca paper trading connector: the BrokerConnector mandate-e
 workspace = true
 
 [dependencies]
+mandate-accounting.workspace = true
 mandate-executor.workspace = true
 mandate-num.workspace = true
 mandate-time.workspace = true
@@ -22,6 +23,5 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["time"] }
 
 [dev-dependencies]
-mandate-accounting.workspace = true
 proptest.workspace = true
 tokio = { workspace = true, features = ["macros", "rt", "time"] }

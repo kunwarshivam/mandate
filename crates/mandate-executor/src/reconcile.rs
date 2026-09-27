@@ -14,7 +14,7 @@ use crate::ids::ClientOrderId;
 use crate::orders::{EXTERNAL, fill, status_mapping};
 use crate::payload::{int, text};
 use crate::ports::Ports;
-use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
+use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     BrokerRequest, BrokerSnapshot, Difference, DifferenceKind, EventId, Mode, OrderState,
     ReconcileReason, Reconciliation, ReconciliationVerdict, StatusMapping,
@@ -71,6 +71,7 @@ pub(crate) fn run(
     snapshot: &BrokerSnapshot,
 ) -> Result<(ReconciliationVerdict, Vec<Difference>), ExecutorError> {
     let mut differences = Vec::new();
+    owed(batch, &mut differences)?;
     let before = batch.view.clone();
     orders(batch, snapshot, &mut differences)?;
     for missing in &snapshot.fills {
@@ -196,6 +197,54 @@ fn orders(
     Ok(())
 }
 
+/// Journals the `CompensatingEvent` an adoption already on the journal is still owed — the run a
+/// crash cut between the two (§11) — before anything else is compared.
+fn owed(batch: &mut Batch<'_, '_>, differences: &mut Vec<Difference>) -> Result<(), ExecutorError> {
+    let owed: Vec<(EventId, Adoption)> = batch
+        .view
+        .uncompensated
+        .iter()
+        .map(|(id, adoption)| (id.clone(), adoption.clone()))
+        .collect();
+    for (corrected, adoption) in owed {
+        compensate(
+            batch,
+            corrected,
+            &adoption.subject,
+            adoption.from,
+            adoption.to,
+        )?;
+        differences.push(Difference {
+            kind: DifferenceKind::OrderState,
+            subject: adoption.subject.as_str().to_owned(),
+            adopted: true,
+        });
+    }
+    Ok(())
+}
+
+/// The `CompensatingEvent` for one adoption: the difference and the event it corrected.
+fn compensate(
+    batch: &mut Batch<'_, '_>,
+    corrected: EventId,
+    id: &ClientOrderId,
+    from: OrderState,
+    to: OrderState,
+) -> Result<(), ExecutorError> {
+    batch.journal(
+        "CompensatingEvent",
+        Some(corrected.clone()),
+        vec![
+            ("subject", text(id.as_str())),
+            ("difference", text("order_state")),
+            ("from", text(state_name(from))),
+            ("to", text(state_name(to))),
+            ("corrected_event_ids", Value::Array(vec![text(corrected.0)])),
+        ],
+    )?;
+    Ok(())
+}
+
 /// Adopts the broker's state for one of our orders: `OrderStateChanged` to the broker's state and
 /// a `CompensatingEvent` naming the difference and the event it corrected (§11). The journal
 /// keeps both, so a replay reproduces the adoption rather than the assumption.
@@ -215,17 +264,7 @@ fn adopt(
             ("adopted", Value::Bool(true)),
         ],
     )?;
-    batch.journal(
-        "CompensatingEvent",
-        Some(corrected.clone()),
-        vec![
-            ("subject", text(id.as_str())),
-            ("difference", text("order_state")),
-            ("from", text(state_name(from))),
-            ("to", text(state_name(to))),
-            ("corrected_event_ids", Value::Array(vec![text(corrected.0)])),
-        ],
-    )?;
+    compensate(batch, corrected, id, from, to)?;
     differences.push(Difference {
         kind: DifferenceKind::OrderState,
         subject: id.as_str().to_owned(),
@@ -235,8 +274,8 @@ fn adopt(
 }
 
 /// Step 3: the model's net position, after the missing fills, against the broker's. Equities are
-/// exact except under a pending corporate action; crypto is the model net less unposted asset fees
-/// until they post (§11). A difference is a mismatch: the agents holding the instrument are
+/// exact except under a pending corporate action; crypto is the model net plus the asset fees the
+/// broker has not yet posted, which it still shows (§6.3, §11). A difference is a mismatch: the agents holding the instrument are
 /// paused and the owner is alerted, and nothing is written away.
 fn positions(
     batch: &mut Batch<'_, '_>,
@@ -268,7 +307,7 @@ fn positions(
             .get(&instrument)
             .copied()
             .unwrap_or(Qty::ZERO);
-        let expected = model.checked_add(SignedQty::from(fees).negated())?;
+        let expected = model.checked_add(SignedQty::from(fees))?;
         let broker = snapshot
             .positions
             .iter()
