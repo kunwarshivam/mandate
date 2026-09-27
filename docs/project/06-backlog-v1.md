@@ -156,6 +156,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E7-5 (Must)** As an owner, I want one account ledger per broker account and one agent per
   instrument per account, so that agents never overspend or cross each other.
   *Accepted when:* RC-17 passes; external activity switches agents to exits-only (RC-15).
+- **E7-7 (Must, M6)** As the founder, I want one order placed end to end on my Alpaca paper account
+  through the real crates, so that integration defects appear before the Phase 1 soak
+  ([task brief](tasks/E7-7-tracer-bullet.md), [DEC-137](04-decision-log.md#decisions)).
+  *Accepted when:* the whole path — validated mandate, stored market data, the E4-2 moving-average
+  baseline as the signal, the order builder's sizing, the risk gate, the runtime's decision cycle with
+  journal-before-acting, the executor's idempotent intent, the Alpaca paper connector, the journal
+  record, and a reconciliation after a restart — runs in CI against recorded Alpaca paper fixtures and
+  touches no network; with any one stage replaced by a stub returning its crate's `Unimplemented`
+  error, zero orders reach the connector and nothing is journaled as submitted; and a manual paper run
+  places exactly one order, journals its intent before sending it, and refuses any host that is not
+  Alpaca's paper host.
 
 ### E8 Escalation and approvals
 
