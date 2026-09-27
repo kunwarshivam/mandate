@@ -2,13 +2,18 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.10 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.11 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 amendment [DEC-160](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.11:** a protective leg the broker created, which no submission recorded, belongs to the
+  entry's agent when its id names the entry, otherwise to the position's single holder; with no
+  holder or several it belongs to no one, and the instrument holds new openings until a
+  reconciliation has run (§5.4, [DEC-160](../project/04-decision-log.md#decisions)). Exits are
+  untouched. Every reference case is unchanged.
 - **v0.10:** corporate-action rules found while implementing E3-2
   ([DEC-92 to DEC-94](../project/04-decision-log.md#decisions)). A split that leaves no share
   removes the whole basis (DEC-92); otherwise the residual formula is unchanged and never removes
@@ -334,6 +339,18 @@ protective legs are checked against position + entry quantity.
   re-place the stop-limit for the new net quantity. **Adds are limit IOC orders within the collar;
   exits are marketable** (§5.6). The unprotected interval is bounded as for equities.
 - A stop-limit may not fill on a gap; disclosed to the owner.
+
+**Ownership of broker-created legs** ([DEC-160](../project/04-decision-log.md#decisions)):
+
+- A bracket's or OCO's legs are created by the broker, so no `OrderSubmitted` records them. When
+  `ProtectionChanged` records them placed, each joins the order set as a live protective sell of the
+  covered quantity, reserving nothing.
+- A leg belongs to its entry's agent when its client order id names the entry (`md-<entry>-p…`);
+  otherwise to the position's **single holder**, the one agent whose own orders bought into the
+  instrument and filled.
+- With no holder, or more than one, the leg belongs to no one and the executor never guesses: the
+  instrument **holds** every new opening (`protection_unattributed`) until a reconciliation has run.
+  Exits are never held by it (`AGENTS.md` rule 13).
 
 ### 5.5 Kill switch
 
