@@ -4,7 +4,7 @@
 |---|---|
 | **Owner** | Product |
 | **Status** | Research note, 2026-09-27. Input for [DEC-149](../project/04-decision-log.md#decisions) (the harness and the platform) and for the proposed [enterprise harness stories](../project/06-backlog-v1.md#enterprise-harness-proposed-dec-149). Not a PRD change, and not legal advice |
-| **Method** | The canonical posts were read directly, or from an archive where the live page was blocked. Repository READMEs and docs were read through `gh api`. Star counts and last-push dates come from `gh api repos/...` on 2026-09-27. Web search was exhausted, so non-GitHub writing such as vendor enterprise pages and analyst reports was **not checked**. Inferences are marked **[inference]** |
+| **Method** | The canonical posts were read directly, or from an archive where the live page was blocked (OpenAI's post: Wayback snapshot `web.archive.org/web/20260924171239/https://openai.com/index/harness-engineering/`, whose six quoted passages the coordinator re-checked verbatim on 2026-09-27). Repository READMEs and docs were read through `gh api`. Star counts and last-push dates come from `gh api repos/...` on 2026-09-27. Web search was exhausted, so non-GitHub writing such as vendor enterprise pages and analyst reports was **not checked**. Inferences are marked **[inference]** |
 | **Related** | [Strategy options](10-strategy-options.md#positioning-harness-and-platform-dec-149), [Competitive landscape](03-competitive-landscape.md), [Compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md) |
 
 > Compliance, SOC 2, and regulatory points here summarize what vendors publish about their own
@@ -57,7 +57,7 @@ live page returned 403:
 - "Agent = Model + Harness."
 - Guides (feedforward) "steer it before it acts"; sensors (feedback) "observe after the agent acts and
   help it self-correct".
-- "The agent harness acts like a [cybernetic] governor."
+- "The agent harness acts like a cybernetic governor."
 
 **LangChain**, "The Anatomy of an Agent Harness" (Vivek Trivedy, 2026-03-10),
 <https://www.langchain.com/blog/the-anatomy-of-an-agent-harness>:
@@ -103,8 +103,8 @@ it says it did not check one. A dash means the research recorded nothing beyond 
 | Teaching | walkinglabs/awesome-harness-engineering | 4,176 | 2026-08-19 | — |
 | Teaching | Picrew/awesome-agent-harness | 1,809 | 2026-09-20 | — |
 | Teaching | lopopolo/harness-engineering | 2,703 | 2026-07-18 | Nonfunctional requirements as executable constraints; a source manifest with archived evidence |
-| Teaching | QoderAI/better-harness | 2,342 | 2026-09-24 | "Define harnesses as code, run controlled experiments, inspect evidence" |
-| Reference harness | openai/codex | 126,755 | 2026-09-27 | Sandbox plus approvals; Starlark exec-policy rules (allow, prompt, forbidden; the "most restrictive decision" wins; inline match and not_match tests) |
+| Teaching | QoderAI/better-harness | 2,342 | 2026-09-24 | Harness experiments; tagline "Delegate coding to agents. Improve the loop around them." |
+| Reference harness | openai/codex | 126,755 | 2026-09-27 | Sandbox plus approvals; Starlark exec-policy rules (allow, prompt, forbidden; "the effective `decision` is the strictest severity across all matches (`forbidden` > `prompt` > `allow`)"; inline match and not_match tests) |
 | Reference harness | anthropics/claude-code | 148,317 | 2026-09-26 | PreToolUse hooks return allow, deny, or ask: "exit 2 … even a JSON permissionDecision of "allow" can't override it" |
 | Reference harness | anthropics/sandbox-runtime | 5,361 | 2026-09-27 | OS-level filesystem and network sandbox |
 | Reference harness | anomalyco/opencode | 210,384 | 2026-09-27 | — |
@@ -145,8 +145,8 @@ it says it did not check one. A dash means the research recorded nothing beyond 
 - **Policy as code:** the agent governance toolkit (AGT), Codex exec-policy, agentgateway's CEL, and
   Invariant's sequence rules. **[inference]** The common gap: rules are stateless and per call; none
   models positions, P&L, drawdown, settlement, or budgets.
-- **MCP security best practices:** "MCP servers MUST NOT accept any tokens that were not explicitly
-  issued for the MCP server"; progressive least-privilege scopes with "incremental elevation"; a
+- **MCP security best practices:** MCP servers "MUST only accept tokens that are valid for use with
+  their own resource" and "MUST NOT accept or transit any other tokens"; progressive least-privilege scopes with "incremental elevation"; a
   warning against "wildcard or omnibus scopes". Alpaca's MCP server offers only coarse
   `ALPACA_TOOLSETS` filtering.
 - **Approval gates:** Claude Code's PreToolUse ask, Codex's prompt, AGT's `require_approval`, and
@@ -168,7 +168,7 @@ repositories with 0 to 2 stars.
 | Project | Stars (as of 2026-09-27) | What it does | What it does not do |
 |---|---|---|---|
 | TauricResearch/TradingAgents | 108,883 | Multi-agent research; "risk management" is LLM debate; "The Portfolio Manager approves/rejects"; a simulated exchange | "designed for research purposes"; no deterministic enforcement layer |
-| virattt/ai-hedge-fund | 63,770 | A YAML "mandate"; withholds ticker, industry, and dates in backtests to reduce memorization | "educational… Not intended for real trading"; no enforcement layer |
+| virattt/ai-hedge-fund | 63,770 | A YAML "mandate"; withholds ticker, industry, and dates in backtests to reduce memorization | "educational" and "is not intended for real trading"; no enforcement layer |
 | alpacahq/alpaca-mcp-server | 994 | Paper by default; toolset filtering | No per-order limits, approvals, journal, or idempotency |
 | coiltrade/claude-robinhood-deterministic-trading | 0 (last push 2026-09-07) | "The agent operates the system. The agent never originates a trading decision"; a "Policy gate … hard limits the agent CANNOT modify" | Evidence is README-level only |
 | google-agentic-commerce/AP2 | 3,195 | User-signed Checkout and Payment mandates "anchored to deterministic, non-repudiable proof of intent" | A payments protocol, not a trading harness |
@@ -261,7 +261,7 @@ changes milestone order.
   its own SOC 2 self-assessment of its gaps.
 - **mcp-hangar/mcp-hangar:** reproducible verdicts, schema pinning, per-tenant projection, SIEM
   formats.
-- **openai/codex:** exec-policy rules with inline tests; the most restrictive decision wins.
+- **openai/codex:** exec-policy rules with inline tests; the strictest matching decision wins.
 - **anthropics/claude-code:** hooks whose deny cannot be overridden.
 - **modelcontextprotocol/modelcontextprotocol:** the security best practices (token audience,
   incremental scopes, sessions are not authentication).
