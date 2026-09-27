@@ -134,7 +134,6 @@ fn reducing(purpose: Purpose) -> ActionContext {
 /// built-in, whatever the rules say. The anchor is the same rule set denying an `open`, so the test
 /// cannot pass on an implementation that returns AUTO for everything.
 #[test]
-#[ignore = "pending E6-2"]
 fn every_reducing_purpose_is_auto_by_the_builtin() {
     let deny_everything = policy(
         vec![Rule {
@@ -238,7 +237,6 @@ fn a_buy_with_no_position_is_open_and_with_one_is_increase() {
 /// opening action scored 0.6; the answer is `low_score`'s ASK, and reversing the two rules gives
 /// `routine`'s AUTO, so the test pins the order and not one rule's outcome.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_first_matching_rule_decides_and_a_later_one_is_not_read() {
     let action = opening("300", "0.6");
     let forwards = classified(&base_policy(), &action);
@@ -262,7 +260,6 @@ fn the_first_matching_rule_decides_and_a_later_one_is_not_read() {
 /// §6.2 step 4: with no rule matching, `autonomy.default` decides and `by` says so (MC-A09). The
 /// anchor is the same action under the base rules, which does match one.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_rule_matches_so_the_default_decides() {
     let empty = policy(
         Vec::new(),
@@ -296,7 +293,6 @@ fn no_rule_matches_so_the_default_decides() {
 /// `autonomy.admission`, and `by` names the ceiling **only** when the ceiling changed the answer —
 /// MC-A13's `auto` admission leaves `rule:routine` in place.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_admission_ceiling_turns_auto_into_ask_for_a_new_instrument() {
     let admitted = ActionContext {
         new_instrument: true,
@@ -330,7 +326,6 @@ fn the_admission_ceiling_turns_auto_into_ask_for_a_new_instrument() {
 /// §6.2 step 5, MC-A14 and MC-A15: the ceiling only tightens. An `auto` admission leaves a `deny`
 /// rule denying, and a `deny` admission overrides an `auto` rule.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_admission_ceiling_never_loosens_a_deny_rule() {
     let admitted = ActionContext {
         new_instrument: true,
@@ -366,7 +361,6 @@ fn the_admission_ceiling_never_loosens_a_deny_rule() {
 /// §6.2 step 5: the ceiling applies only when `new_instrument` is true. The same `deny` admission
 /// leaves an order in a held instrument exactly where the rules put it.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_admission_ceiling_does_not_touch_an_order_in_a_held_instrument() {
     let strict_admission = policy(
         base_rules(),
@@ -392,7 +386,6 @@ fn an_admission_ceiling_does_not_touch_an_order_in_a_held_instrument() {
 /// §6.4, MC-A10: an ASK above `two_approver_above_usd` needs two approvers, and the comparison is
 /// strict, so an order exactly at the threshold needs one.
 #[test]
-#[ignore = "pending E6-2"]
 fn two_approvers_above_the_threshold_and_one_at_it() {
     let with_threshold = policy(
         base_rules(),
@@ -422,7 +415,6 @@ fn two_approvers_above_the_threshold_and_one_at_it() {
 /// §6.4, DEC-06: `on_timeout` is always `skip`, so an unanswered ASK adds no risk. An AUTO and a
 /// DENY carry no approval at all.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_ask_always_carries_skip_on_timeout() {
     let asked = classified(&base_policy(), &opening("950", "0.9"));
     assert_eq!(asked.decision, AutonomyDecision::Ask);
@@ -457,7 +449,6 @@ fn an_ask_always_carries_skip_on_timeout() {
 /// §6.3, V-017: `all`, `any`, and `not` evaluate as written and nest to four levels. The two halves
 /// differ in one leaf, so the test pins the tree's meaning rather than one answer.
 #[test]
-#[ignore = "pending E6-2"]
 fn nested_conditions_evaluate_as_written() {
     let four_levels = |threshold: &str| {
         Condition::All(vec![Condition::Any(vec![Condition::Not(Box::new(
@@ -519,7 +510,6 @@ fn nested_conditions_evaluate_as_written() {
 /// first rung doing the work, and the first assertion records it so the next reader does not go
 /// looking for the test that is missing.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_decimal_condition_compares_numerically_not_lexically() {
     assert!(
         SchemaDec::parse("0.650", DecGrammar::Decimal).is_err(),
@@ -567,7 +557,6 @@ fn a_decimal_condition_compares_numerically_not_lexically() {
 /// §6.3, V-023: a value that is not of its field's type is refused rather than compared. The anchor
 /// is the same field with a value of the right type, which classifies.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_condition_whose_value_does_not_match_its_field_type_is_refused() {
     let listed_decimal = policy(
         vec![Rule {
@@ -662,7 +651,6 @@ fn a_rule_using_unusual_input_is_refused() {
 /// order**, which is what bounds order splitting. Two orders of 500 under a 2000 bound ask once the
 /// day's total passes it, and not before.
 #[test]
-#[ignore = "pending E6-2"]
 fn bought_today_catches_order_splitting() {
     let mut rules = vec![Rule {
         id: rule_id("daily_buys"),
@@ -2667,7 +2655,6 @@ fn conviction_of(text: &str) -> mandate_num::Conviction {
 /// for an order the gate would deny. The same proposal under `allow` reaches the rules and ASKs, so
 /// the test pins the skip rather than a proposal nobody would have asked about.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_gate_deny_skips_and_asks_nobody() {
     let proposal = buy_proposal("800", "0.6");
     let policy = base_policy();
@@ -2694,7 +2681,6 @@ fn a_gate_deny_skips_and_asks_nobody() {
 /// §6.2 step 2, MC-B22, DEC-48: a `defer` verdict stores nothing and never becomes a deny. The three
 /// verdicts give three different outcomes, which is what stops one reading as another.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_defer_verdict_stores_nothing_and_never_becomes_a_deny() {
     let proposal = buy_proposal("800", "0.6");
     let policy = base_policy();

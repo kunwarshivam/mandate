@@ -869,28 +869,24 @@ fn mc_a04() {
 
 /// `MC-A05`: Large open: ASK by large_orders.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a05() {
     autonomy_case("MC-A05");
 }
 
 /// `MC-A06`: Low score open: ASK.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a06() {
     autonomy_case("MC-A06");
 }
 
 /// `MC-A07`: Routine open: AUTO.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a07() {
     autonomy_case("MC-A07");
 }
 
 /// `MC-A08`: Order exactly at the threshold is not large.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a08() {
     autonomy_case("MC-A08");
 }
@@ -903,49 +899,42 @@ fn mc_a09() {
 
 /// `MC-A10`: Two approvers above the threshold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a10() {
     autonomy_case("MC-A10");
 }
 
 /// `MC-A11`: Bought-today rule catches order splitting.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a11() {
     autonomy_case("MC-A11");
 }
 
 /// `MC-A12`: The admission ceiling turns an auto rule into ask for a new instrument.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a12() {
     autonomy_case("MC-A12");
 }
 
 /// `MC-A13`: Admission auto confirmed by the owner is AUTO.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a13() {
     autonomy_case("MC-A13");
 }
 
 /// `MC-A14`: Admission deny overrides an auto rule.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a14() {
     autonomy_case("MC-A14");
 }
 
 /// `MC-A15`: The admission ceiling never loosens a deny rule.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a15() {
     autonomy_case("MC-A15");
 }
 
 /// `MC-A16`: A thesis-confidence rule asks below the owner threshold.
 #[test]
-#[ignore = "pending E6-2"]
 fn mc_a16() {
     autonomy_case("MC-A16");
 }
