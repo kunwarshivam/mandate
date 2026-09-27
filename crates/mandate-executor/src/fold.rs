@@ -1192,6 +1192,29 @@ mod buying_power_tests {
         Ok(())
     }
 
+    /// The bucket is keyed by family as well as day: two families' fees on one day are rounded up
+    /// once each, never merged and rounded once, which would read a cent richer (§7.2, DEC-104;
+    /// the backlog's family-key row, #198 review, round 2, finding 2).
+    #[test]
+    fn two_families_on_one_day_are_two_buckets() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        stream.fold("FeesCharged", fee("2026-09-22", "0.001", true))?;
+        let mut crypto = fee("2026-09-22", "0.001", true);
+        for pair in &mut crypto {
+            if pair.0 == "family" {
+                pair.1 = text("crypto");
+            }
+        }
+        stream.fold("FeesCharged", crypto)?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("999.98")?),
+            "0.01 for each family's 0.001, not 0.01 for a merged 0.002"
+        );
+        Ok(())
+    }
+
     #[test]
     fn a_crypto_order_reads_no_more_than_the_non_marginable_figure() -> Result<(), ExecutorError> {
         let mut stream = Stream::opened()?;

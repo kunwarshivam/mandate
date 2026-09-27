@@ -509,7 +509,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   items 23 and 27, ADR-0001 ES-09; #206 review).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
-- Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
+- Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
+  restriction stands "until the owner acknowledges and the account is refreshed", but
+  `state::restriction_for` only yields `reconciliation:{subject}`, so no `OwnerAcknowledged` can
+  name `account_trading_blocked`, and a later `ACTIVE` read leaves `account_state` `Blocked` and the
+  restriction in place. Pre-existing on main; the cash slice is the first to raise it from every
+  reconciliation run (#205 review, round 2, minor 3).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
 - **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
   `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's

@@ -373,18 +373,12 @@ pub struct Difference {
     /// The client order id, fill id, or instrument the difference is about, as text, so a payload
     /// can carry it without the type.
     pub subject: String,
-    /// Whether the broker's value was adopted. Only [`DifferenceKind::OrderState`] and
-    /// [`DifferenceKind::MissingFill`] are ever adopted (trading-domain spec §11's on-mismatch
-    /// column, task brief interpretation 13).
-    pub adopted: bool,
-    /// Private, so nothing outside this module writes a `Difference` literal: every one is made by
-    /// [`Difference::unexplained`] or [`Difference::adopted`], whose kinds hold §11's on-mismatch
-    /// column in their types (#205 review, round 1, finding 3).
-    sealed: Sealed,
+    /// Whether the broker's value was adopted, read through [`Difference::adopted`]. Private, so
+    /// nothing outside this module writes a `Difference` literal or assigns the flag: every one is
+    /// made by [`Difference::unexplained`] or [`Difference::adopting`], whose kinds hold §11's
+    /// on-mismatch column in their types (#205 review, round 1, finding 3, and round 2, major 2).
+    adopted: bool,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Sealed;
 
 /// The rows §11 never adopts: a difference of one of these kinds is recorded and alerted, and the
 /// ledger keeps its own value.
@@ -431,18 +425,23 @@ impl Difference {
             kind: kind.into(),
             subject: subject.into(),
             adopted: false,
-            sealed: Sealed,
         }
     }
 
     /// A difference whose broker value was adopted, of a kind §11 adopts.
-    pub(crate) fn adopted(kind: Adopted, subject: impl Into<String>) -> Self {
+    pub(crate) fn adopting(kind: Adopted, subject: impl Into<String>) -> Self {
         Self {
             kind: kind.into(),
             subject: subject.into(),
             adopted: true,
-            sealed: Sealed,
         }
+    }
+
+    /// Whether the broker's value was adopted. Only [`DifferenceKind::OrderState`] and
+    /// [`DifferenceKind::MissingFill`] are ever adopted (trading-domain spec §11's on-mismatch
+    /// column, task brief interpretation 13), and no assignment can change it.
+    pub fn adopted(&self) -> bool {
+        self.adopted
     }
 }
 
@@ -914,15 +913,15 @@ mod difference_tests {
             let difference = Difference::unexplained(kind, "s");
             assert!(!DifferenceKind::from(kind).adoptable(), "{kind:?}");
             assert_eq!(
-                (difference.kind, difference.adopted),
+                (difference.kind, difference.adopted()),
                 (DifferenceKind::from(kind), false)
             );
         }
         for kind in [Adopted::OrderState, Adopted::MissingFill] {
-            let difference = Difference::adopted(kind, "s");
+            let difference = Difference::adopting(kind, "s");
             assert!(DifferenceKind::from(kind).adoptable(), "{kind:?}");
             assert_eq!(
-                (difference.kind, difference.adopted),
+                (difference.kind, difference.adopted()),
                 (DifferenceKind::from(kind), true)
             );
         }

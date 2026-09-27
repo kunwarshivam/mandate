@@ -1802,7 +1802,9 @@ fn a_journal_only_order_is_reconciled_away_not_kept() {
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
     assert!(
-        run.differences.iter().any(|d| d.subject == id && d.adopted),
+        run.differences
+            .iter()
+            .any(|d| d.subject == id && d.adopted()),
         "the broker wins on the order set: our own state is never kept because it is ours \
          (planted bug 3): {:?}",
         run.differences
@@ -2186,7 +2188,7 @@ fn a_fee_difference_is_alerted_and_never_adjusted() {
         .find(|d| d.kind == mandate_executor::DifferenceKind::Fee)
         .expect("3.5 of accrued fees the ledger does not have is a difference");
     assert!(
-        !fee.adopted,
+        !fee.adopted(),
         "§11 says a fee difference is alerted and never silently adjusted"
     );
     assert!(

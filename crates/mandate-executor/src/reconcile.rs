@@ -79,7 +79,7 @@ pub(crate) fn run(
     for missing in &snapshot.fills {
         if !batch.view.fills.contains(&missing.fill_id) {
             fill(batch, missing, Some(&before))?;
-            differences.push(Difference::adopted(
+            differences.push(Difference::adopting(
                 Adopted::MissingFill,
                 missing.fill_id.0.clone(),
             ));
@@ -91,7 +91,7 @@ pub(crate) fn run(
         fees(batch, snapshot, recorded, &mut differences)?;
     }
     account_restriction(batch, &snapshot.account)?;
-    let unexplained = differences.iter().any(|difference| !difference.adopted);
+    let unexplained = differences.iter().any(|difference| !difference.adopted());
     let verdict = if unexplained {
         ReconciliationVerdict::Mismatch
     } else if differences.is_empty() {
@@ -217,7 +217,7 @@ fn owed(batch: &mut Batch<'_, '_>, differences: &mut Vec<Difference>) -> Result<
             adoption.from,
             adoption.to,
         )?;
-        differences.push(Difference::adopted(
+        differences.push(Difference::adopting(
             Adopted::OrderState,
             adoption.subject.as_str(),
         ));
@@ -267,7 +267,7 @@ fn adopt(
         ],
     )?;
     compensate(batch, corrected, id, from, to)?;
-    differences.push(Difference::adopted(Adopted::OrderState, id.as_str()));
+    differences.push(Difference::adopting(Adopted::OrderState, id.as_str()));
     Ok(())
 }
 
