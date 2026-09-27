@@ -1,0 +1,1 @@
+POST /v2/orders {"client_order_id":"md-e144b97773a6f87c1978cc2831-p01JPROTECTION0000000000001","order_class":"oco","qty":"60","side":"sell","stop_loss":{"stop_price":"140"},"symbol":"AAPL","take_profit":{"limit_price":"170"},"time_in_force":"gtc","type":"limit"}
