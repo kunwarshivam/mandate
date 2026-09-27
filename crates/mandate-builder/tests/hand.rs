@@ -171,7 +171,6 @@ fn every_reducing_purpose_is_auto_by_the_builtin() {
 /// §6.1: the builder labels a buy `open` with no position and `increase` with one, and the label
 /// follows the position rather than the order.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_buy_with_no_position_is_open_and_with_one_is_increase() {
     let mandate = two_stock_swing();
     let outputs = [
@@ -687,7 +686,6 @@ fn bought_today_catches_order_splitting() {
 /// `has_prior_fill` and is never inferred from the position, because a re-entry after a round trip
 /// is a flat agent that has traded here before.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_absent_prior_fill_flag_is_not_inferred_from_the_position() {
     let mandate = two_stock_swing();
     let outputs = [
@@ -733,7 +731,6 @@ fn an_absent_prior_fill_flag_is_not_inferred_from_the_position() {
 /// exactly at `now` is used. The anchor is the second half: the later output is bearish enough to
 /// change the action, so an implementation that ignored both would fail it.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_future_as_of_is_not_fresh() {
     let mandate = two_stock_swing();
     let base = [
@@ -809,7 +806,6 @@ fn a_future_as_of_is_not_fresh() {
 /// §8.2: `now − as_of ≤ max_output_age_s`, inclusive. `quant.momentum` is fresh for 900 seconds, so
 /// an output cut exactly 900 seconds ago counts and one cut 901 seconds ago does not (MC-B10).
 #[test]
-#[ignore = "pending E6-2"]
 fn an_output_at_exactly_max_output_age_is_fresh_and_one_second_later_is_not() {
     let mandate = two_stock_swing();
     let fresh_news = output(&news(), SWING_INSTRUMENT, "0.9", "0.9");
@@ -878,7 +874,6 @@ fn an_output_at_exactly_max_output_age_is_fresh_and_one_second_later_is_not() {
 /// §8.2: fresh is `now < expires_at`, so an output expiring exactly now is **not** fresh (MC-B06),
 /// and one expiring a nanosecond later is.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_output_expiring_exactly_now_is_not_fresh() {
     let mandate = two_stock_swing();
     let momentum_output = output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9");
@@ -939,7 +934,6 @@ fn an_output_expiring_exactly_now_is_not_fresh() {
 /// §8.1, DEC-67, MC-B12: an output whose version is not the pinned one is ignored and counts as
 /// missing, which lowers the buy conviction rather than leaving it out of the average.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_wrong_model_version_counts_as_missing() {
     let mandate = two_stock_swing();
     let stale_version = ModelOutput {
@@ -991,7 +985,6 @@ fn a_wrong_model_version_counts_as_missing() {
 /// the mandate does not configure is ignored, and so is one whose id and version match but whose
 /// content hash does not.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_unpinned_model_id_is_ignored() {
     let mandate = two_stock_swing();
     let unconfigured = ModelOutput {
@@ -1052,7 +1045,6 @@ fn an_unpinned_model_id_is_ignored() {
 /// §8.2, MC-B11: only the latest fresh output per model counts, by `as_of`. The two halves swap the
 /// two convictions, so the test pins which output was taken rather than one arithmetic result.
 #[test]
-#[ignore = "pending E6-2"]
 fn duplicate_outputs_take_the_latest_as_of() {
     let mandate = two_stock_swing();
     let expiry = "2026-09-22T15:00:00.000000000Z";
@@ -1133,7 +1125,6 @@ fn duplicate_outputs_take_the_latest_as_of() {
 /// §8.2, DEC-130 item 10: ties in `as_of` break by journal order, which is the index in the slice
 /// the caller supplies. The later position wins.
 #[test]
-#[ignore = "pending E6-2"]
 fn two_outputs_with_one_as_of_take_the_later_journal_position() {
     let mandate = two_stock_swing();
     let quiet = output(&momentum(), SWING_INSTRUMENT, "0.1", "0.9");
@@ -1185,7 +1176,6 @@ fn two_outputs_with_one_as_of_take_the_later_journal_position() {
 /// an outage never forces a sell. The anchor is the buy conviction in the same call, which is
 /// −0.886: if the exit used it the position would sell on a different number.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_missing_model_counts_as_zero_for_the_exit_conviction() {
     let mandate = two_stock_swing();
     let outputs = [output(&momentum(), SWING_INSTRUMENT, "-0.9", "0.9")];
@@ -1225,7 +1215,6 @@ fn a_missing_model_counts_as_zero_for_the_exit_conviction() {
 /// §8.3 step 1, MI-10, MC-B06: a model without a fresh output counts as **fully bearish** for the
 /// buy conviction, so an outage never enlarges a buy. c is 0.432 and b is 0.032 in the same call.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_missing_model_counts_as_fully_bearish_for_buys() {
     let mandate = two_stock_swing();
     let outputs = [output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9")];
@@ -1280,7 +1269,6 @@ fn a_missing_model_counts_as_fully_bearish_for_buys() {
 /// dividing by the fresh weight would give c = 0.81 and s = 0.9; dividing by W = 1 gives 0.324 and
 /// 0.36, and the agent holds instead of buying.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_denominator_counts_configured_models_not_fresh_ones() {
     let mandate = two_stock_swing();
     let outputs = [output(&news(), SWING_INSTRUMENT, "0.9", "0.9")];
@@ -1306,7 +1294,6 @@ fn the_denominator_counts_configured_models_not_fresh_ones() {
 /// places the score is 0.649999999999 96 and `low_score` would ASK; at 12 it is exactly 0.65 and
 /// the order is AUTO by `routine`.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_score_rounds_to_twelve_places_before_the_rule_compares_it() {
     let mandate = two_stock_swing();
     let outputs = [
@@ -1360,7 +1347,6 @@ fn the_score_rounds_to_twelve_places_before_the_rule_compares_it() {
 /// §8.3 step 1, MC-B20, DEC-130 item 9: no fresh output holds, and still reports c = 0, b = −1 and
 /// s = 0, so an outage is visible as an outage rather than as a blank.
 #[test]
-#[ignore = "pending E6-2"]
 fn no_fresh_output_holds_and_reports_zero_minus_one_and_zero() {
     let proposal = proposed(
         &two_stock_swing(),
@@ -1396,7 +1382,6 @@ fn unanimous(conviction: &str) -> Vec<ModelOutput> {
 /// §8.3 step 2: the exit fires at c ≤ −`exit_threshold` — inclusive — and sells the **whole**
 /// position at the bid. One place inside the threshold nothing is proposed, which is the anchor.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_exit_at_the_threshold_sells_the_whole_position() {
     let mandate = two_stock_swing();
     let at_threshold = proposed(
@@ -1455,7 +1440,6 @@ fn an_exit_at_the_threshold_sells_the_whole_position() {
 /// §8.3 step 2: with no position there is nothing to exit, and the reason says so rather than
 /// reporting a sell of zero. The anchor is the same conviction with a position, which sells.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_flat_position_below_the_exit_threshold_holds() {
     let mandate = two_stock_swing();
     let flat = proposed(
@@ -1493,7 +1477,6 @@ fn a_flat_position_below_the_exit_threshold_holds() {
 /// The same inputs under a `profit_stop` goal give `no_position`, which is what makes the ordering
 /// the thing this test pins.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_flat_accumulate_agent_below_the_exit_threshold_holds_exits_disabled() {
     let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "-0.9", "0.9")];
     let market = crypto_market("54990", "55000", "0.0001");
@@ -1537,7 +1520,6 @@ fn a_flat_accumulate_agent_below_the_exit_threshold_holds_exits_disabled() {
 
 /// §3.1, MC-B29: an `accumulate` agent never sells on a negative conviction, whatever its position.
 #[test]
-#[ignore = "pending E6-2"]
 fn accumulate_never_sells_on_negative_conviction() {
     let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "-0.9", "0.9")];
     let market = crypto_market("54990", "55000", "0.0001");
@@ -1578,7 +1560,6 @@ fn accumulate_never_sells_on_negative_conviction() {
 
 /// §8.3 step 2, MC-B03: between the thresholds nothing is proposed — no buy and no sell.
 #[test]
-#[ignore = "pending E6-2"]
 fn between_the_thresholds_nothing_is_proposed() {
     let mandate = two_stock_swing();
     let held = account("5", "99.9");
@@ -1627,7 +1608,6 @@ fn between_the_thresholds_nothing_is_proposed() {
 /// binds depends on the equity. At 10000 the dollar limit binds at 1500; at 5000 the fraction binds
 /// at 1000, and the order is smaller for it.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_cap_is_the_lesser_of_the_dollar_and_fraction_limits() {
     let mandate = two_stock_swing();
     let outputs = swing_outputs("0.8", "0.2");
@@ -1668,7 +1648,6 @@ fn the_cap_is_the_lesser_of_the_dollar_and_fraction_limits() {
 /// §8.3 step 2, MC-B02: T = b × cap × size factor, so an active `scale_sizes` rung shrinks the
 /// target and the order with it.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_ladder_size_factor_scales_the_target() {
     let mandate = two_stock_swing();
     let outputs = swing_outputs("0.8", "0.2");
@@ -1711,7 +1690,6 @@ fn the_ladder_size_factor_scales_the_target() {
 /// §8.3 step 3, MC-B15: Delta subtracts the max cost of the working **opening** orders, so an order
 /// already resting counts toward the target and the agent does not buy the same exposure twice.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_working_opening_order_counts_toward_the_target() {
     let mandate = two_stock_swing();
     let outputs = swing_outputs("0.8", "0.2");
@@ -1753,7 +1731,6 @@ fn a_working_opening_order_counts_toward_the_target() {
 /// no signal trims in v1; positions shrink by exits and by `trim_to_target`, which is the risk
 /// engine's (DEC-130 item 3).
 #[test]
-#[ignore = "pending E6-2"]
 fn at_or_above_target_holds_and_never_sells() {
     let scaled = RiskContext {
         size_factor: frac("0.5"),
@@ -1784,7 +1761,6 @@ fn at_or_above_target_holds_and_never_sells() {
 /// §8.3 step 3, MC-B18: Delta below `rebalance_band` × cap holds, and MV is taken at the **risk
 /// mark**, not at the ask — 7 × 99.9 = 699.3, which is what makes Delta 8.7 rather than 8.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_delta_inside_the_band_holds() {
     let mandate = two_stock_swing();
     let outputs = swing_outputs("0.8", "0.2");
@@ -1834,7 +1810,6 @@ fn a_delta_inside_the_band_holds() {
 /// last block asserts that equality rather than pretending to a fourth binding case, and the gross
 /// headroom block also pins `min(max_gross_exposure_usd, E)`, which the equity reaches first.
 #[test]
-#[ignore = "pending E6-2"]
 fn each_of_the_four_clips_binds_in_turn() {
     let mandate = two_stock_swing();
     let delta_binds = proposed(
@@ -1972,7 +1947,6 @@ fn each_of_the_four_clips_binds_in_turn() {
 /// §8.3 step 3, MC-B19: the band is compared against the value **after** the clips, not against
 /// Delta alone, so a top-up the limits cut to nothing holds instead of going out tiny.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_value_below_the_band_after_clipping_holds() {
     let mandate = two_stock_swing();
     let nearly_full = AccountSnapshot {
@@ -2029,7 +2003,6 @@ fn a_value_below_the_band_after_clipping_holds() {
 
 /// §8.3 step 5: a value below the minimum order holds, even where the rebalance band admits it.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_value_below_the_minimum_order_holds() {
     let no_band = BuilderMandate {
         sizing: Sizing {
@@ -2088,7 +2061,6 @@ fn a_value_below_the_minimum_order_holds() {
 /// `min_order_usd` and `rebalance_band` are both zero, which is the one place the minimum stops
 /// guarding.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_zero_quantity_never_becomes_a_buy_at_a_zero_minimum_and_zero_band() {
     let base = two_stock_swing();
     let unguarded = BuilderMandate {
@@ -2189,7 +2161,6 @@ fn accumulating(
 /// 0.15 with 0.14 held the remaining quantity is what binds; at 0.2 it is not, and the spend clip
 /// leaves a much larger order.
 #[test]
-#[ignore = "pending E6-2"]
 fn accumulate_clipped_to_the_remaining_target_quantity() {
     let market = crypto_market("54990", "55000", "0.0001");
     let account = btc_account("0.14", "54990", "7700", "7700", "7698.6");
@@ -2251,7 +2222,6 @@ fn accumulate_clipped_to_the_remaining_target_quantity() {
 /// §8.3 step 4: `n ≤ (max_spend_usd − goal spend) ÷ a`, truncated to the increment. The goal here
 /// carries no `max_avg_price`, so the spend is the only bound that can bind.
 #[test]
-#[ignore = "pending E6-2"]
 fn accumulate_clipped_by_max_spend() {
     let market = crypto_market("54990", "55000", "0.0001");
     let mandate = accumulating("0.15", None, "9000");
@@ -2300,7 +2270,6 @@ fn accumulate_clipped_by_max_spend() {
 /// §8.3 step 4, MC-B27: `n ≤ (max_avg_price × position − cost basis) ÷ (a − max_avg_price × β)`.
 /// Dropping `max_avg_price` from the same goal leaves an order three times the size.
 #[test]
-#[ignore = "pending E6-2"]
 fn accumulate_clipped_by_max_avg_price() {
     let market = crypto_market("59990", "60000", "0.0001");
     let account = btc_account("0.05", "59990", "2890", "2890", "2999.5");
@@ -2378,7 +2347,6 @@ fn accumulate_clipped_by_max_avg_price() {
 /// −3000, the clip is left off, and the same goal admits an order ten times the size — because
 /// buying below the average can only lower it.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_max_avg_price_denominator_that_is_not_positive_leaves_the_clip_off() {
     let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "1", "1")];
 
@@ -2448,7 +2416,6 @@ fn a_max_avg_price_denominator_that_is_not_positive_leaves_the_clip_off() {
 /// clip did not cut — here the `max_avg_price` clip is off because the denominator is not positive,
 /// and the position's existing average is already above the bound.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_projected_average_above_max_avg_price_holds() {
     let market = crypto_market("54990", "55000", "0.0001");
     let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "1", "1")];
@@ -2505,7 +2472,6 @@ fn a_projected_average_above_max_avg_price_holds() {
 /// unit β = 1 − 0.0025, so reaching 0.15 takes 0.010025 rather than 0.01; the cash fee makes the
 /// per-unit cost a = ask × 1.1, so a spend bound buys fewer units than the ask alone would say.
 #[test]
-#[ignore = "pending E6-2"]
 fn accumulate_with_fees_counts_the_spend_and_the_quantity_received() {
     let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "1", "1")];
     let account = btc_account("0.14", "54990", "7700", "7700", "7698.6");
@@ -2706,7 +2672,6 @@ fn a_defer_verdict_stores_nothing_and_never_becomes_a_deny() {
 /// §9.6, DEC-70, MC-B23: an equity discretionary exit inside the close window is proposed as a
 /// marketable limit order. Outside the window the same exit is a plain limit.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_discretionary_exit_in_the_close_window_is_a_marketable_limit() {
     let mandate = two_stock_swing();
     let held = account("5", "99.9");
@@ -2758,7 +2723,6 @@ fn a_discretionary_exit_in_the_close_window_is_a_marketable_limit() {
 /// §9.6, DEC-130 item 15: crypto has no regular session and no close window, so a crypto
 /// discretionary exit is a plain limit even with `in_close_window` set, and in any session.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_crypto_discretionary_exit_is_a_plain_limit_in_any_session() {
     let continuous = BuilderMandate {
         goal: GoalKind::Continuous,
@@ -2820,7 +2784,6 @@ fn a_crypto_discretionary_exit_is_a_plain_limit_in_any_session() {
 /// the mandate cannot be built and nothing is proposed. Exactly 12 places is inside the budget, and
 /// the second half sizes an order off two such weights.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_weight_beyond_twelve_places_is_refused() {
     assert_eq!(
         SizeFraction::parse("0.0000000000001").map_err(|e| e.code()),
@@ -2882,7 +2845,6 @@ fn a_weight_beyond_twelve_places_is_refused() {
 /// exactly 18 the combine step still rounds once, to 12 places, which is what turns
 /// 0.5999999999999999994 into 0.6 and 0.1999999999999999994 into 0.2.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_confidence_beyond_eighteen_places_is_refused() {
     assert_eq!(
         Unit::parse("0.0000000000000000001").map_err(|e| e.code()),
@@ -2924,7 +2886,6 @@ fn a_confidence_beyond_eighteen_places_is_refused() {
 /// DEC-130 item 17: a crossed quote refuses the proposal rather than sizing an order against a
 /// market that does not exist. A bid equal to the ask is not crossed and proposes as usual.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_crossed_quote_refuses_the_proposal() {
     let crossed = Market {
         bid: price("100.01"),
@@ -2976,7 +2937,6 @@ fn a_crossed_quote_refuses_the_proposal() {
 /// leaving out this order or the working cost, and `new_instrument` or `thesis_confidence` not
 /// copied — survived all 125 tests while the generator reached no buy at all.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_after_values_a_rule_reads_include_this_order() {
     let mandate = two_stock_swing();
     let account = AccountSnapshot {
@@ -3142,7 +3102,6 @@ fn a_malformed_rule_set_never_blocks_a_reducing_purpose() {
 /// another, and ignoring it silently would be indistinguishable from a model that did not answer
 /// (DEC-85).
 #[test]
-#[ignore = "pending E6-2"]
 fn an_output_for_another_instrument_is_refused() {
     let mandate = two_stock_swing();
     let strayed = [
@@ -3201,7 +3160,6 @@ fn an_output_for_another_instrument_is_refused() {
 /// `max_avg_price` clip is off because `a − max_avg × β` is not positive, and the existing average is
 /// already above the bound, so no clip could have cut the order to fix it.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_projected_average_guard_fires_with_no_goal_clip() {
     let roomy_goal = accumulating("0.5", Some("58000"), "50000");
     let market = crypto_market("54990", "55000", "0.0001");
@@ -3251,7 +3209,6 @@ fn a_projected_average_guard_fires_with_no_goal_clip() {
 /// pins for its own side: b ≥ `entry_threshold` buys, Delta ≤ 0 holds, and Delta < the band holds
 /// while Delta **equal** to the band goes on to be clipped.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_entry_threshold_is_inclusive_and_the_band_and_target_are_exclusive() {
     let outputs = swing_outputs("0.8", "0.2");
     let at_entry = BuilderMandate {
@@ -3355,7 +3312,6 @@ fn the_entry_threshold_is_inclusive_and_the_band_and_target_are_exclusive() {
 /// §8.3 step 5: the minimum-order comparison is strict, so a value **equal** to `min_order_usd` is
 /// proposed and one dollar more of minimum holds it.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_order_value_exactly_at_the_minimum_is_proposed() {
     let single_share = BuilderMandate {
         sizing: Sizing {
@@ -3412,7 +3368,6 @@ fn an_order_value_exactly_at_the_minimum_is_proposed() {
 /// `session` field has no name for it, and leaves an exit alone, because an exit is paced and never
 /// denied and reads no session. A hold is a hold in any session.
 #[test]
-#[ignore = "pending E6-2"]
 fn an_overnight_market_refuses_a_buy_and_still_proposes_an_exit() {
     let overnight = Market {
         session: MarketSession::Overnight,
@@ -3483,7 +3438,6 @@ fn an_overnight_market_refuses_a_buy_and_still_proposes_an_exit() {
 /// model, weights that sum to zero, an `accumulate` goal for another instrument, `decide` on a
 /// holding proposal, and a unit-bounded condition value outside the unit interval.
 #[test]
-#[ignore = "pending E6-2"]
 fn every_declared_refusal_is_reachable() {
     let duplicate = policy(
         vec![

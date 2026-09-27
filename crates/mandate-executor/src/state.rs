@@ -443,8 +443,6 @@ pub(crate) fn restriction_for(subject: &str) -> String {
 
 /// A restriction is the one an acknowledgment of its own subject lifts, so no two subjects share
 /// one (§11): the account-wide cash, fee and incomplete-run restrictions included.
-/// The protection and copied-origin accessors answer their story's stub until E7-4 folds what
-/// they read, never a silent "none" an order path could take for an answer.
 #[cfg(test)]
 mod restriction_tests {
     use super::restriction_for;

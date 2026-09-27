@@ -1755,7 +1755,6 @@ fn usd_exact_is_canonical_text_and_compares_by_value() {
 /// Half-up would differ on a tie, and summing rounded terms would differ on almost everything; the
 /// oracle catches both because it never rounds until the end.
 #[test]
-#[ignore = "pending E6-2"]
 fn a_weighted_ratio_is_one_rounding_of_the_exact_quotient() {
     let weights = ["0.6", "0.4"];
     let confidences = ["0.65", "0.6499999999999"];
@@ -1834,7 +1833,6 @@ fn a_weighted_ratio_is_one_rounding_of_the_exact_quotient() {
 /// DEC-130 item 7 and the digit budget: the wide sizing chain is exact or an error, never an
 /// approximation, and the one truncation goes to the increment the caller names.
 #[test]
-#[ignore = "pending E6-2"]
 fn the_builder_arithmetic_is_exact_or_an_error() {
     let cap = UsdExact::of(Usd::parse("10000").unwrap_or(Usd::ZERO));
     let fraction = SizeFraction::parse("0.2").unwrap_or(SizeFraction::ZERO);
