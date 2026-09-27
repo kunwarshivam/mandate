@@ -575,6 +575,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
+  committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
+  oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
+  agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
+- **E7-7, when streams F and H land:** a drift check for
+  `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
+  so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
+  (#227 review, round 1, minor 4).
 - **Before stream G's gate is wired in:** register `startup_reconciliation_pending` in the
   trading-domain `reason_codes` registry, or record why not. It is a third partial-gate reason code
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
