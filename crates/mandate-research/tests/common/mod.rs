@@ -213,7 +213,7 @@ impl Scenario {
                 data_universe: None,
                 research_spend_usd_today: usd("0"),
             },
-            lineages: LineageState::empty(),
+            lineages: LineageState::default(),
         }
     }
 

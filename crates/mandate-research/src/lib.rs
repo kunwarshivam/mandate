@@ -494,6 +494,10 @@ pub struct Lineage {
 /// reason the journal does not carry. A lineage keeps its holder entry after it retires — the map
 /// records which lineage held what, not what the universe holds now — and loses it the moment
 /// another lineage's thesis for that instrument is admitted (DEC-132 items 9 and 10).
+///
+/// An empty state is `LineageState::default()`: there is no `empty()` beside it, because a function
+/// whose body is `Self::default()` can be mutated to `Default::default()` with no visible effect, and
+/// no test could tell the two apart.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LineageState {
     lineages: BTreeMap<LineageId, Lineage>,
@@ -501,11 +505,6 @@ pub struct LineageState {
 }
 
 impl LineageState {
-    #[must_use]
-    pub fn empty() -> Self {
-        Self::default()
-    }
-
     /// Builds a state from folded events. The narrow constructor tests use; the runtime folds
     /// `ThesisProposed`, `ThesisRevised`, and `UniverseChanged` instead.
     #[must_use]

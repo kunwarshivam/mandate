@@ -133,9 +133,12 @@ pub enum UniverseChange {
     Removed,
 }
 
-/// Every reason journal spec §9's `UniverseChanged` row lists. Stream F's brief names its risk-state
-/// enum `RemovalReason`, which cannot carry [`UniverseChangeReason::ThesisAdmitted`]; one enum with
-/// all seven is what both streams need, and the coordinator settles the name (DEC-132 item 15).
+/// Every reason journal spec §9's `UniverseChanged` row lists.
+///
+/// Stream F's shipped `mandate_spec::risk::RemovalReason` carries **all seven**, including
+/// [`UniverseChangeReason::ThesisAdmitted`], so this is that enum under another name and there is no
+/// variant to add. DEC-132 item 15 first said otherwise, from reading F's brief rather than its code;
+/// the implementation PR takes F's as it stands and the name is the coordinator's call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UniverseChangeReason {
     ThesisAdmitted,

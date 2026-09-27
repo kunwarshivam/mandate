@@ -778,8 +778,16 @@ proptest! {
         );
     }
 
-    /// DEC-101, R-05: no string a model wrote can change a verdict. Every text field is replaced by
-    /// adversarial prose, including prose naming the checks, and the verdict must not move.
+    /// DEC-101, R-05: no string a model wrote can change a verdict. Every text a model controls is
+    /// replaced by adversarial prose — its invalidation, a source name, its own ids — including prose
+    /// naming the checks, and the verdict must not move.
+    ///
+    /// The injection changes text **content** only, never a typed fact's *presence* or a key another
+    /// input is filed under: it renames `predecessor_thesis_id` only where one already exists, because
+    /// check 3 reads presence and supplying one would satisfy it; it keeps `lineage_id` equal to
+    /// `thesis_id` at revision 0; and it re-keys the lineage state, because renaming a lineage without
+    /// that would hide a retired one from check 16. Each of those three, left unhandled, makes the
+    /// property fail on a **correct** implementation — verified at 20,000 cases against one.
     #[test]
     #[ignore = "pending E17-3"]
     fn text_never_changes_a_verdict(d in dials(), injection in "[a-zA-Z0-9 .,:_-]{1,120}") {
@@ -799,12 +807,32 @@ proptest! {
         injected.proposal.thesis.evidence_sources.push(adversarial_source.clone());
         injected.facts.allowlist.sources.insert(adversarial_source);
 
-        injected.proposal.thesis.thesis_id = thesis_id(&format!("th-{attack}"));
-        injected.proposal.thesis.lineage_id = lineage_id(&format!("lin-{attack}"));
-        if injected.proposal.thesis.revision > 0 {
+        let injected_thesis = thesis_id(&format!("th-{attack}"));
+        injected.proposal.thesis.thesis_id = injected_thesis.clone();
+        if injected.proposal.thesis.predecessor_thesis_id.is_some() {
             injected.proposal.thesis.predecessor_thesis_id =
                 Some(thesis_id(&format!("pred-{attack}")));
         }
+        injected.proposal.thesis.lineage_id = if injected.proposal.thesis.revision > 0 {
+            lineage_id(&format!("lin-{attack}"))
+        } else {
+            lineage_id(injected_thesis.as_str())
+        };
+
+        let renamed = injected.proposal.thesis.lineage_id.clone();
+        let rekeyed: BTreeMap<LineageId, mandate_research::Lineage> = plain
+            .lineages
+            .lineages()
+            .values()
+            .map(|state| (renamed.clone(), *state))
+            .collect();
+        let holders: BTreeMap<LineageId, AssetId> = plain
+            .lineages
+            .holders()
+            .values()
+            .map(|held| (renamed.clone(), held.clone()))
+            .collect();
+        injected.lineages = LineageState::from_parts(rekeyed, holders);
 
         let after = admit(&injected.input()).expect("the crate decides").decision;
 
@@ -812,7 +840,10 @@ proptest! {
             before,
             after,
             "a verdict depends on typed facts alone, so no string a model can write moves it: \
-             not its invalidation prose, not a source name, not its own ids"
+             not its invalidation prose, not a source name, not its own ids. The lineage state is
+             re-keyed to the injected id, because renaming the thesis's lineage without it would
+             hide a retired lineage from check 16 and move the verdict for a reason that is not
+             the text"
         );
     }
 

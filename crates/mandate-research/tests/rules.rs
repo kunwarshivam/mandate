@@ -13,15 +13,20 @@
 //! pending tests cannot do that job — cargo-mutants runs the suite, and an `#[ignore]` test does not
 //! run.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use mandate_canon::Digest;
 use mandate_research::{
-    AutonomyDecision, GroupId, InstrumentGroup, PolicyOverlay, RefusalReason, group_of,
+    AdmissionChange, AdmissionDecision, AutonomyDecision, ContentHash, Corroboration, FoldStep,
+    GroupId, InstrumentGroup, Invalidation, Lineage, LineageId, LineageState, ModelId,
+    ModelVersion, PolicyOverlay, RefusalReason, ResearchError, SchemaDec, SourceId, ThesisId,
+    UniverseChangeReason, WorkspaceId, group_of,
 };
 
 mod common;
 
 use common::{INSTRUMENT_2, INSTRUMENT_5, asset, usd};
+use mandate_research::AssetId;
 
 /// §8.5's order is the enum's order, and every ordinal from 1 to 17 appears exactly once.
 #[test]
@@ -402,6 +407,284 @@ fn an_empty_group_map_leaves_every_instrument_ungrouped() {
             group_of(&asset(id), &groups),
             InstrumentGroup::Ungrouped(asset(id)),
             "with no policy groups, a claim on one instrument claims only that instrument"
+        );
+    }
+}
+
+/// Every id and value type round-trips its own text, and every `code()` returns the identifier the
+/// journal carries. A table test rather than one per type, so adding a type without adding a row is a
+/// compile error here rather than an untested accessor (round 2's finding 4, and the shape
+/// `mandate-spec`'s vocabulary tests use).
+#[test]
+fn every_accessor_returns_its_own_text() {
+    let digest_hex = "4444444444444444444444444444444444444444444444444444444444444444";
+
+    assert_eq!(asset(INSTRUMENT_5).as_str(), INSTRUMENT_5, "AssetId");
+    assert_eq!(
+        GroupId::new("grp.megacap")
+            .expect("a fixture group id is not empty")
+            .as_str(),
+        "grp.megacap",
+        "GroupId"
+    );
+    assert_eq!(
+        SchemaDec::from_checked_text("0.8").as_str(),
+        "0.8",
+        "SchemaDec keeps the field's text, unrounded"
+    );
+    assert_eq!(
+        ThesisId::new("th-1")
+            .expect("a fixture thesis id is not empty")
+            .as_str(),
+        "th-1",
+        "ThesisId"
+    );
+    assert_eq!(
+        LineageId::new("th-1")
+            .expect("a fixture lineage id is not empty")
+            .as_str(),
+        "th-1",
+        "LineageId"
+    );
+    assert_eq!(
+        SourceId::new("src.filings")
+            .expect("a fixture source id is not empty")
+            .as_str(),
+        "src.filings",
+        "SourceId"
+    );
+    assert_eq!(
+        WorkspaceId::new("ws_a")
+            .expect("a fixture workspace id is not empty")
+            .as_str(),
+        "ws_a",
+        "WorkspaceId"
+    );
+    assert_eq!(
+        ModelId::new("llm.research_agent")
+            .expect("a fixture model id is not empty")
+            .as_str(),
+        "llm.research_agent",
+        "ModelId"
+    );
+    assert_eq!(ModelVersion::new("0.1.0").as_str(), "0.1.0", "ModelVersion");
+    assert_eq!(
+        Invalidation::new("Guidance is cut.")
+            .expect("a fixture invalidation is not empty")
+            .as_str(),
+        "Guidance is cut.",
+        "Invalidation keeps the text the approval screen shows (DEC-126)"
+    );
+    let digest = Digest::from_hex(digest_hex).expect("a fixture digest is 32 hex bytes");
+    assert_eq!(
+        ContentHash::new(digest).digest().to_hex(),
+        digest_hex,
+        "ContentHash carries the pinned digest unchanged (§8.1, DEC-67)"
+    );
+}
+
+/// Every id type rejects the empty string, which is the whole of its validation.
+#[test]
+fn no_id_type_accepts_the_empty_string() {
+    assert!(AssetId::new("").is_err(), "AssetId");
+    assert!(GroupId::new("").is_err(), "GroupId");
+    assert!(ThesisId::new("").is_err(), "ThesisId");
+    assert!(LineageId::new("").is_err(), "LineageId");
+    assert!(SourceId::new("").is_err(), "SourceId");
+    assert!(WorkspaceId::new("").is_err(), "WorkspaceId");
+    assert!(ModelId::new("").is_err(), "ModelId");
+    assert!(
+        Invalidation::new("   ").is_err(),
+        "§8.4 asks a thesis what would end it, so whitespace is not an answer"
+    );
+    assert!(
+        AssetId::new(INSTRUMENT_5).is_ok() && Invalidation::new("x").is_ok(),
+        "and a non-empty value is accepted, so the check is not simply always failing"
+    );
+}
+
+/// Every `UniverseChangeReason` and `Corroboration` code, and every `ResearchError` code: the strings
+/// the journal and a reader see (ES-09, journal spec §9).
+#[test]
+fn every_code_is_the_identifier_the_journal_carries() {
+    let reasons = [
+        (UniverseChangeReason::ThesisAdmitted, "thesis_admitted"),
+        (UniverseChangeReason::ThesisExpired, "thesis_expired"),
+        (
+            UniverseChangeReason::ThesisInvalidated,
+            "thesis_invalidated",
+        ),
+        (UniverseChangeReason::LineageRetired, "lineage_retired"),
+        (UniverseChangeReason::EligibilityLost, "eligibility_lost"),
+        (UniverseChangeReason::OperatorHalt, "operator_halt"),
+        (UniverseChangeReason::VersionApplied, "version_applied"),
+    ];
+    for (reason, code) in reasons {
+        assert_eq!(reason.code(), code, "{reason:?}");
+    }
+    let codes: BTreeSet<&str> = reasons.iter().map(|(r, _)| r.code()).collect();
+    assert_eq!(codes.len(), 7, "no two reasons share a code");
+
+    assert_eq!(
+        Corroboration::IndependentSource.code(),
+        "independent_source"
+    );
+    assert_eq!(Corroboration::MarketData.code(), "market_data");
+
+    let errors = [
+        (ResearchError::UniverseUnavailable, "universe_unavailable"),
+        (ResearchError::DuplicateInstrument, "duplicate_instrument"),
+        (ResearchError::DuplicateThesisId, "duplicate_thesis_id"),
+        (
+            ResearchError::SessionCalendarMissing,
+            "session_calendar_missing",
+        ),
+        (ResearchError::WindowTooLarge, "window_too_large"),
+        (ResearchError::IntervalTooLarge, "interval_too_large"),
+        (ResearchError::TimeOutOfRange, "time_out_of_range"),
+        (ResearchError::OutOfRange, "out_of_range"),
+        (ResearchError::EmptyId, "empty_id"),
+        (ResearchError::EmptyInvalidation, "empty_invalidation"),
+    ];
+    for (error, code) in &errors {
+        assert_eq!(error.code(), *code, "{error:?}");
+    }
+    assert_eq!(
+        ResearchError::Unimplemented("admit", "E17-3").code(),
+        "unimplemented",
+        "the stub variant the implementation PR removes"
+    );
+    let unique: BTreeSet<&str> = errors.iter().map(|(e, _)| e.code()).collect();
+    assert_eq!(unique.len(), errors.len(), "no two errors share a code");
+}
+
+/// `AdmissionDecision`'s three readers, over both variants: a caller must not be able to read
+/// "admitted" from a refusal, a reason from an admission, or `ignored` from a check past the third.
+#[test]
+fn an_admission_decision_reads_the_same_way_for_both_variants() {
+    let admitted = AdmissionDecision::Admitted {
+        change: AdmissionChange::Admitted,
+    };
+    let renewed = AdmissionDecision::Admitted {
+        change: AdmissionChange::Renewed,
+    };
+    for decision in [admitted, renewed] {
+        assert!(decision.admitted(), "an admission reads as admitted");
+        assert_eq!(decision.reason(), None, "and carries no refusal reason");
+        assert!(!decision.ignored(), "and is not an ignored output");
+    }
+
+    for reason in RefusalReason::all() {
+        let refused = AdmissionDecision::Refused { reason };
+        assert!(!refused.admitted(), "{} is a refusal", reason.code());
+        assert_eq!(
+            refused.reason(),
+            Some(reason),
+            "which carries its own reason"
+        );
+        assert_eq!(
+            refused.ignored(),
+            reason.check_number() <= 3,
+            "and is an ignored output exactly for checks 1 to 3: {}",
+            reason.code()
+        );
+    }
+}
+
+/// `LineageState`'s five readers, including `held_by`, whose `==` a mutant can flip: an instrument is
+/// found under the lineage that holds it and no other.
+#[test]
+fn lineage_state_reads_back_what_it_was_built_from() {
+    let held = asset(INSTRUMENT_5);
+    let other = asset(INSTRUMENT_2);
+    let holder = LineageId::new("th-70").expect("a fixture lineage id is not empty");
+    let bystander = LineageId::new("th-80").expect("a fixture lineage id is not empty");
+    let state = LineageState::from_parts(
+        [(
+            holder.clone(),
+            Lineage {
+                revisions: 2,
+                admitted: 3,
+                retired: true,
+            },
+        )]
+        .into_iter()
+        .collect(),
+        [(holder.clone(), held.clone())].into_iter().collect(),
+    );
+
+    let lineage = state
+        .lineage(&holder)
+        .expect("the lineage it was built with");
+    assert_eq!(
+        (lineage.revisions, lineage.admitted, lineage.retired),
+        (2, 3, true),
+        "every field reads back"
+    );
+    assert_eq!(
+        state.lineage(&bystander),
+        None,
+        "and an unknown lineage is absent"
+    );
+    assert_eq!(
+        state.holder_of(&holder),
+        Some(&held),
+        "the holder map reads back"
+    );
+    assert_eq!(state.holder_of(&bystander), None);
+    assert_eq!(
+        state.held_by(&held),
+        Some(&holder),
+        "and the reverse lookup finds the lineage that holds it"
+    );
+    assert_eq!(
+        state.held_by(&other),
+        None,
+        "an instrument no lineage holds is held by none — the `==` this reverse lookup turns on"
+    );
+    assert_eq!(state.lineages().len(), 1, "the maps themselves read back");
+    assert_eq!(state.holders().len(), 1);
+
+    let empty = LineageState::default();
+    assert!(
+        empty.lineages().is_empty() && empty.holders().is_empty(),
+        "and an empty state holds nothing, so a fold starts from nothing"
+    );
+    assert_eq!(empty.held_by(&held), None);
+}
+
+/// MI-18, unignored: a fold step never reports a carried-forward score, whatever else it carries.
+///
+/// The pending fold tests assert this too, but they cannot run until the fold exists, and a constant
+/// that nothing unignored reads is a constant a mutant can flip unnoticed (round 2's finding 4).
+/// `FoldStep`'s fields are public, so the assertion needs no fold at all — which is the point: **no
+/// API in this crate can produce a step that carries a score**, so the claim holds by construction and
+/// this test says so for every kind of step.
+#[test]
+fn no_fold_step_can_report_a_carried_forward_score() {
+    let admitted = FoldStep {
+        thesis_id: ThesisId::new("th-1").expect("a fixture thesis id is not empty"),
+        decision: AdmissionDecision::Admitted {
+            change: AdmissionChange::Admitted,
+        },
+        lineage_revisions: 0,
+        lineage_retired: false,
+        journal: Vec::new(),
+    };
+    let retired = FoldStep {
+        thesis_id: ThesisId::new("th-2").expect("a fixture thesis id is not empty"),
+        decision: AdmissionDecision::Refused {
+            reason: RefusalReason::LineageRetired,
+        },
+        lineage_revisions: 3,
+        lineage_retired: true,
+        journal: Vec::new(),
+    };
+
+    for step in [&admitted, &retired] {
+        assert!(
+            !step.score_carried_forward(),
+            "DEC-111 item 2: a revision starts with no track record, and there is no way to give it one"
         );
     }
 }

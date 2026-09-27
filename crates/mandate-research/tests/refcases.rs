@@ -3,7 +3,7 @@
 //!
 //! Typing a case's figures into a test makes the test agree with whatever the author read, not with
 //! the case; the founder owns the fixture, so the fixture is the input. Each case becomes one named
-//! test (`MC_N01`), its base document supplies the envelope, its `input` block supplies the facts,
+//! test (`mc_n01` and so on, named for the case), its base document supplies the envelope, its `input` block supplies the facts,
 //! and its `expect` block is compared key by key.
 //!
 //! **Twenty-five of the twenty-eight.** MC-N01, MC-N14 and MC-N26 state `first_order_autonomy`,
@@ -17,8 +17,9 @@
 //! tests PR (the brief's Dependencies). Stream G's `mandate-risk` carries the same file for the same
 //! reason.
 //!
-//! **Every `expect` key is read.** [`compare`] walks the case's own `expect` object and fails on a key
-//! it does not know, so a case cannot pass because nobody compared the field that matters (DEC-85).
+//! **Every `expect` key is read.** [`assert_every_key_known`] walks the case's own `expect` object
+//! and fails on a key it does not know, so a case cannot pass because nobody compared the field that
+//! matters (DEC-85).
 
 mod common;
 
@@ -463,6 +464,25 @@ fn assert_every_key_known(id: &str, kind: &str, expect: &Value) {
     }
 }
 
+/// The fixture writes `working_universe` as a YAML array in whatever order the case's author typed,
+/// and for a refusal `ref.py` hands back the input list unchanged (MC-N02's is `2222, 3333, 4444,
+/// 1111, 9999`). This crate holds the universe in a `BTreeSet` (ES-21) that cannot repeat (MI-15), so
+/// its order is always sorted and the array's order carries no meaning. The comparison is therefore
+/// **membership**: both sides sorted, with a duplicate in the fixture failing rather than being
+/// quietly absorbed.
+fn same_universe(got: &BTreeSet<AssetId>, expect: &Value, id: &str, what: &str) {
+    let mut want = strings(expect.get("working_universe"));
+    let unique: BTreeSet<&String> = want.iter().collect();
+    assert_eq!(
+        unique.len(),
+        want.len(),
+        "{id}: the fixture's working_universe holds a duplicate, which MI-15 forbids"
+    );
+    want.sort();
+    let mine: Vec<String> = got.iter().map(|i| i.as_str().to_owned()).collect();
+    assert_eq!(mine, want, "{id}: {what}");
+}
+
 fn run_admission(id: &str) {
     let c = case(id);
     let input = c
@@ -538,14 +558,7 @@ fn run_admission(id: &str) {
     let WorkingUniverse::Known { instruments, .. } = &a.universe else {
         panic!("{id}: the crate returns a known universe");
     };
-    assert_eq!(
-        instruments
-            .iter()
-            .map(|i| i.as_str().to_owned())
-            .collect::<Vec<String>>(),
-        strings(expect.get("working_universe")),
-        "{id}: the working universe after"
-    );
+    same_universe(instruments, expect, id, "the working universe after");
     assert_eq!(
         instruments.len(),
         usize::try_from(
@@ -695,13 +708,11 @@ fn run_lineage(id: &str) {
     let WorkingUniverse::Known { instruments, .. } = &fold.universe else {
         panic!("{id}: the fold returns a known universe");
     };
-    assert_eq!(
-        instruments
-            .iter()
-            .map(|i| i.as_str().to_owned())
-            .collect::<Vec<String>>(),
-        strings(expect.get("working_universe")),
-        "{id}: the working universe after the fold"
+    same_universe(
+        instruments,
+        expect,
+        id,
+        "the working universe after the fold",
     );
 }
 
@@ -739,14 +750,7 @@ fn run_thesis_expiry(id: &str) {
     let WorkingUniverse::Known { instruments, .. } = &e.universe else {
         panic!("{id}: expiry returns a known universe");
     };
-    assert_eq!(
-        instruments
-            .iter()
-            .map(|i| i.as_str().to_owned())
-            .collect::<Vec<String>>(),
-        strings(expect.get("working_universe")),
-        "{id}: the working universe after"
-    );
+    same_universe(instruments, expect, id, "the working universe after");
     assert_eq!(
         e.removed
             .iter()

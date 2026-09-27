@@ -34,7 +34,7 @@ fn retired(lineage: &str) -> LineageState {
 fn mc_n20_a_thesis_at_its_horizon_removes_its_instrument() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false)];
 
-    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::empty())
+    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::default())
         .expect("the removal is decided");
     assert_eq!(
         e.universe,
@@ -75,7 +75,7 @@ fn the_horizon_removes_at_exactly_the_horizon_and_not_before() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false)];
     let just_before = at("2026-09-23T13:59:59.999999999Z");
 
-    let e = expire_theses(just_before, &entries, &LineageState::empty())
+    let e = expire_theses(just_before, &entries, &LineageState::default())
         .expect("the removal is decided");
     assert_eq!(
         e.universe,
@@ -98,7 +98,7 @@ fn mc_n21_an_invalidated_thesis_removes_at_once_before_its_horizon() {
     let e = expire_theses(
         at("2026-09-22T18:00:00.000000000Z"),
         &entries,
-        &LineageState::empty(),
+        &LineageState::default(),
     )
     .expect("the removal is decided");
     let ResearchEvent::UniverseChanged(change) = &e.journal[0] else {
@@ -195,7 +195,7 @@ fn several_removals_count_the_universe_down() {
         entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false),
     ];
 
-    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::empty())
+    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::default())
         .expect("the removal is decided");
     let sizes: Vec<usize> = e
         .journal
@@ -230,9 +230,9 @@ fn the_removal_order_does_not_depend_on_the_input_order() {
         entry(INSTRUMENT_2, "th-2", "th-2", EXPIRES_AT, false),
     ];
 
-    let a = expire_theses(at(EXPIRES_AT), &forwards, &LineageState::empty())
+    let a = expire_theses(at(EXPIRES_AT), &forwards, &LineageState::default())
         .expect("the removal is decided");
-    let b = expire_theses(at(EXPIRES_AT), &backwards, &LineageState::empty())
+    let b = expire_theses(at(EXPIRES_AT), &backwards, &LineageState::default())
         .expect("the removal is decided");
     assert_eq!(
         a, b,
@@ -249,7 +249,7 @@ fn an_entry_list_holding_one_instrument_twice_is_an_error() {
         entry(INSTRUMENT_5, "th-2", "th-2", EXPIRES_AT, false),
     ];
 
-    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::empty())
+    let e = expire_theses(at(EXPIRES_AT), &entries, &LineageState::default())
         .expect_err("a duplicate instrument cannot be expired");
     assert_eq!(
         e.code(),
