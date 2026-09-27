@@ -12,10 +12,12 @@
 
 use mandate_num::Qty;
 
+use std::collections::BTreeSet;
+
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
-    GateInput, InstrumentRestriction, Origin, Purpose, ReasonCode, Side, Verdict, WorkingUniverse,
-    limits,
+    GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Side,
+    Verdict, WorkingUniverse, limits,
 };
 
 /// The eight checks, in §9.1's order.
@@ -34,8 +36,9 @@ const ORDER: [Check; 8] = [
 pub(crate) type Stop = (Verdict, ReasonCode);
 
 /// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
-/// still lacks the floor (E6-7), check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls
-/// (E6-8) and check 7 buying power (E6-6), and checks 3, 5 and 8 are not written yet.
+/// still lacks the floor (E6-7), check 3 its sessions and auction windows (E6-6; the halt is here),
+/// check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls (E6-8) and check 7 buying power
+/// (E6-6), and checks 5 and 8 are not written yet.
 fn owed(check: Check) -> Option<&'static str> {
     match check {
         Check::AccountAndMode => None,
@@ -94,11 +97,16 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
         (None, Some(story)) => return Err(GateError::Unimplemented("evaluate", story)),
         (None, None) => (Verdict::Allow, None),
     };
+    let pacing = if verdict == Verdict::Allow {
+        presumed_halt_repricing(input)
+    } else {
+        None
+    };
     Ok(Decision {
         verdict,
         reason,
         purpose,
-        pacing: None,
+        pacing,
         checks,
         computed,
     })
@@ -117,6 +125,7 @@ fn run(
             None => limits::position_order_and_cooldown(input, computed),
             stop => Ok(stop),
         },
+        Check::SessionAndHalt if opening => Ok(halt(input)),
         Check::OrderConstraints => Ok(order_constraints(input, opening)),
         Check::ConductControls if opening => Ok(limits::orders_per_day(input, computed)),
         Check::BuyingPowerAndExposure if opening => limits::gross_exposure(input, computed),
@@ -174,10 +183,44 @@ fn working_universe(
     Ok(None)
 }
 
+/// Check 3's halt (§4.4): a halted or paused instrument takes no new opening order. Only an opening
+/// reaches here, so a halt never denies an exit (MI-1); a presumed halt, a dropped status feed, is
+/// not a halt and denies nothing here (DEC-129 item 24).
+fn halt(input: &GateInput<'_>) -> Option<Stop> {
+    input
+        .instrument
+        .halted
+        .then_some((Verdict::Deny, ReasonCode::InstrumentHalted))
+}
+
+/// §4.4's "no market orders" applies under a halt, real or presumed: a halted instrument, or a
+/// dropped status feed. The stale-quote arm of a presumed halt reads the mark's freshness, which is
+/// check 5's (E6-8). The `halted` arm cannot change check 4's verdict on an opening, which check 3
+/// has already denied; it stays because the same predicate re-prices an exit under a real halt
+/// (DEC-129 item 31), and as defence in depth should check 3's halt ever be reordered.
+fn market_orders_barred(input: &GateInput<'_>) -> bool {
+    input.instrument.halted || !input.instrument.status_feed_current
+}
+
+/// §4.4 and §5.6 (DEC-129 item 28): an allowed market order under a halt, real or presumed, is sent
+/// as a marketable limit at its proposed quantity and price, never as a market order. Only a
+/// reduction gets here with a market kind under a halt, since checks 3 and 4 deny such an opening.
+fn presumed_halt_repricing(input: &GateInput<'_>) -> Option<Pacing> {
+    (market_orders_barred(input) && input.proposed.kind == ProposedKind::Market).then(|| Pacing {
+        qty: input.proposed.qty,
+        limit_price: input.proposed.limit_price,
+        marketable_limit_required: true,
+        applied: BTreeSet::new(),
+    })
+}
+
 /// Check 4, the rules this story owns: rule 3 (every sell above the position, a protective leg's
 /// included, is typed an opening by [`assign_purpose`], so it is the only sell that reaches here as
 /// one), then rule 9, which denies an opening and holds a reduction under one code (DEC-129 item
-/// 22). §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
+/// 22), then §4.4's presumed halt: a market order to open or increase is denied
+/// `market_order_not_allowed` (DEC-129 items 24 and 28). §5.1's wider rule, that every opening is a
+/// limit order in any state of the feed, is the v1 order policy's, which E6-6 completes; until then
+/// such an opening is refused by the fail-closed rule (DEC-129 item 29), never allowed. §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
 /// rules 4 to 6 (`sell_exceeds_available`, E6-6), not to rule 3.
 fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
     if opening && input.proposed.side == Side::Sell {
@@ -194,6 +237,9 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
             Verdict::Hold
         };
         return Some((verdict, ReasonCode::UnknownOrderInFlight));
+    }
+    if opening && input.proposed.kind == ProposedKind::Market && market_orders_barred(input) {
+        return Some((Verdict::Deny, ReasonCode::MarketOrderNotAllowed));
     }
     None
 }
@@ -233,7 +279,7 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
 /// crypto account denying an opening, a protective leg above the position crossing zero, the
 /// partial gate failing closed, a value exactly at each limit passing, and the account's own 1×
-/// bound.
+/// bound; and, for E6-9, every row of the halt and market-order table.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -855,6 +901,147 @@ mod tests {
             [Err("E6-7"), Err("E6-7"), Ok(ReasonCode::ConcentrationLimit)],
             "protective, non-opening, and an opening order that does count"
         );
+        Ok(())
+    }
+
+    /// What the halt table expects of one row: the verdict, the code, the check that failed, and
+    /// the pacing, or the story a fail-closed opening is refused for.
+    type HaltRow =
+        Result<(Verdict, Option<ReasonCode>, Option<Check>, Option<Pacing>), &'static str>;
+
+    /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
+    /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
+    /// `exits_only` denying an opening (§7.4), then §4.4's halt for an opening at check 3, then
+    /// §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal of
+    /// DEC-129 item 29; an exit is allowed, and re-priced as a marketable limit when it is a
+    /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
+    /// Only the `Market` kind is a market order: a bracket, an IOC and a plain limit are limits.
+    fn halt_oracle(
+        side: Side,
+        origin: Origin,
+        mode: AgentMode,
+        (halted, feed_current): (bool, bool),
+        proposed: &crate::ProposedOrder,
+    ) -> HaltRow {
+        let market = proposed.kind == ProposedKind::Market;
+        let exit = side == Side::Sell;
+        let exempt = exit
+            && matches!(
+                origin,
+                Origin::ProtectiveLeg | Origin::AutomatedKillSwitch | Origin::OwnerKillSwitch
+            );
+        let hold = |code| Ok((Verdict::Hold, Some(code), Some(Check::AccountAndMode), None));
+        if mode == AgentMode::Stopped {
+            return hold(ReasonCode::AgentStopped);
+        }
+        if mode == AgentMode::Paused && !exempt {
+            return hold(ReasonCode::AgentPaused);
+        }
+        if !exit {
+            let deny = |code, check| Ok((Verdict::Deny, Some(code), Some(check), None));
+            if mode == AgentMode::ExitsOnly {
+                return deny(ReasonCode::AgentExitsOnly, Check::AccountAndMode);
+            }
+            if halted {
+                return deny(ReasonCode::InstrumentHalted, Check::SessionAndHalt);
+            }
+            if market && !feed_current {
+                return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
+            }
+            return Err("E6-7");
+        }
+        let repriced = market && (halted || !feed_current);
+        let pacing = repriced.then(|| Pacing {
+            qty: proposed.qty,
+            limit_price: proposed.limit_price,
+            marketable_limit_required: true,
+            applied: BTreeSet::new(),
+        });
+        Ok((Verdict::Allow, None, None, pacing))
+    }
+
+    /// Every side, origin (10), `AgentMode` (all 4), halt, status feed and `ProposedKind` (all 4)
+    /// against [`halt_oracle`]: 2 × 10 × 4 × 2 × 2 × 4 = 1280 rows. It pins that a halt denies
+    /// only an opening and only at check 3; that a market opening is denied at check 4 under a
+    /// dropped feed and nowhere else, and a bracket or IOC opening never is; that a market exit
+    /// under a real or presumed halt is allowed and re-priced at its own quantity and price, in
+    /// every mode that lets it through, `exits_only` included; that a limit, bracket or IOC exit
+    /// and a market exit with a current feed are not paced; and that a held exit carries no
+    /// pacing.
+    #[test]
+    fn halts_and_market_orders_match_the_oracle_on_every_row() -> Result<(), GateError> {
+        let origins = [
+            Origin::OrderBuilder,
+            Origin::GoalCompletion,
+            Origin::RemovedInstrument,
+            Origin::RiskEngine,
+            Origin::TrimToTarget,
+            Origin::StopWatchdog,
+            Origin::AutomatedKillSwitch,
+            Origin::OwnerClose,
+            Origin::OwnerKillSwitch,
+            Origin::ProtectiveLeg,
+        ];
+        let mut rows = 0_u32;
+        for side in [Side::Buy, Side::Sell] {
+            for origin in origins {
+                for mode in [
+                    AgentMode::Normal,
+                    AgentMode::ExitsOnly,
+                    AgentMode::Paused,
+                    AgentMode::Stopped,
+                ] {
+                    for (halted, feed_current, kind) in (0..16_u8)
+                        .map(|bits| -> Result<_, GateError> {
+                            let kind = match bits >> 2 {
+                                0 => ProposedKind::Plain,
+                                1 => ProposedKind::Market,
+                                2 => ProposedKind::Ioc,
+                                _ => ProposedKind::Bracket {
+                                    take_profit: Price::parse("110")?,
+                                    stop: Price::parse("90")?,
+                                },
+                            };
+                            Ok((bits & 1 == 1, bits & 2 == 2, kind))
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
+                    {
+                        let mut o = match side {
+                            Side::Buy => allowing()?,
+                            Side::Sell => allowing()?.selling(origin)?,
+                        };
+                        o.proposed.origin = origin;
+                        o.proposed.limit_price = Price::parse("99.5")?;
+                        o.agent.mode = mode;
+                        o.instrument.halted = halted;
+                        o.instrument.status_feed_current = feed_current;
+                        o.proposed.kind = kind.clone();
+                        let expected =
+                            halt_oracle(side, origin, mode, (halted, feed_current), &o.proposed);
+                        let actual: HaltRow = match o.decide() {
+                            Ok(d) => Ok((
+                                d.verdict,
+                                d.reason,
+                                d.checks.iter().find_map(|c| match c {
+                                    CheckOutcome::Failed(check, _) => Some(*check),
+                                    CheckOutcome::Passed(_) | CheckOutcome::NotReached(_) => None,
+                                }),
+                                d.pacing,
+                            )),
+                            Err(GateError::Unimplemented("evaluate", story)) => Err(story),
+                            Err(e) => return Err(e),
+                        };
+                        assert_eq!(
+                            actual, expected,
+                            "{side:?} from {origin:?} under {mode:?}, halted {halted}, feed \
+                             current {feed_current}, {kind:?}"
+                        );
+                        rows = rows.saturating_add(1);
+                    }
+                }
+            }
+        }
+        assert_eq!(rows, 1280, "every row of the table ran");
         Ok(())
     }
 

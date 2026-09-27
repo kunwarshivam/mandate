@@ -39,6 +39,9 @@
 //! E6-3 implements [`evaluate`] — the eight checks in order, purpose assignment, check 1 whole
 //! (the account's state, then the mode rule), the working universe, the mandate limits of mandate
 //! spec §5.3 with the account's own 1× bound, and §5.3 rules 3 and 9 — and [`agent_flatten`].
+//! E6-9 adds check 3's halt and, at check 4, §4.4's "no market orders" under a presumed halt: a
+//! market opening is denied and a market exit is re-priced as a marketable limit (DEC-129 items 24
+//! and 28).
 //! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
 //! opening or increasing order the implemented checks would allow returns
 //! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
@@ -361,7 +364,11 @@ pub enum Check {
     DayTradeBudget,
 }
 
-/// What §9.6 did to a discretionary or owner exit that it may pace but never deny.
+/// How an allowed order must be sent when the gate constrains its form but never denies it: §9.6's
+/// pacing of a discretionary or owner exit (the collar, the participation caps, the close window),
+/// and §4.4 and §5.6's re-pricing of a market-order exit as a marketable limit under a real or
+/// presumed halt, which applies to every reducing purpose, risk exits, protective legs and
+/// kill-switch exits included (DEC-129 items 28 and 31).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pacing {
     pub qty: Qty,

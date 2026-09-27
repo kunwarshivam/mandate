@@ -32,7 +32,10 @@ fn oracle_allows(path_and_query: &str) -> bool {
         return false;
     }
     let segments: Vec<&str> = path.split('/').collect();
-    if segments.contains(&"..") {
+    if segments
+        .iter()
+        .any(|s| matches!(percent_decoded(s).as_str(), "." | ".."))
+    {
         return false;
     }
     let one = |s: &&str| !s.is_empty() && unreserved(s, "-._~%");
@@ -48,9 +51,59 @@ fn oracle_allows(path_and_query: &str) -> bool {
     }
 }
 
+/// A segment as a URL parser reads it for dot-segment removal: every `%XX` triple decoded to its
+/// byte. The oracle decodes every triple, not only `%2e`, so it reads a dot segment its own way
+/// rather than the crate's.
+fn percent_decoded(segment: &str) -> String {
+    let bytes = segment.as_bytes();
+    let mut decoded = Vec::new();
+    let mut at = 0;
+    while at < bytes.len() {
+        let triple = bytes.get(at..at + 3).and_then(|t| {
+            let hex = std::str::from_utf8(t.get(1..)?).ok()?;
+            (t.first() == Some(&b'%')).then(|| u8::from_str_radix(hex, 16).ok())?
+        });
+        match triple {
+            Some(byte) => {
+                decoded.push(byte);
+                at += 3;
+            }
+            None => {
+                decoded.extend(bytes.get(at));
+                at += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+/// Every spelling of a dot segment a URL parser removes, and the ordinary segments that look like
+/// one (#174: `url` 2.5.8 sends `/v2/orders/%2e` to `/v2/orders/`).
+const DOT_LIKE: [&str; 12] = [
+    ".",
+    "..",
+    "%2e",
+    "%2E",
+    ".%2e",
+    "%2e.",
+    "%2E%2e",
+    "%2e%2E",
+    "A..B",
+    "...",
+    "%2e%2e%2e",
+    "BRK.B",
+];
+
 /// A generator that produces both plausible endpoints and plausible attacks on them.
 fn candidate_path() -> impl Strategy<Value = String> {
     prop_oneof![
+        prop::sample::select(DOT_LIKE.as_slice()).prop_map(|s| format!("/v2/orders/{s}")),
+        prop::sample::select(DOT_LIKE.as_slice()).prop_map(|s| format!("/v2/positions/{s}")),
+        (
+            prop::sample::select(DOT_LIKE.as_slice()),
+            "[A-Za-z0-9]{1,8}"
+        )
+            .prop_map(|(s, tail)| format!("/v2/orders/{s}/{tail}")),
         Just("/v2/orders".to_owned()),
         Just("/v2/account".to_owned()),
         Just("/v2/account/activities".to_owned()),
@@ -142,6 +195,13 @@ proptest! {
                 !url.contains("//api.alpaca.markets") && !url.contains('\n'),
                 "and nothing in it can reach a live host or split a header: {}",
                 url
+            );
+            let parsed = reqwest::Url::parse(&url).map(|u| u.to_string());
+            prop_assert_eq!(
+                parsed,
+                Ok(url.clone()),
+                "and a URL parser sends it exactly as it was built, so the path judged is the \
+                 path sent (#174)"
             );
         }
     }
