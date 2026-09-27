@@ -802,6 +802,21 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     instrument restriction in front of a risk exit, which MI-1 names outright. Numbered 28 rather
     than beside 24 because renumbering accepted items invalidates references already written
     against them.
+29. **A partial gate fails closed for adding risk** (the coordinator's ruling on #157). While any
+    check, or part of one, is owed by a later PR or story, an opening or increasing order every
+    implemented check would allow returns `GateError::Unimplemented("evaluate", <story>)`, naming
+    the story that completes the first owed check; a denial or hold from an implemented check
+    reports first, and an owed check is listed `NotReached` for every purpose, since the gate did
+    not look. A reducing purpose passes a check that
+    does not exist yet (`AGENTS.md` rule 13; the broker is the backstop). A test that needs an
+    allowed opening stays pending until the PR that completes the last check it passes through.
+30. **Every buy is an opening and every sell above the position is an opening, a protective leg's
+    included** (DEC-32: v1 holds no short). The purpose table's "any side, `ProtectiveLeg`" row is
+    therefore a *sell within the position*: a protective "buy" adds risk, and a protective sell
+    above the position would open a short if it triggered, so it is typed `Open` and check 4 denies
+    it `would_cross_zero`, which is §9.1's own rule ("a sell above the position is denied").
+    §5.3's "bracket protective legs are checked against position + entry quantity" sits with rules
+    4 to 6 and is rule 4's (`sell_exceeds_available`, E6-6). Under `paused` or `stopped` such a sell is held at check 1 before check 4.
 
 ## Decisions needed
 
