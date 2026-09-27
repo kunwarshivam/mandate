@@ -30,7 +30,6 @@ fn retired(lineage: &str) -> LineageState {
 
 /// MC-N20: `now` equals `expires_at`, so the comparison is inclusive and the instrument goes.
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n20_a_thesis_at_its_horizon_removes_its_instrument() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false)];
 
@@ -70,7 +69,6 @@ fn mc_n20_a_thesis_at_its_horizon_removes_its_instrument() {
 /// One nanosecond before the horizon the thesis is current, which is what makes the comparison's
 /// direction visible.
 #[test]
-#[ignore = "pending E17-3"]
 fn the_horizon_removes_at_exactly_the_horizon_and_not_before() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false)];
     let just_before = at("2026-09-23T13:59:59.999999999Z");
@@ -91,7 +89,6 @@ fn the_horizon_removes_at_exactly_the_horizon_and_not_before() {
 
 /// MC-N21: twenty hours of horizon left, but the invalidation condition holds, so it goes at once.
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n21_an_invalidated_thesis_removes_at_once_before_its_horizon() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, true)];
 
@@ -115,7 +112,6 @@ fn mc_n21_an_invalidated_thesis_removes_at_once_before_its_horizon() {
 /// MC-N22: two unexpired theses, one of whose lineages retired. Retirement is read from the folded
 /// lineage state, never from a per-entry flag.
 #[test]
-#[ignore = "pending E17-9"]
 fn mc_n22_a_retired_lineage_removes_its_instrument_and_an_unexpired_thesis_stays() {
     let entries = [
         entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false),
@@ -152,7 +148,6 @@ fn mc_n22_a_retired_lineage_removes_its_instrument_and_an_unexpired_thesis_stays
 /// The reason order, shown where all three conditions hold at once: invalidated wins over a retired
 /// lineage, which wins over an expired horizon.
 #[test]
-#[ignore = "pending E17-9"]
 fn the_removal_reason_is_the_first_that_holds() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, true)];
 
@@ -170,7 +165,6 @@ fn the_removal_reason_is_the_first_that_holds() {
 
 /// A retired lineage outranks an expired horizon, which the invalidated case alone would not show.
 #[test]
-#[ignore = "pending E17-9"]
 fn a_retired_lineage_outranks_an_expired_horizon() {
     let entries = [entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false)];
 
@@ -188,7 +182,6 @@ fn a_retired_lineage_outranks_an_expired_horizon() {
 
 /// Several removals at once count down: each event's size is the universe after that removal.
 #[test]
-#[ignore = "pending E17-3"]
 fn several_removals_count_the_universe_down() {
     let entries = [
         entry(INSTRUMENT_2, "th-2", "th-2", EXPIRES_AT, false),
@@ -219,7 +212,6 @@ fn several_removals_count_the_universe_down() {
 
 /// The walk's order does not depend on the order the entries arrive in (ES-21).
 #[test]
-#[ignore = "pending E17-3"]
 fn the_removal_order_does_not_depend_on_the_input_order() {
     let forwards = [
         entry(INSTRUMENT_2, "th-2", "th-2", EXPIRES_AT, false),
@@ -242,7 +234,6 @@ fn the_removal_order_does_not_depend_on_the_input_order() {
 
 /// An entry list naming one instrument twice is an input error: MI-15 forbids a duplicate.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_entry_list_holding_one_instrument_twice_is_an_error() {
     let entries = [
         entry(INSTRUMENT_5, "th-1", "th-1", EXPIRES_AT, false),

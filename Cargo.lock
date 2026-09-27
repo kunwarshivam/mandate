@@ -1442,6 +1442,7 @@ dependencies = [
  "libtest-mimic",
  "mandate-accounting",
  "mandate-canon",
+ "mandate-domain",
  "mandate-journal",
  "mandate-num",
  "mandate-sim",

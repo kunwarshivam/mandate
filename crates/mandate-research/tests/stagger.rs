@@ -36,7 +36,6 @@ fn digest_of(workspace_id: &str, thesis: &str) -> Digest {
 
 /// MC-N23, and the oracle agreeing on each of the three pairs.
 #[test]
-#[ignore = "pending E17-3"]
 fn mc_n23_the_three_fixture_offsets() {
     let window = StaggerWindow(900);
     let pairs = [
@@ -63,7 +62,6 @@ fn mc_n23_the_three_fixture_offsets() {
 /// The offset depends on both ids, which is what spreads one thesis's flow across workspaces
 /// (DEC-100).
 #[test]
-#[ignore = "pending E17-3"]
 fn both_ids_change_the_offset() {
     let window = StaggerWindow(900);
     let a = stagger_offset(&workspace("ws_a"), &thesis_id("th-1"), window)
@@ -85,7 +83,6 @@ fn both_ids_change_the_offset() {
 
 /// §8.4: a window of 0 means no wait.
 #[test]
-#[ignore = "pending E17-3"]
 fn a_zero_window_gives_a_zero_offset() {
     let offset = stagger_offset(&workspace("ws_a"), &thesis_id("th-1"), StaggerWindow(0))
         .expect("zero is exact");
@@ -95,7 +92,6 @@ fn a_zero_window_gives_a_zero_offset() {
 
 /// A one-second window leaves one possible offset, which pins the modulus rather than the digest.
 #[test]
-#[ignore = "pending E17-3"]
 fn a_one_second_window_gives_a_zero_offset() {
     let offset = stagger_offset(&workspace("ws_a"), &thesis_id("th-1"), StaggerWindow(1))
         .expect("one is exact");
@@ -106,7 +102,6 @@ fn a_one_second_window_gives_a_zero_offset() {
 /// The hand-computed digest prefix, so a change in how the parts are joined is caught here and not
 /// only through the offset.
 #[test]
-#[ignore = "pending E17-3"]
 fn the_digest_is_the_workspace_a_zero_byte_and_the_thesis() {
     let expected = digest_of("ws_a", "th-1");
 
@@ -125,7 +120,6 @@ fn the_digest_is_the_workspace_a_zero_byte_and_the_thesis() {
 
 /// §8.4: an equity counts from the later of the admission and the next regular-session open.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_equity_release_waits_for_the_later_of_the_two_instants() {
     let admitted = at("2026-09-22T08:00:00.000000000Z");
     let open = at("2026-09-22T13:30:00.000000000Z");
@@ -141,7 +135,6 @@ fn an_equity_release_waits_for_the_later_of_the_two_instants() {
 
 /// An admission inside the session is the later instant, so the offset runs from it.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_equity_admitted_inside_the_session_counts_from_the_admission() {
     let admitted = at("2026-09-22T14:00:00.000000000Z");
     let open = at("2026-09-22T13:30:00.000000000Z");
@@ -157,7 +150,6 @@ fn an_equity_admitted_inside_the_session_counts_from_the_admission() {
 
 /// §8.4: crypto trades continuously, so the offset runs from the admission and no calendar is needed.
 #[test]
-#[ignore = "pending E17-3"]
 fn a_crypto_release_is_counted_from_the_admission() {
     let admitted = at("2026-09-22T03:00:00.000000000Z");
 
@@ -172,7 +164,6 @@ fn a_crypto_release_is_counted_from_the_admission() {
 
 /// A zero offset releases at the anchor itself.
 #[test]
-#[ignore = "pending E17-3"]
 fn a_zero_offset_releases_at_the_anchor() {
     let admitted = at("2026-09-22T14:00:00.000000000Z");
 
@@ -184,7 +175,6 @@ fn a_zero_offset_releases_at_the_anchor() {
 /// An equity with no next regular open is an error, not a release at the admission: guessing would
 /// put an opening order outside the session §8.4 requires.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_equity_without_a_next_regular_open_is_an_error() {
     let admitted = at("2026-09-22T08:00:00.000000000Z");
 
@@ -199,7 +189,6 @@ fn an_equity_without_a_next_regular_open_is_an_error() {
 
 /// §8.4's proposal cadence: the interval is a policy minimum, and the crate reads no clock.
 #[test]
-#[ignore = "pending E17-3"]
 fn the_next_proposal_is_one_interval_after_the_last() {
     let last = at("2026-09-22T14:00:00.000000000Z");
 
@@ -213,7 +202,6 @@ fn the_next_proposal_is_one_interval_after_the_last() {
 
 /// Before the first proposal there is no earliest instant to wait for.
 #[test]
-#[ignore = "pending E17-3"]
 fn an_agent_that_has_never_proposed_may_propose_now() {
     let next = next_proposal_at(None, 3_600).expect("the cadence is decided");
 

@@ -156,8 +156,9 @@ DEC-130; the paths arrive with the tests PR, which updates this entry.
 ## Agent runtime and kill switches
 
 Planned by [the E6-1 and E6-5 task brief](../../../docs/project/tasks/E6-1-agent-runtime-and-kill-switches.md)
-and DEC-131. The crate holds stubs until the implementation PR; the 88 tests below are pending and
-every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
+and DEC-131, and implemented in the DEC-77 stage-3 PR: every stub carries its real logic, the 88
+pending markers are gone, and all 101 tests run live: the round-3 sanctioned case plus the twelve the
+implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 - **Spec:** `docs/specs/mandate.md` section 2 (lifecycle and applying a version), 2.3 (the working
   universe as runtime state), 5.2 (inputs, the risk clock, MI-13), 5.5 (the agent-scoped kill
@@ -173,10 +174,13 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
   `FlattenPlan` — which has no account-wide variant, so `cancel-all` and `close-position` are
   unrepresentable), `crates/mandate-runtime/src/ports.rs` (the pure `IdGen`, `GateDryRun`, and
   `OrderPlan` in `Ports`, and the shell-driven `IntentSink` and `TimerSource`),
-  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant). Over
+  `crates/mandate-runtime/src/error.rs` (`RuntimeError` with a stable `code()` per variant), and
+  `crates/mandate-runtime/src/payload.rs` (the one place a journaled payload becomes a core value and
+  a core value becomes a canonical payload again, so every draft the runtime writes is one its own
+  fold can rebuild state from). Over
   `mandate-journal`'s drafts and append protocol unchanged. The shell (tokio, the
   Postgres `LISTEN`/`NOTIFY` tail) is an M6 crate and is not here.
-- **Tests:** `crates/mandate-runtime/tests/hand.rs` (62 hand cases: the fold's sequencing and loud
+- **Tests:** `crates/mandate-runtime/tests/hand.rs` (75 hand cases: the fold's sequencing and loud
   refusals, the risk clock and deadlines, derived ids and fencing, modes and restrictions, decisions,
   approvals, version application, recovery, and the kill switches),
   `crates/mandate-runtime/tests/properties.rs` (26 properties against three oracles that share no
@@ -188,8 +192,8 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 - **Reference cases:** none move. `trading_domain::RC-14`'s `kill_switch` variant also needs E7-2's
   `actions` and E6-9's `agent_mode`; the mandate suite's flatten family MC-F01 to MC-F04 belongs to
   `mandate-risk`.
-- **Run:** `cargo nextest run -p mandate-runtime` (and, while the tests are pending,
-  `cargo nextest run -p mandate-runtime --run-ignored ignored-only --no-fail-fast`).
+- **Run:** `cargo nextest run -p mandate-runtime`, and the mutation gate the implementation PR must
+  pass, `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants`.
 
 ## Idempotent executor and broker connector
 
@@ -404,9 +408,16 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   each rejection carries), `crates/mandate-spec/tests/validate.rs` (the closed §7 list, the provenance
   rules, the confirmation screen's four figures), `crates/mandate-spec/tests/policy.rs` (the nearest
   broken ancestor, each key kind, the absence asymmetry),
+  `crates/mandate-spec/tests/risk_day.rs` (the year tiled without gap or overlap),
+  `crates/mandate-spec/tests/goal.rs` (each §3.1 "done when" row, and a `profit_stop` left to the risk
+  state), `crates/mandate-spec/tests/risk.rs` (the §5 fold: the ladder and its hysteresis boundary,
+  breach confirmation either side of the window, the two-quote hard trigger, the rollover, the daily
+  lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
+  carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
+  `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The risk-state, goal, and classification tests and
-  their oracles arrive with the later tests PRs. Planted bugs per test: the task brief.
+  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
+  PR. Planted bugs per test: the task brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, B, and N stay with streams G, H,
   and J and fail as "not interpreted until" their owning story. A rejection that carries no reason
