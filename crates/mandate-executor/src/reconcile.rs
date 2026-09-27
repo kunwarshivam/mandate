@@ -1273,6 +1273,29 @@ mod tests {
             1,
             "a run since the start releases the held opening at the next tick"
         );
+
+        for purpose in [
+            Purpose::Protective,
+            Purpose::OwnerExit,
+            Purpose::DiscretionaryExit,
+            Purpose::Flatten,
+            Purpose::RiskExit,
+        ] {
+            let mut unreported = Executor::opened(&ports)?;
+            filled_ten(&mut unreported)?;
+            let reducing = unreported.run(
+                intent("01JABCDEFGHJKMNPQRSTVWXYZ2", "agent-a", Side::Sell, purpose)?,
+                &ports,
+            )?;
+            assert_eq!(
+                (
+                    submitted(&reducing),
+                    gate_decision(&reducing).map(|(verdict, _)| verdict)
+                ),
+                (1, Some("allow".to_owned())),
+                "on a stream with no account and no run, a {purpose:?} still goes (rule 13)"
+            );
+        }
         Ok(())
     }
 

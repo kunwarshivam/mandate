@@ -323,6 +323,15 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   trading endpoint distinguishes a rejection from a duplicate id from an absence by status: eleven
   scenarios are recorded against the paper host and twelve are hand-built from the spec. Planted bugs
   per test (21): the task brief.
+- **Startup hold:** the gate holds, never denies, an opening until an account has been journaled
+  and a reconciliation has run since `Input::Started` (`gate::unreconciled_opening`,
+  `ExecutorState::reconciled_since_start`; the coordinator's rulings on #174). Its three live cases
+  are in-module in `crates/mandate-executor/src/reconcile.rs`:
+  `an_opening_is_held_until_a_reconciliation_has_run_since_the_start` (a reported account, the
+  release at the next tick, and every non-adding purpose allowed on a stream with neither),
+  `a_run_from_before_the_restart_does_not_release_an_opening`, and
+  `the_hold_lifts_on_an_account_and_a_run_in_either_order`. Run: `cargo nextest run -p
+  mandate-executor --lib reconcile::tests`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they

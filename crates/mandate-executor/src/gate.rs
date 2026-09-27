@@ -29,7 +29,8 @@ pub struct PartialGateDecision {
     /// Whether the first failing check holds rather than denies: one of the holds `AGENTS.md`
     /// rule 13 names for an exit (agent mode `paused` or `stopped`, an `Unknown` order in the
     /// instrument, or `broker` on a blocked account), or `startup_reconciliation_pending` on an
-    /// opening before a reconciliation and an account since the start (#206 review).
+    /// opening until an account has been journaled, at any time, and a reconciliation has run
+    /// since this process started (#206 review; #230 review, minor 1).
     held: bool,
 }
 
