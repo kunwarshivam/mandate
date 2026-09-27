@@ -779,7 +779,6 @@ fn a_rung_trims_only_after_breach_confirm_s() {
 
 /// The close window is the last ten minutes of the session the calendar gives, not of 16:00.
 #[test]
-#[ignore = "pending E6-8"]
 fn the_close_window_follows_the_early_close_calendar() {
     let full = mandate_risk::session_at(
         at("2026-09-22T19:50:00Z"),
@@ -824,7 +823,6 @@ fn an_increase_in_the_closing_ten_minutes_is_close_window() {
 /// window, so this is the code's only reachable path: an *opening* order at 09:29 is in pre-market
 /// and check 3's session rule denies it first, and the closing ten minutes report `close_window`.
 #[test]
-#[ignore = "pending E6-6"]
 fn the_opening_auction_denies_a_market_order() {
     let session = mandate_risk::session_at(
         at("2026-09-22T13:29:00Z"),
@@ -854,7 +852,6 @@ fn the_opening_auction_denies_a_market_order() {
 
 /// `RC-25` step 8: an owner exit outside the session without a confirmed bid defers.
 #[test]
-#[ignore = "pending E6-6"]
 fn an_unconfirmed_owner_exit_defers() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
@@ -871,7 +868,6 @@ fn an_unconfirmed_owner_exit_defers() {
 
 /// `RC-25` step 5: an equity discretionary exit outside the session defers, never denies.
 #[test]
-#[ignore = "pending E6-6"]
 fn a_discretionary_exit_outside_the_session_defers() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
@@ -952,7 +948,6 @@ fn a_cancel_before_a_risk_reducing_order_is_exempt() {
 
 /// Buying power is the lower of the model's and the broker's figure (DEC-34).
 #[test]
-#[ignore = "pending E6-6"]
 fn buying_power_is_the_lower_of_the_two() {
     let mut s = Scenario::allowing();
     s.account.model_buying_power = usd("10000");
@@ -969,7 +964,6 @@ fn buying_power_is_the_lower_of_the_two() {
 
 /// A cash account's shortfall is a different code from a margin account's (`RC-08`, `RC-18`).
 #[test]
-#[ignore = "pending E6-6"]
 fn a_cash_account_reports_the_settled_code() {
     let mut s = Scenario::allowing();
     s.account.account_type = mandate_risk::AccountType::Cash;
@@ -987,7 +981,6 @@ fn a_cash_account_reports_the_settled_code() {
 
 /// The fee reservation is part of check 7's left-hand side (§9.5).
 #[test]
-#[ignore = "pending E6-6"]
 fn a_reservation_includes_the_rounded_fee() {
     let mut s = Scenario::allowing();
     s.account.model_buying_power = usd("100");
@@ -1060,7 +1053,6 @@ fn required_counts_every_component() {
 
 /// The window is today plus the four prior trading days (§9.2), not the four prior alone.
 #[test]
-#[ignore = "pending E6-6"]
 fn the_window_is_today_plus_four() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
@@ -1415,7 +1407,6 @@ fn a_risk_exit_accepts_a_last_trade_mark() {
 
 /// §4.3: an opening outside the regular session is denied, and an extended-hours one needs a limit.
 #[test]
-#[ignore = "pending E6-6"]
 fn an_opening_outside_the_regular_session_is_denied() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
@@ -1428,7 +1419,6 @@ fn an_opening_outside_the_regular_session_is_denied() {
 }
 
 #[test]
-#[ignore = "pending E6-6"]
 fn an_extended_hours_opening_needs_a_limit() {
     let mut s = Scenario::allowing();
     s.now = at("2026-09-22T21:00:00Z");
@@ -1499,7 +1489,6 @@ fn order_constraints_report_the_first_failing_rule() {
 
 /// §5.3: the first pass excludes the agent's own protective and resting opening orders.
 #[test]
-#[ignore = "pending E6-6"]
 fn the_first_pass_excludes_the_agents_own_protective_orders() {
     let mut s = Scenario::allowing();
     let mut protective = open_order(AgentId(1), INSTRUMENT_3, "0");

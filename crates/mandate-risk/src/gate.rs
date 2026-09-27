@@ -16,8 +16,8 @@ use mandate_num::Qty;
 
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
-    GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Side,
-    Verdict, WorkingUniverse, floor, limits,
+    GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Session,
+    SessionAt, Side, Verdict, WorkingUniverse, account_rules, floor, limits, session,
 };
 
 /// The eight checks, in §9.1's order.
@@ -35,29 +35,28 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
-/// is whole for a US equity but still owes §3.2 item 7's "USD pairs only" for crypto (E6-10);
-/// check 3 its sessions and auction windows (E6-6; the halt is here),
-/// check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls (E6-8) and check 7 buying power
-/// (E6-6), and checks 5 and 8 are not written yet.
+/// The story that completes a check, while any part of it is owed: check 5 (marks and the collar)
+/// and check 6's conduct controls are E6-8's, and check 2 still owes §3.2 item 7's "USD pairs
+/// only" for crypto (E6-10). Checks 1, 3, 4, 7 and 8 are whole.
 ///
 /// Check 2 takes the input because "USD pairs only" has no field to read: `InstrumentSnapshot`
 /// carries no quote currency and `AssetId` is a UUID, so nothing distinguishes BTC/USD from
-/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened the moment E6-6
-/// and E6-8 land, so a crypto opening stays owed and is refused by the fail-closed rule until
-/// E6-10 supplies the field (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues
-/// only for an opening.
+/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened the moment E6-8
+/// lands, so a crypto opening stays owed and is refused by the fail-closed rule until E6-10
+/// supplies the field (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues only
+/// for an opening.
 fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
     match check {
         Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
             Some("E6-10")
         }
-        Check::AccountAndMode | Check::UniverseAndLimits => None,
-        Check::SessionAndHalt
+        Check::MarkAndCollar | Check::ConductControls => Some("E6-8"),
+        Check::AccountAndMode
+        | Check::UniverseAndLimits
+        | Check::SessionAndHalt
         | Check::OrderConstraints
         | Check::BuyingPowerAndExposure
-        | Check::DayTradeBudget => Some("E6-6"),
-        Check::MarkAndCollar | Check::ConductControls => Some("E6-8"),
+        | Check::DayTradeBudget => None,
     }
 }
 
@@ -77,6 +76,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let p = &input.proposed;
     let purpose = assign_purpose(p.origin, p.side, p.qty, held);
     let opening = matches!(purpose, Purpose::Open | Purpose::Increase);
+    let at = session::derive(input.now, input.config, input.instrument.asset_class)?;
     let mut computed = Computed::default();
     let mut checks = Vec::with_capacity(ORDER.len());
     let mut stop: Option<Stop> = None;
@@ -86,7 +86,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
             checks.push(CheckOutcome::NotReached(check));
             continue;
         }
-        match run(check, input, purpose, opening, &mut computed)? {
+        match run(check, input, (purpose, opening, &at), &mut computed)? {
             Some((verdict, reason)) => {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
@@ -108,7 +108,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
         (None, None) => (Verdict::Allow, None),
     };
     let pacing = if verdict == Verdict::Allow {
-        presumed_halt_repricing(input)
+        market_exit_repricing(input, &at)
     } else {
         None
     };
@@ -125,8 +125,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
 fn run(
     check: Check,
     input: &GateInput<'_>,
-    purpose: Purpose,
-    opening: bool,
+    (purpose, opening, at): (Purpose, bool, &SessionAt),
     computed: &mut Computed,
 ) -> Result<Option<Stop>, GateError> {
     match check {
@@ -138,10 +137,16 @@ fn run(
             },
             stop => Ok(stop),
         },
-        Check::SessionAndHalt if opening => Ok(halt(input)),
-        Check::OrderConstraints => Ok(order_constraints(input, opening)),
+        Check::SessionAndHalt => {
+            Ok(session::rules(input, purpose, at).or_else(|| halt(input).filter(|_| opening)))
+        }
+        Check::OrderConstraints => order_constraints(input, opening),
         Check::ConductControls if opening => Ok(limits::orders_per_day(input, computed)),
-        Check::BuyingPowerAndExposure if opening => limits::gross_exposure(input, computed),
+        Check::BuyingPowerAndExposure if opening => match account_rules::buying_power(input)? {
+            None => limits::gross_exposure(input, computed),
+            stop => Ok(stop),
+        },
+        Check::DayTradeBudget if opening => account_rules::day_trade_budget(input),
         _ => Ok(None),
     }
 }
@@ -196,9 +201,9 @@ fn working_universe(
     Ok(None)
 }
 
-/// Check 3's halt (§4.4): a halted or paused instrument takes no new opening order. Only an opening
-/// reaches here, so a halt never denies an exit (MI-1); a presumed halt, a dropped status feed, is
-/// not a halt and denies nothing here (DEC-129 item 24).
+/// Check 3's halt (§4.4), after the session rules: a halted or paused instrument takes no new
+/// opening order. It is applied to an opening only, so a halt never denies an exit (MI-1); a
+/// presumed halt, a dropped status feed, is not a halt and denies nothing here (DEC-129 item 24).
 fn halt(input: &GateInput<'_>) -> Option<Stop> {
     input
         .instrument
@@ -206,38 +211,54 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
         .then_some((Verdict::Deny, ReasonCode::InstrumentHalted))
 }
 
-/// §4.4's "no market orders" applies under a halt, real or presumed: a halted instrument, or a
-/// dropped status feed. The stale-quote arm of a presumed halt reads the mark's freshness, which is
-/// check 5's (E6-8). The `halted` arm cannot change check 4's verdict on an opening, which check 3
-/// has already denied; it stays because the same predicate re-prices an exit under a real halt
-/// (DEC-129 item 31), and as defence in depth should check 3's halt ever be reordered.
-fn market_orders_barred(input: &GateInput<'_>) -> bool {
-    input.instrument.halted || !input.instrument.status_feed_current
+/// §5.1: a market order is allowed only in the regular session with current status data, so it is
+/// barred under a halt, real or presumed (§4.4: a halted instrument or a dropped status feed), and
+/// for a US equity outside the regular session (§9.4: "exits in extended hours as limit orders").
+/// The stale-quote arm of a presumed halt reads the mark's freshness, which is check 5's (E6-8).
+fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
+    let i = input.instrument;
+    i.halted
+        || !i.status_feed_current
+        || (i.asset_class == AssetClass::UsEquity && at.session != Session::Regular)
 }
 
-/// §4.4 and §5.6 (DEC-129 item 28): an allowed market order under a halt, real or presumed, is sent
-/// as a marketable limit at its proposed quantity and price, never as a market order. Only a
-/// reduction gets here with a market kind under a halt, since checks 3 and 4 deny such an opening.
-fn presumed_halt_repricing(input: &GateInput<'_>) -> Option<Pacing> {
-    (market_orders_barred(input) && input.proposed.kind == ProposedKind::Market).then(|| Pacing {
-        qty: input.proposed.qty,
-        limit_price: input.proposed.limit_price,
-        marketable_limit_required: true,
-        applied: BTreeSet::new(),
+/// §4.4, §5.6 and §9.4 (DEC-129 items 28 and 31): an allowed market-order exit where market orders
+/// are barred is sent as a marketable limit at its proposed quantity and price, never as a market
+/// order, and never denied. Only a reduction is allowed with a market kind, since check 4 denies
+/// every market opening.
+fn market_exit_repricing(input: &GateInput<'_>, at: &SessionAt) -> Option<Pacing> {
+    (market_orders_barred(input, at) && input.proposed.kind == ProposedKind::Market).then(|| {
+        Pacing {
+            qty: input.proposed.qty,
+            limit_price: input.proposed.limit_price,
+            marketable_limit_required: true,
+            applied: BTreeSet::new(),
+        }
     })
 }
 
-/// Check 4, the rules this story owns: rule 3 (every sell above the position, a protective leg's
-/// included, is typed an opening by [`assign_purpose`], so it is the only sell that reaches here as
-/// one), then rule 9, which denies an opening and holds a reduction under one code (DEC-129 item
-/// 22), then §4.4's presumed halt: a market order to open or increase is denied
-/// `market_order_not_allowed` (DEC-129 items 24 and 28). §5.1's wider rule, that every opening is a
-/// limit order in any state of the feed, is the v1 order policy's, which E6-6 completes; until then
-/// such an opening is refused by the fail-closed rule (DEC-129 item 29), never allowed. §5.3's "bracket protective legs are checked against position + entry quantity" belongs to
-/// rules 4 to 6 (`sell_exceeds_available`, E6-6), not to rule 3.
-fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
-    if opening && input.proposed.side == Side::Sell {
-        return Some((Verdict::Deny, ReasonCode::WouldCrossZero));
+/// Check 4, §5.3's rules in list order. Rule 1 is unrepresentable (a proposal has no notional).
+/// Rules 2 and 7 have no registered code, so an opening that breaks one is refused rather than
+/// decided ([`account_rules::unregistered_rules`], DEC-129 item 27). Rule 3: every sell above the
+/// position, a protective leg's included, is typed an opening by [`assign_purpose`], so it is the
+/// only sell that reaches here as one. Rule 4 binds a reduction and rules 5, 6 and 8 an opening
+/// ([`account_rules`]). Rule 9 denies an opening and holds a reduction under one code (DEC-129 item
+/// 22). Then §5.1's order policy: every opening is a limit order, so a market opening is
+/// `market_order_not_allowed` in any state of the feed (DEC-129 item 24).
+fn order_constraints(input: &GateInput<'_>, opening: bool) -> Result<Option<Stop>, GateError> {
+    if opening {
+        account_rules::unregistered_rules(input)?;
+        if input.proposed.side == Side::Sell {
+            return Ok(Some((Verdict::Deny, ReasonCode::WouldCrossZero)));
+        }
+    }
+    let rules_4_to_8 = if opening {
+        account_rules::one_working_order(input)
+    } else {
+        account_rules::sell_available(input)?
+    };
+    if rules_4_to_8.is_some() {
+        return Ok(rules_4_to_8);
     }
     if input
         .account
@@ -249,12 +270,10 @@ fn order_constraints(input: &GateInput<'_>, opening: bool) -> Option<Stop> {
         } else {
             Verdict::Hold
         };
-        return Some((verdict, ReasonCode::UnknownOrderInFlight));
+        return Ok(Some((verdict, ReasonCode::UnknownOrderInFlight)));
     }
-    if opening && input.proposed.kind == ProposedKind::Market && market_orders_barred(input) {
-        return Some((Verdict::Deny, ReasonCode::MarketOrderNotAllowed));
-    }
-    None
+    Ok((opening && input.proposed.kind == ProposedKind::Market)
+        .then_some((Verdict::Deny, ReasonCode::MarketOrderNotAllowed)))
 }
 
 /// §9.1's purpose table, with the two rows v1's long-only book decides (DEC-129 item 30). Every
@@ -540,12 +559,12 @@ mod tests {
             [
                 CheckOutcome::Passed(Check::AccountAndMode),
                 CheckOutcome::Passed(Check::UniverseAndLimits),
-                CheckOutcome::NotReached(Check::SessionAndHalt),
-                CheckOutcome::NotReached(Check::OrderConstraints),
+                CheckOutcome::Passed(Check::SessionAndHalt),
+                CheckOutcome::Passed(Check::OrderConstraints),
                 CheckOutcome::NotReached(Check::MarkAndCollar),
                 CheckOutcome::NotReached(Check::ConductControls),
-                CheckOutcome::NotReached(Check::BuyingPowerAndExposure),
-                CheckOutcome::NotReached(Check::DayTradeBudget),
+                CheckOutcome::Passed(Check::BuyingPowerAndExposure),
+                CheckOutcome::Passed(Check::DayTradeBudget),
             ],
             "an owed check is journaled NotReached for a reduction too, never Passed: the gate did \
              not look"
@@ -630,12 +649,12 @@ mod tests {
     }
 
     /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
-    /// that completes the first check still owed (check 3's sessions, E6-6).
+    /// that completes the first check still owed (check 5's marks and collar, E6-8).
     #[test]
     fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
         let refused = allowing()?.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-8"))),
             "a partial gate fails closed for adding risk, not open: {refused:?}"
         );
         Ok(())
@@ -710,7 +729,7 @@ mod tests {
         o.account.equity = Usd::parse("2000")?;
         let refused = o.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-8"))),
             "every comparison is `>`, so a value exactly at a limit passes it: {refused:?}"
         );
         Ok(())
@@ -752,8 +771,8 @@ mod tests {
             .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
         let (a, b) = (other_group.decide(), run_its_course.decide());
         assert!(
-            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-6")))
-                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-6"))),
+            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-8")))
+                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-8"))),
             "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
         );
         Ok(())
@@ -818,7 +837,7 @@ mod tests {
                 limit_row(held_elsewhere("1400"))?,
                 limit_row(held_elsewhere("1400.000000001"))?,
             ],
-            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-8"), Ok(ReasonCode::GrossExposureLimit)],
             "1400 + 100 against min(2000, agent equity 1500)"
         );
         Ok(())
@@ -845,7 +864,7 @@ mod tests {
         held_here("100.000000001")(&mut over)?;
         assert_eq!(
             (limit_row(held_here("100"))?, over.decide()?.computed.cap,),
-            (Err("E6-6"), Some(Usd::parse("200")?)),
+            (Err("E6-8"), Some(Usd::parse("200")?)),
             "100 + 100 is exactly the cap of 200; over it the denial reports cap 200"
         );
         assert_eq!(
@@ -884,14 +903,15 @@ mod tests {
                 limit_row(other_agent("900"))?,
                 limit_row(other_agent("900.000000001"))?,
             ],
-            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-8"), Ok(ReasonCode::GrossExposureLimit)],
             "900 of another agent's + 100 against the account's 1000"
         );
         Ok(())
     }
 
     /// Working cost is the agent's working *opening, non-protective* orders: a 100000 order in the
-    /// instrument that is protective, or that is not an opening, changes nothing.
+    /// instrument that is protective, or that is not an opening, passes check 2's cap and is met
+    /// only by check 4's own rules, 8 and 6.
     #[test]
     fn working_cost_ignores_protective_and_non_opening_orders() -> Result<(), GateError> {
         let big_order = |protective: bool, opening: bool| {
@@ -918,8 +938,13 @@ mod tests {
                 limit_row(big_order(false, false))?,
                 limit_row(big_order(false, true))?,
             ],
-            [Err("E6-6"), Err("E6-6"), Ok(ReasonCode::ConcentrationLimit)],
-            "protective, non-opening, and an opening order that does count"
+            [
+                Ok(ReasonCode::AddBlockedByProtectiveOrder),
+                Ok(ReasonCode::WorkingOrderLimit),
+                Ok(ReasonCode::ConcentrationLimit)
+            ],
+            "protective and non-opening orders pass check 2's cap and meet check 4's rules 8 and \
+             6; an opening order counts toward the cap"
         );
         Ok(())
     }
@@ -931,9 +956,8 @@ mod tests {
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
     /// rule of `ref.py`'s `order_decision` (check 1), then `exits_only` denying an opening (§7.4),
-    /// then §4.4's halt for an opening at check 3, then
-    /// §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal of
-    /// DEC-129 item 29; an exit is allowed, and re-priced as a marketable limit when it is a
+    /// then §4.4's halt for an opening at check 3, then §5.1's limit-only openings at check 4, then
+    /// the fail-closed refusal of DEC-129 item 29 for check 5 (E6-8); an exit is allowed, and re-priced as a marketable limit when it is a
     /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
     /// Only the `Market` kind is a market order: a bracket, an IOC and a plain limit are limits.
     fn halt_oracle(
@@ -965,10 +989,10 @@ mod tests {
             if halted {
                 return deny(ReasonCode::InstrumentHalted, Check::SessionAndHalt);
             }
-            if market && !feed_current {
+            if market {
                 return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
             }
-            return Err("E6-6");
+            return Err("E6-8");
         }
         let repriced = market && (halted || !feed_current);
         let pacing = repriced.then(|| Pacing {
@@ -982,8 +1006,8 @@ mod tests {
 
     /// Every side, origin (10), `AgentMode` (all 4), halt, status feed and `ProposedKind` (all 4)
     /// against [`halt_oracle`]: 2 × 10 × 4 × 2 × 2 × 4 = 1280 rows. It pins that a halt denies
-    /// only an opening and only at check 3; that a market opening is denied at check 4 under a
-    /// dropped feed and nowhere else, and a bracket or IOC opening never is; that a market exit
+    /// only an opening and only at check 3; that a market opening is denied at check 4 whatever
+    /// the feed, and a bracket or IOC opening never is; that a market exit
     /// under a real or presumed halt is allowed and re-priced at its own quantity and price, in
     /// every mode that lets it through, `exits_only` included; that a limit, bracket or IOC exit
     /// and a market exit with a current feed are not paced; and that a held exit carries no
@@ -1275,7 +1299,7 @@ mod tests {
     ///
     /// §3.2 item 7 admits USD pairs only and nothing in `InstrumentSnapshot` says what a pair is
     /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open the moment
-    /// E6-6 and E6-8 land. The refusal names E6-10 rather than E6-6, which is what distinguishes
+    /// E6-8 lands. The refusal names E6-10 rather than E6-8, which is what distinguishes
     /// this from the ordinary fail-closed refusal every opening gets today.
     #[test]
     fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
