@@ -125,6 +125,59 @@ pub fn overnight(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
     }
 }
 
+/// `hh:mm` New York on `day` in **standard** time, which is UTC−05:00: [`et`]'s offset is the
+/// daylight one, so a case that has to tell a fixed offset from the America/New_York rules cannot be
+/// written with it.
+pub fn est(day: &str, clock: &str) -> String {
+    format!("{day}T{clock}:00-05:00")
+}
+
+/// A regular-session bar of a standard-time `day`, the [`bar`] of a November week.
+pub fn standard_bar(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    let [open, high, low, close, volume] = ohlcv;
+    SimBar {
+        start: at(&est(day, clock)),
+        trade_date: d(day),
+        open: price(open),
+        high: price(high),
+        low: price(low),
+        close: price(close),
+        volume: qty(volume),
+        session: Session::Regular,
+        session_start: at(&est(day, REGULAR_CLOCK)),
+        auction: false,
+    }
+}
+
+/// The first regular bar of a standard-time day, the [`auction`] of a November week.
+pub fn standard_auction(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    SimBar {
+        auction: true,
+        ..standard_bar(day, clock, ohlcv)
+    }
+}
+
+/// An after-hours bar of a standard-time `day`, the [`after_hours`] of a November week.
+pub fn standard_after_hours(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    SimBar {
+        session: Session::AfterHours,
+        session_start: at(&est(day, AFTER_HOURS_CLOCK)),
+        ..standard_bar(day, clock, ohlcv)
+    }
+}
+
+/// An overnight bar of a standard-time `day`, the [`overnight`] of a November week: its trade date is
+/// the calendar's, for the reason [`overnight`] gives.
+pub fn standard_overnight(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
+    let start = at(&est(day, clock));
+    SimBar {
+        session: Session::Overnight,
+        session_start: at(&est(day, "20:00")),
+        trade_date: us_2026().equity_trade_date(start).unwrap(),
+        ..standard_bar(day, clock, ohlcv)
+    }
+}
+
 /// A crypto bar, in UTC: crypto trades continuously and its day ends at 00:00 UTC (spec §2.2, §4.3).
 pub fn continuous(day: &str, clock: &str, ohlcv: [&str; 5]) -> SimBar {
     let [open, high, low, close, volume] = ohlcv;

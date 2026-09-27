@@ -75,7 +75,6 @@ fn one_round_trip() -> Totals {
 /// `sharpe_squared_annualized` 28.93510288368; `sharpe_annualized` 5.379135886337;
 /// `max_drawdown` 0.019801980199 at peak 1 and trough 2, 2000 USD; `turnover` 0.5.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_report_carries_every_figure_the_prd_names() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -118,7 +117,6 @@ fn a_report_carries_every_figure_the_prd_names() {
 
 /// A single period defines a mean but no dispersion: `absent` says which (DEC-127 item 7).
 #[test]
-#[ignore = "pending E4-2"]
 fn one_period_leaves_the_dispersion_fields_absent() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -143,7 +141,6 @@ fn one_period_leaves_the_dispersion_fields_absent() {
 /// A flat run has a variance of zero, so the Sharpe is absent rather than infinite, and every other
 /// figure is zero.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_flat_run_leaves_the_sharpe_absent_with_zero_variance() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -169,7 +166,6 @@ fn a_flat_run_leaves_the_sharpe_absent_with_zero_variance() {
 /// variance is zero and the Sharpe is absent as `zero_variance`. The **exact** net P&L is still
 /// positive while the total return is zero: a figure below the report's last place is not a figure.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -198,7 +194,6 @@ fn a_variance_that_rounds_to_zero_leaves_the_sharpe_absent_as_zero_variance() {
 /// A constant rise never drops below its peak, so the drawdown is zero and both periods it reports
 /// are period 0, the starting equity (the brief's first degenerate series).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_run_that_only_rises_has_no_drawdown() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -223,7 +218,6 @@ fn a_run_that_only_rises_has_no_drawdown() {
 /// The drawdown is measured from the running peak, not from the start: 100000 → 120000 → 90000 has
 /// round((120000 − 90000) ÷ 120000, 12, ceiling) = 0.25, not 0.1.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_drawdown_after_a_new_peak_is_measured_from_that_peak() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -243,7 +237,6 @@ fn a_drawdown_after_a_new_peak_is_measured_from_that_peak() {
 /// 100000 → 99000 → 98000 gives 0.02 at peak 0 and trough 2, and a negative Sharpe whose magnitude
 /// is the **negated ceiling** root of the squared figure (−140.70763353166 for 19798.638134079871).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_run_that_only_falls_measures_from_the_starting_equity() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -266,7 +259,6 @@ fn a_run_that_only_falls_measures_from_the_starting_equity() {
 /// A negative excess mean reports a negative sign and a Sharpe rounded towards minus infinity, so
 /// the magnitude comes from the ceiling root and the figure never reads better than the truth.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_negative_sharpe_rounds_away_from_zero() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -287,13 +279,87 @@ fn a_negative_sharpe_rounds_away_from_zero() {
     );
 }
 
+/// A non-zero risk-free rate is subtracted from the mean **before** the Sharpe, and from nothing
+/// else (DEC-127 item 6, FR-4.2). On the series 100000 → 102000 → 103020 the period returns are
+/// exactly 0.02 and 0.01, so `return_sum` is 0.03, `return_sum_of_squares` is 0.0005, the mean is
+/// 0.015, and the sample variance is (2 × 0.0005 − 0.03²) ÷ (2 × 1) = 0.0001 ÷ 2 = 0.00005, whose
+/// ceiling root is 0.007071067812. At `risk_free_per_period` 0.005 the excess mean is
+/// 0.015 − 0.005 = 0.01 and the squared Sharpe is 0.01² ÷ 0.00005 = **2** exactly, whose floor root
+/// is 1.414213562373; annualized, 2 × 252 = 504 with a floor root of 22.449944320643. Ignoring the
+/// rate would report 0.015² ÷ 0.00005 = 4.5 and a Sharpe of 2.121320343559, and the rate touches
+/// neither the variance nor the returns, so both are asserted at their risk-free-free values.
+#[test]
+fn a_non_zero_risk_free_rate_is_subtracted_before_the_sharpe() {
+    let metrics = Metrics::of(
+        usd("100000"),
+        &observations(&["102000", "103020"]),
+        &no_trades(),
+        &MetricsConfig {
+            periods_per_year: 252,
+            risk_free_per_period: ratio("0.005"),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(metrics.risk_free_per_period, ratio("0.005"));
+    assert_eq!(metrics.return_sum, ratio("0.03"));
+    assert_eq!(metrics.return_sum_of_squares, ratio("0.0005"));
+    assert_eq!(metrics.mean_return, ratio("0.015"));
+    assert_eq!(
+        metrics.variance,
+        Some(ratio("0.00005")),
+        "the rate is not part of the dispersion"
+    );
+    assert_eq!(metrics.volatility, Some(ratio("0.007071067812")));
+    assert_eq!(metrics.sharpe_sign, Sign::Positive);
+    assert_eq!(metrics.sharpe_squared, Some(ratio("2")));
+    assert_eq!(metrics.sharpe, Some(ratio("1.414213562373")));
+    assert_eq!(metrics.sharpe_squared_annualized, Some(ratio("504")));
+    assert_eq!(metrics.sharpe_annualized, Some(ratio("22.449944320643")));
+    assert_eq!(
+        metrics.total_return,
+        ratio("0.0302"),
+        "the reported return is the run's, never net of the rate"
+    );
+}
+
+/// A risk-free rate above the mean makes the excess negative, so the Sharpe is negative although
+/// every period return and the run itself are positive: on the same series, at
+/// `risk_free_per_period` 0.02, the excess mean is 0.015 − 0.02 = −0.005, the squared Sharpe is
+/// 0.000025 ÷ 0.00005 = 0.5, and the figure is rounded towards minus infinity, so its magnitude is
+/// the ceiling root: −0.707106781187, and annualized −11.224972160322 from 0.5 × 252 = 126. A Sharpe
+/// that read the mean instead of the excess would report a positive sign here.
+#[test]
+fn a_risk_free_rate_above_the_mean_makes_the_sharpe_negative() {
+    let metrics = Metrics::of(
+        usd("100000"),
+        &observations(&["102000", "103020"]),
+        &no_trades(),
+        &MetricsConfig {
+            periods_per_year: 252,
+            risk_free_per_period: ratio("0.02"),
+        },
+    )
+    .unwrap();
+
+    assert!(
+        metrics.mean_return > Ratio::ZERO && metrics.total_return > Ratio::ZERO,
+        "the run made money at every period"
+    );
+    assert_eq!(metrics.sharpe_sign, Sign::Negative);
+    assert_eq!(metrics.sharpe_squared, Some(ratio("0.5")));
+    assert_eq!(metrics.sharpe, Some(ratio("-0.707106781187")));
+    assert_eq!(metrics.sharpe_squared_annualized, Some(ratio("126")));
+    assert_eq!(metrics.sharpe_annualized, Some(ratio("-11.224972160322")));
+    assert_eq!(metrics.absent, None);
+}
+
 /// Annualizing multiplies the variance and the squared Sharpe by the period count, exactly, and the
 /// annualized roots are taken from those products: 0.000906221436 × 252 = 0.228367801872 with a
 /// ceiling root of 0.477878438384, and 0.11482183684 × 252 = 28.93510288368 with a floor root of
 /// 5.379135886337. Multiplying the period volatility by a root of 252 is not an exact decimal and is
 /// not what the report does.
 #[test]
-#[ignore = "pending E4-2"]
 fn annualizing_scales_the_squares_not_the_roots() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -317,7 +383,6 @@ fn annualizing_scales_the_squares_not_the_roots() {
 /// The variance divides by n − 1, not n: on the main series the sample variance is 0.000906221436,
 /// where a population divisor of 3 rather than 2 would give two thirds of it, 0.000604147624.
 #[test]
-#[ignore = "pending E4-2"]
 fn variance_uses_the_sample_divisor() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -339,7 +404,6 @@ fn variance_uses_the_sample_divisor() {
 /// One round trip of 1,000 shares turns the position over once: min(50000, 50600) ÷ 100000 = 0.5,
 /// where counting both sides would report 1.006 and the half-sum 0.503.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_single_round_trip_turns_over_its_notional_once() {
     let metrics = Metrics::of(
         usd("100000"),
@@ -359,7 +423,6 @@ fn a_single_round_trip_turns_over_its_notional_once() {
 /// The total return is net of fees, because equity subtracts accrued fees (spec §8.2): the same run
 /// with the fees switched off ends strictly higher, by exactly the fee total.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_total_return_is_net_of_accrued_and_charged_fees() {
     let mut free = run_config(equity(), crossover(), "100000");
     free.fees = no_equity_fees();
@@ -388,7 +451,6 @@ fn the_total_return_is_net_of_accrued_and_charged_fees() {
 
 /// A year must hold at least one period.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_year_with_no_periods_is_an_error() {
     let outcome = Metrics::of(
         usd("100000"),
@@ -413,7 +475,6 @@ fn a_year_with_no_periods_is_an_error() {
 /// A period that opens at zero equity has no return, and the report says so rather than inventing
 /// one.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_period_opening_at_zero_equity_has_no_return() {
     let outcome = Metrics::of(
         usd("100000"),
@@ -431,7 +492,6 @@ fn a_period_opening_at_zero_equity_has_no_return() {
 /// The excess return is the exact difference of the two reported total returns, with no rounding of
 /// its own, and the benchmark it is measured against actually traded.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_excess_return_is_the_difference_of_the_two_reported_returns() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -541,7 +601,6 @@ fn days_then(days: usize, extra: Vec<mandate_sim::SimBar>) -> Vec<mandate_sim::S
 /// close and put on the tick against the order: 104.00 × (1 + 25 bps) = 104.26, already on the penny
 /// grid, and 50,000 ÷ 104.26 truncates to 479 whole shares.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_entry_is_a_day_limit_buy_at_the_collar_above_the_close() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -565,7 +624,6 @@ fn an_entry_is_a_day_limit_buy_at_the_collar_above_the_close() {
 /// A limit below one dollar rounds on the finer Reg NMS tick: 0.50 × (1 + 25 bps) = 0.50125, which a
 /// buy limit rounds down to 0.5012 (spec §2.1).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_collar_below_one_dollar_uses_the_finer_tick() {
     let config = run_config(equity(), crossover(), "10000");
     let bars = penny_stock_week();
@@ -635,7 +693,6 @@ fn penny_stock_week() -> Vec<mandate_sim::SimBar> {
 /// the signal: with closes 100, 101, 104 the fast sum 205 times 3 beats the slow sum 305 times 2, and
 /// with 104.50 and 103.00 added the fast sum 207.50 times 3 falls at or below 311.50 times 2.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_crossover_compares_sums_by_cross_multiplication() {
     let strategy = crossover();
 
@@ -675,7 +732,6 @@ fn the_crossover_compares_sums_by_cross_multiplication() {
 /// Equal averages are a tie, which resolves flat: ambiguity never adds risk (AGENTS.md rule 3).
 /// With closes 100, 100, 100 the comparison is 200 × 3 = 300 × 2, so neither side is above.
 #[test]
-#[ignore = "pending E4-2"]
 fn equal_averages_leave_the_strategy_flat() {
     let flat = [price("100"), price("100"), price("100")];
     assert_eq!(
@@ -686,7 +742,6 @@ fn equal_averages_leave_the_strategy_flat() {
 
 /// A crossover whose windows are crossed, or zero, is an error rather than a silent reordering.
 #[test]
-#[ignore = "pending E4-2"]
 fn crossed_windows_are_an_error() {
     let crossed = Strategy::MovingAverageCrossover(StrategyConfig {
         fast_periods: 3,
@@ -715,7 +770,6 @@ fn crossed_windows_are_an_error() {
 /// entry filled 479 shares on bar 6, so the exit decided at bar 9 submits 479, priced
 /// `on_tick(103.00 × (1 − 25 bps), up)` = `on_tick(102.7425, up)` = 102.75.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_exit_sells_the_whole_position() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -743,7 +797,6 @@ fn an_exit_sells_the_whole_position() {
 /// A crypto buy pays its fee in the asset, so the position sits off the increment; the exit still
 /// sells the whole position, and the gross filled quantity stays above it (DEC-127 item 22).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_crypto_exit_sells_the_part_the_asset_fee_left_off_the_increment() {
     let config = run_config(crypto(), crossover(), "100000");
     let run = run(&config, &crypto_days()).unwrap();
@@ -806,7 +859,6 @@ fn crypto_days() -> Vec<mandate_sim::SimBar> {
 /// against a close of 102.00, is why the fixture's last bar opens at 102.00 and the case compares the
 /// two explicitly.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_period_mark_is_the_last_bars_close() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let mut bars = seven_days();
@@ -844,7 +896,6 @@ fn the_period_mark_is_the_last_bars_close() {
 /// An after-hours bar never closes an equity period: §8.2's end of day is the official close, so the
 /// period still closes at 15:59 and the after-hours bar's mark lands in the next period.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_after_hours_bar_does_not_close_an_equity_period() {
     let mut bars = seven_days();
     bars.insert(
@@ -863,7 +914,6 @@ fn an_after_hours_bar_does_not_close_an_equity_period() {
 /// A trade date the input covers only outside the regular session is no period at all; its bars are
 /// still folded, so their marks reach the next period.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_date_covered_only_outside_the_regular_session_is_no_period() {
     let mut bars: Vec<_> = seven_days()
         .into_iter()
@@ -891,7 +941,6 @@ fn a_date_covered_only_outside_the_regular_session_is_no_period() {
 /// the bar's fills, its mark, and its charges, never before. The benchmark's first fill is 800 shares
 /// on bar 1, which is also the bar that closes period 1, so the first observation already holds them.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_fill_in_the_last_bar_of_a_day_is_inside_that_days_equity() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let bars = seven_days();
@@ -930,7 +979,6 @@ fn a_fill_in_the_last_bar_of_a_day_is_inside_that_days_equity() {
 /// still moves no equity, which is what that exact difference proves: any gain or loss from the
 /// bucket transfer would not land on the rounding to the last place.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_settlement_posts_before_the_bars_fills() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -965,7 +1013,6 @@ fn a_settlement_posts_before_the_bars_fills() {
 /// while the same run ending at 19:30 has charged nothing and still accrues 0.00479. A rule that
 /// charged at New York midnight instead would charge neither.
 #[test]
-#[ignore = "pending E4-2"]
 fn equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date() {
     let config = run_config(equity(), crossover(), "100000");
 
@@ -1005,7 +1052,6 @@ fn equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date() {
 /// crypto **buy** pays in the asset instead, which is never accrued, so a run that only bought would
 /// have nothing to charge.
 #[test]
-#[ignore = "pending E4-2"]
 fn crypto_fees_are_charged_at_midnight_utc() {
     let config = run_config(crypto(), crossover(), "100000");
     let run = run(&config, &crypto_days()).unwrap();
@@ -1041,7 +1087,6 @@ fn crypto_fees_are_charged_at_midnight_utc() {
 /// the charged day itself and so cannot tell the instant from the hour. This case stops before the
 /// instant instead of relying on the hour of the bars it has.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_accrual_the_bars_never_reach_stays_accrued() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &days_then(4, Vec::new())).unwrap();
@@ -1063,7 +1108,6 @@ fn an_accrual_the_bars_never_reach_stays_accrued() {
 /// A day's fees are charged once: two bars past 20:00 ET on the same trade date leave one charge of
 /// 0.01, not two.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_days_fees_are_charged_once_after_the_day_ends() {
     let config = run_config(equity(), crossover(), "100000");
     let twice = run(
@@ -1097,7 +1141,6 @@ fn a_days_fees_are_charged_once_after_the_day_ends() {
 /// charges `round(0.00479, 2, ceiling)` = 0.01, leaving nothing accrued. A rule that charged only in
 /// the 20:00 hour would leave the whole accrual behind.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_bar_later_than_the_charge_hour_still_charges_its_day() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(
@@ -1117,6 +1160,69 @@ fn a_bar_later_than_the_charge_hour_still_charges_its_day() {
     assert_eq!(run.report.strategy.fees_accrued, Usd::ZERO);
 }
 
+/// One standard-time trading day of two regular bars, on 2026-11-16: the Monday eight weeks after
+/// [`seven_days`]' first day, which falls after daylight time ends on 2026-11-01, so its New York
+/// offset is −05:00 and not the −04:00 every other fixture here is written at. The price series is
+/// [`seven_days`]' first day, and `extra` is the bar that ends the run.
+fn standard_time_day(extra: Vec<mandate_sim::SimBar>) -> Vec<mandate_sim::SimBar> {
+    let mut bars = vec![
+        standard_auction(
+            "2026-11-16",
+            "09:30",
+            ["100", "100.2", "99.8", "100.1", "8000"],
+        ),
+        standard_bar(
+            "2026-11-16",
+            "15:59",
+            ["100.1", "100.2", "99.9", "100", "9000"],
+        ),
+    ];
+    bars.extend(extra);
+    bars
+}
+
+/// The charging instant is 20:00 **America/New_York**, not 20:00 at a fixed offset (spec §6.2,
+/// DEC-127 item 17): in standard time the instant is 01:00 UTC of the next date, so a bar at 19:30
+/// EST — 00:30 UTC, which a fixed −04:00 offset would read as 20:30 and charge — charges nothing,
+/// while a bar at exactly 20:00 EST charges the day.
+///
+/// The strategy is buy-and-hold, which orders at the first bar, so the case needs one trading day
+/// rather than the crossover's four: 10,000 USD buys at 100.10 × (1 + 25 bps) = 100.350250, put on
+/// the penny grid against the order at 100.35, and 10,000 ÷ 100.35 truncates to 99 whole shares,
+/// which accrue CAT 0.00001 × 99 = 0.00099 on 2026-11-16 and are charged
+/// `round(0.00099, 2, ceiling)` = 0.01. Every other charging case here sits in daylight time, where
+/// a fixed −04:00 offset and the zone agree, so this is the one that tells them apart.
+#[test]
+fn a_standard_time_charge_follows_new_york_and_not_a_fixed_offset() {
+    let config = run_config(equity(), buy_and_hold(), "10000");
+
+    let before = run(
+        &config,
+        &standard_time_day(vec![standard_after_hours(
+            "2026-11-16",
+            "19:30",
+            ["100", "100.1", "99.9", "100", "500"],
+        )]),
+    )
+    .unwrap();
+    assert_eq!(before.report.strategy.filled_qty, qty("99"));
+    assert_eq!(before.report.strategy.fees_charged, Usd::ZERO);
+    assert_eq!(before.report.strategy.fees_accrued, usd("0.00099"));
+
+    let after = run(
+        &config,
+        &standard_time_day(vec![standard_overnight(
+            "2026-11-16",
+            "20:00",
+            ["100", "100.1", "99.9", "100", "500"],
+        )]),
+    )
+    .unwrap();
+    assert_eq!(after.report.strategy.filled_qty, qty("99"));
+    assert_eq!(after.report.strategy.fees_charged, usd("0.01"));
+    assert_eq!(after.report.strategy.fees_accrued, Usd::ZERO);
+}
+
 /// A crypto fee accrued on a run's **last** UTC date stays accrued, because its charge is 00:00 UTC of
 /// the next date and no bar reaches it (spec §6.3, DEC-127 item 17). [`crypto_days`] exits on its
 /// sixth day and the seventh's first bar charges that sale; cut the seventh day off and the same fee is
@@ -1124,7 +1230,6 @@ fn a_bar_later_than_the_charge_hour_still_charges_its_day() {
 /// accrued is exactly what the longer one charges, so the case needs no fee figure of its own and
 /// cannot drift with the fee schedule.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_crypto_fee_accrued_on_the_last_utc_date_stays_accrued() {
     let config = run_config(crypto(), crossover(), "100000");
     let six: Vec<_> = crypto_days()
@@ -1164,7 +1269,6 @@ fn a_crypto_fee_accrued_on_the_last_utc_date_stays_accrued() {
 /// A signal at a period's close fills no earlier than the next bar: the decision is timed at that
 /// bar's start (DEC-127 item 2), so the bar whose close produced it never fills it.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_signal_at_a_days_close_fills_no_earlier_than_the_next_bar() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -1185,7 +1289,6 @@ fn a_signal_at_a_days_close_fills_no_earlier_than_the_next_bar() {
 /// Every fill carries its order's client order ID, a distinct fill ID built from the order's index and
 /// the fill's ordinal within it, and the start of the bar it happened in (DEC-127 item 21).
 #[test]
-#[ignore = "pending E4-2"]
 fn every_fill_carries_its_orders_identifiers() {
     let config = run_config(equity(), crossover(), "100000");
     let bars = seven_days();
@@ -1220,7 +1323,6 @@ fn every_fill_carries_its_orders_identifiers() {
 /// letting it happen at an instant the input does not cover: with the whole of day 4 missing, the
 /// entry decided at day 3's close first becomes eligible on day 5.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_decision_is_timed_at_the_next_bars_start_so_a_gap_delays_it() {
     let bars: Vec<_> = seven_days()
         .into_iter()
@@ -1246,7 +1348,6 @@ fn a_decision_is_timed_at_the_next_bars_start_so_a_gap_delays_it() {
 /// all; a slice trimmed to start at bar 1 would make that bar its session's first covered bar and cap
 /// it at 0, filling nothing.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let bars = seven_days();
@@ -1270,7 +1371,6 @@ fn an_order_eligible_mid_session_caps_on_the_previous_bars_volume_not_the_median
 /// A day order's remainder ends where the fill model says it does: the loop reads `OrderEnd` back
 /// rather than recomputing rule 2's last eligible session.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_day_orders_remainder_ends_where_simulate_says_it_does() {
     let config = run_config(equity(), crossover(), "100000");
     let bars = seven_days();
@@ -1289,7 +1389,6 @@ fn a_day_orders_remainder_ends_where_simulate_says_it_does() {
 /// that bar (§5.3 rule 6), so the next submission comes from a later period close. The entry fills in
 /// full on bar 6 and the exit is decided at bar 9.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_bar_that_ends_an_order_submits_no_replacement() {
     let config = run_config(equity(), crossover(), "100000");
     let run = run(&config, &seven_days()).unwrap();
@@ -1317,7 +1416,6 @@ fn the_bar_that_ends_an_order_submits_no_replacement() {
 /// which is also what a `client_order_id` of `None` would give, because the fold then treats every
 /// execution as its own order.
 #[test]
-#[ignore = "pending E4-2"]
 fn two_executions_of_one_order_share_its_client_order_id_and_one_taf_cap() {
     let bars = thin_exit_week();
     let mut per_order = run_config(equity(), crossover(), "100000");
@@ -1391,7 +1489,6 @@ fn thin_exit_week() -> Vec<mandate_sim::SimBar> {
 /// A bar whose `trade_date` is not the one the calendar gives its start fails the run, so a
 /// mislabelled bar can never move a period boundary (DEC-127 item 20).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_bar_whose_trade_date_disagrees_with_the_calendar_fails_the_run() {
     let mut bars = seven_days();
     bars[2].trade_date = d("2026-09-23");
@@ -1410,7 +1507,6 @@ fn a_bar_whose_trade_date_disagrees_with_the_calendar_fails_the_run() {
 /// `truncate(min(50000, 59443.33973) ÷ 107.26)` = 466 shares, where settled cash alone would have
 /// bought `truncate(10121.14083 ÷ 107.26)` = 94.
 #[test]
-#[ignore = "pending E4-2"]
 fn an_entry_the_day_after_an_exit_sizes_from_unsettled_proceeds() {
     let config = run_config(equity(), crossover(), "60000");
     let run = run(&config, &round_trip_and_re_entry()).unwrap();
@@ -1459,7 +1555,6 @@ fn round_trip_and_re_entry() -> Vec<mandate_sim::SimBar> {
 /// = 100.35, its quantity `truncate(100000 ÷ 100.35)` = 996, and its first fill is 800 shares at
 /// `min(100.35, 100.10 × 1.0003)` = 100.13003 on bar 1.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_benchmark_buys_at_its_first_eligible_bar_not_the_last() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let bars = seven_days();
@@ -1484,7 +1579,6 @@ fn the_benchmark_buys_at_its_first_eligible_bar_not_the_last() {
 /// A benchmark the volume cap never lets fill in full reports its unfilled quantity rather than
 /// pretending to hold shares, and its GTC order is still working when the bars run out.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_benchmark_that_cannot_fill_reports_its_unfilled_quantity() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let bars = thin_week();
@@ -1513,7 +1607,6 @@ fn thin_week() -> Vec<mandate_sim::SimBar> {
 /// Identical inputs give byte-identical reports, and a changed bar changes the digest that says which
 /// snapshot produced them (FR-4.5).
 #[test]
-#[ignore = "pending E4-2"]
 fn a_changed_bar_changes_the_bars_digest() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let bars = seven_days();
@@ -1545,7 +1638,6 @@ fn a_changed_bar_changes_the_bars_digest() {
 /// bars here share their instant, their OHLCV row, their trade date, and their session start, so the
 /// label is the only difference between the inputs.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_changed_session_changes_the_bars_digest() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let late = after_hours(
@@ -1579,7 +1671,6 @@ fn a_changed_session_changes_the_bars_digest() {
 /// The report's canonical bytes hold decimals as text and nothing else: a reader can recompute every
 /// figure from them, and the digest is the SHA-256 of exactly those bytes.
 #[test]
-#[ignore = "pending E4-2"]
 fn the_report_serializes_to_the_committed_canonical_bytes() {
     let config = run_config(equity(), buy_and_hold(), "100000");
     let run = run(&config, &seven_days()).unwrap();
