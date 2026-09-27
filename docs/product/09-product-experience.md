@@ -166,6 +166,10 @@ screen says exactly what the owner may now do.
 4. **Goal complete / Holding** [D11]: release (the positions become the owner's and **unprotected**;
    step-up; the warning shown is recorded) or close.
 
+5. **Stop** [G2, D2]: ends the agent without selling (DEC-131): terminal, positions and resting
+   protection stay where they are, step-up (the brief's addition, because it cannot be undone). What
+   the owner can then do with those positions is §7 question 1; PX-13 proposes changing the rule.
+
 *Moment that matters:* in a panic, the owner reaches the right stop in two taps and knows its scope.
 
 **J-F. Audit** (Dana)
@@ -217,12 +221,18 @@ accepted (§9).
   is unavailable"; P1, P9.
 
 **G2 Stop sheet** ⚠
-- *Shows:* in the current context (agent, connection, workspace), the two ways to stop: **Pause**
-  (no new orders; protection stays) and **Kill switch** (cancel and flatten, terminal), each with its
-  scope in words.
-- *Primary action:* Pause, the least drastic, is first; Kill switch is the second, distinct choice.
-- *States:* Paused agent: offers Resume and Kill switch. Stopped: the kill switch is shown as done.
-  Loading and Stale: both actions stay enabled.
+- *Shows:* in the current context (agent, connection, workspace), the three ways to stop, each with
+  its scope in words: **Pause** (no new orders; protection stays; reversible; no step-up), **Stop**
+  (agent scope only: ends the agent, terminal, sells nothing, and leaves positions and resting
+  protection where they are, DEC-131; step-up, the brief's addition because it cannot be undone), and
+  **Kill switch** (cancel and flatten, terminal; step-up, as the spec requires for an owner exit).
+- *Primary action:* Pause, the least drastic, is first; Stop and Kill switch follow as distinct
+  choices.
+- *States:* Paused agent: offers Resume, Stop, and Kill switch. Stopped by a kill switch: shown as
+  done. Stopped by an owner Stop while holding positions: says that an owner-stopped agent sends no further orders and re-places no protection; any positions it held
+stay in the account under whatever protection is resting (DEC-131, PX-13 (b)), and that
+  what the owner can still do with them through Mandate is open (§7 question 1). Loading and Stale:
+  every action stays enabled.
 - *Governs:* trading §5.5, §7.4; PRD FR-8.2; DEC-131 (owner Pause, Resume, Stop); PX-3, PX-4, PX-11.
 
 **G3 Step-up dialog** ⚠
@@ -247,8 +257,8 @@ accepted (§9).
   the owner-exit remainder resting at its floor (DEC-66). On the safety side, the alerts that say a
   position was briefly unprotected or an exit stalled: an unprotected interval that reached
   `max_unprotected_s` and was canceled with protection re-placed (trading §5.4); the triggered-stop
-  watchdog exiting a position whose stop did not fill (trading §5.4); a risk exit resting at the exit
-  ladder's floor (trading §5.6); a cash reconciliation difference above threshold (trading §11). The
+  watchdog exiting a position whose stop did not fill (trading §5.4); any exit resting at the exit ladder's
+  floor, whatever its purpose (trading §5.6); a cash reconciliation difference above threshold (trading §11). The
   crypto stop-limit gap disclosure (a stop-limit may not fill on a gap, trading §5.4) appears on D3 and
   on the confirmation screen when crypto is allowed.
 - *Primary action:* open the screen that resolves the alert.
@@ -315,7 +325,8 @@ never as values (mandate §4.3).
 **A5 Confirmation** ⚠ (record screen)
 - *Shows:* §2.3 J-B step 5; platform defaults marked "platform default", proposals marked "proposed
   by the platform — confirm or change"; `on_complete` in words; for `profit_stop`, the level at which
-  the agent stops.
+  the agent stops; when `universe.asset_classes` includes crypto, the disclosure that a stop-limit may
+  not fill on a gap (trading §5.4).
 - *Primary action:* Confirm (step-up).
 - *States:* Error after step-up: nothing was confirmed; the version does not exist yet.
 - *Governs:* mandate §2.1, §4.2, §10 (`MandateConfirmed` stores the rendered screen and UI build);
@@ -373,17 +384,21 @@ labeled simulated; trading §10). Paper results are labeled "paper — simulated
   (§4.3); limits with headroom in dollars; ladder rungs, the active size factor, and any `pending`
   breach confirmation; the lifetime floor in dollars; positions with protection status; the working
   universe [D4] or the pinned list; open approvals; recent decisions linking to the trace [J2].
-- *Primary action:* Stop (G2); the acknowledgment the current restriction needs, if any [D7]. An
-  owner Stop (end the agent without selling) is offered here, stating that it leaves positions and
-  resting protection where they are (DEC-131; PX-13).
+- *Primary action:* Stop control (G2: Pause, Stop, Kill switch); the acknowledgment the current
+  restriction needs, if any [D7]. The owner Stop states that it ends the agent without selling and
+  leaves positions and resting protection where they are (DEC-131; PX-13).
 - *States:* Paused, Restricted: banner per §4.3. Recovering (`awaiting_reconciliation` at startup):
-  "Checking with the broker", no action needed. Holding: see D11. Stopped: read-only, with the reason.
+  "Checking with the broker", no action needed. Holding: see D11. Stopped: read-only, with the reason;
+  after an owner Stop with positions, the positions and their resting protection stay listed, with the
+  statement that an owner-stopped agent sends no further orders and re-places no protection; any positions it held
+stay in the account under whatever protection is resting (DEC-131, PX-13 (b)) and that closing them through Mandate is open (§7 question 1).
 - *Governs:* mandate §5.3 to §5.9, §3.1; trading §7.4; FR-8.1, FR-8.2.
 
 **D3 Position detail** ⚠
 - *Shows:* quantity from the ledger and the broker's last observation, cost basis, risk mark and its
   age, resting protection (bracket or OCO legs, or the crypto stop-limit), any unprotected interval
-  running, the fractional part that cannot be protected, and working exits (deferred ones say
+  running, the fractional part that cannot be protected, for crypto the disclosure that a stop-limit
+  may not fill on a gap (trading §5.4), and working exits (deferred ones say
   "waiting for the regular session").
 - *Primary action:* Close position [D9].
 - *States:* `Unknown` order in the instrument: exits in it are held by the spec (trading §1
@@ -495,7 +510,7 @@ requests are not delivered in quiet hours and so time out, while risk-limit aler
 operator; journey J4): versions, heartbeats, reachability, and the DEC-100 operator surface, which
 shows the aggregate-flow monitor's alerts (research-agent exposure per instrument over the
 deployment's workspaces above the DEC-123 threshold; the monitor never halts by itself) and the active
-per-thesis halts, and is where the operator issues or lifts a halt (step-up; journaled in every
+per-thesis halts, and is where the operator issues or lifts a halt (step-up, the brief's addition; journaled in every
 workspace of the deployment as a `PlatformOperatorAction`). A halt only removes permissions: exits
 and protection continue (mandate §8.4, §8.5 check 9; HLD §8). In managed mode the platform is the
 operator and this surface is internal. It carries only instrument identifiers and aggregate figures
@@ -594,7 +609,8 @@ A rung whose breach is still confirming is shown as `pending` with its time in b
 ## 6. Open product decisions for the founder
 
 Each question has options, a recommendation, and the reason. Until the founder answers, designs
-follow the recommendation, because each is the more conservative option (rule 9). Answers are
+follow the recommendation, because each is the more conservative option (rule 9), except PX-13, where
+the designs follow the accepted rule (b) of DEC-131 until the founder records a change. Answers are
 recorded as decision-log rows. The labels PX-1 to PX-14 are local to this brief.
 
 **PX-1. How much of the compiled mandate the confirmation screen shows by default.**
@@ -613,18 +629,22 @@ platform choosing limits in all but name (compliance question 23). Per-field for
 tedious for values the owner stated in their own words.
 
 **PX-3. What the one Stop control offers.**
-(a) Only the kill switch. (b) Pause first (instant, no flatten), kill switch second. (c) Separate
-Pause and Kill buttons in the shell.
+(a) Only the kill switch. (b) Pause first (instant, no flatten, reversible), then the owner Stop
+(terminal, no flatten, positions stay, DEC-131), then the kill switch (terminal, flatten). (c) Separate
+Pause, Stop, and Kill buttons in the shell.
 *Recommendation: (b).* Most "stop" moments want the agent to stop acting, not to sell at any price;
-pause preserves positions and protection. One entry keeps the panic path to two taps, and a sheet
-makes the scope explicit.
+pause preserves positions and protection and can be undone. Stop is for ending the agent without
+selling, and says it leaves positions in place (PX-13). One entry keeps the panic path to two taps, and
+a sheet makes each scope explicit.
 
-**PX-4. Step-up on pause and resume.** The spec requires step-up for an owner exit and for resuming
-after a reconciliation pause; it says nothing for an owner pause or its resume.
-(a) Neither needs step-up. (b) Pause needs none; resume needs step-up. (c) Both need it.
-*Recommendation: (b).* Pause only removes permissions, so friction there is pure cost; resume restores
-risk-taking, which is the case step-up exists for (FR-1.4). Needs a line in the runtime brief or the
-mandate spec.
+**PX-4. Step-up on pause, resume, and stop.** The spec requires step-up for an owner exit (so for the
+kill switch) and for resuming after a reconciliation pause; it says nothing for an owner pause, its
+resume, or an owner Stop.
+(a) None needs step-up. (b) Pause needs none; resume and Stop need step-up. (c) All three need it.
+*Recommendation: (b).* Pause only removes permissions and can be undone, so friction there is pure
+cost; resume restores risk-taking, which is the case step-up exists for (FR-1.4); Stop cannot be
+undone and leaves positions without further management (DEC-131), so it gets the same check as the
+kill switch. Needs a line in the runtime brief or the mandate spec.
 
 **PX-5. What the owner sees while reconciliation holds an agent.**
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
@@ -682,11 +702,11 @@ engagement design amounts to a recommendation; (c) is a nudge the other way that
 distrust the tool. Neutral design is the defensible position.
 
 **PX-11. Which roles may stop an agent.**
-(a) Operators and admins only. (b) Operators and admins may pause and flatten; approvers may pause.
-(c) Anyone with access, viewers included.
+(a) Operators and admins only. (b) Operators and admins may pause, stop, and flatten; approvers may
+pause. (c) Anyone with access, viewers included.
 *Recommendation: (b).* An approver who sees something wrong at 3 a.m. should be able to stop new
-orders; pausing never adds risk. Flattening realizes losses and is the operator's call. Viewers and
-auditors act on nothing.
+orders; pausing never adds risk and can be undone. Stop ends the agent for good and flattening
+realizes losses, so both are the operator's call. Viewers and auditors act on nothing.
 
 **PX-12. The account-wide kill switch and the owner's own holdings.** At connection or workspace scope,
 the spec uses the broker's cancel-all and close-position, which can close positions no agent manages.
@@ -735,6 +755,10 @@ owners, with a recommended reading; none is decided here.
    protection once it reaches GTC expiry, since a stopped agent re-places nothing (trading §5.4); and
    whether a stopped agent with positions retires (mandate §2, `AgentStopped`), and if so what net
    dollar loss joins the connection's loss carry while positions are still held (mandate §5.7).
+   A third follows from them: whether the owner can still close those positions through Mandate (D9 or
+   the agent kill switch), since a stopped runtime proposes nothing, ever. The one path the specs do
+   give is selling at the broker, which is external activity (trading §7.1) and switches every agent on
+   the account to `exits_only` until acknowledged. G2 and D2 point here.
    Recommended: answer both in the runtime brief; PX-13 (a) would remove the case.
 2. **Owner exit while paused, or with an `Unknown` order.** Trading §5.5 exempts kill-switch orders
    from the agent's mode, while MI-1 lets `paused` hold exits. Is closing one position (`owner_exit`,
