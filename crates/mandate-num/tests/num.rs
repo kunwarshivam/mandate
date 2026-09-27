@@ -111,10 +111,7 @@ fn exact_or_overflow(
         Ok(actual) => prop_assert_eq!(at_scale(&actual, scale), Some(expected)),
         Err(e) => {
             prop_assert_eq!(e, NumError::Overflow);
-            prop_assert!(
-                !fits(expected, scale),
-                "an Overflow where the oracle's {expected} fits in {scale} places"
-            );
+            prop_assert!(!fits(expected, scale));
         }
     }
     Ok(())
@@ -425,6 +422,7 @@ fn error_codes_are_stable() {
         (NumError::NotPositive, "not_positive"),
         (NumError::DivisionByZero, "division_by_zero"),
         (NumError::AboveOne, "above_one"),
+        (NumError::Unimplemented, "unimplemented"),
     ];
     for (error, code) in all {
         assert_eq!(error.code(), code);

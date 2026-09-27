@@ -7,6 +7,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result, bail};
 use serde::Deserialize;
@@ -1036,16 +1037,21 @@ fn mutants() -> Result<()> {
     ];
     fs::remove_dir_all(MUTANTS_OUT).ok();
     eprintln!("    $ cargo {}", args.join(" "));
+    let started = fs::metadata(&diff_file)
+        .and_then(|meta| meta.modified())
+        .context("timing the diff this run reads")?;
     let status = Command::new("cargo")
         .args(args)
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     fs::remove_file(&diff_file).ok();
-    mutants_outcome(Path::new("."), &crates, status?.code())
+    mutants_outcome(Path::new("."), &crates, status?.code(), started)
 }
 
-/// Where `--output target` puts the run's outcomes. Removed before every run, so nothing a previous
-/// run or a restored cache left behind can be read as this run's result (DEC-137).
+/// Where `--output target` puts the run's outcomes. Removed before every run and required to be
+/// newer than the diff the run reads, which is written moments before it starts, so nothing a
+/// previous run or a restored cache left behind can be read as this run's result (DEC-137). The
+/// diff's own timestamp is the reference because a clock read is disallowed here (ADR-0001 ES-05).
 const MUTANTS_OUT: &str = "target/mutants.out";
 
 /// The status `cargo mutants` exits with when mutants survived and nothing else went wrong. Only
@@ -1054,10 +1060,15 @@ const MUTANTS_OUT: &str = "target/mutants.out";
 /// whatever `target/mutants.out` holds (DEC-137).
 const MISSED_MUTANTS: i32 = 2;
 
-fn mutants_outcome(root: &Path, crates: &[MutatedCrate], code: Option<i32>) -> Result<()> {
+fn mutants_outcome(
+    root: &Path,
+    crates: &[MutatedCrate],
+    code: Option<i32>,
+    started: SystemTime,
+) -> Result<()> {
     match code {
         Some(0) => Ok(()),
-        Some(MISSED_MUTANTS) => stub_exemptions(root, crates),
+        Some(MISSED_MUTANTS) => stub_exemptions(root, crates, started),
         other => bail!(
             "`cargo mutants` exited with {other:?}, which is not the status it reports for missed \
              mutants ({MISSED_MUTANTS}); the run did not finish, so nothing in {MUTANTS_OUT} is \
@@ -1161,14 +1172,24 @@ struct LineColumn {
 /// Reads the outcomes of a run that missed mutants and fails unless every mutant it missed sits in a
 /// stub body of a crate whose tests are still pending; those are named as skipped. Anything else
 /// the run reports, a failed baseline or a timeout included, is a problem of its own (DEC-137).
-fn stub_exemptions(root: &Path, crates: &[MutatedCrate]) -> Result<()> {
+fn stub_exemptions(root: &Path, crates: &[MutatedCrate], started: SystemTime) -> Result<()> {
     let outcomes = root.join(MUTANTS_OUT).join("outcomes.json");
-    let text = fs::read_to_string(&outcomes).with_context(|| {
-        format!(
-            "reading {} after a run that missed mutants",
+    let written = fs::metadata(&outcomes)
+        .and_then(|meta| meta.modified())
+        .with_context(|| {
+            format!(
+                "reading {} after a run that missed mutants",
+                outcomes.display()
+            )
+        })?;
+    if written < started {
+        bail!(
+            "{} is older than the diff this run read, so it is not this run's result",
             outcomes.display()
-        )
-    })?;
+        );
+    }
+    let text =
+        fs::read_to_string(&outcomes).with_context(|| format!("reading {}", outcomes.display()))?;
     let (problems, skipped) = mutant_verdicts(root, crates, &text)
         .with_context(|| format!("reading {}", outcomes.display()))?;
     for name in &skipped {
@@ -1450,8 +1471,7 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    let stubs = stub_errors_by_package(root, &packages, &tests)?;
-    let problems = verdicts(&tests, &outcomes, &stubs);
+    let problems = verdicts(&tests, &outcomes);
     if problems.is_empty() {
         eprintln!(
             "    pending: all {} fail at a stub, as pending tests must; nextest's `test run failed` above is expected",
@@ -1501,14 +1521,14 @@ impl PendingTestRun {
     }
 }
 
-/// How a stub reports itself, read off every stub the workspace has: `Unimplemented` is the `Debug`
-/// of the variant every stub error carries, `unimplemented` its `code()`, "is not implemented yet"
-/// and "<story> has not been implemented yet" the two `Display` forms in use, and "not yet
-/// implemented" the panic of `todo!()`. A pending test's failure must show one of these, name its
-/// own story as a whole word, or name an error `STUB_ERROR_EXCEPTIONS` declares for its crate, so
-/// that a fixture, parse, or harness panic cannot stand in for the stub the story implements. A
-/// story or a marker written into the test's own assertion message satisfies the gate: it proves
-/// the failure says what it stops at, not where the failure came from (DEC-137).
+/// How a stub reports itself, and the only evidence the gate accepts: `Unimplemented` is the
+/// `Debug` of the variant every stub error carries, `unimplemented` its `code()`, "is not
+/// implemented yet" and "<story> has not been implemented yet" the two `Display` forms in use, and
+/// "not yet implemented" the panic of `todo!()`. A story id is not evidence: a test can write one
+/// into its own assertion message, and a stub naming another story (`E6-1` under a `pending E6-5`
+/// test) is still a stub. A crate whose stubs report none of these is fixed, not excused: that is
+/// why `mandate-num`'s E4-2 stubs and `mandate-spec`'s `Confirmation::update` are `todo!()`
+/// (DEC-137).
 const STUB_MARKERS: [&str; 5] = [
     "Unimplemented",
     "unimplemented",
@@ -1517,89 +1537,17 @@ const STUB_MARKERS: [&str; 5] = [
     "not yet implemented",
 ];
 
-/// Stub errors declared crate by crate, for stubs that name themselves no better: `mandate-num`'s
-/// E4-2 stubs return `NumError::Overflow`, which no reader can tell from a real overflow. A row
-/// holds only while that crate still has a body returning it, so it cannot outlive the stubs it
-/// excuses, and a crate not named here must fail at a marker (DEC-137).
-const STUB_ERROR_EXCEPTIONS: [(&str, &str); 1] = [("mandate-num", "Overflow")];
-
-/// Whether a pending test's failure output shows that it stopped at the stub of `story`. The story
-/// matches as a whole word, so `E6-1` is not found in `E6-10`; `errors` are the exceptions declared
-/// for the test's own crate and still confirmed by its source.
-fn names_a_stub(output: &str, story: &str, errors: Option<&BTreeSet<String>>) -> bool {
-    contains_word(output, story)
-        || STUB_MARKERS.iter().any(|marker| output.contains(marker))
-        || errors.is_some_and(|errors| errors.iter().any(|error| contains_word(output, error)))
-}
-
-/// The declared stub errors each package with pending tests may fail on, each confirmed against a
-/// body still in that package's source: the declaration says which error is excused, the source says
-/// whether the stub returning it is still there, so an implementation PR that replaces its stubs
-/// stops accepting the name in the same change (DEC-137).
-fn stub_errors_by_package(
-    root: &Path,
-    packages: &[(String, String)],
-    tests: &[PendingTestRun],
-) -> Result<BTreeMap<String, BTreeSet<String>>> {
-    let mut found: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
-    for package in tests.iter().map(|t| &t.package).collect::<BTreeSet<_>>() {
-        let declared: BTreeSet<&str> = STUB_ERROR_EXCEPTIONS
-            .iter()
-            .filter(|(crate_name, _)| crate_name == package)
-            .map(|(_, error)| *error)
-            .collect();
-        if declared.is_empty() {
-            continue;
-        }
-        let Some((_, dir)) = packages.iter().find(|(name, _)| name == package) else {
-            continue;
-        };
-        let src = if dir.is_empty() {
-            "src".to_owned()
+/// Whether a pending test's failure output shows that it stopped at a stub. A one-word marker
+/// matches as a whole word, so `Unimplemented` is not found in `Unimplementedish`; the phrases
+/// match as they are printed.
+fn names_a_stub(output: &str) -> bool {
+    STUB_MARKERS.iter().any(|marker| {
+        if marker.contains(' ') {
+            output.contains(marker)
         } else {
-            format!("{dir}/src")
-        };
-        let files = output_in(
-            root,
-            "git",
-            &[
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "--",
-                &src,
-            ],
-        )?;
-        let mut errors = BTreeSet::new();
-        for file in files.lines().filter(|f| f.ends_with(".rs")) {
-            if let Ok(text) = fs::read_to_string(root.join(file)) {
-                errors.extend(
-                    stub_errors(&text)
-                        .into_iter()
-                        .filter(|error| declared.contains(error.as_str())),
-                );
-            }
+            contains_word(output, marker)
         }
-        found.insert(package.clone(), errors);
-    }
-    Ok(found)
-}
-
-/// The error each always-failing body in one source file returns: the last capitalised name of its
-/// `Err(...)`, which is the variant a failure shows.
-fn stub_errors(src: &str) -> BTreeSet<String> {
-    let toks = tokens(src);
-    let mut found = BTreeSet::new();
-    for (i, (t, _)) in toks.iter().enumerate() {
-        if matches!(t, Token::Ident(kw) if kw == "fn")
-            && let Some(body) = function_body(&toks, i)
-            && let Some(error) = stub_return(body)
-        {
-            found.insert(error);
-        }
-    }
-    found
+    })
 }
 
 /// The panic a failure starts with: the `panicked at` line and the message under it, or the first
@@ -1634,11 +1582,7 @@ fn first_panic_line(output: &str) -> String {
 
 /// A problem for each pending test that passed in any binary, ran in none, or failed on something
 /// other than its story's stub.
-fn verdicts(
-    tests: &[PendingTestRun],
-    outcomes: &[TestOutcome],
-    stubs: &BTreeMap<String, BTreeSet<String>>,
-) -> Vec<String> {
+fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
     tests
         .iter()
         .filter_map(|t| {
@@ -1661,18 +1605,16 @@ fn verdicts(
                 ))
             } else {
                 let story = &t.test.story;
-                let errors = stubs.get(&t.package);
-                runs.iter()
-                    .find(|o| !names_a_stub(&o.output, story, errors))
-                    .map(|o| {
-                        format!(
-                            "{at} fails away from its stub; it must stop at the stub {story} \
-                             implements, so its failure must name `{story}` or the crate's \
-                             `Unimplemented` error, and a fixture, parse, or harness panic shows \
-                             nothing about the story (DEC-137). It panicked with: {}",
-                            first_panic_line(&o.output)
-                        )
-                    })
+                runs.iter().find(|o| !names_a_stub(&o.output)).map(|o| {
+                    format!(
+                        "{at} fails away from its stub; it must stop at the stub {story} \
+                         implements, so its failure must carry that stub's own report — an \
+                         `Unimplemented` error or a `todo!()` panic — and neither a fixture, parse, \
+                         or harness panic nor the test's own story id counts (DEC-137). It \
+                         panicked with: {}",
+                        first_panic_line(&o.output)
+                    )
+                })
             }
         })
         .collect()
@@ -2171,16 +2113,15 @@ mod tests {
     use std::env;
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Duration;
 
     use anyhow::{Context, Result};
-
-    use std::collections::{BTreeMap, BTreeSet};
 
     use super::{
         MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify,
         contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        is_pending_marker, mutant_verdicts, mutants_outcome, names_a_stub, output_in,
-        pending_problems, pending_tests, plain_comment_lines, repo_root, stub_errors, test_binary,
+        is_pending_marker, is_stub_function, mutant_verdicts, mutants_outcome, names_a_stub,
+        output_in, pending_problems, pending_tests, plain_comment_lines, repo_root, test_binary,
         test_outcomes, verdicts,
     };
 
@@ -2515,8 +2456,7 @@ mod tests {
             new(8, Some("a::fs"), "own_error"),
             new(9, Some("a::fs"), "skipped"),
         ];
-        let stubs = BTreeMap::from([("a".to_owned(), BTreeSet::from(["Overflow".to_owned()]))]);
-        let verdicts = verdicts(&tests, &outcomes, &stubs);
+        let verdicts = verdicts(&tests, &outcomes);
         let problems: Vec<String> = verdicts
             .iter()
             .map(|p| p.split([',', ';']).next().unwrap_or_default().to_owned())
@@ -2536,10 +2476,11 @@ mod tests {
                 "f.rs:5: `missing` (pending E1-1) did not run",
                 "f.rs:6: `fails` (pending E1-1) did not run",
                 "f.rs:7: `away` (pending E1-1) fails away from its stub",
+                "f.rs:8: `own_error` (pending E1-1) fails away from its stub",
                 "f.rs:9: `skipped` (pending E1-1) did not run",
             ],
-            "`fails` stops at an `Unimplemented`, `own_error` at the error its own crate's stubs \
-             return; neither is a problem"
+            "`fails` stops at an `Unimplemented` and is no problem; an `Overflow` names no stub, \
+             so the crate whose stubs returned it was fixed instead of excused"
         );
     }
 
@@ -2566,43 +2507,41 @@ mod tests {
     }
 
     #[test]
-    fn a_stub_body_names_the_error_it_returns() {
+    fn only_an_unimplemented_body_is_a_stub() {
         let src = concat!(
             "pub fn evaluate(input: &Input) -> Result<Decision, GateError> {\n",
             "    let _ = input;\n",
             "    Err(GateError::Unimplemented(\"evaluate\", \"E6-3\"))\n",
             "}\n",
-            "pub fn sample_variance(sum: Self, count: u32) -> Result<Self, NumError> {\n",
-            "    let _ = (sum, count);\n",
-            "    Err(NumError::Overflow)\n",
+            "pub fn refuse(n: u32) -> Result<u32, SpecError> {\n",
+            "    let _ = n;\n",
+            "    Err(SpecError::ClockWentBackwards)\n",
             "}\n",
-            "pub fn fold(state: &mut State) -> Result<(), RuntimeError> {\n",
-            "    Err(RuntimeError::Unimplemented { story: \"E6-1\" })\n",
+            "pub fn read_artifact(&self, id: &Id) -> Result<Vec<u8>, ArtifactError> {\n",
+            "    let _ = id;\n",
+            "    Err(ArtifactError::Missing)\n",
             "}\n",
             "pub fn answer() -> u32 { todo!() }\n",
             "pub fn rejected() -> Result<(), Rejected> {\n",
             "    Err(Rejected::NotEvaluated(SpecError::Unimplemented))\n",
             "}\n",
-            "pub fn counted(n: u32) -> Result<u32, NumError> {\n",
-            "    let doubled = n + n;\n",
-            "    Err(NumError::Overflow)\n",
-            "}\n",
             "pub fn real(n: u32) -> u32 {\n",
             "    n + 1\n",
             "}\n",
-            "pub trait T {\n",
-            "    fn declared(&self) -> Result<(), NumError>;\n",
-            "}\n",
         );
-        assert_eq!(
-            stub_errors(src),
-            BTreeSet::from([
-                "Unimplemented".to_owned(),
-                "Overflow".to_owned(),
-                "not yet implemented".to_owned(),
-            ]),
-            "a body with a statement of its own (`counted`) can succeed, and so can `real`"
+        let stub = |from, to| is_stub_function(src, from, to);
+        assert!(stub(1, 4), "an Unimplemented variant is a stub");
+        assert!(stub(13, 13), "so is a todo!()");
+        assert!(stub(14, 16), "so is a wrapped Unimplemented");
+        assert!(
+            !stub(5, 8),
+            "a body that always returns another error is not a stub (DEC-137)"
         );
+        assert!(
+            !stub(9, 12),
+            "nor is `NoArtifacts::read_artifact`, which is live code"
+        );
+        assert!(!stub(17, 19), "nor is an implemented function");
     }
 
     /// A git repository in a temporary directory holding a one-crate workspace laid out like this
@@ -2816,40 +2755,66 @@ mod tests {
                 "}\n",
             ),
         )?;
+        let second = Duration::from_secs(1);
+        let written = fs::metadata(fx.0.join("target/mutants.out/outcomes.json"))?.modified()?;
+        let before = written
+            .checked_sub(second)
+            .context("a timestamp before the outcomes were written")?;
+        let after = written
+            .checked_add(second)
+            .context("a timestamp after the outcomes were written")?;
         assert!(
-            mutants_outcome(&fx.0, &crates, Some(2)).is_ok(),
+            mutants_outcome(&fx.0, &crates, Some(2), before).is_ok(),
             "a run that missed only a stub's mutants passes"
         );
-        assert!(mutants_outcome(&fx.0, &crates, Some(0)).is_ok());
+        assert!(mutants_outcome(&fx.0, &crates, Some(0), before).is_ok());
         for code in [Some(1), Some(3), Some(4), None] {
-            let failure = mutants_outcome(&fx.0, &crates, code)
+            let failure = mutants_outcome(&fx.0, &crates, code, before)
                 .expect_err("a run that did not finish keeps its failure, whatever it left behind");
             assert!(
                 failure.to_string().contains("did not finish"),
                 "{failure}, for {code:?}"
             );
         }
+        let stale = mutants_outcome(&fx.0, &crates, Some(2), after)
+            .expect_err("outcomes older than the run are not this run's result");
+        assert!(
+            stale
+                .to_string()
+                .contains("older than the diff this run read"),
+            "{stale}"
+        );
         Ok(())
     }
 
     #[test]
-    fn a_failure_names_a_stub_only_by_a_marker_a_whole_story_or_a_declared_error() {
-        let declared = BTreeSet::from(["Overflow".to_owned()]);
-        let at = |text: &str| names_a_stub(text, "E6-1", Some(&declared));
-        assert!(at(
+    fn only_a_stubs_own_report_names_a_stub() {
+        assert!(names_a_stub(
             "called `Result::unwrap()` on an `Err` value: Unimplemented"
         ));
-        assert!(at("Test failed: E6-1 has not been implemented yet."));
-        assert!(at("thread 'x' panicked: not yet implemented"));
-        assert!(at("an `Err` value: Overflow"));
+        assert!(names_a_stub("left: Err(Unimplemented { story: \"E6-1\" })"));
+        assert!(names_a_stub(
+            "Test failed: E6-1 has not been implemented yet."
+        ));
+        assert!(names_a_stub(
+            "Test failed: this rule is not implemented yet."
+        ));
+        assert!(names_a_stub(
+            "thread 'x' panicked at s.rs:1:1: not yet implemented"
+        ));
+        assert!(names_a_stub("refused: unimplemented"));
         assert!(
-            !at("Test failed: E6-10 has been implemented."),
-            "E6-10 is not E6-1"
+            !names_a_stub("Test failed: E6-4 fixture: invalid digit found in string"),
+            "a story id in the test's own message is not the stub's report"
         );
-        assert!(!at("assertion failed: `(left == right)`"));
         assert!(
-            !names_a_stub("an `Err` value: Overflow", "E6-1", None),
-            "a crate with no declared exception must fail at a marker"
+            !names_a_stub("an `Err` value: Overflow"),
+            "an error that names no stub is not one; the crate's stubs are fixed instead"
+        );
+        assert!(!names_a_stub("assertion failed: `(left == right)`"));
+        assert!(
+            !names_a_stub("Unimplementedish is a word of its own"),
+            "a one-word marker matches as a whole word"
         );
     }
 
