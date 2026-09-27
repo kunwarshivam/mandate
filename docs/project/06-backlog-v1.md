@@ -47,9 +47,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
   `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
   message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
-  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate;
-  and `mandate-executor`'s three E7-4 properties that pass today only on a discarded case's stub
-  report get their rows in the same change (see the row under #196's reviews).
+  replaced by a rule that reads the cause; and the planted cases of #172's reviews all fail the
+  gate. Since DEC-164 a failing property is already read by proptest's report of its minimal
+  failure alone, and `mandate-executor`'s three E7-4 properties that passed only on a stub report
+  from a case shrinking moved past have their rows; E1-3 narrows that report, and every other
+  test's output, to the cause.
 
 ### E2 Market data
 
@@ -632,17 +634,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   TAF cap. Since #196 the executor books one only for a fill attributed to one of its orders,
   stated in `orders::simulated_fee`'s doc; booking it too would lower paper buying power, the
   conservative side (#196 review, round 1, finding 7).
-- With E1-3, give `mandate-executor`'s three E7-4 properties `BEHAVIOUR_ONLY_TESTS` rows
-  (`protective_sell_quantity_never_exceeds_the_position`,
-  `every_unprotected_interval_has_a_journaled_start_and_end`,
-  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their shrunk failure is their own
-  E7-4 assertion (the protected lead has no bracket). The gate accepts them only because cases
-  discarded before shrinking stop at a later E7-3 slice's stub, and `names_a_stub` reads the whole
-  output. Since #199, `ci pending` pins their seed (`PENDING_PROPTEST_SEED`), so that verdict is one
-  answer rather than red on some runs, but it still rests on incidental evidence. A row now would be
-  reported as not needed, because the output names a stub. When E1-3 reads the failure's own
-  cause, these three fail away from the stub and need their rows, expiring with E7-4 (#196 review,
-  round 1, finding 5; #199 review, round 1, finding 4).
 - Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
   hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a

@@ -1032,9 +1032,17 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .to_str()
         .context("non-UTF-8 temp path")?
         .to_owned();
-    if let Err(unjudged) = live_tests_judge_every_mutant(root, &diff_path) {
-        fs::remove_file(&diff_file).ok();
-        return Err(unjudged);
+    match live_tests_judge_every_mutant(root, &diff_path) {
+        Ok(Listed::Mutants) => {}
+        Ok(Listed::Nothing) => {
+            fs::remove_file(&diff_file).ok();
+            eprintln!("    mutants: the diff generates no mutants");
+            return Ok(());
+        }
+        Err(unjudged) => {
+            fs::remove_file(&diff_file).ok();
+            return Err(unjudged);
+        }
     }
     let args = [
         "mutants",
@@ -1077,7 +1085,10 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
 /// The count is per package because that is the package `cargo mutants` runs tests from. Were a
 /// workspace-wide test run ever configured, this count could only be stricter than it needs to be,
 /// never looser.
-fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<()> {
+///
+/// A diff with no mutants, such as one that touches only `#[cfg(test)]` code, answers
+/// [`Listed::Nothing`], and the job ends there without starting a run that could only test nothing.
+fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<Listed> {
     let listed = output_in(
         root,
         "cargo",
@@ -1085,8 +1096,7 @@ fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<()> {
     )?;
     let mutants = listed_mutant_counts(&listed)?;
     if mutants.is_empty() {
-        eprintln!("    mutants: the diff generates no mutants");
-        return Ok(());
+        return Ok(Listed::Nothing);
     }
     let packages: Vec<String> = mutants
         .keys()
@@ -1097,7 +1107,15 @@ fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<()> {
     eprintln!("    $ cargo {}", args.join(" "));
     let listing = output_in(root, "cargo", &args)?;
     let live = live_test_counts(&listing)?;
-    report(unjudged_mutants(&mutants, &live), "mutants")
+    report(unjudged_mutants(&mutants, &live), "mutants")?;
+    Ok(Listed::Mutants)
+}
+
+/// Whether the diff's listing named any mutant for the run to test.
+#[derive(Debug, PartialEq)]
+enum Listed {
+    Mutants,
+    Nothing,
 }
 
 /// One mutant of `cargo mutants --list --json`. Only its package is read here: that is the package
@@ -1107,8 +1125,14 @@ struct ListedMutant {
     package: String,
 }
 
-/// How many mutants the run will test in each package.
+/// How many mutants the run will test in each package. `cargo mutants` 27.1.0 answers `--list
+/// --json --in-diff` with no output at all, not `[]`, when the diff generates no mutant (a diff
+/// that touches only `#[cfg(test)]` code, #227's round-2 delta review), so empty output is zero
+/// mutants; any other output that is not a JSON list is still an error.
 fn listed_mutant_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
+    if listing.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let listed: Vec<ListedMutant> =
         serde_json::from_str(listing).context("parsing the mutants listing")?;
     let mut counts = BTreeMap::new();
@@ -1604,15 +1628,22 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         "    pending: {} pending test(s) must fail on this change's code, at their story's stub",
         tests.len()
     );
-    eprintln!(
-        "    $ PROPTEST_RNG_SEED={PENDING_PROPTEST_SEED} cargo {}",
-        args.join(" ")
-    );
-    let out = Command::new("cargo")
-        .current_dir(root)
-        .args(args)
+    let pinned = PENDING_PROPTEST_ENV
+        .iter()
+        .map(|(var, value)| format!("{var}={value}"))
+        .collect::<Vec<_>>()
+        .join(" ");
+    eprintln!("    $ {pinned} cargo {}", args.join(" "));
+    let mut nextest = Command::new("cargo");
+    nextest.current_dir(root).args(args);
+    for (var, _) in env::vars_os() {
+        if var.to_string_lossy().starts_with("PROPTEST_") {
+            nextest.env_remove(var);
+        }
+    }
+    let out = nextest
         .env("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1")
-        .env("PROPTEST_RNG_SEED", PENDING_PROPTEST_SEED)
+        .envs(PENDING_PROPTEST_ENV)
         .stderr(Stdio::inherit())
         .output()
         .context("starting `cargo nextest` (is it installed? see AGENTS.md)")?;
@@ -1676,24 +1707,35 @@ impl PendingTestRun {
     }
 }
 
-/// The seed every pending property draws its cases from in `ci pending`, so the gate gives one
-/// verdict for one tree. A pending property's failure can depend on which cases it draws: #196's
-/// review and #199's measured three `mandate-executor` properties pending E7-4
+/// The environment every pending property runs under in `ci pending`, so the gate gives one verdict
+/// for one tree. The seed is the one every pending property draws its cases from: a pending
+/// property's failure can depend on which cases it draws. #196's review and #199's measured three
+/// `mandate-executor` properties pending E7-4
 /// (`protective_sell_quantity_never_exceeds_the_position`,
 /// `every_unprotected_interval_has_a_journaled_start_and_end`,
 /// `no_interval_exceeds_the_limit_without_an_alert`) putting a later slice's stub report in their
 /// output on some seeds and none on others, which turned the required `fast` check red and green on
-/// the same code. Live properties keep drawing a fresh seed in `ci test`, where variety finds bugs;
-/// only the pending verdict is pinned. A pinned seed cannot hide a pending test that passes: #199's
-/// review planted one passing on every case and one failing on one input in 100,000, and the gate
-/// reported both as passing.
+/// the same code. A pinned seed cannot hide a pending test that passes: #199's review planted one
+/// passing on every case and one failing on one input in 100,000, and the gate reported both as
+/// passing.
 ///
-/// Those three are not in [`BEHAVIOUR_ONLY_TESTS`], although their shrunk failure is their own E7-4
-/// assertion. Under this seed their output always carries a stub report from a case discarded
-/// before shrinking, and [`names_a_stub`] reads the whole output, so a row for them would be
-/// reported as not needed. They pass on that incidental evidence, which is the whole-output reading
-/// E1-3 replaces with the failure's own cause; when it lands, they need rows (backlog).
-const PENDING_PROPTEST_SEED: &str = "20260927";
+/// A pinned seed alone was not one verdict per tree (DEC-164). The gate read a property's whole
+/// output, and a property prints a panic for every failing case it tries while shrinking, so a
+/// stub's report from a case shrinking moved past stood in for the failure proptest reports: on
+/// #230 thirty `mandate-executor` properties whose minimal failure was a prefix assertion passed
+/// on that incidental text. Proptest also replays the failures it saved in
+/// `*.proptest-regressions` files beside the tests before drawing from the seed, so a checkout's
+/// earlier runs, on other code, changed which cases a later run tried; and an inherited
+/// `PROPTEST_*` variable (`PROPTEST_CASES`, `PROPTEST_MAX_SHRINK_ITERS`) changed what a property
+/// that takes proptest's defaults runs. So the run clears every inherited `PROPTEST_*` variable,
+/// sets these two, and [`failure_cause`] reads only the minimal failure proptest reports. Case
+/// counts stay the ones each property names in its source, which is what they mean in `ci test`.
+/// Live properties keep drawing a fresh seed and saving their failures in `ci test`, where variety
+/// finds bugs; only the pending verdict is pinned.
+const PENDING_PROPTEST_ENV: [(&str, &str); 2] = [
+    ("PROPTEST_RNG_SEED", "20260927"),
+    ("PROPTEST_DISABLE_FAILURE_PERSISTENCE", "1"),
+];
 
 /// How a stub reports itself, and the only evidence the gate accepts: `Unimplemented` is the
 /// `Debug` of the variant every stub error carries, `unimplemented` its `code()`, "is not
@@ -1726,7 +1768,12 @@ const STUB_MARKERS: [&str; 5] = [
 /// Each still runs and fails, and E7-4's implementation PR deletes each row with its `#[ignore]`
 /// line. The stub check runs first, so a row whose test stops at a stub is reported for deletion
 /// rather than applied (#194 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
+///
+/// The last 3 are E7-4's properties too. Their minimal failure has been their own E7-4 assertion
+/// since #196 (the protected lead has no bracket); they passed only on a stub's report from a case
+/// shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review, round 1,
+/// finding 5; #199 review, round 1, finding 4).
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
     (
         "crates/mandate-risk/tests/hand.rs",
         "a_participation_cap_slices_and_never_denies",
@@ -1763,6 +1810,18 @@ const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 9] = [
         "crates/mandate-executor/tests/fault.rs",
         "crash_between_entry_fill_and_oco",
     ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "protective_sell_quantity_never_exceeds_the_position",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "every_unprotected_interval_has_a_journaled_start_and_end",
+    ),
+    (
+        "crates/mandate-executor/tests/properties.rs",
+        "no_interval_exceeds_the_limit_without_an_alert",
+    ),
 ];
 
 /// Whether a pending test's failure output shows that it stopped at a stub. A one-word marker
@@ -1776,6 +1835,30 @@ fn names_a_stub(output: &str) -> bool {
             contains_word(output, marker)
         }
     })
+}
+
+/// The part of a failing test's output its verdict rests on. A property's output holds a panic for
+/// every failing case proptest tried, and only the last is the failure it reports: `Test failed:
+/// <why>.` over the minimal input, or `Test aborted: <why>` when it gave up. That reason alone is
+/// the cause, so a stub's report from a case shrinking moved past, or from the input's `Debug`, is
+/// not evidence (DEC-164). Any other test fails on one panic, and its whole output is read, as
+/// DEC-137 says.
+fn failure_cause(output: &str) -> &str {
+    const FAILED: &str = "Test failed: ";
+    const ABORTED: &str = "Test aborted: ";
+    let reported = output.rmatch_indices("panicked at ").find_map(|(at, _)| {
+        let (_, message) = output.get(at..)?.split_once('\n')?;
+        (message.starts_with(FAILED) || message.starts_with(ABORTED)).then_some(message)
+    });
+    let Some(message) = reported else {
+        return output;
+    };
+    let end = if message.starts_with(FAILED) {
+        message.find(".\nminimal failing input:")
+    } else {
+        message.find('\n')
+    };
+    end.and_then(|end| message.get(..end)).unwrap_or(message)
 }
 
 /// The panic a failure starts with: the `panicked at` line and the message under it, or the first
@@ -1838,7 +1921,10 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                     .iter()
                     .any(|(file, name)| *file == t.file && *name == t.test.path);
                 let story = &t.test.story;
-                match runs.iter().find(|o| !names_a_stub(&o.output)) {
+                match runs
+                    .iter()
+                    .find(|o| !names_a_stub(failure_cause(&o.output)))
+                {
                     None if listed => Some(format!(
                         "{at} fails at its stub, so its BEHAVIOUR_ONLY_TESTS row is not needed; \
                          delete the row, which is how the exception stays as small as it must \
@@ -1860,7 +1946,7 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                          the `Unimplemented` error of its crate, and neither a fixture, parse, or \
                          harness panic nor the test's own story id counts (DEC-137). It panicked \
                          with: {}",
-                        first_panic_line(&o.output)
+                        first_panic_line(failure_cause(&o.output))
                     )),
                 }
             }
@@ -2368,11 +2454,11 @@ mod tests {
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome,
-        backticked_paths, ci, classify, contains_dec_id, contains_word, first_panic_line,
-        generated_pending_markers, has_pending_tests, is_pending_marker, is_stub_function,
-        listed_mutant_counts, live_test_counts, mutant_verdicts, mutants, mutants_outcome,
-        names_a_stub, output_in, pending_problems, pending_tests, plain_comment_lines, repo_root,
-        test_binary, test_outcomes, unjudged_mutants, verdicts,
+        backticked_paths, ci, classify, contains_dec_id, contains_word, failure_cause,
+        first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
+        is_stub_function, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
+        mutants_outcome, names_a_stub, output_in, pending_problems, pending_tests,
+        plain_comment_lines, repo_root, test_binary, test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -3338,6 +3424,190 @@ mod tests {
         assert!(
             unjudged_mutants(&mutants, &all_live).is_empty(),
             "every crate with a live test is judged"
+        );
+        Ok(())
+    }
+
+    /// A property prints a panic for every failing case it tries, and only proptest's own report of
+    /// the minimal one is the failure's cause (DEC-164). Here shrinking moves from a case that
+    /// stopped at the stub to one that fails the test's own assertion, which is how #230's thirty
+    /// properties passed the gate on a stub's report they had shrunk past.
+    #[test]
+    fn a_property_is_judged_by_its_minimal_failure_alone() {
+        let shrunk_past_the_stub = concat!(
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:9:9:\n",
+            "called `Result::unwrap()` on an `Err` value: Unimplemented\n",
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:12:5:\n",
+            "the prefix's opening must reach the broker\n",
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:4:1:\n",
+            "Test failed: the prefix's opening must reach the broker.\n",
+            "minimal failing input: n = 1\n",
+            "\tsuccesses: 0\n",
+            "\tlocal rejects: 0\n",
+        );
+        assert_eq!(
+            failure_cause(shrunk_past_the_stub),
+            "Test failed: the prefix's opening must reach the broker"
+        );
+        let stopped_at_the_stub = concat!(
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:12:5:\n",
+            "the prefix's opening must reach the broker\n",
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:4:1:\n",
+            "Test failed: called `Result::unwrap()` on an `Err` value: Unimplemented { story: ",
+            "\"E7-3\" }.\n",
+            "minimal failing input: n = 10\n",
+        );
+        assert!(names_a_stub(failure_cause(stopped_at_the_stub)));
+        let input_names_a_stub = concat!(
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:4:1:\n",
+            "Test failed: assertion failed: fills <= 1.\n",
+            "minimal failing input: Script { reply: Unimplemented }\n",
+        );
+        assert!(
+            !names_a_stub(failure_cause(input_names_a_stub)),
+            "the minimal input's `Debug` is what the test was given, not what it stopped at"
+        );
+        let aborted = concat!(
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:9:9:\n",
+            "called `Result::unwrap()` on an `Err` value: Unimplemented\n",
+            "thread 'p' (7) panicked at crates/fx/tests/props.rs:4:1:\n",
+            "Test aborted: Too many global rejects\n",
+            "\tsuccesses: 0\n",
+        );
+        assert_eq!(
+            failure_cause(aborted),
+            "Test aborted: Too many global rejects"
+        );
+        let plain = "thread 't' panicked at x.rs:1:1:\nnot yet implemented\n";
+        assert_eq!(
+            failure_cause(plain),
+            plain,
+            "a test that is not a property fails on one panic, and its whole output is read"
+        );
+
+        let run = PendingTestRun {
+            file: "f.rs".to_owned(),
+            package: "fx".to_owned(),
+            binary: Some("fx::props".to_owned()),
+            test: PendingTest {
+                path: "p".to_owned(),
+                story: "E1-1".to_owned(),
+                line: 4,
+            },
+        };
+        let failed = |output: &str| TestOutcome {
+            binary_id: "fx::props".to_owned(),
+            name: "p".to_owned(),
+            passed: false,
+            output: output.to_owned(),
+        };
+        let away = verdicts(std::slice::from_ref(&run), &[failed(shrunk_past_the_stub)]);
+        assert!(
+            away.len() == 1
+                && away.iter().all(|p| p.contains("fails away from its stub")
+                    && p.ends_with(
+                        "It panicked with: Test failed: the prefix's opening must reach the broker"
+                    )),
+            "{away:?}"
+        );
+        assert!(verdicts(&[run], &[failed(stopped_at_the_stub)]).is_empty());
+    }
+
+    /// The whole pending gate over real properties, run three times: one whose shrinking passes
+    /// through a stub's report and ends on the test's own assertion is reported every time, one
+    /// that stops at its stub never is, and no run leaves a `*.proptest-regressions` file for the
+    /// next to replay (DEC-164). Under the whole-output reading the first passed the gate.
+    #[test]
+    fn a_property_that_shrinks_away_from_its_stub_is_reported_on_every_run() -> Result<()> {
+        let fx = Fixture::new("pending-props")?;
+        fx.write(
+            "crates/fx/Cargo.toml",
+            concat!(
+                "[package]\nname = \"fx\"\nversion = \"0.0.0\"\nedition = \"2024\"\n",
+                "[dev-dependencies]\nproptest = \"1\"\n",
+            ),
+        )?;
+        fs::copy(repo_root()?.join("Cargo.lock"), fx.0.join("Cargo.lock"))?;
+        output_in(&fx.0, "cargo", &["update", "--offline", "--workspace"])?;
+        fx.write(
+            "crates/fx/tests/props.rs",
+            concat!(
+                "use proptest::prelude::*;\n",
+                "proptest! {\n",
+                "    #[test]\n",
+                "    #[ignore = \"pending E1-1\"]\n",
+                "    fn shrinks_away_from_the_stub(n in 0u32..1_000_000) {\n",
+                "        if n >= 10 {\n",
+                "            fx::lookup().unwrap();\n",
+                "        }\n",
+                "        prop_assert!(n < 1, \"the fixture's own assertion\");\n",
+                "    }\n",
+                "    #[test]\n",
+                "    #[ignore = \"pending E1-1\"]\n",
+                "    fn stops_at_the_stub(n in 0u32..1_000_000) {\n",
+                "        prop_assert_eq!(fx::lookup().unwrap(), n);\n",
+                "    }\n",
+                "}\n",
+            ),
+        )?;
+        fx.commit()?;
+        for round in 1..=3 {
+            let problems = pending_problems(&fx.0)?;
+            assert!(
+                problems.len() == 1
+                    && problems.iter().all(|p| p.starts_with(
+                        "crates/fx/tests/props.rs:5: `shrinks_away_from_the_stub` (pending E1-1) \
+                         fails away from its stub"
+                    ) && p
+                        .contains("It panicked with: Test failed: the fixture's own assertion")),
+                "run {round}: {problems:?}"
+            );
+            let saved = output_in(
+                &fx.0,
+                "git",
+                &["ls-files", "--others", "--", "*.proptest-regressions"],
+            )?;
+            assert!(
+                saved.trim().is_empty(),
+                "run {round} saved failures for the next run to replay: {saved}"
+            );
+        }
+        Ok(())
+    }
+
+    /// `cargo mutants --list --json --in-diff` prints nothing, not `[]`, for a diff with no
+    /// mutants, which is every diff that touches only `#[cfg(test)]` code (#227, round-2 delta
+    /// review). That is zero mutants and a job with nothing to do; other output that is not a JSON
+    /// list is still an error.
+    #[test]
+    fn an_empty_mutants_listing_is_zero_mutants() -> Result<()> {
+        assert!(listed_mutant_counts("")?.is_empty());
+        assert!(listed_mutant_counts("\n")?.is_empty());
+        assert!(listed_mutant_counts("[]")?.is_empty());
+        assert!(listed_mutant_counts("[").is_err());
+        assert!(listed_mutant_counts("no mutants").is_err());
+
+        let fx = Fixture::gated("mutants-test-only")?;
+        fx.write(
+            "crates/probe/tests/probe.rs",
+            "#[test]\nfn the_code_names_the_refusal() {\n    assert_eq!(probe::code(true), \"refused\");\n    assert_eq!(probe::code(false), \"accepted\");\n}\n",
+        )?;
+        fx.commit()?;
+        let base = output_in(&fx.0, "git", &["rev-parse", "HEAD"])?;
+        fx.write(
+            "crates/covered/src/lib.rs",
+            concat!(
+                "#[must_use]\npub fn negate(flag: bool) -> bool {\n    !flag\n}\n",
+                "#[cfg(test)]\nmod tests {\n    #[test]\n",
+                "    fn negates() {\n        assert!(super::negate(false));\n    }\n}\n",
+            ),
+        )?;
+        fx.commit()?;
+        mutants(&fx.0, Some(base.trim()))
+            .context("a diff touching only `#[cfg(test)]` code has no mutants to judge")?;
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "and the job ends at the listing, without a run that could test nothing"
         );
         Ok(())
     }
