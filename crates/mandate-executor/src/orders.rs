@@ -1,16 +1,19 @@
 //! The §5.7 order state machine over what the broker says: acknowledgments, query answers,
-//! status updates, and silence.
+//! status updates, fills, and silence.
 
 use mandate_canon::Value;
 use mandate_num::Qty;
 
 use crate::batch::Batch;
-use crate::codec::state_name;
+use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::text;
-use crate::types::{BrokerOrder, BrokerRequest, EventId, OrderState, StatusMapping};
+use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
+use crate::types::{
+    BrokerFill, BrokerOrder, BrokerRequest, EventId, Mode, OrderState, StatusMapping,
+};
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
 /// maps, and any other value is [`ExecutorError::UnmappedBrokerStatus`], which the step turns into
@@ -147,7 +150,7 @@ pub(crate) fn described(
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
-        Ok(StatusMapping::ReplacedPair) => replaced()?,
+        Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {
@@ -252,12 +255,6 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     Ok(())
 }
 
-/// `replaced`: the old order becomes `Replaced` and a new one, linked to it, holds its reservation
-/// (§5.7, interpretation 26). A later slice of this stack, with the fills its tests need.
-fn replaced() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-2" })
-}
-
 /// A cancel the broker confirmed, which only the kill switch's and E7-4's cancels ask for: a later
 /// slice of this stack.
 pub(crate) fn cancelled() -> Result<(), ExecutorError> {
@@ -295,3 +292,141 @@ pub(crate) fn lookups_due(batch: &mut Batch<'_, '_>) {
         batch.broker(BrokerRequest::GetOrderByClientId(id));
     }
 }
+
+/// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived
+/// from the event that records the replacement, becomes `Accepted` holding the old reservation
+/// (§5.7, interpretation 26).
+fn replaced(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    order: &BrokerOrder,
+    mut status: Vec<(&'static str, Value)>,
+) -> Result<(), ExecutorError> {
+    let from = batch
+        .view
+        .orders
+        .get(id)
+        .map_or(OrderState::Unknown, |known| known.state);
+    if !legal(from, OrderState::Replaced) {
+        transition(batch, id, OrderState::Replaced, status)?;
+        return Ok(());
+    }
+    let linked = ClientOrderId::for_replacement(&batch.next_id())?;
+    status.push(("replaced_by", text(linked.as_str())));
+    if let Some(broker) = &order.replaced_by_broker_order_id {
+        status.push(("replaced_by_broker_order_id", text(broker.clone())));
+    }
+    transition(batch, id, OrderState::Replaced, status)?;
+    batch.journal(
+        "OrderStateChanged",
+        None,
+        vec![
+            ("client_order_id", text(linked.as_str())),
+            ("state", text(state_name(OrderState::Accepted))),
+            ("replaces", text(id.as_str())),
+        ],
+    )?;
+    Ok(())
+}
+
+/// One broker fill, applied by its fill id, once (§5.7). A fill for a terminal order is a
+/// `LateFillApplied` that triggers a reconciliation. A fill that cannot be one of our orders' —
+/// not our id, another instrument or side, or more than the order has left — is still applied to
+/// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
+/// alerted (§7.1), so filled quantity never exceeds an order's quantity.
+///
+/// "Terminal" is judged against `before` when given: a reconciliation that has just adopted the
+/// broker's `filled` for an order ingests that order's missing fill as the fill it is, not as a
+/// late one.
+pub(crate) fn fill(
+    batch: &mut Batch<'_, '_>,
+    fill: &BrokerFill,
+    before: Option<&ExecutorState>,
+) -> Result<(), ExecutorError> {
+    if batch.view.fills.contains(&fill.fill_id) {
+        return Ok(());
+    }
+    let ours = known(batch, fill.client_order_id.as_deref()).filter(|id| {
+        batch.view.orders.get(id).is_some_and(|order| {
+            order.instrument == fill.instrument
+                && order.side == fill.side
+                && order
+                    .qty
+                    .checked_sub(order.filled_qty)
+                    .is_ok_and(|left| fill.qty <= left)
+        })
+    });
+    let terminal = ours
+        .as_ref()
+        .and_then(|id| before.unwrap_or(&batch.view).orders.get(id))
+        .is_some_and(|order| order.state.is_terminal());
+    let mut pairs = vec![
+        ("fill_id", text(fill.fill_id.0.clone())),
+        ("instrument", text(fill.instrument.as_str())),
+        ("side", text(side_name(fill.side))),
+        ("qty_gross", text(fill.qty.to_string())),
+        ("price", text(fill.price.to_string())),
+        ("fees", text(fill.fees.to_string())),
+        ("trade_date", text(fill.trade_date.to_string())),
+    ];
+    let Some(id) = ours else {
+        let ingested = batch.journal(
+            "ExternalActivityIngested",
+            None,
+            vec![("fill_id", text(fill.fill_id.0.clone()))],
+        )?;
+        batch.journal("FillApplied", None, pairs)?;
+        every_agent(batch, Mode::ExitsOnly, &restriction_for(EXTERNAL))?;
+        batch.notify(ingested, "external_activity");
+        return Ok(());
+    };
+    pairs.push(("client_order_id", text(id.as_str())));
+    let kind = if terminal {
+        "LateFillApplied"
+    } else {
+        "FillApplied"
+    };
+    batch.journal(kind, None, pairs)?;
+    if terminal {
+        batch.request_reconciliation();
+        return Ok(());
+    }
+    if let Some(order) = batch.view.orders.get(&id) {
+        let pending = matches!(
+            order.state,
+            OrderState::PendingCancel | OrderState::PendingReplace
+        );
+        let to = if order.filled_qty >= order.qty {
+            OrderState::Filled
+        } else if pending {
+            order.state
+        } else {
+            OrderState::PartiallyFilled
+        };
+        if to != order.state {
+            transition(batch, &id, to, Vec::new())?;
+        }
+    }
+    Ok(())
+}
+
+/// A restriction on every agent of the account, originated here rather than copied.
+pub(crate) fn every_agent(
+    batch: &mut Batch<'_, '_>,
+    mode: Mode,
+    restriction: &str,
+) -> Result<EventId, ExecutorError> {
+    batch.journal(
+        "AgentModeApplied",
+        None,
+        vec![
+            ("agent", text(EVERY_AGENT)),
+            ("to", text(crate::codec::mode_name(mode))),
+            ("restriction", text(restriction)),
+            ("originated", Value::Bool(true)),
+        ],
+    )
+}
+
+/// The subject external activity is recorded and acknowledged under (§7.1).
+pub(crate) const EXTERNAL: &str = "external_activity";

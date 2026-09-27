@@ -1751,7 +1751,6 @@ proptest! {
 
     /// §5.7: the status map is total and never silently ignores.
     #[test]
-    #[ignore = "pending E7-2"]
     fn the_status_map_is_total_and_never_silently_ignores(
         status in prop::sample::select(vec![
             "new", "accepted", "pending_new", "accepted_for_bidding", "held", "partially_filled",
@@ -2327,7 +2326,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 14] = [
+        const INTERPRETED: [&str; 15] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2341,6 +2340,7 @@ proptest! {
             "MarkUpdated",
             "FillApplied",
             "LateFillApplied",
+            "ExternalActivityIngested",
             "AccountRestrictionChanged",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"

@@ -1411,7 +1411,6 @@ fn an_illegal_transition_is_journaled_and_ignored() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_fill_inside_an_illegal_transition_is_still_applied() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1455,7 +1454,6 @@ fn a_fill_inside_an_illegal_transition_is_still_applied() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_fill_after_a_terminal_state_is_applied_as_a_late_fill() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1497,7 +1495,6 @@ fn a_fill_after_a_terminal_state_is_applied_as_a_late_fill() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_late_fill_triggers_a_reconciliation() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1541,7 +1538,6 @@ fn a_late_fill_triggers_a_reconciliation() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_repeated_fill_id_changes_nothing() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1695,7 +1691,6 @@ fn an_abandoned_order_releases_its_reservation() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_replaced_orders_reservation_passes_to_the_new_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

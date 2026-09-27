@@ -345,6 +345,12 @@ impl ExecutorState {
     }
 }
 
+/// The restriction a reconciliation places for one subject — an instrument, or external activity
+/// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
+pub(crate) fn restriction_for(subject: &str) -> String {
+    format!("reconciliation:{subject}")
+}
+
 /// The accessors read their own fields. These cases set the private fields directly, so a mutant
 /// that answers the fresh value dies even for a field no merged slice folds yet, which no test
 /// outside the crate can reach until that slice lands (DEC-137).

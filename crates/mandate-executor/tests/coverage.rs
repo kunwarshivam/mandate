@@ -785,7 +785,6 @@ fn an_unknown_order_is_looked_up_again_only_after_the_spacing() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_replacement_is_a_new_order_under_its_own_id() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -901,7 +900,6 @@ fn a_kill_switch_leaves_another_agents_working_order_alone() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn fills_move_an_order_through_partially_filled_to_filled() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -939,7 +937,6 @@ fn fills_move_an_order_through_partially_filled_to_filled() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1575,7 +1572,6 @@ fn a_resubmission_the_recheck_holds_waits_in_intent_and_goes_once_released() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_paper_crypto_fill_books_no_simulated_regulatory_fee() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, BTC]);

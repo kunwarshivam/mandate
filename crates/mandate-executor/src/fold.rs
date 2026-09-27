@@ -98,6 +98,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "TradingDayStarted" | "ClockAdvanced" | "RiskDayStarted" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
+        "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -358,10 +359,8 @@ fn order_state_changed(
 ) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
-    if optional_text(payload, "replaces").is_some()
-        || optional_text(payload, "replaced_by").is_some()
-    {
-        return later_slice();
+    if let Some(old) = optional_text(payload, "replaces") {
+        replacement(state, &id, &ClientOrderId::parse(old)?)?;
     }
     let order = state
         .orders
@@ -385,7 +384,12 @@ fn order_state_changed(
     }
     order.state = next;
     if next.is_terminal() {
-        state.reservations.remove(&id);
+        let amount = state.reservations.remove(&id);
+        if let Some(new) = optional_text(payload, "replaced_by") {
+            let new = ClientOrderId::parse(new)?;
+            order.replaced_by = Some(new.clone());
+            state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
+        }
     }
     Ok(())
 }
@@ -496,6 +500,29 @@ fn recompute(state: &mut ExecutorState, agent: &AgentId) {
     state.modes.insert(agent.clone(), mode);
 }
 
+/// The order a broker-initiated replacement created, linked to the one it replaced and carrying
+/// the reservation the old one passed on (trading-domain spec §5.7, interpretation 26).
+fn replacement(
+    state: &mut ExecutorState,
+    id: &ClientOrderId,
+    old: &ClientOrderId,
+) -> Result<(), ExecutorError> {
+    let original = state
+        .orders
+        .get(old)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: old.as_str().to_owned(),
+        })?;
+    let linked = Order {
+        client_order_id: id.clone(),
+        filled_qty: Qty::ZERO,
+        replaced_by: None,
+        ..original.clone()
+    };
+    state.orders.insert(id.clone(), linked);
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::fold;
@@ -507,8 +534,8 @@ mod tests {
     };
 
     /// A stream opened on paper, then an `OrderStateChanged` for an order the fold has never seen,
-    /// carrying one extra field. Without that field the fold answers `UnknownOrder`; the
-    /// replacement fields are refused before the order is looked up.
+    /// carrying one extra field that names `md-r-e-1`. Without that field the fold answers
+    /// `UnknownOrder` for the order itself; `replaces` is followed to the order it names first.
     fn fold_state_change(extra: &str) -> Result<(), ExecutorError> {
         let mut state = ExecutorState::new(AccountScope {
             account: AccountRef("acct-1".to_owned()),
@@ -543,21 +570,23 @@ mod tests {
     }
 
     #[test]
-    fn a_replacement_field_answers_the_later_slice_not_a_silent_fold() {
-        for field in ["replaces", "replaced_by"] {
-            let answer = fold_state_change(field);
-            assert!(
-                matches!(answer, Err(ExecutorError::Unimplemented { .. })),
-                "an OrderStateChanged carrying `{field}` alone is refused until the slice that \
-                 interprets replacements, never folded without it: {answer:?}"
+    fn a_replacement_field_is_followed_to_the_order_it_names() {
+        let named = |answer: Result<(), ExecutorError>| match answer {
+            Err(ExecutorError::UnknownOrder { client_order_id }) => Some(client_order_id),
+            _ => None,
+        };
+        assert_eq!(
+            named(fold_state_change("replaces")).as_deref(),
+            Some("md-r-e-1"),
+            "`replaces` links the new order to the one it replaced, so an unseen original is \
+             refused by its own id, never folded without it"
+        );
+        for extra in ["replaced_by", ""] {
+            assert_eq!(
+                named(fold_state_change(extra)).as_deref(),
+                Some("md-01JABCDEFGHJKMNPQRSTVWXYZ0"),
+                "without `replaces` the event reaches the lookup of its own order ({extra:?})"
             );
         }
-        assert!(
-            matches!(
-                fold_state_change(""),
-                Err(ExecutorError::UnknownOrder { .. })
-            ),
-            "and without either field the same event reaches the order lookup"
-        );
     }
 }
