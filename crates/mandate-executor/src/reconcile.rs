@@ -1643,9 +1643,10 @@ mod tests {
     }
 
     /// The never-observed hold on its own, not through any test harness's startup: an opening is
-    /// held while no account has been journaled, however many runs complete, and released at the
-    /// next tick once an account is journaled and a run has completed since the start, whichever
-    /// comes first (#222 review, minor 3).
+    /// held while no account has been journaled, however many runs complete, and released once an
+    /// account is journaled and a run has completed since the start, whichever comes first: by the
+    /// startup run's resume when the account came first, at the next tick when the run did (#222
+    /// review, minor 3).
     #[test]
     fn the_hold_lifts_on_an_account_and_a_run_in_either_order() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
