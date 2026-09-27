@@ -1460,6 +1460,7 @@ dependencies = [
  "mandate-domain",
  "mandate-journal",
  "mandate-num",
+ "mandate-research",
  "mandate-sim",
  "mandate-spec",
  "mandate-time",
