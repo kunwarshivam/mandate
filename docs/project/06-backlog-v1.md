@@ -372,6 +372,20 @@ after the DEC-99 evaluation (E17-8) passes on the thin slice.
 Live retail trading before counsel signs off; users outside the US; options; Interactive Brokers and Coinbase connectors; native mobile apps; WebAssembly plug-ins; SAML and SCIM;
 fully on-prem control plane; shared data plane; strategy marketplace.
 
+## Later (wanted after v1)
+
+- **Custom signals for power users** ([DEC-20](04-decision-log.md#decisions)). Today a mandate chooses the
+  platform's registered signal models, their declared parameters, fixed weights, thresholds, universe,
+  autonomy, protection and cadence, but it cannot define a new signal formula, combine signals other than
+  by fixed linear weights, or change sizing. Two steps, in order:
+  1. A **declarative signal-expression layer**: arithmetic and comparisons over the platform's indicators
+     and data, stored in the mandate, validated, bounded, and replayed deterministically. It keeps the
+     mandate checkable.
+  2. **WebAssembly plug-ins**, only if step 1 falls short: sandboxed, resource-limited, versioned by content
+     hash, with every output journaled. A plug-in emits only an opinion (a signal or a thesis), which enters
+     through the eligibility floor, the autonomy rules and the risk gate like the platform's own ideas. It
+     never sizes or places an order (rule 4).
+
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
 From the final review of mandate spec v0.3:
