@@ -305,7 +305,7 @@ fn a_submission_journals_before_the_request_leaves() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
 
     let ran = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -350,7 +350,7 @@ fn an_opening_without_protective_prices_is_gated_and_sent_as_a_plain_order() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
 
     let ran = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -405,7 +405,7 @@ fn a_re_handed_intent_produces_no_effect_at_all() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
 
     let first = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -438,7 +438,7 @@ fn two_processes_derive_one_client_order_id_for_one_intent() {
 
     let mut first = Shell::new(1);
     first.fold_one(&stream_opened()).expect("folds");
-    let (mut first, _) = first.restart(&ports);
+    let mut first = first.restart_ready(&ports);
     let one = first.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -446,7 +446,7 @@ fn two_processes_derive_one_client_order_id_for_one_intent() {
 
     let mut second = Shell::new(9);
     second.fold_one(&stream_opened()).expect("folds");
-    let (mut second, _) = second.restart(&ports);
+    let mut second = second.restart_ready(&ports);
     let earlier = second.run(
         handoff(OTHER_INTENT, common::AGENT, opening(CPHC, "5", "20")),
         &ports,
@@ -485,13 +485,13 @@ fn a_new_intent_after_a_restart_derives_a_fresh_client_order_id() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let first = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
     );
 
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let second = shell.run(
         handoff(OTHER_INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -524,7 +524,7 @@ fn a_resubmission_after_a_crash_reuses_the_same_client_order_id() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let first = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -567,7 +567,7 @@ fn an_unacknowledged_submission_queries_before_it_resubmits() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.next_append = AppendOutcome::Committed;
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -609,7 +609,7 @@ fn an_order_the_broker_confirms_present_is_adopted_not_resent() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -655,7 +655,7 @@ fn one_absent_lookup_does_not_resubmit() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -690,7 +690,7 @@ fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -757,7 +757,7 @@ fn a_stale_intent_is_abandoned_rather_than_resubmitted() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -799,7 +799,7 @@ fn a_stale_intent_is_abandoned_at_its_first_submission() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Tick(clock(100)), &ports);
 
     shell
@@ -854,7 +854,7 @@ fn an_abandoned_intent_is_never_re_sent() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Tick(clock(100)), &ports);
     shell
         .step_crashing(
@@ -902,7 +902,7 @@ fn a_gate_denial_on_re_check_abandons_the_intent() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -989,7 +989,7 @@ fn a_timeout_is_not_a_rejection() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1027,7 +1027,7 @@ fn a_duplicate_client_order_id_is_folded_as_already_submitted() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1067,7 +1067,7 @@ fn a_retried_append_derives_the_same_event_id() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let head = shell.head();
     shell.next_append = AppendOutcome::Unresolved;
 
@@ -1103,7 +1103,7 @@ fn a_new_input_is_refused_at_an_unresolved_head() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.next_append = AppendOutcome::Unresolved;
     shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -1126,7 +1126,7 @@ fn a_fenced_append_stops_the_executor() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.next_append = AppendOutcome::Fenced;
     shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
@@ -1158,7 +1158,7 @@ fn a_step_under_another_epoch_is_refused() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
 
     let error = shell
         .step(Input::Started(WriterEpoch(99)), &ports)
@@ -1219,7 +1219,7 @@ fn every_broker_status_maps_to_the_table_row() {
     for (status, expected) in table {
         let mut shell = started();
         shell.fold_one(&stream_opened()).expect("folds");
-        let (mut shell, _) = shell.restart(&ports);
+        let mut shell = shell.restart_ready(&ports);
         let id = accepted_order(&mut shell, &ports, INTENT);
         shell.run(
             Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
@@ -1258,7 +1258,7 @@ fn the_unchanged_statuses_leave_the_state_alone() {
     for status in ["done_for_day", "stopped", "calculated"] {
         let mut shell = started();
         shell.fold_one(&stream_opened()).expect("folds");
-        let (mut shell, _) = shell.restart(&ports);
+        let mut shell = shell.restart_ready(&ports);
         let id = accepted_order(&mut shell, &ports, INTENT);
         let key = shell
             .state
@@ -1297,7 +1297,7 @@ fn an_unknown_broker_status_pauses_the_agent_and_alerts() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
 
     let ran = shell.run(
@@ -1341,7 +1341,7 @@ fn a_suspended_status_flags_restricted_and_triggers_a_reconciliation() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
 
     let ran = shell.run(
@@ -1375,7 +1375,7 @@ fn an_illegal_transition_is_journaled_and_ignored() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
@@ -1430,7 +1430,7 @@ fn a_fill_inside_an_illegal_transition_is_still_applied() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
@@ -1473,7 +1473,7 @@ fn a_fill_after_a_terminal_state_is_applied_as_a_late_fill() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
@@ -1514,7 +1514,7 @@ fn a_late_fill_triggers_a_reconciliation() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
@@ -1557,7 +1557,7 @@ fn a_repeated_fill_id_changes_nothing() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     let fill = || {
         Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
@@ -1594,7 +1594,7 @@ fn an_unknown_order_reserves_its_maximum_cost() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1623,7 +1623,7 @@ fn an_unknown_order_blocks_new_orders_in_the_instrument() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1663,7 +1663,7 @@ fn an_abandoned_order_releases_its_reservation() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1710,7 +1710,7 @@ fn a_replaced_orders_reservation_passes_to_the_new_order() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let id = accepted_order(&mut shell, &ports, INTENT);
     let key = shell
         .state
@@ -1749,7 +1749,7 @@ fn a_reject_releases_the_reservation_and_is_journaled_with_its_code() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(INTENT, common::AGENT, opening(AAPL, "10", "150")),
         &ports,
@@ -1784,8 +1784,7 @@ fn a_reject_releases_the_reservation_and_is_journaled_with_its_code() {
 fn reconciling(ports: &mandate_executor::Ports<'_>) -> Shell {
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (shell, _) = shell.restart(ports);
-    shell
+    shell.restart_ready(ports)
 }
 
 #[test]
@@ -2448,6 +2447,14 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
         "the run is drafted at the stale head"
     );
 
+    let runs = |shell: &Shell| {
+        shell
+            .account_journal
+            .iter()
+            .filter(|e| e.event_type == "ReconciliationRun")
+            .count()
+    };
+    let runs_before = runs(&shell);
     shell.next_append = AppendOutcome::HeadMismatch;
     let refused = shell.run(Input::BrokerSnapshot(taken), &ports);
     assert!(
@@ -2455,13 +2462,7 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
         "the stale batch is offered to the journal: {:?}",
         refused.draft_types()
     );
-    assert!(
-        !shell
-            .account_journal
-            .iter()
-            .any(|e| e.event_type == "ReconciliationRun"),
-        "and the journal refused it"
-    );
+    assert_eq!(runs(&shell), runs_before, "and the journal refused it");
     shell.next_append = AppendOutcome::Committed;
     let fresh_head = shell.head();
     let again = shell.run(
@@ -2836,7 +2837,7 @@ fn a_partly_filled_bracket_becomes_an_oco_for_the_filled_quantity() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(
             INTENT,
@@ -2913,7 +2914,7 @@ fn an_entry_unfinished_at_the_timeout_is_cancelled_then_oco_d() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(
             INTENT,
@@ -2968,7 +2969,7 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     let submitted = shell.run(
         handoff(
             INTENT,
@@ -3200,7 +3201,7 @@ fn a_crypto_position_carries_one_stop_limit_for_the_whole_position() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
     let submitted = shell.run(
         handoff(
@@ -3334,7 +3335,7 @@ fn a_crypto_stop_limit_is_re_placed_for_the_new_net_quantity() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
     let submitted = shell.run(
         handoff(
@@ -3383,7 +3384,7 @@ fn a_fractional_position_protects_the_whole_shares_and_discloses_the_fraction() 
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(FRAC, "20", "20.1", 20)), &ports);
     let submitted = shell.run(
         handoff(

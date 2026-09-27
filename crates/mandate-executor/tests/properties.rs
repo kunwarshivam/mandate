@@ -1768,7 +1768,7 @@ proptest! {
         shell
             .fold_one(&stream_opened())
             .map_err(|e| TestCaseError::fail(format!("the stream must open: {e}")))?;
-        let (mut shell, _) = shell.restart(&ports);
+        let mut shell = shell.restart_ready(&ports);
         let sent = shell.run(
             handoff("01JABCDEFGHJKMNPQRSTVWXYZ0", common::AGENT, opening(AAPL, "1", "150")),
             &ports,
