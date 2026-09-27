@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141, DEC-145, and DEC-148 and for option 16. Not a PRD change, and not legal advice |
+| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141, DEC-145, DEC-148, and DEC-149 and for option 16. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee. [DEC-149](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): the harness is an enterprise product, and the platform runs through it ([positioning](#positioning-harness-and-platform-dec-149)) |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -256,6 +256,9 @@ evidence below is unchanged.
 - **Experiment.** A two-page controls brief mapped to FINRA's report, with no outreach; with
   authorization, one validation call with a mid-size API broker. **Kill.** No broker takes a second
   meeting within four weeks.
+- **Positioning ([DEC-149](../project/04-decision-log.md#decisions)).** Brokers are one of
+  the enterprise buyers of the harness ([positioning](#positioning-harness-and-platform-dec-149));
+  this option's score is unchanged.
 
 ### Option 5: Open-core
 
@@ -288,6 +291,9 @@ evidence below is unchanged.
 - **Experiment.** Fifteen scenarios runnable against the simulator and Alpaca paper, with Mandate's
   own results; with authorization, ask two builders to run it. **Kill.** No outside party runs it
   within four weeks of availability.
+- **Positioning ([DEC-149](../project/04-decision-log.md#decisions)).** The conformance suite
+  is part of the harness sold to enterprises
+  ([positioning](#positioning-harness-and-platform-dec-149)); this option's score is unchanged.
 
 ### Option 7: Insurance and audit partnership
 
@@ -522,6 +528,35 @@ motion (revisit after option 6 has outside users).
 **Rules 4 and 11.** DEC-141 interprets these rules without changing them. A request from the owner's
 agent is owner input: deterministic code still sizes and places every order, and the working universe
 changes only as rule 11 allows.
+
+### Positioning: harness and platform (DEC-149)
+
+The founder decided on 2026-09-27 ([DEC-149](../project/04-decision-log.md#decisions)):
+
+> I want it both to evolve along side each other, harness is for enterprise and platform runs
+> through the harness. Retail would bring some money, real money would be in the enterprise, retail
+> is hard to crack.
+
+- **Two layers, two buyers.** The **harness** (the gate, the autonomy rules, the journal, the
+  executor, the connectors, the conformance suite, and the MCP channel) is sold to enterprises:
+  brokers, fintechs, and teams building agents. The retail **platform** is sold to owners.
+- **The platform runs through the harness.** It has no private path around it: every platform order
+  passes the same builder, autonomy rules, gate, account ledger, and journal an enterprise customer's
+  would.
+- **Enterprise is the expected main revenue; retail is the proving ground.** Retail brings some
+  revenue and proves the harness on real owners' accounts. The founder expects retail to be hard to
+  win.
+- **The harness moat.** Generic harnesses and MCP gateways enforce stateless per-call rules; Mandate's
+  harness is stateful and domain-aware, journals before acting, and reduces risk without approval
+  ([harness engineering §6](11-harness-engineering.md#6-what-mandate-already-does-that-most-harnesses-dont)).
+- **Open for discovery: the first enterprise customer.** Which of brokers, fintechs, or agent
+  builders comes first is not decided. Customer outreach needs the founder's authorization
+  ([DEC-79](../project/04-decision-log.md#decisions)).
+
+DEC-149 amends DEC-141's positioning without reversing it: the complete product, the research agent
+inside the envelope, and the optional MCP channel still hold. Milestone order does not change; the
+enterprise harness stories are proposals in the
+[backlog](../project/06-backlog-v1.md#enterprise-harness-proposed-dec-149).
 
 ## 8. Differentiators mapped to existing work
 
