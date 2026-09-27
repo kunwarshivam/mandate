@@ -1678,3 +1678,71 @@ async fn the_tokio_pause_waits_for_the_duration() {
     let waited = nanos(after) - nanos(before);
     assert!(waited >= 40_000_000, "the pause returned after {waited} ns");
 }
+
+#[tokio::test]
+#[ignore = "pending E7-2"]
+async fn a_5xx_on_the_cancels_delete_is_an_unknown_outcome() {
+    let (client, transport) = serving(vec![
+        common::reply(200, "order_by_client_id_found", 0),
+        common::inline(503, "{\"message\":\"unavailable\"}"),
+    ]);
+    let error = common::answered(
+        client
+            .call_one(&mandate_executor::BrokerRequest::Cancel {
+                client_order_id: client_order_id("md-e144b97773a6f87c1978cc2831"),
+            })
+            .await,
+    )
+    .expect_err("a 5xx after the DELETE left is not a settled answer");
+    assert_eq!(
+        error.as_unknown(),
+        Some(BrokerUnknown::Ambiguous),
+        "the broker may have cancelled it: the answer is unknown, never a refusal read back as \
+         the order's state (interpretation 10)"
+    );
+    assert_eq!(
+        transport.sent().len(),
+        2,
+        "the lookup and the DELETE, and nothing read back after an unknown outcome"
+    );
+}
+
+#[tokio::test]
+#[ignore = "pending E7-3"]
+async fn a_5xx_on_a_reconciliation_read_is_an_unknown_outcome_not_an_unreadable_body() {
+    let (client, _transport) = serving(vec![common::inline(503, "{\"message\":\"unavailable\"}")]);
+    let error = common::answered(
+        client
+            .call_one(&mandate_executor::BrokerRequest::ListPositions)
+            .await,
+    )
+    .expect_err("a 5xx is not a positions page");
+    assert_eq!(
+        error.to_connector().code(),
+        "unknown_outcome",
+        "an overloaded broker is retried by the shell's reconciliation timer, not stopped on as \
+         an unreadable answer (DEC-85 is for bodies this crate cannot read)"
+    );
+}
+
+#[test]
+#[ignore = "pending E7-3"]
+fn an_exchange_of_exactly_the_inline_limit_stays_inline() {
+    let envelope = "{\"message\":\"\"}".len();
+    let filler = "x".repeat(mandate_alpaca::INLINE_LIMIT.saturating_sub(envelope));
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: format!("{{\"message\":\"{filler}\"}}").into_bytes(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    let mandate_alpaca::RecordedBody::Inline(text) = &recorded.body else {
+        panic!(
+            "at exactly the limit the body is still inline (journal §6.3: above it, a reference)"
+        );
+    };
+    assert_eq!(
+        text.len(),
+        mandate_alpaca::INLINE_LIMIT,
+        "the redacted bytes are the limit exactly"
+    );
+}
