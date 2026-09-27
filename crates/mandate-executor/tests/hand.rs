@@ -79,6 +79,56 @@ fn a_gap_in_seq_fails_the_fold() {
     );
 }
 
+/// Journal §2's gapless `seq` runs both ways: an event already folded is not folded again.
+#[test]
+fn a_repeated_seq_fails_the_fold() {
+    let mut state = ExecutorState::new(scope());
+    fold(&mut state, &stream_opened()).expect("seq 1 folds");
+    let error = fold(&mut state, &stream_opened()).expect_err("a repeat must fail");
+    assert_eq!(error.code(), "sequence_out_of_order", "{error}");
+    assert!(
+        matches!(
+            error,
+            ExecutorError::SequenceOutOfOrder {
+                expected: 2,
+                found: 1,
+                ..
+            }
+        ),
+        "the refusal names the seq it wanted and the repeated one it got: {error}"
+    );
+}
+
+/// Journal §2's gapless `seq` runs both ways: a followed stream cannot be rewound either.
+#[test]
+fn a_rewound_seq_fails_the_fold() {
+    let mut state = ExecutorState::new(scope());
+    fold(
+        &mut state,
+        &event(CLOCK_STREAM, 1, "ClockAdvanced", object(&[])),
+    )
+    .expect("seq 1 folds");
+    fold(
+        &mut state,
+        &event(CLOCK_STREAM, 2, "ClockAdvanced", object(&[])),
+    )
+    .expect("seq 2 folds");
+    let rewound = event(CLOCK_STREAM, 1, "ClockAdvanced", object(&[]));
+    let error = fold(&mut state, &rewound).expect_err("a rewind must fail");
+    assert_eq!(error.code(), "sequence_out_of_order", "{error}");
+    assert!(
+        matches!(
+            error,
+            ExecutorError::SequenceOutOfOrder {
+                expected: 3,
+                found: 1,
+                ..
+            }
+        ),
+        "the refusal names the seq it wanted and the earlier one it got: {error}"
+    );
+}
+
 #[test]
 fn an_unknown_event_type_fails_the_fold() {
     let mut state = ExecutorState::new(scope());
