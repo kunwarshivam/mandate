@@ -333,7 +333,49 @@ impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
 
 #[cfg(test)]
 mod tests {
-    use super::query_value;
+    use std::cell::RefCell;
+
+    use mandate_executor::{ActivityCursor, BrokerRequest};
+
+    use super::{RetryPolicy, TokioPause, TradingClient, query_value};
+    use crate::error::TransportError;
+    use crate::http::{HttpRequest, Response, TradingTransport};
+
+    /// Records every path it is handed and answers an empty page.
+    #[derive(Default)]
+    struct Recorder {
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl TradingTransport for Recorder {
+        async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
+            self.sent
+                .borrow_mut()
+                .push(request.path_and_query().to_owned());
+            Ok(Response {
+                status: 200,
+                body: b"[]".to_vec(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn the_activities_read_sends_its_cursor_encoded() {
+        let client = TradingClient::new(Recorder::default(), TokioPause, RetryPolicy::default());
+        let answer = client
+            .call_one(&BrokerRequest::ListActivities {
+                since: ActivityCursor("x&side=sell".to_owned()),
+            })
+            .await;
+        assert!(answer.is_ok(), "an empty page is an answer: {answer:?}");
+        let sent = client.transport.sent.borrow().clone();
+        assert_eq!(
+            sent.last()
+                .map(|path| path.ends_with("&page_token=x%26side%3Dsell")),
+            Some(true),
+            "the cursor reaches the query encoded, never as a second parameter: {sent:?}"
+        );
+    }
 
     #[test]
     fn a_cursor_is_encoded_so_it_cannot_add_a_parameter_or_end_the_query() {
