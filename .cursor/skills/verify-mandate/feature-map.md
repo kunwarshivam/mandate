@@ -681,7 +681,10 @@ proves each pending test fails on them (DEC-110).
 
 - **Code:** `xtask`: `xtask/src/main.rs` (every CI job, including `mutants_outcome`,
   `mutant_verdicts` and `is_stub_function`, which exempt an `Unimplemented` stub body of a crate
-  with pending tests, on a missed-mutant exit status, and nothing else),
+  with pending tests, on a missed-mutant exit status, and nothing else, and
+  `live_tests_judge_every_mutant` with `listed_mutant_counts`, `live_test_counts` and
+  `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
+  run, since `cargo mutants` would report every one of them caught, DEC-139),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
