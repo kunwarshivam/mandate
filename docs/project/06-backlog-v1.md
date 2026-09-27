@@ -393,3 +393,16 @@ a coordinator ruling rather than left undone (DEC-131 item 25):
   action adds risk, and carries no order body, so the runtime records a response and re-proposes at
   the next evaluation rather than placing the bound order; the bound content is M7's (DEC-131 item
   25(a)).
+
+From the independent review of stream G's mandate limits (`mandate-risk`, #160):
+
+- Give `Computed` the account's own figures (`account_gross`, `account_equity`), so an account-1×
+  `gross_exposure_limit` denial journals the figures it compared; today it carries none and is told
+  apart from the agent-limit denial only by `computed.gross` being unset. It is an addition to
+  #136's public API, so it needs its own ruling.
+- Settle what DEC-129 item 2's "`computed` blocks included" means: `ref.py`'s keys only, or every
+  figure the gate computed. The flat `Computed` also reports `order_usd`, `instrument_total` and
+  `cap` on branches whose reference block omits them, and `compare_computed` checks only the keys a
+  case states, so nothing asserts either reading.
+- Give §3.3's "organization ceiling" on the per-instrument cap a `GateConfig` field and an owning
+  story; check 2 has no value to bound the mandate's cap with today.
