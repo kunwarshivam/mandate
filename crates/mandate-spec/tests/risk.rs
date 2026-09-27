@@ -2689,7 +2689,10 @@ proptest! {
         let mut confirmation = Confirmation::default();
         let mut actual = None;
         for (index, (breached, seconds)) in inputs.iter().enumerate() {
-            if confirmation.update(*breached, *seconds, need) {
+            if ok(confirmation
+                .update(*breached, *seconds, need)
+                .map_err(|e| e.to_string()))?
+            {
                 actual = Some(index + 1);
                 break;
             }
