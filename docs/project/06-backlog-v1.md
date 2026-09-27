@@ -98,6 +98,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   heads with writer fencing) so that records cannot be altered by application code.
 - **E5-2 (Must)** As an engineer, I want large artifacts stored by content hash so that the
   journal stays small and verifiable.
+- **E5-5 (Must)** As an owner, I want my personal data (the broker's account number and account
+  id, names, emails) held in the workspace's personal-data vault under a per-person key, with each
+  journal event carrying only random vault references in `pii_refs`, so that the records can be
+  kept and my data erased separately ([journal spec](../specs/journal.md) §3, §6.4). It replaces
+  DEC-142's interim: `mandate-alpaca`'s record discards a redacted value and labels it by position.
+  *Accepted when:* a recorded exchange's redacted values are in the vault, its `pii_refs` are the
+  vault's random references passed into the record as an input (ES-21), sorted, and none is a hash
+  of the value.
 - **E5-4 (Must)** As an auditor, I want `mandate-cli journal verify` over an exported stream and
   its artifact store, and a CLI command to put and fetch artifacts, so that I can check a journal
   without writing code (M4's verification tool; deferred from the E5-1 and E5-2 briefs).
@@ -422,12 +430,21 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
   `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
   every named entry are already caught (round-3 review finding 3).
-- Encode a crypto pair's `/` where `/v2/positions/{symbol}` is built (`HttpRequest::close_position`
-  and the positions read). `wire` now holds a broker symbol to one or two segments of letters,
-  digits and `.` (slice a2), so nothing hostile reaches the path, but `BTC/USD` still builds two
-  segments where Alpaca takes `BTCUSD` or `BTC%2FUSD`; the allowlist refuses the read and #189's
-  post-parse check sends the close unchanged, so a crypto close goes to the wrong path rather than
-  to another endpoint (pre-existing on `main`, #191 review, round 3).
+- **Blocks E7-4 (the first `AccountWideScope` constructor):** encode a crypto pair's `/` where
+  `/v2/positions/{symbol}` is built (`HttpRequest::close_position` and the positions read). `wire`
+  holds a broker symbol to one or two segments of letters, digits and `.` (slice a2), so nothing
+  hostile reaches the path, but `BTC/USD` still builds two segments where Alpaca takes `BTCUSD` or
+  `BTC%2FUSD`. Since #195 the allowlist refuses both the read and the close, and a refused close
+  answers `NotSent`, never a broker's rejection, so a crypto close fails loudly rather than going
+  to the wrong path; until this lands the account and workspace kill switches cannot close a crypto
+  position by close-position, so E7-4 must not construct an `AccountWideScope` before it (#191
+  review, round 3; #195 review, round 1, finding 1).
+- Read a working external notional order's exposure. `wire` ingests an external order placed by
+  notional with `qty` equal to its `filled_qty`, so a working one understates what it can still
+  buy, and its `notional` is read nowhere and is not in `record::RECORDED_FIELDS`. The exposure is
+  bounded meanwhile: external activity puts every agent on the account in `exits_only` and blocks
+  claiming the instrument until the owner acknowledges it (trading-domain spec §7.1), so no agent
+  adds risk beside it (#195 review, round 1, finding 6).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):

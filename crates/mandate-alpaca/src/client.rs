@@ -14,7 +14,7 @@ use mandate_executor::{
 };
 use mandate_time::UtcNanos;
 
-use crate::error::{ClientError, WireError};
+use crate::error::{ClientError, TransportError, WireError};
 use crate::http::{HttpRequest, Method, Response, TradingTransport};
 use crate::wire;
 
@@ -180,12 +180,12 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
                 Ok(BrokerOutcome::Activities { fills, cursor })
             }
             BrokerRequest::CancelAll(scope) => {
-                account_wide(self.dispatch(&HttpRequest::cancel_all(scope)).await?)
+                self.account_wide(HttpRequest::cancel_all(scope)).await
             }
-            BrokerRequest::ClosePosition(scope, instrument) => account_wide(
-                self.dispatch(&HttpRequest::close_position(scope, instrument))
-                    .await?,
-            ),
+            BrokerRequest::ClosePosition(scope, instrument) => {
+                self.account_wide(HttpRequest::close_position(scope, instrument))
+                    .await
+            }
         }
     }
 
@@ -239,6 +239,26 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     ) -> Result<Response, ClientError> {
         self.dispatch(&HttpRequest::new(method, &path_and_query, body)?)
             .await
+    }
+
+    /// An account-wide request. It exists only for a path the allowlist accepts (see
+    /// [`HttpRequest::close_position`]); a refused one never leaves, and the connector answers
+    /// `NotSent`. The endpoints answer success or a reject; either way the executor confirms what
+    /// happened by reading the order set back (trading-domain spec §5.5). An overloaded or failing
+    /// broker is an unknown outcome, never a reject (`AGENTS.md` rule 3, DEC-133 item 10).
+    async fn account_wide(
+        &self,
+        request: Result<HttpRequest, TransportError>,
+    ) -> Result<BrokerOutcome, ClientError> {
+        let response = self.dispatch(&request?).await?;
+        match response.status {
+            200..=299 => Ok(BrokerOutcome::AccountWideAccepted),
+            429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
+            status => Ok(BrokerOutcome::Rejected(wire::reject(
+                status,
+                &response.body,
+            )?)),
+        }
     }
 
     /// The one place a request leaves.
@@ -302,19 +322,6 @@ fn query_value(raw: &str) -> String {
         .collect()
 }
 
-/// The account-wide endpoints answer success or a reject; either way the executor confirms what
-/// happened by reading the order set back (trading-domain spec §5.5).
-fn account_wide(response: Response) -> Result<BrokerOutcome, ClientError> {
-    match response.status {
-        200..=299 => Ok(BrokerOutcome::AccountWideAccepted),
-        429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
-        status => Ok(BrokerOutcome::Rejected(wire::reject(
-            status,
-            &response.body,
-        )?)),
-    }
-}
-
 /// The connector the executor declares.
 ///
 /// The mapping is [`ClientError::to_connector`]: only a failure whose outcome is genuinely
@@ -335,11 +342,13 @@ impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
 mod tests {
     use std::cell::RefCell;
 
-    use mandate_executor::{ActivityCursor, BrokerRequest};
+    use mandate_executor::{
+        ActivityCursor, BrokerOutcome, BrokerRequest, BrokerUnknown, ConnectorError,
+    };
 
     use super::{RetryPolicy, TokioPause, TradingClient, query_value};
     use crate::error::TransportError;
-    use crate::http::{HttpRequest, Response, TradingTransport};
+    use crate::http::{HttpRequest, Method, Response, TradingTransport};
 
     /// Records every path it is handed and answers an empty page.
     #[derive(Default)]
@@ -391,5 +400,87 @@ mod tests {
         );
         assert_eq!(query_value("a/b%c#d e+f"), "a%2Fb%25c%23d%20e%2Bf");
         assert_eq!(query_value(""), "");
+    }
+
+    /// Records every path it is handed and answers one fixed status, with a reject's body.
+    struct Answering {
+        status: u16,
+        sent: RefCell<Vec<String>>,
+    }
+
+    impl Answering {
+        fn with(status: u16) -> TradingClient<Self, TokioPause> {
+            let transport = Self {
+                status,
+                sent: RefCell::new(Vec::new()),
+            };
+            TradingClient::new(transport, TokioPause, RetryPolicy::default())
+        }
+    }
+
+    impl TradingTransport for Answering {
+        async fn send(&self, request: &HttpRequest) -> Result<Response, TransportError> {
+            self.sent
+                .borrow_mut()
+                .push(request.path_and_query().to_owned());
+            Ok(Response {
+                status: self.status,
+                body: br#"{"code":40410000,"message":"refused"}"#.to_vec(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_close_position_the_allowlist_refuses_is_not_sent_and_never_a_reject() {
+        let client = Answering::with(404);
+        let answer = client
+            .account_wide(HttpRequest::account_wide_for_tests(
+                Method::Delete,
+                "/v2/positions/BTC/USD",
+            ))
+            .await;
+        assert_eq!(
+            answer.map_err(|error| error.to_connector()),
+            Err(ConnectorError::NotSent {
+                code: "refused_path"
+            }),
+            "`BTC/USD` is two path segments, so the close is our unbuildable URL, never the \
+             broker refusing to reduce risk (rule 13, DEC-133 item 32)"
+        );
+        assert!(
+            client.transport.sent.borrow().is_empty(),
+            "and no request left the process"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_overloaded_or_failing_broker_leaves_an_account_wide_call_unknown() {
+        for status in [429, 503] {
+            let client = Answering::with(status);
+            let answer = client
+                .account_wide(HttpRequest::account_wide_for_tests(
+                    Method::Delete,
+                    "/v2/orders",
+                ))
+                .await;
+            assert_eq!(
+                answer.map_err(|error| error.to_connector()),
+                Err(ConnectorError::Unknown(BrokerUnknown::Ambiguous)),
+                "a {status} on the cancel-all is an unknown outcome the executor queries, never \
+                 a settled reject (rule 3, DEC-133 item 10)"
+            );
+            assert_eq!(client.transport.sent.borrow().len(), 1, "it was sent once");
+        }
+        let client = Answering::with(404);
+        let answer = client
+            .account_wide(HttpRequest::account_wide_for_tests(
+                Method::Delete,
+                "/v2/positions/AAPL",
+            ))
+            .await;
+        assert!(
+            matches!(answer, Ok(BrokerOutcome::Rejected(ref reject)) if reject.http_status == 404),
+            "while a 404 on an allowlisted close is the broker's own refusal: {answer:?}"
+        );
     }
 }

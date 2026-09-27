@@ -1,11 +1,19 @@
 //! `BrokerExchangeRecorded`: the raw broker exchange, redacted before it is hashed or stored.
 //!
-//! Trading-domain spec §13 keeps raw broker requests and responses as records and `AGENTS.md`
-//! rule 7 keeps credentials out of them — but the raw body of `/v2/account` also carries the
-//! broker's `account_number` and account `id`, which journal spec §6.4 keeps in the vault and
-//! holds by reference. So the redaction pass runs over the **body** as well as the headers, and
-//! it runs **before** the bytes are hashed or stored, so nothing that reaches the journal or the
-//! artifact store has ever held either (task brief interpretation 24).
+//! Trading-domain spec §13 asks for the broker's requests and responses as records. What this
+//! module keeps is their projection onto the fields some wire type reads (`RECORDED_FIELDS`),
+//! which drops most of `/v2/account`'s body, so the record is of what the broker said that this
+//! platform acts on, not the whole exchange. `AGENTS.md` rule 7 keeps credentials out of it. Neither [`HttpRequest`] nor [`Response`] has a header
+//! field at all, so no credential can be in what this module is handed (rung 1 of the trust
+//! ladder, stronger than removing one). The body of `/v2/account` does carry the broker's
+//! `account_number` and account `id`, which journal spec §6.4 keeps out of the journal, so the
+//! redaction pass runs over the **body**, **before** the bytes are hashed or stored: nothing that
+//! reaches the journal or the artifact store has ever held either (task brief interpretation 24).
+//!
+//! Until the vault story lands, a redacted value is **discarded**, not vaulted, and its
+//! `pii_refs` entry is a deterministic positional label rather than a random vault reference,
+//! because the record is a pure function (ES-21). DEC-142 records this and names the story that
+//! replaces both.
 //!
 //! The pass is a total function over the wire types rather than a denylist of field names: only a
 //! field a wire type names is recorded at all, so a field the broker adds later cannot slip
@@ -47,13 +55,13 @@ pub struct RecordedExchange {
     pub endpoint: String,
     pub status: Option<u16>,
     pub body: RecordedBody,
-    /// One opaque `pii_refs` entry for each personal-data field replaced, which is the only trace
-    /// of the value that reaches the journal (journal spec §6.4).
+    /// One opaque `pii_refs` entry for each personal-data field replaced, sorted, which is the
+    /// only trace of the value that reaches the journal (journal spec §3, §6.4; DEC-142).
     pub pii_refs: Vec<String>,
 }
 
-/// Redacts a request: the authorisation headers are removed before anything is hashed or stored,
-/// so no credential has ever been in the bytes this returns.
+/// Redacts a request's body. A request carries no headers (see the module documentation), so no
+/// credential has ever been in the bytes this returns.
 pub fn request(request: &HttpRequest) -> Result<RecordedExchange, WireError> {
     let body = request.body().unwrap_or_default().as_bytes();
     let (body, pii_refs) = redact(body)?;
@@ -135,7 +143,9 @@ fn endpoint(path_and_query: &str) -> String {
 }
 
 /// Projects a body onto [`RECORDED_FIELDS`], replaces its personal data, and places the result
-/// inline or by artifact reference. An empty body (a `204`) records as empty.
+/// inline or by artifact reference. An empty body (a `204`) records as empty. What is kept is the
+/// projection: every field some wire type reads, the ones the executor folds, and no other, so
+/// the record is of what the broker said that this platform acts on, not its whole body.
 fn redact(body: &[u8]) -> Result<(RecordedBody, Vec<String>), WireError> {
     let mut pii_refs = Vec::new();
     let bytes = if body.is_empty() {
@@ -144,6 +154,7 @@ fn redact(body: &[u8]) -> Result<(RecordedBody, Vec<String>), WireError> {
         let value = serde_json::from_slice(body).map_err(|_| WireError::NotJson)?;
         serde_json::to_vec(&project(&value, &mut pii_refs)).map_err(|_| WireError::NotJson)?
     };
+    pii_refs.sort();
     let body = if bytes.len() > INLINE_LIMIT {
         RecordedBody::Artifact {
             digest: format!("sha256:{}", Digest::of(&bytes).to_hex()),
@@ -160,8 +171,8 @@ fn redact(body: &[u8]) -> Result<(RecordedBody, Vec<String>), WireError> {
 /// `account_number` and `account_id` are personal data wherever they appear, and so is the `id`
 /// of the object that carries an `account_number` — the account itself (journal spec §6.4). Each
 /// is replaced by `pii:<field>:<n>`, numbered within the exchange, and the same text is pushed to
-/// `pii_refs`. An order's own `id` is not personal data and is kept, because trading-domain spec
-/// §13 keeps the raw exchange as the record of what the broker said.
+/// `pii_refs`. An order's own `id` is not personal data and is kept: it is how the record ties
+/// what the broker said to the order it said it about (trading-domain spec §13).
 fn project(value: &Value, pii_refs: &mut Vec<String>) -> Value {
     match value {
         Value::Object(fields) => {

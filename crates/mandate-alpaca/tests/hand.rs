@@ -1127,7 +1127,10 @@ fn a_large_exchange_is_recorded_by_artifact_reference() {
     let filler = "x".repeat(mandate_alpaca::INLINE_LIMIT.saturating_add(1));
     let response = mandate_alpaca::Response {
         status: 200,
-        body: format!("{{\"message\":\"{filler}\"}}").into_bytes(),
+        body: format!(
+            "{{\"account_number\":\"PA3ABCDEFGHI\",\"message\":\"{filler}\",\"unread\":1}}"
+        )
+        .into_bytes(),
     };
     let recorded = record::response("/v2/orders", &response).expect("the response records");
     let mandate_alpaca::RecordedBody::Artifact { digest, bytes } = &recorded.body else {
@@ -1148,6 +1151,80 @@ fn a_large_exchange_is_recorded_by_artifact_reference() {
         bytes.len() > mandate_alpaca::INLINE_LIMIT,
         "and the redacted bytes the digest names travel with it, for the shell to store"
     );
+    assert_eq!(
+        digest,
+        &format!("sha256:{}", mandate_canon::Digest::of(bytes).to_hex()),
+        "the reference names the redacted bytes, never the body as the broker sent it \
+         (interpretation 24, DEC-133 item 24)"
+    );
+    assert!(
+        !String::from_utf8_lossy(bytes).contains("PA3ABCDEFGHI"),
+        "and those bytes have never held the account number"
+    );
+}
+
+#[test]
+fn an_account_id_is_personal_data_wherever_it_appears() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"account_id":"acct-7f3e","status":"filled"}"#.to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    assert!(
+        !format!("{:?}", recorded.body).contains("acct-7f3e"),
+        "an `account_id` field is replaced, not kept (DEC-133 item 33): {:?}",
+        recorded.body
+    );
+    assert_eq!(recorded.pii_refs.len(), 1, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn an_account_nested_in_an_array_is_redacted() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"legs":[{"account_number":"PA3INARRAY","id":"acct-in-array","symbol":"AAPL"}]}"#
+            .to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    let rendered = format!("{:?}", recorded.body);
+    assert!(
+        !rendered.contains("PA3INARRAY") && !rendered.contains("acct-in-array"),
+        "an account inside an array is redacted like one at the top: {rendered}"
+    );
+    assert_eq!(recorded.pii_refs.len(), 2, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn an_account_nested_in_an_object_is_redacted() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"take_profit":{"account_number":"PA3INOBJECT","id":"acct-in-object"}}"#.to_vec(),
+    };
+    let recorded = record::response("/v2/orders", &response).expect("the response records");
+    let rendered = format!("{:?}", recorded.body);
+    assert!(
+        !rendered.contains("PA3INOBJECT") && !rendered.contains("acct-in-object"),
+        "an account inside an object is redacted like one at the top: {rendered}"
+    );
+    assert_eq!(recorded.pii_refs.len(), 2, "{:?}", recorded.pii_refs);
+}
+
+#[test]
+fn the_pii_refs_are_a_sorted_set() {
+    let response = mandate_alpaca::Response {
+        status: 200,
+        body: br#"{"account_number":"PA3SORTED","id":"acct-sorted","legs":[{"account_id":"acct-leg"}]}"#
+            .to_vec(),
+    };
+    let recorded = record::response("/v2/account", &response).expect("the response records");
+    let mut sorted = recorded.pii_refs.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        recorded.pii_refs, sorted,
+        "journal §3's `pii_refs` is a sorted set, whatever order the fields were met in"
+    );
+    assert_eq!(recorded.pii_refs.len(), 3);
 }
 
 /// A client serving scripted replies, and the transport that records what it sent.
