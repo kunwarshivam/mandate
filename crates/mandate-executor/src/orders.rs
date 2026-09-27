@@ -14,7 +14,7 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::{int, text};
-use crate::state::{EVERY_AGENT, restriction_for};
+use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
     Mode, OrderState, StatusMapping,
@@ -339,7 +339,15 @@ fn replaced(
 /// not our id, another instrument or side, or more than the order has left — is still applied to
 /// accounting, unattributed, as external activity: every agent goes `exits_only` and the owner is
 /// alerted (§7.1), so filled quantity never exceeds an order's quantity.
-pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), ExecutorError> {
+///
+/// `before` is the state a reconciliation began from, when the fill is one it found missing: an
+/// order the same reconciliation adopted as terminal was not terminal when the fill happened, so
+/// the fill is an ordinary one, not a late one.
+pub(crate) fn fill(
+    batch: &mut Batch<'_, '_>,
+    fill: &BrokerFill,
+    before: Option<&ExecutorState>,
+) -> Result<(), ExecutorError> {
     if batch.view.fills.contains(&fill.fill_id) {
         return Ok(());
     }
@@ -355,7 +363,7 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
     });
     let terminal = ours
         .as_ref()
-        .and_then(|id| batch.view.orders.get(id))
+        .and_then(|id| before.unwrap_or(&batch.view).orders.get(id))
         .is_some_and(|order| order.state.is_terminal());
     let mut pairs = vec![
         ("fill_id", text(fill.fill_id.0.clone())),

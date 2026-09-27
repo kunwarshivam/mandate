@@ -188,7 +188,6 @@ fn a_split_multiplies_the_position_and_ends_the_pending_action() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reconciliation_run_advances_the_checkpoint_and_the_covered_head() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -699,7 +698,6 @@ fn the_age_bound_is_inclusive() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn absences_are_counted_afresh_each_time_an_order_goes_unknown() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1145,7 +1143,6 @@ fn a_crypto_opening_is_gtc_and_an_equity_opening_is_day() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_received_intent_resumes_after_the_startup_reconciliation_and_not_before() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1178,7 +1175,6 @@ fn a_received_intent_resumes_after_the_startup_reconciliation_and_not_before() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reconciliation_leaves_an_agreeing_order_and_an_unknown_one_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1257,7 +1253,6 @@ fn cash_within_the_band_agrees_and_beyond_it_differs() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -1441,7 +1436,6 @@ fn an_unprotected_interval_ends_for_its_own_instrument() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_order_adopted_as_unknown_is_queried_and_one_adopted_as_known_is_not() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1483,7 +1477,6 @@ fn an_order_adopted_as_unknown_is_queried_and_one_adopted_as_known_is_not() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn external_activity_reaches_an_agent_the_executor_has_not_yet_seen() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
