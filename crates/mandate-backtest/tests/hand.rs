@@ -1033,9 +1033,13 @@ fn crypto_fees_are_charged_at_midnight_utc() {
 /// 0.00001 × 479 = 0.00479, which is therefore still accrued when the bars run out, and the three
 /// earlier dates are charged nothing because nothing accrued on them. A charging instant **is** a
 /// point in time the bars pass, so a run that went on to the 25th would charge the 24th at that day's
-/// first bar, whatever its hour, which is what
-/// [`equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`] pins; this case stops
-/// before the instant instead of relying on the hour of the bars it has.
+/// first bar, whatever its hour. What pins that are
+/// [`a_settlement_posts_before_the_bars_fills`],
+/// [`the_total_return_is_net_of_accrued_and_charged_fees`] and the golden report, each of which has a
+/// date charged from a **later** date's first bar; not
+/// [`equity_fees_are_charged_at_twenty_hundred_new_york_on_their_trade_date`], whose 20:30 bar falls on
+/// the charged day itself and so cannot tell the instant from the hour. This case stops before the
+/// instant instead of relying on the hour of the bars it has.
 #[test]
 #[ignore = "pending E4-2"]
 fn an_accrual_the_bars_never_reach_stays_accrued() {
