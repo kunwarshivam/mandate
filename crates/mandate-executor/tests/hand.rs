@@ -2584,8 +2584,7 @@ fn protected_position(ports: &mandate_executor::Ports<'_>) -> Shell {
             .fold_one(&event)
             .expect("the protected position folds");
     }
-    let (shell, _) = shell.restart(ports);
-    shell
+    shell.restart_ready(ports)
 }
 
 #[test]
@@ -3302,7 +3301,7 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
         ),
     );
     shell.fold_one(&protection).expect("the stop-limit folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
 
     let ran = shell.run(
@@ -3947,7 +3946,7 @@ fn an_automated_flatten_sells_crypto_at_once() {
         ),
     );
     shell.fold_one(&held).expect("the crypto position folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
 
     let ran = shell.run(
@@ -4117,7 +4116,7 @@ fn a_protective_order_submits_with_no_buying_power() {
             .fold_one(&event)
             .expect("the protected position folds");
     }
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     assert!(
         shell
             .state
