@@ -495,9 +495,10 @@ mod tests {
     use crate::step::handle;
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
-        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, Effect, EventId,
-        ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff, MandateVersion,
-        Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId, WriterEpoch,
+        BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, DifferenceKind, Effect,
+        EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff,
+        MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId,
+        WriterEpoch,
     };
 
     /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
@@ -904,6 +905,51 @@ mod tests {
             })
             .collect();
         assert_eq!(alerts, vec!["reconciliation_cash", "reconciliation_fees"]);
+        Ok(())
+    }
+
+    /// §11's band includes the accrued unposted fees: the model's cash is already lowered by them
+    /// and the broker's is not until they post, so a broker still holding exactly that much agrees,
+    /// and one cent more differs.
+    #[test]
+    fn the_cash_band_includes_the_unposted_fees() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        state.observed = Some(ObservedAccount {
+            state: AccountState::Active,
+            multiplier: 1,
+            equity: Usd::ZERO,
+            cash: Usd::ZERO,
+            buying_power: Usd::ZERO,
+            non_marginable_buying_power: Usd::ZERO,
+            accrued_fees: Usd::ZERO,
+            complete: true,
+        });
+        state.unposted_fees = Usd::parse("3")?;
+        for (cash, differs) in [("0", false), ("0.01", true)] {
+            let mut taken = snapshot(ReconcileReason::Scheduled)?;
+            taken.account.cash = Usd::parse(cash)?;
+            let run = reconcile(&state, &taken, &ports)?;
+            assert_eq!(
+                run.differences
+                    .iter()
+                    .any(|difference| difference.kind == DifferenceKind::Cash),
+                differs,
+                "the model is 0 − 3 and the band 0.01 × 0 + 3: {cash}"
+            );
+        }
         Ok(())
     }
 

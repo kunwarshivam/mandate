@@ -969,6 +969,28 @@ mod buying_power_tests {
         Ok(())
     }
 
+    /// §11's cash band is 0.01 × the fills since the last broker cash snapshot: a snapshot,
+    /// observed or recorded by a reconciliation, starts the count again, so an old fill never
+    /// widens a later band.
+    #[test]
+    fn each_cash_snapshot_restarts_the_fill_notional() -> Result<(), ExecutorError> {
+        for snapshot in ["AccountStateObserved", "AccountSnapshotRecorded"] {
+            let mut stream = Stream::opened()?;
+            stream.fold("AccountStateObserved", account("1000", "5000"))?;
+            stream.fold("FillApplied", fill("f-1", "buy", "2", "100"))?;
+            assert_eq!(stream.state.fill_notional, usd("200")?);
+            stream.fold(snapshot, account("800", "5000"))?;
+            assert_eq!(
+                stream.state.fill_notional,
+                Usd::ZERO,
+                "{snapshot} restarts it"
+            );
+            stream.fold("FillApplied", fill("f-2", "sell", "1", "110"))?;
+            assert_eq!(stream.state.fill_notional, usd("110")?);
+        }
+        Ok(())
+    }
+
     #[test]
     fn a_fill_with_no_price_is_refused_never_priced_at_zero() -> Result<(), ExecutorError> {
         let mut stream = Stream::opened()?;
