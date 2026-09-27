@@ -478,7 +478,6 @@ fn the_parser_accepts_unknown_extra_fields() {
 /// `[A-Za-z0-9-]+` is an answer this crate cannot read, and it never reaches the
 /// `/v2/orders/{id}` the cancel builds from it (DEC-133 item 18a, #174).
 #[test]
-#[ignore = "pending E7-2"]
 fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
     for id in [
         ".",

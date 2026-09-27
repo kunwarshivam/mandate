@@ -407,6 +407,17 @@ fn new_york_date(fields: &Map<String, Value>, field: &'static str) -> Result<Dat
     Ok(new_york_date_and_hour(at)?.0)
 }
 
+/// The broker's order id, which the cancel puts in a path (`/v2/orders/{id}`). Alpaca's is a UUID,
+/// so an id outside `[A-Za-z0-9-]+` is not one this crate can read: a dot, a percent sign or a
+/// slash never reaches path building, behind the allowlist's own dot-segment rule (#174, #189).
+fn broker_id(fields: &Map<String, Value>) -> Result<String, WireError> {
+    let id = text(fields, "id")?;
+    if id.is_empty() || !id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
+        return Err(WireError::WrongType { field: "id" });
+    }
+    Ok(id.to_owned())
+}
+
 fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
     let fields = object(value, "order")?;
     let legs = match fields.get("legs") {
@@ -417,7 +428,7 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
             .collect::<Result<_, WireError>>()?,
     };
     Ok(BrokerOrder {
-        broker_order_id: text(fields, "id")?.to_owned(),
+        broker_order_id: broker_id(fields)?,
         client_order_id: optional_text(fields, "client_order_id")?.map(str::to_owned),
         instrument: instrument(fields)?,
         side: side(fields)?,
