@@ -9,12 +9,16 @@ mandate-alpaca = { path = "crates/mandate-alpaca", version = "0.0.0" }
 mandate-artifacts-fs = { path = "crates/mandate-artifacts-fs", version = "0.0.0" }
 mandate-backtest = { path = "crates/mandate-backtest", version = "0.0.0" }
 mandate-canon = { path = "crates/mandate-canon", version = "0.0.0" }
+mandate-domain = { path = "crates/mandate-domain", version = "0.0.0" }
 mandate-executor = { path = "crates/mandate-executor", version = "0.0.0" }
 mandate-journal = { path = "crates/mandate-journal", version = "0.0.0" }
 mandate-marketdata = { path = "crates/mandate-marketdata", version = "0.0.0" }
 mandate-num = { path = "crates/mandate-num", version = "0.0.0" }
+mandate-risk = { path = "crates/mandate-risk", version = "0.0.0" }
 mandate-runtime = { path = "crates/mandate-runtime", version = "0.0.0" }
+mandate-research = { path = "crates/mandate-research", version = "0.0.0" }
 mandate-sim = { path = "crates/mandate-sim", version = "0.0.0" }
+mandate-spec = { path = "crates/mandate-spec", version = "0.0.0" }
 mandate-time = { path = "crates/mandate-time", version = "0.0.0" }
 anyhow = "1.0.104"
 arrow-array = { version = "60.0.0", default-features = false }

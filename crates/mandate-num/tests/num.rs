@@ -1423,3 +1423,147 @@ fn hand_calculated_roots_at_their_edges() {
         "2233.664435359109"
     );
 }
+
+/// The risk gate's arithmetic, against digits computed by hand.
+///
+/// `Usd::times_fraction` is exact, so the oracle is the product written out: 0.2 × 9500 = 1900 to
+/// the last place, which is what mandate spec §5.3's cap comparison needs — a rounded cap would
+/// admit or refuse an order the exact comparison would not.
+#[test]
+fn hand_calculated_gate_bounds() {
+    let cases = [
+        ("10000", "0.2", "2000"),
+        ("9500", "0.15", "1425"),
+        ("10000", "1", "10000"),
+        ("0.01", "0.5", "0.005"),
+        ("1", "0.000000001", "0.000000001"),
+        ("123.456789", "0.333333333", "41.152262958847737"),
+    ];
+    for (equity, fraction, want) in cases {
+        let got = Usd::parse(equity)
+            .unwrap()
+            .times_fraction(Fraction::parse(fraction).unwrap())
+            .unwrap();
+        assert_eq!(got.to_string(), want, "{fraction} x {equity}");
+    }
+
+    assert_eq!(Usd::parse("-250").unwrap().abs().to_string(), "250");
+    assert_eq!(Usd::parse("250").unwrap().abs().to_string(), "250");
+    assert_eq!(Usd::ZERO.abs().to_string(), "0");
+}
+
+/// A collar bound rounds so the constraint gets stricter, never looser: a buy's ceiling truncates
+/// down and a sell's floor rounds up. The asymmetry is the whole point, so both directions are
+/// pinned on a price whose exact bound needs more than nine places.
+#[test]
+fn a_collar_bound_rounds_against_the_order() {
+    let ask = Price::parse("100.05").unwrap();
+    let one_percent = Fraction::parse("0.01").unwrap();
+    assert_eq!(
+        ask.collar_bound(one_percent, Adverse::Up)
+            .unwrap()
+            .to_string(),
+        "101.0505",
+        "100.05 x 1.01 = 101.0505 exactly, so no rounding is needed"
+    );
+
+    let bid = Price::parse("99.95").unwrap();
+    assert_eq!(
+        bid.collar_bound(one_percent, Adverse::Down)
+            .unwrap()
+            .to_string(),
+        "98.9505",
+        "99.95 x 0.99 = 98.9505 exactly"
+    );
+
+    let awkward = Price::parse("100.000000001").unwrap();
+    let third = Fraction::parse("0.333333333").unwrap();
+    let a_product_that_runs_past_nine_places = "so the rounding direction is visible";
+    let up = awkward.collar_bound(third, Adverse::Up).unwrap();
+    let down = awkward.collar_bound(third, Adverse::Down).unwrap();
+    assert_eq!(
+        (up.to_string().as_str(), down.to_string().as_str()),
+        ("133.333333301", "66.666666701"),
+        "the buy ceiling truncates down and the sell floor rounds up ({a_product_that_runs_past_nine_places}): \
+         the exact products are 133.333333301333333333 and 66.666666700666666667"
+    );
+
+    let tiny = Price::parse("0.000000001").unwrap();
+    assert!(
+        tiny.collar_bound(Fraction::ONE, Adverse::Down).is_err(),
+        "a sell bound that reaches zero is not a price"
+    );
+}
+
+proptest! {
+    /// `times_fraction` against an `i128` oracle at the fraction's own scale: a product of two
+    /// exact decimals is exact, so the oracle multiplies the scaled integers and the scales add.
+    #[test]
+    fn times_fraction_matches_an_integer_oracle(
+        dollars in 0_i128..100_000_000,
+        ninths in 0_i128..1_000_000_000,
+    ) {
+        let equity = format!("{}.{:02}", dollars / 100, dollars % 100);
+        let fraction_text = format!("0.{ninths:09}");
+        let equity_usd = Usd::parse(equity.trim_end_matches('0').trim_end_matches('.'))
+            .or_else(|_| Usd::parse(&equity))?;
+        let f = Fraction::parse(fraction_text.trim_end_matches('0').trim_end_matches('.'))
+            .or_else(|_| Fraction::parse(&fraction_text))?;
+
+        let got = equity_usd.times_fraction(f)?;
+        let want_scaled = dollars * ninths;
+        let got_scaled: i128 = {
+            let s = got.to_string();
+            let (int, frac) = s.split_once('.').unwrap_or((s.as_str(), ""));
+            let mut padded = frac.to_owned();
+            while padded.len() < 11 {
+                padded.push('0');
+            }
+            prop_assert!(padded.len() <= 11, "the product holds at most 2 + 9 places");
+            int.parse::<i128>().unwrap_or(0) * 100_000_000_000
+                + padded.parse::<i128>().unwrap_or(0)
+        };
+        prop_assert_eq!(got_scaled, want_scaled, "{} x {}", equity, fraction_text);
+    }
+
+    /// A collar bound is never looser than the exact product: a buy's ceiling is at or below it and
+    /// a sell's floor at or above it, whatever the price and the tier's x.
+    #[test]
+    fn a_collar_bound_is_never_looser_than_the_exact_product(
+        cents in 1_i128..10_000_000,
+        x_bps in 1_i128..2_000,
+    ) {
+        let price_text = format!("{}.{:02}", cents / 100, cents % 100);
+        let p = Price::parse(price_text.trim_end_matches('0').trim_end_matches('.'))
+            .or_else(|_| Price::parse(&price_text))?;
+        let x_text = format!("0.{:04}", x_bps);
+        let x = Fraction::parse(x_text.trim_end_matches('0').trim_end_matches('.'))
+            .or_else(|_| Fraction::parse(&x_text))?;
+
+        let scaled_price = cents * 10_000_000;
+        let exact_up = scaled_price + scaled_price * x_bps / 10_000;
+        let exact_down = scaled_price - scaled_price * x_bps / 10_000;
+
+        let to_i128 = |v: Price| -> i128 {
+            let s = v.to_string();
+            let (int, frac) = s.split_once('.').unwrap_or((s.as_str(), ""));
+            let mut padded = frac.to_owned();
+            while padded.len() < 9 {
+                padded.push('0');
+            }
+            int.parse::<i128>().unwrap_or(0) * 1_000_000_000 + padded.parse::<i128>().unwrap_or(0)
+        };
+
+        let up = p.collar_bound(x, Adverse::Up)?;
+        prop_assert!(
+            to_i128(up) <= exact_up,
+            "a buy ceiling {} is above the exact bound {}", up, exact_up
+        );
+        if let Ok(down) = p.collar_bound(x, Adverse::Down) {
+            prop_assert!(
+                to_i128(down) >= exact_down,
+                "a sell floor {} is below the exact bound {}", down, exact_down
+            );
+        }
+    }
+}

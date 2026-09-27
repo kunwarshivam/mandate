@@ -27,11 +27,15 @@
 /crates/mandate-time/       @kunwarshivam
 /crates/mandate-journal/    @kunwarshivam
 /crates/mandate-artifacts-fs/ @kunwarshivam
+/crates/mandate-domain/     @kunwarshivam
+/crates/mandate-spec/       @kunwarshivam
 /crates/mandate-accounting/ @kunwarshivam
 /crates/mandate-sim/        @kunwarshivam
+/crates/mandate-risk/       @kunwarshivam
 /crates/mandate-backtest/   @kunwarshivam
 /crates/mandate-refcases/   @kunwarshivam
 /crates/mandate-journal-pg/ @kunwarshivam
 /crates/mandate-runtime/    @kunwarshivam
+/crates/mandate-research/   @kunwarshivam
 /crates/mandate-executor/   @kunwarshivam
 /crates/mandate-alpaca/     @kunwarshivam
