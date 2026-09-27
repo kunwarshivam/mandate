@@ -140,6 +140,11 @@ pub struct Combined {
 /// every output an `instrument_id`, so nothing else in the chain would notice the mix-up — and
 /// counting a mismatched output would let one instrument's conviction open a position in another.
 /// The parameter is here rather than in [`propose`] alone so that the rule has one home.
+///
+/// The refusal covers the whole call, the exit branch included, so the caller (the runtime, stream
+/// I) must hand this function only the outputs for the instrument being sized. A tick's whole output
+/// buffer passed through unfiltered would stop a discretionary exit the way a crossed quote once did
+/// (#234 review, round 1).
 pub fn combine(
     models: &[SignalModel],
     outputs: &[ModelOutput],
@@ -475,15 +480,17 @@ pub struct Proposal {
 /// order.
 ///
 /// Pure: no clock, no I/O, no state between calls, and identical inputs give an identical proposal
-/// (ES-21). A crossed quote is [`BuilderError::CrossedQuote`]; an input too wide for the exact
-/// chain is `too_precise` or `overflow` and nothing is proposed (DEC-130 item 8).
+/// (ES-21). An input too wide for the exact chain is `too_precise` or `overflow` and nothing is
+/// proposed (DEC-130 item 8).
 ///
 /// The step-5 guard is `n ≤ 0` **or** a value below the minimum order, not the minimum alone, so a
 /// zero-quantity buy is impossible even where `min_order_usd` and `rebalance_band` are both zero
 /// (DEC-130 item 21).
 ///
-/// [`BuilderError::UntradableSession`] is reached on the **buy path only**: an exit is paced, never
-/// denied, and reads no session. [`BuilderError::OutputInstrumentMismatch`] is reached first of all,
+/// [`BuilderError::CrossedQuote`] and [`BuilderError::UntradableSession`] are reached on the **buy
+/// path only**: a discretionary exit is paced, never denied (`AGENTS.md` rule 13), so neither a
+/// crossed tick nor the session stops one. The exit goes out at the bid it was given, and the
+/// gate's collar judges that price. [`BuilderError::OutputInstrumentMismatch`] is reached first of all,
 /// because it says an input was not interpreted rather than that an action was refused.
 pub fn propose(
     mandate: &BuilderMandate,
@@ -495,9 +502,6 @@ pub fn propose(
 ) -> Result<Proposal, BuilderError> {
     let combined = combine(&mandate.models, outputs, &market.instrument, now)?;
     let SizingMethod::ConvictionLinear = mandate.sizing.method;
-    if market.bid > market.ask {
-        return Err(BuilderError::CrossedQuote);
-    }
     if let GoalKind::Accumulate(goal) = &mandate.goal
         && goal.instrument != market.instrument
     {
@@ -692,8 +696,10 @@ fn per_unit_terms(market: &Market) -> Result<(UsdExact, UsdExact), BuilderError>
 }
 
 /// The buy and the facts §6.2 step 4 reads: the exposure fields are this order's **after** values
-/// (§6.3). An opening order has no session name in the overnight session, where none may trade
-/// (DEC-30).
+/// (§6.3). A buy is sized off the ask, so a crossed quote prices it against a market that does not
+/// exist (DEC-130 item 17); and an opening order has no session name in the overnight session, where
+/// none may trade (DEC-30). Both refusals are here, on the buy path alone, so that neither can stop an
+/// exit (`AGENTS.md` rule 13).
 fn buy(
     account: &AccountSnapshot,
     market: &Market,
@@ -701,6 +707,9 @@ fn buy(
     proposal: &Proposal,
     quantity: Qty,
 ) -> Result<Action, BuilderError> {
+    if market.bid > market.ask {
+        return Err(BuilderError::CrossedQuote);
+    }
     if market.session == MarketSession::Overnight {
         return Err(BuilderError::UntradableSession);
     }
@@ -750,4 +759,148 @@ fn fraction(value: SizeFraction) -> Result<UsdExact, BuilderError> {
 
 fn conviction(value: Conviction) -> Result<UsdExact, BuilderError> {
     Ok(UsdExact::one().times_conviction(value)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+
+    type Checked = Result<(), Box<dyn Error>>;
+
+    const INSTRUMENT: &str = "7b4a1c2e-2222-4a2b-9c3d-000000000002";
+    const HASH: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+    const NOW_SECS: i64 = 1_790_000_000;
+
+    fn now() -> Result<UtcNanos, Box<dyn Error>> {
+        Ok(UtcNanos::from_parts(NOW_SECS, 0)?)
+    }
+
+    fn model() -> Result<SignalModel, Box<dyn Error>> {
+        Ok(SignalModel {
+            id: ModelId::parse("quant.momentum")?,
+            version: ModelVersion::parse("1.0.0")?,
+            content_hash: Digest::from_hex(HASH).ok_or("a sha256 hex digest")?,
+            weight: SizeFraction::ONE,
+            max_output_age_s: 900,
+        })
+    }
+
+    fn mandate() -> Result<BuilderMandate, Box<dyn Error>> {
+        Ok(BuilderMandate {
+            models: vec![model()?],
+            sizing: Sizing {
+                method: SizingMethod::ConvictionLinear,
+                entry_threshold: SizeFraction::parse("0.3")?,
+                exit_threshold: SizeFraction::parse("0.3")?,
+                rebalance_band: SizeFraction::parse("0.05")?,
+            },
+            limits: Limits {
+                max_position_usd: Usd::parse("1500")?,
+                max_position_fraction: SizeFraction::parse("0.2")?,
+                max_order_usd: Usd::parse("1000")?,
+                max_gross_exposure_usd: Usd::parse("2000")?,
+            },
+            goal: GoalKind::ProfitStop,
+        })
+    }
+
+    fn output(conviction: &str) -> Result<ModelOutput, Box<dyn Error>> {
+        let pinned = model()?;
+        Ok(ModelOutput {
+            model_id: pinned.id,
+            model_version: pinned.version,
+            content_hash: pinned.content_hash,
+            instrument: AssetId::parse(INSTRUMENT)?,
+            as_of: UtcNanos::from_parts(NOW_SECS - 60, 0)?,
+            expires_at: UtcNanos::from_parts(NOW_SECS + 600, 0)?,
+            direction: Direction::Long,
+            conviction: Conviction::parse(conviction)?,
+            confidence: Unit::ONE,
+        })
+    }
+
+    fn account(position: &str) -> Result<AccountSnapshot, Box<dyn Error>> {
+        Ok(AccountSnapshot {
+            agent_equity: Usd::parse("10000")?,
+            position_qty: Qty::parse(position)?,
+            cost_basis: CostBasis::ZERO,
+            risk_mark: MarkPrice::parse("100")?,
+            gross_usd: Usd::ZERO,
+            working_opening_cost: Usd::ZERO,
+            goal_spent_usd: Usd::ZERO,
+        })
+    }
+
+    /// A tick whose bid, 100.01, is above its ask, 100.
+    fn crossed() -> Result<Market, Box<dyn Error>> {
+        Ok(Market {
+            instrument: AssetId::parse(INSTRUMENT)?,
+            asset_class: AssetClass::UsEquity,
+            session: MarketSession::Regular,
+            in_close_window: false,
+            bid: Price::parse("100.01")?,
+            ask: Price::parse("100")?,
+            increment: Qty::parse("1")?,
+            min_order_usd: Usd::parse("1")?,
+            fee_rate_cash: FeeRate::parse("0")?,
+            fee_rate_asset: FeeRate::parse("0")?,
+        })
+    }
+
+    fn quiet() -> RiskContext {
+        RiskContext {
+            size_factor: SizeFraction::ONE,
+            drawdown: Unit::ZERO,
+            daily_pnl_fraction: mandate_num::Signed::ZERO,
+            position_pnl_fraction: mandate_num::Signed::ZERO,
+            bought_today_usd: Usd::ZERO,
+            has_prior_fill: true,
+            new_instrument: false,
+            thesis_confidence: Unit::ZERO,
+        }
+    }
+
+    #[test]
+    fn a_crossed_quote_never_stops_a_discretionary_exit() -> Checked {
+        let proposal = propose(
+            &mandate()?,
+            &account("5")?,
+            &crossed()?,
+            &quiet(),
+            &[output("-1")?],
+            now()?,
+        )?;
+        assert_eq!(
+            proposal.action,
+            Action::Sell {
+                purpose: Purpose::DiscretionaryExit,
+                qty: Qty::parse("5")?,
+                limit_price: Price::parse("100.01")?,
+                order_usd: Usd::parse("500.05")?,
+                shape: OrderShape::Limit,
+            },
+            "rule 13: the exit goes out at the bid it was given, whole, and the collar is the gate's"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_crossed_quote_still_refuses_a_buy() -> Checked {
+        assert_eq!(
+            propose(
+                &mandate()?,
+                &account("0")?,
+                &crossed()?,
+                &quiet(),
+                &[output("1")?],
+                now()?,
+            )
+            .map_err(|e| e.code()),
+            Err("crossed_quote"),
+            "a buy sized off an ask below the bid is priced against a market that does not exist"
+        );
+        Ok(())
+    }
 }
