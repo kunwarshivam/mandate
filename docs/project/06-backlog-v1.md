@@ -484,6 +484,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   measured three problems at `6d58c94`, and two local runs there and on the merged head measured
   none. A fixed seed for pending properties, or a script that stops at E7-4's own entry point,
   would make it one answer (#196 review, round 1, finding 5).
+- Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
+  hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
+  fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
+  `day` taken straight from the broker's `trade_date`, bypassing the account's calendar, passes the
+  suite. A fixture with a Saturday or holiday `trade_date` pins it (#196 review, round 2, finding 1).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
