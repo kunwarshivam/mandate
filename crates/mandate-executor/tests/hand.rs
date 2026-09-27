@@ -2420,7 +2420,6 @@ fn a_startup_reconciliation_covers_every_submission_it_reports_on() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
