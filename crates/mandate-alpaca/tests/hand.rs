@@ -214,6 +214,84 @@ fn a_path_that_is_not_a_paper_trading_endpoint_is_refused() {
     }
 }
 
+/// A dot segment is refused whatever it is spelled as, because a URL parser removes it: each row
+/// is a path `url` 2.5.8 sends somewhere else (measured on #174). `DELETE /v2/orders/%2e` would
+/// reach `DELETE /v2/orders/`, the account-wide cancel-all (DEC-133 item 18a, AGENTS.md rule 13).
+fn assert_refused_and_never_built(method: Method, path: &str, sent_to: &str) {
+    assert!(
+        !is_paper_trading_path(path),
+        "{path} is not one of ours: a parser sends it to {sent_to}"
+    );
+    assert_eq!(
+        mandate_alpaca::endpoint_for(method, path),
+        None,
+        "{} {path} matches no endpoint, since a parser sends it to {sent_to}",
+        method.as_str()
+    );
+    assert_eq!(
+        HttpRequest::new(method, path, None).err(),
+        Some(mandate_alpaca::TransportError::RefusedPath),
+        "{} {path} is refused, so no request exists for a transport to send to {sent_to}",
+        method.as_str()
+    );
+}
+
+#[test]
+fn a_single_dot_order_id_is_refused_and_never_sent() {
+    assert_refused_and_never_built(Method::Delete, "/v2/orders/.", "/v2/orders/");
+    assert_refused_and_never_built(Method::Get, "/v2/orders/.", "/v2/orders/");
+}
+
+#[test]
+fn a_percent_encoded_dot_order_id_is_refused_and_never_sent() {
+    for path in ["/v2/orders/%2e", "/v2/orders/%2E"] {
+        assert_refused_and_never_built(Method::Delete, path, "/v2/orders/");
+        assert_refused_and_never_built(Method::Get, path, "/v2/orders/");
+    }
+}
+
+#[test]
+fn a_double_dot_order_id_in_any_spelling_is_refused_and_never_sent() {
+    for path in [
+        "/v2/orders/..",
+        "/v2/orders/%2e%2e",
+        "/v2/orders/.%2e",
+        "/v2/orders/%2e.",
+        "/v2/orders/%2E%2e",
+    ] {
+        assert_refused_and_never_built(Method::Delete, path, "/v2/");
+        assert_refused_and_never_built(Method::Get, path, "/v2/");
+    }
+}
+
+#[test]
+fn a_dot_segment_symbol_is_refused_and_never_sent() {
+    for path in [
+        "/v2/positions/.",
+        "/v2/positions/%2e",
+        "/v2/positions/%2E%2e",
+    ] {
+        assert_refused_and_never_built(Method::Get, path, "/v2/positions/ or /v2/");
+    }
+}
+
+#[test]
+fn a_symbol_with_two_dots_inside_it_is_allowed_and_sent_unchanged() {
+    for path in ["/v2/orders/A..B", "/v2/positions/A..B"] {
+        assert!(
+            is_paper_trading_path(path),
+            "{path} has no dot segment; `A..B` is one ordinary segment"
+        );
+        let request = HttpRequest::new(Method::Get, path, None)
+            .unwrap_or_else(|e| panic!("GET {path} is one of ours: {e}"));
+        assert_eq!(
+            request.url(),
+            format!("https://paper-api.alpaca.markets{path}"),
+            "and it is sent exactly as it was built"
+        );
+    }
+}
+
 #[tokio::test]
 #[ignore = "pending E7-2"]
 async fn the_client_refuses_a_path_that_is_not_a_paper_trading_endpoint() {
@@ -402,6 +480,44 @@ fn the_parser_accepts_unknown_extra_fields() {
     );
     assert_eq!(parsed.qty.to_string(), "1");
     assert_eq!(parsed.status, "accepted");
+}
+
+/// Defence in depth behind the allowlist: a broker order id is a UUID, so an `id` outside
+/// `[A-Za-z0-9-]+` is an answer this crate cannot read, and it never reaches the
+/// `/v2/orders/{id}` the cancel builds from it (DEC-133 item 18a, #174).
+#[test]
+#[ignore = "pending E7-2"]
+fn a_broker_order_id_outside_a_uuids_alphabet_is_unreadable() {
+    for id in [
+        ".",
+        "..",
+        "%2e",
+        "%2E%2e",
+        "a/b",
+        "",
+        "A..B",
+        "e02fc2d2 0ff3",
+    ] {
+        let mut body: serde_json::Value =
+            serde_json::from_slice(&body_of("submit_limit_accepted", 0)).expect("valid JSON");
+        if let Some(object) = body.as_object_mut() {
+            object.insert("id".to_owned(), serde_json::json!(id));
+        }
+        let text = serde_json::to_vec(&body).expect("re-serialises");
+        let error = wire::order(&text).expect_err("a hostile broker id is not an order");
+        assert_eq!(
+            error.code(),
+            "unsafe_id",
+            "the id {id:?} is refused as unsafe to put in a path"
+        );
+        assert_eq!(
+            mandate_alpaca::ClientError::from(error)
+                .to_connector()
+                .code(),
+            "unreadable",
+            "and the shell stops and alerts on it rather than sending anything (DEC-85)"
+        );
+    }
 }
 
 #[tokio::test]
