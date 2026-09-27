@@ -3112,10 +3112,21 @@ fn a_malformed_rule_set_never_blocks_a_reducing_purpose() {
         AutonomyDecision::Deny,
         None,
     );
+    let asking = policy(
+        vec![Rule {
+            id: rule_id("drift"),
+            when: compare(ConditionField::UnusualInput, Operator::Ne, flag(false)),
+            then: AutonomyDecision::Ask,
+        }],
+        AutonomyDecision::Ask,
+        AutonomyDecision::Ask,
+        Some("1"),
+    );
     for (name, broken) in [
         ("a reserved field", &reserved),
         ("a fifth level of nesting", &too_deep),
         ("an ill-typed comparison", &mistyped),
+        ("a reserved field whose rules would ASK", &asking),
     ] {
         for purpose in [
             Purpose::DiscretionaryExit,
@@ -3461,6 +3472,14 @@ fn an_overnight_market_refuses_a_buy_and_still_proposes_an_exit() {
         }
         other => panic!("a discretionary exit of 5, not {other:?}"),
     }
+
+    assert_eq!(
+        decide(&base_policy(), &exit, GateVerdict::Defer)
+            .unwrap_or_else(|e| panic!("decide returns an outcome, not {e}")),
+        Outcome::Deferred,
+        "the session rule is the gate's: an equity exit outside the regular session is deferred, \
+         with nothing stored, and the builder is what proposed it (DEC-130 item 15)"
+    );
 
     let quiet = proposed(
         &two_stock_swing(),

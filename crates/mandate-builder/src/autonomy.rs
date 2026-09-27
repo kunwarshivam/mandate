@@ -51,20 +51,64 @@ pub struct ActionContext {
     pub position_pnl_fraction: Signed,
 }
 
+/// The projection of an action onto the §6.3 field names.
+///
+/// Live rather than a stub, under DEC-128 item 22: it is a total function with no rule logic — a
+/// field name to a field this struct already holds — and `Condition::matches` cannot be exercised
+/// without it, so every autonomy test needs it to construct an answer at all. A `None`-returning stub
+/// would also have been a **plausible** one, since `matches` treats an absent fact as an error, and
+/// the mutation gate does not recognise `None` as a stub body the way it recognises `Unimplemented`.
+/// `crates/mandate-builder/tests/vocabulary.rs` pins every arm live.
+///
+/// A field this action does not carry is `None`, which `Condition::matches` treats as an error rather
+/// than as a false: a rule that cannot be evaluated must never read as "does not match", which would
+/// quietly widen autonomy. [`ConditionField::UnusualInput`] is one of those, because V-018 reserves
+/// it and [`classify`] refuses a rule naming it before any fact is read.
 impl Facts for ActionContext {
     fn enum_field(&self, field: ConditionField) -> Option<&str> {
-        let _ = field;
-        None
+        match field {
+            ConditionField::Purpose => Some(purpose_name(self.purpose)),
+            ConditionField::AssetClass => Some(self.asset_class.as_str()),
+            ConditionField::Session => Some(self.session.as_str()),
+            ConditionField::Instrument => Some(self.instrument.as_str()),
+            _ => None,
+        }
     }
 
     fn decimal_field(&self, field: ConditionField) -> Option<Ratio> {
-        let _ = field;
-        None
+        let text = match field {
+            ConditionField::OrderUsd => self.order_usd.to_string(),
+            ConditionField::CombinedScore => self.combined_score.to_string(),
+            ConditionField::ThesisConfidence => self.thesis_confidence.to_string(),
+            ConditionField::Drawdown => self.drawdown.to_string(),
+            ConditionField::DailyPnlFraction => self.daily_pnl_fraction.to_string(),
+            ConditionField::PositionUsdAfter => self.position_usd_after.to_string(),
+            ConditionField::GrossUsdAfter => self.gross_usd_after.to_string(),
+            ConditionField::BoughtTodayUsd => self.bought_today_usd.to_string(),
+            ConditionField::PositionPnlFraction => self.position_pnl_fraction.to_string(),
+            _ => return None,
+        };
+        Ratio::parse(&text).ok()
     }
 
     fn bool_field(&self, field: ConditionField) -> Option<bool> {
-        let _ = field;
-        None
+        match field {
+            ConditionField::FirstTradeInInstrument => Some(self.first_trade_in_instrument),
+            ConditionField::NewInstrument => Some(self.new_instrument),
+            _ => None,
+        }
+    }
+}
+
+/// The §6.3 spelling of a purpose. §6.1's six names, of which a rule can only ever see the first two.
+fn purpose_name(purpose: Purpose) -> &'static str {
+    match purpose {
+        Purpose::Open => "open",
+        Purpose::Increase => "increase",
+        Purpose::DiscretionaryExit => "discretionary_exit",
+        Purpose::OwnerExit => "owner_exit",
+        Purpose::RiskExit => "risk_exit",
+        Purpose::Protective => "protective",
     }
 }
 

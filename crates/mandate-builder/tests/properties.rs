@@ -2828,11 +2828,11 @@ fn zz_the_generated_scenarios_reach_every_action_and_every_clip() {
             .unwrap_or_else(|failure| {
                 panic!("seed {seed}: the agreement helper failed: {failure}")
             });
-        coverage_reached(seed);
+        coverage_reached(seed, "the sizing scenarios");
     }
 }
 
-fn coverage_reached(seed: u64) {
+fn coverage_reached(seed: u64, what: &str) {
     let seen: Vec<(&str, u32)> = vec![
         ("a buy", SAW_BUY.load(Ordering::Relaxed)),
         ("a discretionary exit", SAW_SELL.load(Ordering::Relaxed)),
@@ -2881,7 +2881,7 @@ fn coverage_reached(seed: u64) {
         .collect();
     assert!(
         missing.is_empty(),
-        "seed {seed}: the generated scenarios never reached {missing:?}, so the properties that \
-         depend on them are not evidence; counts were {seen:?}"
+        "seed {seed}: {what} never reached {missing:?}, so the properties that depend on them are \
+         not evidence; counts were {seen:?}"
     );
 }
