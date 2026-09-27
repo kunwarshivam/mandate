@@ -21,16 +21,17 @@
 mod common;
 
 use common::{
-    BTC_INSTRUMENT, NOW, SWING_INSTRUMENT, account, asset, base_policy, base_rules, basis,
-    btc_accumulator, compare, crypto_market, decimal, digest, fee, flag, flat_account, frac, ids,
-    mark, mean_reversion, model, momentum, news, output, policy, price, qty, quiet_risk, rule_id,
-    swing_market, text, timed_output, two_stock_swing, unit, usd, version,
+    BTC_INSTRUMENT, NOW, OTHER_INSTRUMENT, SWING_INSTRUMENT, account, asset, base_policy,
+    base_rules, basis, btc_accumulator, compare, crypto_market, decimal, digest, fee, flag,
+    flat_account, frac, ids, mark, mean_reversion, model, momentum, news, output, policy, price,
+    qty, quiet_risk, rule_id, signed, swing_market, text, timed_output, two_stock_swing, unit, usd,
+    version,
 };
 use mandate_builder::{
     AccountSnapshot, AccumulateGoal, Action, ActionContext, BuilderMandate, Classification, Clip,
     Combined, DecidedBy, GateVerdict, GoalKind, HoldReason, Limits, Market, ModelOutput,
-    OrderShape, Outcome, Proposal, RiskContext, SignalModel, Sizes, Sizing, classify, decide,
-    propose,
+    OrderShape, Outcome, Proposal, RiskContext, SignalModel, Sizes, Sizing, classify, combine,
+    decide, propose,
 };
 use mandate_domain::{AssetClass, AutonomyDecision, MarketSession, Purpose};
 use mandate_num::{Signed, SizeFraction, Unit, UsdExact};
@@ -2980,4 +2981,634 @@ fn a_crossed_quote_refuses_the_proposal() {
         }
         other => panic!("a buy of 7, not {other:?}"),
     }
+}
+
+/// §6.3: the three exposure fields a rule reads are the order's **after** values, and the thesis and
+/// risk facts come from the [`RiskContext`] the caller supplied, not from anywhere else.
+///
+/// Pinned by hand as well as by `properties::position_and_gross_after_include_this_order`, because
+/// the independent review of this PR found that four bugs here — any of the three after-values
+/// leaving out this order or the working cost, and `new_instrument` or `thesis_confidence` not
+/// copied — survived all 125 tests while the generator reached no buy at all.
+#[test]
+#[ignore = "pending E6-2"]
+fn the_after_values_a_rule_reads_include_this_order() {
+    let mandate = two_stock_swing();
+    let account = AccountSnapshot {
+        gross_usd: usd("400"),
+        working_opening_cost: usd("100"),
+        ..account("3", "99.9")
+    };
+    let risk = RiskContext {
+        new_instrument: true,
+        thesis_confidence: unit("0.77"),
+        drawdown: unit("0.02"),
+        daily_pnl_fraction: signed("-0.01"),
+        position_pnl_fraction: signed("0.05"),
+        bought_today_usd: usd("250"),
+        has_prior_fill: true,
+        ..quiet_risk()
+    };
+    let proposal = proposed(
+        &mandate,
+        &account,
+        &swing_market(),
+        &risk,
+        &swing_outputs("0.8", "0.2"),
+    );
+    assert_sizes(&proposal.sizes, "1500", "299.7", Some("708"), Some("308.3"));
+    let Action::Buy {
+        qty: quantity,
+        order_usd,
+        action,
+        ..
+    } = &proposal.action
+    else {
+        panic!("a buy, not {:?}", proposal.action);
+    };
+    assert_eq!(
+        *quantity,
+        qty("3"),
+        "308.3 of Delta buys three shares at 100"
+    );
+    assert_eq!(*order_usd, usd("300"));
+    assert_eq!(
+        action.order_usd,
+        usd("300"),
+        "the rule reads this order's value"
+    );
+    assert_eq!(
+        action.position_usd_after,
+        usd("699.7"),
+        "299.7 of position at the mark, plus 100 of working cost, plus this 300"
+    );
+    assert_eq!(
+        action.gross_usd_after,
+        usd("700"),
+        "400 of gross plus this 300"
+    );
+    assert_eq!(
+        action.bought_today_usd,
+        usd("550"),
+        "250 bought today plus this 300"
+    );
+    assert_eq!(action.combined_score, unit("0.74"));
+    assert!(
+        action.new_instrument,
+        "the flag is the caller's, not derived"
+    );
+    assert_eq!(action.thesis_confidence, unit("0.77"));
+    assert_eq!(action.drawdown, unit("0.02"));
+    assert_eq!(action.daily_pnl_fraction, signed("-0.01"));
+    assert_eq!(action.position_pnl_fraction, signed("0.05"));
+    assert!(!action.first_trade_in_instrument, "a prior fill was stated");
+    assert_eq!(action.asset_class, AssetClass::UsEquity);
+    assert_eq!(action.session, MarketSession::Regular);
+    assert_eq!(action.instrument, asset(SWING_INSTRUMENT));
+    assert_eq!(action.purpose, Purpose::Increase);
+}
+
+/// §6.2 step 3 and `AGENTS.md` rule 13: the built-in AUTO is reached **before** the order path
+/// re-checks the rules, so a malformed rule set is never a reason a risk-reducing action is refused.
+///
+/// Validating first passes every other test in this suite, because every refusal test uses `Open`
+/// and every reducing-purpose test uses a well-typed policy — the gap the independent review found.
+#[test]
+#[ignore = "pending E6-2"]
+fn a_malformed_rule_set_never_blocks_a_reducing_purpose() {
+    let reserved = policy(
+        vec![Rule {
+            id: rule_id("drift"),
+            when: compare(ConditionField::UnusualInput, Operator::Eq, flag(true)),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Deny,
+        AutonomyDecision::Deny,
+        None,
+    );
+    let too_deep = policy(
+        vec![Rule {
+            id: rule_id("nested"),
+            when: Condition::All(vec![Condition::All(vec![Condition::Any(vec![
+                Condition::Not(Box::new(compare(
+                    ConditionField::OrderUsd,
+                    Operator::Gte,
+                    decimal("0"),
+                ))),
+            ])])]),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Deny,
+        AutonomyDecision::Deny,
+        None,
+    );
+    let mistyped = policy(
+        vec![Rule {
+            id: rule_id("mistyped"),
+            when: compare(ConditionField::Purpose, Operator::Gt, text("open")),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Deny,
+        AutonomyDecision::Deny,
+        None,
+    );
+    for (name, broken) in [
+        ("a reserved field", &reserved),
+        ("a fifth level of nesting", &too_deep),
+        ("an ill-typed comparison", &mistyped),
+    ] {
+        for purpose in [
+            Purpose::DiscretionaryExit,
+            Purpose::OwnerExit,
+            Purpose::RiskExit,
+            Purpose::Protective,
+        ] {
+            let decided = classified(broken, &reducing(purpose));
+            assert_eq!(
+                decided.decision,
+                AutonomyDecision::Auto,
+                "{purpose:?} under {name}"
+            );
+            assert_eq!(
+                decided.by,
+                DecidedBy::BuiltinRiskReducing,
+                "{purpose:?} under {name}"
+            );
+        }
+        assert!(
+            classify(broken, &opening("300", "0.8")).is_err(),
+            "the same policy does refuse an opening action, so {name} is reached on that path"
+        );
+    }
+}
+
+/// §8.2, §8.3: only **this instrument's** outputs count. An output naming another is refused rather
+/// than counted, because counting it would let one instrument's conviction open a position in
+/// another, and ignoring it silently would be indistinguishable from a model that did not answer
+/// (DEC-85).
+#[test]
+#[ignore = "pending E6-2"]
+fn an_output_for_another_instrument_is_refused() {
+    let mandate = two_stock_swing();
+    let strayed = [
+        output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9"),
+        output(&news(), OTHER_INSTRUMENT, "0.2", "0.5"),
+    ];
+    assert_eq!(
+        propose(
+            &mandate,
+            &flat_account(),
+            &swing_market(),
+            &quiet_risk(),
+            &strayed,
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("output_instrument_mismatch")
+    );
+    assert_eq!(
+        combine(
+            &mandate.models,
+            &strayed,
+            &asset(SWING_INSTRUMENT),
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("output_instrument_mismatch"),
+        "the rule has one home, in `combine`"
+    );
+
+    let matched = [
+        output(&momentum(), SWING_INSTRUMENT, "0.8", "0.9"),
+        output(&news(), SWING_INSTRUMENT, "0.2", "0.5"),
+    ];
+    let proposal = proposed(
+        &mandate,
+        &flat_account(),
+        &swing_market(),
+        &quiet_risk(),
+        &matched,
+    );
+    assert_combined(
+        &proposal.combined,
+        &["llm.news_research", "quant.momentum"],
+        "0.472",
+        "0.472",
+        "0.74",
+    );
+    match &proposal.action {
+        Action::Buy { qty: quantity, .. } => assert_eq!(*quantity, qty("7")),
+        other => panic!("a buy of 7, not {other:?}"),
+    }
+}
+
+/// §8.3 step 4: the projected-average guard decides on its own, with **no** goal clip binding. The
+/// `max_avg_price` clip is off because `a − max_avg × β` is not positive, and the existing average is
+/// already above the bound, so no clip could have cut the order to fix it.
+#[test]
+#[ignore = "pending E6-2"]
+fn a_projected_average_guard_fires_with_no_goal_clip() {
+    let roomy_goal = accumulating("0.5", Some("58000"), "50000");
+    let market = crypto_market("54990", "55000", "0.0001");
+    let outputs = [output(&mean_reversion(), BTC_INSTRUMENT, "1", "1")];
+
+    let dear = btc_account("0.14", "54990", "8300", "8300", "7698.6");
+    let held = proposed(&roomy_goal, &dear, &market, &quiet_risk(), &outputs);
+    assert_sizes(
+        &held.sizes,
+        "10000",
+        "7698.6",
+        Some("10000"),
+        Some("2301.4"),
+    );
+    assert_eq!(
+        hold_reason(&held.action),
+        HoldReason::WouldExceedMaxAvgPrice,
+        "9295.5 of basis over 0.1581 is above 58000"
+    );
+    assert_eq!(
+        held.clipped_by,
+        [Clip::Limits].into_iter().collect(),
+        "no goal bound bound: the guard alone held the order"
+    );
+
+    let cheap = btc_account("0.14", "54990", "7700", "8300", "7698.6");
+    let bought = proposed(&roomy_goal, &cheap, &market, &quiet_risk(), &outputs);
+    match &bought.action {
+        Action::Buy {
+            qty: quantity,
+            order_usd,
+            ..
+        } => {
+            assert_eq!(
+                *quantity,
+                qty("0.0181"),
+                "the same order, under a cheaper basis"
+            );
+            assert_eq!(*order_usd, usd("995.5"));
+        }
+        other => panic!("a buy of 0.0181, not {other:?}"),
+    }
+    assert_eq!(bought.clipped_by, [Clip::Limits].into_iter().collect());
+}
+
+/// §8.3 steps 2 and 3, the three inclusive-or-exclusive boundaries the exit threshold's test already
+/// pins for its own side: b ≥ `entry_threshold` buys, Delta ≤ 0 holds, and Delta < the band holds
+/// while Delta **equal** to the band goes on to be clipped.
+#[test]
+#[ignore = "pending E6-2"]
+fn the_entry_threshold_is_inclusive_and_the_band_and_target_are_exclusive() {
+    let outputs = swing_outputs("0.8", "0.2");
+    let at_entry = BuilderMandate {
+        sizing: Sizing {
+            entry_threshold: frac("0.472"),
+            ..two_stock_swing().sizing
+        },
+        ..two_stock_swing()
+    };
+    let bought = proposed(
+        &at_entry,
+        &flat_account(),
+        &swing_market(),
+        &quiet_risk(),
+        &outputs,
+    );
+    match &bought.action {
+        Action::Buy { qty: quantity, .. } => {
+            assert_eq!(*quantity, qty("7"), "b equal to the entry threshold buys")
+        }
+        other => panic!("a buy of 7, not {other:?}"),
+    }
+    let above_entry = BuilderMandate {
+        sizing: Sizing {
+            entry_threshold: frac("0.472000000001"),
+            ..two_stock_swing().sizing
+        },
+        ..two_stock_swing()
+    };
+    let held = proposed(
+        &above_entry,
+        &flat_account(),
+        &swing_market(),
+        &quiet_risk(),
+        &outputs,
+    );
+    assert_eq!(
+        hold_reason(&held.action),
+        HoldReason::BetweenThresholds,
+        "one twelfth-place step above b and nothing is proposed"
+    );
+
+    let at_target = AccountSnapshot {
+        gross_usd: usd("708"),
+        working_opening_cost: usd("708"),
+        ..flat_account()
+    };
+    let exactly_met = proposed(
+        &two_stock_swing(),
+        &at_target,
+        &swing_market(),
+        &quiet_risk(),
+        &outputs,
+    );
+    assert_sizes(&exactly_met.sizes, "1500", "0", Some("708"), Some("0"));
+    assert_eq!(
+        hold_reason(&exactly_met.action),
+        HoldReason::AtOrAboveTarget,
+        "a Delta of exactly zero is not positive"
+    );
+
+    let at_band = AccountSnapshot {
+        gross_usd: usd("633"),
+        working_opening_cost: usd("633"),
+        ..flat_account()
+    };
+    let band_reached = proposed(
+        &two_stock_swing(),
+        &at_band,
+        &swing_market(),
+        &quiet_risk(),
+        &outputs,
+    );
+    assert_sizes(&band_reached.sizes, "1500", "0", Some("708"), Some("75"));
+    assert_eq!(
+        hold_reason(&band_reached.action),
+        HoldReason::BelowBandAfterClipping,
+        "a Delta equal to the band is not inside it, so it is clipped and then falls below it"
+    );
+
+    let inside_band = AccountSnapshot {
+        gross_usd: usd("634"),
+        working_opening_cost: usd("634"),
+        ..flat_account()
+    };
+    let band_held = proposed(
+        &two_stock_swing(),
+        &inside_band,
+        &swing_market(),
+        &quiet_risk(),
+        &outputs,
+    );
+    assert_sizes(&band_held.sizes, "1500", "0", Some("708"), Some("74"));
+    assert_eq!(
+        hold_reason(&band_held.action),
+        HoldReason::WithinRebalanceBand,
+        "one dollar less and the comparison is the band's own"
+    );
+}
+
+/// §8.3 step 5: the minimum-order comparison is strict, so a value **equal** to `min_order_usd` is
+/// proposed and one dollar more of minimum holds it.
+#[test]
+#[ignore = "pending E6-2"]
+fn an_order_value_exactly_at_the_minimum_is_proposed() {
+    let single_share = BuilderMandate {
+        sizing: Sizing {
+            rebalance_band: frac("0"),
+            ..two_stock_swing().sizing
+        },
+        limits: Limits {
+            max_order_usd: usd("100"),
+            ..two_stock_swing().limits
+        },
+        ..two_stock_swing()
+    };
+    let at_minimum = Market {
+        min_order_usd: usd("100"),
+        ..swing_market()
+    };
+    let bought = proposed(
+        &single_share,
+        &flat_account(),
+        &at_minimum,
+        &quiet_risk(),
+        &swing_outputs("0.8", "0.2"),
+    );
+    match &bought.action {
+        Action::Buy {
+            qty: quantity,
+            order_usd,
+            ..
+        } => {
+            assert_eq!(*quantity, qty("1"));
+            assert_eq!(*order_usd, usd("100"), "100 is not below a minimum of 100");
+        }
+        other => panic!("a buy of 1, not {other:?}"),
+    }
+
+    let above_minimum = Market {
+        min_order_usd: usd("101"),
+        ..swing_market()
+    };
+    let held = proposed(
+        &single_share,
+        &flat_account(),
+        &above_minimum,
+        &quiet_risk(),
+        &swing_outputs("0.8", "0.2"),
+    );
+    assert_eq!(
+        hold_reason(&held.action),
+        HoldReason::BelowMinimumAfterClipping
+    );
+}
+
+/// DEC-30 and `AGENTS.md` rule 13: the overnight session refuses an **opening** order, because §6.3's
+/// `session` field has no name for it, and leaves an exit alone, because an exit is paced and never
+/// denied and reads no session. A hold is a hold in any session.
+#[test]
+#[ignore = "pending E6-2"]
+fn an_overnight_market_refuses_a_buy_and_still_proposes_an_exit() {
+    let overnight = Market {
+        session: MarketSession::Overnight,
+        ..swing_market()
+    };
+    assert_eq!(
+        propose(
+            &two_stock_swing(),
+            &flat_account(),
+            &overnight,
+            &quiet_risk(),
+            &swing_outputs("0.8", "0.2"),
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("untradable_session"),
+        "no opening order may trade overnight"
+    );
+
+    let exit = proposed(
+        &two_stock_swing(),
+        &account("5", "99.9"),
+        &overnight,
+        &quiet_risk(),
+        &swing_outputs("-0.8", "-0.2"),
+    );
+    match &exit.action {
+        Action::Sell {
+            qty: quantity,
+            order_usd,
+            shape,
+            ..
+        } => {
+            assert_eq!(*quantity, qty("5"), "an exit is never denied by a session");
+            assert_eq!(*order_usd, usd("499.5"));
+            assert_eq!(
+                *shape,
+                OrderShape::Limit,
+                "the close window is an equity-session rule"
+            );
+        }
+        other => panic!("a discretionary exit of 5, not {other:?}"),
+    }
+
+    let quiet = proposed(
+        &two_stock_swing(),
+        &flat_account(),
+        &overnight,
+        &quiet_risk(),
+        &swing_outputs("0.3", "0.2"),
+    );
+    assert_eq!(
+        hold_reason(&quiet.action),
+        HoldReason::BetweenThresholds,
+        "a hold proposes nothing, so there is nothing for the session to refuse"
+    );
+}
+
+/// The refusals the crate declares and the order path reaches: two rules with one id, no signal
+/// model, weights that sum to zero, an `accumulate` goal for another instrument, `decide` on a
+/// holding proposal, and a unit-bounded condition value outside the unit interval.
+#[test]
+#[ignore = "pending E6-2"]
+fn every_declared_refusal_is_reachable() {
+    let duplicate = policy(
+        vec![
+            Rule {
+                id: rule_id("same"),
+                when: compare(ConditionField::OrderUsd, Operator::Gt, decimal("100")),
+                then: AutonomyDecision::Ask,
+            },
+            Rule {
+                id: rule_id("same"),
+                when: compare(ConditionField::OrderUsd, Operator::Gt, decimal("200")),
+                then: AutonomyDecision::Deny,
+            },
+        ],
+        AutonomyDecision::Ask,
+        AutonomyDecision::Ask,
+        None,
+    );
+    assert_eq!(
+        classify(&duplicate, &opening("300", "0.8")).map_err(|e| e.code()),
+        Err("duplicate_rule_id"),
+        "the first-match walk would report a `by` that names either"
+    );
+
+    let modelless = BuilderMandate {
+        models: Vec::new(),
+        ..two_stock_swing()
+    };
+    assert_eq!(
+        propose(
+            &modelless,
+            &flat_account(),
+            &swing_market(),
+            &quiet_risk(),
+            &[],
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("no_signal_models"),
+        "§8.3's W has no denominator without a model"
+    );
+
+    let weightless = BuilderMandate {
+        models: vec![SignalModel {
+            weight: SizeFraction::ZERO,
+            ..momentum()
+        }],
+        ..two_stock_swing()
+    };
+    assert_eq!(
+        propose(
+            &weightless,
+            &flat_account(),
+            &swing_market(),
+            &quiet_risk(),
+            &[output(&momentum(), SWING_INSTRUMENT, "1", "1")],
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("weight_sum_zero")
+    );
+
+    let other_instrument = accumulating("0.15", Some("58000"), "9000");
+    let mismatched = BuilderMandate {
+        goal: GoalKind::Accumulate(AccumulateGoal {
+            instrument: asset(OTHER_INSTRUMENT),
+            target_qty: qty("0.15"),
+            max_avg_price: Some(price("58000")),
+            max_spend_usd: usd("9000"),
+        }),
+        ..other_instrument
+    };
+    assert_eq!(
+        propose(
+            &mismatched,
+            &btc_account("0.05", "54990", "0", "0", "2749.5"),
+            &crypto_market("54990", "55000", "0.0001"),
+            &quiet_risk(),
+            &[output(&mean_reversion(), BTC_INSTRUMENT, "1", "1")],
+            common::at(NOW),
+        )
+        .map_err(|e| e.code()),
+        Err("accumulate_instrument_mismatch"),
+        "V-003 pins the universe to the goal's one instrument"
+    );
+
+    let holding = Proposal {
+        action: Action::Hold {
+            reason: HoldReason::BetweenThresholds,
+        },
+        ..buy_proposal("800", "0.6")
+    };
+    for verdict in [GateVerdict::Allow, GateVerdict::Deny, GateVerdict::Defer] {
+        assert_eq!(
+            decide(&base_policy(), &holding, verdict).map_err(|e| e.code()),
+            Err("nothing_proposed"),
+            "a hold and a denied order are two different things on the journal"
+        );
+    }
+
+    let above_one = policy(
+        vec![Rule {
+            id: rule_id("impossible"),
+            when: compare(ConditionField::CombinedScore, Operator::Gt, decimal("2")),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Auto,
+        AutonomyDecision::Auto,
+        None,
+    );
+    assert_eq!(
+        classify(&above_one, &opening("300", "0.8")).map_err(|e| e.code()),
+        Err("condition_type_mismatch"),
+        "V-023 bounds a `combined_score` value to the closed unit interval"
+    );
+    let at_one = policy(
+        vec![Rule {
+            id: rule_id("possible"),
+            when: compare(ConditionField::CombinedScore, Operator::Lte, decimal("1")),
+            then: AutonomyDecision::Deny,
+        }],
+        AutonomyDecision::Auto,
+        AutonomyDecision::Auto,
+        None,
+    );
+    assert_eq!(
+        classified(&at_one, &opening("300", "0.8")).by,
+        DecidedBy::Rule(rule_id("possible")),
+        "one is inside the interval, so the bound is closed"
+    );
 }

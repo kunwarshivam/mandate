@@ -133,12 +133,19 @@ pub struct Combined {
 ///
 /// W is the sum over **all** of `models`, never over the fresh ones: that is what makes a missing
 /// model lower the buy conviction instead of silently rescaling the rest.
+///
+/// `instrument` is the one being sized, and an output naming another is
+/// [`BuilderError::OutputInstrumentMismatch`]. §8.3 sizes one instrument at a time and §8.2 gives
+/// every output an `instrument_id`, so nothing else in the chain would notice the mix-up — and
+/// counting a mismatched output would let one instrument's conviction open a position in another.
+/// The parameter is here rather than in [`propose`] alone so that the rule has one home.
 pub fn combine(
     models: &[SignalModel],
     outputs: &[ModelOutput],
+    instrument: &AssetId,
     now: UtcNanos,
 ) -> Result<Combined, BuilderError> {
-    let _ = (models, outputs, now);
+    let _ = (models, outputs, instrument, now);
     Err(BuilderError::Unimplemented)
 }
 
@@ -409,6 +416,10 @@ pub struct Proposal {
 /// The step-5 guard is `n ≤ 0` **or** a value below the minimum order, not the minimum alone, so a
 /// zero-quantity buy is impossible even where `min_order_usd` and `rebalance_band` are both zero
 /// (DEC-130 item 21).
+///
+/// [`BuilderError::UntradableSession`] is reached on the **buy path only**: an exit is paced, never
+/// denied, and reads no session. [`BuilderError::OutputInstrumentMismatch`] is reached first of all,
+/// because it says an input was not interpreted rather than that an action was refused.
 pub fn propose(
     mandate: &BuilderMandate,
     account: &AccountSnapshot,

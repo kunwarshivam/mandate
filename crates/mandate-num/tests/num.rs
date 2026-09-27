@@ -1937,6 +1937,41 @@ fn the_builder_arithmetic_is_exact_or_an_error() {
             .unwrap_or_else(|e| panic!("a rounding, not {e}")),
         "708"
     );
+    assert_eq!(
+        UsdExact::parse("-0.05")
+            .and_then(|headroom| {
+                headroom.truncated_quotient(UsdExact::parse("2000")?, Qty::parse("0.0001")?)
+            })
+            .map(|q| q.to_string())
+            .unwrap_or_else(|e| panic!("a bound below zero is a quantity, not {e}")),
+        "0",
+        "a negative bound is no room at all, and a Qty is non-negative (Decisions item 5); an error \
+         here would refuse the proposal where §8.3 step 5 holds on it"
+    );
+    assert_eq!(
+        UsdExact::parse("-1000")
+            .and_then(|budget| budget.shares_at(Price::parse("100")?, Qty::parse("1")?))
+            .map(|q| q.to_string())
+            .unwrap_or_else(|e| panic!("a negative amount is a quantity, not {e}")),
+        "0",
+        "`shares_at` clamps alike, so the two cannot disagree about which hold a zero band reaches"
+    );
+    assert_eq!(
+        UsdExact::parse("0.015")
+            .and_then(|v| v.round(2, Rounding::HalfEven))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a rounding, not {e}")),
+        "0.02",
+        "`round` rounds in the mode it is given; truncation would give 0.01"
+    );
+    assert_eq!(
+        UsdExact::parse("0.025")
+            .and_then(|v| v.round(2, Rounding::HalfEven))
+            .map(|v| v.to_string())
+            .unwrap_or_else(|e| panic!("a rounding, not {e}")),
+        "0.02",
+        "and half-even sends an exact half to the even neighbour, where half-up would give 0.03"
+    );
     let widest = "1".to_owned() + &"0".repeat(70);
     assert_eq!(
         UsdExact::parse(&widest)

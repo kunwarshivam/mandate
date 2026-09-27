@@ -146,8 +146,10 @@ pub enum Outcome {
 /// §6.2 steps 3 to 5: the built-in AUTO purposes, the first matching rule, the default, and the
 /// admission ceiling, in that order.
 ///
-/// Step 3 comes first and is unconditional: every purpose other than `open` and `increase` is AUTO
-/// whatever the rules say, so no rule set can deny or ask a risk-reducing action (MI-1, DEC-05).
+/// Step 3 comes first and is unconditional, and that includes coming before the order path's
+/// re-check of V-017, V-018, V-020 and V-023: a malformed rule set must not be a reason a risk exit,
+/// an owner exit, a protective order or a discretionary exit is refused (`AGENTS.md` rule 13,
+/// MI-1, DEC-05). The rules are validated only on the path that reads them.
 /// Step 4 takes the **first** matching rule, not the last and not the strictest. Step 5's ceiling
 /// applies only when `new_instrument` is true and only **tightens** (MI-17).
 pub fn classify(policy: &Autonomy, action: &ActionContext) -> Result<Classification, BuilderError> {

@@ -332,6 +332,9 @@ impl UsdExact {
     }
 
     /// `round(self, scale, mode)` as a [`Usd`]: the one explicit narrowing out of the wide chain.
+    ///
+    /// It **rounds** in the mode the caller names; it does not truncate. `too_precise` when the
+    /// value needs more places than `Usd` stores, rather than silently dropping them.
     pub fn round(self, scale: u32, mode: Rounding) -> Result<Usd, NumError> {
         let _ = (scale, mode);
         Err(NumError::Unimplemented)

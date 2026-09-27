@@ -68,6 +68,14 @@ use mandate_time::TimeError;
 /// Why the builder proposed nothing, or could not classify an action. One cause each, with a stable
 /// `code()` (ES-09).
 ///
+/// [`BuilderError::ConditionTooDeep`], [`BuilderError::ConditionTypeMismatch`] and
+/// [`BuilderError::ReservedField`] are named here although DEC-128 item 18 puts those three errors
+/// in `mandate-spec`: they are the **order path's** re-check of V-017, V-018 and V-023, which
+/// [`classify`] does because it is handed a §6 block and cannot assume validation ran, and
+/// `mandate-spec` does not carry the three variants yet. The codes are the ones item 18 names, so
+/// when `mandate-spec::validate` lands them the implementation PR maps its `SpecError` onto these
+/// and no caller sees a different code. Recorded in this PR's Decisions needed.
+///
 /// Every variant is a **refusal**, and a refusal adds no risk: nothing is proposed, nothing is
 /// submitted, and nothing is approved. That is what AGENTS.md rule 3 and DEC-06 require of an
 /// ambiguous input, whereas an approximated size would be an order nobody specified (DEC-130
@@ -123,9 +131,25 @@ pub enum BuilderError {
     #[error("the proposal holds, so there is nothing to decide")]
     NothingProposed,
     /// No order may trade in the overnight session (DEC-30), and §6.3's `session` field has no name
-    /// for it, so a market in that session is refused rather than classified.
-    #[error("no order may trade in the overnight session")]
+    /// for it, so an **opening or increasing** order in that session is refused rather than
+    /// classified against a value the condition language cannot express.
+    ///
+    /// It is refused on the buy path only. A discretionary exit is paced, never denied
+    /// (`AGENTS.md` rule 13), and needs no rule and so no session name: refusing one here would
+    /// make an untradable session a reason an exit did not go out, which is the one thing rule 13
+    /// forbids. The session rule that holds an equity exit is the gate's `defer` (trading spec
+    /// §9.6, DEC-130 item 15).
+    #[error("no opening order may trade in the overnight session")]
     UntradableSession,
+    /// A model output naming another instrument than the market being sized.
+    ///
+    /// §8.2 gives every output an `instrument_id` and §8.3 sizes **one** instrument at a time, so an
+    /// output for another one is a caller's mistake, not a signal. Counting it would let one
+    /// instrument's conviction open or enlarge a position in another; ignoring it silently would
+    /// make that mistake indistinguishable from a model that did not answer. Refusing adds no risk
+    /// and says which input was not interpreted (DEC-85).
+    #[error("a model output names another instrument than the market")]
+    OutputInstrumentMismatch,
     #[error(transparent)]
     Num(#[from] NumError),
     #[error(transparent)]
@@ -153,6 +177,7 @@ impl BuilderError {
             Self::MalformedModelVersion => "malformed_model_version",
             Self::NothingProposed => "nothing_proposed",
             Self::UntradableSession => "untradable_session",
+            Self::OutputInstrumentMismatch => "output_instrument_mismatch",
             Self::Num(e) => e.code(),
             Self::Time(e) => e.code(),
             Self::Domain(e) => e.code(),

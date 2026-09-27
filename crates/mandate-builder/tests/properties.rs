@@ -33,6 +33,7 @@
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::{
     BTC_INSTRUMENT, NOW, SWING_INSTRUMENT, asset, basis, compare, decimal, flag, frac, mark,
@@ -49,6 +50,70 @@ use mandate_spec::condition::{Condition, ConditionField, ConditionValue, Operato
 use mandate_spec::document::{Autonomy, Rule, SizingMethod};
 use mandate_time::UtcNanos;
 use proptest::prelude::*;
+use proptest::test_runner::RngSeed;
+
+/// What the generated scenarios reached, counted by the **oracle** rather than by the crate, so the
+/// evidence is about the generator and cannot be manufactured by the code under test.
+///
+/// A fuzz that never proposed a buy is not evidence for a property about buys, which is what the
+/// independent review of this PR found: every sizing property ran 256 cases of which none reached a
+/// buy, so four planted bugs in the after-values survived all 125 tests.
+/// [`zz_the_generated_scenarios_reach_every_action_and_every_clip`] is the gate that keeps that
+/// from coming back.
+static SAW_BUY: AtomicU32 = AtomicU32::new(0);
+static SAW_SELL: AtomicU32 = AtomicU32::new(0);
+static SAW_NO_FRESH_OUTPUTS: AtomicU32 = AtomicU32::new(0);
+static SAW_BETWEEN_THRESHOLDS: AtomicU32 = AtomicU32::new(0);
+static SAW_NO_POSITION: AtomicU32 = AtomicU32::new(0);
+static SAW_EXITS_DISABLED: AtomicU32 = AtomicU32::new(0);
+static SAW_AT_OR_ABOVE_TARGET: AtomicU32 = AtomicU32::new(0);
+static SAW_WITHIN_BAND: AtomicU32 = AtomicU32::new(0);
+static SAW_BELOW_BAND: AtomicU32 = AtomicU32::new(0);
+static SAW_BELOW_MINIMUM: AtomicU32 = AtomicU32::new(0);
+static SAW_MAX_AVG_PRICE: AtomicU32 = AtomicU32::new(0);
+static SAW_CLIP_LIMITS: AtomicU32 = AtomicU32::new(0);
+static SAW_CLIP_GOAL: AtomicU32 = AtomicU32::new(0);
+static EVERY_COUNTER: [&AtomicU32; 13] = [
+    &SAW_BUY,
+    &SAW_SELL,
+    &SAW_NO_FRESH_OUTPUTS,
+    &SAW_BETWEEN_THRESHOLDS,
+    &SAW_NO_POSITION,
+    &SAW_EXITS_DISABLED,
+    &SAW_AT_OR_ABOVE_TARGET,
+    &SAW_WITHIN_BAND,
+    &SAW_BELOW_BAND,
+    &SAW_BELOW_MINIMUM,
+    &SAW_MAX_AVG_PRICE,
+    &SAW_CLIP_LIMITS,
+    &SAW_CLIP_GOAL,
+];
+
+fn record(proposal: &OracleProposal) {
+    let counter = match &proposal.action {
+        OracleAction::Buy { .. } => &SAW_BUY,
+        OracleAction::Sell { .. } => &SAW_SELL,
+        OracleAction::Hold(reason) => match *reason {
+            "no_fresh_outputs" => &SAW_NO_FRESH_OUTPUTS,
+            "between_thresholds" => &SAW_BETWEEN_THRESHOLDS,
+            "no_position" => &SAW_NO_POSITION,
+            "discretionary_exits_disabled" => &SAW_EXITS_DISABLED,
+            "at_or_above_target" => &SAW_AT_OR_ABOVE_TARGET,
+            "within_rebalance_band" => &SAW_WITHIN_BAND,
+            "below_band_after_clipping" => &SAW_BELOW_BAND,
+            "below_minimum_after_clipping" => &SAW_BELOW_MINIMUM,
+            "would_exceed_max_avg_price" => &SAW_MAX_AVG_PRICE,
+            other => panic!("the oracle returned a hold reason the counters do not know: {other}"),
+        },
+    };
+    counter.fetch_add(1, Ordering::Relaxed);
+    if proposal.clips.contains("limits") {
+        SAW_CLIP_LIMITS.fetch_add(1, Ordering::Relaxed);
+    }
+    if proposal.clips.contains("goal") {
+        SAW_CLIP_GOAL.fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 /// An exact rational on `i128`, reduced after every operation, compared by cross-multiplication.
 ///
@@ -578,7 +643,19 @@ struct OracleProposal {
 
 /// §8.3 steps 2 to 5 as rationals: every bound is a numerator over a denominator, every comparison
 /// is a cross-multiplication, and the only division is the truncation to the share increment.
+///
+/// The share count is clamped at zero, as `UsdExact::shares_at` clamps it: the gross headroom can be
+/// negative, and a negative count would make the oracle answer `below_band_after_clipping` where the
+/// crate answers `below_minimum_after_clipping` at a zero band. The clamp is the crate's documented
+/// behaviour, not a convenience — an oracle that disagreed with it here would have failed
+/// `identical_inputs_give_identical_proposals` on correct code.
 fn oracle_propose(scenario: &Scenario) -> OracleProposal {
+    let answer = oracle_sized(scenario);
+    record(&answer);
+    answer
+}
+
+fn oracle_sized(scenario: &Scenario) -> OracleProposal {
     let combined = oracle_combine(scenario);
     let cap = Scenario::money(scenario.max_position_dollars).min(
         Scenario::milli(scenario.position_fraction_milli)
@@ -653,7 +730,7 @@ fn oracle_propose(scenario: &Scenario) -> OracleProposal {
     }
     let ask = Scenario::price(scenario.ask_tenths);
     let increment = Scenario::quantity(scenario.increment_units);
-    let mut units = budget.trunc_div(ask.mul(increment)) * scenario.increment_units;
+    let mut units = (budget.trunc_div(ask.mul(increment)) * scenario.increment_units).max(0);
     if Scenario::quantity(units).mul(ask).below(band) {
         return with_sizes(OracleAction::Hold("below_band_after_clipping"), &clips);
     }
@@ -885,26 +962,83 @@ fn rat_of_text(text: &str) -> Rat {
 }
 
 /// V-023's type rules, restated: which operators and value kinds a field admits.
+/// Which kind of value a field takes, restated here rather than read from
+/// `ConditionField::kind()`, so this oracle shares no table with the crate under test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OracleKind {
+    Bool,
+    Decimal,
+    Text,
+}
+
+fn oracle_kind(field: ConditionField) -> OracleKind {
+    match field {
+        ConditionField::Purpose
+        | ConditionField::AssetClass
+        | ConditionField::Session
+        | ConditionField::Instrument => OracleKind::Text,
+        ConditionField::FirstTradeInInstrument
+        | ConditionField::NewInstrument
+        | ConditionField::UnusualInput => OracleKind::Bool,
+        ConditionField::OrderUsd
+        | ConditionField::CombinedScore
+        | ConditionField::ThesisConfidence
+        | ConditionField::Drawdown
+        | ConditionField::DailyPnlFraction
+        | ConditionField::PositionUsdAfter
+        | ConditionField::GrossUsdAfter
+        | ConditionField::BoughtTodayUsd
+        | ConditionField::PositionPnlFraction => OracleKind::Decimal,
+    }
+}
+
+/// The two fields §6.3 bounds to the closed unit interval, restated for the same reason.
+fn oracle_is_unit_bounded(field: ConditionField) -> bool {
+    matches!(
+        field,
+        ConditionField::CombinedScore | ConditionField::Drawdown
+    )
+}
+
+/// The one refusal `classify` owes a rule, computed the oracle's own way: the reserved field is
+/// checked before the type rules, so the expected code is exactly one value and never a choice.
+fn oracle_refusal(condition: &Condition) -> Option<&'static str> {
+    for (comparison, depth) in condition.comparisons() {
+        if depth > 4 {
+            return Some("condition_too_deep");
+        }
+        let Condition::Compare { field, op, value } = comparison else {
+            continue;
+        };
+        if *field == ConditionField::UnusualInput {
+            return Some("reserved_field");
+        }
+        if !oracle_type_ok(*field, *op, value) {
+            return Some("condition_type_mismatch");
+        }
+    }
+    None
+}
+
 fn oracle_type_ok(field: ConditionField, op: Operator, value: &ConditionValue) -> bool {
-    use mandate_spec::condition::FieldKind;
-    match field.kind() {
-        FieldKind::Bool => {
+    match oracle_kind(field) {
+        OracleKind::Bool => {
             matches!(op, Operator::Eq | Operator::Ne) && matches!(value, ConditionValue::Bool(_))
         }
-        FieldKind::Decimal => {
+        OracleKind::Decimal => {
             if matches!(op, Operator::In | Operator::NotIn) {
                 return false;
             }
             let ConditionValue::Decimal(decimal) = value else {
                 return false;
             };
-            if !field.is_unit_bounded() {
+            if !oracle_is_unit_bounded(field) {
                 return true;
             }
             let held = rat_of_text(decimal.as_str());
             !held.below(Rat::ZERO) && !Rat::int(1).below(held)
         }
-        FieldKind::Enum | FieldKind::Text => {
+        OracleKind::Text => {
             if matches!(
                 op,
                 Operator::Gt | Operator::Gte | Operator::Lt | Operator::Lte
@@ -1009,9 +1143,176 @@ fn output_specs(models: usize) -> impl Strategy<Value = Vec<OutputSpec>> {
     )
 }
 
+/// Which region of §8.3 a generated scenario is aimed at.
+///
+/// Without this the generator was **vacuous on the buy path**: 256 uniformly drawn cases produced
+/// about 125 `no_fresh_outputs`, about 110 `between_thresholds`, a handful of sells and
+/// **no buys at all**, so every property past step 2 asserted nothing. Each shape narrows only what
+/// it must to land in its region and leaves every other field to the generator, so the fuzzing power
+/// is kept where it matters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// Uniform and mostly stale: `no_fresh_outputs` and `between_thresholds`.
+    Stale,
+    /// Fresh and bullish with room to buy.
+    FreshBuy,
+    /// Fresh and bullish with the gross headroom cut to half the band: `below_band_after_clipping`.
+    Crowded,
+    /// The position placed so Delta lands inside the band: `within_rebalance_band`.
+    NearTarget,
+    /// The position placed above the target: `at_or_above_target`.
+    AboveTarget,
+    /// A zero band with a minimum above any affordable order: `below_minimum_after_clipping`.
+    Dust,
+    /// Fresh and bearish over a position: a discretionary exit.
+    Exit,
+    /// An `accumulate` goal whose bounds bite: the goal clip and `would_exceed_max_avg_price`.
+    Accumulate,
+}
+
+const EVERY_SHAPE: [Shape; 8] = [
+    Shape::Stale,
+    Shape::FreshBuy,
+    Shape::Crowded,
+    Shape::NearTarget,
+    Shape::AboveTarget,
+    Shape::Dust,
+    Shape::Exit,
+    Shape::Accumulate,
+];
+
+fn cap_dollars(scenario: &Scenario) -> i128 {
+    scenario
+        .max_position_dollars
+        .min(scenario.position_fraction_milli * scenario.equity_dollars / 1000)
+}
+
+fn band_dollars(scenario: &Scenario) -> i128 {
+    scenario.band_milli * cap_dollars(scenario) / 1000
+}
+
+/// The target value in whole dollars, from the oracle's own buy conviction. Used only to **place**
+/// a position, never to assert anything.
+fn target_dollars(scenario: &Scenario) -> i128 {
+    let buy = oracle_combine(scenario).buy.max(0);
+    buy * cap_dollars(scenario) / 1_000_000_000_000 * scenario.size_factor_milli / 1000
+}
+
+/// One fresh, pinned output per configured model, so nothing counts as missing and b equals c.
+fn fresh_outputs(scenario: &Scenario, bearish: bool) -> Vec<OutputSpec> {
+    scenario
+        .models
+        .iter()
+        .enumerate()
+        .map(|(model, _)| {
+            let seed = scenario.outputs.get(model % scenario.outputs.len().max(1));
+            let conviction = seed
+                .map(|o| o.conviction_milli.abs())
+                .unwrap_or(900)
+                .max(600);
+            let confidence = seed.map(|o| o.confidence_milli).unwrap_or(900).max(700);
+            OutputSpec {
+                model,
+                conviction_milli: if bearish { -conviction } else { conviction },
+                confidence_milli: confidence,
+                as_of_s: EPOCH_SECS - 30,
+                expires_s: EPOCH_SECS + 3600,
+                pinned: true,
+            }
+        })
+        .collect()
+}
+
+fn shaped(mut scenario: Scenario, shape: Shape) -> Scenario {
+    if shape == Shape::Stale {
+        return scenario;
+    }
+    scenario.outputs = fresh_outputs(&scenario, shape == Shape::Exit);
+    scenario.entry_milli = scenario.entry_milli.min(300);
+    scenario.exit_milli = scenario.exit_milli.min(300);
+    scenario.size_factor_milli = 1000;
+    scenario.working_dollars = 0;
+    scenario.gross_dollars = 0;
+    scenario.position_units = 0;
+    scenario.equity_dollars = scenario.equity_dollars.max(1000);
+    scenario.max_position_dollars = scenario.max_position_dollars.max(100);
+    scenario.position_fraction_milli = scenario.position_fraction_milli.max(100);
+    match shape {
+        Shape::Stale => scenario,
+        Shape::FreshBuy => {
+            scenario.band_milli = scenario.band_milli.min(50);
+            scenario.min_order_dollars = scenario.min_order_dollars.min(10);
+            scenario
+        }
+        Shape::Crowded => {
+            scenario.band_milli = scenario.band_milli.clamp(50, 200);
+            let bound = scenario.max_gross_dollars.min(scenario.equity_dollars);
+            let half = (band_dollars(&scenario) / 2).max(1);
+            scenario.gross_dollars = (bound - half).max(0);
+            scenario
+        }
+        Shape::NearTarget => {
+            scenario.band_milli = scenario.band_milli.clamp(50, 200);
+            scenario.mark_tenths = scenario.mark_tenths.clamp(1, 1000);
+            scenario.bid_tenths = scenario.mark_tenths;
+            scenario.ask_tenths = scenario.mark_tenths;
+            let wanted = target_dollars(&scenario) - band_dollars(&scenario) / 2;
+            scenario.position_units = (wanted.max(0) * 1000 / scenario.mark_tenths).max(0);
+            scenario
+        }
+        Shape::AboveTarget => {
+            scenario.mark_tenths = scenario.mark_tenths.clamp(1, 1000);
+            scenario.bid_tenths = scenario.mark_tenths;
+            scenario.ask_tenths = scenario.mark_tenths;
+            scenario.position_units = (cap_dollars(&scenario) + 1) * 1000 / scenario.mark_tenths;
+            scenario
+        }
+        Shape::Dust => {
+            scenario.band_milli = 0;
+            scenario.min_order_dollars = scenario.min_order_dollars.max(50);
+            scenario.max_order_dollars = 1 + scenario.max_order_dollars % 40;
+            scenario
+        }
+        Shape::Exit => {
+            scenario.mark_tenths = scenario.mark_tenths.clamp(1, 1000);
+            scenario.bid_tenths = scenario.mark_tenths;
+            scenario.ask_tenths = scenario.mark_tenths;
+            scenario.position_units = 1 + scenario.max_order_dollars % 10_000;
+            scenario
+        }
+        Shape::Accumulate => {
+            scenario.crypto = true;
+            scenario.band_milli = scenario.band_milli.min(50);
+            scenario.min_order_dollars = scenario.min_order_dollars.min(1);
+            scenario.mark_tenths = scenario.mark_tenths.clamp(10, 1000);
+            scenario.bid_tenths = scenario.mark_tenths;
+            scenario.ask_tenths = scenario.mark_tenths;
+            scenario.position_units = 100 + scenario.max_order_dollars % 10_000;
+            let ask = scenario.ask_tenths / 10;
+            let position_value = scenario.position_units * scenario.ask_tenths / 1000;
+            let dear_basis = scenario.max_order_dollars % 2 == 0;
+            scenario.basis_dollars = if dear_basis {
+                position_value * 11 / 10 + 1
+            } else {
+                position_value / 2
+            };
+            scenario.goal_spent_dollars = scenario.basis_dollars;
+            scenario.goal = GoalSpec::Accumulate {
+                target_units: scenario.position_units + 1 + scenario.max_position_dollars % 200,
+                max_avg_dollars: Some(ask.max(1)),
+                max_spend_dollars: scenario.goal_spent_dollars
+                    + 1
+                    + scenario.max_gross_dollars % 2000,
+            };
+            scenario
+        }
+    }
+}
+
 prop_compose! {
-    /// A scenario whose weights sum to one, which is the range the rational sizing oracle covers.
-    fn sizing_scenario()(
+    /// The uniform base: weights that sum to one, which is the range the rational sizing oracle
+    /// covers, and every other field over its whole admissible range.
+    fn base_scenario()(
         weights in unit_weights(),
     )(
         models in model_specs(weights.clone()),
@@ -1066,6 +1367,12 @@ prop_compose! {
     }
 }
 
+/// The generator every sizing property runs: the uniform base aimed at one of the eight regions.
+fn sizing_scenario() -> impl Strategy<Value = Scenario> {
+    (base_scenario(), prop::sample::select(EVERY_SHAPE.to_vec()))
+        .prop_map(|(base, shape)| shaped(base, shape))
+}
+
 prop_compose! {
     /// A scenario whose weights are free, so W is anything: the range the integer combine oracle
     /// covers, and the one that exercises the denominator.
@@ -1118,24 +1425,9 @@ fn blank_scenario() -> Scenario {
     }
 }
 
-prop_compose! {
-    /// A scenario with an `accumulate` goal, whose three clips the goal properties check.
-    fn accumulate_scenario()(
-        base in sizing_scenario(),
-        target_units in 0i128..=200_000,
-        max_avg_dollars in prop::option::of(1i128..=20_000),
-        max_spend_dollars in 0i128..=100_000,
-        basis_dollars in 0i128..=100_000,
-        goal_spent_dollars in 0i128..=100_000,
-    ) -> Scenario {
-        Scenario {
-            goal: GoalSpec::Accumulate { target_units, max_avg_dollars, max_spend_dollars },
-            basis_dollars,
-            goal_spent_dollars,
-            crypto: true,
-            ..base
-        }
-    }
+/// The `accumulate` shape on its own, for the goal properties.
+fn accumulate_scenario() -> impl Strategy<Value = Scenario> {
+    base_scenario().prop_map(|base| shaped(base, Shape::Accumulate))
 }
 
 fn action_kind(action: &Action) -> &'static str {
@@ -1254,6 +1546,7 @@ fn the_three_combined_figures_match_the_integer_oracle() {
         let combined = mandate_builder::combine(
             &scenario.signal_models(),
             &scenario.model_outputs(),
+            &asset(scenario.instrument()),
             scenario.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -1290,6 +1583,7 @@ fn freshness_matches_the_interval_oracle() {
         let combined = mandate_builder::combine(
             &scenario.signal_models(),
             &scenario.model_outputs(),
+            &asset(scenario.instrument()),
             scenario.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -1327,6 +1621,7 @@ fn one_output_per_model_is_used_and_it_is_the_latest() {
         let all = mandate_builder::combine(
             &scenario.signal_models(),
             &scenario.model_outputs(),
+            &asset(scenario.instrument()),
             scenario.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -1382,6 +1677,7 @@ fn one_output_per_model_is_used_and_it_is_the_latest() {
         let only_latest = mandate_builder::combine(
             &trimmed.signal_models(),
             &trimmed.model_outputs(),
+            &asset(trimmed.instrument()),
             trimmed.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -1413,12 +1709,14 @@ fn removing_a_fresh_output_never_lowers_the_exit_conviction_below_the_rest() {
         let full = mandate_builder::combine(
             &scenario.signal_models(),
             &scenario.model_outputs(),
+            &asset(scenario.instrument()),
             scenario.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
         let partial = mandate_builder::combine(
             &without.signal_models(),
             &without.model_outputs(),
+            &asset(without.instrument()),
             without.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -1464,12 +1762,14 @@ fn a_missing_model_never_raises_the_buy_conviction() {
         let full = mandate_builder::combine(
             &scenario.signal_models(),
             &scenario.model_outputs(),
+            &asset(scenario.instrument()),
             scenario.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
         let partial = mandate_builder::combine(
             &without.signal_models(),
             &without.model_outputs(),
+            &asset(without.instrument()),
             without.now(),
         )
         .map_err(|e| TestCaseError::fail(format!("combine returns figures, not {e}")))?;
@@ -2334,8 +2634,12 @@ fn conditions_match_the_recursive_oracle() {
 }
 
 /// §6.3, V-018 and V-023: a rule whose value is not of its field's type, or which reads the
-/// reserved `unusual_input`, is refused; every other rule is evaluated. The type rules are restated
-/// in this file rather than borrowed.
+/// reserved `unusual_input`, is refused; every other rule is evaluated. The type rules and the field
+/// table are restated in this file rather than borrowed from the crate under test.
+///
+/// The expected code is [`oracle_refusal`]'s single answer, not a choice between two: the reserved
+/// field is checked before the type rules, so "either code will do" would have hidden a swap of that
+/// order.
 #[test]
 #[ignore = "pending E6-2"]
 fn every_loaded_rule_is_type_correct() {
@@ -2384,27 +2688,12 @@ fn every_loaded_rule_is_type_correct() {
             AutonomyDecision::Auto,
             None,
         );
-        let refused = match &condition {
-            Condition::Compare { field, op, value } => {
-                field.is_reserved() || !oracle_type_ok(*field, *op, value)
-            }
-            _ => false,
-        };
-        match classify(&single, &opening) {
-            Ok(_) => prop_assert!(!refused, "an ill-typed or reserved rule is not evaluated"),
-            Err(error) => {
-                prop_assert!(
-                    refused,
-                    "a well-typed rule is evaluated, and gave {:?}",
-                    error.code()
-                );
-                prop_assert!(
-                    matches!(error.code(), "reserved_field" | "condition_type_mismatch"),
-                    "the refusal names its cause: {:?}",
-                    error.code()
-                );
-            }
-        }
+        let expected = oracle_refusal(&condition);
+        prop_assert_eq!(
+            classify(&single, &opening).err().map(|e| e.code()),
+            expected,
+            "a rule is refused exactly when the oracle says so, with exactly that code"
+        );
         Ok(())
     });
 }
@@ -2500,4 +2789,99 @@ fn proposal_for(action: &ActionContext) -> Proposal {
         },
         clipped_by: BTreeSet::new(),
     }
+}
+
+/// The seeds the coverage gate runs: the first five, by rule, not chosen for passing.
+const COVERAGE_SEEDS: std::ops::RangeInclusive<u64> = 1..=5;
+
+/// The coverage gate: [`agree`] run over [`sizing_scenario`] under each of [`COVERAGE_SEEDS`], with
+/// the counters reset before each, and every run required to reach **every** action and **both**
+/// clips.
+///
+/// This exists because the independent review of this PR found the sizing generator vacuous: 256
+/// uniformly drawn cases reached no buy at all, so twelve properties past §8.3 step 2 asserted
+/// nothing and four planted bugs in the after-values survived every test. A fuzz that never proposed
+/// a buy is not evidence for a property about buys, and must not report success.
+///
+/// The seeds are fixed so the evidence is deterministic (ES-12), the same reason
+/// `mandate-risk`'s own coverage gate pins its five. The properties themselves keep proptest's random
+/// seed and their fuzzing power; only the evidence is pinned. The counts come from the **oracle**, so
+/// the code under test cannot manufacture them.
+#[test]
+#[ignore = "pending E6-2"]
+fn zz_the_generated_scenarios_reach_every_action_and_every_clip() {
+    for seed in COVERAGE_SEEDS {
+        for counter in EVERY_COUNTER {
+            counter.store(0, Ordering::Relaxed);
+        }
+        let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig {
+            cases: 256,
+            rng_seed: RngSeed::Fixed(seed),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        });
+        runner
+            .run(&sizing_scenario(), |scenario| {
+                agree(&scenario)?;
+                Ok(())
+            })
+            .unwrap_or_else(|failure| {
+                panic!("seed {seed}: the agreement helper failed: {failure}")
+            });
+        coverage_reached(seed);
+    }
+}
+
+fn coverage_reached(seed: u64) {
+    let seen: Vec<(&str, u32)> = vec![
+        ("a buy", SAW_BUY.load(Ordering::Relaxed)),
+        ("a discretionary exit", SAW_SELL.load(Ordering::Relaxed)),
+        (
+            "a hold on no fresh outputs",
+            SAW_NO_FRESH_OUTPUTS.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold between the thresholds",
+            SAW_BETWEEN_THRESHOLDS.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold at or above the target",
+            SAW_AT_OR_ABOVE_TARGET.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold inside the band",
+            SAW_WITHIN_BAND.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold below the band after clipping",
+            SAW_BELOW_BAND.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold below the minimum order",
+            SAW_BELOW_MINIMUM.load(Ordering::Relaxed),
+        ),
+        (
+            "a hold on the projected average",
+            SAW_MAX_AVG_PRICE.load(Ordering::Relaxed),
+        ),
+        ("a limits clip", SAW_CLIP_LIMITS.load(Ordering::Relaxed)),
+        ("a goal clip", SAW_CLIP_GOAL.load(Ordering::Relaxed)),
+    ];
+    assert_eq!(
+        EVERY_COUNTER.len(),
+        seen.len() + 2,
+        "EVERY_COUNTER resets every counter `seen` reads, plus SAW_NO_POSITION and \
+         SAW_EXITS_DISABLED, which the `hand` suite pins deterministically and the gate does not \
+         require; a counter read here but missing from the reset list would let a later seed pass on \
+         an earlier seed's evidence"
+    );
+    let missing: BTreeSet<&str> = seen
+        .iter()
+        .filter_map(|(name, count)| (*count == 0).then_some(*name))
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "seed {seed}: the generated scenarios never reached {missing:?}, so the properties that \
+         depend on them are not evidence; counts were {seen:?}"
+    );
 }
