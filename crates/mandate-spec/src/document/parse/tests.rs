@@ -843,3 +843,24 @@ fn a_mandate_changed_after_parsing_has_no_version() -> Result<(), String> {
     );
     Ok(())
 }
+
+/// The canonical form is the document the owner confirmed, not the typed fields written back: a
+/// set-like array the typed mandate holds as a sorted set keeps its order, so V-009 can see it and
+/// the version hash does not move.
+#[test]
+fn an_unsorted_set_like_array_keeps_its_order_in_the_canonical_form() -> Result<(), String> {
+    for (path, members) in [
+        ("/universe/asset_classes", ["us_equity", "crypto"]),
+        ("/notifications/channels", ["sms", "email"]),
+        ("/behavior/cadence/event_sources", ["price", "fills"]),
+    ] {
+        let document = with(path, Some(Value::Array(members.map(text).to_vec())))?;
+        let mandate = Mandate::parse(&document).map_err(|e| e.code().to_owned())?;
+        assert_eq!(
+            mandate.canonical_bytes().map_err(|e| e.code().to_owned())?,
+            mandate_canon::to_canonical(&document),
+            "{path} keeps the order the owner wrote"
+        );
+    }
+    Ok(())
+}
