@@ -1431,6 +1431,20 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         eprintln!("    pending: no pending tests");
         return Ok(Vec::new());
     }
+    let mut stale: Vec<String> = BEHAVIOUR_ONLY_TESTS
+        .iter()
+        .filter(|(file, name)| {
+            !tests
+                .iter()
+                .any(|t| t.file == *file && t.test.path == *name)
+        })
+        .map(|(file, name)| {
+            format!(
+                "BEHAVIOUR_ONLY_TESTS names `{name}` in {file}, which is no longer a pending test \
+                 there; delete the row, which is how the exception expires (DEC-137)"
+            )
+        })
+        .collect();
     let filter = tests
         .iter()
         .map(PendingTestRun::filterset)
@@ -1471,7 +1485,8 @@ fn pending_problems(root: &Path) -> Result<Vec<String>> {
         );
     }
     let outcomes = test_outcomes(&String::from_utf8(out.stdout).context("non-UTF-8 output")?);
-    let problems = verdicts(&tests, &outcomes);
+    let mut problems = verdicts(&tests, &outcomes);
+    problems.append(&mut stale);
     if problems.is_empty() {
         eprintln!(
             "    pending: all {} fail at a stub, as pending tests must; nextest's `test run failed` above is expected",
@@ -1535,6 +1550,35 @@ const STUB_MARKERS: [&str; 5] = [
     "not implemented",
     "implemented yet",
     "not yet implemented",
+];
+
+/// The pending tests that fail on the answer a partly implemented crate gives rather than at a
+/// stub, named one by one so the exception cannot spread. `mandate-risk`'s E6-3 spine (#157) decides
+/// an exit without E6-6's session rules or E6-8's pacing, and AGENTS.md rule 13 forbids it to refuse
+/// an exit, so these five see `Verdict::Allow` and an absent `pacing` instead of a stub's report.
+/// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
+/// lands, and the gate names every row it applies (DEC-137).
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 5] = [
+    (
+        "crates/mandate-risk/tests/hand.rs",
+        "an_unconfirmed_owner_exit_defers",
+    ),
+    (
+        "crates/mandate-risk/tests/hand.rs",
+        "a_discretionary_exit_outside_the_session_defers",
+    ),
+    (
+        "crates/mandate-risk/tests/hand.rs",
+        "a_participation_cap_slices_and_never_denies",
+    ),
+    (
+        "crates/mandate-risk/tests/hand.rs",
+        "the_first_pass_excludes_the_agents_own_protective_orders",
+    ),
+    (
+        "crates/mandate-risk/tests/hand.rs",
+        "a_sliced_exit_reports_what_it_applied",
+    ),
 ];
 
 /// Whether a pending test's failure output shows that it stopped at a stub. A one-word marker
@@ -1603,6 +1647,16 @@ fn verdicts(tests: &[PendingTestRun], outcomes: &[TestOutcome]) -> Vec<String> {
                     "{at} passes on this change's code; a pending test must fail until its story \
                      is implemented, so make it assert what the stubs cannot satisfy (DEC-77)"
                 ))
+            } else if BEHAVIOUR_ONLY_TESTS
+                .iter()
+                .any(|(file, name)| *file == t.file && *name == t.test.path)
+            {
+                eprintln!(
+                    "    pending: {}:{}: `{}` fails on a partly implemented crate's answer, not at \
+                     a stub; it is named in BEHAVIOUR_ONLY_TESTS until {} lands",
+                    t.file, t.test.line, t.test.path, t.test.story
+                );
+                None
             } else {
                 let story = &t.test.story;
                 runs.iter().find(|o| !names_a_stub(&o.output)).map(|o| {
