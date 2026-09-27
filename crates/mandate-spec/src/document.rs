@@ -430,6 +430,18 @@ impl LimitAction {
     }
 }
 
+/// Every `LimitAction` is a `LadderAction` with the same name, which is what lets a daily-loss trigger
+/// journal its action beside a rung's (§5.10). The reverse is not total: `scale_sizes` is not a daily-loss
+/// action, and `LimitAction` stays two-valued so `daily_loss_action` cannot hold one (DEC-128 item 29).
+impl From<LimitAction> for LadderAction {
+    fn from(action: LimitAction) -> Self {
+        match action {
+            LimitAction::ExitsOnly => Self::ExitsOnly,
+            LimitAction::FlattenAndPause => Self::FlattenAndPause,
+        }
+    }
+}
+
 /// What an active `scale_sizes` rung does to positions (§5.5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ScaleAction {
