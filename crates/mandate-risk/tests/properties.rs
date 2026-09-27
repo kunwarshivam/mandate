@@ -39,7 +39,6 @@ proptest! {
     /// budget, or buying power. The only denial a reducing purpose may carry is
     /// `account_trading_blocked`, the broker arm of MI-1's own list.
     #[test]
-    #[ignore = "pending E6-3"]
     fn mi1_reduction_is_never_denied_by_a_limit(
         origin in reducing_origin(),
         position in 1_u32..50,
@@ -84,7 +83,6 @@ proptest! {
     /// A discretionary exit is never denied at all: §9.6 paces it, and a defer is never converted
     /// to a deny.
     #[test]
-    #[ignore = "pending E6-8"]
     fn a_discretionary_exit_is_never_denied(
         position in 1_u32..50,
         limit in whole_dollars(),
@@ -111,7 +109,6 @@ proptest! {
     /// A `Hold` carries only the three codes that can hold an order, and the two `agent_*` ones
     /// follow the mode rule exactly. The mode rule has no `Unknown`-order arm: that is check 4's.
     #[test]
-    #[ignore = "pending E6-3"]
     fn a_hold_follows_the_mode_rule_exactly(
         origin in prop::sample::select(vec![
             Origin::RiskEngine, Origin::AutomatedKillSwitch, Origin::OwnerClose,
@@ -537,7 +534,6 @@ proptest! {
 
     /// Mark freshness is a check on openings; it never blocks a reduction.
     #[test]
-    #[ignore = "pending E6-8"]
     fn mark_freshness_never_blocks_a_reduction(has_quote in any::<bool>()) {
         let mut s = Scenario::allowing();
         if !has_quote {
@@ -648,7 +644,6 @@ proptest! {
 /// Purpose assignment is total over the origins and sides v1 can produce, and never turns a buy
 /// into an exit.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_buy_is_never_an_exit() {
     for origin in [
         Origin::OrderBuilder,

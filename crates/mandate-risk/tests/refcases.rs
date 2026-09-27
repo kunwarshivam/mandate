@@ -693,21 +693,18 @@ fn mc_g07() {
 
 /// `MC-G08`: Exit is allowed when orders per day is at the limit.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g08() {
     run_gate("MC-G08");
 }
 
 /// `MC-G09`: Risk exit larger than max_order_usd is allowed.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g09() {
     run_gate("MC-G09");
 }
 
 /// `MC-G10`: Owner exit is allowed by every mandate limit.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g10() {
     run_gate("MC-G10");
 }
@@ -735,21 +732,18 @@ fn mc_g13() {
 
 /// `MC-G14`: Opening an instrument outside the working universe.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g14() {
     run_gate("MC-G14");
 }
 
 /// `MC-G15`: Exiting an instrument outside the working universe is allowed.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g15() {
     run_gate("MC-G15");
 }
 
 /// `MC-G16`: An empty working universe denies every opening.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_g16() {
     run_gate("MC-G16");
 }
@@ -788,7 +782,6 @@ fn mc_f04() {
 /// state gives no `positions_mv` entry. A harness that re-derived the purpose from side and
 /// position would call it a zero crossing and deny; the case expects an allow.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_gate_case_purpose_is_passed_through() {
     run_gate("MC-G15");
 }
