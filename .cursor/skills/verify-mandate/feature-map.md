@@ -194,7 +194,8 @@ every one fails on those stubs (`cargo xtask ci pending`, DEC-110).
 ## Idempotent executor and broker connector
 
 Planned by [the E7-2, E7-3 and E7-4 task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)
-and DEC-133; the paths arrive with the tests PR, which updates this entry.
+and DEC-133. The tests PR has landed the two crate skeletons, their stubs, and the suite; the
+implementation PR turns the pending tests green without editing them (DEC-77).
 
 - **Spec:** `docs/specs/trading-domain.md` section 5.1 to 5.7 (the v1 order policy, the Alpaca
   capability matrix, the constraints before submission, protective exits and the tranche model, the
@@ -207,7 +208,17 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   (replay and `fold_version`), 9 (the account-stream catalogue); `docs/HLD.md` section 5 ("Durability")
   and 6.D (crash recovery); ADR-0001 ES-02, ES-06, ES-09, ES-19, ES-20, ES-21, ES-23, ES-24; backlog
   E7-2, E7-3, E7-4.
-- **Code:** `mandate-executor` (new; `fold` and `handle` over the account stream, the intent protocol,
+- **Code:** `crates/mandate-executor/src/state.rs` (`ExecutorState` and `fold`),
+  `crates/mandate-executor/src/step.rs` (`handle`, the only producer of effects),
+  `crates/mandate-executor/src/ids.rs` (`ClientOrderId`, three derivations and one validating
+  parser, no free constructor), `crates/mandate-executor/src/types.rs` (the vocabulary, including
+  `BrokerRequest` and `AccountWideScope`), `crates/mandate-executor/src/reconcile.rs`,
+  `crates/mandate-executor/src/protection.rs`, `crates/mandate-executor/src/gate.rs` (the binding
+  gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`;
+  `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
+  credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
+  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`.
+  In prose: `mandate-executor` (`fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
   reconciliation whose adoption is scoped to the order set, and the `BrokerRequest` enum whose
@@ -219,15 +230,26 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
   reject mappings). It calls `mandate-risk` directly as the binding gate and reads
   `mandate-accounting` and `mandate-journal` unchanged. The shell that binds runtime, executor, and
   connector is not here.
-- **Tests:** the hand cases of the brief (the submission chain, the `Unknown` lookup discipline, the
+- **Tests:** `crates/mandate-executor/tests/hand.rs`,
+  `crates/mandate-executor/tests/properties.rs`, `crates/mandate-executor/tests/fault.rs`,
+  `crates/mandate-executor/tests/refcases.rs`, `crates/mandate-executor/tests/common/mod.rs`,
+  `crates/mandate-executor/tests/common/golden.rs`,
+  `crates/mandate-executor/tests/golden-journal.json`;
+  `crates/mandate-alpaca/tests/hand.rs`, `crates/mandate-alpaca/tests/properties.rs`,
+  `crates/mandate-alpaca/tests/fixtures.rs`, `crates/mandate-alpaca/tests/common/mod.rs`,
+  `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
+  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`. In prose: the hand cases of the brief
+  (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
   against four independent oracles: a broker-side submission counter inside the fake connector, a
   shadow order book rebuilt from the drafts' canonical bytes, an `i128` shadow position ledger, and a
   protection accountant that finds every unprotected interval. Alpaca fixtures follow
   `mandate-marketdata`'s recorded-scenario shape adapted for a write API (method and body in
-  `requests.txt`, `response-N.json`, its own `record.sh`) and are hand-built; a recording pass against
-  the paper host is an addition on top. Planted bugs per test (21): the task brief.
+  `requests.txt`, `response-N.json`, its own `record.sh`), with `statuses.txt` beside them because a
+  trading endpoint distinguishes a rejection from a duplicate id from an absence by status: eleven
+  scenarios are recorded against the paper host and twelve are hand-built from the spec. Planted bugs
+  per test (21): the task brief.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they

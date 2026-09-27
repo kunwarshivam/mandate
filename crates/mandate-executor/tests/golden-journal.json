@@ -1,0 +1,30 @@
+{
+  "fold_version": 1,
+  "note": "The golden journal of ADR-0001 ES-21: one account-stream run whose fold output is pinned, so a change to what the fold derives has to change this file and bump FOLD_VERSION in the same commit. Streams, event types, and payload fields are exactly what journal spec sections 2, 3, and 9 define for the account stream, and every decimal is canonical text.",
+  "events": [
+    { "stream": "acct:ws1:acct-1", "seq": 1, "event_type": "StreamOpened", "payload": { "environment": "paper", "stream_type": "account", "subject": "acct-1" } },
+    { "stream": "acct:ws1:acct-1", "seq": 2, "event_type": "ClockAdvanced", "causation_id": "clock:ws1-1", "payload": { "risk_clock": 100 } },
+    { "stream": "acct:ws1:acct-1", "seq": 3, "event_type": "AccountStateObserved", "payload": { "buying_power": "20000", "cash": "20000", "equity": "20000", "risk_clock": 100, "status": "ACTIVE" } },
+    { "stream": "acct:ws1:acct-1", "seq": 4, "event_type": "IntentReceived", "payload": { "agent": "agent-a", "instrument": "AAPL", "intent_id": "01JABCDEFGHJKMNPQRSTVWXYZ0", "limit": "150", "purpose": "open", "qty": "10", "risk_clock": 100, "side": "buy", "tif": "gtc", "type": "limit" } },
+    { "stream": "acct:ws1:acct-1", "seq": 5, "event_type": "GateDecided", "payload": { "intent_id": "01JABCDEFGHJKMNPQRSTVWXYZ0", "reason_code": "", "risk_clock": 100, "verdict": "allow" } },
+    { "stream": "acct:ws1:acct-1", "seq": 6, "event_type": "OrderSubmitted", "payload": { "agent": "agent-a", "attempt": 1, "client_order_id": "md-01JABCDEFGHJKMNPQRSTVWXYZ0", "instrument": "AAPL", "intent_id": "01JABCDEFGHJKMNPQRSTVWXYZ0", "limit": "150", "qty": "10", "risk_clock": 100, "side": "buy" } },
+    { "stream": "acct:ws1:acct-1", "seq": 7, "event_type": "OrderStateChanged", "payload": { "broker_status": "new", "client_order_id": "md-01JABCDEFGHJKMNPQRSTVWXYZ0", "risk_clock": 110, "state": "accepted" } },
+    { "stream": "acct:ws1:acct-1", "seq": 8, "event_type": "FillApplied", "payload": { "client_order_id": "md-01JABCDEFGHJKMNPQRSTVWXYZ0", "fees": "0", "fill_id": "f-1", "instrument": "AAPL", "price": "150", "qty_gross": "10", "risk_clock": 120, "side": "buy", "trade_date": "2026-09-22" } },
+    { "stream": "acct:ws1:acct-1", "seq": 9, "event_type": "OrderStateChanged", "payload": { "broker_status": "filled", "client_order_id": "md-01JABCDEFGHJKMNPQRSTVWXYZ0", "risk_clock": 120, "state": "filled" } },
+    { "stream": "acct:ws1:acct-1", "seq": 10, "event_type": "ProtectionChanged", "payload": { "action": "unprotected_start", "instrument": "AAPL", "risk_clock": 120 } },
+    { "stream": "acct:ws1:acct-1", "seq": 11, "event_type": "ProtectionChanged", "payload": { "action": "placed", "instrument": "AAPL", "orders": "md-01JABCDEFGHJKMNPQRSTVWXYZ0-p01JABCDEFGHJKMNPQRSTVWXYZ9", "qty": "10", "risk_clock": 125, "stop": "140", "take_profit": "170" } },
+    { "stream": "acct:ws1:acct-1", "seq": 12, "event_type": "ProtectionChanged", "payload": { "action": "unprotected_end", "instrument": "AAPL", "risk_clock": 125 } },
+    { "stream": "acct:ws1:acct-1", "seq": 13, "event_type": "AgentModeApplied", "causation_id": "agent:ws1:agent-a-4", "payload": { "agent": "agent-a", "restriction": "daily_loss", "risk_clock": 130, "to": "exits_only" } },
+    { "stream": "acct:ws1:acct-1", "seq": 14, "event_type": "AgentModeApplied", "causation_id": "agent:ws1:agent-a-6", "payload": { "agent": "agent-a", "restriction": "daily_loss", "risk_clock": 140, "to": "normal" } },
+    { "stream": "acct:ws1:acct-1", "seq": 15, "event_type": "ReconciliationRun", "payload": { "checkpoint": "cursor-1", "result": "clean", "risk_clock": 150 } }
+  ],
+  "expected": {
+    "risk_clock": 150,
+    "account_head": 15,
+    "orders": 2,
+    "reservations": 1,
+    "open_unprotected_intervals": 0,
+    "mode": "normal",
+    "mismatched": 0
+  }
+}

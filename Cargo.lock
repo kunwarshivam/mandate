@@ -1293,6 +1293,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-alpaca"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-executor",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "reqwest",
+ "rustls",
+ "secrecy",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "mandate-artifacts-fs"
 version = "0.0.0"
 dependencies = [
@@ -1340,6 +1358,20 @@ dependencies = [
  "serde_json",
  "tokio",
  "toml",
+]
+
+[[package]]
+name = "mandate-executor"
+version = "0.0.0"
+dependencies = [
+ "mandate-accounting",
+ "mandate-canon",
+ "mandate-journal",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
