@@ -397,7 +397,9 @@ fn order_state_changed(
         if let Some(new) = optional_text(payload, "replaced_by") {
             let new = ClientOrderId::parse(new)?;
             order.replaced_by = Some(new.clone());
-            state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
+            if let Some(amount) = amount {
+                state.reservations.insert(new, amount);
+            }
         }
     }
     Ok(())
@@ -512,8 +514,14 @@ fn recompute(state: &mut ExecutorState, agent: &AgentId) {
     state.modes.insert(agent.clone(), mode);
 }
 
-/// The order a broker-initiated replacement created, linked to the one it replaced and carrying
-/// the reservation the old one passed on (trading-domain spec §5.7, interpretation 26).
+/// The order a broker-initiated replacement created, linked to the one it replaced (trading-domain
+/// spec §5.7, interpretation 26). Its quantity is what the original had left, `qty − filled_qty`,
+/// and it has filled nothing, so the pair never absorbs more than the gate approved: a later fill
+/// beyond that remainder cannot be the new order's and is ingested as external activity (§7.1).
+///
+/// The reservation the original held passes over unchanged when the original ends. It was sized
+/// for the whole original order, more than is now left, and over-reserving is the safe side
+/// (`AGENTS.md` rule 3); an original that held none passes none.
 fn replacement(
     state: &mut ExecutorState,
     id: &ClientOrderId,
@@ -527,6 +535,7 @@ fn replacement(
         })?;
     let linked = Order {
         client_order_id: id.clone(),
+        qty: original.qty.checked_sub(original.filled_qty)?,
         filled_qty: Qty::ZERO,
         replaced_by: None,
         ..original.clone()
@@ -572,15 +581,19 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
 
 #[cfg(test)]
 mod tests {
+    use mandate_accounting::{InstrumentId, Side};
     use mandate_canon::Value;
+    use mandate_num::Qty;
     use mandate_num::Usd;
 
     use super::fold;
     use crate::error::ExecutorError;
+    use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object, text};
     use crate::state::{ExecutorState, ObservedAccount};
     use crate::types::{
-        AccountRef, AccountScope, EventId, FoldedEvent, RiskClock, Seq, WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, Order, OrderState, Purpose,
+        RiskClock, Seq, WorkspaceId,
     };
 
     /// A stream opened on paper, then an `OrderStateChanged` for an order the fold has never seen,
@@ -670,7 +683,7 @@ mod tests {
                     event_type: "FeesCharged".to_owned(),
                     causation_id: None,
                     payload: object(vec![
-                        ("family", text("regulatory")),
+                        ("family", text("equities")),
                         ("accrued", text("0.0471")),
                         ("simulated", Value::Bool(simulated)),
                         ("risk_clock", clock(RiskClock::from_secs(10))?),
@@ -689,6 +702,72 @@ mod tests {
             state.buying_power(),
             Some(usd("999.9529")?),
             "and a broker fee is the cash slice's: it is not subtracted here"
+        );
+        Ok(())
+    }
+
+    /// An original that held no reservation passes none: the new order gets no zero entry.
+    #[test]
+    fn a_replacement_passes_on_only_a_reservation_that_was_held() -> Result<(), ExecutorError> {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let stream = state.account_stream();
+        let event = |seq: u64, event_type: &str, payload| FoldedEvent {
+            stream: stream.clone(),
+            seq: Seq(seq),
+            event_id: EventId(format!("e-{seq}")),
+            event_type: event_type.to_owned(),
+            causation_id: None,
+            payload,
+        };
+        fold(
+            &mut state,
+            &event(
+                1,
+                "StreamOpened",
+                object(vec![("environment", text("paper"))])?,
+            ),
+        )?;
+        let original = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ0")?;
+        state.orders.insert(
+            original.clone(),
+            Order {
+                client_order_id: original.clone(),
+                intent_id: Some(IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned()))),
+                agent: AgentId("agent-a".to_owned()),
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Buy,
+                qty: Qty::parse("10")?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Open,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: None,
+            },
+        );
+        fold(
+            &mut state,
+            &event(
+                2,
+                "OrderStateChanged",
+                object(vec![
+                    ("client_order_id", text(original.as_str())),
+                    ("state", text("replaced")),
+                    ("replaced_by", text("md-r-e-1")),
+                    ("risk_clock", clock(RiskClock::from_secs(10))?),
+                ])?,
+            ),
+        )?;
+        assert!(
+            state.reservations.is_empty(),
+            "no reservation was held, so none, not a zero, is passed on: {:?}",
+            state.reservations
         );
         Ok(())
     }

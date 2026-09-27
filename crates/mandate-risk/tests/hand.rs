@@ -174,7 +174,6 @@ fn a_restricted_account_still_allows_an_exit() {
 
 /// The eligibility floor reports the first failing item of §3.2's list, not the worst one.
 #[test]
-#[ignore = "pending E6-7"]
 fn the_floor_reports_the_first_failing_item() {
     let mut s = Scenario::allowing();
     s.instrument.exchange = Some(mandate_risk::Exchange::Otc);
@@ -190,7 +189,6 @@ fn the_floor_reports_the_first_failing_item() {
 
 /// §3.2 item 6 fails closed for an ETP the source has not classified.
 #[test]
-#[ignore = "pending E6-7"]
 fn an_unclassified_etp_is_complex() {
     let mut s = Scenario::allowing();
     s.instrument.etp = mandate_risk::EtpClass::Unclassified;
@@ -205,7 +203,6 @@ fn an_unclassified_etp_is_complex() {
 
 /// A classification older than the configured age denies an ETP opening (DEC-129 item 10).
 #[test]
-#[ignore = "pending E6-7"]
 fn a_stale_classification_denies_an_etp_opening() {
     let mut s = Scenario::allowing();
     s.instrument.etp = mandate_risk::EtpClass::Complex;

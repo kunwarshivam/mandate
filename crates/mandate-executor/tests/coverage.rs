@@ -808,9 +808,56 @@ fn a_replacement_is_a_new_order_under_its_own_id() {
         .expect("the old order names the new one");
     let new = shell.state.order(&linked).expect("the new order is folded");
     assert_eq!(new.client_order_id, linked, "under its own derived id");
+    assert_eq!(
+        new.qty,
+        qty("6"),
+        "for what the original had left, 10 less the 4 filled, so the pair never absorbs more \
+         than the gate approved (§5.7, AGENTS.md rule 1)"
+    );
     assert_eq!(new.filled_qty, qty("0"), "a new order has filled nothing");
     assert_eq!(new.replaced_by, None, "and has not itself been replaced");
     assert_eq!(new.state, OrderState::Accepted);
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-2",
+            Some(linked.as_str()),
+            "10",
+            "150",
+        ))),
+        &ports,
+    );
+    assert!(
+        ran.draft_types().contains(&"ExternalActivityIngested")
+            && ran
+                .draft("FillApplied")
+                .is_some_and(|draft| draft.payload.get("client_order_id").is_none()),
+        "ten more shares on the new id would take the pair to 14 of an approved 10, so the fill \
+         cannot be the new order's and is ingested as external activity (§7.1): {:?}",
+        ran.draft_types()
+    );
+    assert_eq!(
+        shell.state.order(&linked).map(|order| order.filled_qty),
+        Some(qty("0"))
+    );
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-3",
+            Some(linked.as_str()),
+            "6",
+            "150",
+        ))),
+        &ports,
+    );
+    assert!(
+        !ran.draft_types().contains(&"ExternalActivityIngested"),
+        "while the six left are the new order's own: {:?}",
+        ran.draft_types()
+    );
+    assert_eq!(
+        shell.state.order(&linked).map(|order| order.state),
+        Some(OrderState::Filled)
+    );
 }
 
 #[test]
@@ -958,6 +1005,43 @@ fn a_fill_that_cannot_be_the_orders_is_applied_unattributed() {
         unattributed(&ran),
         "another instrument: {:?}",
         ran.draft_types()
+    );
+    let restricted = ran
+        .draft("AgentModeApplied")
+        .expect("external activity restricts the agents (§7.1)");
+    for (field, expected) in [
+        ("agent", "*"),
+        ("to", "exits_only"),
+        ("restriction", "reconciliation:external_activity"),
+    ] {
+        assert_eq!(
+            restricted.payload.get(field).and_then(Value::as_str),
+            Some(expected),
+            "every agent on the account goes `exits_only` under the restriction only an owner \
+             acknowledgment of the external activity lifts ({field})"
+        );
+    }
+    assert_eq!(
+        shell.state.effective_mode(&agent(OTHER_AGENT)),
+        Mode::ExitsOnly,
+        "including an agent that placed no order"
+    );
+    let ingested = ran
+        .draft("ExternalActivityIngested")
+        .map(|draft| draft.event_id.clone());
+    let alerts: Vec<_> = ran
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            mandate_executor::Effect::Notify(reference) => Some(reference),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(alerts.len(), 1, "the owner is alerted once");
+    assert_eq!(
+        (Some(alerts[0].subject_event.clone()), alerts[0].message_key),
+        (ingested, "external_activity"),
+        "by the ingested event's opaque id and a message key, nothing more (AGENTS.md rule 6)"
     );
     let other_side = mandate_executor::BrokerFill {
         side: Side::Sell,
@@ -1748,4 +1832,178 @@ fn a_sell_takes_only_its_own_instruments_position() {
         1,
         "the two CPHC held are available to sell"
     );
+}
+
+/// The paper fee of a buy fill (§6.2, §10): CAT only, keyed as the journal keys every fee.
+#[test]
+fn a_paper_buy_books_cat_only_under_the_equities_family_and_its_trade_date() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+
+    let ran = shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+            "f-1",
+            Some(&id),
+            "10",
+            "150",
+        ))),
+        &ports,
+    );
+
+    let fee = ran
+        .draft("FeesCharged")
+        .expect("a paper equity fill books its simulated fee");
+    let field = |name: &str| fee.payload.get(name).and_then(Value::as_str);
+    assert_eq!(
+        (field("family"), field("day")),
+        (Some("equities"), Some("2026-09-22")),
+        "the family and the New York trade date the account keys equity fees by (journal spec \
+         §6, trading spec §6.2)"
+    );
+    assert_eq!(
+        (field("accrued"), field("cat")),
+        (Some("0.0001"), Some("0.0001")),
+        "a buy owes CAT alone: 10 x 0.00001"
+    );
+    assert_eq!(
+        (field("sec"), field("taf")),
+        (None, None),
+        "and no SEC or TAF, which fall on sells"
+    );
+    assert_eq!(
+        field("charged"),
+        Some("0"),
+        "a simulated fee is accrued and never charged by the broker"
+    );
+}
+
+/// DEC-87: under `per_order` the TAF cap binds across an order's partial fills.
+#[test]
+fn the_per_order_taf_cap_binds_across_an_orders_partial_fills() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let mut fees = common::fee_config().clone();
+    fees.equities.taf_cap_basis = mandate_accounting::TafCapBasis::PerOrder;
+    fees.equities.taf_cap =
+        mandate_num::FeeCap::parse("0.01").unwrap_or_else(|e| panic!("the cap: {e}"));
+    let ports = Ports {
+        fees: &fees,
+        ..ports(&ids, &mandates, &instruments, &config)
+    };
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            2,
+            "FillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-0")),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty_gross", text("60")),
+                    ("price", text("150")),
+                ],
+                0,
+            ),
+        ))
+        .expect("the position folds");
+    let mut shell = shell.restart(&ports).0;
+    let id = shell
+        .run(
+            handoff(INTENT, common::AGENT, risk_exit(AAPL, "60", "150")),
+            &ports,
+        )
+        .submissions()
+        .first()
+        .map(|order| order.client_order_id.as_str().to_owned())
+        .expect("the exit is sent");
+    shell.run(
+        Input::Broker(Ok(BrokerOutcome::Submitted(broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Sell,
+            "60",
+            "0",
+            "new",
+        )))),
+        &ports,
+    );
+    let mut taf = |fill: &str| {
+        let ran = shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(mandate_executor::BrokerFill {
+                side: Side::Sell,
+                ..broker_fill(fill, Some(&id), "30", "150")
+            })),
+            &ports,
+        );
+        ran.draft("FeesCharged")
+            .and_then(|fee| fee.payload.get("taf").and_then(Value::as_str))
+            .map(str::to_owned)
+    };
+    assert_eq!(
+        taf("f-1").as_deref(),
+        Some("0.006"),
+        "30 x 0.0002, under the 0.01 cap"
+    );
+    assert_eq!(
+        taf("f-2").as_deref(),
+        Some("0.004"),
+        "max(0, 0.01 - 0.006 already charged on the order): the cap is the order's, not the \
+         fill's (DEC-87)"
+    );
+}
+
+/// §5.7: a fill during a pending cancel or replace moves the filled quantity, not the state.
+#[test]
+fn a_fill_on_a_pending_cancel_or_replace_keeps_its_state() {
+    for (status, pending) in [
+        ("pending_cancel", OrderState::PendingCancel),
+        ("pending_replace", OrderState::PendingReplace),
+    ] {
+        let ids = TestIds;
+        let mandates = FixedMandate::covering(&[AAPL]);
+        let instruments = FixedInstruments;
+        let config = config();
+        let ports = ports(&ids, &mandates, &instruments, &config);
+        let mut shell = fresh(&ports);
+        let id = accepted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+                "b-1",
+                Some(&id),
+                AAPL,
+                Side::Buy,
+                "10",
+                "0",
+                status,
+            ))),
+            &ports,
+        );
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Fill(broker_fill(
+                "f-1",
+                Some(&id),
+                "4",
+                "150",
+            ))),
+            &ports,
+        );
+        let order = shell.state.order(&key(&id)).expect("folded");
+        assert_eq!(
+            (order.state, order.filled_qty),
+            (pending, qty("4")),
+            "{status}: the fill is applied and the order stays where the cancel or replace left \
+             it"
+        );
+    }
 }

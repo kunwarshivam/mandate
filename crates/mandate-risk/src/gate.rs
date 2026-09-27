@@ -10,14 +10,14 @@
 //! purpose passes a check that does not exist yet (`AGENTS.md` rule 13: the broker is the
 //! backstop), exactly as it will pass most of them once they do.
 
-use mandate_num::Qty;
-
 use std::collections::BTreeSet;
+
+use mandate_num::Qty;
 
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
     GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Side,
-    Verdict, WorkingUniverse, limits,
+    Verdict, WorkingUniverse, floor, limits,
 };
 
 /// The eight checks, in §9.1's order.
@@ -36,13 +36,23 @@ const ORDER: [Check; 8] = [
 pub(crate) type Stop = (Verdict, ReasonCode);
 
 /// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
-/// still lacks the floor (E6-7), check 3 its sessions and auction windows (E6-6; the halt is here),
+/// is whole for a US equity but still owes §3.2 item 7's "USD pairs only" for crypto (E6-10);
+/// check 3 its sessions and auction windows (E6-6; the halt is here),
 /// check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls (E6-8) and check 7 buying power
 /// (E6-6), and checks 5 and 8 are not written yet.
-fn owed(check: Check) -> Option<&'static str> {
+///
+/// Check 2 takes the input because "USD pairs only" has no field to read: `InstrumentSnapshot`
+/// carries no quote currency and `AssetId` is a UUID, so nothing distinguishes BTC/USD from
+/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened the moment E6-6
+/// and E6-8 land, so a crypto opening stays owed and is refused by the fail-closed rule until
+/// E6-10 supplies the field (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues
+/// only for an opening.
+fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
     match check {
-        Check::AccountAndMode => None,
-        Check::UniverseAndLimits => Some("E6-7"),
+        Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
+            Some("E6-10")
+        }
+        Check::AccountAndMode | Check::UniverseAndLimits => None,
         Check::SessionAndHalt
         | Check::OrderConstraints
         | Check::BuyingPowerAndExposure
@@ -81,7 +91,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
                 checks.push(CheckOutcome::Failed(check, reason));
                 stop = Some((verdict, reason));
             }
-            None => match owed(check) {
+            None => match owed(check, input) {
                 Some(story) => {
                     checks.push(CheckOutcome::NotReached(check));
                     if opening {
@@ -122,7 +132,10 @@ fn run(
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
         Check::UniverseAndLimits if opening => match working_universe(input, computed)? {
-            None => limits::position_order_and_cooldown(input, computed),
+            None => match floor::eligibility(input)? {
+                None => limits::position_order_and_cooldown(input, computed),
+                stop => Ok(stop),
+            },
             stop => Ok(stop),
         },
         Check::SessionAndHalt if opening => Ok(halt(input)),
@@ -279,7 +292,8 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
 /// crypto account denying an opening, a protective leg above the position crossing zero, the
 /// partial gate failing closed, a value exactly at each limit passing, and the account's own 1×
-/// bound; and, for E6-9, every row of the halt and market-order table.
+/// bound; for E6-9, every row of the halt and market-order table; and for E6-7, every row of the
+/// eligibility floor and where it sits in check 2.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -288,6 +302,7 @@ mod tests {
     use mandate_time::UtcNanos;
 
     use super::*;
+    use crate::floor;
     use crate::spec_types::{GoalState, RiskLimits, RiskSnapshot, ValidatedMandate};
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
@@ -310,7 +325,12 @@ mod tests {
 
     impl Owned {
         fn decide(&self) -> Result<Decision, GateError> {
-            evaluate(&GateInput {
+            self.with_input(evaluate)?
+        }
+
+        /// `f` over this scenario's inputs, at the fixture's `now`.
+        fn with_input<T>(&self, f: impl FnOnce(&GateInput<'_>) -> T) -> Result<T, GateError> {
+            Ok(f(&GateInput {
                 now: UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?,
                 pass: GatePass::First,
                 config: &self.config,
@@ -323,7 +343,7 @@ mod tests {
                 conduct: &ConductState::default(),
                 universe: &self.universe,
                 proposed: &self.proposed,
-            })
+            }))
         }
 
         /// A sell of the whole position of 10, from the origin given.
@@ -341,15 +361,15 @@ mod tests {
         AssetId::new(text).map_err(|_| GateError::InstrumentUnknown)
     }
 
-    /// An opening buy of 10 × 100 in instrument `a`, in the universe, that every check this PR
-    /// implements allows.
+    /// An opening buy of 10 × 100 in instrument `a`, in the universe, of an instrument that passes
+    /// the whole eligibility floor, that every check this PR implements allows.
     fn allowing() -> Result<Owned, GateError> {
         let usd = Usd::parse;
         let fraction = Fraction::parse;
         let config = GateConfig {
             price_floor: usd("5")?,
             liquidity_floor_usd: usd("1000000")?,
-            crypto_liquidity_floor_usd: usd("1000000")?,
+            crypto_liquidity_floor_usd: usd("2000000")?,
             collar_liquid_threshold_usd: usd("50000000")?,
             collar_liquid_x: fraction("0.01")?,
             collar_other_x: fraction("0.02")?,
@@ -424,16 +444,16 @@ mod tests {
         let instrument = InstrumentSnapshot {
             instrument: a.clone(),
             asset_class: AssetClass::UsEquity,
-            exchange: None,
+            exchange: Some(crate::Exchange::Nasdaq),
             status_active: true,
             tradable: true,
             fractionable: false,
             ipo: false,
             ptp_no_exception: false,
             etp: EtpClass::Plain,
-            etp_classified_at: None,
-            prior_close: None,
-            median_dollar_volume_20d: None,
+            etp_classified_at: Some(UtcNanos::parse_rfc3339("2026-09-21T00:00:00Z")?),
+            prior_close: Some(Price::parse("100")?),
+            median_dollar_volume_20d: Some(usd("90000000")?),
             median_dollar_volume_30d: None,
             min_order_size: Qty::parse("1")?,
             halted: false,
@@ -519,7 +539,7 @@ mod tests {
             d.checks,
             [
                 CheckOutcome::Passed(Check::AccountAndMode),
-                CheckOutcome::NotReached(Check::UniverseAndLimits),
+                CheckOutcome::Passed(Check::UniverseAndLimits),
                 CheckOutcome::NotReached(Check::SessionAndHalt),
                 CheckOutcome::NotReached(Check::OrderConstraints),
                 CheckOutcome::NotReached(Check::MarkAndCollar),
@@ -610,12 +630,12 @@ mod tests {
     }
 
     /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
-    /// that completes the first check still owed (check 2's eligibility floor, E6-7).
+    /// that completes the first check still owed (check 3's sessions, E6-6).
     #[test]
     fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
         let refused = allowing()?.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "a partial gate fails closed for adding risk, not open: {refused:?}"
         );
         Ok(())
@@ -675,7 +695,7 @@ mod tests {
     /// DEC-129 item 15: an order of exactly `max_order_usd` (10 × 100 = 1000), an instrument total
     /// of exactly the cap (500 held + 1000 = 1500), an agent gross of exactly its limit (500 + 500
     /// elsewhere + 1000 = 2000) and an account gross of exactly its equity all pass every limit.
-    /// The opening is still refused, as item 29 requires while the floor is owed, and a limit that
+    /// The opening is still refused, as item 29 requires while a check is owed, and a limit that
     /// compared with `>=` would deny it instead.
     #[test]
     fn a_value_exactly_at_every_limit_passes_it() -> Result<(), GateError> {
@@ -690,7 +710,7 @@ mod tests {
         o.account.equity = Usd::parse("2000")?;
         let refused = o.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "every comparison is `>`, so a value exactly at a limit passes it: {refused:?}"
         );
         Ok(())
@@ -715,7 +735,7 @@ mod tests {
     /// Mandate §5.3's re-entry cooldown binds only an exit fill in the instrument's own group, and
     /// only strictly inside `reentry_cooldown_s`. An exit in an ungrouped other instrument 10 s ago
     /// denies nothing, and an exit in this instrument exactly 3600 s ago has run its course: both
-    /// openings pass the cooldown and are refused only because the floor is owed (item 29).
+    /// openings pass the cooldown and are refused only because a later check is owed (item 29).
     #[test]
     fn the_cooldown_binds_only_its_group_and_only_strictly_inside_it() -> Result<(), GateError> {
         let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
@@ -732,8 +752,8 @@ mod tests {
             .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
         let (a, b) = (other_group.decide(), run_its_course.decide());
         assert!(
-            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-7")))
-                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-6")))
+                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
         );
         Ok(())
@@ -798,7 +818,7 @@ mod tests {
                 limit_row(held_elsewhere("1400"))?,
                 limit_row(held_elsewhere("1400.000000001"))?,
             ],
-            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
             "1400 + 100 against min(2000, agent equity 1500)"
         );
         Ok(())
@@ -825,7 +845,7 @@ mod tests {
         held_here("100.000000001")(&mut over)?;
         assert_eq!(
             (limit_row(held_here("100"))?, over.decide()?.computed.cap,),
-            (Err("E6-7"), Some(Usd::parse("200")?)),
+            (Err("E6-6"), Some(Usd::parse("200")?)),
             "100 + 100 is exactly the cap of 200; over it the denial reports cap 200"
         );
         assert_eq!(
@@ -864,7 +884,7 @@ mod tests {
                 limit_row(other_agent("900"))?,
                 limit_row(other_agent("900.000000001"))?,
             ],
-            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
             "900 of another agent's + 100 against the account's 1000"
         );
         Ok(())
@@ -898,7 +918,7 @@ mod tests {
                 limit_row(big_order(false, false))?,
                 limit_row(big_order(false, true))?,
             ],
-            [Err("E6-7"), Err("E6-7"), Ok(ReasonCode::ConcentrationLimit)],
+            [Err("E6-6"), Err("E6-6"), Ok(ReasonCode::ConcentrationLimit)],
             "protective, non-opening, and an opening order that does count"
         );
         Ok(())
@@ -910,8 +930,8 @@ mod tests {
         Result<(Verdict, Option<ReasonCode>, Option<Check>, Option<Pacing>), &'static str>;
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
-    /// rule of `ref.py`'s `order_decision` (check 1), then §4.4's halt for an opening at check 3,
-    /// `exits_only` denying an opening (§7.4), then §4.4's halt for an opening at check 3, then
+    /// rule of `ref.py`'s `order_decision` (check 1), then `exits_only` denying an opening (§7.4),
+    /// then §4.4's halt for an opening at check 3, then
     /// §4.4's "no market orders" under a presumed halt at check 4, then the fail-closed refusal of
     /// DEC-129 item 29; an exit is allowed, and re-priced as a marketable limit when it is a
     /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
@@ -948,7 +968,7 @@ mod tests {
             if market && !feed_current {
                 return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
             }
-            return Err("E6-7");
+            return Err("E6-6");
         }
         let repriced = market && (halted || !feed_current);
         let pacing = repriced.then(|| Pacing {
@@ -1042,6 +1062,390 @@ mod tests {
             }
         }
         assert_eq!(rows, 1280, "every row of the table ran");
+        Ok(())
+    }
+
+    /// One §3.2 row: every input the floor reads, each over the values that sit on, just past and
+    /// well inside its bound, and absent.
+    #[derive(Debug, Clone, Copy)]
+    struct FloorRow {
+        /// Whether the organization's floors are set **below** §3.2's platform minimums. The
+        /// levels below are read against whichever floor binds, so a row means the same thing
+        /// either way: level 1 sits exactly on the binding floor and level 2 one unit under it.
+        weak_config: bool,
+        crypto: bool,
+        status: u8,
+        exchange: u8,
+        item3: u8,
+        price: u8,
+        volume_20d: u8,
+        etp: EtpClass,
+        permission: u8,
+        classified: u8,
+        volume_30d: u8,
+    }
+
+    /// 0 comfortably passes, 1 sits exactly on the floor (passes), 2 is one unit under it, 3 is
+    /// absent.
+    fn figure(level: u8, ok: &str, exact: &str, under: &str) -> Result<Option<Usd>, GateError> {
+        Ok(match level {
+            0 => Some(Usd::parse(ok)?),
+            1 => Some(Usd::parse(exact)?),
+            2 => Some(Usd::parse(under)?),
+            _ => None,
+        })
+    }
+
+    /// The floor's oracle, transcribed from §3.2's list and the three readings the PR raises:
+    /// `status`/`tradable` report `not_in_working_universe`, `ptp_no_exception` reports
+    /// `ipo_not_tradable`, the price and 20-day volume floors bind US equities and the 30-day one
+    /// crypto; and item 6 fails closed on an unclassified ETP and on a stale or undated
+    /// classification.
+    fn floor_oracle(r: FloorRow) -> Option<ReasonCode> {
+        let fails = |level: u8| level >= 2;
+        if r.status != 0 {
+            return Some(ReasonCode::NotInWorkingUniverse);
+        }
+        if !r.crypto && r.exchange != 0 {
+            return Some(ReasonCode::IneligibleExchange);
+        }
+        if r.item3 != 0 {
+            return Some(ReasonCode::IpoNotTradable);
+        }
+        if r.crypto {
+            return fails(r.volume_30d).then_some(ReasonCode::BelowLiquidityFloor);
+        }
+        if fails(r.price) {
+            return Some(ReasonCode::BelowPriceFloor);
+        }
+        if fails(r.volume_20d) {
+            return Some(ReasonCode::BelowLiquidityFloor);
+        }
+        let permitted = r.permission == 0;
+        let complex = matches!(r.etp, EtpClass::Complex | EtpClass::Unclassified);
+        (fails(r.classified) || (complex && !permitted))
+            .then_some(ReasonCode::LeveragedEtpNotEnabled)
+    }
+
+    /// The floor's verdict for a scenario built directly, rather than from a [`FloorRow`].
+    fn floor(o: &Owned) -> Result<Option<ReasonCode>, GateError> {
+        o.with_input(floor::eligibility)?.map(|stop| {
+            stop.map(|(verdict, code)| {
+                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                code
+            })
+        })
+    }
+
+    fn floor_of(o: &mut Owned, r: FloorRow) -> Result<Option<ReasonCode>, GateError> {
+        let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
+        let i = &mut o.instrument;
+        i.asset_class = if r.crypto {
+            AssetClass::Crypto
+        } else {
+            AssetClass::UsEquity
+        };
+        i.status_active = r.status != 1;
+        i.tradable = r.status != 2;
+        i.exchange = match r.exchange {
+            0 => Some(crate::Exchange::Nasdaq),
+            1 => Some(crate::Exchange::Otc),
+            _ => None,
+        };
+        i.ipo = r.item3 == 1;
+        i.ptp_no_exception = r.item3 == 2;
+        let (price_floor, equity_floor, crypto_floor) = if r.weak_config {
+            ("0.5", "1", "1")
+        } else {
+            ("5", "1000000", "2000000")
+        };
+        o.config.price_floor = Usd::parse(price_floor)?;
+        o.config.liquidity_floor_usd = Usd::parse(equity_floor)?;
+        o.config.crypto_liquidity_floor_usd = Usd::parse(crypto_floor)?;
+        let i = &mut o.instrument;
+        i.prior_close = match (r.price, r.weak_config) {
+            (0, _) => Some(Price::parse("100")?),
+            (1, false) => Some(Price::parse("5")?),
+            (2, false) => Some(Price::parse("4.999999999")?),
+            (1, true) => Some(Price::parse("1")?),
+            (2, true) => Some(Price::parse("0.999999999")?),
+            _ => None,
+        };
+        i.median_dollar_volume_20d =
+            figure(r.volume_20d, "90000000", "1000000", "999999.999999999")?;
+        i.median_dollar_volume_30d = if r.weak_config {
+            figure(r.volume_30d, "90000000", "1000000", "999999.999999999")?
+        } else {
+            figure(r.volume_30d, "90000000", "2000000", "1999999.999999999")?
+        };
+        i.etp = r.etp;
+        let age = match r.classified {
+            0 => Some(1),
+            1 => Some(604_800),
+            2 => Some(604_801),
+            _ => None,
+        };
+        i.etp_classified_at = age
+            .map(|secs| {
+                let then = now
+                    .secs()
+                    .checked_sub(secs)
+                    .ok_or(GateError::ConfigOutOfRange)?;
+                Ok::<_, GateError>(UtcNanos::from_parts(then, 0)?)
+            })
+            .transpose()?;
+        o.mandate = ValidatedMandate::from_validated_parts(
+            o.mandate.risk().clone(),
+            GoalState::Running,
+            matches!(r.permission, 0 | 1),
+            matches!(r.permission, 0 | 2),
+        );
+        o.with_input(floor::eligibility)?.map(|stop| {
+            stop.map(|(verdict, code)| {
+                assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
+                code
+            })
+        })
+    }
+
+    /// Every row of §3.2 against [`floor_oracle`]: 2 configs (compliant, and below every platform
+    /// minimum) × 2 asset classes × 3 statuses × 3 exchanges × 3 item-3 states × 4 prices × 4
+    /// 20-day volumes × 3 ETP classes × 4 permissions × 4 classification ages × 4 30-day volumes =
+    /// 331,776 rows. It pins the platform minimums binding over a weaker setting, the list order,
+    /// `≥` at every floor, an absent figure failing, the ETP rule needing both the mandate's switch
+    /// and the disclosure, the classification age failing closed only when strictly older, and
+    /// which items bind which asset class.
+    #[test]
+    fn the_floor_matches_the_oracle_on_every_row() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        let mut rows = 0_u32;
+        let mut denied = BTreeSet::new();
+        for weak_config in [false, true] {
+            for crypto in [false, true] {
+                for status in 0..3 {
+                    for exchange in 0..3 {
+                        for item3 in 0..3 {
+                            for price in 0..4 {
+                                for volume_20d in 0..4 {
+                                    for etp in
+                                        [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified]
+                                    {
+                                        for permission in 0..4 {
+                                            for classified in 0..4 {
+                                                for volume_30d in 0..4 {
+                                                    let r = FloorRow {
+                                                        weak_config,
+                                                        crypto,
+                                                        status,
+                                                        exchange,
+                                                        item3,
+                                                        price,
+                                                        volume_20d,
+                                                        etp,
+                                                        permission,
+                                                        classified,
+                                                        volume_30d,
+                                                    };
+                                                    let got = floor_of(&mut o, r)?;
+                                                    assert_eq!(got, floor_oracle(r), "{r:?}");
+                                                    denied.extend(got);
+                                                    rows = rows.saturating_add(1);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            (rows, denied.len()),
+            (331_776, 6),
+            "every row ran under both a compliant and a below-minimum config, and every floor \
+             code was reached"
+        );
+        Ok(())
+    }
+
+    /// A crypto opening stays owed at check 2 until E6-10 supplies the quote currency, while a
+    /// crypto exit is untouched (DEC-129 item 34).
+    ///
+    /// §3.2 item 7 admits USD pairs only and nothing in `InstrumentSnapshot` says what a pair is
+    /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open the moment
+    /// E6-6 and E6-8 land. The refusal names E6-10 rather than E6-6, which is what distinguishes
+    /// this from the ordinary fail-closed refusal every opening gets today.
+    #[test]
+    fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
+        let mut o = allowing()?;
+        o.instrument.asset_class = AssetClass::Crypto;
+        o.instrument.exchange = None;
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("90000000")?);
+        o.account.crypto_active = true;
+        assert!(
+            matches!(
+                o.with_input(evaluate)?,
+                Err(GateError::Unimplemented("evaluate", "E6-10"))
+            ),
+            "a crypto opening past the floor is owed E6-10's USD-pair check, not allowed"
+        );
+
+        let equity = allowing()?;
+        assert!(
+            matches!(
+                equity.with_input(evaluate)?,
+                Err(GateError::Unimplemented("evaluate", story)) if story != "E6-10"
+            ),
+            "a US equity is not owed E6-10: check 2 is whole for it"
+        );
+
+        o.agent
+            .positions
+            .insert(o.proposed.instrument.clone(), Qty::parse("10")?);
+        o.proposed.side = Side::Sell;
+        o.proposed.origin = Origin::RiskEngine;
+        let exit = o.with_input(evaluate)??;
+        assert_eq!(
+            exit.verdict,
+            Verdict::Allow,
+            "a crypto exit is never owed: first_owed accrues only for an opening"
+        );
+        assert_eq!(
+            exit.checks.get(..2),
+            Some(
+                &[
+                    CheckOutcome::Passed(Check::AccountAndMode),
+                    CheckOutcome::NotReached(Check::UniverseAndLimits),
+                ][..]
+            ),
+            "E6-10 owes check 2 alone for crypto: check 1 is still run and recorded as passed, and \
+             check 2 is recorded as not reached rather than passed"
+        );
+        Ok(())
+    }
+
+    /// §3.2's platform minimums bind whatever the organization set: price 1.00, and 1,000,000 for
+    /// both the 20-day equity volume and the 30-day crypto volume.
+    ///
+    /// `GateConfig`'s fields are public and nothing in the repo validates them, so a config below a
+    /// platform minimum is representable and the gate has to refuse it on its own. Review round 1
+    /// found two substitutions that dropped the minimum surviving the whole suite, because the
+    /// floor table's config then sat at or above every minimum. The table now also runs every row
+    /// under a below-minimum config (331,776 rows) and catches each such plant by itself; this test
+    /// is the second, readable pin on the reviewer's own probes.
+    ///
+    /// Each pair below is the reviewer's own probe and the value one unit above it: the weakened
+    /// config would have admitted the first, and the platform minimum denies it, while the second
+    /// shows the minimum is the floor rather than a blanket refusal.
+    #[test]
+    fn a_config_below_a_platform_minimum_does_not_weaken_the_floor() -> Result<(), GateError> {
+        let weak = |o: &mut Owned| -> Result<(), GateError> {
+            o.config.price_floor = Usd::parse("0.5")?;
+            o.config.liquidity_floor_usd = Usd::parse("1")?;
+            o.config.crypto_liquidity_floor_usd = Usd::parse("1")?;
+            Ok(())
+        };
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.prior_close = Some(Price::parse("0.6")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowPriceFloor),
+            "0.6 clears a 0.5 setting but not the 1.00 platform minimum"
+        );
+        o.instrument.prior_close = Some(Price::parse("1")?);
+        assert_eq!(
+            floor(&o)?,
+            None,
+            "exactly at the 1.00 platform minimum passes, so the minimum is a floor not a ban"
+        );
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.median_dollar_volume_20d = Some(Usd::parse("10")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowLiquidityFloor),
+            "10 clears a 1 setting but not the 1000000 platform minimum"
+        );
+        o.instrument.median_dollar_volume_20d = Some(Usd::parse("1000000")?);
+        assert_eq!(floor(&o)?, None, "exactly at the platform minimum passes");
+
+        let mut o = allowing()?;
+        weak(&mut o)?;
+        o.instrument.asset_class = AssetClass::Crypto;
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("10")?);
+        assert_eq!(
+            floor(&o)?,
+            Some(ReasonCode::BelowLiquidityFloor),
+            "the crypto floor has the same 1000000 minimum, and its own setting cannot lower it"
+        );
+        o.instrument.median_dollar_volume_30d = Some(Usd::parse("1000000")?);
+        assert_eq!(floor(&o)?, None, "exactly at the platform minimum passes");
+        Ok(())
+    }
+
+    /// The floor sits inside check 2, after the working universe and before concentration, and
+    /// never touches an exit: outside the universe on an OTC listing reports the universe; an OTC
+    /// listing over the cap reports the exchange; and a risk exit in an instrument failing every
+    /// item is allowed.
+    #[test]
+    fn the_floor_runs_after_the_universe_before_concentration_and_never_on_an_exit()
+    -> Result<(), GateError> {
+        let otc = |mut o: Owned| {
+            o.instrument.exchange = Some(crate::Exchange::Otc);
+            o.instrument.status_active = false;
+            o.instrument.prior_close = None;
+            o
+        };
+        let outside = otc(outside_the_universe(allowing()?)).decide()?;
+        let mut over_cap = otc(allowing()?);
+        over_cap.instrument.status_active = true;
+        over_cap.proposed.qty = Qty::parse("100")?;
+        let over_cap = over_cap.decide()?;
+        let exit = otc(allowing()?.selling(Origin::RiskEngine)?).decide()?;
+        assert_eq!(
+            [
+                (
+                    outside.verdict,
+                    outside.reason,
+                    outside.checks.get(1).cloned()
+                ),
+                (
+                    over_cap.verdict,
+                    over_cap.reason,
+                    over_cap.checks.get(1).cloned()
+                ),
+                (exit.verdict, exit.reason, None),
+            ],
+            [
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::NotInWorkingUniverse),
+                    Some(CheckOutcome::Failed(
+                        Check::UniverseAndLimits,
+                        ReasonCode::NotInWorkingUniverse
+                    ))
+                ),
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::IneligibleExchange),
+                    Some(CheckOutcome::Failed(
+                        Check::UniverseAndLimits,
+                        ReasonCode::IneligibleExchange
+                    ))
+                ),
+                (Verdict::Allow, None, None),
+            ],
+            "universe, then floor, then concentration; an exit is allowed regardless of the floor"
+        );
+        assert_eq!(
+            over_cap.computed.cap, None,
+            "the floor denied before concentration computed its cap"
+        );
         Ok(())
     }
 
