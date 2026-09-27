@@ -401,15 +401,223 @@ fn restrict(
 /// rather than skipping it (§11).
 #[cfg(test)]
 mod tests {
-    use mandate_num::Usd;
+    use mandate_accounting::{
+        AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
+    };
+    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Fraction, Qty, ShareIncrement, Usd};
+    use mandate_time::{Date, TradingCalendar};
 
-    use super::cash_and_fees;
+    use super::{cash_and_fees, reconcile};
     use crate::error::ExecutorError;
+    use crate::ids::ClientOrderId;
+    use crate::ports::{IdGen, InstrumentSnapshot, MandateView, Ports};
     use crate::state::{ExecutorState, ObservedAccount};
     use crate::types::{
-        AccountRef, AccountScope, AccountState, ActivityCursor, BrokerAccount, BrokerSnapshot,
-        ReconcileReason, Seq, WorkspaceId,
+        AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
+        BrokerSnapshot, Effect, EventId, ExecutorConfig, ExitTier, MandateVersion, Order,
+        OrderState, Purpose, ReconcileReason, Seq, WorkspaceId, WriterEpoch,
     };
+
+    /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
+    struct Ids;
+
+    impl IdGen for Ids {
+        fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
+            EventId(format!("e-{}-{}-{ordinal}", epoch.0, head.0))
+        }
+    }
+
+    /// A mandate covering everything, and whole-share equities: reconciliation reads neither.
+    struct Everything;
+
+    impl MandateView for Everything {
+        fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
+            Some(MandateVersion("v1".to_owned()))
+        }
+
+        fn crypto_stop_limit_offset(&self, _agent: &AgentId) -> Option<Fraction> {
+            None
+        }
+
+        fn covers(&self, _agent: &AgentId, _instrument: &InstrumentId) -> bool {
+            true
+        }
+    }
+
+    impl InstrumentSnapshot for Everything {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::UsEquity)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Whole)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    fn executor_config() -> ExecutorConfig {
+        ExecutorConfig {
+            max_intent_age_s: 120,
+            unknown_absent_lookups: 3,
+            unknown_absent_window_s: 15,
+            protective_replace_buffer_trading_days: 5,
+            restriction_403_threshold: 3,
+            bracket_partial_fill_timeout_s: 60,
+            max_unprotected_s: 30,
+            stop_watchdog_s: 30,
+            exit_step_s: 10,
+            gtc_expiry_days: 90,
+        }
+    }
+
+    fn fees() -> Result<Config, ExecutorError> {
+        let date = |raw: &str| Date::parse(raw).map_err(ExecutorError::from);
+        Ok(Config {
+            equities: EquityFees {
+                sec_rate: FeeRate::parse("0.00003")?,
+                taf_per_share: FeePerShare::parse("0.0002")?,
+                taf_cap: FeeCap::parse("9.79")?,
+                taf_cap_basis: TafCapBasis::PerExecution,
+                cat_per_share: FeePerShare::parse("0.00001")?,
+            },
+            crypto: CryptoFees {
+                maker: Bps::parse("15")?,
+                taker: Bps::parse("25")?,
+            },
+            calendar: TradingCalendar::new(date("2026-09-01")?, date("2026-12-31")?, [], [])?,
+        })
+    }
+
+    /// A started executor on a paper stream: the epoch is what a batch needs.
+    fn started() -> ExecutorState {
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(1));
+        state.started = true;
+        state
+    }
+
+    fn drafted(effects: &[Effect]) -> Vec<&str> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) => Some(draft.event_type.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn order(id: &ClientOrderId, state: OrderState) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: id.clone(),
+            intent_id: None,
+            agent: AgentId("agent-a".to_owned()),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Buy,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            state,
+            attempt: 1,
+            purpose: Purpose::Open,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    /// §11 step 1 compares only the orders the broker could still hold: a finished order, and one
+    /// waiting in `Intent` with nothing at the broker yet, are not adopted when the broker lists
+    /// neither; a live one is.
+    #[test]
+    fn a_reconciliation_compares_only_live_orders() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = started();
+        for (raw, at) in [
+            ("md-01JABCDEFGHJKMNPQRSTVWXYZ0", OrderState::Canceled),
+            ("md-01JABCDEFGHJKMNPQRSTVWXYZ1", OrderState::Intent),
+        ] {
+            let id = ClientOrderId::parse(raw)?;
+            state.orders.insert(id.clone(), order(&id, at)?);
+        }
+        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports)?;
+        assert_eq!(
+            drafted(&run.effects),
+            vec!["ReconciliationRun"],
+            "neither is compared, so nothing is adopted"
+        );
+
+        let live = ClientOrderId::parse("md-01JABCDEFGHJKMNPQRSTVWXYZ2")?;
+        state
+            .orders
+            .insert(live.clone(), order(&live, OrderState::Accepted)?);
+        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports)?;
+        assert!(
+            drafted(&run.effects).contains(&"CompensatingEvent"),
+            "while a live order the broker does not list is adopted: {:?}",
+            drafted(&run.effects)
+        );
+        Ok(())
+    }
+
+    /// §11, DEC-140's slice-5 amendment: until the cash slice, a run that would compare cash or
+    /// fees answers its stub, so the executor stops as on every refusal (DEC-85) and the batch,
+    /// its `ReconciliationRun` included, is never offered to the journal.
+    #[test]
+    fn a_run_that_would_compare_cash_or_fees_stops_and_publishes_nothing()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = started();
+        let refused = Err(ExecutorError::Unimplemented { story: "E7-3" });
+        let run = reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports)?;
+        assert_eq!(
+            drafted(&run.effects),
+            vec!["ReconciliationRun"],
+            "with nothing to compare the run is published"
+        );
+        assert_eq!(
+            reconcile(&state, &snapshot(ReconcileReason::FeePosting), &ports)
+                .map(|run| run.effects),
+            refused,
+            "a fee posting has fees to compare, so the run refuses and nothing is drafted"
+        );
+        state.observed = Some(ObservedAccount {
+            state: AccountState::Active,
+            multiplier: 1,
+            equity: Usd::ZERO,
+            cash: Usd::ZERO,
+            buying_power: Usd::ZERO,
+            non_marginable_buying_power: Usd::ZERO,
+            accrued_fees: Usd::ZERO,
+            complete: true,
+        });
+        assert_eq!(
+            reconcile(&state, &snapshot(ReconcileReason::Scheduled), &ports).map(|run| run.effects),
+            refused,
+            "once an account is reported there is cash to compare, so the run refuses"
+        );
+        Ok(())
+    }
 
     fn snapshot(reason: ReconcileReason) -> BrokerSnapshot {
         BrokerSnapshot {
