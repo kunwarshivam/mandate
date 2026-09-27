@@ -1021,15 +1021,31 @@ fn ratio_of(v: (i128, u32)) -> Ratio {
     Ratio::parse(&text(v.0, v.1)).unwrap()
 }
 
-/// A period return at up to 12 fractional digits, bounded to ±10: a one-period gain or loss of 1,000
-/// per cent, three orders of magnitude past anything the brief's series reach. The bound is what
-/// keeps an exact sum of squares inside a `Ratio`, which is the domain the brief's "`Ratio` holds at
-/// most 24 fractional digits, so `return_sum_of_squares` is exact" describes: the largest 24-place
-/// value is 79228.162514264337593543950335, and at most seven squares of these returns sum to 700.
-/// Outside that domain the sum is the `overflow` the brief documents instead, which
-/// [`adding_and_subtracting_ratios_is_exact`] covers.
+/// The most period returns
+/// [`a_sample_variance_matches_the_integer_oracle_and_is_never_negative`] draws, which is what fixes
+/// [`RETURN_BOUND`]; the draw takes its length from this, so the two cannot drift apart.
+const MOST_PERIODS: usize = 7;
+
+/// The largest magnitude a drawn period return takes, so that the exact sum of squares of
+/// [`MOST_PERIODS`] of them is still a `Ratio`. A `Ratio` keeps a 96-bit significand, so the largest
+/// value it holds with 24 fractional digits is 79228.162514264337593543950335: 7 × 106² = 78,652 is
+/// under it and 7 × 107² = 80,143 is over. That is the whole domain over which the brief's "`Ratio`
+/// holds at most 24 fractional digits, so `return_sum_of_squares` is exact" can hold; above it the
+/// sum is the `overflow` the brief documents instead, which
+/// [`adding_and_subtracting_ratios_is_exact`] covers. The brief's own period returns are four orders
+/// of magnitude smaller, so the bound marks where exactness stops, not what a backtest produces.
+const RETURN_BOUND: i128 = 106;
+
+/// A period return of at most [`RETURN_BOUND`] in **magnitude** with at most 12 fractional digits.
+/// [`ratios`] bounds the mantissa instead, which at a small bound leaves a return only as many
+/// significant digits as the bound has; this draws the scale first and the mantissa to match, so at
+/// twelve places the mantissa runs to 106 × 10¹² and a return like the brief's −0.019801980198 is
+/// drawn.
 fn period_returns() -> impl Strategy<Value = (i128, u32)> {
-    ratios(10)
+    (0u32..=12).prop_flat_map(|scale| {
+        let bound = RETURN_BOUND * pow10(scale);
+        (-bound..=bound, Just(scale))
+    })
 }
 
 /// A ratio takes at most 24 fractional digits, holds its canonical text, and rejects a 25th place
@@ -1297,7 +1313,7 @@ proptest! {
     #[test]
     #[ignore = "pending E4-2"]
     fn a_sample_variance_matches_the_integer_oracle_and_is_never_negative(
-        values in proptest::collection::vec(period_returns(), 2..8),
+        values in proptest::collection::vec(period_returns(), 2..=MOST_PERIODS),
     ) {
         let returns: Vec<Ratio> = values.iter().copied().map(ratio_of).collect();
         let units: Vec<i128> = values.iter().map(|v| scaled(*v, 12)).collect();
