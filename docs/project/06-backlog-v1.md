@@ -576,21 +576,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
 - **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
-- **E7-7's implementation PR:** pin the production exit probes. In `mandate-shell`, a live test
-  over `production()` asserts only that the refusal comes at or before validation, so a
-  `RiskExitPath::probe` or `ExecutorProtection::probe` answering `Ok(())` without an exit path is
-  caught by no test while the stubs are exempt from the mutation gate. When the implementation PR
-  makes the probes real, it adds the cases that each refuses on its crate's non-answer (#227
-  review, round 1, minor 1).
 - **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
   agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
 - **E7-7, when streams F and H land:** a drift check for
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
-  so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules;
-  and add `mandate-shell` to the "Used by" column of `docs/dependencies.md` for `thiserror` and
-  `proptest` (#227 review, round 1, minor 4).
+  so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
+  (#227 review, round 1, minor 4).
 - Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
   whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
   mode `paused` or `stopped`, an `Unknown` order in the instrument), but `held` is also true when

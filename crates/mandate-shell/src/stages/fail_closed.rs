@@ -24,7 +24,7 @@ use super::doubles::{
     PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
     agent_stream, passed_checks, setup, stub,
 };
-use super::{MandateSource, Stage};
+use super::{ExitPath, MandateSource, Protection, Stage};
 use crate::adapters::{Sources, production};
 use crate::error::{Cause, ShellError};
 use crate::tracer::{Report, Session, run};
@@ -706,6 +706,23 @@ fn a_stubbed_stage_answers_its_own_crates_refusal() {
         "{answer:?}"
     );
     assert_eq!(world.tally.borrow().calls, [Stage::Validate]);
+}
+
+/// Rule 13 on the production side (review round 1, minor 1): until their stories land, both
+/// production exit probes answer `Unimplemented`, so the tracer never arms without an exit path.
+/// A probe answering `Ok(())` before its adapter is real fails here.
+#[test]
+fn the_production_exit_probes_answer_unimplemented() {
+    let flatten = crate::adapters::RiskExitPath.probe();
+    assert!(
+        matches!(flatten, Err(Cause::Unimplemented { .. })),
+        "{flatten:?}"
+    );
+    let protection = crate::adapters::ExecutorProtection.probe();
+    assert!(
+        matches!(protection, Err(Cause::Unimplemented { .. })),
+        "{protection:?}"
+    );
 }
 
 /// Every `.rs` file under `src/`, with its text.
