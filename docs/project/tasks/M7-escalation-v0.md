@@ -43,7 +43,7 @@ conditions).
     equals the bound content field for field (EI-4); every skip is journaled with its reason.
   - CLI: every owner command reaches the runtime only as a committed control-stream event, the
     pause and skip need no step-up, the kill switch's step-up is the local `CliConfirm` and is
-    judged at the moment the owner committed it (DEC-158, Proposed for the founder), and the
+    judged at the moment the owner committed it (DEC-158, option (c), accepted by the founder), and the
     property tests of "Test plan" pass.
 - **PRD / HLD / spec anchors:** [PRD](../../product/04-prd-v1.md) §6.6 FR-6.1 (triggers are the
   autonomy rules; gate denials are never asked), FR-6.2 (content; never platform-authored
@@ -701,7 +701,7 @@ claim [#124](https://github.com/kunwarshivam/mandate/issues/124), in progress), 
 Both Accepted (agent, under DEC-79): reversible engineering readings, none touching live money,
 spending, legal or compliance text, or a safety invariant; the founder may veto any after the fact.
 The one question that would weaken a safety rule, whether the kill switch needs step-up, is not
-among them: it is **DEC-158, Proposed for the founder**, and the design keeps step-up until then.
+among them: it is **DEC-158, accepted by the founder on 2026-09-27 as option (c)**: step-up fails open for the stop and closed for any privilege beyond it.
 
 **DEC-155, the M7 v0 architecture:**
 
@@ -715,7 +715,7 @@ among them: it is **DEC-158, Proposed for the founder**, and the design keeps st
 4. **Step-up v0 is `CliConfirm`**, paper only by type; approve, resume, the owner Stop, acknowledge,
    owner exit, and the kill switch need it (mandate spec §6.1, PX-4); skip and pause never do. The
    kill switch's code is computed locally and its freshness judged at commit; whether it should need
-   step-up at all is DEC-158, Proposed for the founder.
+   step-up at all is DEC-158, accepted by the founder as option (c).
 5. **The CLI is an untrusted surface and a one-shot writer.** It commits events; the runtime re-runs
    every check that decides an outcome. On `Fenced` it retries with a new epoch, which DEC-131 item 18
    forbids only for the runtime's long-lived writer.
@@ -774,7 +774,7 @@ and v0 proceeds with the most conservative option of each; the others are for th
 5. **`mandate-shell` is stream L's.** The notifier driver and the control-stream tail belong in the
    shell. This brief asks stream L to agree the module boundary before stage 4 (c); the alternative
    is a separate M7 shell module in the same crate under stream L's review.
-6. **DEC-158, Proposed for the founder: should the kill switch need step-up?** Mandate spec §6.1 and
+6. **DEC-158, accepted by the founder (option (c)): should the kill switch need step-up?** Mandate spec §6.1 and
    PX-4 say yes; rule 13 says the kill switch "is always available", and a step-up that fails would
    block it. Until the founder answers, v0 uses step-up, with the four mitigations of "Step-up
    authentication" kept whichever way the answer goes. The options are in the DEC-158 row.
