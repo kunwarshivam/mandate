@@ -347,9 +347,13 @@ fn a_profit_stop_is_the_risk_states_to_confirm_but_its_end_date_is_not() {
 /// nine, so the document is schema-valid and the comparison §3.1 asks for cannot be made exactly. That is
 /// item 4's case exactly — the mandate breaks no rule, and no rule defines an answer — so the only honest
 /// result is `out_of_range` naming the path, never a goal quietly reported as running.
+///
+/// The name says `Qty` and not "no type", which round 2 was right to flag: `Usd` holds 28 places, so ten
+/// places is only unholdable by the type §3.1's quantity comparison needs. A test name that overstates
+/// what it proves is the very thing round 1 found here.
 #[test]
 #[ignore = "pending E6-4"]
-fn a_target_quantity_no_type_can_hold_is_out_of_range_and_never_a_running_goal() {
+fn a_target_quantity_a_qty_cannot_hold_is_out_of_range_and_never_a_running_goal() {
     let goal = accumulator(&[("/goal/target_qty", Some(s("0.1234567891")))]);
     let answer = status(
         &goal,
