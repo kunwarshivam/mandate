@@ -1,5 +1,7 @@
 //! The live step: the only producer of effects.
 
+use std::collections::BTreeSet;
+
 use mandate_canon::Value;
 
 use crate::error::RuntimeError;
@@ -9,8 +11,8 @@ use crate::state::{RuntimeState, UnresolvedAppend};
 use crate::types::{
     ApprovalOutcome, ApprovalVerdict, Autonomy, Command, DryRunVerdict, Effect, EventDraft,
     EventId, FlattenRequest, Initiator, Input, IntentBody, IntentHandoff, KillScope, MandateView,
-    Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, RiskClock, Seq,
-    TimerId, TimerRequest, WriterEpoch,
+    Mode, ModelOutput, NotificationRef, Observation, OwnerConfirmation, Proposal, Purpose,
+    RiskClock, Seq, TimerId, TimerRequest, WriterEpoch,
 };
 
 /// How long an ASKed action waits before the `skip` timeout fires (mandate spec §6.4).
@@ -50,7 +52,7 @@ pub fn handle(
     }
     if let Some(doubted) = state.unresolved_batch() {
         if doubted.input == input {
-            return Ok(doubted.drafts.into_iter().map(Effect::Journal).collect());
+            return retried(state, &doubted, ports);
         }
         return Err(RuntimeError::AppendUnresolved {
             head: doubted.head.0,
@@ -65,6 +67,65 @@ pub fn handle(
     }
     remember(state, &input, &batch);
     Ok(batch.effects)
+}
+
+/// The retry of a batch whose append was never answered (journal spec §5.1, DEC-131 item 6). It
+/// re-emits the same drafts, so the append answers `AlreadyCommitted` rather than writing a second
+/// event, **and re-emits the handoffs those drafts authorise**, so a batch that resolves on the retry
+/// still reaches the sink. Emitting the drafts alone would have lost the handoff until some later
+/// restart, and for a kill switch's flatten that is the one handoff `AGENTS.md` rule 13 says must
+/// always get through. Every handoff here follows its own draft in the list, so write-before-acting
+/// holds exactly as it did on the first attempt.
+fn retried(
+    state: &RuntimeState,
+    doubted: &UnresolvedAppend,
+    ports: &Ports<'_>,
+) -> Result<Vec<Effect>, RuntimeError> {
+    let mut effects = Vec::new();
+    for draft in &doubted.drafts {
+        effects.push(Effect::Journal(draft.clone()));
+        match draft.event_type.as_str() {
+            "IntentProposed" => effects.push(Effect::Intent(IntentHandoff {
+                intent_id: draft.event_id.clone(),
+                body: payload::order_of(&draft.payload)?,
+            })),
+            "KillSwitchActivated" => {
+                if let Input::Command(Command::KillSwitch {
+                    initiator,
+                    confirmation,
+                    ..
+                }) = &doubted.input
+                {
+                    effects.push(Effect::Intent(IntentHandoff {
+                        intent_id: draft.event_id.clone(),
+                        body: IntentBody::Flatten(flattened(
+                            state,
+                            *initiator,
+                            confirmation.clone(),
+                            ports,
+                        )),
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(effects)
+}
+
+/// The plan stream G computes for this agent. Deterministic in the folded state and the request, so
+/// a retry and a restart ask for and get the same plan (`AGENTS.md` rule 13, family F).
+fn flattened(
+    state: &RuntimeState,
+    initiator: Initiator,
+    confirmation: Option<OwnerConfirmation>,
+    ports: &Ports<'_>,
+) -> crate::types::FlattenPlan {
+    ports.flatten.plan(&FlattenRequest {
+        initiator,
+        confirmation,
+        working_orders: state.working_orders(),
+    })
 }
 
 /// Everything but a command: the effective mode is settled first (tick step 3), then the input
@@ -145,6 +206,19 @@ fn started(
                 body,
             });
         }
+    }
+    if let Some(switch) = state.switch()
+        && state.permits_rehand(Purpose::Flatten)
+    {
+        batch.hand(IntentHandoff {
+            intent_id: switch.event.clone(),
+            body: IntentBody::Flatten(flattened(
+                state,
+                switch.initiator,
+                switch.confirmation.clone(),
+                ports,
+            )),
+        });
     }
     for (approval, pending) in state.pending_approvals() {
         batch.timer(TimerRequest::Arm {
@@ -227,14 +301,9 @@ fn switched(
     }
     let switch = batch.journal("KillSwitchActivated", None, activated(scope, initiator)?)?;
     cancel_approvals(state, batch, payload::REASON_KILL_SWITCH)?;
-    let request = FlattenRequest {
-        initiator,
-        confirmation: confirmation.cloned(),
-        working_orders: state.working_orders(),
-    };
     batch.hand(IntentHandoff {
         intent_id: switch,
-        body: IntentBody::Flatten(ports.flatten.plan(&request)),
+        body: IntentBody::Flatten(flattened(state, initiator, confirmation.cloned(), ports)),
     });
     Ok(())
 }
@@ -252,6 +321,9 @@ fn lifecycle_change(
     lifecycle: Mode,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
+    if lifecycle == state.lifecycle() && state.mode_with(lifecycle) == state.journaled_mode() {
+        return Ok(());
+    }
     let body = payload::object(vec![
         (
             "from",
@@ -307,6 +379,7 @@ fn cancel_approvals(
             ("reason", payload::text(reason)),
         ])?;
         batch.journal("ApprovalCanceled", None, body)?;
+        batch.resolved.insert(approval.clone());
         batch.timer(TimerRequest::Cancel {
             id: TimerId::ApprovalDeadline(approval.clone()),
         });
@@ -336,6 +409,9 @@ fn ticked(
 /// and acts on nothing (mandate spec §6.4).
 fn expire(state: &RuntimeState, now: RiskClock, batch: &mut Batch<'_>) -> Result<(), RuntimeError> {
     for (approval, pending) in state.pending_approvals() {
+        if batch.resolved.contains(approval) {
+            continue;
+        }
         if pending.deadline <= now {
             let body = payload::object(vec![
                 ("approval", payload::text(&approval.0)),
@@ -360,14 +436,14 @@ fn decide(
     now: RiskClock,
     batch: &mut Batch<'_>,
 ) -> Result<(), RuntimeError> {
-    if !state.pending_approvals().is_empty() {
-        return Ok(());
-    }
     let inputs = state.signal_inputs(now);
     let Some(proposal) = ports.plan.plan(ports.view, &inputs) else {
         return Ok(());
     };
     if !state.permits(proposal.purpose) {
+        return Ok(());
+    }
+    if proposal.purpose.adds_risk() && state.awaiting_risk_approval() {
         return Ok(());
     }
     if proposal.purpose.adds_risk()
@@ -622,6 +698,9 @@ struct Batch<'a> {
     ordinal: u32,
     drafts: Vec<EventDraft>,
     effects: Vec<Effect>,
+    /// The approvals this batch has already cancelled, so one approval cannot be both cancelled and
+    /// timed out by a single step: two records of one removal, where the journal should carry one.
+    resolved: BTreeSet<EventId>,
 }
 
 impl<'a> Batch<'a> {
@@ -633,6 +712,7 @@ impl<'a> Batch<'a> {
             ordinal: 0,
             drafts: Vec::new(),
             effects: Vec::new(),
+            resolved: BTreeSet::new(),
         }
     }
 

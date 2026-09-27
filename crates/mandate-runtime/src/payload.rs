@@ -12,7 +12,7 @@ use mandate_canon::{Int, Key, Value};
 use mandate_num::{Price, Qty};
 
 use crate::error::RuntimeError;
-use crate::types::{Initiator, Mode, ModelOutput, Purpose, RiskClock};
+use crate::types::{Initiator, Mode, ModelOutput, OwnerConfirmation, Purpose, RiskClock};
 
 /// A canonical object, refusing a key the canonical form does not admit (journal spec §4.1).
 pub(crate) fn object(pairs: Vec<(&'static str, Value)>) -> Result<Value, RuntimeError> {
@@ -173,6 +173,27 @@ pub(crate) fn model_output_of(payload: &Value) -> Result<ModelOutput, RuntimeErr
     })
 }
 
+/// The order an `IntentProposed` payload records. Shared by the fold and the retry, so an intent
+/// handed again is byte-for-byte the one its draft recorded.
+pub(crate) fn order_of(payload: &Value) -> Result<crate::types::IntentBody, RuntimeError> {
+    let purpose = str_of(payload, "purpose")
+        .and_then(purpose_from)
+        .ok_or_else(|| non_canonical("purpose"))?;
+    let instrument = str_of(payload, "instrument").ok_or_else(|| non_canonical("instrument"))?;
+    let side = str_of(payload, "side")
+        .and_then(side_from)
+        .ok_or_else(|| non_canonical("side"))?;
+    let qty = str_of(payload, "qty").ok_or_else(|| non_canonical("qty"))?;
+    let limit = str_of(payload, "limit").ok_or_else(|| non_canonical("limit"))?;
+    Ok(crate::types::IntentBody::Order {
+        instrument: instrument_of(instrument)?,
+        side,
+        qty: qty_of(qty)?,
+        limit: price_of(limit)?,
+        purpose,
+    })
+}
+
 pub(crate) fn instrument_of(name: &str) -> Result<InstrumentId, RuntimeError> {
     InstrumentId::new(name).map_err(|_| non_canonical("instrument"))
 }
@@ -194,3 +215,27 @@ pub(crate) const REASON_OWNER_PAUSE: &str = "owner_pause";
 pub(crate) const REASON_OWNER_RESUME: &str = "owner_resume";
 pub(crate) const REASON_OWNER_STOP: &str = "owner_stop";
 pub(crate) const REASON_KILL_SWITCH: &str = "kill_switch";
+
+/// The owner's confirmation an `OwnerExitRequested` recorded, or `None` when the owner confirmed
+/// nothing. A replay needs it so that a flatten handed again after a restart carries the same
+/// confirmed bid, bid size, and floor price the executor priced the first one from (trading-domain
+/// spec §5.5, §5.6).
+pub(crate) fn owner_confirmation_of(
+    payload: &Value,
+) -> Result<Option<OwnerConfirmation>, RuntimeError> {
+    if !matches!(payload.get("confirmed"), Some(Value::Bool(true))) {
+        return Ok(None);
+    }
+    let bid = str_of(payload, "bid").ok_or_else(|| non_canonical("bid"))?;
+    let bid_size = str_of(payload, "bid_size").ok_or_else(|| non_canonical("bid_size"))?;
+    let floor = str_of(payload, "floor").ok_or_else(|| non_canonical("floor"))?;
+    let user = str_of(payload, "user").ok_or_else(|| non_canonical("user"))?;
+    let step_up = str_of(payload, "step_up").ok_or_else(|| non_canonical("step_up"))?;
+    Ok(Some(OwnerConfirmation {
+        bid: price_of(bid)?,
+        bid_size: qty_of(bid_size)?,
+        floor: price_of(floor)?,
+        user: user.to_owned(),
+        step_up: step_up.to_owned(),
+    }))
+}

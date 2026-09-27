@@ -2127,3 +2127,289 @@ fn an_owner_exit_of_one_instrument_names_its_story() {
         "and the story it names is the executor's: {error}"
     );
 }
+
+/// Round-1 review finding 1: a kill switch's flatten must not be lost when its append is answered
+/// late or not at all. A retry re-emits the drafts **and** the handoff they authorise, and a restart
+/// hands an unfinished flatten again, which is what `stopped` and `paused` permit a flatten for at
+/// all (`AGENTS.md` rule 13, DEC-131 item 22). The sink is at-least-once by design, so handing one
+/// twice costs nothing and handing none at all is a switch that never reached the executor.
+#[test]
+fn a_kill_switch_flatten_survives_an_unresolved_append_and_a_restart() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let flatten = common::FixedFlatten::one_equity();
+    let view = universe(&["AAPL"]);
+    let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
+    let mut shell = armed_shell(&ports);
+
+    shell.next_append = AppendOutcome::Unresolved;
+    let doubted = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    assert!(
+        !doubted.drafts.is_empty() && doubted.handed.is_empty(),
+        "the switch drafted, and nothing reached the sink while its append was in doubt: {:?}",
+        doubted.draft_types()
+    );
+
+    shell.next_append = AppendOutcome::Committed;
+    let retry = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    assert!(
+        retry
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "the retry hands the flatten its re-emitted KillSwitchActivated authorises, or a switch \
+         whose first append was merely slow would never reach the executor: {:?}",
+        retry.handed
+    );
+
+    let (_after, started) = shell.restart(&ports);
+    assert!(
+        started
+            .handed
+            .iter()
+            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
+        "and a restart hands the unfinished flatten again, which is the only handoff `paused` \
+         re-hands: {:?}",
+        started.handed
+    );
+}
+
+/// Round-1 review finding 5: the same defect for an ordinary intent. A batch that resolves on its
+/// retry must hand the exit its `IntentProposed` recorded; trading-domain spec §5.5 lets only
+/// `paused`, `stopped`, an `Unknown` order, or the broker hold an exit, and a slow append is none of
+/// those.
+#[test]
+fn a_retried_append_hands_the_exit_its_draft_authorises() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::exiting(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+
+    shell.next_append = AppendOutcome::Unresolved;
+    let doubted = shell.run(Input::Tick(clock(100)), &ports);
+    assert!(
+        doubted.handed.is_empty(),
+        "nothing reaches the sink while the append is in doubt: {:?}",
+        doubted.handed
+    );
+
+    shell.next_append = AppendOutcome::Committed;
+    let retry = shell.run(Input::Tick(clock(100)), &ports);
+    let proposed = retry
+        .drafts
+        .iter()
+        .find(|draft| draft.event_type == "IntentProposed")
+        .map(|draft| draft.event_id.clone())
+        .expect("the retry re-emits the proposal's draft");
+    assert_eq!(
+        retry
+            .handed
+            .iter()
+            .map(|handoff| handoff.intent_id.clone())
+            .collect::<Vec<_>>(),
+        vec![proposed],
+        "and hands the intent that draft records, by the same id: {:?}",
+        retry.handed
+    );
+}
+
+/// Round-1 review finding 2: `AgentModeApplied` is agent-scoped on a shared account stream (mandate
+/// spec §5.10), so a sibling's `normal` must not lift this agent's restriction. That would be a mode
+/// change that adds risk, which `AGENTS.md` rules 1 and 3 forbid outright.
+#[test]
+fn another_agents_mode_change_does_not_lift_this_agents_restriction() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::silent();
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+
+    let mine = event(
+        ACCOUNT_STREAM,
+        2,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text(common::AGENT)),
+                ("to", text("paused")),
+                ("restriction", text("daily_loss")),
+            ],
+            100,
+        ),
+    );
+    shell.fold_one(&mine).expect("folds");
+    shell.run(Input::Journal(mine), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a fact naming this agent is this agent's"
+    );
+
+    let a_siblings = event(
+        ACCOUNT_STREAM,
+        3,
+        "AgentModeApplied",
+        with_clock(
+            &[
+                ("agent", text("agent-b")),
+                ("to", text("normal")),
+                ("restriction", text("daily_loss")),
+            ],
+            110,
+        ),
+    );
+    shell.fold_one(&a_siblings).expect("folds");
+    shell.run(Input::Journal(a_siblings), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "and one naming a sibling is not: a sibling's normal that lifted this agent's restriction \
+         would be a mode change that adds risk"
+    );
+}
+
+/// Round-1 review finding 3: the agent kind of a stream name is this deployment's own stream, not
+/// every agent's in the workspace. A sibling's `IntentProposed` folding here would put its order in
+/// this runtime's outstanding set, and a sibling's `AgentModeChanged` would overwrite this one's
+/// lifecycle.
+#[test]
+fn a_sibling_agents_stream_is_not_one_this_runtime_follows() {
+    let mut state = RuntimeState::new(common::deployment());
+    let a_siblings = event(OTHER_AGENT_STREAM, 1, "StreamOpened", object(&[]));
+    let error =
+        fold(&mut state, &a_siblings).expect_err("a sibling's agent stream is not followed");
+    assert_eq!(error.code(), "foreign_stream", "{error}");
+    fold(
+        &mut state,
+        &event(AGENT_STREAM, 1, "StreamOpened", object(&[])),
+    )
+    .expect("and this deployment's own agent stream is");
+}
+
+/// Round-1 review finding 4: the startup hold **lifts** on a clean reconciliation at or after the
+/// last submission, and wants nothing outstanding only to be **taken** (trading-domain spec §11,
+/// DEC-131 item 13). One predicate for both would hold an agent `paused` for ever after its first
+/// order, because an intent stays outstanding until a terminal outcome the fold treats as inert —
+/// and a permanently paused agent cannot even propose a discretionary exit.
+#[test]
+fn a_clean_reconciliation_lifts_the_startup_hold_with_an_intent_still_outstanding() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ports);
+    shell.run(Input::ModelOutput(fresh_output(100)), &ports);
+    shell.run(Input::Tick(clock(100)), &ports);
+
+    let (mut shell, _) = shell.restart(&ports);
+    assert!(
+        !shell.state.outstanding().is_empty(),
+        "the restart replays an intent that is still outstanding"
+    );
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "so the hold is taken: an outstanding intent is exactly what the runtime cannot ask the \
+         broker about"
+    );
+
+    let clean = reconciliation(2, 200);
+    shell.fold_one(&clean).expect("folds");
+    shell.run(Input::Journal(clean), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "and the reconciliation lifts it, outstanding intent or not: the broker's truth is now \
+         known, which is the whole of what the hold waits for"
+    );
+}
+
+/// Round-1 review finding 6: a `RiskLimit` flatten's restriction lifts through the account stream
+/// and nowhere else (brief item 21, mandate spec §5.4, §5.7, §5.8), while an owner or operator stop
+/// is terminal and lifts for no one (DEC-131 item 12). The resume at the end also pins DEC-131 item
+/// 25(h): a command that moves neither the lifecycle nor the effective mode journals nothing.
+#[test]
+fn an_account_mode_change_retires_a_risk_limit_switch_but_never_a_stop() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::opening(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+
+    let mut shell = armed_shell(&ports);
+    shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a mandate limit's flatten pauses"
+    );
+    let lifted = mode_applied(2, "normal", 110);
+    shell.fold_one(&lifted).expect("folds");
+    shell.run(Input::Journal(lifted), &ports);
+    let resumed = shell.run(Input::Command(Command::Resume), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Normal,
+        "and the account stream is what lifts it, or the agent is paused for ever by a limit that \
+         has already cleared"
+    );
+    assert!(
+        resumed.draft_types().is_empty(),
+        "a resume that moves neither the lifecycle nor the effective mode journals nothing (MI-6): \
+         {:?}",
+        resumed.draft_types()
+    );
+
+    let mut terminal = armed_shell(&ports);
+    terminal.run(kill(this_agent(), Initiator::Owner, None), &ports);
+    let ignored = mode_applied(2, "normal", 110);
+    terminal.fold_one(&ignored).expect("folds");
+    terminal.run(Input::Journal(ignored), &ports);
+    assert_eq!(
+        terminal.state.effective_mode(),
+        Mode::Stopped,
+        "an owner stop is terminal and lifts for no one, the account stream included"
+    );
+}
+
+/// Round-1 review finding 7: a pending approval that would add risk holds back a risk-adding
+/// proposal and nothing else. Holding a discretionary exit behind an opening ASK for up to the whole
+/// approval window is a hold trading-domain spec §5.5 gives only `paused`, `stopped`, an `Unknown`
+/// order, or the broker.
+#[test]
+fn an_exit_is_not_held_behind_a_pending_opening_approval() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let asking = FixedPlan::opening(Autonomy::Ask);
+    let exiting = FixedPlan::exiting(Autonomy::Auto);
+    let view = universe(&["AAPL"]);
+    let ask_ports = ports(&ids, &gate, &asking, &view);
+    let exit_ports = ports(&ids, &gate, &exiting, &view);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&reconciliation(1, 100)).expect("folds");
+    let (mut shell, _) = shell.restart(&ask_ports);
+    let approval = asked(&mut shell, &ask_ports, 100);
+
+    let ran = shell.run(Input::Tick(clock(200)), &exit_ports);
+    assert!(
+        ran.draft_types().contains(&"IntentProposed"),
+        "the exit is proposed although an opening approval is pending: {:?}",
+        ran.draft_types()
+    );
+    assert!(
+        shell.state.pending_approvals().contains_key(&approval),
+        "and the opening approval is untouched, still waiting on its approver"
+    );
+}

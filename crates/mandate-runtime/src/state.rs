@@ -7,8 +7,8 @@ use mandate_accounting::InstrumentId;
 use crate::error::RuntimeError;
 use crate::payload;
 use crate::types::{
-    Deployment, EventId, FoldedEvent, Handoff, IntentBody, LocalHold, Mode, ModelOutput,
-    Outstanding, Purpose, RiskClock, Seq, SignalInputs, WriterEpoch,
+    Deployment, EventId, FoldedEvent, Handoff, Initiator, IntentBody, LocalHold, Mode, ModelOutput,
+    Outstanding, OwnerConfirmation, Purpose, RiskClock, Seq, SignalInputs, WriterEpoch,
 };
 
 /// The `fold_version` of ADR-0001 ES-21. Bumped whenever fold output changes, with the golden
@@ -32,7 +32,8 @@ pub struct RuntimeState {
     copied_mode: Mode,
     journaled_mode: Mode,
     lifecycle: Mode,
-    switch: Option<crate::types::Initiator>,
+    switch: Option<Switch>,
+    shown: Option<OwnerConfirmation>,
     awaiting_reconciliation: bool,
     reconciled: bool,
     submission_unreconciled: bool,
@@ -40,6 +41,17 @@ pub struct RuntimeState {
     outstanding: BTreeMap<EventId, Outstanding>,
     bodies: BTreeMap<EventId, IntentBody>,
     outputs: BTreeMap<String, BTreeMap<InstrumentId, ModelOutput>>,
+}
+
+/// The kill switch the fold remembers. The `event` is the `KillSwitchActivated` that identifies the
+/// flatten's handoff, which is what lets `Input::Started` hand an unfinished flatten again: the sink
+/// is at-least-once by design, so handing one twice costs nothing and handing none at all would mean
+/// a switch the owner pulled never reached the executor (`AGENTS.md` rule 13, DEC-131 item 22).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Switch {
+    pub(crate) event: EventId,
+    pub(crate) initiator: Initiator,
+    pub(crate) confirmation: Option<OwnerConfirmation>,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -79,6 +91,7 @@ impl RuntimeState {
             journaled_mode: Mode::Normal,
             lifecycle: Mode::Normal,
             switch: None,
+            shown: None,
             awaiting_reconciliation: false,
             reconciled: false,
             submission_unreconciled: false,
@@ -164,8 +177,8 @@ impl RuntimeState {
         if self.awaiting_reconciliation {
             mode = mode.max(LocalHold::AwaitingReconciliation.mode());
         }
-        if let Some(initiator) = self.switch {
-            mode = mode.max(initiator.final_mode());
+        if let Some(switch) = &self.switch {
+            mode = mode.max(switch.initiator.final_mode());
         }
         mode
     }
@@ -182,19 +195,23 @@ impl RuntimeState {
     /// proposals alone (DEC-131 item 22).
     fn rehand_mode(&self) -> Mode {
         let mut mode = self.copied_mode.max(self.lifecycle);
-        if let Some(initiator) = self.switch {
-            mode = mode.max(initiator.final_mode());
+        if let Some(switch) = &self.switch {
+            mode = mode.max(switch.initiator.final_mode());
         }
         mode
     }
 
-    /// Whether the broker's truth is known: a clean `ReconciliationRun` has been folded, no
-    /// submission has happened since it, and nothing is still outstanding — an outstanding intent
-    /// being exactly the case where the runtime cannot know what the broker did with it (trading
-    /// spec §11, DEC-131 item 13). A submission after the last clean run is what "a reconciliation
-    /// at or after the last observed submission" comes to on a single ordered stream.
+    /// Whether the broker's truth is known: a clean `ReconciliationRun` has been folded and no
+    /// submission has happened since it, which is what "a reconciliation at or after the last
+    /// observed submission" comes to on a single ordered stream (trading spec §11, DEC-131 item 13).
+    ///
+    /// This is what **lifts** the startup hold. Taking it is stricter — it also wants nothing
+    /// outstanding (see [`Self::take_startup_hold`]) — and the two must not be one predicate: an
+    /// intent stays outstanding until a terminal outcome the runtime folds as inert, so a single
+    /// predicate would hold an agent `paused` for ever after its first order, which no reading of
+    /// trading spec §11 supports and which would stop even a discretionary exit.
     fn reconciliation_known(&self) -> bool {
-        self.reconciled && !self.submission_unreconciled && self.outstanding.is_empty()
+        self.reconciled && !self.submission_unreconciled
     }
 
     /// The stream this runtime writes, which is the only one it appends to (journal spec §2).
@@ -211,7 +228,10 @@ impl RuntimeState {
         let mut segments = stream.split(':');
         let kind = segments.next();
         let workspace = segments.next();
-        matches!(kind, Some("agent" | "acct" | "ctl" | "clock"))
+        if matches!(kind, Some("agent")) {
+            return stream == self.agent_stream();
+        }
+        matches!(kind, Some("acct" | "ctl" | "clock"))
             && workspace == Some(self.deployment.workspace.0.as_str())
     }
 
@@ -241,7 +261,8 @@ impl RuntimeState {
     /// (DEC-131 item 13). Called by `Input::Started` and by nothing else, so the hold is a decision
     /// a process takes once, at the point where its replay ends.
     pub(crate) fn take_startup_hold(&mut self) {
-        self.awaiting_reconciliation = !self.reconciliation_known();
+        self.awaiting_reconciliation =
+            !(self.reconciliation_known() && self.outstanding.is_empty());
     }
 
     /// Lifts the startup hold once, when the reconciliation it waits for has arrived. Latched
@@ -283,6 +304,20 @@ impl RuntimeState {
     /// working is exactly the one a kill switch must name (trading spec §5.5, DEC-131 item 22).
     pub(crate) fn working_orders(&self) -> Vec<String> {
         self.outstanding.keys().map(|id| id.0.clone()).collect()
+    }
+
+    /// Whether an approval that would **add** risk is waiting. Only a risk-adding proposal defers to
+    /// one: holding a discretionary or protective exit behind an opening ASK would be a hold
+    /// trading-domain spec §5.5 gives only `paused`, `stopped`, an `Unknown` order, or the broker.
+    pub(crate) fn awaiting_risk_approval(&self) -> bool {
+        self.pending_approvals
+            .values()
+            .any(|pending| pending.adds_risk)
+    }
+
+    /// The kill switch the fold holds, if one has been journaled.
+    pub(crate) fn switch(&self) -> Option<&Switch> {
+        self.switch.as_ref()
     }
 
     pub(crate) fn body_of(&self, intent: &EventId) -> Option<IntentBody> {
@@ -358,18 +393,23 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .ok_or_else(|| payload::non_canonical("lifecycle"))?;
         }
         "KillSwitchActivated" => {
-            state.switch = payload::str_of(&event.payload, "initiator")
+            let initiator = payload::str_of(&event.payload, "initiator")
                 .and_then(payload::initiator_from)
-                .map(Some)
                 .ok_or_else(|| payload::non_canonical("initiator"))?;
+            state.switch = Some(Switch {
+                event: event.event_id.clone(),
+                initiator,
+                confirmation: state.shown.take(),
+            });
         }
+        "OwnerExitRequested" => state.shown = payload::owner_confirmation_of(&event.payload)?,
         "IntentProposed" => {
             let purpose = payload::str_of(&event.payload, "purpose")
                 .and_then(payload::purpose_from)
                 .ok_or_else(|| payload::non_canonical("purpose"))?;
             state
                 .bodies
-                .insert(event.event_id.clone(), order_body(&event.payload, purpose)?);
+                .insert(event.event_id.clone(), payload::order_of(&event.payload)?);
             state.outstanding.insert(
                 event.event_id.clone(),
                 Outstanding {
@@ -398,7 +438,18 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 .or_default()
                 .insert(output.instrument.clone(), output);
         }
-        "AgentModeApplied" => state.copied_mode = mode_field(event)?,
+        "AgentModeApplied" => {
+            if addressed_here(state, &event.payload) {
+                state.copied_mode = mode_field(event)?;
+                if state
+                    .switch
+                    .as_ref()
+                    .is_some_and(|switch| switch.initiator.final_mode() != Mode::Stopped)
+                {
+                    state.switch = None;
+                }
+            }
+        }
         "ReconciliationRun" => {
             if matches!(payload::str_of(&event.payload, "result"), Some("clean")) {
                 state.reconciled = true;
@@ -421,7 +472,6 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         | "ModelInvocationRecorded"
         | "DecisionMade"
         | "ApprovalDelivered"
-        | "OwnerExitRequested"
         | "ThesisProposed"
         | "ThesisRevised"
         | "OrderStateChanged"
@@ -471,32 +521,19 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
     Ok(())
 }
 
+/// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
+/// §5.10 gives `AgentModeApplied` an agent field, and the account stream carries every agent on the
+/// connection, so a sibling's `normal` must not lift this agent's restriction (`AGENTS.md` rules 1
+/// and 3). A payload with no agent field is this agent's by construction: the runtime follows only
+/// its own account stream, and the frozen fixtures carry none.
+fn addressed_here(state: &RuntimeState, payload: &mandate_canon::Value) -> bool {
+    payload::str_of(payload, "agent").is_none_or(|agent| agent == state.deployment.agent.0)
+}
+
 fn mode_field(event: &FoldedEvent) -> Result<Mode, RuntimeError> {
     payload::str_of(&event.payload, "to")
         .and_then(payload::mode_from)
         .ok_or_else(|| payload::non_canonical("to"))
-}
-
-/// The order an `IntentProposed` records, rebuilt so that `Input::Started` can hand it again
-/// without proposing it again (journal spec §5.2).
-fn order_body(
-    payload: &mandate_canon::Value,
-    purpose: Purpose,
-) -> Result<IntentBody, RuntimeError> {
-    let instrument = payload::str_of(payload, "instrument")
-        .ok_or_else(|| payload::non_canonical("instrument"))?;
-    let side = payload::str_of(payload, "side")
-        .and_then(payload::side_from)
-        .ok_or_else(|| payload::non_canonical("side"))?;
-    let qty = payload::str_of(payload, "qty").ok_or_else(|| payload::non_canonical("qty"))?;
-    let limit = payload::str_of(payload, "limit").ok_or_else(|| payload::non_canonical("limit"))?;
-    Ok(IntentBody::Order {
-        instrument: payload::instrument_of(instrument)?,
-        side,
-        qty: payload::qty_of(qty)?,
-        limit: payload::price_of(limit)?,
-        purpose,
-    })
 }
 
 /// What an `ApprovalRequested` binds: the quantity, the limit price, and the mandate version the
