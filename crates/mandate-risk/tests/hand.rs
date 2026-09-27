@@ -611,66 +611,98 @@ fn a_trim_rounds_up_to_the_increment() {
 }
 
 /// A trim waits for the regular session for an equity (§5.5).
+///
+/// Both arms, because an empty result on its own is what a stub returns: the same position at
+/// 21:00 UTC yields nothing and in the regular session yields the trim, so the session is the only
+/// thing that differs and the emptiness is the session's doing.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_trim_waits_for_the_regular_session() {
-    let mut s = Scenario::allowing();
-    s.now = at("2026-09-22T21:00:00Z");
-    s.mandate = mandate_with(common::two_scaling_rungs());
-    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
-    s.risk.size_factor = common::ratio("0.5");
-    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
-    s.agent
-        .market_values
-        .insert(asset(INSTRUMENT_2), usd("1000"));
+    let scenario_at = |when: &str| {
+        let mut s = Scenario::allowing();
+        s.now = at(when);
+        s.mandate = mandate_with(common::two_scaling_rungs());
+        s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+        s.risk.size_factor = common::ratio("0.5");
+        s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+        s.agent
+            .market_values
+            .insert(asset(INSTRUMENT_2), usd("1000"));
+        s
+    };
     let mut instruments = BTreeMap::new();
     instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+    let trims_at = |when: &str| {
+        let s = scenario_at(when);
+        mandate_risk::trim_proposals(
+            s.now,
+            &s.config,
+            &s.mandate,
+            &s.risk,
+            &s.agent,
+            &instruments,
+        )
+        .expect("the trims compute")
+    };
 
-    let trims = mandate_risk::trim_proposals(
-        s.now,
-        &s.config,
-        &s.mandate,
-        &s.risk,
-        &s.agent,
-        &instruments,
-    )
-    .expect("the trims compute");
     assert!(
-        trims.is_empty(),
+        trims_at("2026-09-22T21:00:00Z").is_empty(),
         "an equity trim runs in the regular session only; after hours there is none to propose"
+    );
+    assert_eq!(
+        trims_at("2026-09-21T15:00:00Z").first().map(|t| t.qty),
+        Some(qty("3")),
+        "the same position in the regular session is trimmed, so the emptiness above is the \
+         session rule and not an unimplemented trim"
     );
 }
 
 /// No trim while the goal is Holding (DEC-65).
+///
+/// Both arms, for the reason [`a_trim_waits_for_the_regular_session`] gives: the goal state is the
+/// only difference between the empty result and the trim.
 #[test]
 #[ignore = "pending E6-4"]
 fn no_trim_while_holding() {
-    let mut s = Scenario::allowing();
-    s.mandate = mandate_risk::ValidatedMandate::from_validated_parts(
-        common::two_scaling_rungs(),
-        mandate_risk::spec_types::GoalState::Holding,
-        false,
-        false,
-    );
-    s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
-    s.risk.size_factor = common::ratio("0.5");
-    s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
-    s.agent
-        .market_values
-        .insert(asset(INSTRUMENT_2), usd("1000"));
     let mut instruments = BTreeMap::new();
     instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
+    let trims_for = |goal: mandate_risk::spec_types::GoalState| {
+        let mut s = Scenario::allowing();
+        s.mandate = mandate_risk::ValidatedMandate::from_validated_parts(
+            common::two_scaling_rungs(),
+            goal,
+            false,
+            false,
+        );
+        s.risk.active_rungs = [(0_u8, 120_u64)].into_iter().collect();
+        s.risk.size_factor = common::ratio("0.5");
+        s.agent.positions.insert(asset(INSTRUMENT_2), qty("10"));
+        s.agent
+            .market_values
+            .insert(asset(INSTRUMENT_2), usd("1000"));
+        mandate_risk::trim_proposals(
+            s.now,
+            &s.config,
+            &s.mandate,
+            &s.risk,
+            &s.agent,
+            &instruments,
+        )
+        .expect("the trims compute")
+    };
 
-    let trims = mandate_risk::trim_proposals(
-        s.now,
-        &s.config,
-        &s.mandate,
-        &s.risk,
-        &s.agent,
-        &instruments,
-    )
-    .expect("the trims compute");
-    assert!(trims.is_empty(), "a Holding goal is never trimmed");
+    assert!(
+        trims_for(mandate_risk::spec_types::GoalState::Holding).is_empty(),
+        "a Holding goal is never trimmed"
+    );
+    assert_eq!(
+        trims_for(mandate_risk::spec_types::GoalState::Running)
+            .first()
+            .map(|t| t.qty),
+        Some(qty("3")),
+        "the same position under a Running goal is trimmed, so the emptiness above is DEC-65 and \
+         not an unimplemented trim"
+    );
 }
 
 /// The close window is the last ten minutes of the session the calendar gives, not of 16:00.
@@ -1145,27 +1177,47 @@ fn a_halted_instrument_denies_an_opening() {
 /// A real halt and a presumed one are different denials, so they carry different codes (DEC-129
 /// item 24): a halted instrument takes no new opening order at all and reports `instrument_halted`
 /// at check 3, while a presumed halt leaves openings alone and refuses only market orders, which is
-/// check 4's `market_order_not_allowed`. This test pins both halves.
+/// check 4's `market_order_not_allowed`. This test pins all three halves.
+///
+/// The exit arm is the one that constrains the design, and it is a denial the gate must **not**
+/// make: §4.4 ends "exits use marketable limit orders" and §5.6 lists presumed halts among the
+/// conditions where an exit that must be marketable takes the exit price ladder, so the exit is
+/// re-priced rather than refused. Denying it would also put an instrument restriction in front of
+/// a risk exit, which is exactly what MI-1 forbids (DEC-129 item 28).
 #[test]
 #[ignore = "pending E6-9"]
 fn a_dropped_status_feed_is_a_presumed_halt() {
     let mut s = Scenario::allowing();
     s.instrument.status_feed_current = false;
     let opening = evaluate(&s.input()).expect("the gate decides");
-    assert_ne!(
-        opening.reason,
-        Some(ReasonCode::InstrumentHalted),
-        "a presumed halt is not a halt: a limit opening is not denied by it"
+    assert_eq!(
+        (opening.verdict, opening.reason),
+        (Verdict::Allow, None),
+        "a presumed halt is not a halt: a limit opening passes it untouched"
+    );
+
+    let mut market_opening = s.clone();
+    market_opening.proposed.kind = mandate_risk::ProposedKind::Market;
+    let denied = evaluate(&market_opening.input()).expect("the gate decides");
+    assert_eq!(
+        (denied.verdict, denied.reason),
+        (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
+        "a presumed halt takes marketable limits, never a market order to open"
     );
 
     s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
     s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "100", Origin::RiskEngine);
     s.proposed.kind = mandate_risk::ProposedKind::Market;
-    let market = evaluate(&s.input()).expect("the gate decides");
+    let exit = evaluate(&s.input()).expect("the gate decides");
     assert_eq!(
-        (market.verdict, market.reason),
-        (Verdict::Deny, Some(ReasonCode::MarketOrderNotAllowed)),
-        "a presumed halt takes marketable limits, never market orders"
+        exit.verdict,
+        Verdict::Allow,
+        "§4.4 and §5.6 re-price an exit under a presumed halt; MI-1 forbids denying it"
+    );
+    assert_eq!(
+        exit.pacing.map(|p| p.marketable_limit_required),
+        Some(true),
+        "the allow carries the marketable-limit requirement the exit price ladder needs"
     );
 }
 
@@ -1472,8 +1524,18 @@ fn every_reason_code_is_registered_in_the_case_file() {
             .map(|c| c.as_str())
             .collect::<BTreeSet<_>>()
             .len(),
-        "ReasonCode::ALL lists every variant exactly once; a duplicate or a missing entry here is \
-         how a subset goes stale"
+        "ReasonCode::ALL lists every variant exactly once; a duplicate entry here is how a subset \
+         goes stale"
+    );
+
+    let declared = declared_reason_code_variants();
+    assert_eq!(
+        ReasonCode::ALL.len(),
+        declared.len(),
+        "ReasonCode::ALL is missing {} of the {} variants the enum declares; a hand-listed subset \
+         is exactly the mistake that would have made MC-G07 unpassable",
+        declared.len().saturating_sub(ReasonCode::ALL.len()),
+        declared.len()
     );
 
     let registry = include_str!("../../../docs/specs/reference-cases/trading-domain.yaml");
@@ -1515,4 +1577,39 @@ fn every_reason_code_is_registered_in_the_case_file() {
         resolved.is_empty(),
         "DEC-129 item 25 is settled for {resolved:?}: drop it from KNOWN_UNREGISTERED"
     );
+}
+
+/// The variants the `ReasonCode` enum declares, read out of the source rather than out of
+/// `ReasonCode::ALL`.
+///
+/// An independent oracle, because the array cannot check its own completeness: comparing `ALL`
+/// against itself catches a duplicate but never a variant nobody added, which is the failure
+/// review round 4 found the doc claiming was covered. `as_str` forces a new variant to be *named*
+/// somewhere; only this count forces it into `ALL`.
+fn declared_reason_code_variants() -> BTreeSet<String> {
+    let source = include_str!("../src/lib.rs");
+    let block: Vec<&str> = source
+        .lines()
+        .skip_while(|l| !l.starts_with("pub enum ReasonCode {"))
+        .skip(1)
+        .take_while(|l| !l.starts_with('}'))
+        .collect();
+    assert!(
+        !block.is_empty(),
+        "the ReasonCode enum was not found where this oracle expects it; a moved declaration must \
+         move this reader too, not silently pass"
+    );
+    let variants: BTreeSet<String> = block
+        .iter()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with("///") && !l.starts_with("#["))
+        .filter_map(|l| l.strip_suffix(','))
+        .map(str::to_owned)
+        .collect();
+    assert!(
+        variants.len() > 30,
+        "the ReasonCode enum reader found only {} variants, so it is no longer reading the enum",
+        variants.len()
+    );
+    variants
 }

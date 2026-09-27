@@ -793,6 +793,15 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     and is registered: it is evaluated at check 5 with mark freshness, which is where §9.1 puts it.
     `ref.py`'s `order_decision` returns the restriction's own name because it models the two as one
     parameter; the split by code is this crate's, and it changes no verdict.
+28. **A presumed halt re-prices an exit; it never denies one.** §4.4's sentence has two clauses —
+    "no market orders; exits use marketable limit orders" — and §5.6 lists presumed halts among the
+    conditions where an exit that must be marketable takes the exit price ladder. So a risk or
+    owner exit proposed as a market order under a dropped status feed or a stale quote is allowed
+    with `Pacing::marketable_limit_required` set, while a market order to open or increase is
+    denied at check 4 as `market_order_not_allowed`. Reading only the first clause would put an
+    instrument restriction in front of a risk exit, which MI-1 names outright. Numbered 28 rather
+    than beside 23 because renumbering accepted items invalidates references already written
+    against them; this list's 23 is the DEC row's 24 and its 24 is the DEC row's 23.
 
 ## Decisions needed
 

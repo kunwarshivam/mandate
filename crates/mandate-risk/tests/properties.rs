@@ -368,19 +368,26 @@ proptest! {
     /// trim at all, which is what an `Ok(Vec::new())` stub does. So the property also asserts the
     /// trim **exists** whenever the position exceeds `size_factor × cap` by the rebalance band, and
     /// compares its quantity against a target the property computes itself.
+    ///
+    /// The draw is a **share count**, not a dollar figure, so that the position's market value is
+    /// exactly `shares × 100` and the one price is the same whether the gate sizes the trim by
+    /// market value or by quantity. Drawing dollars and deriving shares by integer division put a
+    /// different price in each, and the oracle below, which values the sell at 100 a share, would
+    /// then reject correct trims: at 851 dollars over 8 shares the right trim is one share, and
+    /// the oracle wants at least 101 dollars of it.
     #[test]
     #[ignore = "pending E6-4"]
     fn a_trim_never_sells_below_the_target(
-        held_dollars in 100_u32..3_000,
+        held_shares in 1_u32..=30,
         factor in prop::sample::select(vec!["1", "0.5", "0.2"]),
     ) {
+        let price_per_share = 100_u32;
+        let held_dollars = held_shares * price_per_share;
         let mut s = Scenario::allowing();
         s.mandate = common::mandate_with(common::two_scaling_rungs());
         s.risk.active_rungs = [(0_u8, 120_u64), (1, 120)].into_iter().collect();
         s.risk.size_factor = common::ratio(factor);
-        s.agent.positions.insert(
-            asset(INSTRUMENT_2), qty(&(held_dollars / 100).max(1).to_string()),
-        );
+        s.agent.positions.insert(asset(INSTRUMENT_2), qty(&held_shares.to_string()));
         s.agent.market_values.insert(asset(INSTRUMENT_2), usd(&held_dollars.to_string()));
         let mut instruments = std::collections::BTreeMap::new();
         instruments.insert(asset(INSTRUMENT_2), common::equity_instrument(INSTRUMENT_2));
@@ -402,7 +409,7 @@ proptest! {
             let trim = trims.first().expect(
                 "a position above its target by the rebalance band is trimmed, not left alone",
             );
-            let sold_dollars = trim.qty.to_string().parse::<u32>().unwrap_or(0) * 100;
+            let sold_dollars = trim.qty.to_string().parse::<u32>().unwrap_or(0) * price_per_share;
             prop_assert!(
                 sold_dollars >= over,
                 "selling {} of a {} position leaves it above the target {}",

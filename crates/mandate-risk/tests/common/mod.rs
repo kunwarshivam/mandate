@@ -278,6 +278,7 @@ pub fn open_order(agent: AgentId, instrument: &str, max_cost: &str) -> WorkingOr
 }
 
 /// Everything an [`GateInput`] needs, owned, so a test can build one and hand out references.
+#[derive(Clone)]
 pub struct Scenario {
     pub now: UtcNanos,
     pub pass: GatePass,

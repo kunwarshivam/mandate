@@ -106,9 +106,10 @@ pub enum ReasonCode {
 impl ReasonCode {
     /// Every variant, so a caller that needs the whole set cannot hand-list a stale subset — the
     /// mistake that would have made `MC-G07` unpassable. A new variant that is not added here is
-    /// caught twice: `as_str`'s match is exhaustive, and
-    /// `hand::every_reason_code_is_registered_in_the_case_file` asserts this array's length equals
-    /// the variant count.
+    /// caught by `hand::every_reason_code_is_registered_in_the_case_file`, which counts the
+    /// variants the enum declares by reading this file rather than by reading this array: an array
+    /// compared against itself can catch a duplicate but never an omission. `as_str`'s exhaustive
+    /// match forces a new variant to be named; only that count forces it in here.
     pub const ALL: [Self; 38] = [
         Self::AccountTradingBlocked,
         Self::AccountRestricted,

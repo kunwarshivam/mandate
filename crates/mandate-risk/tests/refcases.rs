@@ -88,22 +88,25 @@ fn patched_risk(c: &Value) -> Value {
     risk
 }
 
-/// The base's own `sizing.rebalance_band`, not a constant typed here: the value belongs to the
-/// fixture, and a hardcoded copy silently keeps its old reading when the founder changes the base.
-fn sizing_rebalance_band(risk: &Value) -> mandate_num::Fraction {
+/// The named base's own `sizing.rebalance_band`, not a constant typed here: the value belongs to
+/// the fixture, and a hardcoded copy silently keeps its old reading when the founder changes the
+/// base. The base name is the case's own `base` field, threaded in rather than looked for inside
+/// the risk block, which carries only the fields the fixture puts there.
+fn sizing_rebalance_band(base: &str) -> mandate_num::Fraction {
     let f = fixture();
     let from_base = f
-        .as_object()
-        .and_then(|_| risk.get("__base_name"))
-        .and_then(Value::as_str)
-        .and_then(|b| f.pointer(&format!("/bases/{b}/mandate/sizing/rebalance_band")))
+        .pointer(&format!(
+            "/bases/{base}/mandate/behavior/sizing/rebalance_band"
+        ))
         .and_then(Value::as_str);
     fraction(from_base.unwrap_or_else(|| {
-        panic!("the base states sizing.rebalance_band; this harness does not invent one")
+        panic!(
+            "base {base} states behavior.sizing.rebalance_band; this harness does not invent one"
+        )
     }))
 }
 
-fn limits_from(risk: &Value) -> RiskLimits {
+fn limits_from(base: &str, risk: &Value) -> RiskLimits {
     let ladder = risk
         .get("drawdown_ladder")
         .and_then(Value::as_array)
@@ -144,7 +147,7 @@ fn limits_from(risk: &Value) -> RiskLimits {
                 .unwrap_or_else(|| panic!("reentry_cooldown_s is a number")),
         )
         .unwrap_or(u32::MAX),
-        rebalance_band: sizing_rebalance_band(risk),
+        rebalance_band: sizing_rebalance_band(base),
         drawdown_ladder: ladder,
     }
 }
@@ -172,16 +175,28 @@ fn expected_purpose(purpose: &str) -> Purpose {
     }
 }
 
-/// Drives one `kind: gate` case end to end and compares its whole `expect` block.
-fn run_gate(id: &str) {
+/// Everything the harness reads out of a `kind: gate` case, built without calling the gate.
+struct GateCase {
+    scenario: Scenario,
+    case: Value,
+    purpose_text: String,
+}
+
+/// Reads one `kind: gate` case into a [`Scenario`], touching nothing in the crate but its types.
+///
+/// This is split from [`run_gate`] because a pending test that panics in its own setup fails
+/// exactly as a pending test must, so `cargo xtask ci pending` cannot tell a wired-up test from a
+/// broken harness. [`every_gate_case_builds_its_scenario_without_the_gate`] runs this half for
+/// every case and is not pending, so a harness that stops reading the fixture fails loudly today
+/// rather than passing as evidence.
+fn gate_scenario(id: &str) -> GateCase {
     let c = case(id);
     let risk_block = patched_risk(&c);
     let state = c.get("state").unwrap_or_else(|| panic!("{id} has a state"));
     let prop = c
         .get("proposed")
         .unwrap_or_else(|| panic!("{id} has a proposal"));
-    let expect = c
-        .get("expect")
+    c.get("expect")
         .unwrap_or_else(|| panic!("{id} has an expectation"));
 
     let purpose_text = s(prop, "purpose");
@@ -194,7 +209,7 @@ fn run_gate(id: &str) {
 
     let mut sc = Scenario::allowing();
     sc.mandate = ValidatedMandate::from_validated_parts(
-        limits_from(&risk_block),
+        limits_from(&s(&c, "base"), &risk_block),
         GoalState::Running,
         false,
         false,
@@ -301,6 +316,24 @@ fn run_gate(id: &str) {
         &s(prop, "limit_price"),
         origin_for(&purpose_text),
     );
+
+    GateCase {
+        scenario: sc,
+        case: c,
+        purpose_text,
+    }
+}
+
+/// Drives one `kind: gate` case end to end and compares its whole `expect` block.
+fn run_gate(id: &str) {
+    let GateCase {
+        scenario: sc,
+        case: c,
+        purpose_text,
+    } = gate_scenario(id);
+    let expect = c
+        .get("expect")
+        .unwrap_or_else(|| panic!("{id} has an expectation"));
 
     let d = evaluate(&sc.input()).unwrap_or_else(|e| panic!("{id}: the gate decides, not {e}"));
 
@@ -647,6 +680,32 @@ flatten_case!(mc_f04, "MC-F04");
 #[ignore = "pending E6-3"]
 fn a_gate_case_purpose_is_passed_through() {
     run_gate("MC-G15");
+}
+
+/// Every gate case's scenario is built from the fixture, without calling the gate. Not pending.
+///
+/// This exists because review round 4 found the harness panicking in its own setup — it looked for
+/// the base's `rebalance_band` under a key nothing set, and at the wrong path — so all sixteen
+/// `MC-G` tests plus `a_gate_case_purpose_is_passed_through` failed before reaching `evaluate`.
+/// They would have failed on a correct gate too, and `cargo xtask ci pending` cannot tell a
+/// pending test that stops at the stub from one that stops at a broken harness: both just fail.
+/// Running the reading half here, not pending, makes that failure loud today.
+#[test]
+fn every_gate_case_builds_its_scenario_without_the_gate() {
+    for n in 1..=16 {
+        let id = format!("MC-G{n:02}");
+        let built = gate_scenario(&id);
+        assert_eq!(
+            s(&built.case, "id"),
+            id,
+            "the scenario is built from the case it names"
+        );
+        expected_purpose(&built.purpose_text);
+        assert!(
+            built.scenario.mandate.risk().rebalance_band > mandate_num::Fraction::ZERO,
+            "{id}: the rebalance band comes from the base, not from a default"
+        );
+    }
 }
 
 /// The fixture really does carry the twenty cases this file drives, so a renamed or removed case
