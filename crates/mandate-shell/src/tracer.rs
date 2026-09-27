@@ -235,7 +235,7 @@ impl<'s> Session<'s> {
         Ok((effects, first))
     }
 
-    fn perform(&mut self, effects: Vec<Effect>) -> Result<(), ShellError> {
+    pub(crate) fn perform(&mut self, effects: Vec<Effect>) -> Result<(), ShellError> {
         for effect in effects {
             match effect {
                 Effect::Journal(draft) => self.append_agent(&draft)?,

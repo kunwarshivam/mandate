@@ -14,7 +14,10 @@ use mandate_backtest::Signal;
 use mandate_canon::Value;
 use mandate_journal::Environment;
 use mandate_risk::{Check, CheckOutcome, Verdict};
-use mandate_runtime::{AgentId, Autonomy, Command, Initiator, Input, KillScope};
+use mandate_runtime::{
+    AgentId, Autonomy, Command, Effect, EventId, Initiator, Input, IntentBody, IntentHandoff,
+    KillScope, Purpose,
+};
 
 use super::doubles::{
     FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, OneShare,
@@ -327,6 +330,57 @@ fn flatten_poison_halts() -> Result<(), String> {
     assert_eq!(world.ledger.borrow().bodies().len(), before);
     assert_eq!(world.ledger.borrow().count("KillSwitchActivated"), 0);
     assert_eq!(world.tally.borrow().hands, 0);
+    Ok(())
+}
+
+/// TI-1's shell-side guard on its own: an intent handoff whose `IntentProposed` was never appended
+/// is refused before the sink sees it. `mandate_runtime::handle` always orders the draft first, so
+/// only an effect list built by hand reaches this guard (review round 1, minor 2).
+#[test]
+fn an_intent_whose_draft_was_never_appended_never_reaches_the_sink() -> Result<(), String> {
+    let world = World::default();
+    let setup = setup()?;
+    let mut stages = world.stages();
+    let admitted = FixtureMandate {
+        world: world.clone(),
+        environment: Environment::Paper,
+    }
+    .admitted()
+    .map_err(|e| e.to_string())?;
+    let instrument = admitted
+        .view
+        .working_universe
+        .first()
+        .cloned()
+        .ok_or("no instrument")?;
+    let mut session =
+        Session::open(&mut stages, &setup, &admitted.view).map_err(|e| e.to_string())?;
+    session.start().map_err(|e| e.to_string())?;
+    let unrecorded = Effect::Intent(IntentHandoff {
+        intent_id: EventId("00000100000000000099000000".to_owned()),
+        body: IntentBody::Order {
+            instrument,
+            side: mandate_accounting::Side::Buy,
+            qty: mandate_num::Qty::parse("1").map_err(|e| e.to_string())?,
+            limit: mandate_num::Price::parse("255.2").map_err(|e| e.to_string())?,
+            purpose: Purpose::Open,
+        },
+    });
+    let error = match session.perform(vec![unrecorded]) {
+        Err(error) => error,
+        Ok(()) => return Err("an unrecorded intent was handed".to_owned()),
+    };
+    assert!(
+        matches!(
+            error,
+            ShellError::WriteAheadViolated {
+                effect: "intent handoff"
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(world.tally.borrow().hands, 0);
+    assert!(!world.tally.borrow().calls.contains(&Stage::Sink));
     Ok(())
 }
 
