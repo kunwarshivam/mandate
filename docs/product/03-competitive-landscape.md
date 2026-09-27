@@ -42,7 +42,8 @@
    is active [PU8], and that Agent backtesting is not yet available [PU6].
 4. **The least-contested differentiators are account-wide coordination across agents, per-action
    approval with expiry and revalidation, and an exportable, verifiable decision record.** Each is
-   contested by at least one vendor claim, and none is proven by Mandate yet.
+   contested by at least one vendor claim (Conviction, for example, claims human approval before live
+   execution), and none is proven by Mandate yet.
 5. **Idea origination inside an owner's envelope is a real difference and a regulatory cost.**
    Public, Robinhood, and Scalar Field document user-defined logic. QuantConnect's Mia and
    TradeAgentic describe originating ideas. Peers that run automated strategies in retail accounts
@@ -218,7 +219,7 @@ for software-delivered strategies.
   runs"; each run is capped at 3 minutes and 512 MB; a run triggered while the previous one is
   still active "is skipped" [SF17].
 - Robinhood connection: "A desktop computer", "Google Chrome or Brave", and a bridge extension;
-  "Margin is not supported — buying power reflects cash only" [SF18].
+  margin: "Not supported — buying power reflects cash only" [SF18].
 - Pricing is credit-metered: Free $0 with 10 credits, Pro $80 to $175 a month, Ultra $200 to $1,000
   a month, Enterprise custom. Strategy agents are charged "0.01 credits / second" of execution
   [SF14].
@@ -237,8 +238,7 @@ for software-delivered strategies.
 - YC company page: team size 3 [SF13].
 - Vendor claim (first launch, 2025-05-08): "around 800 paying traders, over 34,000 signups, and
   $74,000 in monthly revenue" [SF6]. No later traction figure was found. That is an absence of
-  evidence, not evidence of decline. The About page's team and funding text could not be
-  corroborated elsewhere [SF21].
+  evidence, not evidence of decline.
 
 **Reported.** Trustpilot shows 3 reviews with a TrustScore of 3.4. A 1-star review of June 2026
 says "lost a tonne of money on this janky platform"; a 5-star review of July 2026 says "From
@@ -246,15 +246,16 @@ robinhood to polymarket, can trade everything"; the third, from 2024, concerns h
 [SF20].
 
 **What it does not document.** As of 2026-09-27, the full docs were not found to describe a
-drawdown limit, a loss limit, per-trade approval, or an account-wide kill switch; the drawdown
-thresholds appear in the AI disclosure and the blog guide only [SF16] [SF19] [SF5]. Also not
+drawdown limit, a loss limit, per-trade approval, or an account-wide kill switch. Drawdown
+thresholds, a kill switch, and max-loss limits appear only as guidance in the AI disclosure and the
+blog guide [SF16] [SF19] [SF5]. Also not
 documented: order types and paper availability for its Robinhood path, cross-strategy capital
 arbitration, and export or integrity of logs.
 
 **Overlap with Mandate.** The closest shipped competitor. Multi-broker execution, isolation between
 strategies, idempotent execution, reconciliation, activation approval, and pause and flatten are not
-unique to Mandate. Its product moved from a research assistant to an agentic trading desk between
-March and June 2026 (inference, from the snapshots) [SF11]. Compare exact authority boundaries and
+unique to Mandate. Its public positioning moved from a research assistant to an agentic trading
+desk between March and June 2026 (inference, from the snapshots) [SF11]. Compare exact authority boundaries and
 recovery behavior on identical scenarios, not feature lists.
 
 ### Conviction (YC S25)
@@ -560,7 +561,6 @@ Accessed means the page carried no date and was read on 2026-09-26 or 2026-09-27
 | SF18 | [Scalar Field blog: connect Robinhood](https://blogs.scalarfield.io/guides/connect-robinhood-on-scalar-field) | undated |
 | SF19 | [Scalar Field full docs (llms-full.txt)](https://scalarfield.io/docs/llms-full.txt) | accessed 2026-09-27 |
 | SF20 | [Trustpilot: Scalar Field reviews](https://www.trustpilot.com/review/scalarfield.io) (reported) | accessed 2026-09-27 |
-| SF21 | [Scalar Field: about](https://scalarfield.io/about) | accessed |
 | CV1 | [Conviction, YC company page](https://www.ycombinator.com/companies/conviction) | accessed |
 | CV2 | [Conviction YC launch: trading desk in your pocket](https://www.ycombinator.com/launches/U6n-conviction-trading-desk-in-your-pocket) | about 2026-09-16 |
 | CV3 | [Conviction home page](https://www.convictiontrade.ai/) (client-rendered; text read from its published script bundle) | accessed 2026-09-27 |
