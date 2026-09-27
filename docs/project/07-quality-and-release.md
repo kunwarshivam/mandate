@@ -63,6 +63,13 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 | Privacy | Capture relay and provider payloads; assert no sensitive content | Notifications |
 | Isolation | Cross-workspace access attempts at API, database, and messaging layers | Multi-tenancy |
 
+**Pending tests.** A tests PR marks each test its stubs cannot pass `#[ignore = "pending <story>"]`
+(DEC-77), and `cargo xtask ci pending` runs every one of them and requires each to fail at its
+story's stub (DEC-110, DEC-137). The verdict is one answer per tree (DEC-164): pending properties
+draw from a pinned seed, no `PROPTEST_*` variable is inherited and no saved failure is replayed or
+written, and a failing property is judged only by the minimal failure proptest reports, not by the
+panics of cases it shrank past.
+
 ## Release gates
 
 ### Phase 0 gate

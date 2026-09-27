@@ -47,9 +47,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
   `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
   message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
-  replaced by a rule that reads the cause; the planted cases of #172's reviews all fail the gate;
-  and `mandate-executor`'s three E7-4 properties that pass today only on a discarded case's stub
-  report get their rows in the same change (see the row under #196's reviews).
+  replaced by a rule that reads the cause; and the planted cases of #172's reviews all fail the
+  gate. Since DEC-164 a failing property is already read by proptest's report of its minimal
+  failure alone, and `mandate-executor`'s three E7-4 properties that passed only on a stub report
+  from a case shrinking moved past have their rows; E1-3 narrows that report, and every other
+  test's output, to the cause.
 
 ### E2 Market data
 
@@ -586,7 +588,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
-- **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
 - **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
@@ -595,16 +596,22 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
   (#227 review, round 1, minor 4).
-- Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
-  whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
-  mode `paused` or `stopped`, an `Unknown` order in the instrument), but `held` is also true when
-  the first failing check is `startup_reconciliation_pending` (the startup hold on an opening) or
-  `broker` (a risk-reducing order on a blocked account) (#206 review).
 - **Before stream G's gate is wired in:** register `startup_reconciliation_pending` in the
   trading-domain `reason_codes` registry, or record why not. It is a third partial-gate reason code
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
+  properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
+  would satisfy them; each property must also assert a positive effect a no-op cannot produce
+  (#231 review, follow-up a).
+- **Before E7-3's buying-power path reads them:** the properties' model broker reports `equity` and
+  `buying_power` that follow its `cash_moved`, as `cash` already does; today they stay at 20000
+  whatever its fills (#231 review, follow-up b).
+- Assert the ready precondition in `mandate-executor`'s properties script: after its start, an
+  account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
+  starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
+  it starts ready (#231 review, follow-up c).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
@@ -632,17 +639,6 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   TAF cap. Since #196 the executor books one only for a fill attributed to one of its orders,
   stated in `orders::simulated_fee`'s doc; booking it too would lower paper buying power, the
   conservative side (#196 review, round 1, finding 7).
-- With E1-3, give `mandate-executor`'s three E7-4 properties `BEHAVIOUR_ONLY_TESTS` rows
-  (`protective_sell_quantity_never_exceeds_the_position`,
-  `every_unprotected_interval_has_a_journaled_start_and_end`,
-  `no_interval_exceeds_the_limit_without_an_alert`). Since #196 their shrunk failure is their own
-  E7-4 assertion (the protected lead has no bracket). The gate accepts them only because cases
-  discarded before shrinking stop at a later E7-3 slice's stub, and `names_a_stub` reads the whole
-  output. Since #199, `ci pending` pins their seed (`PENDING_PROPTEST_SEED`), so that verdict is one
-  answer rather than red on some runs, but it still rests on incidental evidence. A row now would be
-  reported as not needed, because the output names a stub. When E1-3 reads the failure's own
-  cause, these three fail away from the stub and need their rows, expiring with E7-4 (#196 review,
-  round 1, finding 5; #199 review, round 1, finding 4).
 - Pin the calendar roll of the simulated `FeesCharged` event's `day` in `mandate-executor`. The
   hour cutoff is pinned (a fill at 20:00 New York belongs to the next trade date), but every fixture
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a

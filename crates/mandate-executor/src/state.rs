@@ -371,9 +371,9 @@ impl ExecutorState {
 
     /// Whether a reconciliation has run since this process started: a `ReconciliationRun` folded
     /// after the head `Input::Started` found. A run an earlier process appended sits at or before
-    /// that head, so a restart always waits for its own. Until one runs, the gate holds every
-    /// opening on a stream that has journaled an account (§11, the coordinator's ruling on #174,
-    /// comment 5857742391).
+    /// that head, so a restart always waits for its own. Until one runs, and until an account is
+    /// journaled, the gate holds every opening (§11, the coordinator's ruling on #174, comment
+    /// 5857742391).
     pub(crate) fn reconciled_since_start(&self) -> bool {
         self.started_at
             .zip(self.reconciled_through)

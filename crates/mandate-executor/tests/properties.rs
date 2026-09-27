@@ -595,6 +595,8 @@ struct BrokerModel {
     fills: Vec<mandate_executor::BrokerFill>,
     positions: BTreeMap<String, i128>,
     cancels_asked: Vec<String>,
+    /// The cash its fills moved, in nine-place units, from the 20000 it reported at the start.
+    cash_moved: i128,
 }
 
 #[derive(Debug, Clone)]
@@ -678,6 +680,9 @@ impl BrokerModel {
             })
             .collect();
         taken.fills = self.fills.clone();
+        taken.account.cash = common::usd(&decimal(
+            20_000_000_000_000_i128.saturating_add(self.cash_moved),
+        ));
         taken.positions = self
             .positions
             .iter()
@@ -740,6 +745,23 @@ fn play(script: &[Step]) -> Run {
     let (restarted, started_effects) = shell.restart(&ports);
     record(started_effects, &mut drafts, &mut effects, &mut broker);
     shell = restarted;
+    let mut startup = broker.snapshot(shell.head());
+    startup.reason = ReconcileReason::Startup;
+    record(
+        shell.run(Input::BrokerSnapshot(startup), &ports),
+        &mut drafts,
+        &mut effects,
+        &mut broker,
+    );
+    record(
+        shell.run(
+            Input::BrokerUpdate(BrokerUpdate::Account(common::broker_account())),
+            &ports,
+        ),
+        &mut drafts,
+        &mut effects,
+        &mut broker,
+    );
 
     for (index, one) in script.iter().enumerate() {
         at = at.saturating_add(if *one == Step::Wait { 34 } else { 4 });
@@ -851,6 +873,8 @@ fn play(script: &[Step]) -> Run {
                         .entry(order.instrument.clone())
                         .or_insert(0);
                     *position = position.saturating_add(signed);
+                    broker.cash_moved =
+                        broker.cash_moved.saturating_sub(signed.saturating_mul(150));
                     let fill = mandate_executor::BrokerFill {
                         instrument: common::instrument(&order.instrument),
                         side: order.side,
