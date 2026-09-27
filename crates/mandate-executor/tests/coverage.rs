@@ -1303,7 +1303,6 @@ fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -2245,46 +2244,63 @@ fn a_reconciliation_compares_only_live_orders() {
     );
 }
 
-/// §11, DEC-140: until the cash slice, a run that would compare cash or fees stops the executor
-/// with its stub, like every refusal (DEC-85), and publishes no run that skipped a comparison.
+/// §11 steps 4 and 5: once an account is reported, a run compares cash within its band and fees
+/// exactly at a fee posting, records the snapshot as the next base, and is published.
 #[test]
-fn a_run_that_would_compare_cash_or_fees_stops_and_publishes_nothing() {
+fn a_run_compares_cash_and_fees_and_records_the_snapshot() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = fresh(&ports);
-    let head = shell.head().0;
-    let refused = shell.step(
-        Input::BrokerSnapshot(snapshot(head, ReconcileReason::FeePosting)),
-        &ports,
-    );
-    assert_eq!(
-        refused.map(|ran| ran.draft_types().len()),
-        Err(ExecutorError::Unimplemented { story: "E7-3" }),
-        "a fee posting has fees to compare, so the run refuses"
-    );
     shell.run(
         Input::BrokerUpdate(BrokerUpdate::Account(broker_account())),
         &ports,
     );
     let head = shell.head().0;
-    let refused = shell.step(
-        Input::BrokerSnapshot(snapshot(head, ReconcileReason::Scheduled)),
+    let agreeing = shell.run(
+        Input::BrokerSnapshot(snapshot(head, ReconcileReason::FeePosting)),
         &ports,
     );
+    assert!(
+        agreeing.draft_types().contains(&"AccountSnapshotRecorded")
+            && agreeing.draft_types().contains(&"ReconciliationRun")
+            && !agreeing.draft_types().contains(&"AgentModeApplied"),
+        "the broker agrees on cash and fees, so the run is recorded clean: {:?}",
+        agreeing.draft_types()
+    );
+
+    let mut drifted = snapshot(shell.head().0, ReconcileReason::FeePosting);
+    drifted.account.cash = usd("1");
+    drifted.account.accrued_fees = usd("3");
+    let ran = shell.run(Input::BrokerSnapshot(drifted), &ports);
+    let paused: Vec<_> = ran
+        .drafts
+        .iter()
+        .filter(|draft| draft.event_type == "AgentModeApplied")
+        .filter_map(|draft| draft.payload.get("restriction").and_then(Value::as_str))
+        .collect();
     assert_eq!(
-        refused.map(|ran| ran.draft_types().len()),
-        Err(ExecutorError::Unimplemented { story: "E7-3" }),
-        "once the broker has reported an account there is cash to compare, so the run refuses"
+        paused,
+        vec!["reconciliation:cash", "reconciliation:fees"],
+        "a cash drift beyond the band and a fee difference each pause every agent until \
+         acknowledged, and neither is written away"
+    );
+    assert_eq!(
+        shell.state.effective_mode(&agent(OTHER_AGENT)),
+        Mode::Paused
     );
     assert!(
-        !shell
-            .account_journal
-            .iter()
-            .any(|event| event.event_type == "ReconciliationRun"),
-        "and no run was journaled as covering a comparison it skipped"
+        ran.effects.iter().any(|effect| matches!(
+            effect,
+            mandate_executor::Effect::Notify(reference)
+                if reference.message_key == "reconciliation_cash"
+        )) && ran.effects.iter().any(|effect| matches!(
+            effect,
+            mandate_executor::Effect::Notify(reference)
+                if reference.message_key == "reconciliation_fees"
+        )),
+        "and the owner is alerted of each"
     );
-    assert_eq!(shell.state.reconciled_through(), None);
 }

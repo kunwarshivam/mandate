@@ -109,6 +109,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             }
             Ok(())
         }
+        "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
             if let Some(cursor) = optional_text(payload, "checkpoint") {
@@ -131,7 +132,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "AccountStateObserved" => account_observed(state, payload),
+        "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
         "RejectObserved" => {
             state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
                 state.consecutive_403s.saturating_add(1)
@@ -521,6 +522,7 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
     state.cash_flow = state.cash_flow.checked_add(cash)?;
+    state.fill_notional = state.fill_notional.checked_add(notional)?;
     if let Some(order) = optional_text(payload, "client_order_id")
         .and_then(|raw| ClientOrderId::parse(raw).ok())
         .and_then(|id| state.orders.get_mut(&id))
@@ -622,6 +624,7 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
         complete: non_marginable.is_some() && accrued.is_some(),
     });
     state.cash_flow = Usd::ZERO;
+    state.fill_notional = Usd::ZERO;
     Ok(())
 }
 
@@ -630,13 +633,61 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
 /// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
 /// unposted, are the cash slice's; until then they fold as records only.
 fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
-    if flag(payload, "simulated") {
+    if required_text(payload, "family")? == "crypto_asset" {
+        let instrument = instrument(payload)?;
+        let accrued = qty(payload, "accrued")?;
+        let charged = optional_qty(payload, "charged")?.unwrap_or(Qty::ZERO);
+        let position = state
+            .positions
+            .entry(instrument.clone())
+            .or_insert(SignedQty::ZERO);
+        *position = position.checked_add(SignedQty::from(accrued).negated())?;
+        let unposted = state.asset_fees.entry(instrument).or_insert(Qty::ZERO);
+        *unposted = unposted
+            .checked_add(accrued)?
+            .checked_sub(charged)
+            .unwrap_or(Qty::ZERO);
+        return Ok(());
+    }
+    if !flag(payload, "simulated") {
+        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
+        state.unposted_fees = state
+            .unposted_fees
+            .checked_add(usd(payload, "accrued")?)?
+            .checked_sub(charged)?;
+        return Ok(());
+    }
+    {
         let bucket = (
             required_text(payload, "family")?.to_owned(),
             required_text(payload, "day")?.to_owned(),
         );
         let accrued = state.simulated_fees.entry(bucket).or_insert(Usd::ZERO);
         *accrued = accrued.checked_add(usd(payload, "accrued")?)?;
+    }
+    Ok(())
+}
+
+/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
+/// pause it caused (trading-domain spec §11, interpretation 14).
+fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let subject = required_text(payload, "subject")?;
+    if required_text(payload, "step_up")?.is_empty() {
+        return Ok(());
+    }
+    if let Ok(instrument) = InstrumentId::new(subject) {
+        state.mismatched.remove(&instrument);
+    }
+    let lifted = crate::state::restriction_for(subject);
+    let agents: Vec<AgentId> = state
+        .restrictions
+        .keys()
+        .filter(|(_, name)| *name == lifted)
+        .map(|(agent, _)| agent.clone())
+        .collect();
+    for agent in agents {
+        state.restrictions.remove(&(agent.clone(), lifted.clone()));
+        recompute(state, &agent);
     }
     Ok(())
 }
@@ -980,11 +1031,11 @@ mod buying_power_tests {
             Some(usd("999.94")?),
             "each (family, day) bucket is rounded on its own: 0.05 for 0.0472, and 0.01 for 0.001"
         );
-        stream.fold("FeesCharged", fee("2026-09-23", "5", false))?;
+        stream.fold("FeesCharged", fee("2026-09-23", "5.001", false))?;
         assert_eq!(
             stream.state.buying_power(),
-            Some(usd("999.94")?),
-            "a broker fee is the cash slice's and is not subtracted here"
+            Some(usd("994.93")?),
+            "and the broker's own unposted fee, 5.001, is charged at its ceiling cent, 5.01 (§7.2)"
         );
         Ok(())
     }

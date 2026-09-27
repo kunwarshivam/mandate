@@ -53,6 +53,9 @@ pub struct ExecutorState {
     pub(crate) consecutive_403s: u32,
     pub(crate) observed: Option<ObservedAccount>,
     pub(crate) cash_flow: Usd,
+    pub(crate) fill_notional: Usd,
+    pub(crate) unposted_fees: Usd,
+    pub(crate) asset_fees: BTreeMap<InstrumentId, Qty>,
     pub(crate) simulated_fees: BTreeMap<(String, String), Usd>,
     pub(crate) mismatched: BTreeSet<InstrumentId>,
     pub(crate) checkpoint: Option<ActivityCursor>,
@@ -159,6 +162,9 @@ impl ExecutorState {
             consecutive_403s: 0,
             observed: None,
             cash_flow: Usd::ZERO,
+            fill_notional: Usd::ZERO,
+            unposted_fees: Usd::ZERO,
+            asset_fees: BTreeMap::new(),
             simulated_fees: BTreeMap::new(),
             mismatched: BTreeSet::new(),
             checkpoint: None,
@@ -322,6 +328,7 @@ impl ExecutorState {
             .cash
             .checked_add(self.cash_flow)
             .and_then(|cash| cash.checked_sub(fees))
+            .and_then(|cash| cash.checked_sub(self.unposted_fees.round(2, Rounding::Ceiling)?))
             .ok()?;
         let reserved = self
             .reservations

@@ -5,13 +5,13 @@ use std::collections::BTreeSet;
 
 use mandate_accounting::InstrumentId;
 use mandate_canon::Value;
-use mandate_num::SignedQty;
+use mandate_num::{Fraction, Qty, SignedQty};
 
 use crate::batch::Batch;
 use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
-use crate::orders::{EXTERNAL, every_agent_alerted, fill, status_mapping};
+use crate::orders::{EXTERNAL, account_fields, every_agent_alerted, fill, status_mapping};
 use crate::payload::{int, text};
 use crate::ports::Ports;
 use crate::state::{Adoption, EVERY_AGENT, ExecutorState, restriction_for};
@@ -85,7 +85,10 @@ pub(crate) fn run(
         }
     }
     positions(batch, snapshot, &mut differences)?;
-    cash_and_fees(&batch.view, snapshot)?;
+    let recorded = cash(batch, snapshot, &mut differences)?;
+    if snapshot.reason == ReconcileReason::FeePosting {
+        fees(batch, snapshot, recorded, &mut differences)?;
+    }
     let unexplained = differences
         .iter()
         .any(|difference| !difference.adopted && difference.kind != DifferenceKind::MissingFill);
@@ -275,10 +278,11 @@ fn adopt(
 }
 
 /// Step 3: the model's net position, after the missing fills, against the broker's, exactly
-/// (§11). A difference is a mismatch: the agents holding the instrument are paused and the owner is
-/// alerted, and nothing is written away. The two explanations §11 allows, a pending corporate
-/// action and a crypto asset fee the broker has not yet posted, come with the slices that fold
-/// them; until then either shows as a mismatch, which pauses rather than trades.
+/// (§11), except that a crypto asset fee the broker has not yet posted is still in the broker's
+/// quantity (§6.3, RC-07). A difference is a mismatch: the agents holding the instrument are
+/// paused and the owner is alerted, and nothing is written away. A pending corporate action, §11's
+/// other explanation, comes with the slice that folds corporate actions; until then it shows as a
+/// mismatch, which pauses rather than trades.
 fn positions(
     batch: &mut Batch<'_, '_>,
     snapshot: &BrokerSnapshot,
@@ -303,7 +307,13 @@ fn positions(
             .get(&instrument)
             .copied()
             .unwrap_or(SignedQty::ZERO);
-        let expected = model;
+        let unposted = batch
+            .view
+            .asset_fees
+            .get(&instrument)
+            .copied()
+            .unwrap_or(Qty::ZERO);
+        let expected = model.checked_add(SignedQty::from(unposted))?;
         let broker = snapshot
             .positions
             .iter()
@@ -334,15 +344,85 @@ fn positions(
     Ok(())
 }
 
-/// Steps 4 and 5, cash and fees, are the cash slice's (trading-domain spec §11). They fail closed:
-/// once the broker has reported an account there is a cash figure to compare, and a fee posting
-/// always has fees to compare, so either answers the later slice's stub and the executor stops
-/// rather than publishing a run that skipped a comparison. Before any account is reported there is
-/// no base to compare the broker's cash with, as in the full comparison.
-fn cash_and_fees(state: &ExecutorState, snapshot: &BrokerSnapshot) -> Result<(), ExecutorError> {
-    if state.observed.is_some() || snapshot.reason == ReconcileReason::FeePosting {
-        return Err(ExecutorError::Unimplemented { story: "E7-3" });
+/// Step 4: the broker's cash against the model's, within 0.01 × the fills since the last broker
+/// cash snapshot plus the accrued unposted fees (§11). Paper's simulated fees are not in the
+/// model's cash at all (§10, interpretation 25). Above the band, every agent is paused and the owner
+/// alerted until the owner acknowledges `cash`. The snapshot is journaled as
+/// `AccountSnapshotRecorded`, whole, and becomes the base the next comparison is measured from.
+/// Before any account was reported there is no base to compare with, and nothing is recorded.
+fn cash(
+    batch: &mut Batch<'_, '_>,
+    snapshot: &BrokerSnapshot,
+    differences: &mut Vec<Difference>,
+) -> Result<Option<EventId>, ExecutorError> {
+    let Some(base) = batch.view.observed.clone() else {
+        return Ok(None);
+    };
+    let model = base
+        .cash
+        .checked_add(batch.view.cash_flow)?
+        .checked_sub(batch.view.unposted_fees)?;
+    let band = batch
+        .view
+        .fill_notional
+        .times_fraction(Fraction::parse(CASH_BAND)?)?
+        .checked_add(batch.view.unposted_fees.abs())?;
+    let drift = snapshot.account.cash.checked_sub(model)?.abs();
+    let mut fields = account_fields(&snapshot.account)?;
+    fields.push(("model_cash", text(model.to_string())));
+    let recorded = batch.journal("AccountSnapshotRecorded", None, fields)?;
+    if drift > band {
+        every_agent_alerted(
+            batch,
+            Mode::Paused,
+            &restriction_for("cash"),
+            recorded.clone(),
+            "reconciliation_cash",
+        )?;
+        differences.push(Difference {
+            kind: DifferenceKind::Cash,
+            subject: "cash".to_owned(),
+            adopted: false,
+        });
     }
+    Ok(Some(recorded))
+}
+
+/// The cash tolerance per unit of fill notional (§11).
+const CASH_BAND: &str = "0.01";
+
+/// Step 5, at a fee posting: fees are exact once posted. A difference pauses every agent and alerts
+/// the owner, naming the recorded snapshot (recorded here if step 4 had no base to record it
+/// against), until the owner acknowledges `fees`; it is never silently adjusted (§11).
+fn fees(
+    batch: &mut Batch<'_, '_>,
+    snapshot: &BrokerSnapshot,
+    recorded: Option<EventId>,
+    differences: &mut Vec<Difference>,
+) -> Result<(), ExecutorError> {
+    if snapshot.account.accrued_fees == batch.view.unposted_fees {
+        return Ok(());
+    }
+    let recorded = match recorded {
+        Some(recorded) => recorded,
+        None => batch.journal(
+            "AccountSnapshotRecorded",
+            None,
+            account_fields(&snapshot.account)?,
+        )?,
+    };
+    every_agent_alerted(
+        batch,
+        Mode::Paused,
+        &restriction_for("fees"),
+        recorded,
+        "reconciliation_fees",
+    )?;
+    differences.push(Difference {
+        kind: DifferenceKind::Fee,
+        subject: "fees".to_owned(),
+        adopted: false,
+    });
     Ok(())
 }
 
@@ -395,77 +475,4 @@ fn restrict(
         what: "a restriction on no agent".to_owned(),
         story: "E7-3",
     })
-}
-
-/// The cash and fee comparisons are the next slice's, so a run that would need either refuses
-/// rather than skipping it (§11).
-#[cfg(test)]
-mod tests {
-    use mandate_num::Usd;
-
-    use super::cash_and_fees;
-    use crate::error::ExecutorError;
-    use crate::state::{ExecutorState, ObservedAccount};
-    use crate::types::{
-        AccountRef, AccountScope, AccountState, ActivityCursor, BrokerAccount, BrokerSnapshot,
-        ReconcileReason, Seq, WorkspaceId,
-    };
-
-    fn snapshot(reason: ReconcileReason) -> BrokerSnapshot {
-        BrokerSnapshot {
-            open_orders: Vec::new(),
-            positions: Vec::new(),
-            account: BrokerAccount {
-                status: "ACTIVE".to_owned(),
-                crypto_status: "ACTIVE".to_owned(),
-                trading_blocked: false,
-                account_blocked: false,
-                trade_suspended_by_user: false,
-                multiplier: 1,
-                equity: Usd::ZERO,
-                cash: Usd::ZERO,
-                buying_power: Usd::ZERO,
-                non_marginable_buying_power: Usd::ZERO,
-                accrued_fees: Usd::ZERO,
-            },
-            fills: Vec::new(),
-            cursor: ActivityCursor("cursor-1".to_owned()),
-            reason,
-            taken_at_head: Seq(1),
-        }
-    }
-
-    #[test]
-    fn a_run_with_cash_or_fees_to_compare_refuses_until_the_cash_slice() {
-        let mut state = ExecutorState::new(AccountScope {
-            account: AccountRef("acct-1".to_owned()),
-            workspace: WorkspaceId("ws1".to_owned()),
-        });
-        let refused = Err(ExecutorError::Unimplemented { story: "E7-3" });
-        assert_eq!(
-            cash_and_fees(&state, &snapshot(ReconcileReason::Scheduled)),
-            Ok(()),
-            "with no account reported and no fee posting there is nothing to compare"
-        );
-        assert_eq!(
-            cash_and_fees(&state, &snapshot(ReconcileReason::FeePosting)),
-            refused,
-            "a fee posting always has fees to compare"
-        );
-        state.observed = Some(ObservedAccount {
-            state: AccountState::Active,
-            multiplier: 1,
-            equity: Usd::ZERO,
-            cash: Usd::ZERO,
-            buying_power: Usd::ZERO,
-            non_marginable_buying_power: Usd::ZERO,
-            accrued_fees: Usd::ZERO,
-            complete: true,
-        });
-        assert_eq!(
-            cash_and_fees(&state, &snapshot(ReconcileReason::Scheduled)),
-            refused,
-            "once the broker has reported an account there is a cash figure to compare"
-        );
-    }
 }
