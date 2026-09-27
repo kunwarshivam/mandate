@@ -209,7 +209,6 @@ fn a_reconciliation_run_advances_the_checkpoint_and_the_covered_head() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_reject_that_is_not_a_403_breaks_the_run_of_403s() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -233,7 +232,6 @@ fn a_reject_that_is_not_a_403_breaks_the_run_of_403s() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_restricted_message_alone_sets_closing_only() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -253,7 +251,6 @@ fn a_restricted_message_alone_sets_closing_only() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn each_account_flag_alone_blocks_the_account() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -299,7 +296,6 @@ fn each_account_flag_alone_blocks_the_account() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn an_observed_account_is_carried_field_for_field() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

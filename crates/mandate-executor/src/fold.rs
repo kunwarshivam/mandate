@@ -8,9 +8,10 @@ use crate::codec::{mode_of, order_type_of, purpose_of, side_of, state_of, tif_of
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{
-    flag, optional_int, optional_price, optional_qty, optional_text, qty, required_text,
+    flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
+    required_text, usd,
 };
-use crate::state::{ExecutorState, IntentOutcome, IntentRecord, OrderDetail};
+use crate::state::{ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail};
 use crate::types::{
     AccountState, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order, OrderState,
     OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
@@ -100,15 +101,26 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
                 "blocked" => AccountState::Blocked,
                 _ => return Err(refused("restriction")),
             };
+            state.consecutive_403s = 0;
+            Ok(())
+        }
+        "AccountStateObserved" => account_observed(state, payload),
+        "RejectObserved" => {
+            state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
+                state.consecutive_403s.saturating_add(1)
+            } else {
+                0
+            };
             Ok(())
         }
         _ => later_slice(),
     }
 }
 
-/// Cash and fee balances, corporate actions, the account snapshot, rejects, reconciliation's
-/// records, the owner acknowledgment, the trading and risk days, protection and the kill switch
-/// (trading-domain spec §5.4 to §5.7, §6, §7.3, §10, §11): the later slices of this stack. Until
+/// Cash and fee balances, corporate actions, reconciliation's records and snapshot, conduct
+/// breaches, recorded broker exchanges, the owner acknowledgment, the trading and risk days,
+/// protection and the kill switch (trading-domain spec §5.4 to §5.7, §6, §10, §11): the later
+/// slices of this stack. Until
 /// the cash slice folds the balances, a `FeesCharged` and an `ExternalActivityIngested` fold as
 /// records only: nothing this crate reads yet depends on either.
 fn later_slice() -> Result<(), ExecutorError> {
@@ -517,6 +529,30 @@ fn replacement(
         ..original.clone()
     };
     state.orders.insert(id.clone(), linked);
+    Ok(())
+}
+
+/// The broker's account as last reported (trading-domain spec §7.2, §7.3). The cash slice moves the
+/// model's cash from this base by every fill since, which is what buying power and the cash
+/// comparison start from (§11).
+fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let buying_power = usd(payload, "buying_power")?;
+    state.observed = Some(ObservedAccount {
+        state: if required_text(payload, "status")? == "ACTIVE" {
+            AccountState::Active
+        } else {
+            AccountState::Blocked
+        },
+        multiplier: optional_int(payload, "multiplier")
+            .and_then(|multiplier| u32::try_from(multiplier).ok())
+            .unwrap_or(1),
+        equity: usd(payload, "equity")?,
+        cash: usd(payload, "cash")?,
+        buying_power,
+        non_marginable_buying_power: optional_usd(payload, "non_marginable_buying_power")?
+            .unwrap_or(buying_power),
+        accrued_fees: optional_usd(payload, "accrued_fees")?.unwrap_or(Usd::ZERO),
+    });
     Ok(())
 }
 

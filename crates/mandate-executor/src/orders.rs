@@ -13,10 +13,11 @@ use crate::codec::{side_name, state_name};
 use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
-use crate::payload::text;
+use crate::payload::{int, text};
 use crate::state::{EVERY_AGENT, restriction_for};
 use crate::types::{
-    BrokerFill, BrokerOrder, BrokerRequest, EventId, Mode, OrderState, StatusMapping,
+    AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
+    Mode, OrderState, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -473,5 +474,119 @@ fn simulated_fee(
             ("simulated", Value::Bool(true)),
         ],
     )?;
+    Ok(())
+}
+
+/// An account snapshot the broker pushed: journaled without the account number or id, which the
+/// type has nowhere to hold (journal spec §6.4), and read against §7.3's first row.
+pub(crate) fn account(
+    batch: &mut Batch<'_, '_>,
+    account: &BrokerAccount,
+) -> Result<(), ExecutorError> {
+    batch.journal(
+        "AccountStateObserved",
+        None,
+        vec![
+            ("status", text(account.status.clone())),
+            ("crypto_status", text(account.crypto_status.clone())),
+            ("trading_blocked", Value::Bool(account.trading_blocked)),
+            ("account_blocked", Value::Bool(account.account_blocked)),
+            (
+                "trade_suspended_by_user",
+                Value::Bool(account.trade_suspended_by_user),
+            ),
+            ("multiplier", int(u64::from(account.multiplier))?),
+            ("equity", text(account.equity.to_string())),
+            ("cash", text(account.cash.to_string())),
+            ("buying_power", text(account.buying_power.to_string())),
+            (
+                "non_marginable_buying_power",
+                text(account.non_marginable_buying_power.to_string()),
+            ),
+            ("accrued_fees", text(account.accrued_fees.to_string())),
+        ],
+    )?;
+    let blocked = account.status != "ACTIVE"
+        || account.trading_blocked
+        || account.account_blocked
+        || account.trade_suspended_by_user;
+    if blocked {
+        restrict(
+            batch,
+            AccountState::Blocked,
+            Mode::Paused,
+            "account_trading_blocked",
+        )?;
+    }
+    Ok(())
+}
+
+/// Stores a detected restriction as account state and applies its agent effect to every agent
+/// (§7.3), alerting the owner. A restriction already in force is not journaled again.
+fn restrict(
+    batch: &mut Batch<'_, '_>,
+    state: AccountState,
+    mode: Mode,
+    reason: &'static str,
+) -> Result<(), ExecutorError> {
+    if batch.view.account_state >= state {
+        return Ok(());
+    }
+    let name = match state {
+        AccountState::Blocked => "blocked",
+        AccountState::ClosingOnly => "closing_only",
+        AccountState::Active => "active",
+    };
+    let changed = batch.journal(
+        "AccountRestrictionChanged",
+        None,
+        vec![("restriction", text(name)), ("reason_code", text(reason))],
+    )?;
+    every_agent(batch, mode, reason)?;
+    batch.notify(changed, reason);
+    Ok(())
+}
+
+/// A reject the broker answered with. Journaled with its code; an order of ours it names is
+/// `Rejected`, which releases its reservation; a closing-only message, or the configured run of
+/// 403s with no known order-level cause, restricts the account to closing only (§7.3). A reject
+/// naming an id we do not know counts toward that threshold and is nothing more.
+pub(crate) fn reject(
+    batch: &mut Batch<'_, '_>,
+    reject: &BrokerReject,
+) -> Result<(), ExecutorError> {
+    let mut pairs = vec![
+        ("http_status", int(u64::from(reject.http_status))?),
+        ("message", text(reject.message.clone())),
+    ];
+    if let Some(raw) = &reject.client_order_id {
+        pairs.push(("client_order_id", text(raw.clone())));
+    }
+    if let Some(code) = &reject.code {
+        pairs.push(("code", text(code.clone())));
+    }
+    batch.journal("RejectObserved", None, pairs)?;
+    if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
+        let extra = reject
+            .code
+            .iter()
+            .map(|code| ("reject_code", text(code.clone())))
+            .collect();
+        transition(batch, &id, OrderState::Rejected, extra)?;
+    }
+    let message = reject.message.to_ascii_lowercase();
+    let closing_only = message.contains("closing") || message.contains("restricted");
+    let threshold = batch.view.consecutive_403s >= batch.ports.config.restriction_403_threshold;
+    if closing_only || threshold {
+        restrict(
+            batch,
+            AccountState::ClosingOnly,
+            Mode::ExitsOnly,
+            "account_restricted",
+        )?;
+        if threshold {
+            batch.broker(BrokerRequest::GetAccount);
+        }
+    }
     Ok(())
 }

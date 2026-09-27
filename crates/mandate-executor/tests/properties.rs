@@ -2326,7 +2326,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 14] = [
+        const INTERPRETED: [&str; 16] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2341,6 +2341,8 @@ proptest! {
             "FeesCharged",
             "ExternalActivityIngested",
             "AccountRestrictionChanged",
+            "AccountStateObserved",
+            "RejectObserved",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)
