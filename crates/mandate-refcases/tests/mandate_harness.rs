@@ -113,7 +113,6 @@ fn a_family_another_stream_owns_fails_with_its_story() {
 /// asserted that the stub fails MC-S01, which any correct parse turns red (#225, the coordinator's
 /// round 1 ruling there).
 #[test]
-#[ignore = "pending E10-1"]
 fn a_wrong_expected_value_fails_the_case() {
     let fixture = fixture();
     let valid = fixture["cases"]
