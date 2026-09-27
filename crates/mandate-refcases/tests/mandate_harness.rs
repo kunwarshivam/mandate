@@ -417,3 +417,173 @@ fn the_two_shapes_the_api_cannot_express_fail_loudly() {
         "a grid the type does express must get past the reader to the rule, got: {whole_shares}"
     );
 }
+
+/// The RFC 6902 subset the fixture uses is applied, not skipped: a patch that does not resolve, an
+/// operation the harness does not apply, and a `replace` or `remove` of an absent member each fail
+/// their case naming the path.
+///
+/// Every owned case fails on a rule stub today, so a patcher that silently did nothing would look
+/// exactly like one that worked. These are the rows that tell the two apart, and the by-hand mutants
+/// run on `src/mandate.rs` is what found them missing.
+#[test]
+fn a_patch_the_harness_cannot_apply_fails_the_case() {
+    let fixture = fixture();
+    let id = "MC-R01";
+    for (op, path, value, expected) in [
+        ("move", "/risk/max_daily_loss", Some("0.5"), "move"),
+        ("replace", "/risk/no_such_member", Some("0.5"), "absent"),
+        (
+            "replace",
+            "/risk/no/such/path",
+            Some("0.5"),
+            "does not resolve",
+        ),
+        ("remove", "/risk/no_such_member", None, "absent"),
+        (
+            "remove",
+            "/risk/drawdown_ladder/9",
+            None,
+            "index out of range",
+        ),
+        (
+            "add",
+            "/risk/drawdown_ladder/9",
+            Some("0.5"),
+            "index out of range",
+        ),
+        (
+            "remove",
+            "/risk/drawdown_ladder/3",
+            None,
+            "index out of range",
+        ),
+    ] {
+        let mut doctored = fixture.clone();
+        let slot = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .expect("the case");
+        let mut operation = serde_json::Map::new();
+        operation.insert("op".to_owned(), Json::String(op.to_owned()));
+        operation.insert("path".to_owned(), Json::String(path.to_owned()));
+        if let Some(value) = value {
+            operation.insert("value".to_owned(), Json::String(value.to_owned()));
+        }
+        slot["patch"]
+            .as_array_mut()
+            .expect("a patch list")
+            .push(Json::Object(operation));
+        let failure = run(doctored, id).expect_err("a patch the harness cannot apply must fail");
+        assert!(
+            failure.contains(expected) && failure.contains(path),
+            "`{op} {path}` must fail naming the path and the reason `{expected}`, got: {failure}"
+        );
+    }
+}
+
+/// Every shape of patch the fixture can carry is applied rather than refused: an array element
+/// replaced whole, a member added to an object, and a rung appended. All three are observable while
+/// the parser is a stub, because a patch the harness cannot apply fails the case *before* the parse
+/// does, with its own message instead of `unimplemented`.
+#[test]
+fn every_shape_of_patch_the_fixture_can_carry_is_applied() {
+    let fixture = fixture();
+    for (op, path, value) in [
+        (
+            "replace",
+            "/risk/drawdown_ladder/0",
+            serde_json::json!({"at": "0.04", "action": "scale_sizes", "factor": "0.5"}),
+        ),
+        ("add", "/risk/a_member", Json::String("1".to_owned())),
+        (
+            "add",
+            "/risk/drawdown_ladder/-",
+            serde_json::json!({"at": "0.09", "action": "flatten_and_pause", "factor": null}),
+        ),
+    ] {
+        let mut doctored = fixture.clone();
+        let slot = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == "MC-R01")
+            .expect("the case");
+        slot["patch"]
+            .as_array_mut()
+            .expect("a patch list")
+            .push(serde_json::json!({"op": op, "path": path, "value": value}));
+        let failure = run(doctored, "MC-R01").expect_err("the rules are stubs");
+        assert!(
+            failure.contains("unimplemented"),
+            "`{op} {path}` must apply and leave the case failing on the rule, got: {failure}"
+        );
+    }
+}
+
+/// A patch that resolves is applied to the document the rules see, not to a copy thrown away. Shown
+/// through the one place a patched value is observable while the parser is a stub: an `initial` field
+/// the harness reads, and the `at` a `risk_day` case states.
+#[test]
+fn a_patch_that_resolves_reaches_the_document() {
+    let fixture = fixture();
+    let mut doctored = fixture.clone();
+    let slot = doctored["cases"]
+        .as_array_mut()
+        .expect("a case list")
+        .iter_mut()
+        .find(|c| c["id"] == "MC-R01")
+        .expect("the case");
+    slot["initial"]["asset_class"] = Json::String("dogecoin".to_owned());
+    let failure = run(doctored, "MC-R01").expect_err("an unknown asset class must fail");
+    assert!(
+        failure.contains("asset_class"),
+        "the harness reads `initial` before it reaches a rule, got: {failure}"
+    );
+}
+
+/// `mandate::version_vector` checks the canonical bytes and the digest of the base document (§9.1), so
+/// it cannot pass while `Mandate::parse` is a stub. A vector case that returned `Ok` regardless would
+/// be the one case in the suite that passes without checking anything.
+#[test]
+fn the_version_vector_case_cannot_pass_on_the_stubs() {
+    let failure =
+        run(fixture(), "version_vector").expect_err("the canonical bytes need a real parse");
+    assert!(
+        failure.contains("unimplemented"),
+        "the vector must fail on the parse stub, got: {failure}"
+    );
+}
+
+/// Every owned family fails on this stream's stubs, naming the rule that is missing. A family arm
+/// that returned `Ok(())` would turn its whole family green in a suite where nothing is implemented,
+/// which is the one failure mode a reference-case harness must not have (DEC-77, DEC-85).
+#[test]
+fn every_owned_family_fails_on_the_stubs_naming_its_rule() {
+    let fixture = fixture();
+    for (kind, named) in [
+        ("schema", "mandate parser"),
+        ("semantic", "validate"),
+        ("policy", "check"),
+        ("change", "classify"),
+        ("risk_state", "Mandate::parse"),
+        ("risk_day", "risk_day"),
+        ("goal", "qty_increment"),
+    ] {
+        let id = fixture["cases"]
+            .as_array()
+            .expect("a case list")
+            .iter()
+            .find(|c| c["kind"] == kind)
+            .and_then(|c| c["id"].as_str())
+            .unwrap_or_else(|| panic!("the fixture has no `{kind}` case"))
+            .to_owned();
+        let failure =
+            run(fixture.clone(), &id).expect_err("an owned family must fail on the stubs");
+        assert!(
+            failure.contains(named),
+            "{id} (`{kind}`) must name what is missing, got: {failure}"
+        );
+    }
+}
