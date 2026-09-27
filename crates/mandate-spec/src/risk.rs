@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{Price, Qty, Ratio, Usd};
-use mandate_time::{Date, UtcNanos};
+use mandate_time::{Date, TimeError, UtcNanos, new_york_date_and_hour, new_york_midnight};
 
 use crate::document::{LadderAction, OnComplete};
 use crate::validate::ValidatedMandate;
@@ -519,9 +519,27 @@ pub struct RiskDay {
 }
 
 /// The risk day containing an instant, and its bounds.
+///
+/// The day is the New York calendar date of `at`, and its bounds are that date's midnight and the next
+/// date's, so the boundary instant is the first of the day it opens. `length_s` is the distance between
+/// the two bounds rather than a count kept beside them, which is how a daylight-saving day comes out at
+/// 23 or 25 hours without the rule naming either (America/New_York changes at 02:00, so both midnights
+/// always exist).
 pub fn risk_day(at: UtcNanos) -> Result<RiskDay, SpecError> {
-    let _ = at;
-    Err(SpecError::Unimplemented)
+    let (day, _) = new_york_date_and_hour(at)?;
+    let starts_at = new_york_midnight(day)?;
+    let ends_at = new_york_midnight(day.next()?)?;
+    let length_s = ends_at
+        .secs()
+        .checked_sub(starts_at.secs())
+        .and_then(|seconds| u32::try_from(seconds).ok())
+        .ok_or(TimeError::OutOfRange)?;
+    Ok(RiskDay {
+        day,
+        starts_at,
+        ends_at,
+        length_s,
+    })
 }
 
 /// Breach-time confirmation (§5.6), kept as its own type because three limits and one goal condition
