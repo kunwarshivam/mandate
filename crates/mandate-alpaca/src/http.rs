@@ -154,19 +154,27 @@ impl HttpRequest {
     /// The broker's close-position for one instrument, `DELETE /v2/positions/{symbol}`. Only an
     /// [`AccountWideScope`] opens it.
     ///
-    /// A symbol the allowlist refuses as one path segment is [`TransportError::RefusedPath`] and
-    /// nothing is sent, so the connector answers `NotSent` (DEC-133 item 32), never a broker's
-    /// rejection: a kill switch must tell a URL we could not build from a broker that refused.
-    /// `BTC/USD` is refused today; percent-encoding its `/` is a backlog row that blocks E7-4.
+    /// The path is [`position_path`]'s. A symbol it cannot write as one segment is
+    /// [`TransportError::RefusedPath`] and nothing is sent, so the connector answers `NotSent`
+    /// (DEC-133 item 32), never a broker's rejection: a kill switch must tell a URL we could not
+    /// build from a broker that refused.
     pub fn close_position(
         scope: &AccountWideScope,
         instrument: &InstrumentId,
     ) -> Result<Self, TransportError> {
         let _ = scope;
-        Self::account_wide(
-            Method::Delete,
-            &format!("/v2/positions/{}", instrument.as_str()),
-        )
+        Self::close_position_path(instrument)
+    }
+
+    /// One instrument's position, `GET /v2/positions/{symbol}`, on [`position_path`]'s path.
+    pub fn position(instrument: &InstrumentId) -> Result<Self, TransportError> {
+        Self::new(Method::Get, &position_path(instrument)?, None)
+    }
+
+    /// [`Self::close_position`] after its scope is shown, split out so this crate's tests, which
+    /// hold no [`AccountWideScope`], build the very request the kill switch does.
+    fn close_position_path(instrument: &InstrumentId) -> Result<Self, TransportError> {
+        Self::account_wide(Method::Delete, &position_path(instrument)?)
     }
 
     /// The one constructor of an account-wide request. `method` and `path_and_query` must name an
@@ -181,6 +189,14 @@ impl HttpRequest {
             }),
             Some(_) | None => Err(TransportError::RefusedPath),
         }
+    }
+
+    /// [`Self::close_position`] for this crate's own tests, which hold no [`AccountWideScope`].
+    #[cfg(test)]
+    pub(crate) fn close_position_for_tests(
+        instrument: &InstrumentId,
+    ) -> Result<Self, TransportError> {
+        Self::close_position_path(instrument)
     }
 
     /// [`Self::account_wide`] for this crate's own tests, which hold no [`AccountWideScope`]:
@@ -306,6 +322,45 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
     }
 }
 
+/// `/v2/positions/{symbol}` for one instrument, the one path both the positions read and the
+/// account-wide close are built on.
+///
+/// A crypto pair is written without its slash, `BTC/USD` as `BTCUSD`: Alpaca answers
+/// `/v2/positions/BTC/USD` with a 404 and `/v2/positions/BTCUSD` with the position (alpaca-py
+/// issue 537, on the paper host), and keeps the slash-free form as its legacy pair symbol. Only a
+/// pair of two letter-and-digit halves loses its slash; every other symbol must already be one
+/// segment of `wire`'s symbol alphabet, letters, digits and `.`, starting with a letter or a
+/// digit. Anything else — a third segment, an empty half, a dot segment, a percent sign, a query
+/// — is [`TransportError::RefusedPath`], so a hostile instrument id is never folded into another
+/// symbol's path, and the allowlist still judges what this returns.
+pub fn position_path(instrument: &InstrumentId) -> Result<String, TransportError> {
+    let symbol = instrument.as_str();
+    let segment = match symbol.split_once('/') {
+        None => symbol.to_owned(),
+        Some((base, quote)) if is_pair_half(base) && is_pair_half(quote) => {
+            format!("{base}{quote}")
+        }
+        Some(_) => return Err(TransportError::RefusedPath),
+    };
+    let symbol_like = segment
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphanumeric())
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.');
+    if symbol_like {
+        Ok(format!("/v2/positions/{segment}"))
+    } else {
+        Err(TransportError::RefusedPath)
+    }
+}
+
+/// One half of a crypto pair: letters and digits only, and at least one.
+fn is_pair_half(half: &str) -> bool {
+    !half.is_empty() && half.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
 /// Whether `segment` is a dot segment, `.` or `..`, in any spelling a URL parser decodes: each dot
 /// may be written `%2e` or `%2E` (the WHATWG URL standard, which `url` implements). A parser
 /// removes such a segment, and `..` the one before it too, so `DELETE /v2/orders/%2e` would be sent
@@ -412,9 +467,11 @@ fn classify(error: reqwest::Error) -> TransportError {
 
 #[cfg(test)]
 mod tests {
+    use mandate_accounting::InstrumentId;
+
     use super::{
         AlpacaPaperHttp, Credentials, HttpRequest, Method, TradingTransport, TransportError,
-        is_dot_segment, sent_as_built,
+        is_dot_segment, position_path, sent_as_built,
     };
 
     /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
@@ -489,6 +546,98 @@ mod tests {
                 "{} {path} would be sent to another endpoint once parsed, so it is refused \
                  before anything leaves (DEC-133 item 18a)",
                 method.as_str()
+            );
+        }
+        Ok(())
+    }
+
+    fn instrument(symbol: &str) -> Result<InstrumentId, String> {
+        InstrumentId::new(symbol).map_err(|e| format!("{e:?}"))
+    }
+
+    /// The path of a request, or its refusal.
+    fn path_of(request: Result<HttpRequest, TransportError>) -> Result<String, TransportError> {
+        request.map(|request| request.path_and_query().to_owned())
+    }
+
+    #[test]
+    fn a_crypto_pair_is_one_segment_without_its_slash_in_a_position_path() -> Result<(), String> {
+        for (symbol, path) in [
+            ("BTC/USD", "/v2/positions/BTCUSD"),
+            ("ETH/USDT", "/v2/positions/ETHUSDT"),
+            ("BRK.B", "/v2/positions/BRK.B"),
+            ("AAPL", "/v2/positions/AAPL"),
+        ] {
+            let instrument = instrument(symbol)?;
+            let expected = Ok(path.to_owned());
+            assert_eq!(
+                position_path(&instrument),
+                expected,
+                "{symbol}: Alpaca answers 404 on `/v2/positions/BTC/USD` and 200 on \
+                 `/v2/positions/BTCUSD`, its legacy pair symbol (#195 finding 1)"
+            );
+            assert_eq!(
+                path_of(HttpRequest::position(&instrument)),
+                expected,
+                "the positions read of {symbol} is built on that path"
+            );
+            assert_eq!(
+                path_of(HttpRequest::close_position_for_tests(&instrument)),
+                expected,
+                "and so is its account-wide close"
+            );
+            assert_eq!(
+                sent_as_built(path).map(|url| url.to_string()),
+                Ok(format!("https://paper-api.alpaca.markets{path}")),
+                "{path} is sent byte for byte as it was built"
+            );
+        }
+        let close = HttpRequest::close_position_for_tests(&instrument("BTC/USD")?);
+        assert_eq!(close.as_ref().map(HttpRequest::method), Ok(Method::Delete));
+        assert_eq!(close.as_ref().map(HttpRequest::body), Ok(None));
+        let read = HttpRequest::position(&instrument("BTC/USD")?);
+        assert_eq!(read.as_ref().map(HttpRequest::method), Ok(Method::Get));
+        assert_eq!(read.as_ref().map(HttpRequest::body), Ok(None));
+        Ok(())
+    }
+
+    #[test]
+    fn a_hostile_symbol_never_becomes_a_position_path() -> Result<(), String> {
+        for symbol in [
+            "../AAPL",
+            "AAPL/..",
+            "A/B/C",
+            "BTC/",
+            "/USD",
+            "/",
+            "BTC/US.D",
+            "BTC//USD",
+            ".",
+            "..",
+            "%2e%2e",
+            ".A",
+            "A%2FB",
+            "AAPL?percentage=1",
+            "AAPL#x",
+            "B TC",
+            "BTC/USD?x=1",
+        ] {
+            let instrument = instrument(symbol)?;
+            assert_eq!(
+                position_path(&instrument),
+                Err(TransportError::RefusedPath),
+                "{symbol:?} is not a symbol, so no position path is written for it"
+            );
+            assert_eq!(
+                path_of(HttpRequest::position(&instrument)),
+                Err(TransportError::RefusedPath),
+                "no read of {symbol:?} is built"
+            );
+            assert_eq!(
+                path_of(HttpRequest::close_position_for_tests(&instrument)),
+                Err(TransportError::RefusedPath),
+                "and no close of {symbol:?}, so the connector answers `NotSent` \
+                 (DEC-133 item 32)"
             );
         }
         Ok(())

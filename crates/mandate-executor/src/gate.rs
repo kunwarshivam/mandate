@@ -26,9 +26,10 @@ use crate::types::{AccountState, AgentId, GateCheck, GateVerdict, Mode, OrderSta
 pub struct PartialGateDecision {
     pub verdict: GateVerdict,
     pub checks: Vec<GateCheck>,
-    /// Whether the first failing check is one of the holds `AGENTS.md` rule 13 names — agent mode
-    /// `paused` or `stopped`, or an `Unknown` order in the instrument — which keep an exit
-    /// waiting and never deny it.
+    /// Whether the first failing check holds rather than denies: one of the holds `AGENTS.md`
+    /// rule 13 names for an exit (agent mode `paused` or `stopped`, an `Unknown` order in the
+    /// instrument, or `broker` on a blocked account), or `startup_reconciliation_pending` on an
+    /// opening before a reconciliation and an account since the start (#206 review).
     held: bool,
 }
 

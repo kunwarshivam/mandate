@@ -234,18 +234,24 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
-- **E10-6 (Should)** As an owner who already runs my own agent (for example Claude), I want to
-  connect it through a Mandate MCP server that exposes the same API Mandate uses to take my input,
-  so that my agent can work inside my mandate without a separate path around it
-  ([DEC-141](04-decision-log.md#decisions)). Follows the owner-input API work, after the tracer
-  bullet (E7-7); no change to milestone order. *Accepted when:* every client request passes through
-  the same order builder, autonomy rules, risk gate, account ledger, and journal as the owner's own
-  input; the client cannot change an envelope field (it may only propose a mandate version that the
-  human confirms with step-up); ASK approvals go only to the human owner, and a client cannot approve
-  its own proposal; owner-only privileges (owner exits outside the regular session at a confirmed
-  bid, Stop and release, the kill switch) stay with the human; the client authenticates with its own
-  scoped, revocable token and no broker credential crosses MCP; every client call is journaled with
-  the client's identity; and the owner can revoke the client at any time.
+- **E10-6 (Should, M8, pulled forward)** As an owner who already runs my own agent (for example
+  Claude), I want to connect it through a Mandate MCP server that exposes the same API Mandate uses
+  to take my input, so that my agent can work inside my mandate without a separate path around it
+  ([DEC-141](04-decision-log.md#decisions), [DEC-148](04-decision-log.md#decisions)). An optional
+  channel and an adoption on-ramp, never the only or the main path: the complete product leads, and
+  the platform's research agent brings the ideas. **Placement (DEC-148):** the first M8 story after
+  the owner-input API (M8's mandate registry, approval service, and owner controls), E9-1, E9-2,
+  E9-4, and E10-3, ahead of M8's other Should stories (E9-5, E10-5); it does not wait for M9 or M10,
+  and its earlier dependencies (E5, E6-2, E6-3, E7-2, E7-3, E7-5, and the tracer bullet E7-7) land
+  before the Phase 1 gate. No change to milestone order. *Accepted when:* every client request
+  passes through the same order builder, autonomy rules, risk gate, account ledger, and journal as
+  the owner's own input; the client cannot change an envelope field (it may only propose a mandate
+  version that the human confirms with step-up); ASK approvals go only to the human owner, and a
+  client cannot approve its own proposal; owner-only privileges (owner exits outside the regular
+  session at a confirmed bid, Stop and release, the kill switch) stay with the human; the client
+  authenticates with its own scoped, revocable token and no broker credential crosses MCP; every
+  client call is journaled with the client's identity; and the owner can revoke the client at any
+  time.
 
 ### E11 Web app: dashboard and controls
 
@@ -260,6 +266,10 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E12-1 (Must)** As an auditor, I want a causal trace from any fill back to its causes.
 - **E12-2 (Must)** As an auditor, I want per-agent timelines with filters and JSON/CSV export.
 - **E12-3 (Should)** As an auditor, I want to run chain verification from the UI.
+- **E12-4 (Could, not yet planned)** As an owner, I want a monthly record of every mandate breach
+  and near-breach on my account, derived from the journal and its anchors, so that I can see the
+  mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
+  DEC-145). Publishing it beyond the owner needs counsel's answer and the founder (DEC-79).
 
 ### E13 Hybrid deployment
 
@@ -288,6 +298,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   from forward paper trading only, never from historical backtests of LLM theses; the scorecard
   shows each signal model's results beside the baselines.
 - **E15-4 (Could)** As an operator, I want shadow mode for a new mandate version.
+- **E15-5 (Should, after the Phase 1 exit)** As an owner, I want to run up to three variants of my
+  mandate at once, one live and the others in shadow, so that I can compare strategy changes before
+  risking money ([strategy option 16](../product/10-strategy-options.md#option-16-mandate-experiments-multi-variant-shadow-mode-founder-2026-09-27)).
+  Subsumes E15-4 (one shadow candidate is the one-variant case) and is pulled forward from Phase 3;
+  no change to the v1 milestones. *Accepted when:*
+  each variant is its own owner-confirmed mandate version that differs only in strategy fields (signal
+  models, weights, thresholds, cadence); shadow variants see the same market data and pass the same
+  gate, evaluated against their own simulated account state, never consuming or holding the live
+  account's buying power, day-trade budget, or reservations (so no shadow variant can hold a live
+  exit, rule 13); they keep a simulated book labelled as simulated, any comparison between variants is
+  labelled as hypothetical performance, and they send nothing to the broker; each variant's
+  hypothesis and success criterion are journaled before it runs; promotion is only an owner action
+  that creates a new confirmed mandate version, with no automatic winner-picking; and no mandate holds
+  more than three variants.
 
 ### E17 Research agent and dynamic universe
 
@@ -386,6 +410,84 @@ fully on-prem control plane; shared data plane; strategy marketplace.
      through the eligibility floor, the autonomy rules and the risk gate like the platform's own ideas. It
      never sizes or places an order (rule 4).
 
+## Enterprise harness (proposed, DEC-149)
+
+Epic **E18**, from the [harness engineering research](../product/11-harness-engineering.md#7-recommendations)
+of 2026-09-27. [DEC-149](04-decision-log.md#decisions) makes the harness (gate, autonomy rules,
+journal, executor, connectors, conformance suite, and MCP channel) an enterprise product that the
+retail platform runs through. Every story here is **(Proposed, not scheduled)**: none is in the epic
+overview, none is assigned a milestone, and v1's milestones do not change. **SC** marks a story that
+touches a safety-critical path (gate, autonomy, journal, executor, connectors, credentials, auth, or
+tenant isolation): the `AGENTS.md` safety-critical rules apply to it (tests written or verified
+against approved reference cases first, property tests for its invariants, an independent review by
+an agent on a different model, zero missed mutants, and green CI).
+
+- **E18-1 (Proposed, not scheduled; SC)** As a broker or fintech, I want a versioned tenant policy
+  overlay on my customers' mandates, with inline tests, so that my house rules apply to every agent.
+  *Accepted when:* the overlay can only tighten a mandate, never loosen it (as E9-3's org limits
+  do), and property tests prove that for any mandate and overlay the effective limits are at least
+  as strict as both.
+- **E18-2 (Proposed, not scheduled; SC)** As an enterprise SRE, I want OpenTelemetry GenAI spans
+  derived from the journal so that agent runs show in my tracing stack. *Accepted when:* spans are
+  derived from journaled events only, content attributes are off by default (no order details,
+  positions, or mandate content leave the deployment unless the customer turns them on, rule 6 and
+  "Do not"), and the semantic-conventions version is pinned.
+- **E18-3 (Proposed, not scheduled; SC)** As a compliance officer, I want SIEM export and a signed
+  per-period evidence pack so that I can file the period's record. *Accepted when:* the pack holds
+  the chain segment, anchor proofs, mandate versions, gate verdicts, and reconciliation results,
+  verifies offline with `journal verify`, and exports in at least one documented SIEM format.
+- **E18-4 (Proposed, not scheduled; SC)** As an agent builder, I want the MCP channel to be a policy
+  enforcement point so that my agent can act only through Mandate's rules. *Accepted when:* it
+  accepts only tokens issued to Mandate and never passes a token through to a broker or another
+  service; its tools are intent-shaped (`propose_intent`, `explain_verdict`), never a raw
+  `place_order`; scopes start read-only and elevate incrementally; and tool schemas are pinned, failing
+  closed on a change. Builds on E10-6.
+- **E18-5 (Proposed, not scheduled; SC)** As an owner, I want each mandate version and each ASK
+  approval signed with my step-up credential and journaled, in the manner of AP2's signed mandates,
+  so that my intent is provable. *Accepted when:* an unsigned or wrongly signed version or approval
+  is refused and journaled, and the signature verifies from the journal alone. Any legal wording
+  about what a signature means is reserved for the founder (DEC-79).
+- **E18-6 (Proposed, not scheduled)** As a connector or agent vendor, I want the conformance suite
+  packaged as a certification kit so that I can show my integration is safe to connect.
+  *Accepted when:* a third party runs it against its connector or agent and gets a report of pass^k
+  over seeded fuzz runs, reproducible from the seed.
+- **E18-7 (Proposed, not scheduled)** As a buyer, I want an adversarial bench so that I can see what
+  a compromised model can do. *Accepted when:* with injected news, filings, and tool outputs, it
+  measures the limit-breach rate given a fully compromised model (every model output adversarial),
+  and the pass condition is zero breaches.
+- **E18-8 (Proposed, not scheduled; SC)** As a platform operator, I want tenant isolation as a
+  checked invariant so that no tenant can read or affect another's state. *Accepted when:* each
+  tenant has its own chains and anchors, type or layer rules make cross-tenant access
+  unrepresentable where possible, and a cross-tenant fuzz finds no leak.
+- **E18-9 (Proposed, not scheduled; SC)** As an enterprise admin, I want OIDC and SAML SSO, SCIM,
+  and AUDITOR and SUPERVISOR roles with ASK routing to supervisors so that the harness fits my
+  identity and supervision model. *Accepted when:* each role's permissions are tested, and an ASK
+  can route to a supervisor without letting anyone approve their own proposal. SAML and SCIM stay
+  after v1 ([DEC-18](04-decision-log.md#decisions)).
+- **E18-10 (Proposed, not scheduled; SC)** As a regulated firm, I want a self-hosted or VPC
+  deployment with a pluggable external anchor (my WORM store or a transparency log) so that my
+  records stay under my control. *Accepted when:* anchors written to the customer's store verify
+  with `journal verify`. Relates to E13 and strategy option 15; a fully on-prem control plane stays
+  Won't (v1).
+- **E18-11 (Proposed, not scheduled; SC)** As a quant team, I want a sandbox for my strategy code so
+  that it can propose but never trade. *Accepted when:* sandboxed code has no broker egress and no
+  vault access and can emit only intents, which enter through the builder, autonomy rules, and gate
+  (rule 4). Relates to DEC-20's later WebAssembly plug-ins.
+- **E18-12 (Proposed, not scheduled; SC)** As a risk officer, I want sequence and flow policies over
+  journaled intents so that order splitting and churn are caught. *Accepted when:* a split order
+  that would breach a limit as one order is denied, and the policy reads journal state only.
+- **E18-13 (Proposed, not scheduled; SC)** As an auditor, I want `mandate replay <range>` so that I
+  can reproduce every gate verdict in a range. *Accepted when:* replay from the journal gives
+  byte-identical verdicts, and any difference is reported, never silently accepted.
+- **E18-14 (Proposed, not scheduled; SC)** As an agent builder, I want a denial to carry its reason
+  codes and the tightest compliant alternative so that my agent can recover without guessing.
+  *Accepted when:* the alternative is computed deterministically, passes the gate against the same
+  state if proposed, and never adds risk beyond the denied request.
+- **E18-15 (Proposed, not scheduled)** As a compliance buyer, I want a published compliance mapping
+  so that I can trace each control to evidence. *Accepted when:* each control maps to a test ID and a
+  journal event type, and CI fails if a mapped test or event type disappears. Its legal and
+  compliance wording is reserved for the founder and counsel (DEC-79).
+
 ## Spec follow-ups (minor review findings, deferred by the freeze rule)
 
 From the final review of mandate spec v0.3:
@@ -452,15 +554,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
   `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
   every named entry are already caught (round-3 review finding 3).
-- **Blocks E7-4 (the first `AccountWideScope` constructor):** encode a crypto pair's `/` where
-  `/v2/positions/{symbol}` is built (`HttpRequest::close_position` and the positions read). `wire`
-  holds a broker symbol to one or two segments of letters, digits and `.` (slice a2), so nothing
-  hostile reaches the path, but `BTC/USD` still builds two segments where Alpaca takes `BTCUSD` or
-  `BTC%2FUSD`. Since #195 the allowlist refuses both the read and the close, and a refused close
-  answers `NotSent`, never a broker's rejection, so a crypto close fails loudly rather than going
-  to the wrong path; until this lands the account and workspace kill switches cannot close a crypto
-  position by close-position, so E7-4 must not construct an `AccountWideScope` before it (#191
-  review, round 3; #195 review, round 1, finding 1).
+- Normalize a crypto symbol `mandate-alpaca` reads back from the broker. Position paths now write
+  `BTC/USD` as `BTCUSD` (`http::position_path`, the positions read and the account-wide close), but
+  `wire` keeps whatever symbol a response names, so a position reported as `BTCUSD` and an order
+  placed as `BTC/USD` would be two instrument ids, where trading-domain spec §2.3 makes them one.
+  Only a recorded crypto position shows which form the paper host sends; normalize on
+  `asset_class: crypto` before E7-3's reconciliation compares crypto positions.
 - Read a working external notional order's exposure. `wire` ingests an external order placed by
   notional with `qty` equal to its `filled_qty`, so a working one understates what it can still
   buy, and its `notional` is read nowhere and is not in `record::RECORDED_FIELDS`. The exposure is
@@ -472,9 +571,19 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
+- **Before stream G's gate is wired in:** register `startup_reconciliation_pending` in the
+  trading-domain `reason_codes` registry, or record why not. It is a third partial-gate reason code
+  outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
+  codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
+  items 23 and 27, ADR-0001 ES-09; #206 review).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
-- Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
+- Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
+  restriction stands "until the owner acknowledges and the account is refreshed", but
+  `state::restriction_for` only yields `reconciliation:{subject}`, so no `OwnerAcknowledged` can
+  name `account_trading_blocked`, and a later `ACTIVE` read leaves `account_state` `Blocked` and the
+  restriction in place. Pre-existing on main; the cash slice is the first to raise it from every
+  reconciliation run (#205 review, round 2, minor 3).
 - Pin or drop the two unreachable overflow sites in `ExecutorState::buying_power`: the reservations sum and the final `min(model, broker) − reserved`. `Usd` is signed, so each fails only at the decimal range, which no reservation reaches, and replacing either `None` with zero passes every test; the reachable site, the model's cash, is pinned (#198 review, round 2, finding 3).
 - **Blocks running the executor across a session boundary:** fold `TradingDayStarted` and
   `RiskDayStarted` in `mandate-executor`. Since #194's round 1 both answer the later slice's
@@ -510,16 +619,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   fill trades on a Tuesday, so `first_on_or_after(date, is_trading_day)` is the identity and a
   `day` taken straight from the broker's `trade_date`, bypassing the account's calendar, passes the
   suite. A fixture with a Saturday or holiday `trade_date` pins it (#196 review, round 2, finding 1).
-- **Decide before E7-3's cash slice:** how an asset-denominated crypto fee is journaled. Two pending
-  E7-3 tests fold `FeesCharged` with `family: "crypto_asset"`, no `day`, and an `instrument`:
-  `hand::unposted_crypto_asset_fees_explain_the_crypto_difference` and the RC-07 harness reached
-  by `refcases::trading_domain_rc_07_unposted_crypto_fees_reconcile`. `crypto_asset` is a `FeeKind`
-  payload name, not a `FeeFamily` (`Equities | Crypto`), and `mandate-refcases`'s reference
-  implementation refuses it as an unknown fee family, so both die on the fold. Unlike `sec_31` (#197)
-  the fix is not a literal swap: §6.3 says asset-denominated fees are not accrued liabilities, which
-  suggests that path should not journal a `FeesCharged` at all. Settle the event first (the
-  coordinator's call, with a decision-log row), then correct both tests in one reviewed
-  tests-correction PR so E7-3's implementer isn't blocked (#197 review, round 1, finding 1).
+- Reconcile journal spec §9's "daily snapshot" with `AccountSnapshotRecorded`'s cadence in
+  `mandate-executor`: since the cash slice every reconciliation run that has a base records one
+  (at startup, at each `Unknown`, at session boundaries, at fee postings). Either the spec line
+  names every run, or the executor records the daily one only and carries the comparison's base
+  another way (#205 review, round 1, finding 7a).
+- Give `AccountSnapshotRecorded` one shape in `mandate-executor`: a fee posting with no cash base
+  records it through `fees()`'s fallback without `model_cash`, `cash_band` or `cash_in_band`,
+  while a run with a base records all three (#205 review, round 1, finding 7b).
+- Answer an underflow in `mandate-executor`'s `asset_fees` with a typed error: a posted crypto asset
+  fee larger than the one held is folded as `checked_sub(charged).unwrap_or(Qty::ZERO)`, which errs
+  strict but silently, where the crate's convention is a typed error (#205 review, round 1,
+  finding 7c).
+- Wire the gate's buying-power port in `mandate-executor`. `ExecutorState::buying_power` and
+  `crypto_buying_power` are computed and pinned but only tests read them; the gate still checks no
+  buying power. The port must read the equity row for an equity order and the crypto row for a
+  crypto order, and treat `None` (no account reported, an incomplete report, or an overflow) as no
+  buying power, failing closed (`AGENTS.md` rule 3; #205 review, round 1).
 - Make the reproduction line `ci pending` prints runnable as printed: quote the `-E` filterset
   (it contains parentheses, so a shell refuses it) and add `NEXTEST_EXPERIMENTAL_LIBTEST_JSON=1`,
   which the gate sets and nextest requires for libtest JSON. Both fail loudly today rather than

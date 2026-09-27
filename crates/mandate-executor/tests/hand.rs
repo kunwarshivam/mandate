@@ -1802,7 +1802,9 @@ fn a_journal_only_order_is_reconciled_away_not_kept() {
     let run = reconcile(&shell.state, &taken, &ports).expect("the reconciliation runs");
 
     assert!(
-        run.differences.iter().any(|d| d.subject == id && d.adopted),
+        run.differences
+            .iter()
+            .any(|d| d.subject == id && d.adopted()),
         "the broker wins on the order set: our own state is never kept because it is ours \
          (planted bug 3): {:?}",
         run.differences
@@ -2188,7 +2190,7 @@ fn a_fee_difference_is_alerted_and_never_adjusted() {
         .find(|d| d.kind == mandate_executor::DifferenceKind::Fee)
         .expect("3.5 of accrued fees the ledger does not have is a difference");
     assert!(
-        !fee.adopted,
+        !fee.adopted(),
         "§11 says a fee difference is alerted and never silently adjusted"
     );
     assert!(
@@ -2459,10 +2461,17 @@ fn a_submission_between_the_snapshot_and_the_run_recomputes_the_run() {
     let runs_before = runs(&shell);
     shell.next_append = AppendOutcome::HeadMismatch;
     let refused = shell.run(Input::BrokerSnapshot(taken), &ports);
-    assert_eq!(
-        refused.draft_types().first(),
-        journaled(&stale.effects).first(),
-        "the stale batch is offered to the journal: {:?}",
+    let stale_drafts: Vec<_> = stale
+        .effects
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Journal(d) => Some(d.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !refused.drafts.is_empty() && stale_drafts.starts_with(&refused.drafts),
+        "the stale batch is offered to the journal, draft for draft, every field equal: {:?}",
         refused.draft_types()
     );
     assert_eq!(runs(&shell), runs_before, "and the journal refused it");

@@ -132,7 +132,12 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
             state.consecutive_403s = 0;
             Ok(())
         }
-        "AccountStateObserved" | "AccountSnapshotRecorded" => account_observed(state, payload),
+        "AccountStateObserved" => account_observed(state, payload),
+        "AccountSnapshotRecorded" => {
+            account_observed(state, payload)?;
+            cash_compared(state, payload);
+            Ok(())
+        }
         "RejectObserved" => {
             state.consecutive_403s = if optional_int(payload, "http_status") == Some(403) {
                 state.consecutive_403s.saturating_add(1)
@@ -628,6 +633,20 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
     Ok(())
 }
 
+/// A reconciliation's recorded snapshot says whether the broker's cash fell inside the band. The
+/// consecutive runs outside it are counted here, from the journal, so the count survives the
+/// re-anchor the snapshot makes and a restart (§11, DEC-146); a snapshot that compared no cash
+/// leaves it alone.
+fn cash_compared(state: &mut ExecutorState, payload: &Value) {
+    match payload.get("cash_in_band") {
+        Some(Value::Bool(true)) => state.cash_out_of_band = 0,
+        Some(Value::Bool(false)) => {
+            state.cash_out_of_band = state.cash_out_of_band.saturating_add(1);
+        }
+        _ => {}
+    }
+}
+
 /// Paper's simulated fee accrues in its `(family, day)` bucket, which buying power charges at
 /// `round(bucket, 2, ceiling)` as `mandate-accounting` charges it (trading-domain spec §6.2, §7.2,
 /// §10, DEC-104), so paper never looks richer than live. The broker's own fees, posted or
@@ -650,11 +669,11 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         return Ok(());
     }
     if !flag(payload, "simulated") {
-        let charged = optional_usd(payload, "charged")?.unwrap_or(Usd::ZERO);
-        state.unposted_fees = state
-            .unposted_fees
-            .checked_add(usd(payload, "accrued")?)?
-            .checked_sub(charged)?;
+        posted(
+            state,
+            usd(payload, "accrued")?,
+            optional_usd(payload, "charged")?,
+        )?;
         return Ok(());
     }
     {
@@ -668,10 +687,36 @@ fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
     Ok(())
 }
 
+/// The broker's own fee, §8.3's `FeesCharged` row: the accrual grows by `accrued`, and a posted
+/// `charged` leaves settled cash (the model's cash flow) and clears that much of the accrual. The
+/// accrual never goes below zero: a charge above what was accrued clears it and still takes the
+/// whole charge from cash, so neither the cash band nor buying power ever reads a negative accrual
+/// as spare cash (§11 "exact after posting", `AGENTS.md` rule 3; #205 review, round 2).
+fn posted(
+    state: &mut ExecutorState,
+    accrued: Usd,
+    charged: Option<Usd>,
+) -> Result<(), ExecutorError> {
+    let charged = charged.unwrap_or(Usd::ZERO);
+    state.cash_flow = state.cash_flow.checked_sub(charged)?;
+    state.unposted_fees = state
+        .unposted_fees
+        .checked_add(accrued)?
+        .checked_sub(charged)?
+        .max(Usd::ZERO);
+    Ok(())
+}
+
 /// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
 /// pause it caused (trading-domain spec §11, interpretation 14).
+///
+/// The owner is who authorizes it: the event reaches the account stream only as a copy from the
+/// control stream, which only the owner-facing surface writes, and it names its `user` (required,
+/// opaque) and carries step-up evidence. Inside this crate nothing else tells an owner from an
+/// agent (journal spec §9, #205 review, round 1, finding 6).
 fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     let subject = required_text(payload, "subject")?;
+    required_text(payload, "user")?;
     if required_text(payload, "step_up")?.is_empty() {
         return Ok(());
     }
@@ -840,7 +885,7 @@ mod buying_power_tests {
         Input as AccountingInput, InstrumentId, Record, Reservations, Side, TafCapBasis,
     };
     use mandate_canon::Value;
-    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, Usd};
+    use mandate_num::{Bps, FeeCap, FeePerShare, FeeRate, Price, Qty, SignedQty, Usd};
     use mandate_time::{Date, NewYorkTime, TradingCalendar, new_york_instant};
 
     use super::fold;
@@ -969,6 +1014,91 @@ mod buying_power_tests {
         Ok(())
     }
 
+    /// §8.3's `FeesCharged` row: a posting takes the charge from settled cash as it clears the
+    /// accrual, and a charge above the accrual clears it to zero and still takes the whole charge.
+    /// Buying power is right between the posting and the next account read (#205 review, round 2).
+    #[test]
+    fn a_posted_fee_leaves_cash_and_clears_the_accrual_never_below_zero()
+    -> Result<(), ExecutorError> {
+        let broker = |accrued: &str, charged: &str| {
+            vec![
+                ("family", text("equities")),
+                ("day", text("2026-09-22")),
+                ("accrued", text(accrued)),
+                ("charged", text(charged)),
+                ("simulated", Value::Bool(false)),
+            ]
+        };
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        stream.fold("FeesCharged", broker("5", "0"))?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("995")?),
+            "the accrual is reserved"
+        );
+        stream.fold("FeesCharged", broker("0", "5"))?;
+        assert_eq!(
+            (stream.state.unposted_fees, stream.state.cash_flow),
+            (Usd::ZERO, usd("-5")?),
+            "the posting clears the accrual and leaves cash"
+        );
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("995")?),
+            "and buying power is right before the next account read"
+        );
+        stream.fold("FeesCharged", broker("2", "5"))?;
+        assert_eq!(
+            (stream.state.unposted_fees, stream.state.cash_flow),
+            (Usd::ZERO, usd("-10")?),
+            "a charge above the accrual floors it at zero and takes the whole charge"
+        );
+        assert_eq!(stream.state.buying_power(), Some(usd("990")?));
+        Ok(())
+    }
+
+    /// §6.3 and §11's crypto row, as DEC-147 records: an asset-denominated crypto fee is not an
+    /// accrued USD liability. It leaves the position net of the fee, is held per instrument in
+    /// `asset_fees` until it posts, and never reaches the USD `unposted_fees` the cash band and the
+    /// fee comparison read.
+    #[test]
+    fn a_crypto_asset_fee_is_held_in_the_asset_never_as_usd() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold(
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-btc")),
+                ("instrument", text("BTC/USD")),
+                ("side", text("buy")),
+                ("qty_gross", text("0.5")),
+                ("price", text("60000")),
+            ],
+        )?;
+        stream.fold(
+            "FeesCharged",
+            vec![
+                ("family", text("crypto_asset")),
+                ("accrued", text("0.00125")),
+                ("charged", text("0")),
+                ("instrument", text("BTC/USD")),
+            ],
+        )?;
+        let btc = InstrumentId::new("BTC/USD")?;
+        assert_eq!(
+            stream.state.asset_fees.get(&btc).copied(),
+            Some(Qty::parse("0.00125")?),
+            "held in the asset"
+        );
+        assert_eq!(stream.state.unposted_fees, Usd::ZERO, "never as USD");
+        assert_eq!(
+            stream.state.positions.get(&btc).copied(),
+            Some(SignedQty::parse("0.49875")?),
+            "the position is net of the fee"
+        );
+        Ok(())
+    }
+
     /// §11's cash band is 0.01 × the fills since the last broker cash snapshot: a snapshot,
     /// observed or recorded by a reconciliation, starts the count again, so an old fill never
     /// widens a later band.
@@ -1058,6 +1188,29 @@ mod buying_power_tests {
             stream.state.buying_power(),
             Some(usd("994.93")?),
             "and the broker's own unposted fee, 5.001, is charged at its ceiling cent, 5.01 (§7.2)"
+        );
+        Ok(())
+    }
+
+    /// The bucket is keyed by family as well as day: two families' fees on one day are rounded up
+    /// once each, never merged and rounded once, which would read a cent richer (§7.2, DEC-104;
+    /// the backlog's family-key row, #198 review, round 2, finding 2).
+    #[test]
+    fn two_families_on_one_day_are_two_buckets() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold("AccountStateObserved", account("1000", "5000"))?;
+        stream.fold("FeesCharged", fee("2026-09-22", "0.001", true))?;
+        let mut crypto = fee("2026-09-22", "0.001", true);
+        for pair in &mut crypto {
+            if pair.0 == "family" {
+                pair.1 = text("crypto");
+            }
+        }
+        stream.fold("FeesCharged", crypto)?;
+        assert_eq!(
+            stream.state.buying_power(),
+            Some(usd("999.98")?),
+            "0.01 for each family's 0.001, not 0.01 for a merged 0.002"
         );
         Ok(())
     }

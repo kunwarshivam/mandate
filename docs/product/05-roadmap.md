@@ -89,7 +89,9 @@ Everything in the [PRD](04-prd-v1.md) P0 list:
 - Hybrid deployments hardened (upgrades, health, fallback approval channels).
 - Fast decision models (Laya in-process, Jev optional) with deadlines.
 - Scorecards extended to the fast decision models; user-selectable sizing methods; calibration only as a user-selected, versioned method (DEC-47).
-- Shadow mode for new mandate versions.
+- Shadow mode for new mandate versions. Multi-variant mandate experiments (E15-5,
+  [strategy option 16](10-strategy-options.md#option-16-mandate-experiments-multi-variant-shadow-mode-founder-2026-09-27))
+  are pulled forward to right after the Phase 1 exit.
 - Kraken Derivatives US connector: CFTC-regulated crypto perpetuals, with perpetuals accounting
   (funding, margin, liquidation thresholds) and a funding/carry signal model.
 - SMS and phone escalation; two-approver rule.

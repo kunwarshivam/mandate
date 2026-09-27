@@ -4,6 +4,9 @@
 |---|---|
 | **Mandate** (product) | Working name of the platform |
 | **mandate** (object) | An agent's binding specification: goal, instruments, capital, connection, signal models, sizing, cadence, protection, risk limits, autonomy rules, notifications ([mandate spec](../specs/mandate.md)). Called the "agent spec" in the HLD |
+| **Harness** | Mandate's enterprise layer: the gate, autonomy rules, journal, executor, connectors, conformance suite, and MCP channel, sold to brokers, fintechs, and teams building agents ([DEC-149](../project/04-decision-log.md#decisions)). Not the same as a test harness |
+| **Platform (Mandate)** | Mandate's retail layer for owners; it runs through the harness and has no private path around it ([DEC-149](../project/04-decision-log.md#decisions)) |
+| **Inner harness / outer harness** | The inner harness is the code around a model: loop, tools, context, sandbox, permissions, and hooks. The outer harness is what a team builds so agents do reliable work: the repository as system of record, mechanical invariants, evals, and feedback ([harness engineering §1](11-harness-engineering.md#1-what-harness-engineering-means)) |
 | **Agent** | A versioned mandate plus the logic that executes it |
 | **Deployment** | A running instance of one agent version |
 | **Organization** | Billing and SSO entity; sets org-wide limits |
@@ -69,6 +72,7 @@
 | **Corporate actions** | Splits, dividends, and similar events that change share counts or cash and must be applied to positions and price history |
 | **CFTC-regulated perpetual** | A perpetual future listed on a US exchange regulated by the Commodity Futures Trading Commission (for example, via Kraken Derivatives US) |
 | **Shadow mode** | Running a new mandate version alongside the live one without real orders, to compare decisions |
+| **Mandate experiment** | Up to three variants of a mandate run at once, one live and the others in shadow mode, each with its hypothesis journaled before it runs; only the owner promotes a variant, as a new confirmed mandate version |
 | **Perpetual future (perp)** | A futures contract with no expiry, kept near spot price through funding payments |
 | **Funding** | Periodic payments between long and short perpetual holders |
 | **Slippage** | Difference between the expected and actual fill price |

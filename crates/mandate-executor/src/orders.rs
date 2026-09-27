@@ -542,6 +542,16 @@ pub(crate) fn account(
     account: &BrokerAccount,
 ) -> Result<(), ExecutorError> {
     batch.journal("AccountStateObserved", None, account_fields(account)?)?;
+    account_restriction(batch, account)
+}
+
+/// §7.3's first row, read on any account the broker reports, pushed or read by a reconciliation:
+/// a status other than `ACTIVE`, or any blocking flag, restricts the account as blocked and pauses
+/// every agent, once.
+pub(crate) fn account_restriction(
+    batch: &mut Batch<'_, '_>,
+    account: &BrokerAccount,
+) -> Result<(), ExecutorError> {
     let blocked = account.status != "ACTIVE"
         || account.trading_blocked
         || account.account_blocked

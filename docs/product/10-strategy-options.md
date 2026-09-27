@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | **Owner** | Product |
-| **Status** | Draft v0.2, 2026-09-27. Research input for the founder, updated for the founder's decision on DEC-141. Not a PRD change, and not legal advice |
+| **Status** | Draft v0.3, 2026-09-27. Research input for the founder, updated for the founder's decisions on DEC-141, DEC-145, DEC-148, and DEC-149 and for option 16. Not a PRD change, and not legal advice |
 | **Inputs** | [Issue #177](https://github.com/kunwarshivam/mandate/issues/177), the [competitive landscape](03-competitive-landscape.md) v0.2, [vision](01-vision-and-strategy.md), [PRD](04-prd-v1.md), [pricing](07-pricing-and-packaging.md), [compliance](08-compliance-and-regulatory.md), [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), and the [decision log](../project/04-decision-log.md) |
 | **Method** | Public web sources, read 2026-09-26 and 2026-09-27, then fact-checked against each source page. No accounts, outreach, broker tools, or orders |
-| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API |
+| **Decision** | [DEC-141](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): Mandate stays the complete product; an owner's own agent may connect as an optional channel through a Mandate MCP server over the owner-input API. [DEC-148](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): that channel (E10-6) is pulled forward to M8 and stays optional, never the main path. [DEC-145](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): no platform-paid loss or breach guarantee. [DEC-149](../project/04-decision-log.md#decisions), Accepted (founder, 2026-09-27): the harness is an enterprise product, and the platform runs through it ([positioning](#positioning-harness-and-platform-dec-149)) |
 
 > **Regulatory material in this document is a summary of public guidance and commentary. It is not
 > legal advice and draws no legal conclusion.** Legal and compliance text is reserved for the founder
@@ -35,7 +35,8 @@ or, for sources used only here, to [this document's source list](#sources).
    owner who already runs their own agent can connect it through a Mandate MCP server that exposes
    the same API Mandate uses to take the owner's input, so every request passes the same builder,
    autonomy rules, gate, ledger, and journal. That channel is an adoption on-ramp, not a separate
-   product. Hedge with compliance evidence for small advisers and an agent-safety conformance suite.
+   product, and never the only or the main path; DEC-148 pulls its story (E10-6) forward to M8.
+   Hedge with compliance evidence for small advisers and an agent-safety conformance suite.
 
 ## 1. Market evidence
 
@@ -117,7 +118,8 @@ the owner's own agent pays its own model costs.
 
 ## 5. Strategy options
 
-Options 0 to 12 come from the strategy research; options 13 to 15 are those in issue #177. Every
+Options 0 to 12 come from the strategy research; options 13 to 15 are those in issue #177; option 16
+is the founder's, from 2026-09-27. Every
 experiment is paper only, spends nothing, and contacts no one without the founder's authorization.
 "Kill" means stop the option, not the product.
 
@@ -141,6 +143,7 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 | 13 | Bring-your-own-strategy as the lead and as a diagnostic (#177) | C, D | Per live agent | Question 34 |
 | 14 | Small systematic trading teams (#177) | E | Per organization | Depends on who owns the ideas |
 | 15 | Customer-side deployment and private models (#177) | D, E | Hybrid and on-prem licence | As 0 or 13 |
+| 16 | Mandate experiments: multi-variant shadow mode (founder, 2026-09-27) | A, C, D | Part of the plan; model cost per variant | Hypothetical performance (questions 10, 35) |
 
 ### Option 0: Baseline, platform-originated theses (DEC-97)
 
@@ -161,8 +164,8 @@ experiment is paper only, spends nothing, and contacts no one without the founde
 
 The research first framed this as a lead "gateway" product. The founder's decision keeps the
 evidence and changes the role: the complete product leads, and this is an optional channel over the
-owner-input API. The evidence below is unchanged.
-
+owner-input API, not the main path. DEC-148 pulls its story forward without changing that role. The
+evidence below is unchanged.
 
 - **Target.** Segment A, then C: owners already running Claude, ChatGPT, Codex, or a custom agent on
   Alpaca or Robinhood.
@@ -180,8 +183,11 @@ owner-input API. The evidence below is unchanged.
   many customers are unresolved (OD-12), and it has no paper environment documented [RH2], which
   is why DEC-124 uses the simulated broker. As a lead product it would weaken the "platform brings
   the ideas" headline, which is why DEC-141 makes it a channel, not the lead.
-- **Plan impact (DEC-141).** No change to milestone order. Story E10-6, a Mandate MCP server over
-  the owner-input API, follows the owner-input API work, after the tracer bullet (E7-7). It is not a
+- **Plan impact (DEC-141, DEC-148).** No change to milestone order. Story E10-6, a Mandate MCP
+  server over the owner-input API, is pulled forward (DEC-148): it is the first M8 story after the
+  owner-input API, sign-in, roles, step-up (E9-1, E9-2, E9-4), and mandate versions (E10-3), ahead
+  of M8's other Should stories, and it does not wait for M9 or M10. It cannot come earlier, because
+  the token and step-up it needs are M8 work. It stays optional and is not the main path. It is not a
   separate proposer path: requests pass the same builder, autonomy rules, gate, ledger, and journal
   as the owner's own input. The client cannot change the envelope (it may propose a mandate version
   the human confirms with step-up), cannot answer its own ASK approvals, and holds none of the
@@ -201,7 +207,8 @@ owner-input API. The evidence below is unchanged.
 - **Kill (of the channel's priority, not of the decision).** Fewer than 4 of 10 agent users report an
   incident, workaround, or refusal to automate that the channel would have addressed; or no
   interviewee would connect their agent this way; or Robinhood and Alpaca ship enforced per-agent
-  limits with exportable records first. E10-6 then stays at the back of the backlog.
+  limits with exportable records first. E10-6 then loses its DEC-148 placement and goes back behind
+  the other Should stories.
 
 ### Option 2: Read-only monitor
 
@@ -249,6 +256,9 @@ owner-input API. The evidence below is unchanged.
 - **Experiment.** A two-page controls brief mapped to FINRA's report, with no outreach; with
   authorization, one validation call with a mid-size API broker. **Kill.** No broker takes a second
   meeting within four weeks.
+- **Positioning ([DEC-149](../project/04-decision-log.md#decisions)).** Brokers are one of
+  the enterprise buyers of the harness ([positioning](#positioning-harness-and-platform-dec-149));
+  this option's score is unchanged.
 
 ### Option 5: Open-core
 
@@ -281,6 +291,9 @@ owner-input API. The evidence below is unchanged.
 - **Experiment.** Fifteen scenarios runnable against the simulator and Alpaca paper, with Mandate's
   own results; with authorization, ask two builders to run it. **Kill.** No outside party runs it
   within four weeks of availability.
+- **Positioning ([DEC-149](../project/04-decision-log.md#decisions)).** The conformance suite
+  is part of the harness sold to enterprises
+  ([positioning](#positioning-harness-and-platform-dec-149)); this option's score is unchanged.
 
 ### Option 7: Insurance and audit partnership
 
@@ -293,7 +306,8 @@ owner-input API. The evidence below is unchanged.
   raises compensation and licensing questions for counsel.
 - **Experiment.** A desk comparison of one published underwriting standard's controls with Mandate's.
   No contact. **Kill.** Investment-decision losses are excluded, or no partner is reachable within six
-  months. A later option.
+  months. A later option. Mandate paying losses itself, insured or self-funded, is ruled out by
+  [DEC-145](../project/04-decision-log.md#decisions); this option is about records, not cover.
 
 ### Option 8: Public forward-paper research league
 
@@ -381,6 +395,46 @@ owner-input API. The evidence below is unchanged.
 - **Plan impact.** M11 hybrid as planned; no change until a paying partner asks (#177).
 - **Experiment.** None beyond asking in discovery. **Kill.** No paying design partner requests it.
 
+### Option 16: Mandate experiments, multi-variant shadow mode (founder, 2026-09-27)
+
+- **Target.** Segments A, C, and D: owners who want to test strategy changes before risking money.
+  **Value.** "Test up to three versions of your strategy against each other on the same market, with
+  the hypothesis written down before the run, and promote the one you choose."
+- **Shape.** A mandate (the owner's envelope) holds at most three variants: one live and the
+  others in shadow. Each variant is its own owner-confirmed mandate version that differs only in
+  strategy fields (signal models, weights, thresholds, cadence), so rule 11 holds. Shadow variants
+  see the same market data and pass the same gate, evaluated against their own simulated account
+  state; each keeps a simulated book, never consumes or holds the live account's buying power,
+  day-trade budget, or reservations, and nothing is sent to the broker. Each variant's hypothesis
+  and success criterion are journaled before it runs (pre-registration), so neither the user nor the
+  platform can cherry-pick results afterwards.
+- **Promotion.** Always an owner action that creates a new confirmed mandate version. No automatic
+  winner-picking: v1 has no calibration, and the platform does not recommend trades.
+- **Why now.** It extends the roadmap's Phase 3 shadow mode for new mandate versions (E15-4) from one
+  candidate to a small set, on the journal, gate, and simulated execution that are already built or
+  in review.
+- **For.** It turns the pre-registered track record into a per-user habit. The hash chain makes the
+  journal tamper-evident, and the [journal spec §10](../specs/journal.md#10-anchoring) specifies
+  anchoring its stream heads externally with an RFC 3161 timestamp every 5 minutes and at each end
+  of day, so that "we recorded it before it happened" becomes provable to within the anchor
+  interval, and best-effort while timestamping is unavailable. The chain and `journal verify` are
+  built (E5-1 to E5-4); the RFC 3161 token check is an E5 follow-up, so the timing proof is
+  specified, not yet checked. Stateless competitors would have to rebuild their core to match it,
+  and the accumulated experiment history is a switching cost.
+- **Against.** Model cost grows with the number of variants, hence the cap of three. Shadow fills are
+  simulated and must be labelled as simulated, like paper, and any comparison between variants is
+  labelled as hypothetical performance. It is scope growth.
+- **Plan impact.** The v1 build is unchanged. Story E15-5 is scheduled right after the Phase 1 exit
+  (M5 to M7, one autonomous agent on Alpaca paper), pulled forward from roadmap Phase 3.
+- **Regulatory exposure.** Flag: comparisons of simulated results are hypothetical performance
+  (questions 10 and 35); owner-chosen promotion keeps the platform from recommending a variant.
+- **Revenue.** Part of the plan; model cost scales with variants.
+- **Experiment (paper only, no build).** Run two or three paper mandates side by side on Alpaca paper
+  and, with the founder's authorization, show the comparison in the ten discovery calls. Ask: "would
+  you pay to test variants against each other before risking money?"
+- **Kill.** Fewer than 4 of 10 discovery interviewees say they would pay to test variants before
+  risking money. E15-5 then returns to Phase 3 with E15-4.
+
 ## 6. Ranking
 
 Each criterion is scored 1 to 5, where 5 is best; for regulatory exposure, 5 means lowest exposure.
@@ -394,17 +448,18 @@ decide it.
 | 2 | 6 | Conformance suite | 3 | 5 | 5 | 5 | 3 | 1 | **22** |
 | 4 | 13 | Bring-your-own-strategy lead | 3 | 5 | 4 | 4 | 2 | 2 | **20** |
 | 4 | 14 | Small systematic teams | 2 | 4 | 3 | 4 | 3 | 4 | **20** |
-| 6 | 4 | Broker supervision layer | 3 | 3 | 1 | 3 | 4 | 5 | **19** |
-| 6 | 5 | Open-core | 2 | 4 | 4 | 5 | 2 | 2 | **19** |
-| 8 | 10 | Register first | 3 | 3 | 2 | 2 | 4 | 4 | **18** |
-| 9 | 2 | Read-only monitor | 3 | 3 | 4 | 5 | 1 | 1 | **17** |
-| 10 | 0 | Baseline, platform ideas first | 2 | 4 | 2 | 1 | 3 | 4 | **16** |
-| 10 | 7 | Insurance and audit | 1 | 4 | 2 | 4 | 3 | 2 | **16** |
-| 10 | 8 | Research league | 2 | 4 | 3 | 3 | 3 | 1 | **16** |
-| 10 | 11 | Embedded for Alpaca fintechs | 2 | 3 | 2 | 3 | 3 | 3 | **16** |
-| 14 | 9 | Crypto first | 3 | 3 | 3 | 1 | 2 | 3 | **15** |
-| 14 | 15 | Customer-side deployment | 1 | 2 | 1 | 4 | 4 | 3 | **15** |
-| 16 | 12 | Prediction markets | 2 | 1 | 1 | 2 | 1 | 2 | **9** |
+| 4 | 16 | Mandate experiments | 1 | 4 | 4 | 3 | 5 | 3 | **20** |
+| 7 | 4 | Broker supervision layer | 3 | 3 | 1 | 3 | 4 | 5 | **19** |
+| 7 | 5 | Open-core | 2 | 4 | 4 | 5 | 2 | 2 | **19** |
+| 9 | 10 | Register first | 3 | 3 | 2 | 2 | 4 | 4 | **18** |
+| 10 | 2 | Read-only monitor | 3 | 3 | 4 | 5 | 1 | 1 | **17** |
+| 11 | 0 | Baseline, platform ideas first | 2 | 4 | 2 | 1 | 3 | 4 | **16** |
+| 11 | 7 | Insurance and audit | 1 | 4 | 2 | 4 | 3 | 2 | **16** |
+| 11 | 8 | Research league | 2 | 4 | 3 | 3 | 3 | 1 | **16** |
+| 11 | 11 | Embedded for Alpaca fintechs | 2 | 3 | 2 | 3 | 3 | 3 | **16** |
+| 15 | 9 | Crypto first | 3 | 3 | 3 | 1 | 2 | 3 | **15** |
+| 15 | 15 | Customer-side deployment | 1 | 2 | 1 | 4 | 4 | 3 | **15** |
+| 17 | 12 | Prediction markets | 2 | 1 | 1 | 2 | 1 | 2 | **9** |
 
 The baseline scores low on time to first value and regulatory exposure because users see no research
 until DEC-99 passes and counsel answers. That is a statement about go-to-market order, not about
@@ -414,6 +469,7 @@ whether DEC-97 is the right destination.
 decided that the complete product (option 0, with option 13 as its pre-DEC-99 mode) leads, and that
 option 1 is an optional channel inside it rather than a competing lead. Option 1's high score now
 reads as "a cheap, well-evidenced on-ramp", not "the lead product". The rest of the ranking stands.
+Option 16 was scored when the founder added it; its demand score is 1 until discovery tests it.
 
 ## 7. Recommendation
 
@@ -427,8 +483,9 @@ The founder decided this on 2026-09-27 ([DEC-141](../project/04-decision-log.md#
 the envelope; the platform's research agent (DEC-97) brings the ideas and reaches users on the
 timetable DEC-99 and DEC-103 already set. Until then, users run bring-your-own-strategy.
 
-**The owner's own agent is an optional channel and an adoption on-ramp (option 1, DEC-141).** An owner
-who already runs an agent (for example Claude) can connect it through a Mandate MCP server that
+**The owner's own agent is an optional channel and an adoption on-ramp (option 1, DEC-141).** It is
+never the only or the main path: an owner who never connects an agent gets the complete product. An
+owner who already runs an agent (for example Claude) can connect it through a Mandate MCP server that
 exposes the owner-input API. It is not a separate proposer path, and it follows the rules below.
 
 - Every request goes through the same order builder, autonomy rules, risk gate, account ledger, and
@@ -439,12 +496,22 @@ exposes the owner-input API. It is not a separate proposer path, and it follows 
 - Owner-only privileges and the kill switch stay with the human.
 - No broker credential crosses MCP. The client has its own scoped, revocable token.
 - Every call is journaled with the client's identity.
-- The work is story E10-6, after the owner-input API and the tracer bullet. Milestone order does not
-  change.
+- The work is story E10-6, pulled forward by the founder on 2026-09-27
+  ([DEC-148](../project/04-decision-log.md#decisions)): "we can make it forward as long as we are
+  saying it is not the only or main path". It is the first M8 story after the owner-input API, E9-1,
+  E9-2, E9-4 (step-up), and E10-3 (mandate versions), ahead of M8's other Should stories, and it
+  does not wait for M9's web app. Its earlier dependencies (the journal, the order builder, the gate,
+  the executor and account ledger, and the tracer bullet E7-7) land before the Phase 1 gate.
+  Milestone order does not change.
 
 The evidence for option 1 (the Robinhood and Alpaca figures, the friction brokers name, and brokers
 disclaiming supervision) is why the channel is worth having. It argues for an on-ramp that brings
-people with their own agents into the complete product, not for replacing it.
+people with their own agents into the complete product, not for replacing it. Research on
+2026-09-27 is why it moves forward: brokers now open order entry to third-party agents while
+disclaiming supervision. Per the broker's announcement, Robinhood's agentic trading (beta from
+2026-05-27) "does not control, supervise, monitor, recommend, or audit these AI agents" [RH1]. Per
+the broker's announcement as reported, Coinbase for Agents (2026-06-11) will add custom limits such
+as maximum trade size and spend later [CB1].
 
 **Hedge A: option 3.** Run discovery in parallel; change no engineering until 2 of 5 name a budget
 and a reachable custodian.
@@ -454,12 +521,53 @@ product and the channel, and is the only credible opening to option 4 later.
 
 **Keep as planned:** option 15 (M11), and option 0's forward-paper experiment, run now.
 
+**Scheduled after the Phase 1 exit: option 16** (mandate experiments, story E15-5), with its paper
+experiment run now ([DEC-145](../project/04-decision-log.md#decisions) rules out a loss guarantee).
+
 **Deprioritize:** option 9 (CTA exposure, leverage), option 12 (out of scope), option 4 as a lead
 motion (revisit after option 6 has outside users).
 
 **Rules 4 and 11.** DEC-141 interprets these rules without changing them. A request from the owner's
 agent is owner input: deterministic code still sizes and places every order, and the working universe
 changes only as rule 11 allows.
+
+### Positioning: harness and platform (DEC-149)
+
+The founder decided on 2026-09-27 ([DEC-149](../project/04-decision-log.md#decisions)):
+
+> I want it both to evolve along side each other, harness is for enterprise and platform runs
+> through the harness. Retail would bring some money, real money would be in the enterprise, retail
+> is hard to crack.
+
+- **Two layers, two buyers.** The **harness** (the gate, the autonomy rules, the journal, the
+  executor, the connectors, the conformance suite, and the MCP channel) is sold to enterprises:
+  brokers, fintechs, and teams building agents. The retail **platform** is sold to owners.
+- **The platform runs through the harness.** It has no private path around it: every platform order
+  passes the same builder, autonomy rules, gate, account ledger, and journal an enterprise customer's
+  would.
+- **Enterprise is the expected main revenue; retail is the proving ground.** Retail brings some
+  revenue and proves the harness on real owners' accounts. The founder expects retail to be hard to
+  win.
+- **The harness moat.** Generic harnesses and MCP gateways enforce stateless per-call rules; Mandate's
+  harness is stateful and domain-aware, journals before acting, and reduces risk without approval
+  ([harness engineering §6](11-harness-engineering.md#6-what-mandate-already-does-that-most-harnesses-dont)).
+- **Build for all three enterprise segments.** The founder, the same day: "could we not build for
+  all?" The shared core serves brokers, fintechs, and agent builders alike, so it is built once, and
+  the segment packaging (self-hosting and house rules for brokers, an embedded API and white-label
+  for fintechs, a software kit and self-serve sign-up for agent builders) is built alongside it rather
+  than waiting for a buyer, because the builders are agents working under the founder's existing
+  subscription. What limits pace is review and merge throughput, the plan's usage limits, and the
+  founder's decisions, not build cost. A self-serve front door for agent builders (the open verifier,
+  the conformance kit, and an MCP server on Alpaca paper) doubles as the demand test.
+- **Open for discovery: the first enterprise customer.** Which of brokers, fintechs, or agent
+  builders buys first is not decided. Customer outreach needs the founder's authorization
+  ([DEC-79](../project/04-decision-log.md#decisions)). Anything that costs money or needs counsel
+  (a SOC 2 audit, broker agreements, legal text) still waits for the founder.
+
+DEC-149 amends DEC-141's positioning without reversing it: the complete product, the research agent
+inside the envelope, and the optional MCP channel still hold. Milestone order does not change; the
+enterprise harness stories are proposals in the
+[backlog](../project/06-backlog-v1.md#enterprise-harness-proposed-dec-149).
 
 ## 8. Differentiators mapped to existing work
 
@@ -477,6 +585,25 @@ proposed.
 P1 items from #177 map to accepted work too: the forward-paper evidence page to E17-8 (DEC-99,
 DEC-111); portable mandates with a broker capability check to E7-6 (DEC-98); the daily owner briefing
 to E12 and E8. None needs a new story yet.
+
+### Defensible differentiators
+
+The P0 differentiators above are what a user sees. What a competitor would find hardest to copy, in
+the founder's order (2026-09-27):
+
+1. **The provable, pre-registered track record.** Every decision is journaled before acting in a
+   hash chain that `journal verify` checks (E5-1 to E5-4). Journal spec §10 specifies the anchoring
+   that makes its existence at a time provable to within the anchor interval; the RFC 3161 token
+   check is an E5 follow-up, not yet built. A monthly breach record for each owner is proposed
+   (story E12-4, not yet planned); publishing it beyond the owner needs counsel's answer and the
+   founder (DEC-79).
+2. **Mandate experiments** (option 16), which make the first one per-user.
+3. **Distribution through brokers** as a supervision layer (option 4).
+4. **Owning the conformance standard:** the journal spec and verifier (options 5 and 6).
+5. **Regulatory position** (option 10 and counsel's answers).
+
+A guarantee against losses or breaches, paid by Mandate and insured or self-funded, is ruled out
+([DEC-145](../project/04-decision-log.md#decisions)).
 
 ## 9. Broker plan
 
@@ -539,7 +666,7 @@ These are discovery targets, not proof of product-market fit.
 | If we observe | Then |
 |---|---|
 | Robinhood or Alpaca ship enforced per-agent limits, approvals, and exportable records | The channel's value shrinks; the complete product competes on ideas, portability, and verification; lean on option 3 |
-| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | Move E10-6 to the back of the backlog |
+| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | E10-6 loses its DEC-148 placement and goes back behind the other Should stories |
 | The DEC-103 thin slice beats its pre-registered baselines net of costs | Platform ideas are a real differentiator, as the lead assumes; consider option 10 |
 | The thin slice fails its baselines | Keep ideation gated; the product rests on control and evidence (options 13, 3, 6), with the channel as an on-ramp; the founder may revisit what leads |
 | Counsel says the optional channel carries different exposure from owner input | Change the channel's terms or scope with counsel before E10-6 ships |
