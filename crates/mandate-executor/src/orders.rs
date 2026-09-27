@@ -147,7 +147,7 @@ pub(crate) fn described(
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
-        Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
+        Ok(StatusMapping::ReplacedPair) => replaced()?,
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {
@@ -226,10 +226,7 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     let Some(id) = known(batch, Some(raw)) else {
         return Ok(());
     };
-    let state = batch.view.orders.get(&id).map(|order| order.state);
-    if state == Some(OrderState::Submitting) {
-        transition(batch, &id, OrderState::Unknown, Vec::new())?;
-    } else if state != Some(OrderState::Unknown) {
+    if batch.view.orders.get(&id).map(|order| order.state) != Some(OrderState::Unknown) {
         return Ok(());
     }
     batch.journal(
@@ -255,48 +252,16 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     Ok(())
 }
 
-/// A cancel the broker confirmed: the order is `Canceled` and its reservation released.
-pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
-    if let Some(id) = known(batch, Some(raw)) {
-        transition(batch, &id, OrderState::Canceled, Vec::new())?;
-    }
-    Ok(())
+/// `replaced`: the old order becomes `Replaced` and a new one, linked to it, holds its reservation
+/// (§5.7, interpretation 26). A later slice of this stack, with the fills its tests need.
+fn replaced() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-2" })
 }
 
-/// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived
-/// from the event that records the replacement, becomes `Accepted` holding the old reservation
-/// (§5.7, interpretation 26).
-fn replaced(
-    batch: &mut Batch<'_, '_>,
-    id: &ClientOrderId,
-    order: &BrokerOrder,
-    mut status: Vec<(&'static str, Value)>,
-) -> Result<(), ExecutorError> {
-    let from = batch
-        .view
-        .orders
-        .get(id)
-        .map_or(OrderState::Unknown, |known| known.state);
-    if !legal(from, OrderState::Replaced) {
-        transition(batch, id, OrderState::Replaced, status)?;
-        return Ok(());
-    }
-    let linked = ClientOrderId::for_replacement(&batch.next_id())?;
-    status.push(("replaced_by", text(linked.as_str())));
-    if let Some(broker) = &order.replaced_by_broker_order_id {
-        status.push(("replaced_by_broker_order_id", text(broker.clone())));
-    }
-    transition(batch, id, OrderState::Replaced, status)?;
-    batch.journal(
-        "OrderStateChanged",
-        None,
-        vec![
-            ("client_order_id", text(linked.as_str())),
-            ("state", text(state_name(OrderState::Accepted))),
-            ("replaces", text(id.as_str())),
-        ],
-    )?;
-    Ok(())
+/// A cancel the broker confirmed, which only the kill switch's and E7-4's cancels ask for: a later
+/// slice of this stack.
+pub(crate) fn cancelled() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded

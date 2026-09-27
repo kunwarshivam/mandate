@@ -68,7 +68,6 @@ pub(crate) struct OrderDetail {
     pub(crate) request: Option<SubmitOrder>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
-    pub(crate) broker_filled: Option<Qty>,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only

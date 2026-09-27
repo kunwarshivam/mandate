@@ -44,7 +44,6 @@ pub fn handle(
     }
     if let Some(batch) = &state.unresolved
         && batch.input != input
-        && !superseded(&batch.input, &input)
     {
         return Err(ExecutorError::AppendUnresolved { head: batch.head.0 });
     }
@@ -70,20 +69,6 @@ pub fn handle(
         });
     }
     Ok(effects)
-}
-
-/// Whether a new input may replace an unresolved batch. Only a fresh snapshot may, and only one
-/// whose predecessor was a snapshot too: a reconciliation is appended at the head its snapshot was
-/// taken at, so a submission that landed in between makes the whole batch answer `HeadMismatch`
-/// and commit nothing, and the run is recomputed against the fresh snapshot rather than retried
-/// (interpretation 15). Were the earlier batch in fact committed, its first event id — derived from
-/// the same epoch, head, and ordinal — would collide with the new batch's, and the journal refuses
-/// a collision rather than appending a second event.
-fn superseded(unresolved: &Input, input: &Input) -> bool {
-    matches!(
-        (unresolved, input),
-        (Input::BrokerSnapshot(_), Input::BrokerSnapshot(_))
-    )
 }
 
 /// `Input::Started`: the process folded the stream and took an epoch. Every order whose outcome
@@ -115,7 +100,7 @@ fn started(
     for id in unresolved {
         batch.broker(BrokerRequest::GetOrderByClientId(id));
     }
-    resume(&mut batch, true)?;
+    resume(&mut batch)?;
     batch.request_reconciliation();
     Ok(batch.effects)
 }
@@ -143,7 +128,7 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
             duplicate(batch, &client_order_id)
         }
         BrokerOutcome::Absent { client_order_id } => absent(batch, &client_order_id),
-        BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
+        BrokerOutcome::CancelAccepted { .. } => cancelled(),
         BrokerOutcome::Rejected(_)
         | BrokerOutcome::Account(_)
         | BrokerOutcome::OpenOrders(_)

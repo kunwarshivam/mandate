@@ -1645,6 +1645,7 @@ fn an_abandoned_order_releases_its_reservation() {
 }
 
 #[test]
+#[ignore = "pending E7-2"]
 fn a_replaced_orders_reservation_passes_to_the_new_order() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

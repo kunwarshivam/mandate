@@ -357,8 +357,10 @@ fn order_state_changed(
 ) -> Result<(), ExecutorError> {
     let id = client_order_id(payload)?;
     let next = state_of(required_text(payload, "state")?)?;
-    if let Some(old) = optional_text(payload, "replaces") {
-        replacement(state, &id, &ClientOrderId::parse(old)?)?;
+    if optional_text(payload, "replaces").is_some()
+        || optional_text(payload, "replaced_by").is_some()
+    {
+        return later_slice();
     }
     let order = state
         .orders
@@ -367,9 +369,6 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
-    if let Some(filled) = optional_qty(payload, "filled_qty")? {
-        detail.broker_filled = Some(detail.broker_filled.map_or(filled, |was| was.max(filled)));
-    }
     if flag(payload, "ignored") {
         return Ok(());
     }
@@ -385,36 +384,8 @@ fn order_state_changed(
     }
     order.state = next;
     if next.is_terminal() {
-        let amount = state.reservations.remove(&id);
-        if let Some(new) = optional_text(payload, "replaced_by") {
-            let new = ClientOrderId::parse(new)?;
-            order.replaced_by = Some(new.clone());
-            state.reservations.insert(new, amount.unwrap_or(Usd::ZERO));
-        }
+        state.reservations.remove(&id);
     }
-    Ok(())
-}
-
-/// The order a broker-initiated replacement created, linked to the one it replaced and carrying
-/// the reservation the old one passed on (trading-domain spec §5.7, interpretation 26).
-fn replacement(
-    state: &mut ExecutorState,
-    id: &ClientOrderId,
-    old: &ClientOrderId,
-) -> Result<(), ExecutorError> {
-    let original = state
-        .orders
-        .get(old)
-        .ok_or_else(|| ExecutorError::UnknownOrder {
-            client_order_id: old.as_str().to_owned(),
-        })?;
-    let linked = Order {
-        client_order_id: id.clone(),
-        filled_qty: Qty::ZERO,
-        replaced_by: None,
-        ..original.clone()
-    };
-    state.orders.insert(id.clone(), linked);
     Ok(())
 }
 
