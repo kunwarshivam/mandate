@@ -72,7 +72,7 @@ Four findings shaped the decisions:
 | ES-17 Builds | **Now:** x86_64 Linux per PR and aarch64 Linux nightly; rustls only and no system C libraries beyond libc, so static builds stay possible; `--remap-path-prefix`; and a real **`actor.build` digest** from the first journaled event (the node hashes its own executable; a manifest maps digest to commit). **At M6:** `SOURCE_DATE_EPOCH`, a build container pinned by digest, and a nightly double-build reproducibility diff. **At M11 or the first external install:** musl vs glibc (measured against the latency budget), distroless images, Helm and Compose, cosign signing with a founder hardware key, build provenance, and the air-gapped bundle |
 | ES-18 Observability | **Now:** span names `component.operation`, ID-only fields, JSON logs to local files. **The journal is the audit record, not telemetry** ([DEC-73](../project/04-decision-log.md#decisions) amends the HLD). **At M6:** metrics through the OpenTelemetry API with a Prometheus pull exporter (works air-gapped, no collector). **At M8:** push export (OTLP) only under a data policy |
 | ES-19 Local secrets | `MANDATE_ALPACA_PAPER_KEY_ID` and `MANDATE_ALPACA_PAPER_SECRET` from the environment, the OS keychain, or `~/.config/mandate/paper.env` (mode 0600, outside the repo); `.env*` gitignored. Cloud agents get keys for a **separate, agent-only Alpaca paper account** through dashboard secrets, rotated monthly. Typed config (TOML with `MANDATE_*` overrides) in which `environment` accepts only `paper` or `backtest`. CI uses recorded fixtures; live paper-API tests are opt-in and nightly |
-| ES-20 DEC-16 and DEC-17 | Phase 0 needs neither: the Postgres journal is the durable log, and channels are in-process behind `IntentSink` and `TimerSource` traits. **DEC-17 (messaging) is decided at the start of M5**, because one process per agent deployment (DEC-08) means intents cross processes there; Postgres LISTEN/NOTIFY plus journal tailing is a named option beside NATS (Apache-2.0). **DEC-16 (durable execution) is decided before M7**, evaluating journaled deadlines re-armed by the scheduler first; Restate's server is BUSL-1.1, so bundling it on-prem needs counsel review. No message-bus-shaped abstractions in the core meanwhile |
+| ES-20 DEC-16 and DEC-17 | Phase 0 needs neither: the Postgres journal is the durable log, and channels are in-process behind `IntentSink` and `TimerSource` traits. **DEC-17 (messaging) is decided at the start of M5**, because one process per agent deployment (DEC-08) means intents cross processes there; Postgres LISTEN/NOTIFY plus journal tailing is a named option beside NATS (Apache-2.0). **DEC-16 (durable execution) is decided (founder, 2026-09-27): journaled deadlines re-armed by the scheduler, no external engine**, which was the option this row named first; Restate's server is BUSL-1.1, so bundling it on-prem needs counsel review. No message-bus-shaped abstractions in the core meanwhile |
 
 ### Added by the panel
 
@@ -95,7 +95,7 @@ Four findings shaped the decisions:
 - **Tooling risk:** all CI logic lives in `cargo xtask`, so moving CI platforms changes only the
   thin workflow files.
 - **Deferred with triggers:** PyO3 (first SDK story), cargo-vet, SBOM, and cargo-auditable (M6),
-  packaging and signing (M11), push telemetry (M8), DEC-17 (M5), DEC-16 (before M7).
+  packaging and signing (M11), push telemetry (M8), DEC-17 (M5); DEC-16 is decided (journal-backed timers).
 
 ## Alternatives rejected
 
