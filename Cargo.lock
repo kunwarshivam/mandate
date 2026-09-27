@@ -1313,6 +1313,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mandate-approval"
+version = "0.0.0"
+dependencies = [
+ "mandate-canon",
+ "mandate-num",
+ "mandate-time",
+ "proptest",
+ "thiserror",
+]
+
+[[package]]
 name = "mandate-artifacts-fs"
 version = "0.0.0"
 dependencies = [
