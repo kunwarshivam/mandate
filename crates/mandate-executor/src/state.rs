@@ -28,8 +28,8 @@ pub(crate) const EVERY_AGENT: &str = "*";
 /// is ordered (ES-21). The folded position of each followed stream lives here and is re-derived by
 /// replay, so nothing durable exists outside the journal and a restart cannot mistake an old event
 /// for a new one. Only `fold.rs` writes folded state. `step.rs` writes only the running process's
-/// own fields, which are never folded: the writer epoch, `started`, the latest tick, and the
-/// unresolved append (which the fold clears once the append's events are folded back). That split
+/// own fields, which are never folded: the writer epoch, `started`, the head it started at, the
+/// latest tick, and the unresolved append (which the fold clears once the append's events are folded back). That split
 /// is a convention the review holds (rung 3 of the trust ladder), not a guarantee the types give;
 /// the backlog carries making it one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,7 @@ pub struct ExecutorState {
     pub(crate) heads: BTreeMap<String, Seq>,
     pub(crate) epoch: Option<WriterEpoch>,
     pub(crate) started: bool,
+    pub(crate) started_at: Option<Seq>,
     pub(crate) environment: Option<String>,
     pub(crate) unresolved: Option<UnresolvedAppend>,
     pub(crate) risk_clock: Option<RiskClock>,
@@ -144,6 +145,7 @@ impl ExecutorState {
             heads: BTreeMap::new(),
             epoch: None,
             started: false,
+            started_at: None,
             environment: None,
             unresolved: None,
             risk_clock: None,
@@ -349,6 +351,16 @@ impl ExecutorState {
     /// (DEC-131 item 13, interpretation 15).
     pub fn reconciled_through(&self) -> Option<Seq> {
         self.reconciled_through
+    }
+
+    /// Whether a reconciliation has run since this process started: a `ReconciliationRun` folded
+    /// after the head `Input::Started` found. A run an earlier process appended sits at or before
+    /// that head, so a restart always waits for its own. Until one runs, the gate holds every
+    /// opening (§11, the coordinator's ruling on #202).
+    pub(crate) fn reconciled_since_start(&self) -> bool {
+        self.started_at
+            .zip(self.reconciled_through)
+            .is_some_and(|(start, run)| run > start)
     }
 
     pub fn last_submission(&self) -> Option<Seq> {

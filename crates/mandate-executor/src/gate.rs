@@ -121,6 +121,11 @@ pub(crate) fn account_stream_checks(
         "sell_exceeds_available",
         exceeds.then_some(("sell_exceeds_available", false)),
     );
+    let unreconciled = adds && state.observed.is_some() && !state.reconciled_since_start();
+    record(
+        "startup_reconciliation",
+        unreconciled.then_some(("startup_reconciliation_pending", true)),
+    );
     let (verdict, held) = match first {
         None => (GateVerdict::Allow, false),
         Some((reason, held)) => (
