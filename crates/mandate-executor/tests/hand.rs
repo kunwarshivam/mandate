@@ -730,6 +730,17 @@ fn an_absence_confirmed_over_the_window_resubmits_the_same_id() {
         Some(id.as_str()),
         "with the same client order id"
     );
+    let attempt = |ran: &common::Ran| {
+        ran.draft("OrderSubmitted")
+            .and_then(|draft| draft.payload.get("attempt"))
+            .and_then(mandate_canon::Value::as_int)
+    };
+    let prior = attempt(&submitted).expect("the first submission names its attempt");
+    assert_eq!(
+        attempt(&third),
+        Some(prior.saturating_add(1)),
+        "under the next attempt number (§5.7)"
+    );
     assert_eq!(
         shell.connector.accepted_for(&id),
         1,

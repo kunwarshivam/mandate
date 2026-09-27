@@ -2327,7 +2327,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 14] = [
+        const INTERPRETED: [&str; 12] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2335,9 +2335,7 @@ proptest! {
             "OrderStateChanged",
             "OrderAbandoned",
             "AgentModeApplied",
-            "TradingDayStarted",
             "ClockAdvanced",
-            "RiskDayStarted",
             "MarkUpdated",
             "FillApplied",
             "LateFillApplied",

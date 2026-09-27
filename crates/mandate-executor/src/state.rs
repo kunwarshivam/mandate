@@ -24,11 +24,14 @@ pub(crate) const EVERY_AGENT: &str = "*";
 /// Everything the executor knows about one broker account, derived from journaled events and
 /// nothing else.
 ///
-/// Every field is private and every collection is ordered (ES-21). The folded position of each
-/// followed stream lives here and is re-derived by replay, so nothing durable exists outside the
-/// journal and a restart cannot mistake an old event for a new one. Two fields are the running
-/// process's own and are never folded: the writer epoch and the latest tick, neither of which a
-/// replay could know or needs.
+/// Every field is `pub(crate)`, private to this crate but not to its modules, and every collection
+/// is ordered (ES-21). The folded position of each followed stream lives here and is re-derived by
+/// replay, so nothing durable exists outside the journal and a restart cannot mistake an old event
+/// for a new one. Only `fold.rs` writes folded state. `step.rs` writes only the running process's
+/// own fields, which are never folded: the writer epoch, `started`, the latest tick, and the
+/// unresolved append (which the fold clears once the append's events are folded back). That split
+/// is a convention the review holds (rung 3 of the trust ladder), not a guarantee the types give;
+/// the backlog carries making it one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExecutorState {
     pub(crate) scope: AccountScope,

@@ -432,6 +432,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   check in `send`; a symbol alphabet that admits `BRK.B` and `BTC/USD`'s encoded form, refused
   otherwise as `wrong_type`, belongs in slice a2 or E7-2's successor (pre-existing on `main`, #191
   review, round 3).
+- Make "only the fold writes folded state" a type guarantee in `mandate-executor`. `ExecutorState`'s
+  fields are `pub(crate)`, so the rule that only `fold.rs` writes folded state and `step.rs` writes
+  only the process-local fields (the epoch, `started`, the latest tick, the unresolved append) is a
+  convention the review holds. A `FoldedState` newtype with private fields, written only through the
+  fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
 
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):

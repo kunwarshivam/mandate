@@ -1606,3 +1606,154 @@ fn a_paper_crypto_fill_books_no_simulated_regulatory_fee() {
         ran.draft_types()
     );
 }
+
+#[test]
+fn a_late_fill_on_a_terminal_order_moves_the_position_and_the_orders_fill() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = submitted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    shell.run(
+        Input::BrokerUpdate(BrokerUpdate::Order(broker_order(
+            "b-1",
+            Some(&id),
+            AAPL,
+            Side::Buy,
+            "10",
+            "0",
+            "canceled",
+        ))),
+        &ports,
+    );
+    assert_eq!(
+        shell.state.order(&key(&id)).map(|order| order.state),
+        Some(OrderState::Canceled),
+        "the order is terminal before its fill arrives"
+    );
+
+    shell
+        .fold_one(&event(
+            ACCOUNT_STREAM,
+            next_seq(&shell),
+            "LateFillApplied",
+            with_clock(
+                &[
+                    ("fill_id", text("f-late")),
+                    ("client_order_id", text(&id)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty_gross", text("4")),
+                    ("price", text("150")),
+                ],
+                5,
+            ),
+        ))
+        .expect("a late fill folds (§5.7: a fill after a terminal state is still applied)");
+
+    assert_eq!(
+        shell.state.positions().get(&instrument(AAPL)).copied(),
+        Some(signed_qty("4")),
+        "the four shares the broker filled are held"
+    );
+    assert_eq!(
+        shell.state.order(&key(&id)).map(|order| order.filled_qty),
+        Some(qty("4")),
+        "and are the order's filled quantity"
+    );
+}
+
+#[test]
+fn absences_faster_than_the_window_leave_the_order_unknown() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = fresh(&ports);
+    let id = submitted(&mut shell, &ports, INTENT, common::AGENT, AAPL);
+    shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
+
+    let mut ran = Vec::new();
+    for at in [1, 2, 3] {
+        shell.run(Input::Tick(clock(at)), &ports);
+        ran.push(shell.run(
+            Input::Broker(Ok(BrokerOutcome::Absent {
+                client_order_id: id.clone(),
+            })),
+            &ports,
+        ));
+    }
+
+    assert!(
+        ran.iter().all(|one| one.submissions().is_empty()),
+        "three absences inside three seconds reach `unknown_absent_lookups` but not the \
+         15-second `unknown_absent_window_s`, so nothing is resubmitted (§5.7, rule 3)"
+    );
+    assert!(
+        ran.iter()
+            .all(|one| !one.draft_types().contains(&"OrderAbandoned")),
+        "and nothing is abandoned"
+    );
+    assert_eq!(
+        shell.state.order(&key(&id)).map(|order| order.state),
+        Some(OrderState::Unknown),
+        "the order stays Unknown until the window has passed too"
+    );
+    assert_eq!(shell.connector.accepted_for(&id), 1, "still one order");
+}
+
+#[test]
+fn a_sell_takes_only_its_own_instruments_position() {
+    let ids = TestIds;
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
+    let instruments = FixedInstruments;
+    let config = config();
+    let ports = ports(&ids, &mandates, &instruments, &config);
+    let mut shell = Shell::new(1);
+    shell.fold_one(&stream_opened()).expect("folds");
+    for (seq, name, held) in [(2, AAPL, "10"), (3, CPHC, "2")] {
+        shell
+            .fold_one(&event(
+                ACCOUNT_STREAM,
+                seq,
+                "FillApplied",
+                with_clock(
+                    &[
+                        ("fill_id", text(&format!("f-{name}"))),
+                        ("instrument", text(name)),
+                        ("side", text("buy")),
+                        ("qty_gross", text(held)),
+                        ("price", text("20")),
+                    ],
+                    0,
+                ),
+            ))
+            .expect("the position folds");
+    }
+    let mut shell = shell.restart(&ports).0;
+
+    let over = shell.run(
+        handoff(INTENT, common::AGENT, risk_exit(CPHC, "3", "20")),
+        &ports,
+    );
+    assert_eq!(
+        gate_field(&over, "reason_code").as_deref(),
+        Some("sell_exceeds_available"),
+        "three CPHC from two crosses zero, whatever the ten AAPL beside them (§5.3 rules 3 and 4, \
+         AGENTS.md rule 12)"
+    );
+    assert!(over.submissions().is_empty());
+
+    let within = shell.run(
+        handoff(OTHER_INTENT, common::AGENT, risk_exit(CPHC, "2", "20")),
+        &ports,
+    );
+    assert_eq!(
+        within.submissions().len(),
+        1,
+        "the two CPHC held are available to sell"
+    );
+}
