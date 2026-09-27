@@ -8,9 +8,9 @@
 # Mandate
 
 Autonomous trading agents that run on their owner's own brokerage account, inside a mandate the
-owner writes or confirms and can enforce. The owner sets the envelope: capital, goal, risk limits, allowed
-asset classes, how much the agent may do alone, and when it must ask. Inside that envelope a
-research agent proposes theses from market data, news, and filings, and admits instruments into
+owner writes or confirms and can enforce. The owner sets the envelope: capital, goal, risk limits,
+allowed asset classes, how much the agent may do alone, and when it must ask. Inside that envelope
+a research agent proposes theses from market data, news, and filings, and admits instruments into
 the agent's working universe only through an eligibility floor and the owner's autonomy rules.
 Deterministic code sizes and builds every order, an independent risk gate decides whether it may go
 out, the agent asks the owner when a decision exceeds what it may do alone, and every observation,
@@ -22,10 +22,9 @@ or on profits, and trades paper only until securities counsel signs off on live 
 ([compliance](docs/product/08-compliance-and-regulatory.md)).
 
 > **Where it stands:** exact arithmetic, market data, accounting, the fill model, and the journal's
-> hash chain and stores are built and verified; the backtest loop, the journal's cold store, the
-> agent runtime, risk gate, order builder, research agent, and the Alpaca paper connector are being
-> built now. Nothing in this repository
-> places a real order ([status](#status)).
+> hash chain and stores are built and verified; the backtest loop, the agent runtime, risk gate,
+> order builder, research agent, and the Alpaca paper connector are being built now, and the
+> journal's cold store is next. Nothing in this repository places a real order ([status](#status)).
 
 ## How it works
 
@@ -70,7 +69,7 @@ merged and the implementation is under way; planned means scheduled in the
 | Market data | Alpaca historical bars, trades, quotes, and corporate actions into verified datasets | M1 | Built |
 | Accounting | Positions, cash and settlement, fees, corporate actions, P&L, buying power | M2 | Built |
 | Simulated execution and backtest | The fill model, the backtest loop, a baseline strategy, an exact metrics report | M3 | Fill model built; backtest in progress |
-| Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store in progress |
+| Journal and verification | Hash chain, append protocol, Postgres hot store, artifact store, a verification command | M4 | Built; cold store next |
 | Mandate document | Parsing, validation, the policy hierarchy, change classification, risk state | M5 | In progress |
 | Risk gate | The ordered checks, US account rules, eligibility, conduct controls, forced flatten | M5 | In progress |
 | Order builder and autonomy | AUTO, ASK, or DENY per decision; deterministic sizing and order construction | M5 | In progress |
@@ -88,9 +87,10 @@ merged and the implementation is under way; planned means scheduled in the
 
 Phase 1 ends when one agent trades an Alpaca paper account unattended, on theses it generated,
 through a soak with forced restarts and escalations and no duplicate orders, and its theses beat
-the pre-registered baselines on forward paper (M5 to M7, [DEC-99](docs/project/04-decision-log.md)). Phase 2 is the platform for design
-partners (M8 to M13). Interactive Brokers and Coinbase come in later releases; options, short sales, and
-margin are out of scope for v1 ([PRD](docs/product/04-prd-v1.md)).
+the pre-registered baselines on forward paper (M5 to M7,
+[DEC-99](docs/project/04-decision-log.md)). Phase 2 is the platform for design partners (M8 to
+M13). Kraken Derivatives US, Interactive Brokers, and Coinbase come in later releases; options,
+short sales, and margin are out of scope for v1 ([PRD](docs/product/04-prd-v1.md)).
 
 ## Repository
 
