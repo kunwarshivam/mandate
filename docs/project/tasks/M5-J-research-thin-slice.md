@@ -586,6 +586,14 @@ requires: a typed error naming the field, never a rounded number), and `unimplem
 PR's stubs only; it is gone from the crate by the implementation PR, which the pending gate proves by
 requiring every pending test to fail on the stubs).
 
+*As implemented:* no entry point returns `unimplemented`, but the variant stays because
+`tests/rules.rs` constructs it, and so do `window_too_large`, `interval_too_large` and `out_of_range`,
+which `rules.rs` pins too. `window_too_large` guards the byte fold's checked arithmetic, which
+interpretation 8's bound makes unreachable; `next_proposal_at` reports an instant past the range as
+`time_out_of_range`, so `interval_too_large` is never constructed; and `out_of_range` is first
+constructed when the swap PR converts the cost cap through `to_usd` (interpretation 24). Removing the
+unused ones is a tests correction.
+
 ## Interpretations (recorded as DEC-132)
 
 1. **One new crate, `mandate-research`, layer 5, safety-critical and pure.** The reasoning is the
@@ -753,6 +761,14 @@ requiring every pending test to fail on the stubs).
     reads the envelope field **`universe.pinned`**, not `WorkingUniverse::Known { pinned }`, and it is
     MI-20 rather than a policy key. The two are kept in step by validation, and the crate reads the
     envelope, because a runtime flag is not what the owner confirmed.
+
+    *As implemented (#158, and the follow-up after its post-merge review):* the lowered ceiling at
+    check 7 is pinned by the crate's own unit test `tests::check_7_a_policy_cap_below_the_mandates_binds_at_equality`
+    (checks 16 and 17 by `admission::check_16_a_policy_ceiling_lowers_the_revision_cap` and
+    `admission::a_lowered_ceiling_refuses_and_never_removes`). Check 6's overlay read changes no
+    verdict today, because the overlay tightens `auto` to `ask` and never to `deny`, so no test can
+    tell it from the mandate's own value; it is kept so that a policy able to deny admission binds
+    there without a code change.
 
 23. **Three rules stay live, and are mutation-tested by hand.** `RefusalReason`'s ordinals, codes and
     `is_ignored_output`; `PolicyOverlay`'s six stricter-of rules and its two profile constructors; and
