@@ -36,3 +36,16 @@ condition = "AND"
 paths = ['''^crates/mandate-marketdata/tests/http\.rs$''']
 regexTarget = "match"
 regexes = ['''^PKSENTINELKEYID00000$''']
+
+# The key-ID-shaped sentinel the trading connector's redaction tests check never reaches output
+# (E7-2, DEC-133), allowed only in the file that defines it. It is a planted test value, never a
+# credential and never a recording: the recorded fixtures under
+# `crates/mandate-alpaca/tests/fixtures/` are deliberately **not** allowlisted, so a real key that
+# reached one would still be reported.
+[[allowlists]]
+description = "Trading redaction test sentinel"
+targetRules = ["alpaca-key-id"]
+condition = "AND"
+paths = ['''^crates/mandate-alpaca/tests/common/mod\.rs$''']
+regexTarget = "match"
+regexes = ['''^PKSENTINELTRADING000$''']

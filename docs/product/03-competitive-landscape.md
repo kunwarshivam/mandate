@@ -84,7 +84,7 @@
 - Pause, edit, and delete take effect immediately [PU2]. Repeated system failures mark an agent
   "action required" instead of retrying (2026-07-06) [PU7].
 - Run logs and an activity feed of "everything your Agent evaluates and acts on" [PU5] [PU10].
-- "Two Agents acting on the same asset will each run their own plan independently. If you want them
+- "two Agents acting on the same asset will each run their own plan independently. If you want them
   to coordinate, build that logic into the plan" [PU5].
 - Once an agent is active, Public "will not alert you in advance of any pending Transaction, nor will
   we await confirmation from you in advance of executing that Transaction", and "Transactions cannot
@@ -109,7 +109,7 @@
 
 - An account-level cap across all agents, or a "pause all" control.
 - Export of run logs, plan-version history, or any integrity check on the logs.
-- Handling of ambiguous submissions, idempotency, or crash recovery beyond "action required".
+- Handling of ambiguous submissions, idempotency, or crash recovery beyond "action required" [PU7].
 - A paper or simulation mode for Agents.
 - The model provider behind the builder and Research.
 - Any count of agents or users.
@@ -169,8 +169,8 @@ ideas. Not a US channel today.
 
 ### Composer by SoFi
 
-**What it documents.** Launched 2026-06-23 after SoFi's acquisition of Composer; users can "search
-over 2,000 community-built strategies" and build strategies with AI [CO1]. Current pricing: Starter
+**What it documents.** Launched 2026-06-23 after SoFi's acquisition of Composer; users can search
+over 2,000 community-built strategies and build strategies with AI [CO1]. Current pricing: Starter
 $0, Advanced $10 a month, Pro $32 a month billed yearly ($384 a year) [CO2]. Composer's Form CRS
 describes a registered investment adviser offering "limited, automated investment advisory
 services" by subscription [CO3].
@@ -240,7 +240,7 @@ concentration caps, pre-flight refusal gates, and a kill switch are described as
 "Every refusal is recorded and scored later against what the market actually did". It describes
 itself as a software licensor, not a registered adviser or broker-dealer [TA1] [TA2].
 
-**What it does not document.** The team, supported brokers ("additional broker adapters in
+**What it does not document.** The team, supported brokers [TA1] ("additional broker adapters in
 migration"), prices, customers, or any integrity check on its records.
 
 **Overlap with Mandate.** The closest statement of Mandate's thesis (DEC-97: owner envelope,
@@ -251,10 +251,11 @@ Mandate has AUTO, ASK, and DENY. No traction is published.
 
 **What it documents (vendor claims).** A "financial authorization and compliance layer for AI agents
 that move money": mandate conditions "enforced before the action executes", allow, hold, or deny verdicts, a kill
-switch, "Mandates fail closed if the control layer is unreachable", and audit batches anchored on
-Solana that verify "against published keys without trusting the operator" [RG1]. Devnet only;
-mainnet "after an independent security review" [RG1] [RG2]. Terms are governed by the laws of
-Kazakhstan [RG3].
+switch, "Mandates fail closed" ("if the control layer is unreachable, the money action is
+refused"), and audit batches anchored on
+Solana: "Evidence verifies against published keys, so an auditor does not have to trust the
+operator" [RG1]. Available on devnet only; "Independent audit and SOC 2 are on the roadmap" [RG1].
+Terms are governed by the laws of Kazakhstan [RG3].
 
 **What it does not document.** Broker connectors, customers, pricing, or team.
 
@@ -265,8 +266,8 @@ peer, or competitor for the control-layer story.
 ### NexusTrade
 
 **What it documents (vendor blog).** Automated agents launched 2025-10-11, with live trades
-"manually confirmed" at the time [NX1]. A May 2026 post describes proposals that "queue for manual
-review before submission", rejection of stale option chains, and per-position stops [NX2]. Brokers
+"manually confirmed" at the time [NX1]. A May 2026 post describes "Two spreads in the approval queue right now,
+waiting for me to press execute", rejection of stale option chains, and per-position stops [NX2]. Brokers
 named: Alpaca and TradeStation.
 
 **What it does not document.** Whether fully autonomous live trading is now allowed; pricing; users.
@@ -283,11 +284,11 @@ included" [CL1].
 
 ### Others, not researched in depth
 
-- **Autonomous (ATG):** an AI "wealth strategist" run as a registered adviser with Apex custody,
+- **Autonomous (ATG):** an AI wealth manager run as a registered adviser with Apex custody,
   invite-only [AU1]; "emerged from stealth with $15 million in pre-seed funding" in January 2026
   [AU2]. Platform-originated ideas, but in its own accounts, not the user's existing broker.
 - **Nof1:** ran Alpha Arena, where language models traded real money; raised $15 million in May 2026
-  and "intends to launch a consumer platform" [NF1]. In one US-equities season, "The portfolio as a
+  and plans a consumer platform [NF1]. In one US-equities season, "The portfolio as a
   whole lost about a third", and "a model finished in profit only six times" [NF2].
 - **Instinct (YC W26)** and **Volaren (YC F26):** pre-launch; execution not documented [YC1] [YC2].
   An unrelated company also called Instinct raised a large round in 2026; do not conflate them.
@@ -296,7 +297,7 @@ included" [CL1].
 
 ### QuantConnect (Mia and LEAN)
 
-**What it documents.** "Mia writes QuantConnect algorithm code, runs it, fixes what breaks", and
+**What it documents.** "Mia writes QuantConnect algorithm code, runs it, fixes what is broken, and runs it again", and
 backtests it. "When the pipeline is empty, she reads recent financial news" to generate ideas. She
 "deploys and monitors paper trading" and watches live performance against the backtest baseline; "The decision about live capital stays with you" [QC1]. LEAN's risk-management model
 "seeks to manage risk on the PortfolioTarget collection it receives from the Portfolio Construction
@@ -315,7 +316,7 @@ may also be a source of strategies for the bring-your-own-strategy mode.
 ### Registered-adviser automation: Surmount, Autopilot
 
 - **Surmount** connects to E*Trade, Alpaca, TradeStation, Coinbase, Kraken, and others; Surmount AI
-  Inc. "is not a registered investment adviser" and acts as "solely a technology provider" for
+  Inc. "is not a registered investment adviser" and "acts solely as a technology provider" for
   self-directed connections, while internal accounts run through Quantbase, LLC, a registered adviser
   [SU1]. Its own review page lists Core $50 a year, Plus $100 a year, and Pro $300 a year, with a
   "1% management fee" on internal (Quantbase-managed) accounts [SU2].
@@ -330,8 +331,8 @@ an adviser registration. The regulatory template closest to DEC-98's working ass
 
 ### Rule automation: Option Alpha, TradersPost, Capitalise.ai
 
-- **Option Alpha:** options bots; "$99 /mo with annual billing or $149 monthly ... 50 bots, $100k
-  limit per bot" [OA1]. Per-bot capital caps are an established retail control.
+- **Option Alpha:** options bots; "$99 /mo with annual billing or $149 monthly", with "50 bots" and a
+  "$100k limit per bot" [OA1]. Per-bot capital caps are an established retail control.
 - **TradersPost:** turns TradingView and TrendSpider alerts into broker orders, with paper accounts
   [TP1].
 - **Capitalise.ai:** natural-language automation supplied through brokers [CA1].

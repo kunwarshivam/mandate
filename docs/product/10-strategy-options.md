@@ -50,10 +50,10 @@ or, for sources used only here, to [this document's source list](#sources).
 | Interactive Brokers: "approximately 4.4 million cleared customer accounts" at the end of 2025 | [IK1] |
 | QuantConnect: "more than 375,000 live strategies" since 2012 (vendor claim) | [QC4] |
 | Scalar Field: "around 800 paying traders, over 34,000 signups, and $74,000 in monthly revenue" (vendor claim, more than a year old) | [SF6] |
-| Composer by SoFi: launched 2026-06-23 with "over 2,000 community-built strategies" | [CO1] |
+| Composer by SoFi: launched 2026-06-23 with over 2,000 community-built strategies | [CO1] |
 | Autopilot: "about three million downloads, including 80,000 paid subscribers"; Form ADV of 2025-04-29 lists $462 million across 132,559 accounts; the $750 million figure is the founder's LinkedIn claim | [AP1] |
-| Investing.com survey (n=938): 62% use AI tools to inform decisions; trust in AI 54% "somewhat", 20% "mostly", 4% "completely" | [IN1] |
-| Investing.com: "6.4% using AI portfolio management tools", "4.5% using automated trading algorithms" | [IN2] |
+| Investing.com survey (n=938): 62% use AI tools to inform decisions; trust in AI: 54% somewhat, 20% mostly, 4% completely | [IN1] |
+| Investing.com: 6.4% use AI portfolio-management tools and 4.5% use automated trading algorithms | [IN2] |
 | Betterment 2025: "just 30% said they trust AI to give them financial advice, and just 26% would let AI manage their investments" | [BE1] |
 | FINRA Foundation: 34% of US adults hold investments outside retirement accounts | [FF1] |
 | FINRA Foundation: among investors under 35, 43% trade options, 22% buy on margin, and 61% use influencer recommendations | [FF2] |

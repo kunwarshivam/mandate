@@ -41,7 +41,7 @@ Mandate is built by the founder working with AI coding agents. Agents follow
 | [Pricing and packaging](product/07-pricing-and-packaging.md) | Plans, price levers, questions to validate |
 | [Compliance and regulatory](product/08-compliance-and-regulatory.md) | Regulatory posture and derived requirements (not legal advice) |
 | [Product experience](product/09-product-experience.md) | Web v1 experience brief: principles, journeys, screen inventory and states, UX rules from the safety rules, open product decisions |
-| [Strategy options](product/10-strategy-options.md) | Market and regulatory evidence, strategy options ranked, recommended wedge, broker, demo, and discovery plans |
+| [Strategy options](product/10-strategy-options.md) | Market and regulatory evidence, strategy options ranked, the recommendation as decided in DEC-141 (the complete product leads; the owner's own agent is an optional channel), broker, demo, and discovery plans |
 | [Glossary](product/glossary.md) | Shared vocabulary |
 
 ## Project
