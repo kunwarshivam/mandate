@@ -29,8 +29,11 @@ pub(crate) fn eligibility(input: &GateInput<'_>) -> Result<Option<Stop>, GateErr
     } else if equity {
         equity_items(input)?
     } else {
-        below(i.median_dollar_volume_30d, config.crypto_liquidity_floor_usd)
-            .then_some(ReasonCode::BelowLiquidityFloor)
+        below(
+            i.median_dollar_volume_30d,
+            config.crypto_liquidity_floor_usd,
+        )
+        .then_some(ReasonCode::BelowLiquidityFloor)
     };
     Ok(failed.map(|code| (Verdict::Deny, code)))
 }
@@ -46,8 +49,8 @@ fn equity_items(input: &GateInput<'_>) -> Result<Option<ReasonCode>, GateError> 
     if below(i.median_dollar_volume_20d, config.liquidity_floor_usd) {
         return Ok(Some(ReasonCode::BelowLiquidityFloor));
     }
-    let enabled = input.mandate.leveraged_etps_enabled()
-        && input.mandate.leveraged_etp_disclosure_accepted();
+    let enabled =
+        input.mandate.leveraged_etps_enabled() && input.mandate.leveraged_etp_disclosure_accepted();
     let complex = i.etp != EtpClass::Plain;
     Ok((classification_stale(input)? || (complex && !enabled))
         .then_some(ReasonCode::LeveragedEtpNotEnabled))

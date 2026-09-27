@@ -289,8 +289,8 @@ mod tests {
     use mandate_time::UtcNanos;
 
     use super::*;
-    use crate::spec_types::{GoalState, RiskLimits, RiskSnapshot, ValidatedMandate};
     use crate::floor;
+    use crate::spec_types::{GoalState, RiskLimits, RiskSnapshot, ValidatedMandate};
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
         ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass, GroupId,
@@ -1140,11 +1140,12 @@ mod tests {
             matches!(r.permission, 0 | 1),
             matches!(r.permission, 0 | 2),
         );
-        o.with_input(floor::eligibility)?
-            .map(|stop| stop.map(|(verdict, code)| {
+        o.with_input(floor::eligibility)?.map(|stop| {
+            stop.map(|(verdict, code)| {
                 assert_eq!(verdict, Verdict::Deny, "the floor only ever denies");
                 code
-            }))
+            })
+        })
     }
 
     /// Every row of §3.2 against [`floor_oracle`]: 2 asset classes × 3 statuses × 3 exchanges × 3
@@ -1164,7 +1165,9 @@ mod tests {
                     for item3 in 0..3 {
                         for price in 0..4 {
                             for volume_20d in 0..4 {
-                                for etp in [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified] {
+                                for etp in
+                                    [EtpClass::Plain, EtpClass::Complex, EtpClass::Unclassified]
+                                {
                                     for permission in 0..4 {
                                         for classified in 0..4 {
                                             for volume_30d in 0..4 {
@@ -1223,8 +1226,16 @@ mod tests {
         let exit = otc(allowing()?.selling(Origin::RiskEngine)?).decide()?;
         assert_eq!(
             [
-                (outside.verdict, outside.reason, outside.checks.get(1).cloned()),
-                (over_cap.verdict, over_cap.reason, over_cap.checks.get(1).cloned()),
+                (
+                    outside.verdict,
+                    outside.reason,
+                    outside.checks.get(1).cloned()
+                ),
+                (
+                    over_cap.verdict,
+                    over_cap.reason,
+                    over_cap.checks.get(1).cloned()
+                ),
                 (exit.verdict, exit.reason, None),
             ],
             [
