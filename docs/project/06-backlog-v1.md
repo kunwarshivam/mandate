@@ -710,3 +710,23 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
   ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
   undercount the account's day trades (#221 review, round 1, minor).
+
+From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
+round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
+
+- **V-023 at load must bound a decimal's precision (stream F).** The schema's `decimal` admits 28
+  fractional digits and `Ratio` holds 24, so a rule comparing `order_usd` against a 26-digit value
+  passes `mandate-builder`'s `check_rules`/`well_typed` re-check and is refused mid-walk by
+  `Condition::matches` with `too_precise`. It is still refused, so rule 3 holds, but DEC-152 (1)
+  promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
+  `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
+  the same bound so both report it by name.
+- **E6-6:** drop or pin the `at.opening_auction` clause in `mandate-risk`'s `market_orders_barred`.
+  The opening auction is always pre-market, which the clause for a US equity outside the regular
+  session already bars, and crypto never has an auction, so the clause changes no decision and no
+  test can catch its removal (#228 review, round 1, minor 2; E6-6's bug list when it lands).
+- **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
+  `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
+  not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
+  asserts only times inside the window, so it passes against a `close_window` that is always true
+  (#228 review, round 1, minor 3; E6-6's bug list when it lands).

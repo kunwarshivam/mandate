@@ -817,13 +817,17 @@ fn an_increase_in_the_closing_ten_minutes_is_close_window() {
     );
 }
 
-/// The opening auction denies a market order, which is what `auction_window` is for.
+/// An auction window denies a market *opening* and re-prices a market *exit* (DEC-159, amending
+/// DEC-129 item 18).
 ///
-/// DEC-129 item 18 narrows `auction_window` to the opening auction and to market orders in either
-/// window, so this is the code's only reachable path: an *opening* order at 09:29 is in pre-market
-/// and check 3's session rule denies it first, and the closing ten minutes report `close_window`.
+/// §4.3 says "no opening orders in either [window]; exits in them use limit orders, never market
+/// orders". A market-order exit is therefore sent as a marketable limit, never denied, which is
+/// MI-1 and `AGENTS.md` rule 13 and how DEC-129 items 28 and 31 treat a halt. `auction_window`
+/// stays a check-3 denial for a market opening. Check 3 reads the session before the auction
+/// window (§9.1), so a market opening at 09:29 ET is `session_not_allowed` (pre-market takes no
+/// opening); the denial `auction_window` names is reachable in the closing window, at 15:55 ET.
 #[test]
-fn the_opening_auction_denies_a_market_order() {
+fn an_auction_window_denies_a_market_opening_and_reprices_a_market_exit() {
     let session = mandate_risk::session_at(
         at("2026-09-22T13:29:00Z"),
         &common::test_default_config(),
@@ -835,18 +839,41 @@ fn the_opening_auction_denies_a_market_order() {
         "09:29 ET is inside the 09:28 to 09:30 opening auction"
     );
 
-    let mut s = Scenario::allowing();
-    s.now = at("2026-09-22T13:29:00Z");
-    s.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
-    s.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "120", Origin::RiskEngine);
-    s.proposed.kind = mandate_risk::ProposedKind::Market;
-
-    let d = evaluate(&s.input()).expect("the gate decides");
+    let mut exit = Scenario::allowing();
+    exit.now = at("2026-09-22T13:29:00Z");
+    exit.agent.positions.insert(asset(INSTRUMENT_3), qty("10"));
+    exit.proposed = proposal(INSTRUMENT_3, Side::Sell, "10", "120", Origin::RiskEngine);
+    exit.proposed.kind = mandate_risk::ProposedKind::Market;
+    let d = evaluate(&exit.input()).expect("the gate decides");
     assert_eq!(
-        (d.verdict, d.reason),
-        (Verdict::Deny, Some(ReasonCode::AuctionWindow)),
-        "exits in an auction window use limit orders, never market orders (spec 4.3), and DEC-129 \
-         item 18 puts that denial at check 3 under auction_window"
+        (
+            d.verdict,
+            d.reason,
+            d.pacing.map(|p| (p.qty, p.marketable_limit_required))
+        ),
+        (Verdict::Allow, None, Some((qty("10"), true))),
+        "a market-order risk exit in the opening auction is sent as a marketable limit, never \
+         denied (spec 4.3, MI-1)"
+    );
+
+    let mut pre_market = Scenario::allowing();
+    pre_market.now = at("2026-09-22T13:29:00Z");
+    pre_market.proposed.kind = mandate_risk::ProposedKind::Market;
+    let mut closing = Scenario::allowing();
+    closing.now = at("2026-09-22T19:55:00Z");
+    closing.proposed.kind = mandate_risk::ProposedKind::Market;
+    let decide = |s: &Scenario| {
+        let d = evaluate(&s.input()).expect("the gate decides");
+        (d.verdict, d.reason)
+    };
+    assert_eq!(
+        (decide(&pre_market), decide(&closing)),
+        (
+            (Verdict::Deny, Some(ReasonCode::SessionNotAllowed)),
+            (Verdict::Deny, Some(ReasonCode::AuctionWindow)),
+        ),
+        "a market opening at 09:29 ET meets the session rule first; at 15:55 ET it is \
+         auction_window, at check 3, before check 6's close_window"
     );
 }
 
