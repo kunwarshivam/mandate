@@ -1108,7 +1108,15 @@ struct ListedMutant {
 }
 
 /// How many mutants the run will test in each package.
+///
+/// `cargo mutants` 27.1.0 prints nothing at all, not `[]`, when the diff touches safety-critical
+/// source but generates no mutant, as a diff confined to a `#[cfg(test)]` module does. That empty
+/// listing is no mutants rather than a malformed one; anything else that does not parse is still
+/// an error.
 fn listed_mutant_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
+    if listing.trim().is_empty() {
+        return Ok(BTreeMap::new());
+    }
     let listed: Vec<ListedMutant> =
         serde_json::from_str(listing).context("parsing the mutants listing")?;
     let mut counts = BTreeMap::new();
@@ -3294,6 +3302,17 @@ mod tests {
     /// non-zero on `no tests to run`, which it reads as the mutant being caught. So a crate with no
     /// live test must fail the gate before the run rather than have that exit code stand in for
     /// evidence (DEC-139).
+    #[test]
+    fn an_empty_mutants_listing_is_no_mutants_and_a_malformed_one_is_an_error() -> Result<()> {
+        assert_eq!(listed_mutant_counts("")?, BTreeMap::new());
+        assert_eq!(listed_mutant_counts("\n")?, BTreeMap::new());
+        assert!(
+            listed_mutant_counts("[{").is_err(),
+            "a truncated listing is not read as no mutants"
+        );
+        Ok(())
+    }
+
     #[test]
     fn a_crate_with_no_live_test_cannot_have_its_mutants_counted_as_caught() -> Result<()> {
         let mutants = listed_mutant_counts(LISTED_MUTANTS)?;
