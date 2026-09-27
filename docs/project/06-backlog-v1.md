@@ -288,6 +288,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   from forward paper trading only, never from historical backtests of LLM theses; the scorecard
   shows each signal model's results beside the baselines.
 - **E15-4 (Could)** As an operator, I want shadow mode for a new mandate version.
+- **E15-5 (Should, after the Phase 1 exit)** As an owner, I want to run up to three variants of my
+  mandate at once, one live and the others in shadow, so that I can compare strategy changes before
+  risking money ([strategy option 16](../product/10-strategy-options.md#option-16-mandate-experiments-multi-variant-shadow-mode-founder-2026-09-27)).
+  Extends E15-4 and is pulled forward from Phase 3; no change to the v1 milestones. *Accepted when:*
+  each variant is its own owner-confirmed mandate version that differs only in strategy fields (signal
+  models, weights, thresholds, cadence); shadow variants see the same market data, pass the same gate,
+  keep a simulated book labelled as simulated, and send nothing to the broker; each variant's
+  hypothesis and success criterion are journaled before it runs; promotion is only an owner action
+  that creates a new confirmed mandate version, with no automatic winner-picking; and no mandate holds
+  more than three variants.
 
 ### E17 Research agent and dynamic universe
 
