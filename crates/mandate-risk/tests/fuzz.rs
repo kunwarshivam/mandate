@@ -26,6 +26,7 @@ use common::{
 };
 use mandate_risk::{AgentMode, GroupId, Origin, ReasonCode, Side, Verdict, evaluate};
 use proptest::prelude::*;
+use proptest::test_runner::{RngSeed, TestCaseError, TestRunner};
 
 /// What the proptest run actually reached, counted across cases. A fuzz whose assertions never see
 /// an allow, or never see a limit bind, is not evidence that the limits hold.
@@ -38,6 +39,17 @@ static SAW_COOLDOWN: AtomicU32 = AtomicU32::new(0);
 static SAW_UNIVERSE: AtomicU32 = AtomicU32::new(0);
 static SAW_DEFER: AtomicU32 = AtomicU32::new(0);
 static SAW_HOLD: AtomicU32 = AtomicU32::new(0);
+static EVERY_COUNTER: [&AtomicU32; 9] = [
+    &SAW_ALLOW,
+    &SAW_CONCENTRATION,
+    &SAW_ORDER_SIZE,
+    &SAW_GROSS,
+    &SAW_ORDERS_PER_DAY,
+    &SAW_COOLDOWN,
+    &SAW_UNIVERSE,
+    &SAW_DEFER,
+    &SAW_HOLD,
+];
 
 fn note(d: &mandate_risk::Decision) {
     let counter = match (d.verdict, d.reason) {
@@ -65,29 +77,44 @@ struct Drawn {
     reentry_cooldown_s: u32,
 }
 
+/// Half the drawn mandates are **gross-binding**: a gross limit below 1000, at least three orders a
+/// day, and no re-entry cooldown. Check 7's gross exposure runs after check 6's orders per day and
+/// needs at least two allowed openings before it can bind, so under the other half's draws alone it
+/// bound in only about 0.7% of sequences, and 20% of 256-case runs never saw it on a correct gate
+/// (the #160 finding, reproduced through `ref.py`'s own `gate`). The draw now reaches it; no
+/// assertion changed.
 fn drawn_mandate() -> impl Strategy<Value = Drawn> {
-    (
-        300_u32..4_000,
-        100_u32..1_500,
-        400_u32..6_000,
-        1_u32..6,
-        prop::sample::select(vec![0_u32, 60, 1_800, 3_600]),
+    prop_oneof![
+        (
+            300_u32..4_000,
+            100_u32..1_500,
+            400_u32..6_000,
+            1_u32..6,
+            prop::sample::select(vec![0_u32, 60, 1_800, 3_600]),
+        ),
+        (
+            300_u32..4_000,
+            100_u32..1_500,
+            400_u32..1_000,
+            3_u32..6,
+            Just(0_u32),
+        ),
+    ]
+    .prop_map(
+        |(
+            max_position_usd,
+            max_order_usd,
+            max_gross_exposure_usd,
+            max_orders_per_day,
+            reentry_cooldown_s,
+        )| Drawn {
+            max_position_usd,
+            max_order_usd,
+            max_gross_exposure_usd,
+            max_orders_per_day,
+            reentry_cooldown_s,
+        },
     )
-        .prop_map(
-            |(
-                max_position_usd,
-                max_order_usd,
-                max_gross_exposure_usd,
-                max_orders_per_day,
-                reentry_cooldown_s,
-            )| Drawn {
-                max_position_usd,
-                max_order_usd,
-                max_gross_exposure_usd,
-                max_orders_per_day,
-                reentry_cooldown_s,
-            },
-        )
 }
 
 /// One step: a proposal, the market path's equity at that moment, the agent's mode, whether the
@@ -167,6 +194,122 @@ fn is_sell(origin: Origin) -> bool {
     )
 }
 
+/// One drawn mandate and one drawn path through the gate, against the shadow ledger: the body of
+/// [`no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits`], as a function so the coverage
+/// gate can run it under fixed seeds.
+fn drawn_sequence(m: Drawn, path: Vec<Step>) -> Result<(), TestCaseError> {
+    let mut limits = two_stock_swing_limits();
+    limits.max_position_usd = usd(&m.max_position_usd.to_string());
+    limits.max_order_usd = usd(&m.max_order_usd.to_string());
+    limits.max_gross_exposure_usd = usd(&m.max_gross_exposure_usd.to_string());
+    limits.max_orders_per_day = m.max_orders_per_day;
+    limits.reentry_cooldown_s = m.reentry_cooldown_s;
+
+    let mut s = Scenario::allowing();
+    s.mandate = mandate_with(limits);
+    s.agent
+        .instrument_groups
+        .insert(asset(INSTRUMENT_2), GroupId(7));
+    s.agent
+        .instrument_groups
+        .insert(asset(INSTRUMENT_3), GroupId(7));
+    let mut ledger = ShadowLedger::default();
+
+    for step in path {
+        let instrument = if step.other_instrument {
+            INSTRUMENT_2
+        } else {
+            INSTRUMENT_3
+        };
+        let notional = scaled(&(step.shares * 100).to_string());
+        let selling = is_sell(step.origin);
+
+        s.agent.mode = step.mode;
+        s.risk = common::healthy_risk(&step.equity.to_string());
+        s.account.equity = usd(&step.equity.to_string());
+        s.agent.orders_today = ledger.opening_orders_today;
+        s.instrument = common::equity_instrument(instrument);
+        s.agent.market_values.clear();
+        s.agent.positions.clear();
+        for (id, mv) in &ledger.market_value {
+            if *mv > 0 {
+                s.agent
+                    .market_values
+                    .insert(asset(id), usd(&(mv / 1_000_000_000).to_string()));
+                s.agent.positions.insert(asset(id), qty("1"));
+            }
+        }
+        if selling {
+            s.agent
+                .positions
+                .insert(asset(instrument), qty(&step.shares.to_string()));
+        }
+        s.universe = if step.in_universe {
+            common::working_universe(&[INSTRUMENT_2, INSTRUMENT_3])
+        } else {
+            common::working_universe(&[])
+        };
+        s.agent.last_exit_fill_at.clear();
+        if let Some(secs) = step.seconds_since_exit {
+            let exit_at = mandate_time::UtcNanos::from_parts(s.now.secs() - secs, 0)
+                .expect("the test instant is in range");
+            s.agent
+                .last_exit_fill_at
+                .insert(asset(INSTRUMENT_2), exit_at);
+        }
+        s.proposed = proposal(
+            instrument,
+            if selling { Side::Sell } else { Side::Buy },
+            &step.shares.to_string(),
+            "100",
+            step.origin,
+        );
+
+        let d = evaluate(&s.input()).expect("the gate decides");
+        note(&d);
+
+        if d.verdict == Verdict::Allow && !selling {
+            let equity = scaled(&step.equity.to_string());
+            let oracle_limits = Limits {
+                cap: position_cap(
+                    scaled(&m.max_position_usd.to_string()),
+                    scaled("0.2"),
+                    equity,
+                ),
+                max_order: scaled(&m.max_order_usd.to_string()),
+                gross_cap: gross_limit(scaled(&m.max_gross_exposure_usd.to_string()), equity),
+                max_orders_per_day: m.max_orders_per_day,
+                reentry_cooldown_s: i64::from(m.reentry_cooldown_s),
+            };
+            let p = Proposal {
+                instrument_total: ledger.instrument_total(instrument, notional),
+                order: notional,
+                gross: ledger.gross(notional),
+                orders_today: ledger.opening_orders_today,
+                seconds_since_group_exit: step.seconds_since_exit,
+                in_universe: step.in_universe,
+            };
+            prop_assert_eq!(
+                breached(p, oracle_limits),
+                None::<Breach>,
+                "an allowed opening left the ledger past a limit: {:?} against {:?}",
+                p,
+                oracle_limits
+            );
+            ledger.apply_opening(instrument, notional);
+        }
+
+        if selling {
+            prop_assert!(
+                d.verdict != Verdict::Deny || d.reason == Some(ReasonCode::AccountTradingBlocked),
+                "MI-1: a reducing purpose was denied {:?}",
+                d.reason
+            );
+        }
+    }
+    Ok(())
+}
+
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
@@ -178,100 +321,7 @@ proptest! {
         m in drawn_mandate(),
         path in steps(),
     ) {
-        let mut limits = two_stock_swing_limits();
-        limits.max_position_usd = usd(&m.max_position_usd.to_string());
-        limits.max_order_usd = usd(&m.max_order_usd.to_string());
-        limits.max_gross_exposure_usd = usd(&m.max_gross_exposure_usd.to_string());
-        limits.max_orders_per_day = m.max_orders_per_day;
-        limits.reentry_cooldown_s = m.reentry_cooldown_s;
-
-        let mut s = Scenario::allowing();
-        s.mandate = mandate_with(limits);
-        s.agent.instrument_groups.insert(asset(INSTRUMENT_2), GroupId(7));
-        s.agent.instrument_groups.insert(asset(INSTRUMENT_3), GroupId(7));
-        let mut ledger = ShadowLedger::default();
-
-        for step in path {
-            let instrument = if step.other_instrument { INSTRUMENT_2 } else { INSTRUMENT_3 };
-            let notional = scaled(&(step.shares * 100).to_string());
-            let selling = is_sell(step.origin);
-
-            s.agent.mode = step.mode;
-            s.risk = common::healthy_risk(&step.equity.to_string());
-            s.account.equity = usd(&step.equity.to_string());
-            s.agent.orders_today = ledger.opening_orders_today;
-            s.instrument = common::equity_instrument(instrument);
-            s.agent.market_values.clear();
-            s.agent.positions.clear();
-            for (id, mv) in &ledger.market_value {
-                if *mv > 0 {
-                    s.agent.market_values.insert(asset(id), usd(&(mv / 1_000_000_000).to_string()));
-                    s.agent.positions.insert(asset(id), qty("1"));
-                }
-            }
-            if selling {
-                s.agent.positions.insert(asset(instrument), qty(&step.shares.to_string()));
-            }
-            s.universe = if step.in_universe {
-                common::working_universe(&[INSTRUMENT_2, INSTRUMENT_3])
-            } else {
-                common::working_universe(&[])
-            };
-            s.agent.last_exit_fill_at.clear();
-            if let Some(secs) = step.seconds_since_exit {
-                let exit_at = mandate_time::UtcNanos::from_parts(s.now.secs() - secs, 0)
-                    .expect("the test instant is in range");
-                s.agent.last_exit_fill_at.insert(asset(INSTRUMENT_2), exit_at);
-            }
-            s.proposed = proposal(
-                instrument,
-                if selling { Side::Sell } else { Side::Buy },
-                &step.shares.to_string(),
-                "100",
-                step.origin,
-            );
-
-            let d = evaluate(&s.input()).expect("the gate decides");
-            note(&d);
-
-            if d.verdict == Verdict::Allow && !selling {
-                let equity = scaled(&step.equity.to_string());
-                let oracle_limits = Limits {
-                    cap: position_cap(
-                        scaled(&m.max_position_usd.to_string()), scaled("0.2"), equity,
-                    ),
-                    max_order: scaled(&m.max_order_usd.to_string()),
-                    gross_cap: gross_limit(scaled(&m.max_gross_exposure_usd.to_string()), equity),
-                    max_orders_per_day: m.max_orders_per_day,
-                    reentry_cooldown_s: i64::from(m.reentry_cooldown_s),
-                };
-                let p = Proposal {
-                    instrument_total: ledger.instrument_total(instrument, notional),
-                    order: notional,
-                    gross: ledger.gross(notional),
-                    orders_today: ledger.opening_orders_today,
-                    seconds_since_group_exit: step.seconds_since_exit,
-                    in_universe: step.in_universe,
-                };
-                prop_assert_eq!(
-                    breached(p, oracle_limits),
-                    None::<Breach>,
-                    "an allowed opening left the ledger past a limit: {:?} against {:?}",
-                    p,
-                    oracle_limits
-                );
-                ledger.apply_opening(instrument, notional);
-            }
-
-            if selling {
-                prop_assert!(
-                    d.verdict != Verdict::Deny
-                        || d.reason == Some(ReasonCode::AccountTradingBlocked),
-                    "MI-1: a reducing purpose was denied {:?}",
-                    d.reason
-                );
-            }
-        }
+        drawn_sequence(m, path)?;
     }
 
     /// MI-8 over drawn mandates as well as drawn proposals.
@@ -292,18 +342,42 @@ proptest! {
     }
 }
 
-/// The coverage gate, over what the proptest run above actually reached.
+/// The seeds the coverage gate runs: the first five, by rule, not chosen for passing.
+const COVERAGE_SEEDS: std::ops::RangeInclusive<u64> = 1..=5;
+
+/// The coverage gate: the drawn-sequence property run under each of [`COVERAGE_SEEDS`] in turn,
+/// with the counters reset before each, and every run required to reach every verdict and every
+/// mandate limit.
 ///
-/// Named to sort last so the run has happened: nextest runs each test in its own process, so this
-/// asserts over the counters the sequence property filled **in this process**. If the sequence
-/// property never ran — a filter, a shrink to nothing, a rename — every counter is zero and this
-/// fails, which is the point: a fuzz that produced no allow and no binding limit is not evidence,
-/// and must not report success.
+/// Fixed seeds make the evidence deterministic (ES-12): under proptest's random seed a correct
+/// gate failed this about one run in five, because whether a 256-case run reached a gross-exposure
+/// denial depended on the seed (the #160 finding). The property itself,
+/// [`no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits`], keeps its random seed and its
+/// fuzzing power; only the coverage evidence is pinned. A fuzz that produced no allow and no
+/// binding limit is not evidence, and must not report success.
 #[test]
 #[ignore = "pending E6-3"]
 fn zz_the_fuzz_run_reached_every_verdict_and_every_mandate_limit() {
-    no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits();
+    for seed in COVERAGE_SEEDS {
+        for counter in EVERY_COUNTER {
+            counter.store(0, Ordering::Relaxed);
+        }
+        let mut runner = TestRunner::new(ProptestConfig {
+            cases: 256,
+            rng_seed: RngSeed::Fixed(seed),
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        });
+        runner
+            .run(&(drawn_mandate(), steps()), |(m, path)| {
+                drawn_sequence(m, path)
+            })
+            .unwrap_or_else(|e| panic!("seed {seed}: the sequence property failed: {e}"));
+        coverage_reached(seed);
+    }
+}
 
+fn coverage_reached(seed: u64) {
     let seen: Vec<(&str, u32)> = vec![
         ("an allow", SAW_ALLOW.load(Ordering::Relaxed)),
         (
@@ -335,7 +409,7 @@ fn zz_the_fuzz_run_reached_every_verdict_and_every_mandate_limit() {
         .collect();
     assert!(
         missing.is_empty(),
-        "the fuzz run never produced {missing:?}, so its other assertions are not evidence; \
-         counts were {seen:?}"
+        "seed {seed}: the fuzz run never produced {missing:?}, so its other assertions are not \
+         evidence; counts were {seen:?}"
     );
 }
