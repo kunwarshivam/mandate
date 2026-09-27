@@ -2674,7 +2674,6 @@ proptest! {
     /// The generated list is extended with four in-breach intervals so the oracle always confirms: a
     /// property that could be satisfied by never triggering would check nothing.
     #[test]
-    #[ignore = "pending E6-4"]
     fn breach_time_matches_an_independent_interval_accumulator(
         generated in prop::collection::vec((any::<bool>(), 1_u64..90), 1..12),
         need in prop::sample::select(vec![0_u32, 30, 60, 300]),
