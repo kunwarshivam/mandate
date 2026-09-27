@@ -52,6 +52,10 @@ pub(crate) struct Switch {
     pub(crate) event: EventId,
     pub(crate) initiator: Initiator,
     pub(crate) confirmation: Option<OwnerConfirmation>,
+    /// Whether the account stream has taken the switch's own mode yet. Until it has, nothing on that
+    /// stream can lift the switch: the streams have no global order (journal spec §2), so a `normal`
+    /// written before the breach can fold after the command, and lifting on it would add risk.
+    pub(crate) confirmed: bool,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -400,6 +404,7 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
                 event: event.event_id.clone(),
                 initiator,
                 confirmation: state.shown.take(),
+                confirmed: false,
             });
         }
         "OwnerExitRequested" => state.shown = payload::owner_confirmation_of(&event.payload)?,
@@ -440,14 +445,9 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
         "AgentModeApplied" => {
             if addressed_here(state, &event.payload) {
-                state.copied_mode = mode_field(event)?;
-                if state
-                    .switch
-                    .as_ref()
-                    .is_some_and(|switch| switch.initiator.final_mode() != Mode::Stopped)
-                {
-                    state.switch = None;
-                }
+                let to = mode_field(event)?;
+                state.copied_mode = to;
+                state.switch = retired(state.switch.take(), to);
             }
         }
         "ReconciliationRun" => {
@@ -519,6 +519,36 @@ fn interpret(state: &mut RuntimeState, event: &FoldedEvent) -> Result<(), Runtim
         }
     }
     Ok(())
+}
+
+/// What an account-stream mode change does to a kill switch the runtime still holds.
+///
+/// A `RiskLimit` flatten's restriction lifts through the account stream and nowhere else (brief item
+/// 21, mandate spec §5.4, §5.7, §5.8), but two things on that stream must never lift it. The
+/// executor **copies the runtime's own `AgentModeChanged` back as `AgentModeApplied`** (journal spec
+/// §2), so the switch's own `paused` returns as an account-stream fact: lifting on it would retire
+/// the switch the moment it was pulled, and a restart would then have no flatten to hand. And the
+/// streams have **no global order** (journal spec §2), so a `normal` written before the breach can
+/// fold after the command: lifting on that would hand the agent back to `normal` with the breach
+/// unaddressed, which adds risk (`AGENTS.md` rules 1 and 3).
+///
+/// So a mode at or above the switch's own is the account stream *confirming* it, never lifting it,
+/// and only a looser mode that arrives **after** that confirmation lifts it. An owner or operator
+/// stop is terminal and lifts for no one (DEC-131 item 12).
+fn retired(switch: Option<Switch>, to: Mode) -> Option<Switch> {
+    let mut switch = switch?;
+    let final_mode = switch.initiator.final_mode();
+    if final_mode == Mode::Stopped {
+        return Some(switch);
+    }
+    if to >= final_mode {
+        switch.confirmed = true;
+        return Some(switch);
+    }
+    if switch.confirmed {
+        return None;
+    }
+    Some(switch)
 }
 
 /// Whether an agent-scoped fact on the shared account stream is this deployment's. Mandate spec
