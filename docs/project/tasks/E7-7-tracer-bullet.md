@@ -622,11 +622,14 @@ Two items need the founder, neither of which is a new decision about spending or
    breaking merge faster; one PR is less queue traffic. The coordinator's go comment decides.
 7. **Whether `mandate-shell` also becomes M7's soak harness now or later.** This brief builds it so
    it can, and scopes it so it does not have to.
-8. ~~Whether this PR may correct stream K's stale layer-7 wording.~~ **Settled: not here.** DEC-138
-   amends DEC-133 item 1, and the coordinator will align the tracker's K row and
-   [the M6-K brief](M6-K-executor-and-connector.md) in a coordinator change after this merges. This PR
-   touches neither, which is also what the
-   [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md) §4 asks.
+8. ~~Whether this PR may correct stream K's stale layer-7 wording.~~ **Settled: here, in this PR.**
+   DEC-138 amends DEC-133 item 1, so the tracker's two K rows, the M6-K brief's `IntentSink`
+   paragraph, and the feature map's executor entry say the layer-8 `mandate-shell` and cite the
+   amendment. The [coordination playbook](../../../.cursor/skills/mandate-mode/playbooks/coordination.md)
+   §4 keeps agents out of another stream's rows, so this PR asked rather than assumed; the coordinator
+   directed it here, and its later note about doing it itself after the merge is superseded. Leaving it
+   undone was the one option ruled out, because it would have left three documents contradicting an
+   accepted decision with nobody owning the fix. Nothing else of stream K's changes.
 
 ## Not done
 
