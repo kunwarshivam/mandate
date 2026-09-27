@@ -437,12 +437,15 @@ impl ClientOrderId {
     /// `md-<26 chars of the intent id>` for an order submitted for an intent. A pure function of
     /// the intent id, so every process, epoch, and restart derives the same value (E7-2).
     pub fn for_intent(intent: IntentId) -> Self;
-    /// `md-<26>-r<26>` for the order that replaces one the broker replaced: derived from the
-    /// `OrderStateChanged` event that recorded the replacement, never from a counter.
+    /// `md-r-<origin>` for the order that replaces one the broker replaced: derived from the
+    /// `OrderStateChanged` event that recorded the replacement, never from a counter. The id
+    /// carries no intent segment, because the derivation takes the origin event alone; the
+    /// replacement is attributable to its intent through the order it replaced, which the fold
+    /// links (`replaced_by`), not from the id by itself.
     pub fn for_replacement(origin: EventId) -> Self;
-    /// `md-<26>-p<26>` for a protective order we submit on its own (the OCO after a partial fill,
+    /// `md-p-<origin>` for a protective order we submit on its own (the OCO after a partial fill,
     /// a re-placement before expiry, a crypto stop-limit): derived from the `ProtectionChanged`
-    /// draft that records it.
+    /// draft that records it, and attributable to its position through that draft.
     pub fn for_protection(origin: EventId) -> Self;
     pub fn parse(raw: &str) -> Result<Self, ExecutorError>;
     pub fn as_str(&self) -> &str;
