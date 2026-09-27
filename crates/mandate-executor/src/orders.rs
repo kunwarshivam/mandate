@@ -147,7 +147,7 @@ pub(crate) fn described(
             transition(batch, &id, OrderState::Accepted, status)?;
             batch.request_reconciliation();
         }
-        Ok(StatusMapping::ReplacedPair) => replaced()?,
+        Ok(StatusMapping::ReplacedPair) => replaced(batch, &id, order, status)?,
         Ok(StatusMapping::Becomes(to)) => {
             let mut extra = status;
             if let Some(code) = &order.reject_code {
@@ -263,11 +263,40 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
     Ok(())
 }
 
-/// `replaced`: the old order becomes `Replaced` and a new one, linked to it, holds its reservation
-/// (§5.7, interpretation 26). A later slice of this stack, with the reconciliation that confirms
-/// it.
-fn replaced() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
+/// `replaced`: the old order becomes `Replaced` and the new one, linked to it under an id derived
+/// from the event that records the replacement, becomes `Accepted` holding the old reservation
+/// (§5.7, interpretation 26).
+fn replaced(
+    batch: &mut Batch<'_, '_>,
+    id: &ClientOrderId,
+    order: &BrokerOrder,
+    mut status: Vec<(&'static str, Value)>,
+) -> Result<(), ExecutorError> {
+    let from = batch
+        .view
+        .orders
+        .get(id)
+        .map_or(OrderState::Unknown, |known| known.state);
+    if !legal(from, OrderState::Replaced) {
+        transition(batch, id, OrderState::Replaced, status)?;
+        return Ok(());
+    }
+    let linked = ClientOrderId::for_replacement(&batch.next_id())?;
+    status.push(("replaced_by", text(linked.as_str())));
+    if let Some(broker) = &order.replaced_by_broker_order_id {
+        status.push(("replaced_by_broker_order_id", text(broker.clone())));
+    }
+    transition(batch, id, OrderState::Replaced, status)?;
+    batch.journal(
+        "OrderStateChanged",
+        None,
+        vec![
+            ("client_order_id", text(linked.as_str())),
+            ("state", text(state_name(OrderState::Accepted))),
+            ("replaces", text(id.as_str())),
+        ],
+    )?;
+    Ok(())
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
