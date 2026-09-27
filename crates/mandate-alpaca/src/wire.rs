@@ -400,8 +400,40 @@ fn optional_price(
     }
 }
 
+/// A broker symbol. It reaches `/v2/positions/{symbol}` (the read, and the account-wide close), so
+/// it is held to a symbol's alphabet: one or two `/`-separated segments (`AAPL`, `BRK.B`,
+/// `BTC/USD`), each starting with a letter or a digit and holding only letters, digits and `.`. A
+/// dot segment, a percent sign, a query, or an empty segment is not a symbol this crate can read
+/// (#191 review, round 3).
 fn instrument(fields: &Map<String, Value>) -> Result<InstrumentId, WireError> {
-    InstrumentId::new(text(fields, "symbol")?).map_err(|_| WireError::WrongType { field: "symbol" })
+    let raw = text(fields, "symbol")?;
+    let segments: Vec<&str> = raw.split('/').collect();
+    let symbol_like = segments.len() <= 2
+        && segments.iter().all(|segment| {
+            segment
+                .bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_alphanumeric())
+                && segment
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'.')
+        });
+    if !symbol_like {
+        return Err(WireError::WrongType { field: "symbol" });
+    }
+    InstrumentId::new(raw).map_err(|_| WireError::WrongType { field: "symbol" })
+}
+
+/// An order's quantity. An order placed by notional amount (`qty: null`, possible on the owner's
+/// own account) names no share quantity, so its filled quantity is the only quantity known: it is
+/// read as that, and the order is ingested like any other rather than failing the page it sits on
+/// (trading-domain spec §11's external-activity row, #191 review, round 1). An order that omits
+/// `qty` altogether is still unreadable.
+fn order_qty(fields: &Map<String, Value>, filled: Qty) -> Result<Qty, WireError> {
+    match fields.get("qty") {
+        Some(Value::Null) => Ok(filled),
+        _ => qty(fields, "qty"),
+    }
 }
 
 fn side(fields: &Map<String, Value>) -> Result<Side, WireError> {
@@ -455,13 +487,14 @@ fn order_from(value: &Value) -> Result<BrokerOrder, WireError> {
             .map(|leg| broker_id(text(object(leg, "legs")?, "id")?, "id"))
             .collect::<Result<_, WireError>>()?,
     };
+    let filled_qty = qty(fields, "filled_qty")?;
     Ok(BrokerOrder {
         broker_order_id: broker_id(text(fields, "id")?, "id")?,
         client_order_id: optional_text(fields, "client_order_id")?.map(str::to_owned),
         instrument: instrument(fields)?,
         side: side(fields)?,
-        qty: qty(fields, "qty")?,
-        filled_qty: qty(fields, "filled_qty")?,
+        qty: order_qty(fields, filled_qty)?,
+        filled_qty,
         limit_price: optional_price(fields, "limit_price")?,
         stop_price: optional_price(fields, "stop_price")?,
         status: text(fields, "status")?.to_owned(),

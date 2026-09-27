@@ -8,11 +8,15 @@
 use std::future::Future;
 use std::time::Duration;
 
-use mandate_executor::{BrokerConnector, BrokerOutcome, BrokerRequest, ConnectorError};
+use mandate_executor::{
+    ActivityCursor, BrokerConnector, BrokerOrder, BrokerOutcome, BrokerRequest, BrokerUnknown,
+    ConnectorError,
+};
 use mandate_time::UtcNanos;
 
-use crate::error::ClientError;
-use crate::http::TradingTransport;
+use crate::error::{ClientError, WireError};
+use crate::http::{HttpRequest, Method, Response, TradingTransport};
+use crate::wire;
 
 /// Tells the time and waits between retries. The client paces against `now`, so a `pause` must
 /// move `now` forward by at least its duration.
@@ -68,19 +72,26 @@ impl Default for RetryPolicy {
 }
 
 /// The client. One method per request variant; nothing else reaches the host.
+///
+/// It never retries on its own. A request whose outcome is unknown answers
+/// [`ConnectorError::Unknown`] through [`BrokerConnector::call`], and
+/// the executor resolves it by querying on the client order id from its own timer, confirming an
+/// absence over a window before anything is sent again (trading-domain spec §5.7, task brief
+/// interpretation 9). A retry here would be a second, unjournaled path to the broker. The pause
+/// and the policy are carried for the shell, which paces those lookups.
 #[derive(Debug)]
 pub struct TradingClient<T, P> {
     transport: T,
-    pause: P,
-    retry: RetryPolicy,
+    _pause: P,
+    _retry: RetryPolicy,
 }
 
 impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     pub fn new(transport: T, pause: P, retry: RetryPolicy) -> Self {
         Self {
             transport,
-            pause,
-            retry,
+            _pause: pause,
+            _retry: retry,
         }
     }
 
@@ -93,24 +104,214 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     /// said. A duplicate `client_order_id` is [`BrokerOutcome::DuplicateClientOrderId`], not a
     /// failure: the broker refusing our own id means the order is already there (E7-2 step 6).
     pub async fn submit(&self, request: &BrokerRequest) -> Result<BrokerOutcome, ClientError> {
-        let _ = (&self.transport, &self.pause, self.retry, request);
-        Err(ClientError::Unimplemented { story: "E7-2" })
+        let BrokerRequest::Submit(order) = request else {
+            return Err(WireError::NotInterpreted {
+                field: "request",
+                story: "E7-2",
+            }
+            .into());
+        };
+        let body = wire::submission_body(order)?;
+        let response = self
+            .send(Method::Post, "/v2/orders".to_owned(), Some(body))
+            .await?;
+        settle(
+            response,
+            order.client_order_id.as_str(),
+            BrokerOutcome::Submitted,
+        )
     }
 
     /// Reads one order back by client order id, which is how an unacknowledged submission is
-    /// resolved (journal spec §5.2).
+    /// resolved (journal spec §5.2). A `404` is [`BrokerOutcome::Absent`]: one absence is a fact
+    /// the executor counts, never a reason to resubmit.
     pub async fn order_by_client_id(
         &self,
         client_order_id: &str,
     ) -> Result<BrokerOutcome, ClientError> {
-        let _ = (&self.transport, client_order_id);
-        Err(ClientError::Unimplemented { story: "E7-2" })
+        let path = format!("/v2/orders:by_client_order_id?client_order_id={client_order_id}");
+        let response = self.send(Method::Get, path, None).await?;
+        if response.status == 404 {
+            return Ok(BrokerOutcome::Absent {
+                client_order_id: client_order_id.to_owned(),
+            });
+        }
+        settle(response, client_order_id, BrokerOutcome::Order)
     }
 
     /// One request of any variant, the shape [`BrokerConnector`] wraps.
     pub async fn call_one(&self, request: &BrokerRequest) -> Result<BrokerOutcome, ClientError> {
-        let _ = (&self.transport, &self.pause, self.retry, request);
-        Err(ClientError::Unimplemented { story: "E7-3" })
+        match request {
+            BrokerRequest::Submit(_) => self.submit(request).await,
+            BrokerRequest::Cancel { client_order_id } => {
+                self.cancel(client_order_id.as_str()).await
+            }
+            BrokerRequest::AcknowledgeReplace { replaced: id }
+            | BrokerRequest::GetOrderByClientId(id) => self.order_by_client_id(id.as_str()).await,
+            BrokerRequest::ListOpenOrders => {
+                let orders = wire::open_orders(&self.read(OPEN_ORDERS.to_owned()).await?.body)?;
+                if orders.len() >= OPEN_ORDERS_PAGE {
+                    return Err(WireError::NotInterpreted {
+                        field: "open_orders_page",
+                        story: "E7-3",
+                    }
+                    .into());
+                }
+                Ok(BrokerOutcome::OpenOrders(orders))
+            }
+            BrokerRequest::ListPositions => {
+                let body = self.read("/v2/positions".to_owned()).await?.body;
+                Ok(BrokerOutcome::Positions(wire::positions(&body)?))
+            }
+            BrokerRequest::GetAccount => {
+                let body = self.read("/v2/account".to_owned()).await?.body;
+                Ok(BrokerOutcome::Account(wire::account(&body)?))
+            }
+            BrokerRequest::ListActivities { since } => {
+                let path = match since.0.as_str() {
+                    "" => ACTIVITIES.to_owned(),
+                    cursor => format!("{ACTIVITIES}&page_token={}", query_value(cursor)),
+                };
+                let fills = wire::activities(&self.read(path).await?.body)?;
+                let cursor = fills.last().map_or_else(
+                    || since.clone(),
+                    |fill| ActivityCursor(fill.fill_id.0.clone()),
+                );
+                Ok(BrokerOutcome::Activities { fills, cursor })
+            }
+            BrokerRequest::CancelAll(scope) => {
+                account_wide(self.dispatch(&HttpRequest::cancel_all(scope)).await?)
+            }
+            BrokerRequest::ClosePosition(scope, instrument) => account_wide(
+                self.dispatch(&HttpRequest::close_position(scope, instrument))
+                    .await?,
+            ),
+        }
+    }
+
+    /// Cancels one of our orders. Alpaca cancels by **its** order id, so the order is looked up by
+    /// our client order id first, and an order that is not there answers what the lookup said.
+    ///
+    /// An accepted `DELETE` is [`BrokerOutcome::CancelAccepted`], which is **not** a confirmation:
+    /// the executor waits for the order's own `canceled` state (trading-domain spec §5.4). A
+    /// refused `DELETE` — the order filled first — is answered with the order's own state, read
+    /// back at once, because that is the fact the executor folds (§5.7's
+    /// `PendingCancel --> Filled`).
+    async fn cancel(&self, client_order_id: &str) -> Result<BrokerOutcome, ClientError> {
+        let order = match self.order_by_client_id(client_order_id).await? {
+            BrokerOutcome::Order(order) => order,
+            other => return Ok(other),
+        };
+        let path = format!("/v2/orders/{}", order.broker_order_id);
+        let response = self.send(Method::Delete, path, None).await?;
+        match response.status {
+            200..=299 => Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: client_order_id.to_owned(),
+            }),
+            429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
+            _ => self.order_by_client_id(client_order_id).await,
+        }
+    }
+
+    /// A read whose answer must be a success. An overloaded or failing broker is an unknown
+    /// outcome; any other answer is not a fact this crate can fold (DEC-85).
+    async fn read(&self, path_and_query: String) -> Result<Response, ClientError> {
+        let response = self.send(Method::Get, path_and_query, None).await?;
+        match response.status {
+            200..=299 => Ok(response),
+            429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
+            _ => Err(WireError::NotInterpreted {
+                field: "status",
+                story: "E7-3",
+            }
+            .into()),
+        }
+    }
+
+    /// An ordinary request: [`HttpRequest::new`] checks the method and the path together against
+    /// the allowlist **before** anything is sent, so a crafted id or symbol is refused without a
+    /// round trip, and neither account-wide endpoint can be reached from here.
+    async fn send(
+        &self,
+        method: Method,
+        path_and_query: String,
+        body: Option<String>,
+    ) -> Result<Response, ClientError> {
+        self.dispatch(&HttpRequest::new(method, &path_and_query, body)?)
+            .await
+    }
+
+    /// The one place a request leaves.
+    async fn dispatch(&self, request: &HttpRequest) -> Result<Response, ClientError> {
+        Ok(self.transport.send(request).await?)
+    }
+}
+
+/// The open-orders read: every open order, oldest first, with bracket and OCO legs nested under
+/// their parent so a leg's broker-assigned `client_order_id` is never mistaken for external
+/// activity (trading-domain spec §11).
+const OPEN_ORDERS: &str = "/v2/orders?status=open&limit=500&direction=asc&nested=true";
+/// Alpaca's largest page. A full page may be a truncated one, and a reconciliation that missed an
+/// order would adopt its absence, so a full page fails loudly instead (DEC-85).
+const OPEN_ORDERS_PAGE: usize = 500;
+/// The fill activities read, oldest first, resumed from the cursor.
+const ACTIVITIES: &str = "/v2/account/activities?activity_types=FILL&direction=asc&page_size=100";
+/// What Alpaca answers, with a `422`, for a `client_order_id` it already holds (the recorded
+/// `submit_duplicate_client_order_id` scenario).
+const DUPLICATE_CLIENT_ORDER_ID: &str = "client_order_id must be unique";
+
+/// Settles one order-bearing answer: a success parses into `found`; a broker that is overloaded
+/// or failing is an unknown outcome, never a rejection (interpretation 10); the broker refusing
+/// our own `client_order_id` is the order already being there (E7-2 step 6); and anything else is
+/// a reject the executor reads §7.3's restriction table from.
+fn settle(
+    response: Response,
+    client_order_id: &str,
+    found: fn(BrokerOrder) -> BrokerOutcome,
+) -> Result<BrokerOutcome, ClientError> {
+    match response.status {
+        200..=299 => Ok(found(wire::order(&response.body)?)),
+        429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
+        status => {
+            let mut reject = wire::reject(status, &response.body)?;
+            if reject.message.contains(DUPLICATE_CLIENT_ORDER_ID) {
+                return Ok(BrokerOutcome::DuplicateClientOrderId {
+                    client_order_id: client_order_id.to_owned(),
+                });
+            }
+            reject.client_order_id = Some(client_order_id.to_owned());
+            Ok(BrokerOutcome::Rejected(reject))
+        }
+    }
+}
+
+/// A query parameter's value, percent-encoded: letters, digits, `-`, `.`, `_`, `~` and `:` stay as
+/// they are (RFC 3986 lets a query carry `:`), and every other byte becomes `%XX`. The activities
+/// cursor is already held to `[A-Za-z0-9:-]+` by `wire`, so today nothing changes on the wire;
+/// this keeps a cursor from adding a parameter or ending the query if that alphabet ever widens
+/// (#191 review, round 3).
+fn query_value(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"-._~:".contains(&b) {
+                char::from(b).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+/// The account-wide endpoints answer success or a reject; either way the executor confirms what
+/// happened by reading the order set back (trading-domain spec §5.5).
+fn account_wide(response: Response) -> Result<BrokerOutcome, ClientError> {
+    match response.status {
+        200..=299 => Ok(BrokerOutcome::AccountWideAccepted),
+        429 | 500..=599 => Err(BrokerUnknown::Ambiguous.into()),
+        status => Ok(BrokerOutcome::Rejected(wire::reject(
+            status,
+            &response.body,
+        )?)),
     }
 }
 
@@ -127,5 +328,26 @@ impl<T: TradingTransport, P: Pause> BrokerConnector for TradingClient<T, P> {
         self.call_one(request)
             .await
             .map_err(|error| error.to_connector())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::query_value;
+
+    #[test]
+    fn a_cursor_is_encoded_so_it_cannot_add_a_parameter_or_end_the_query() {
+        assert_eq!(
+            query_value("20260926233000000::2222-aB.c_d~e"),
+            "20260926233000000::2222-aB.c_d~e",
+            "the activity alphabet and the rest of RFC 3986's unreserved set pass unchanged"
+        );
+        assert_eq!(
+            query_value("x&side=sell"),
+            "x%26side%3Dsell",
+            "`&` and `=` cannot start another parameter"
+        );
+        assert_eq!(query_value("a/b%c#d e+f"), "a%2Fb%25c%23d%20e%2Bf");
+        assert_eq!(query_value(""), "");
     }
 }
