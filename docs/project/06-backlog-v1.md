@@ -218,6 +218,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
+- **E10-6 (Should)** As an owner who already runs my own agent (for example Claude), I want to
+  connect it through a Mandate MCP server that exposes the same API Mandate uses to take my input,
+  so that my agent can work inside my mandate without a separate path around it
+  ([DEC-141](04-decision-log.md#decisions)). Follows the owner-input API work, after the tracer
+  bullet (E7-7); no change to milestone order. *Accepted when:* every client request passes through
+  the same order builder, autonomy rules, risk gate, account ledger, and journal as the owner's own
+  input; the client cannot change an envelope field (it may only propose a mandate version that the
+  human confirms with step-up); ASK approvals go only to the human owner, and a client cannot approve
+  its own proposal; owner-only privileges (owner exits outside the regular session at a confirmed
+  bid, Stop and release, the kill switch) stay with the human; the client authenticates with its own
+  scoped, revocable token and no broker credential crosses MCP; every client call is journaled with
+  the client's identity; and the owner can revoke the client at any time.
 
 ### E11 Web app: dashboard and controls
 
