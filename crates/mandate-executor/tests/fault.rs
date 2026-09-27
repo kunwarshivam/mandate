@@ -451,7 +451,7 @@ fn protected(ports: &Ports<'_>) -> Shell {
             ),
         ))
         .expect("the resting OCO folds");
-    let (mut shell, _) = shell.restart(ports);
+    let mut shell = shell.restart_ready(ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), ports);
     shell
 }
