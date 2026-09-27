@@ -729,3 +729,12 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
   `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
   the same bound so both report it by name.
+- **E6-6:** drop or pin the `at.opening_auction` clause in `mandate-risk`'s `market_orders_barred`.
+  The opening auction is always pre-market, which the clause for a US equity outside the regular
+  session already bars, and crypto never has an auction, so the clause changes no decision and no
+  test can catch its removal (#228 review, round 1, minor 2; E6-6's bug list when it lands).
+- **E6-6:** pin the rest of a re-priced exit and of the close window. The tests assert
+  `marketable_limit_required` and the quantity of a market exit re-priced in an auction window but
+  not its `limit_price` or `applied`, and `hand::the_close_window_follows_the_early_close_calendar`
+  asserts only times inside the window, so it passes against a `close_window` that is always true
+  (#228 review, round 1, minor 3; E6-6's bug list when it lands).
