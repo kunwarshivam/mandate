@@ -290,7 +290,7 @@ and DEC-133; the paths arrive with the tests PR, which updates this entry.
 ## Risk gate
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
-implementation PRs fill the crate in story by story: E6-3's first PR lands the evaluation spine.
+implementation PRs fill the crate in story by story: E6-3's first two PRs land `evaluate`.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -309,7 +309,9 @@ check still owed.
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
   purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
-  refusal of an opening while a check is owed),
+  refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
+  mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
+  exposure with the account's own 1×),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s

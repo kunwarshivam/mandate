@@ -1344,7 +1344,6 @@ fn a_passive_price_inside_the_band_is_allowed() {
 
 /// §5.3: the day's count is of submitted orders, rejected ones included.
 #[test]
-#[ignore = "pending E6-3"]
 fn a_rejected_order_still_counts() {
     let mut limits = common::two_stock_swing_limits();
     limits.max_orders_per_day = 2;
