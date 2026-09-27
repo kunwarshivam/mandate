@@ -418,4 +418,20 @@ mod tests {
         }
         Ok(())
     }
+
+    /// A stagger pair is exactly a workspace and a thesis: a third member would be an input no
+    /// offset reads (DEC-85).
+    #[test]
+    fn a_stagger_pair_is_exactly_two_ids() -> Result<(), String> {
+        let fixture = fixture()?;
+        let grown = doctored(&fixture, "MC-N23", "/input/pairs/0", |v| {
+            if let Some(items) = v.as_array_mut() {
+                items.push(Json::String(PLANTED.to_owned()));
+            }
+        })?;
+        match run(grown, "MC-N23") {
+            Err(e) if e.contains(PLANTED) => Ok(()),
+            other => Err(format!("a three-member pair gave {other:?}")),
+        }
+    }
 }
