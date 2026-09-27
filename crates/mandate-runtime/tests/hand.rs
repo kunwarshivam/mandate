@@ -2142,9 +2142,10 @@ fn a_kill_switch_flatten_survives_an_unresolved_append_and_a_restart() {
     let view = universe(&["AAPL"]);
     let ports = common::ports_with_flatten(&ids, &gate, &plan, &flatten, &view);
     let mut shell = armed_shell(&ports);
+    let switch = || kill(this_agent(), Initiator::Owner, Some(owner_confirmation()));
 
     shell.next_append = AppendOutcome::Unresolved;
-    let doubted = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let doubted = shell.run(switch(), &ports);
     assert!(
         !doubted.drafts.is_empty() && doubted.handed.is_empty(),
         "the switch drafted, and nothing reached the sink while its append was in doubt: {:?}",
@@ -2152,7 +2153,7 @@ fn a_kill_switch_flatten_survives_an_unresolved_append_and_a_restart() {
     );
 
     shell.next_append = AppendOutcome::Committed;
-    let retry = shell.run(kill(this_agent(), Initiator::RiskLimit, None), &ports);
+    let retry = shell.run(switch(), &ports);
     assert!(
         retry
             .handed
@@ -2164,14 +2165,51 @@ fn a_kill_switch_flatten_survives_an_unresolved_append_and_a_restart() {
     );
 
     let (_after, started) = shell.restart(&ports);
-    assert!(
-        started
-            .handed
-            .iter()
-            .any(|handoff| matches!(handoff.body, IntentBody::Flatten(_))),
-        "and a restart hands the unfinished flatten again, which is the only handoff `paused` \
-         re-hands: {:?}",
-        started.handed
+    let handed = started
+        .handed
+        .iter()
+        .find_map(|handoff| match &handoff.body {
+            IntentBody::Flatten(plan) => Some(plan.clone()),
+            IntentBody::Order { .. } => None,
+        })
+        .expect("a restart hands the unfinished flatten again, which is what `stopped` re-hands");
+    assert_eq!(
+        handed.confirmation.map(|confirmed| confirmed.bid),
+        Some(price("155")),
+        "carrying the bid the owner confirmed, rebuilt from the OwnerExitRequested the fold read: \
+         without it the executor cannot price an after-hours owner exit and the sells wait"
+    );
+}
+
+/// Round-1 review finding 8, the half a mode comparison alone cannot see: an owner pause taken while
+/// the startup hold already has the agent `paused` moves the **lifecycle** without moving the
+/// effective mode, so the draft that records it must still be written. Otherwise the pause lives only
+/// in memory and lifting the hold returns the agent to `normal` — less strict than the owner asked
+/// for (DEC-131 item 25(h)).
+#[test]
+fn an_owner_pause_taken_under_the_startup_hold_outlives_it() {
+    let ids = TestIds;
+    let gate = AllowGate;
+    let plan = FixedPlan::silent();
+    let view = universe(&["AAPL"]);
+    let ports = ports(&ids, &gate, &plan, &view);
+    let shell = Shell::new(1);
+    let (mut shell, _) = shell.restart(&ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "a replay with nothing reconciled holds awaiting_reconciliation"
+    );
+
+    shell.run(Input::Command(Command::Pause), &ports);
+    let lifts_the_hold = reconciliation(1, 30);
+    shell.fold_one(&lifts_the_hold).expect("folds");
+    shell.run(Input::Journal(lifts_the_hold), &ports);
+    assert_eq!(
+        shell.state.effective_mode(),
+        Mode::Paused,
+        "the owner's pause outlives the hold that happened to be stricter when it was given: a \
+         pause recorded nowhere would be lost the moment the hold lifted"
     );
 }
 
