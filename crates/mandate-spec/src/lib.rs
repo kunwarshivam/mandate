@@ -69,8 +69,18 @@ pub enum ParseError {
     OutOfBounds { path: Pointer },
     #[error("`{path}` is not in the `{grammar}` grammar the schema declares for it", grammar = grammar.as_str())]
     OffGrammar { path: Pointer, grammar: DecGrammar },
+    /// An array the schema marks `uniqueItems` holds the same value twice; the path names the
+    /// second one.
+    #[error("`{path}` repeats an earlier item of an array whose items must be unique")]
+    NotUnique { path: Pointer },
+    /// A condition nests past the one level beyond V-017's limit that the parse reads, so V-017 can
+    /// still report the first level too deep and nothing deeper is ever recursed into (DEC-151).
     #[error("conditions nest deeper than the schema allows")]
     TooDeep { path: Pointer },
+    /// The public fields no longer hold what the document they were parsed from says, so there is no
+    /// canonical form to hash: a version must name the mandate the gate enforces, never a stale one.
+    #[error("the mandate's fields were changed after it was parsed, so it has no canonical form")]
+    Diverged,
     /// The stubs of this story's tests PR return this, so every pending test fails on them
     /// (DEC-77, DEC-83); the implementation PR replaces the stubs and removes the variant.
     #[error("the mandate parser is not implemented yet")]
@@ -91,7 +101,9 @@ impl ParseError {
             Self::OffPattern { .. } => "off_pattern",
             Self::OutOfBounds { .. } => "out_of_bounds",
             Self::OffGrammar { .. } => "off_grammar",
+            Self::NotUnique { .. } => "not_unique",
             Self::TooDeep { .. } => "too_deep",
+            Self::Diverged => "diverged",
             Self::Unimplemented => "unimplemented",
             Self::Domain(e) => e.code(),
         }

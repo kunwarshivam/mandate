@@ -105,9 +105,13 @@ fn a_family_another_stream_owns_fails_with_its_story() {
     assert_eq!(seen, 4, "all four unowned kinds are dispatched");
 }
 
-/// A wrong expected value fails its case. On the stubs only the schema family can show this, because
-/// it is the one owned family whose expectation the harness already compares; the other six report
-/// their rule as unimplemented, which is itself a failure and is what keeps them from passing early.
+/// A wrong expected value fails its case, and a right one passes: MC-S01 and the first rejection
+/// case pass as the fixture states them and fail with their `schema_valid` flipped, and an
+/// expectation the harness cannot read fails loudly.
+///
+/// Pending on E10-1 because the first half needs a working parse. The version this replaces
+/// asserted that the stub fails MC-S01, which any correct parse turns red (#225, the coordinator's
+/// round 1 ruling there).
 #[test]
 fn a_wrong_expected_value_fails_the_case() {
     let fixture = fixture();
@@ -119,10 +123,9 @@ fn a_wrong_expected_value_fails_the_case() {
         .and_then(|c| c["id"].as_str())
         .expect("MC-S01 expects a valid document")
         .to_owned();
-    assert!(
-        run(fixture.clone(), &valid).is_err(),
-        "{valid} expects the base to parse, which the stub cannot do, so it fails now"
-    );
+    if let Err(failure) = run(fixture.clone(), &valid) {
+        panic!("{valid} expects the base to parse: {failure}");
+    }
 
     let rejected = fixture["cases"]
         .as_array()
@@ -132,11 +135,24 @@ fn a_wrong_expected_value_fails_the_case() {
         .and_then(|c| c["id"].as_str())
         .expect("a rejection case")
         .to_owned();
-    let failure = run(fixture.clone(), &rejected).expect_err("a stubbed parse names no reason");
-    assert!(
-        failure.contains("not implemented"),
-        "{rejected}: a rejection with no reason must not count as a rejection, got: {failure}"
-    );
+    if let Err(failure) = run(fixture.clone(), &rejected) {
+        panic!("{rejected} expects the parse to reject its document: {failure}");
+    }
+
+    for (id, flipped) in [(&valid, false), (&rejected, true)] {
+        let mut wrong = fixture.clone();
+        let slot = wrong["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id.as_str())
+            .expect("the case");
+        slot["expect"]["schema_valid"] = Json::Bool(flipped);
+        assert!(
+            run(wrong, id).is_err(),
+            "{id}: a wrong expected value must fail the case"
+        );
+    }
 
     let mut doctored = fixture.clone();
     let slot = doctored["cases"]
@@ -259,13 +275,16 @@ fn every_owned_expectation_member_is_read() {
 /// reason as an unedited one and prove nothing. What is checkable now is the other half — that a stub
 /// is never mistaken for a pass — and the read-every-key half arrives with the implementation PR, where
 /// an edited `starts_at` or `then` must change the outcome.
+///
+/// A goal or risk-state case stops at the first stub on its path: the parser until E10-1's parse
+/// lands, then validation's `rule` stub until E10-1's V-rules do (#225, round 1).
 #[test]
 fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
     let fixture = fixture();
-    for (kind, stub) in [
-        ("risk_day", "risk_day"),
-        ("goal", "parser"),
-        ("risk_state", "parser"),
+    for (kind, stubs) in [
+        ("risk_day", &["risk_day"][..]),
+        ("goal", &["parser", "rule"][..]),
+        ("risk_state", &["parser", "rule"][..]),
     ] {
         let ids: Vec<String> = fixture["cases"]
             .as_array()
@@ -278,7 +297,8 @@ fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
         for id in ids {
             let failure = run(fixture.clone(), &id).expect_err("a stub is never a pass");
             assert!(
-                failure.contains("not implemented yet") && failure.contains(stub),
+                failure.contains("not implemented yet")
+                    && stubs.iter().any(|stub| failure.contains(stub)),
                 "{id}: the failure must name the stub it stopped at, got: {failure}"
             );
         }

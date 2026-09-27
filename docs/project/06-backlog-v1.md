@@ -519,6 +519,17 @@ From the independent reviews of stream J's implementation (`mandate-research`, #
 - `ResearchError::Unimplemented` is returned by no entry point, but stays until
   `crates/mandate-research/tests/rules.rs` stops constructing it (a tests correction).
 
+From the independent review of E10-1's slice-S implementation ([#225](https://github.com/kunwarshivam/mandate/pull/225)
+round 1), as the coordinator ruled there:
+
+- `tests/document.rs`'s `two_documents_that_differ_only_in_order_hash_the_same` parses one value twice,
+  and a canonical `Object` is a `BTreeMap`, so it pins determinism, not the order-independence its name
+  claims. Fix it in the next tests correction that touches the file, from key-shuffled JSON text read
+  through `mandate_canon::parse`.
+- No live `mandate-spec` test pins an absolute version digest: both canonical tests compare against the
+  same `mandate-canon` writer, so a non-canonical writer survives them. E10-3's status PR adds one
+  assertion against `btc_accumulator`'s literal `sha256:9fb03f7e…` beside `mandate::version_vector`.
+
 From the independent review of E4-2's implementation ([#163](https://github.com/kunwarshivam/mandate/pull/163)
 round 2, verdict approve), whose first two minors are closed by the third tests correction
 (DEC-127 item 26) and whose third waits on another story:
@@ -705,6 +716,13 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
   fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
   misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+- **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
+  every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
+  held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
+  DEC-129 item 6), and interpret RC-09's and RC-09B's `regime`, `prior_day_trades`,
+  `last_equity`, `multiplier` and `day_trade_count` in `mandate-refcases`. Slice 1 (#221) reads the
+  ledger as an input the caller folds, so until slice 2 lands an agent-scoped ledger would
+  undercount the account's day trades (#221 review, round 1, minor).
 
 From the independent review of E6-2's autonomy slice ([#216](https://github.com/kunwarshivam/mandate/pull/216)
 round 1, verdict approve; minor 2, deferred by the coordinator's ruling):

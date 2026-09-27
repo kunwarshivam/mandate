@@ -344,8 +344,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
 
 Planned by [the E6-3 task brief](../../../docs/project/tasks/E6-3-risk-gate.md) and DEC-129. The
 implementation PRs fill the crate in story by story: E6-3 has landed `evaluate` and `agent_flatten`,
-E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced), and
-E6-7 check 2's eligibility floor.
+E6-9 check 3's halt and no market orders under a presumed halt (a market exit is re-priced),
+E6-7 check 2's eligibility floor, and E6-6 `session_at`, check 3's sessions, the rest of check 4,
+check 7's buying power and check 8's `legacy_pdt` budget.
 Until every check exists the gate fails closed for adding risk (DEC-129 item 29): an opening the
 implemented checks would allow is `GateError::Unimplemented`, while a reducing purpose passes a
 check still owed.
@@ -363,12 +364,16 @@ check still owed.
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
   `assign_purpose`, `session_at`, `size_factor`, `trim_proposals`, `agent_flatten` and
   `surveillance`), `crates/mandate-risk/src/gate.rs` (`evaluate`: the eight checks in order,
-  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, and the fail-closed
+  purpose assignment, check 1 whole, the working universe, §5.3 rules 3 and 9, §5.1's limit-only
+  openings, the re-pricing of a market exit, and the fail-closed
   refusal of an opening while a check is owed), `crates/mandate-risk/src/limits.rs` (the §5.3
   mandate limits: concentration, order size, the re-entry cooldown, orders per day, and gross
   exposure with the account's own 1×),
   `crates/mandate-risk/src/flatten.rs` (`agent_flatten`, the agent-scoped kill switch's plan),
   `crates/mandate-risk/src/floor.rs` (check 2's eligibility floor, trading spec §3.2),
+  `crates/mandate-risk/src/session.rs` (`session_at` from the committed calendar and check 3's
+  session and auction-window rules), `crates/mandate-risk/src/account_rules.rs` (§5.3 rules 2 and
+  4 to 8, buying power with the fee reservation, and the `legacy_pdt` day-trade budget),
   `crates/mandate-risk/src/spec_types.rs` (the stream-F shapes this crate needs
   before `mandate-spec` and `mandate-domain` exist, in the names DEC-128 item 21 fixes; the first
   implementation PR after stream F's tests PR deletes it). It reads `mandate-accounting`'s
