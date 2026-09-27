@@ -93,7 +93,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
         "FillApplied" | "LateFillApplied" => fill_applied(state, payload),
-        "ExternalActivityIngested" => Ok(()),
+        "FeesCharged" | "ExternalActivityIngested" => Ok(()),
         "AccountRestrictionChanged" => {
             state.account_state = match required_text(payload, "restriction")? {
                 "closing_only" => AccountState::ClosingOnly,
@@ -106,9 +106,11 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     }
 }
 
-/// Fees, corporate actions, the account snapshot, rejects, reconciliation's records, the owner
-/// acknowledgment, the trading and risk days, protection and the kill switch (trading-domain spec
-/// §5.4 to §5.7, §6, §7.3, §10, §11): the later slices of this stack.
+/// Cash and fee balances, corporate actions, the account snapshot, rejects, reconciliation's
+/// records, the owner acknowledgment, the trading and risk days, protection and the kill switch
+/// (trading-domain spec §5.4 to §5.7, §6, §7.3, §10, §11): the later slices of this stack. Until
+/// the cash slice folds the balances, a `FeesCharged` and an `ExternalActivityIngested` fold as
+/// records only: nothing this crate reads yet depends on either.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }

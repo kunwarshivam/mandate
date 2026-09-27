@@ -1,8 +1,12 @@
 //! The §5.7 order state machine over what the broker says: acknowledgments, query answers,
 //! status updates, fills, and silence.
 
+use mandate_accounting::{
+    Account, AccountType, AssetClass, Execution, Input as AccountingInput, Record,
+};
 use mandate_canon::Value;
-use mandate_num::Qty;
+use mandate_num::{Qty, Usd};
+use mandate_time::{NewYorkTime, new_york_instant};
 
 use crate::batch::Batch;
 use crate::codec::{side_name, state_name};
@@ -379,6 +383,7 @@ pub(crate) fn fill(batch: &mut Batch<'_, '_>, fill: &BrokerFill) -> Result<(), E
         "FillApplied"
     };
     batch.journal(kind, None, pairs)?;
+    simulated_fee(batch, fill, &id)?;
     if terminal {
         batch.request_reconciliation();
         return Ok(());
@@ -422,3 +427,51 @@ pub(crate) fn every_agent(
 
 /// The subject external activity is recorded and acknowledged under (§7.1).
 pub(crate) const EXTERNAL: &str = "external_activity";
+
+/// Paper's regulatory fees (trading-domain spec §10, R-22). Alpaca paper charges no SEC, TAF, or
+/// CAT fee, so on a paper stream the fee live would charge is computed with `mandate-accounting`'s
+/// own rules from the effective fee configuration and booked `simulated = true`: in P&L and buying
+/// power, and out of the cash comparison. Crypto fees are the broker's own on paper too, so only
+/// equity fills are simulated.
+fn simulated_fee(
+    batch: &mut Batch<'_, '_>,
+    fill: &BrokerFill,
+    id: &ClientOrderId,
+) -> Result<(), ExecutorError> {
+    let equity =
+        batch.ports.instruments.asset_class(&fill.instrument) == Some(AssetClass::UsEquity);
+    if batch.view.environment() != Some("paper") || !equity {
+        return Ok(());
+    }
+    let execution = Execution {
+        fill_id: fill.fill_id.0.clone(),
+        client_order_id: Some(id.as_str().to_owned()),
+        instrument: fill.instrument.clone(),
+        asset_class: AssetClass::UsEquity,
+        side: fill.side,
+        qty_gross: fill.qty,
+        price: fill.price,
+        liquidity: None,
+        executed_at: new_york_instant(fill.trade_date, NewYorkTime::new(12, 0)?)?,
+    };
+    let applied = Account::opening(AccountType::Margin, Usd::ZERO, Vec::new())
+        .apply(&AccountingInput::Fill(execution), batch.ports.fees)?;
+    let Record::Fill { fees, .. } = applied.record else {
+        return Ok(());
+    };
+    let accrued = fees
+        .iter()
+        .try_fold(Usd::ZERO, |total, fee| total.checked_add(fee.usd))?;
+    batch.journal(
+        "FeesCharged",
+        None,
+        vec![
+            ("family", text("regulatory")),
+            ("instrument", text(fill.instrument.as_str())),
+            ("accrued", text(accrued.to_string())),
+            ("charged", text("0")),
+            ("simulated", Value::Bool(true)),
+        ],
+    )?;
+    Ok(())
+}

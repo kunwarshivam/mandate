@@ -4616,7 +4616,6 @@ fn a_reservation_lowers_buying_power_by_its_amount() {
 }
 
 #[test]
-#[ignore = "pending E7-3"]
 fn a_paper_fill_books_a_simulated_fee_in_the_shadow_ledger() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
