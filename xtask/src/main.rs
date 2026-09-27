@@ -1148,7 +1148,9 @@ fn live_test_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
 }
 
 /// Names every package whose mutants no live test would judge, with what the run would have claimed
-/// about them (DEC-139).
+/// about them (DEC-139). A package of nothing but stubs is named too: DEC-137 item 3 exempts a stub
+/// body's mutants from a run that *tested* them and found them missed, which a package with no live
+/// test never produces.
 fn unjudged_mutants(
     mutants: &BTreeMap<String, usize>,
     live: &BTreeMap<String, usize>,
@@ -1158,10 +1160,13 @@ fn unjudged_mutants(
         .filter(|(package, _)| live.get(package.as_str()).copied().unwrap_or(0) == 0)
         .map(|(package, count)| {
             format!(
-                "`{package}`: no live tests to judge {count} mutant(s); add live tests or stub the \
-                 code. `cargo nextest run --package={package}` reports `no tests to run` and exits \
-                 non-zero, which `cargo mutants` reads as every one of them caught, so the run \
-                 would report a clean gate while nothing ran (DEC-139)"
+                "`{package}`: no live tests to judge {count} mutant(s); it needs at least one \
+                 live test before the gate can judge any of them, a crate of nothing but stubs \
+                 included, since a stub body's mutants are exempt only on a run that tested them \
+                 (#175 added live tests over its error codes and vocabulary). `cargo nextest run \
+                 --package={package}` reports `no tests to run` and exits non-zero, which `cargo \
+                 mutants` reads as every one of them caught, so the run would report a clean gate \
+                 while nothing ran (DEC-139)"
             )
         })
         .collect()
@@ -3015,6 +3020,12 @@ mod tests {
         assert!(
             named.contains("`mandate-probe`") && named.contains("2 mutant(s)"),
             "{named}"
+        );
+        assert!(
+            named.contains("at least one live test"),
+            "the advice is a live test, the one thing that helps, and not \"stub the code\": a \
+             crate of nothing but stubs is named here too, because DEC-137 item 3 exempts a stub \
+             body only on a run that tested it: {named}"
         );
 
         assert!(
