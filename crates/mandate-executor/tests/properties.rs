@@ -2277,7 +2277,6 @@ proptest! {
 
     /// DEC-85: every account-stream catalogue event is interpreted or named.
     #[test]
-    #[ignore = "pending E7-2"]
     fn every_catalogue_event_is_interpreted_or_named(
         event_type in prop::sample::select(vec![
             "StreamOpened", "IntentReceived", "GateDecided", "OrderSubmitted",

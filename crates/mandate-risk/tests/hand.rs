@@ -1110,6 +1110,7 @@ fn crypto_never_counts() {
     s.account.prior_close_equity = usd("10000");
     s.instrument.asset_class = AssetClass::Crypto;
     s.instrument.exchange = None;
+    s.instrument.median_dollar_volume_30d = Some(usd("90000000"));
     s.agent.day_trades = mandate_risk::DayTradeLedger {
         window_count: 3,
         flagged_pattern_day_trader: false,
@@ -1118,6 +1119,13 @@ fn crypto_never_counts() {
     };
 
     let d = evaluate(&s.input()).expect("the gate decides");
+    assert_eq!(
+        d.checks.get(1),
+        Some(&mandate_risk::CheckOutcome::Passed(
+            mandate_risk::Check::UniverseAndLimits
+        )),
+        "the crypto opening must pass check 2's floor, or the assertion below is vacuous"
+    );
     assert_ne!(
         d.reason,
         Some(ReasonCode::LegacyPdtDayTradeBudget),
@@ -1232,7 +1240,6 @@ fn a_flatten_prices_by_session_alone() {
 
 /// §4.4: a halted instrument takes no opening order.
 #[test]
-#[ignore = "pending E6-9"]
 fn a_halted_instrument_denies_an_opening() {
     let mut s = Scenario::allowing();
     s.instrument.halted = true;

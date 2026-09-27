@@ -60,7 +60,6 @@ const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
 const OTHER_INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ1";
 
 #[test]
-#[ignore = "pending E7-2"]
 fn a_gap_in_seq_fails_the_fold() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -81,7 +80,6 @@ fn a_gap_in_seq_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_unknown_event_type_fails_the_fold() {
     let mut state = ExecutorState::new(scope());
     let unknown = event(ACCOUNT_STREAM, 1, "SomethingNobodyWrote", object(&[]));
@@ -94,7 +92,6 @@ fn an_unknown_event_type_fails_the_fold() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_uninterpreted_broker_field_names_its_story() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -115,7 +112,6 @@ fn an_uninterpreted_broker_field_names_its_story() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_event_on_a_stream_the_executor_does_not_follow_is_refused() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");
@@ -205,7 +201,6 @@ fn a_risk_clock_that_goes_backwards_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn an_append_with_another_environment_is_rejected() {
     let mut state = ExecutorState::new(scope());
     fold(&mut state, &stream_opened()).expect("seq 1 folds");

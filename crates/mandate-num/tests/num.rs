@@ -1086,7 +1086,6 @@ fn ratios_round_once_and_reject_twenty_five_places() {
 /// a penny grid at or above 1.00 USD and a hundredth of a penny below it. A crypto increment rounds
 /// the same way.
 #[test]
-#[ignore = "pending E4-2"]
 fn a_limit_price_sits_on_the_reg_nms_tick_against_the_order() {
     let equity = TickRule::RegNmsEquity;
     let buy = |text: &str| {
@@ -1143,7 +1142,6 @@ fn a_limit_price_sits_on_the_reg_nms_tick_against_the_order() {
 /// definitions: the variance of the main series, its ceiling root, the squared Sharpe, its
 /// minus-infinity root, and the annualized pair.
 #[test]
-#[ignore = "pending E4-2"]
 fn hand_calculated_backtest_statistics() {
     let returns = [
         Ratio::parse("0.01").unwrap(),
@@ -1199,7 +1197,6 @@ fn hand_calculated_backtest_statistics() {
 /// A falling series' figures, where the Sharpe is negative and its magnitude comes from the ceiling
 /// root: the brief's second degenerate series.
 #[test]
-#[ignore = "pending E4-2"]
 fn hand_calculated_statistics_of_a_falling_series() {
     let returns = [
         Ratio::parse("-0.01").unwrap(),
@@ -1239,7 +1236,6 @@ fn hand_calculated_statistics_of_a_falling_series() {
 
 /// A zero denominator is an error, not an infinity, and a root of a negative value is rejected.
 #[test]
-#[ignore = "pending E4-2"]
 fn statistics_that_have_no_value_are_errors() {
     let zero = Ratio::ZERO;
     let one = Ratio::parse("1").unwrap();
@@ -1273,7 +1269,6 @@ proptest! {
     /// A return is one rounding of the exact quotient, at the scale and mode the caller names, with
     /// the sign of the numerator (DEC-127 item 4).
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_return_is_one_rounding_of_the_exact_quotient(
         numerator in decimal(1_000_000, 2),
         denominator in positive(1_000_000, 2),
@@ -1292,7 +1287,6 @@ proptest! {
     /// Shares bought with an amount of money are truncated to the increment and never cost more than
     /// the money available.
     #[test]
-    #[ignore = "pending E4-2"]
     fn shares_at_a_price_truncate_to_the_increment(
         cash in unsigned(1_000_000, 2),
         price in positive(100_000, 2),
@@ -1313,7 +1307,6 @@ proptest! {
     /// The sample variance is one rounding of `(n Σr² − (Σr)²) ÷ (n(n − 1))` and is never negative,
     /// whatever the series (DEC-127 item 5).
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_sample_variance_matches_the_integer_oracle_and_is_never_negative(
         values in proptest::collection::vec(period_returns(), 2..=MOST_PERIODS),
     ) {
@@ -1343,7 +1336,6 @@ proptest! {
     /// The volatility is the least 12-place value whose square reaches the variance, so it never
     /// understates dispersion (DEC-127 item 6).
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_volatility_root_is_the_least_twelve_place_value_whose_square_reaches_the_variance(
         variance in unsigned(1_000_000, 12),
     ) {
@@ -1363,7 +1355,6 @@ proptest! {
     /// A Sharpe's magnitude never exceeds the root of its squared figure: the floor root squares to at
     /// most the value, and one place more would exceed it (DEC-127 item 7).
     #[test]
-    #[ignore = "pending E4-2"]
     fn a_sharpe_root_never_exceeds_the_squared_value(squared in unsigned(1_000_000, 12)) {
         let value = ratio_of(squared);
         let units = scaled(squared, 12);
@@ -1380,7 +1371,6 @@ proptest! {
     /// Annualizing multiplies by an integer exactly, so the product divided back gives the period
     /// figure and no rounding enters (DEC-127 items 6 and 7).
     #[test]
-    #[ignore = "pending E4-2"]
     fn an_annualized_variance_is_the_period_value_times_the_period_count(
         variance in unsigned(1_000_000, 12),
         periods in 1u32..=365,
@@ -1394,7 +1384,6 @@ proptest! {
 
     /// Adding and subtracting ratios is exact or an error, which is what the excess return needs.
     #[test]
-    #[ignore = "pending E4-2"]
     fn adding_and_subtracting_ratios_is_exact(
         a in ratios(1_000_000),
         b in ratios(1_000_000),
@@ -1416,7 +1405,6 @@ proptest! {
 /// value one unit below, and a squared Sharpe large enough to need the whole integer part. A ceiling
 /// root and a floor root agree exactly on a perfect square and straddle every value between two.
 #[test]
-#[ignore = "pending E4-2"]
 fn hand_calculated_roots_at_their_edges() {
     let zero = Ratio::ZERO;
     assert_eq!(zero.root_ceiling().unwrap(), Ratio::ZERO);

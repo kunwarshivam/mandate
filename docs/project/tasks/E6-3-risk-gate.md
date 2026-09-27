@@ -817,6 +817,12 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
     it `would_cross_zero`, which is §9.1's own rule ("a sell above the position is denied").
     §5.3's "bracket protective legs are checked against position + entry quantity" sits with rules
     4 to 6 and is rule 4's (`sell_exceeds_available`, E6-6). Under `paused` or `stopped` such a sell is held at check 1 before check 4.
+31. **An exit is re-priced under a real halt as well as a presumed one** (the coordinator's ruling on
+    #186). §4.4, §5.6 and item 28 attach re-pricing to the presumed halt, and §5.1 permits a market
+    exit "with current status data", which a real halt has. The gate still sends a market-order exit
+    in a halted instrument as a marketable limit, because a market order into a halt reopens at an
+    unknown price. It is rule 3's safe direction and never a denial: the exit is allowed and only
+    its form is constrained, so MI-1 and rule 13 hold.
 
 ## Decisions needed
 
