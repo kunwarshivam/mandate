@@ -742,28 +742,24 @@ fn mc_g16() {
 
 /// `MC-F01`: Automated flatten on a shared account touches only that agent.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f01() {
     run_flatten("MC-F01");
 }
 
 /// `MC-F02`: Automated flatten after hours: equity sells wait; crypto sells go now.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f02() {
     run_flatten("MC-F02");
 }
 
 /// `MC-F03`: Owner kill switch after hours with the bid confirmed: sells now, never below the floor price.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f03() {
     run_flatten("MC-F03");
 }
 
 /// `MC-F04`: Owner kill switch after hours without confirmation: equity sells wait.
 #[test]
-#[ignore = "pending E6-3"]
 fn mc_f04() {
     run_flatten("MC-F04");
 }
