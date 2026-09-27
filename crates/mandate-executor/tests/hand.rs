@@ -3820,7 +3820,7 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
 #[ignore = "pending E7-4"]
 fn an_account_cancel_all_covers_unknown_orders() {
     let ids = TestIds;
-    let mandates = FixedMandate::covering(&[AAPL]);
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -4131,6 +4131,8 @@ fn a_protective_order_submits_with_no_buying_power() {
             &[
                 ("status", text("ACTIVE")),
                 ("buying_power", text("0")),
+                ("non_marginable_buying_power", text("0")),
+                ("accrued_fees", text("0")),
                 ("equity", text("0")),
                 ("cash", text("0")),
             ],
