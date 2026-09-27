@@ -103,7 +103,6 @@ fn next_seq(shell: &Shell) -> u64 {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_workspaces_agent_control_and_clock_streams_are_followed() {
     let mut state = ExecutorState::new(common::scope());
     for stream in [AGENT_STREAM, CONTROL_STREAM, CLOCK_STREAM] {
@@ -124,7 +123,6 @@ fn the_workspaces_agent_control_and_clock_streams_are_followed() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn every_uninterpreted_event_names_the_story_that_owns_it() {
     for (kind, story) in [
         ("RelatedAccountsCoordination", "E7-5"),
@@ -1454,7 +1452,6 @@ fn external_activity_reaches_an_agent_the_executor_has_not_yet_seen() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_client_order_id_grammar_is_the_derivations_and_nothing_else() {
     for accepted in ["md-01JABC", "md-p-e1-h2-o3"] {
         if let Err(error) = ClientOrderId::parse(accepted) {

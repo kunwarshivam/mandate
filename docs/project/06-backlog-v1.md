@@ -393,6 +393,15 @@ assert:
   both `cargo xtask check` and CI run, so the gate is sound as used; a per-run counter would make it
   sound under either runner.
 
+From the independent reviews of stream K's tests (`mandate-executor`, `mandate-alpaca`, #152):
+
+- Key the reference-case partition check (`refcases::the_fixture_partition_is_driven_plus_dropped`)
+  to the scopes the suite actually drives, not to the `executor` and `reconciliation` labels. Five
+  of the sixteen driven entries sit outside that filter (`RC-06`'s
+  `protective_orders_kept_through_dividend` is `accounting`; `RC-15` and its three variants are
+  `gate`), so a new `gate`-scoped case still leaves the suite silently; renames and removals of
+  every named entry are already caught (round-3 review finding 3).
+
 From the independent reviews of stream I's implementation (`mandate-runtime`, #151), each deferred by
 a coordinator ruling rather than left undone (DEC-131 item 25):
 

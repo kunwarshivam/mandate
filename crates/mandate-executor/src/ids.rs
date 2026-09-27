@@ -12,6 +12,9 @@ pub struct IntentId(pub EventId);
 /// order of ours from external activity (trading-domain spec §7.1).
 pub const PREFIX: &str = "md-";
 
+/// The longest `client_order_id` Alpaca accepts.
+const MAX_LEN: usize = 128;
+
 /// The broker's name for one of our orders, and our only idempotency key on the broker side.
 ///
 /// There is no `ClientOrderId::new(String)`. The three derivations below and [`ClientOrderId::parse`]
@@ -22,44 +25,61 @@ pub const PREFIX: &str = "md-";
 pub struct ClientOrderId(String);
 
 impl ClientOrderId {
-    /// `md-<26 chars of the intent id>` for the order submitted for an intent.
+    /// `md-<intent id>` for the order submitted for an intent.
     ///
     /// A pure function of the intent id alone, so every process, every writer epoch, and every
     /// restart derives the same value (E7-2). It is deliberately **not** a function of the attempt
     /// number: trading-domain spec §5.7 requires a resubmission after a confirmed absence to carry
-    /// the same id, and an id that depended on the attempt could not.
+    /// the same id, and an id that depended on the attempt could not. An intent id is a ULID, so
+    /// its body is alphanumeric; anything else is refused rather than escaped.
     pub fn for_intent(intent: &IntentId) -> Result<Self, ExecutorError> {
-        let _ = intent;
-        Err(ExecutorError::Unimplemented { story: "E7-2" })
+        let raw = intent.0.0.as_str();
+        if !raw.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(malformed(raw));
+        }
+        Self::parse(&format!("{PREFIX}{raw}"))
     }
 
-    /// `md-<26>-r<26>` for the order that replaces one the broker replaced, derived from the
+    /// `md-r-<origin>` for the order that replaces one the broker replaced, derived from the
     /// `OrderStateChanged` event that recorded the replacement, never from a counter
-    /// (trading-domain spec §5.7's `replaced` row).
+    /// (trading-domain spec §5.7's `replaced` row). An intent-derived id has no hyphen after the
+    /// prefix, so the derivations can never meet.
     pub fn for_replacement(origin: &EventId) -> Result<Self, ExecutorError> {
-        let _ = origin;
-        Err(ExecutorError::Unimplemented { story: "E7-2" })
+        Self::parse(&format!("{PREFIX}r-{}", origin.0))
     }
 
-    /// `md-<26>-p<26>` for a protective order submitted on its own — the OCO after a partial fill,
+    /// `md-p-<origin>` for a protective order submitted on its own — the OCO after a partial fill,
     /// a re-placement before expiry, a crypto stop-limit — derived from the `ProtectionChanged`
     /// draft that records it (trading-domain spec §5.4).
     pub fn for_protection(origin: &EventId) -> Result<Self, ExecutorError> {
-        let _ = origin;
-        Err(ExecutorError::Unimplemented { story: "E7-4" })
+        Self::parse(&format!("{PREFIX}p-{}", origin.0))
     }
 
-    /// Reads an id back from the broker, validating the grammar. An id that does not parse is not
-    /// ours, which is what makes an order carrying one external activity rather than a mystery
-    /// (trading-domain spec §7.1, §11).
+    /// Reads an id back from the broker, validating the grammar: the platform prefix, then one or
+    /// more ASCII letters, digits, or hyphens, within Alpaca's 128-byte bound. An id that does not
+    /// parse is not ours, which is what makes an order carrying one external activity rather than
+    /// a mystery (trading-domain spec §7.1, §11).
     pub fn parse(raw: &str) -> Result<Self, ExecutorError> {
-        let _ = raw;
-        Err(ExecutorError::Unimplemented { story: "E7-2" })
+        let body = raw.strip_prefix(PREFIX).ok_or_else(|| malformed(raw))?;
+        let grammatical = !body.is_empty()
+            && raw.len() <= MAX_LEN
+            && body.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if grammatical {
+            Ok(Self(raw.to_owned()))
+        } else {
+            Err(malformed(raw))
+        }
     }
 
     /// The wire form, which is what the submission sets Alpaca's `client_order_id` to.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+fn malformed(raw: &str) -> ExecutorError {
+    ExecutorError::MalformedClientOrderId {
+        raw: raw.to_owned(),
     }
 }
 
