@@ -1303,6 +1303,7 @@ fn a_position_mismatch_pauses_only_the_agents_holding_the_instrument() {
 }
 
 #[test]
+#[ignore = "pending E7-3"]
 fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);

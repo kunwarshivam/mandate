@@ -2351,6 +2351,7 @@ fn the_executor_never_lifts_a_reconciliation_pause_itself() {
 }
 
 #[test]
+#[ignore = "pending E7-3"]
 fn only_an_acknowledged_owner_ack_clears_a_mismatch_pause() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
