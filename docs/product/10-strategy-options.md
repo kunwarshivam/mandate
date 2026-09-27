@@ -505,7 +505,7 @@ people with their own agents into the complete product, not for replacing it. Re
 disclaiming supervision. Per the broker's announcement, Robinhood's agentic trading (beta from
 2026-05-27) "does not control, supervise, monitor, recommend, or audit these AI agents" [RH1]. Per
 the broker's announcement as reported, Coinbase for Agents (2026-06-11) will add custom limits such
-as maximum trade size and spend later [CB1]. Hobby projects add their own safety layers.
+as maximum trade size and spend later [CB1].
 
 **Hedge A: option 3.** Run discovery in parallel; change no engineering until 2 of 5 name a budget
 and a reachable custodian.
@@ -622,7 +622,7 @@ These are discovery targets, not proof of product-market fit.
 | If we observe | Then |
 |---|---|
 | Robinhood or Alpaca ship enforced per-agent limits, approvals, and exportable records | The channel's value shrinks; the complete product competes on ideas, portability, and verification; lean on option 3 |
-| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | Move E10-6 to the back of the backlog |
+| Fewer than 4 of 10 agent users report a real incident or fear, and none would connect their agent | E10-6 loses its DEC-148 placement and goes back behind the other Should stories |
 | The DEC-103 thin slice beats its pre-registered baselines net of costs | Platform ideas are a real differentiator, as the lead assumes; consider option 10 |
 | The thin slice fails its baselines | Keep ideation gated; the product rests on control and evidence (options 13, 3, 6), with the channel as an on-ramp; the founder may revisit what leads |
 | Counsel says the optional channel carries different exposure from owner input | Change the channel's terms or scope with counsel before E10-6 ships |
