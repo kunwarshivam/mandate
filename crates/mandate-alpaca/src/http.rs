@@ -146,25 +146,51 @@ impl HttpRequest {
 
     /// The broker's cancel-all, `DELETE /v2/orders`. Only an [`AccountWideScope`] opens it, and
     /// only the account and workspace kill switches hold one (trading-domain spec §5.5).
-    pub fn cancel_all(scope: &AccountWideScope) -> Self {
+    pub fn cancel_all(scope: &AccountWideScope) -> Result<Self, TransportError> {
         let _ = scope;
-        Self {
-            method: Method::Delete,
-            path_and_query: "/v2/orders".to_owned(),
-            body: None,
-        }
+        Self::account_wide(Method::Delete, "/v2/orders")
     }
 
     /// The broker's close-position for one instrument, `DELETE /v2/positions/{symbol}`. Only an
-    /// [`AccountWideScope`] opens it, and the symbol is an [`InstrumentId`], which is already one
-    /// path segment.
-    pub fn close_position(scope: &AccountWideScope, instrument: &InstrumentId) -> Self {
+    /// [`AccountWideScope`] opens it.
+    ///
+    /// A symbol the allowlist refuses as one path segment is [`TransportError::RefusedPath`] and
+    /// nothing is sent, so the connector answers `NotSent` (DEC-133 item 32), never a broker's
+    /// rejection: a kill switch must tell a URL we could not build from a broker that refused.
+    /// `BTC/USD` is refused today; percent-encoding its `/` is a backlog row that blocks E7-4.
+    pub fn close_position(
+        scope: &AccountWideScope,
+        instrument: &InstrumentId,
+    ) -> Result<Self, TransportError> {
         let _ = scope;
-        Self {
-            method: Method::Delete,
-            path_and_query: format!("/v2/positions/{}", instrument.as_str()),
-            body: None,
+        Self::account_wide(
+            Method::Delete,
+            &format!("/v2/positions/{}", instrument.as_str()),
+        )
+    }
+
+    /// The one constructor of an account-wide request. `method` and `path_and_query` must name an
+    /// account-wide endpoint of [`ENDPOINTS`] together, which is [`is_paper_trading_path`]'s check
+    /// with the method added, or no request exists.
+    fn account_wide(method: Method, path_and_query: &str) -> Result<Self, TransportError> {
+        match endpoint_for(method, path_and_query) {
+            Some(endpoint) if endpoint.account_wide => Ok(Self {
+                method,
+                path_and_query: path_and_query.to_owned(),
+                body: None,
+            }),
+            Some(_) | None => Err(TransportError::RefusedPath),
         }
+    }
+
+    /// [`Self::account_wide`] for this crate's own tests, which hold no [`AccountWideScope`]:
+    /// only the executor's kill-switch paths can make one, and no public constructor is added.
+    #[cfg(test)]
+    pub(crate) fn account_wide_for_tests(
+        method: Method,
+        path_and_query: &str,
+    ) -> Result<Self, TransportError> {
+        Self::account_wide(method, path_and_query)
     }
 
     pub fn method(&self) -> Method {
