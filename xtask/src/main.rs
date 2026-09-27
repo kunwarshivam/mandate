@@ -216,7 +216,7 @@ fn ci(job: &str) -> Result<()> {
             spec_guard()
         }
         "postgres" => postgres(),
-        "mutants" => mutants(),
+        "mutants" => mutants(Path::new("."), base_ref().as_deref()),
         "fast" => {
             for part in FAST_JOB {
                 ci(part)?;
@@ -1000,13 +1000,17 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
 /// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`. A
 /// crate whose tests are still pending runs the gate as well (DEC-137 amends DEC-83): there a
 /// missed mutant in a stub body is named and skipped, and every other one still fails.
-fn mutants() -> Result<()> {
-    let Some(base) = base_ref() else {
+fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
+    let Some(base) = base else {
         eprintln!("    mutants: HEAD is the base; nothing to check");
         return Ok(());
     };
-    let crates = mutated_crates()?;
-    let changed = output("git", &["diff", "--name-only", &format!("{base}...HEAD")])?;
+    let crates = mutated_crates(root)?;
+    let changed = output_in(
+        root,
+        "git",
+        &["diff", "--name-only", &format!("{base}...HEAD")],
+    )?;
     let touched: Vec<&str> = changed
         .lines()
         .filter(|f| f.ends_with(".rs") && crates.iter().any(|c| f.starts_with(&c.src_dir())))
@@ -1017,14 +1021,18 @@ fn mutants() -> Result<()> {
     }
     let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
     args.extend(touched.iter().map(|f| (*f).to_owned()));
-    let diff = output("git", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+    let diff = output_in(
+        root,
+        "git",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
     let diff_file = env::temp_dir().join(format!("mandate-mutants-{}.diff", std::process::id()));
     fs::write(&diff_file, diff)?;
     let diff_path = diff_file
         .to_str()
         .context("non-UTF-8 temp path")?
         .to_owned();
-    if let Err(unjudged) = live_tests_judge_every_mutant(&diff_path) {
+    if let Err(unjudged) = live_tests_judge_every_mutant(root, &diff_path) {
         fs::remove_file(&diff_file).ok();
         return Err(unjudged);
     }
@@ -1039,17 +1047,18 @@ fn mutants() -> Result<()> {
         "--output",
         "target",
     ];
-    fs::remove_dir_all(MUTANTS_OUT).ok();
+    fs::remove_dir_all(root.join(MUTANTS_OUT)).ok();
     eprintln!("    $ cargo {}", args.join(" "));
     let started = fs::metadata(&diff_file)
         .and_then(|meta| meta.modified())
         .context("timing the diff this run reads")?;
     let status = Command::new("cargo")
+        .current_dir(root)
         .args(args)
         .status()
         .context("starting `cargo mutants` (is it installed? see AGENTS.md)");
     fs::remove_file(&diff_file).ok();
-    mutants_outcome(Path::new("."), &crates, status?.code(), started)
+    mutants_outcome(root, &crates, status?.code(), started)
 }
 
 /// Every mutant the run is about to test must have at least one live test that can judge it, or the
@@ -1068,8 +1077,9 @@ fn mutants() -> Result<()> {
 /// The count is per package because that is the package `cargo mutants` runs tests from. Were a
 /// workspace-wide test run ever configured, this count could only be stricter than it needs to be,
 /// never looser.
-fn live_tests_judge_every_mutant(diff_path: &str) -> Result<()> {
-    let listed = output(
+fn live_tests_judge_every_mutant(root: &Path, diff_path: &str) -> Result<()> {
+    let listed = output_in(
+        root,
         "cargo",
         &["mutants", "--list", "--json", "--in-diff", diff_path],
     )?;
@@ -1085,7 +1095,7 @@ fn live_tests_judge_every_mutant(diff_path: &str) -> Result<()> {
     let mut args = vec!["nextest", "list", "--locked", "--message-format", "json"];
     args.extend(packages.iter().map(String::as_str));
     eprintln!("    $ cargo {}", args.join(" "));
-    let listing = output("cargo", &args)?;
+    let listing = output_in(root, "cargo", &args)?;
     let live = live_test_counts(&listing)?;
     report(unjudged_mutants(&mutants, &live), "mutants")
 }
@@ -1148,7 +1158,9 @@ fn live_test_counts(listing: &str) -> Result<BTreeMap<String, usize>> {
 }
 
 /// Names every package whose mutants no live test would judge, with what the run would have claimed
-/// about them (DEC-139).
+/// about them (DEC-139). A package of nothing but stubs is named too: DEC-137 item 3 exempts a stub
+/// body's mutants from a run that *tested* them and found them missed, which a package with no live
+/// test never produces.
 fn unjudged_mutants(
     mutants: &BTreeMap<String, usize>,
     live: &BTreeMap<String, usize>,
@@ -1158,10 +1170,13 @@ fn unjudged_mutants(
         .filter(|(package, _)| live.get(package.as_str()).copied().unwrap_or(0) == 0)
         .map(|(package, count)| {
             format!(
-                "`{package}`: no live tests to judge {count} mutant(s); add live tests or stub the \
-                 code. `cargo nextest run --package={package}` reports `no tests to run` and exits \
-                 non-zero, which `cargo mutants` reads as every one of them caught, so the run \
-                 would report a clean gate while nothing ran (DEC-139)"
+                "`{package}`: no live tests to judge {count} mutant(s); it needs at least one \
+                 live test before the gate can judge any of them, a crate of nothing but stubs \
+                 included, since a stub body's mutants are exempt only on a run that tested them \
+                 (#175 added live tests over its error codes and vocabulary). `cargo nextest run \
+                 --package={package}` reports `no tests to run` and exits non-zero, which `cargo \
+                 mutants` reads as every one of them caught, so the run would report a clean gate \
+                 while nothing ran (DEC-139)"
             )
         })
         .collect()
@@ -1215,12 +1230,12 @@ impl MutatedCrate {
 /// `#[ignore = "pending <story>"]` tests is no longer excluded (DEC-137 amends DEC-83): a tests PR
 /// carries stubs no live test runs, so only its stub bodies are exempt, and everything else it adds
 /// is gated in the PR that adds it rather than one PR later (ADR-0001 ES-15).
-fn mutated_crates() -> Result<Vec<MutatedCrate>> {
-    let policy: Layers = toml::from_str(&fs::read_to_string("xtask/layers.toml")?)
+fn mutated_crates(root: &Path) -> Result<Vec<MutatedCrate>> {
+    let policy: Layers = toml::from_str(&fs::read_to_string(root.join("xtask/layers.toml"))?)
         .context("parsing xtask/layers.toml")?;
-    let root = env::current_dir()?;
+    let root = fs::canonicalize(root)?;
     let mut crates = Vec::new();
-    for pkg in workspace_packages(&metadata()?) {
+    for pkg in workspace_packages(&metadata_in(&root)?) {
         let Some(own) = policy.crates.get(&pkg.name) else {
             continue;
         };
@@ -1232,7 +1247,7 @@ fn mutated_crates() -> Result<Vec<MutatedCrate>> {
                 .strip_prefix(&root)
                 .context("crate outside the repository")?;
             let dir = dir.display().to_string();
-            let pending = has_pending_tests(&dir)?;
+            let pending = has_pending_tests(&root, &dir)?;
             if pending {
                 eprintln!(
                     "    mutants: `{}` has pending tests, so a missed mutant is a failure there \
@@ -1485,8 +1500,9 @@ fn discards_an_argument(statement: &[(Token, usize)]) -> bool {
             if let_ == "let" && hole == "_")
 }
 
-fn has_pending_tests(dir: &str) -> Result<bool> {
-    let files = output(
+fn has_pending_tests(root: &Path, dir: &str) -> Result<bool> {
+    let files = output_in(
+        root,
         "git",
         &[
             "ls-files",
@@ -1498,7 +1514,7 @@ fn has_pending_tests(dir: &str) -> Result<bool> {
         ],
     )?;
     for file in files.lines().filter(|f| f.ends_with(".rs")) {
-        if let Ok(text) = fs::read_to_string(file)
+        if let Ok(text) = fs::read_to_string(root.join(file))
             && text.lines().any(is_pending_marker)
         {
             return Ok(true);
@@ -2293,11 +2309,12 @@ mod tests {
     use anyhow::{Context, Result};
 
     use super::{
-        MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, classify,
-        contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
-        is_pending_marker, is_stub_function, listed_mutant_counts, live_test_counts,
-        mutant_verdicts, mutants_outcome, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, test_binary, test_outcomes, unjudged_mutants, verdicts,
+        MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome, backticked_paths, ci,
+        classify, contains_dec_id, contains_word, first_panic_line, generated_pending_markers,
+        has_pending_tests, is_pending_marker, is_stub_function, listed_mutant_counts,
+        live_test_counts, mutant_verdicts, mutants, mutants_outcome, names_a_stub, output_in,
+        pending_problems, pending_tests, plain_comment_lines, repo_root, test_binary,
+        test_outcomes, unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -2758,6 +2775,89 @@ mod tests {
             Ok(fixture)
         }
 
+        /// A repository the whole mutation gate can run in: a two-crate workspace where `probe`'s
+        /// only test is pending and `covered`'s runs, its own `xtask/layers.toml` making both
+        /// safety-critical product crates, and an `origin/main` at the base commit so
+        /// `base_ref_in` reaches its merge-base path (DEC-139).
+        fn gated(name: &str) -> Result<Self> {
+            let dir = env::temp_dir().join(format!("mandate-xtask-{name}-{}", std::process::id()));
+            if dir.exists() {
+                fs::remove_dir_all(&dir)?;
+            }
+            let fixture = Fixture(dir);
+            fixture.write(
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"crates/probe\", \"crates/covered\"]\nresolver = \"3\"\n",
+            )?;
+            fixture.write(
+                "xtask/layers.toml",
+                concat!(
+                    "impure_crates = []\n",
+                    "[crates.probe]\nlayer = 0\nsafety_critical = true\npure = true\n",
+                    "[crates.covered]\nlayer = 0\nsafety_critical = true\npure = true\n",
+                ),
+            )?;
+            for krate in ["probe", "covered"] {
+                fixture.write(
+                    &format!("crates/{krate}/Cargo.toml"),
+                    &format!(
+                        "[package]\nname = \"{krate}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"
+                    ),
+                )?;
+                fixture.write(&format!("crates/{krate}/src/lib.rs"), "")?;
+            }
+            fixture.write(
+                "crates/covered/tests/covered.rs",
+                concat!(
+                    "#[test]\n",
+                    "fn the_flag_is_negated() {\n",
+                    "    assert!(covered::negate(false));\n",
+                    "    assert!(!covered::negate(true));\n",
+                    "}\n",
+                ),
+            )?;
+            fixture.write(".gitignore", "/target\n/base\n")?;
+            fs::copy(
+                repo_root()?.join("rust-toolchain.toml"),
+                fixture.0.join("rust-toolchain.toml"),
+            )?;
+            output_in(&fixture.0, "cargo", &["generate-lockfile", "--offline"])?;
+            output_in(&fixture.0, "git", &["init", "-q"])?;
+            fixture.commit()?;
+            let base = output_in(&fixture.0, "git", &["rev-parse", "HEAD"])?;
+            output_in(
+                &fixture.0,
+                "git",
+                &["update-ref", "refs/remotes/origin/main", base.trim()],
+            )?;
+            fs::write(fixture.0.join("base"), base.trim())?;
+            fixture.write(
+                "crates/probe/src/lib.rs",
+                concat!(
+                    "#[must_use]\n",
+                    "pub fn code(refused: bool) -> &'static str {\n",
+                    "    if refused { \"refused\" } else { \"accepted\" }\n",
+                    "}\n",
+                ),
+            )?;
+            fixture.write(
+                "crates/probe/tests/probe.rs",
+                concat!(
+                    "#[test]\n",
+                    "#[ignore = \"pending E1-1\"]\n",
+                    "fn the_code_names_the_refusal() {\n",
+                    "    assert_eq!(probe::code(true), \"refused\");\n",
+                    "}\n",
+                ),
+            )?;
+            fixture.write(
+                "crates/covered/src/lib.rs",
+                "#[must_use]\npub fn negate(flag: bool) -> bool {\n    !flag\n}\n",
+            )?;
+            fixture.commit()?;
+            Ok(fixture)
+        }
+
         fn write(&self, path: &str, text: &str) -> Result<()> {
             let file = self.0.join(path);
             fs::create_dir_all(file.parent().context("fixture file without a directory")?)?;
@@ -2962,6 +3062,95 @@ mod tests {
         Ok(())
     }
 
+    /// The whole job, in a fixture repository, so nothing between `cargo xtask ci mutants` and its
+    /// verdict can be deleted without a test noticing: `mutants -> Ok(())` and
+    /// `live_tests_judge_every_mutant -> Ok(())` both fail here, which is what the independent
+    /// review of #180 asked for (finding 2). `probe` has a live function and only a pending test, so
+    /// the gate must refuse before it runs; `covered` has a live test, so a run would pass its
+    /// baseline and report `probe`'s mutants caught while nothing ran, which is the whole defect.
+    ///
+    /// Four verdicts, in order: a refusal before the run for a crate no live test judges; a pass
+    /// once one live test covers that crate's function, so the refusal is precise rather than a
+    /// blanket one; a failure on the run's own missed-mutant status once a live, non-stub mutant
+    /// survives; and nothing to do without a base.
+    #[test]
+    fn the_job_refuses_a_crate_whose_mutants_no_live_test_would_judge() -> Result<()> {
+        let fx = Fixture::gated("mutants-job")?;
+        let base = fs::read_to_string(fx.0.join("base"))?;
+        let base = base.trim();
+
+        let refused = mutants(&fx.0, Some(base)).expect_err(
+            "the gate refuses `probe`: it has mutants and no live test, so a run would report them \
+             caught while nothing ran",
+        );
+        let named = format!("{refused:#}");
+        assert_eq!(
+            named, "mutants: 1 problem(s)",
+            "the gate's own verdict on one crate, not a tool that would not start, whose error \
+             reads `failed:` instead (the message itself is pinned by \
+             a_crate_with_no_live_test_cannot_have_its_mutants_counted_as_caught)"
+        );
+        assert!(
+            !fx.0.join(MUTANTS_OUT).exists(),
+            "and it refuses before the run, so the run wrote nothing"
+        );
+
+        fx.write(
+            "crates/probe/tests/live.rs",
+            "#[test]\nfn the_code_names_the_refusal() {\n                 assert_eq!(probe::code(true), \"refused\");\n                 assert_eq!(probe::code(false), \"accepted\");\n}\n",
+        )?;
+        fx.commit()?;
+        mutants(&fx.0, Some(base)).context(
+            "with one live test over `code`, the same diff passes: the pre-flight is precise, not a \
+             refusal of every crate whose tests are pending",
+        )?;
+        fx.write(
+            "crates/covered/tests/covered.rs",
+            "#[test]\nfn the_flag_is_negated() {\n    assert!(covered::negate(false));\n}\n",
+        )?;
+        fx.commit()?;
+        let missed = mutants(&fx.0, Some(base)).expect_err(
+            "a live mutant no live test catches is the run's own missed-mutant status, and the \
+             function it mutates is not a stub",
+        );
+        let missed = format!("{missed:#}");
+        assert_eq!(missed, "mutants: 1 problem(s)", "one live mutant survived");
+        assert!(
+            fx.0.join(MUTANTS_OUT).exists(),
+            "and this verdict is the run's own, so the run did happen: the pre-flight passed and \
+             `cargo mutants` reported the miss"
+        );
+
+        assert!(
+            mutants(&fx.0, None).is_ok(),
+            "with no base there is no diff to judge, so the job has nothing to do"
+        );
+        Ok(())
+    }
+
+    /// A pending marker anywhere in a crate is what makes a stub body exempt, so the gate must read
+    /// each crate's own files and no other's.
+    #[test]
+    fn a_crates_pending_tests_are_its_own() -> Result<()> {
+        let fx = Fixture::gated("pending-tests")?;
+        assert!(
+            has_pending_tests(&fx.0, "crates/probe")?,
+            "`probe`'s only test is marked pending"
+        );
+        assert!(
+            !has_pending_tests(&fx.0, "crates/covered")?,
+            "`covered`'s test runs, and `probe`'s marker is not its own"
+        );
+        Ok(())
+    }
+
+    /// The job dispatch refuses a name it does not know, rather than reporting a job it never ran.
+    #[test]
+    fn an_unknown_ci_job_is_refused() {
+        let unknown = ci("no-such-job").expect_err("an unknown job name is an error");
+        assert!(unknown.to_string().contains("unknown CI job"), "{unknown}");
+    }
+
     /// `cargo mutants --list --json`, trimmed to the one member the gate reads. Two crates have
     /// mutants: one whose tests all run and one whose only test is `#[ignore]`d.
     const LISTED_MUTANTS: &str = r#"[
@@ -3015,6 +3204,12 @@ mod tests {
         assert!(
             named.contains("`mandate-probe`") && named.contains("2 mutant(s)"),
             "{named}"
+        );
+        assert!(
+            named.contains("at least one live test"),
+            "the advice is a live test, the one thing that helps, and not \"stub the code\": a \
+             crate of nothing but stubs is named here too, because DEC-137 item 3 exempts a stub \
+             body only on a run that tested it: {named}"
         );
 
         assert!(
