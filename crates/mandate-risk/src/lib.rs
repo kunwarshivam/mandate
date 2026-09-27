@@ -54,6 +54,7 @@ use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
 mod flatten;
+mod floor;
 mod gate;
 mod limits;
 #[doc(hidden)]

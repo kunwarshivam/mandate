@@ -17,7 +17,7 @@ use std::collections::BTreeSet;
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
     GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Side,
-    Verdict, WorkingUniverse, limits,
+    Verdict, WorkingUniverse, floor, limits,
 };
 
 /// The eight checks, in §9.1's order.
@@ -35,14 +35,13 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check, while any part of it is owed. Check 1 is whole here; check 2
-/// still lacks the floor (E6-7), check 3 its sessions and auction windows (E6-6; the halt is here),
+/// The story that completes a check, while any part of it is owed. Checks 1 and 2 are whole here;
+/// check 3 its sessions and auction windows (E6-6; the halt is here),
 /// check 4 its rules 1, 2 and 4 to 8, check 6 its conduct controls (E6-8) and check 7 buying power
 /// (E6-6), and checks 5 and 8 are not written yet.
 fn owed(check: Check) -> Option<&'static str> {
     match check {
-        Check::AccountAndMode => None,
-        Check::UniverseAndLimits => Some("E6-7"),
+        Check::AccountAndMode | Check::UniverseAndLimits => None,
         Check::SessionAndHalt
         | Check::OrderConstraints
         | Check::BuyingPowerAndExposure
@@ -122,7 +121,10 @@ fn run(
     match check {
         Check::AccountAndMode => Ok(account_and_mode(input, purpose, opening)),
         Check::UniverseAndLimits if opening => match working_universe(input, computed)? {
-            None => limits::position_order_and_cooldown(input, computed),
+            None => match floor::eligibility(input)? {
+                None => limits::position_order_and_cooldown(input, computed),
+                stop => Ok(stop),
+            },
             stop => Ok(stop),
         },
         Check::SessionAndHalt if opening => Ok(halt(input)),
@@ -602,12 +604,12 @@ mod tests {
     }
 
     /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
-    /// that completes the first check still owed (check 2's eligibility floor, E6-7).
+    /// that completes the first check still owed (check 3's sessions, E6-6).
     #[test]
     fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
         let refused = allowing()?.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "a partial gate fails closed for adding risk, not open: {refused:?}"
         );
         Ok(())
@@ -667,7 +669,7 @@ mod tests {
     /// DEC-129 item 15: an order of exactly `max_order_usd` (10 × 100 = 1000), an instrument total
     /// of exactly the cap (500 held + 1000 = 1500), an agent gross of exactly its limit (500 + 500
     /// elsewhere + 1000 = 2000) and an account gross of exactly its equity all pass every limit.
-    /// The opening is still refused, as item 29 requires while the floor is owed, and a limit that
+    /// The opening is still refused, as item 29 requires while a check is owed, and a limit that
     /// compared with `>=` would deny it instead.
     #[test]
     fn a_value_exactly_at_every_limit_passes_it() -> Result<(), GateError> {
@@ -682,7 +684,7 @@ mod tests {
         o.account.equity = Usd::parse("2000")?;
         let refused = o.decide();
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "every comparison is `>`, so a value exactly at a limit passes it: {refused:?}"
         );
         Ok(())
@@ -707,7 +709,7 @@ mod tests {
     /// Mandate §5.3's re-entry cooldown binds only an exit fill in the instrument's own group, and
     /// only strictly inside `reentry_cooldown_s`. An exit in an ungrouped other instrument 10 s ago
     /// denies nothing, and an exit in this instrument exactly 3600 s ago has run its course: both
-    /// openings pass the cooldown and are refused only because the floor is owed (item 29).
+    /// openings pass the cooldown and are refused only because a later check is owed (item 29).
     #[test]
     fn the_cooldown_binds_only_its_group_and_only_strictly_inside_it() -> Result<(), GateError> {
         let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
@@ -724,8 +726,8 @@ mod tests {
             .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
         let (a, b) = (other_group.decide(), run_its_course.decide());
         assert!(
-            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-7")))
-                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-7"))),
+            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-6")))
+                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-6"))),
             "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
         );
         Ok(())
@@ -790,7 +792,7 @@ mod tests {
                 limit_row(held_elsewhere("1400"))?,
                 limit_row(held_elsewhere("1400.000000001"))?,
             ],
-            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
             "1400 + 100 against min(2000, agent equity 1500)"
         );
         Ok(())
@@ -817,7 +819,7 @@ mod tests {
         held_here("100.000000001")(&mut over)?;
         assert_eq!(
             (limit_row(held_here("100"))?, over.decide()?.computed.cap,),
-            (Err("E6-7"), Some(Usd::parse("200")?)),
+            (Err("E6-6"), Some(Usd::parse("200")?)),
             "100 + 100 is exactly the cap of 200; over it the denial reports cap 200"
         );
         assert_eq!(
@@ -856,7 +858,7 @@ mod tests {
                 limit_row(other_agent("900"))?,
                 limit_row(other_agent("900.000000001"))?,
             ],
-            [Err("E6-7"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("E6-6"), Ok(ReasonCode::GrossExposureLimit)],
             "900 of another agent's + 100 against the account's 1000"
         );
         Ok(())
@@ -890,7 +892,7 @@ mod tests {
                 limit_row(big_order(false, false))?,
                 limit_row(big_order(false, true))?,
             ],
-            [Err("E6-7"), Err("E6-7"), Ok(ReasonCode::ConcentrationLimit)],
+            [Err("E6-6"), Err("E6-6"), Ok(ReasonCode::ConcentrationLimit)],
             "protective, non-opening, and an opening order that does count"
         );
         Ok(())
@@ -935,7 +937,7 @@ mod tests {
             if market {
                 return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
             }
-            return Err("E6-7");
+            return Err("E6-6");
         }
         let repriced = market && (halted || !feed_current);
         let pacing = repriced.then(|| Pacing {
