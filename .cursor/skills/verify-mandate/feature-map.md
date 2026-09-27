@@ -539,9 +539,10 @@ proves each pending test fails on them (DEC-110).
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
-  `mandate` suite (DEC-154). `thesis_expiry` and `stagger` (MC-N20 to MC-N23) are interpreted;
-  `admission` and `lineage` fail as "not interpreted until E17-3" until the stacked slices that
-  interpret them. The module's in-module tests doctor every expected member of every interpreted
+  `mandate` suite (DEC-154). `admission` (MC-N01 to MC-N16, MC-N25, MC-N26), `thesis_expiry`
+  and `stagger` (MC-N20 to MC-N23) are interpreted; MC-N01, MC-N14 and MC-N26 compare everything
+  and then fail naming E6-2's `classify`, and `lineage` fails as "not interpreted until E17-3"
+  until the stacked slice that interprets it. The module's in-module tests doctor every expected member of every interpreted
   case and require it to fail.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
