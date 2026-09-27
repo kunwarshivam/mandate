@@ -10,7 +10,9 @@ This brief records the product-experience decisions that the designs and, later,
 built from: the principles that settle trade-offs, the journeys, every screen with its states, the
 interface rules that follow from the safety rules, the decisions only the founder can make, and the
 order in which designs are needed. It is design and decisions, not code. `web/` stays at M9
-([ADR-0001](../adr/0001-engineering-setup.md) ES-01), and no framework is chosen here (§6, PX-14).
+([ADR-0001](../adr/0001-engineering-setup.md) ES-01). [HLD §11](../HLD.md#11-technology) names
+Next.js and React Native for the web app and mobile approvals; that has not yet been ratified as a
+decision, and this brief does not ratify it (§6, PX-14).
 
 Where this brief and a spec disagree, the spec wins and the brief is wrong; §7 lists the places where
 designing the screens found a gap in the specs.
@@ -40,7 +42,7 @@ These principles decide trade-offs. When two of them conflict, the lower number 
 | P5 | **Notifications carry nothing about trading.** | Push, email, SMS, and chat carry an opaque ID and generic text only: no instrument, size, price, thesis, or agent name. The same applies to anything a browser or operating system may copy elsewhere: URLs, page titles, and cached pages | Rule 6; DEC-11; FR-6.4 |
 | P6 | **Show the state truthfully, including uncertainty.** | Stale data is labeled with its age; an `Unknown` order is shown as unknown; a degraded dependency is named. The interface never shows a calm "all good" it cannot prove. Unknown means stop, and the screen shows it stopped | [trading §1](../specs/trading-domain.md#1-principles) principle 3; [mandate §5.2](../specs/mandate.md#52-inputs-the-risk-clock-and-determinism) staleness |
 | P7 | **Limits are visible where decisions are made, in dollars.** | Each limit appears as a dollar amount with its headroom, next to the action it limits. Policy ceilings appear as limits and are never pre-filled as values. `profit_stop` is a level where the agent stops, never a progress bar | [mandate §4.2](../specs/mandate.md#42-warnings-and-the-confirmation-screen), [§4.3](../specs/mandate.md#43-policy-hierarchy-dec-51-dec-98), [§3.1](../specs/mandate.md#31-goals-and-stop-conditions-dec-46-dec-59) |
-| P8 | **What the owner saw is what gets recorded.** | The confirmation, go-live, approval, owner-exit, and acknowledgment screens are *record screens*: rendered deterministically, stored as an artifact with the UI build, and frozen once shown (§4.1) | [mandate §10](../specs/mandate.md#10-records-dec-51-dec-97); `MandateConfirmed`, `AgentDeployed`, `OwnerExitRequested` |
+| P8 | **What the owner saw is what gets recorded.** | The confirmation, go-live, approval, owner-exit, kill-switch, and release screens are *record screens*: rendered deterministically, stored as an artifact with the UI build, and frozen once shown (§4.1) | [mandate §10](../specs/mandate.md#10-records-dec-51-dec-97); `MandateConfirmed`, `AgentDeployed`, `OwnerExitRequested` |
 | P9 | **Paper and live can never be confused.** | The environment is on every screen that shows an agent, a connection, or money. No live path is built into any flow until counsel signs off; in the designs, live exists only as a blocked state | Rule 8; DEC-98; V-031 |
 | P10 | **Ask only when it matters, and make the answer fast.** | An approval is decidable in under a minute on a phone. Escalations are few, so each one gets the evidence it needs and nothing else | [Vision](01-vision-and-strategy.md#product-principles) principle 3; journey J2; PRD §8 (median response under 5 minutes) |
 
@@ -56,9 +58,9 @@ These principles decide trade-offs. When two of them conflict, the lower number 
 | **Dana**, compliance | Auditor (read-only) | Journey J3: from a fill back to its causes in one query; export |
 | **Sam**, IT | Org or workspace admin | Journey J4: hybrid install, SSO, health |
 
-Roles decide who may act, not what is shown: a viewer sees an agent's mode and limits but has no Stop
-control, and an auditor sees the journal and exports only
-([PRD FR-1.3](04-prd-v1.md#61-identity-and-tenancy)). Which roles may pause and which may flatten is PX-11.
+[PRD FR-1.3](04-prd-v1.md#61-identity-and-tenancy) lists the roles only; what each role sees and may
+do is this brief's proposal (PX-11): roles decide who may act, not what is shown, so a viewer sees an
+agent's mode and limits but has no Stop control, and an auditor sees the journal and exports only.
 
 ### 2.2 The research agent is gated, so design both modes
 
@@ -93,7 +95,7 @@ Each journey lists its steps with the screens of §3 in brackets, and the moment
    ([mandate §7](../specs/mandate.md#7-compiler-and-platform-proposals-dec-97)).
 3. The owner edits in the form or YAML [A3]; both stay in sync (FR-3.2).
 4. Validation [A4]: errors list every violated rule; a policy error names the nearest ancestor limit
-   (FR-1.5). Each warning (W-001 to W-006) is acknowledged individually.
+   (mandate §4.3). Each warning (W-001, W-002, W-003, W-005, W-006) is acknowledged individually.
 5. Confirmation [A5], a record screen: the plain-language summary; in dollars, one position's loss
    at its stop, the daily loss budget, the loss at which the agent flattens, and the lifetime-floor
    loss; the statement that gaps and exit pricing can exceed each of them; `scale_action` in plain
@@ -242,10 +244,16 @@ accepted (§9).
 **G5 Alerts center**
 - *Shows:* rung reached, reconciliation mismatch, stale feed, agent paused, external activity,
   account restriction, 1× check failed, model withdrawn, lineage retired, policy nonconforming, and
-  the owner-exit remainder resting at its floor.
+  the owner-exit remainder resting at its floor (DEC-66). On the safety side, the alerts that say a
+  position was briefly unprotected or an exit stalled: an unprotected interval that reached
+  `max_unprotected_s` and was canceled with protection re-placed (trading §5.4); the triggered-stop
+  watchdog exiting a position whose stop did not fill (trading §5.4); a risk exit resting at the exit
+  ladder's floor (trading §5.6); a cash reconciliation difference above threshold (trading §11). The
+  crypto stop-limit gap disclosure (a stop-limit may not fill on a gap, trading §5.4) appears on D3 and
+  on the confirmation screen when crypto is allowed.
 - *Primary action:* open the screen that resolves the alert.
 - *Governs:* FR-8.3; mandate §3.1 (Holding alert), §8.1 (model withdrawn), §8.6 (lineage retired);
-  trading §5.4, §7.2.
+  trading §5.4, §5.6, §7.2, §11.
 
 #### Onboarding
 
@@ -299,7 +307,7 @@ never as values (mandate §4.3).
 
 **A4 Validation and warnings** ⚠
 - *Shows:* every violated code in plain language; a policy error names the key, the value, and the
-  nearest ancestor it breaks (FR-1.5); each warning with its own acknowledgment. W-006 names the
+  nearest ancestor it breaks (mandate §4.3); each warning with its own acknowledgment. W-006 names the
   eligibility floor, `max_instruments`, and the position and daily-loss limits as what still bounds an
   automatic admission.
 - *Governs:* mandate §4.1, §4.2, §4.3.
@@ -365,7 +373,9 @@ labeled simulated; trading §10). Paper results are labeled "paper — simulated
   (§4.3); limits with headroom in dollars; ladder rungs, the active size factor, and any `pending`
   breach confirmation; the lifetime floor in dollars; positions with protection status; the working
   universe [D4] or the pinned list; open approvals; recent decisions linking to the trace [J2].
-- *Primary action:* Stop (G2); the acknowledgment the current restriction needs, if any [D7].
+- *Primary action:* Stop (G2); the acknowledgment the current restriction needs, if any [D7]. An
+  owner Stop (end the agent without selling) is offered here, stating that it leaves positions and
+  resting protection where they are (DEC-131; PX-13).
 - *States:* Paused, Restricted: banner per §4.3. Recovering (`awaiting_reconciliation` at startup):
   "Checking with the broker", no action needed. Holding: see D11. Stopped: read-only, with the reason.
 - *Governs:* mandate §5.3 to §5.9, §3.1; trading §7.4; FR-8.1, FR-8.2.
@@ -409,8 +419,11 @@ mode change).
   persuasive language.
 - *Governs:* mandate §6.4; FR-6.2, FR-6.5, FR-6.6, FR-6.7; HLD flow C; PX-6, PX-7.
 
-**D7 Acknowledgments** ⚠ (record screens). One pattern, several variants; each shows what happened,
-what acknowledging changes, and requires step-up:
+**D7 Acknowledgments** ⚠ (record screens, pending the spec change of §7 question 7). One pattern,
+several variants; each shows what happened and what acknowledging changes. The spec requires step-up
+for the drawdown acknowledgment (mandate §5.8), the daily-loss flatten acknowledgment (§5.4), and the
+reconciliation resume (trading §11); **this brief adds step-up to the other variants** (external
+activity, account restriction, surveillance), because each acknowledgment restores risk-taking:
 - *Drawdown `exits_only` or flatten:* acknowledging resets the high-water mark to current equity and
   sizes return in steps (DEC-57). Disabled with the reason `flatten_in_progress` until the agent is
   flat (acknowledging re-enables risk-taking, so holding it is safe). Independent approval where
@@ -474,11 +487,19 @@ Auditors see these screens and nothing that acts.
 #### Administration
 
 **X1 Policies** ⚠: the organization and workspace policy editors. A value looser than its parent is
-rejected with a message naming the parent limit (FR-1.5); a change shows the agents it makes
+rejected with a message naming the parent limit (FR-1.5; the nearest ancestor per mandate §4.3); a change shows the agents it makes
 nonconforming (mandate §4.3). **X2 Members and roles**, with separation of duties (FR-1.3, FR-1.6).
 **X3 Notifications**: channels, escalation chain, quiet hours; the screen states that approval
 requests are not delivered in quiet hours and so time out, while risk-limit alerts ignore quiet hours
-(mandate §6.4). **X4 Deployment health** (hybrid): versions, heartbeats, reachability (journey J4).
+(mandate §6.4). **X4 Deployment health** (hybrid and on-prem, where the customer is the deployment's
+operator; journey J4): versions, heartbeats, reachability, and the DEC-100 operator surface, which
+shows the aggregate-flow monitor's alerts (research-agent exposure per instrument over the
+deployment's workspaces above the DEC-123 threshold; the monitor never halts by itself) and the active
+per-thesis halts, and is where the operator issues or lifts a halt (step-up; journaled in every
+workspace of the deployment as a `PlatformOperatorAction`). A halt only removes permissions: exits
+and protection continue (mandate §8.4, §8.5 check 9; HLD §8). In managed mode the platform is the
+operator and this surface is internal. It carries only instrument identifiers and aggregate figures
+of the deployment's own workspaces, never another deployment's.
 **X5 Billing**: plan and agent count (FR-10.1). **X6 Disclosures** ⚠: accepted versions; leveraged-ETP
 opt-in with step-up (V-005).
 
@@ -486,8 +507,13 @@ opt-in with step-up (V-005).
 
 ### 4.1 Record screens
 
-A record screen is one whose rendering the journal keeps: confirmation (A5), go-live (B5), approval
-(D6), acknowledgments (D7), owner exit (D9), kill switch (D10), and release (D11).
+A record screen is one whose rendering the journal keeps as an artifact: confirmation (A5,
+`MandateConfirmed`), go-live (B5, `AgentDeployed`), approval (D6, the approval events), owner exit
+(D9) and kill switch (D10) (`OwnerExitRequested`), and release (D11, `PositionReleased`), per mandate
+§5.10 and §10. **Acknowledgments (D7) are not record screens yet:** `HighWaterMarkReset` carries no
+rendered content, and no event records what the owner saw when acknowledging a daily-loss flatten,
+a reconciliation pause, external activity, an account restriction, or a surveillance breach. §7
+question 7 asks for that event; D7 is designed as a record screen so it is ready when it exists.
 
 - It renders deterministically from the data it records; the stored artifact and the UI build
   identify exactly what was on screen (mandate §10).
@@ -558,7 +584,7 @@ A rung whose breach is still confirming is shown as `pending` with its time in b
 | Trading §5.5 | Kill-switch scopes named and their effects listed (D10) |
 | Trading §7.1, §7.3, §11 | External activity, account restrictions, and reconciliation pauses resolve only through an acknowledgment screen (D7), with step-up for reconciliation |
 | Trading §7.2 | The 1× check result is shown at connect and whenever it fails |
-| FR-1.5 | A policy violation names the parent limit it breaks |
+| FR-1.5; mandate §4.3 | A policy violation names the nearest ancestor limit it breaks |
 | FR-8.4; DEC-52 | The model picker shows methodology only: no rank, "recommended", or scorecard; parameters start empty |
 | DEC-99 | Backtest reports for research agents state that they test mechanics, not thesis quality |
 | DEC-111; MI-18 | A revision shows the lineage's revision count and never a predecessor's score |
@@ -604,7 +630,8 @@ mandate spec.
 (a) "Paused: reconciliation mismatch" and a resume button. (b) The difference (ledger against broker,
 per instrument and order), the compensating events adopted, what still runs (resting protection) and
 what does not (new orders, the agent's own exits), the kill switch, and the resume action enabled
-only after the difference has been shown, with step-up, recording the difference shown. (c) Automatic
+only after the difference has been shown, with step-up, recording the difference shown (which needs
+the acknowledgment event of §7 question 7). (c) Automatic
 resume once the difference is adopted.
 *Recommendation: (b).* (c) contradicts trading §11. With (a), the owner acknowledges what they have
 not seen, which makes the step-up theater; the acknowledgment should carry the evidence the way a
@@ -671,31 +698,44 @@ per-agent form.
 holdings by surprise is a harm of its own. The account-wide switch stays for a compromised or runaway
 account, where closing everything is the point.
 
-**PX-13. Owner stop while holding positions.** An owner Stop without a flatten leaves positions whose
-fate the specs do not state (§7 question 1).
+**PX-13. Owner stop while holding positions.** **The current rule is (b), accepted under DEC-131:**
+an owner Stop sets `stopped`, cancels approvals, and hands no flatten; "stopping an agent leaves its
+positions where they are, and flattening them is what a kill switch is for"
+([runtime brief](../project/tasks/E6-1-agent-runtime-and-kill-switches.md), agent modes). The
+designs follow (b) until the founder decides otherwise.
 (a) Stop is offered only when flat; otherwise the choice is the kill switch (close and stop) or
 "stop and release positions to me" (as `release`: unprotected, with the warning, step-up). (b) Stop
-leaves positions under the agent's protection with no further management. (c) Stop always flattens.
-*Recommendation: (a).* Every ending then has a defined owner of the positions; (b) leaves protection
-nobody will re-place when the GTC orders expire.
+leaves positions where they are, under whatever protection is resting, with no further management
+(DEC-131, current). (c) Stop always flattens.
+*Proposed change to DEC-131: (a).* Every ending then has a defined owner of the positions; under (b)
+nobody re-places protection when the GTC orders expire, and the open questions of §7 question 1
+remain. Choosing (a) changes an accepted decision, so under rule 9 it needs a new decision-log entry,
+which the founder makes. What it costs: the runtime's Stop gains a flat-or-release precondition and
+one more owner choice in G2. Until then, D2 offers Stop with the plain statement that it leaves
+positions and resting protection in place, and G2 offers the kill switch for ending with a flatten.
 
-**PX-14. When to choose the web stack.** DEC-134 starts design, not code.
-(a) Keep the stack decision at M9 (ADR-0001 ES-01). (b) Decide it now so prototypes can become code.
-(c) Decide it at M8's start, from the designs and one constraint recorded now: record screens render
-deterministically into journaled artifacts (§4.1), which favors server-side rendering for those
-screens.
-*Recommendation: (c).* Choosing now gains little, since no web code is planned before M9, and the
+**PX-14. When to ratify the web stack.** DEC-134 starts design, not code.
+[HLD §11](../HLD.md#11-technology) names Next.js for the web app and React Native for mobile
+approvals, but no decision-log entry or ADR-0001 row ratifies it, so it is a sketch, not a decision.
+(a) Ratify or revisit it at M9 (ADR-0001 ES-01). (b) Ratify it now so prototypes can become code.
+(c) Ratify or revisit it at the start of M8, from the designs and one constraint recorded now: record
+screens render deterministically into journaled artifacts (§4.1), which favors server-side rendering
+for those screens. The HLD's Next.js choice is consistent with that constraint.
+*Recommendation: (c).* Ratifying now gains little, since no web code is planned before M9, and the
 designs will say more about what the stack needs; waiting until M9 itself would put the choice on the
 critical path.
 
 ## 7. Questions for the specs
 
-Designing the screens found places where the specs are silent or disagree. They are for the spec
+Designing the screens found places where the specs are silent, disagree, or need a change. They are for the spec
 owners, with a recommended reading; none is decided here.
 
-1. **Owner Stop with open positions.** HLD's lifecycle has "Live → Stopped: owner stops", mandate §2
-   sends a stopped agent to Retired, and runtime DEC-131 has an owner `Stop`, but no document says
-   what happens to a stopped agent's positions and resting protection. Recommended: PX-13 (a).
+1. **A stopped agent that still holds positions.** DEC-131's runtime brief settles that an owner Stop
+   leaves positions where they are (PX-13 (b)). Two parts stay open: what happens to the resting
+   protection once it reaches GTC expiry, since a stopped agent re-places nothing (trading §5.4); and
+   whether a stopped agent with positions retires (mandate §2, `AgentStopped`), and if so what net
+   dollar loss joins the connection's loss carry while positions are still held (mandate §5.7).
+   Recommended: answer both in the runtime brief; PX-13 (a) would remove the case.
 2. **Owner exit while paused, or with an `Unknown` order.** Trading §5.5 exempts kill-switch orders
    from the agent's mode, while MI-1 lets `paused` hold exits. Is closing one position (`owner_exit`,
    not a kill switch) held by `paused`? And during a reconciliation mismatch, which quantity does a
@@ -712,6 +752,13 @@ owners, with a recommended reading; none is decided here.
    including those no agent manages (PX-12).
 6. **Notification examples.** HLD flow C and persona journey J2 show agent names in notification text;
    rule 6 says generic text. Recommended: update the examples once PX-6 is decided.
+7. **An acknowledgment record.** Mandate §10 keeps the rendered screen for confirmations, go-live,
+   approvals, owner exits, and releases, but `HighWaterMarkReset` (§5.10) carries only the old and new
+   high-water mark, the user, and step-up evidence, and the daily-loss flatten (§5.4), reconciliation
+   (trading §11), external-activity (§7.1), account-restriction (§7.3), and surveillance
+   acknowledgments define no event with the content shown. Recommended: one owner-acknowledgment
+   event (or a field on `OwnerAcknowledged` and `HighWaterMarkReset`) carrying the rendered screen as
+   an artifact and the UI build, like `MandateConfirmed`. PX-5 (b) depends on it.
 
 ## 8. What the designs must cover first
 
