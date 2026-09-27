@@ -164,7 +164,7 @@ impl ExecutorState {
     /// The orders whose `OrderSubmitted` committed with no acknowledgment. `Input::Started`
     /// queries each by `client_order_id` and never resubmits blindly (journal spec §5.2).
     pub fn unacknowledged(&self) -> Vec<&Order> {
-        Vec::new()
+        vec![]
     }
 
     /// Reservations by client order id. An `Unknown` order reserves its maximum cost, and only
@@ -208,8 +208,7 @@ impl ExecutorState {
     /// One agent's effective mode: the strictest of the account state and its own mode
     /// (trading-domain spec §7.3 evaluates account state **before** agent mode).
     pub fn effective_mode(&self, _agent: &AgentId) -> Mode {
-        let _ = (&self.modes, self.account_state);
-        Mode::Normal
+        Default::default()
     }
 
     /// The account state detected from statuses and rejects (§7.3).
@@ -231,7 +230,6 @@ impl ExecutorState {
     /// The gate's buying power: the lower of the model and the broker, reservations included and
     /// uncleared deposits excluded (§7.2, DEC-34, DEC-104).
     pub fn buying_power(&self) -> Option<Usd> {
-        let _ = (&self.observed, &self.reservations);
         None
     }
 
@@ -289,4 +287,121 @@ impl ExecutorState {
 pub fn fold(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
     let _ = (state, event);
     Err(ExecutorError::Unimplemented { story: "E7-2" })
+}
+
+/// The accessors read their own fields. Only a stubbed `fold` can move a state off fresh, so these
+/// cases set the private fields directly: without them a mutant that answers the fresh value would
+/// be equivalent on every state a test outside the crate can reach (DEC-137).
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::Side;
+    use mandate_time::Date;
+
+    use super::*;
+    use crate::types::{AccountRef, Input, OrderState, Purpose, WorkspaceId};
+
+    fn id(raw: &str) -> ClientOrderId {
+        ClientOrderId::seeded_for_tests(raw)
+    }
+
+    fn apple() -> Option<InstrumentId> {
+        InstrumentId::new("AAPL").ok()
+    }
+
+    fn held() -> Option<ExecutorState> {
+        let instrument = apple()?;
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        state.epoch = Some(WriterEpoch(7));
+        state.started = true;
+        state.environment = Some("paper".to_owned());
+        state.risk_clock = Some(RiskClock::from_secs(42));
+        state.unresolved = Some(UnresolvedAppend {
+            head: Seq(3),
+            input: Input::Tick(RiskClock::from_secs(42)),
+            drafts: Vec::new(),
+        });
+        state.orders.insert(
+            id("md-a"),
+            Order {
+                client_order_id: id("md-a"),
+                intent_id: None,
+                agent: AgentId("agent-a".to_owned()),
+                instrument: instrument.clone(),
+                side: Side::Buy,
+                qty: Qty::parse("1").ok()?,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Open,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on: Date::parse("2026-09-22").ok(),
+            },
+        );
+        state
+            .reservations
+            .insert(id("md-a"), Usd::parse("150").ok()?);
+        state.unprotected.push(UnprotectedInterval {
+            instrument: instrument.clone(),
+            started_at: RiskClock::from_secs(40),
+            ended_at: None,
+            alerted: false,
+        });
+        state
+            .positions
+            .insert(instrument.clone(), SignedQty::parse("10").ok()?);
+        state.fills.insert(FillId("f-1".to_owned()));
+        state
+            .modes
+            .insert(AgentId("agent-a".to_owned()), Mode::Paused);
+        state.account_state = AccountState::ClosingOnly;
+        state.consecutive_403s = 2;
+        state.observed = Some(ObservedAccount {
+            state: AccountState::ClosingOnly,
+            multiplier: 2,
+            equity: Usd::parse("1").ok()?,
+            cash: Usd::parse("1").ok()?,
+            buying_power: Usd::parse("1").ok()?,
+            non_marginable_buying_power: Usd::parse("1").ok()?,
+            accrued_fees: Usd::ZERO,
+        });
+        state.mismatched.insert(instrument);
+        state.checkpoint = Some(ActivityCursor("cursor-9".to_owned()));
+        state.reconciled_through = Some(Seq(5));
+        state.last_submission = Some(Seq(4));
+        Some(state)
+    }
+
+    #[test]
+    fn every_field_accessor_answers_its_own_field() {
+        let state = held();
+        assert!(state.is_some(), "the held state builds");
+        let Some(state) = state else { return };
+        assert_eq!(state.epoch(), Some(WriterEpoch(7)));
+        assert!(state.started());
+        assert_eq!(state.environment(), Some("paper"));
+        assert_eq!(state.risk_clock(), Some(RiskClock::from_secs(42)));
+        assert_eq!(state.unresolved().map(|u| u.head), Some(Seq(3)));
+        assert_eq!(state.orders().len(), 1);
+        assert_eq!(state.reservations().len(), 1);
+        assert_eq!(state.unprotected_intervals().len(), 1);
+        assert_eq!(state.positions().len(), 1);
+        assert_eq!(state.fills().len(), 1);
+        assert_eq!(state.modes().len(), 1);
+        assert_eq!(state.account_state(), AccountState::ClosingOnly);
+        assert_eq!(state.consecutive_403s(), 2);
+        assert_eq!(state.observed_account().map(|a| a.multiplier), Some(2));
+        assert_eq!(state.mismatched().len(), 1);
+        assert_eq!(
+            state.checkpoint(),
+            Some(&ActivityCursor("cursor-9".to_owned()))
+        );
+        assert_eq!(state.reconciled_through(), Some(Seq(5)));
+        assert_eq!(state.last_submission(), Some(Seq(4)));
+    }
 }

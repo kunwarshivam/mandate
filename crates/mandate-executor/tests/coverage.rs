@@ -1456,8 +1456,11 @@ fn external_activity_reaches_an_agent_the_executor_has_not_yet_seen() {
 #[test]
 #[ignore = "pending E7-2"]
 fn the_client_order_id_grammar_is_the_derivations_and_nothing_else() {
-    assert!(ClientOrderId::parse("md-01JABC").is_ok());
-    assert!(ClientOrderId::parse("md-p-e1-h2-o3").is_ok());
+    for accepted in ["md-01JABC", "md-p-e1-h2-o3"] {
+        if let Err(error) = ClientOrderId::parse(accepted) {
+            panic!("{accepted} is this platform's grammar and parses: {error:?}");
+        }
+    }
     for refused in ["md-", "xx-01JABC", "md-a b", "md-a_b"] {
         let error = ClientOrderId::parse(refused).expect_err("not this platform's");
         assert_eq!(error.code(), "malformed_client_order_id", "{refused}");

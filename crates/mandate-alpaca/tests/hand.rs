@@ -1726,7 +1726,7 @@ async fn a_5xx_on_a_reconciliation_read_is_an_unknown_outcome_not_an_unreadable_
 }
 
 #[test]
-#[ignore = "pending E7-3"]
+#[ignore = "pending E7-2"]
 fn an_exchange_of_exactly_the_inline_limit_stays_inline() {
     let envelope = "{\"message\":\"\"}".len();
     let filler = "x".repeat(mandate_alpaca::INLINE_LIMIT.saturating_sub(envelope));

@@ -62,3 +62,25 @@ impl ClientOrderId {
         &self.0
     }
 }
+
+/// A test-only constructor, so the crate's own unit tests can hold an id while every public
+/// constructor is a stub. Outside `cfg(test)` there is still no way to build one from a string.
+#[cfg(test)]
+impl ClientOrderId {
+    pub(crate) fn seeded_for_tests(raw: &str) -> Self {
+        Self(raw.to_owned())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClientOrderId;
+
+    #[test]
+    fn the_wire_form_is_the_id_itself() {
+        assert_eq!(
+            ClientOrderId::seeded_for_tests("md-01JABC").as_str(),
+            "md-01JABC"
+        );
+    }
+}
