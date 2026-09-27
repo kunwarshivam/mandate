@@ -234,18 +234,24 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
-- **E10-6 (Should)** As an owner who already runs my own agent (for example Claude), I want to
-  connect it through a Mandate MCP server that exposes the same API Mandate uses to take my input,
-  so that my agent can work inside my mandate without a separate path around it
-  ([DEC-141](04-decision-log.md#decisions)). Follows the owner-input API work, after the tracer
-  bullet (E7-7); no change to milestone order. *Accepted when:* every client request passes through
-  the same order builder, autonomy rules, risk gate, account ledger, and journal as the owner's own
-  input; the client cannot change an envelope field (it may only propose a mandate version that the
-  human confirms with step-up); ASK approvals go only to the human owner, and a client cannot approve
-  its own proposal; owner-only privileges (owner exits outside the regular session at a confirmed
-  bid, Stop and release, the kill switch) stay with the human; the client authenticates with its own
-  scoped, revocable token and no broker credential crosses MCP; every client call is journaled with
-  the client's identity; and the owner can revoke the client at any time.
+- **E10-6 (Should, M8, pulled forward)** As an owner who already runs my own agent (for example
+  Claude), I want to connect it through a Mandate MCP server that exposes the same API Mandate uses
+  to take my input, so that my agent can work inside my mandate without a separate path around it
+  ([DEC-141](04-decision-log.md#decisions), [DEC-148](04-decision-log.md#decisions)). An optional
+  channel and an adoption on-ramp, never the only or the main path: the complete product leads, and
+  the platform's research agent brings the ideas. **Placement (DEC-148):** the first M8 story after
+  the owner-input API (M8's mandate registry, approval service, and owner controls), E9-1, E9-2,
+  E9-4, and E10-3, ahead of M8's other Should stories (E9-5, E10-5); it does not wait for M9 or M10,
+  and its earlier dependencies (E5, E6-2, E6-3, E7-2, E7-3, E7-5, and the tracer bullet E7-7) land
+  before the Phase 1 gate. No change to milestone order. *Accepted when:* every client request
+  passes through the same order builder, autonomy rules, risk gate, account ledger, and journal as
+  the owner's own input; the client cannot change an envelope field (it may only propose a mandate
+  version that the human confirms with step-up); ASK approvals go only to the human owner, and a
+  client cannot approve its own proposal; owner-only privileges (owner exits outside the regular
+  session at a confirmed bid, Stop and release, the kill switch) stay with the human; the client
+  authenticates with its own scoped, revocable token and no broker credential crosses MCP; every
+  client call is journaled with the client's identity; and the owner can revoke the client at any
+  time.
 
 ### E11 Web app: dashboard and controls
 
@@ -491,6 +497,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   convention the review holds. A `FoldedState` newtype with private fields, written only through the
   fold and read through accessors, moves it to rung 1 (#194 review, round 1, finding 5).
 - **Blocks E7-7 ([DEC-138](04-decision-log.md#decisions)).** `mandate-executor` still gates and submits a new opening before any reconciliation on a stream that has never journaled an account observation: the scoped startup hold holds openings only once an account is journaled (the coordinator's ruling on #174, comment 5857742391). Close it in the executor, not by the shell's convention of reporting the account first: such an opening is held, never denied, with `startup_reconciliation_pending`, until an account is observed and a run completes. Two PRs, in order: (1) a reviewed harness tests-correction PR in which `tests/common`'s `started`, `restart` and `fresh` report an account and run the startup snapshot, listing every assertion the extra run changes, one by one with why, and weakening none; (2) the implementation. No paper order may go through this executor until both land.
+- Correct `PartialGateDecision::held`'s doc comment in `crates/mandate-executor/src/gate.rs`, in
+  whichever PR next touches that file. It enumerates only the holds `AGENTS.md` rule 13 names (agent
+  mode `paused` or `stopped`, an `Unknown` order in the instrument), but `held` is also true when
+  the first failing check is `startup_reconciliation_pending` (the startup hold on an opening) or
+  `broker` (a risk-reducing order on a blocked account) (#206 review).
+- **Before stream G's gate is wired in:** register `startup_reconciliation_pending` in the
+  trading-domain `reason_codes` registry, or record why not. It is a third partial-gate reason code
+  outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
+  codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
+  items 23 and 27, ADR-0001 ES-09; #206 review).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Pin the `family` half of `mandate-executor`'s simulated-fee bucket key. Buying power charges paper's simulated fees per `(family, day)` bucket, but only `equities` is ever written, so keying on a constant instead of the payload's `family` passes every test; merging two families' buckets would round once instead of twice, up to a cent more buying power. Pin it with a crypto fee, with the cash slice's crypto row (#198 review, round 2, finding 2).
