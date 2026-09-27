@@ -8,7 +8,7 @@ use mandate_num::{Qty, SignedQty, Usd};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
     AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
-    Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    OrderState, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -62,6 +62,7 @@ pub struct ExecutorState {
     pub(crate) held: BTreeSet<IntentId>,
     pub(crate) details: BTreeMap<ClientOrderId, OrderDetail>,
     pub(crate) restrictions: BTreeMap<(AgentId, String), Mode>,
+    pub(crate) uncompensated: BTreeMap<EventId, Adoption>,
     pub(crate) now: Option<RiskClock>,
 }
 
@@ -71,8 +72,19 @@ pub struct ExecutorState {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct OrderDetail {
     pub(crate) request: Option<SubmitOrder>,
+    pub(crate) submitted_seq: Option<Seq>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
+}
+
+/// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
+/// not been folded yet: a crash between the two leaves one here, and the next reconciliation
+/// journals the missing compensation before anything else, so no adoption stays silent (§11).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Adoption {
+    pub(crate) subject: ClientOrderId,
+    pub(crate) from: OrderState,
+    pub(crate) to: OrderState,
 }
 
 /// A batch whose append has not been answered. The input and the drafts are kept so that the only
@@ -154,6 +166,7 @@ impl ExecutorState {
             held: BTreeSet::new(),
             details: BTreeMap::new(),
             restrictions: BTreeMap::new(),
+            uncompensated: BTreeMap::new(),
             now: None,
         }
     }

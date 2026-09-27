@@ -290,10 +290,11 @@ fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Execu
     )
 }
 
-/// Received intents with no order yet: `Input::Started` abandons the ones past their age at once.
-/// The rest wait for the startup reconciliation, which gates them (a later slice of this stack),
-/// so a restart never submits on state it has not reconciled.
-pub(crate) fn resume(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+/// Received intents with no order yet. With `stale_only`, the ones past their age are abandoned
+/// and the rest are left for later; otherwise every one is gated now. `Input::Started` abandons
+/// the stale at once and resumes the rest only once the startup reconciliation has run, so a
+/// restart never submits on state it has not reconciled.
+pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), ExecutorError> {
     let waiting: Vec<IntentId> = batch
         .view
         .intents
@@ -307,6 +308,8 @@ pub(crate) fn resume(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for intent in waiting {
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
+        } else if !stale_only {
+            gate_and_submit(batch, &intent)?;
         }
     }
     Ok(())

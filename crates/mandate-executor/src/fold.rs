@@ -11,10 +11,12 @@ use crate::payload::{
     flag, optional_int, optional_price, optional_qty, optional_text, optional_usd, qty,
     required_text, usd,
 };
-use crate::state::{ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail};
+use crate::state::{
+    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
+};
 use crate::types::{
-    AccountState, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order, OrderState,
-    OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
+    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
+    OrderState, OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -89,7 +91,32 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "IntentReceived" => intent_received(state, payload, at),
         "GateDecided" => gate_decided(state, payload),
         "OrderSubmitted" => order_submitted(state, event),
-        "OrderStateChanged" => order_state_changed(state, payload, at),
+        "OrderStateChanged" => {
+            adoption(state, event)?;
+            order_state_changed(state, payload, at)
+        }
+        "CompensatingEvent" => {
+            if let Some(Value::Array(corrected)) = payload.get("corrected_event_ids") {
+                for id in corrected.iter().filter_map(Value::as_str) {
+                    state.uncompensated.remove(&EventId(id.to_owned()));
+                }
+            }
+            Ok(())
+        }
+        "BrokerPositionObserved" => {
+            if flag(payload, "mismatch") {
+                state.mismatched.insert(instrument(payload)?);
+            }
+            Ok(())
+        }
+        "ReconciliationRun" => {
+            state.reconciled_through = Some(event.seq);
+            if let Some(cursor) = optional_text(payload, "checkpoint") {
+                state.checkpoint = Some(ActivityCursor(cursor.to_owned()));
+            }
+            Ok(())
+        }
+        "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "OrderAbandoned" => order_abandoned(state, payload),
         "AgentModeApplied" => agent_mode_applied(state, payload),
         "ClockAdvanced" | "MarkUpdated" => Ok(()),
@@ -351,6 +378,7 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         id,
         OrderDetail {
             request: Some(request),
+            submitted_seq: Some(event.seq),
             ..OrderDetail::default()
         },
     );
@@ -358,6 +386,26 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
         record.outcome = IntentOutcome::Submitted;
     }
     state.last_submission = Some(event.seq);
+    Ok(())
+}
+
+/// Records an adoption as owed a `CompensatingEvent` until one names it (§11).
+fn adoption(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), ExecutorError> {
+    if !flag(&event.payload, "adopted") {
+        return Ok(());
+    }
+    let subject = client_order_id(&event.payload)?;
+    let from = state
+        .orders
+        .get(&subject)
+        .map(|order| order.state)
+        .ok_or_else(|| ExecutorError::UnknownOrder {
+            client_order_id: subject.as_str().to_owned(),
+        })?;
+    let to = state_of(required_text(&event.payload, "state")?)?;
+    state
+        .uncompensated
+        .insert(event.event_id.clone(), Adoption { subject, from, to });
     Ok(())
 }
 
@@ -575,6 +623,30 @@ fn account_observed(state: &mut ExecutorState, payload: &Value) -> Result<(), Ex
 fn fees_charged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
     if flag(payload, "simulated") {
         state.simulated_fees = state.simulated_fees.checked_add(usd(payload, "accrued")?)?;
+    }
+    Ok(())
+}
+
+/// Only an owner acknowledgment carrying step-up evidence clears a reconciliation mismatch and the
+/// pause it caused (trading-domain spec §11, interpretation 14).
+fn owner_acknowledged(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+    let subject = required_text(payload, "subject")?;
+    if required_text(payload, "step_up")?.is_empty() {
+        return Ok(());
+    }
+    if let Ok(instrument) = InstrumentId::new(subject) {
+        state.mismatched.remove(&instrument);
+    }
+    let lifted = crate::state::restriction_for(subject);
+    let agents: Vec<AgentId> = state
+        .restrictions
+        .keys()
+        .filter(|(_, name)| *name == lifted)
+        .map(|(agent, _)| agent.clone())
+        .collect();
+    for agent in agents {
+        state.restrictions.remove(&(agent.clone(), lifted.clone()));
+        recompute(state, &agent);
     }
     Ok(())
 }

@@ -2143,7 +2143,6 @@ proptest! {
 
     /// §11 and interpretation 14: only an owner acknowledgment clears a mismatch pause.
     #[test]
-    #[ignore = "pending E7-3"]
     fn no_input_but_an_acknowledged_owner_ack_clears_a_mismatch_pause(
         later in prop::collection::vec(0i64..500, 1..6),
     ) {
@@ -2326,7 +2325,7 @@ proptest! {
         /// The catalogue events a merged slice interprets. Every other event this crate owns
         /// answers its story's stub until the slice that implements it moves it here, in the same
         /// change, with live tests pinning what it does (DEC-137, #184 review finding 4).
-        const INTERPRETED: [&str; 16] = [
+        const INTERPRETED: [&str; 20] = [
             "StreamOpened",
             "IntentReceived",
             "GateDecided",
@@ -2343,6 +2342,10 @@ proptest! {
             "AccountRestrictionChanged",
             "AccountStateObserved",
             "RejectObserved",
+            "CompensatingEvent",
+            "BrokerPositionObserved",
+            "ReconciliationRun",
+            "OwnerAcknowledged",
         ];
         let stubbed = event_type != "NobodyEverWroteThis"
             && !OTHER_STREAMS.contains(&event_type)
