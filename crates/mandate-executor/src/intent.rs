@@ -10,6 +10,7 @@ use crate::error::ExecutorError;
 use crate::gate::{Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
+use crate::protection::sequenced;
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
@@ -164,6 +165,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
+    sequenced(&batch.view, &instrument, purpose)?;
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
         _ => TimeInForce::Day,
@@ -285,7 +287,7 @@ fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Execu
         batch,
         request,
         order.intent_id.as_ref(),
-        &order.agent,
+        order.agent.as_ref().ok_or_else(unknown)?,
         attempt,
     )
 }
@@ -337,4 +339,74 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod sequence_call_tests {
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_canon::Value;
+    use mandate_num::{Price, Qty};
+
+    use crate::error::ExecutorError;
+    use crate::ids::IntentId;
+    use crate::payload::object;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{
+        Everything, Ids, executor_config, fees, protected_by_an_oco, submitted,
+    };
+    use crate::types::{AgentId, EventId, Input, IntentBody, IntentHandoff, Purpose, RiskClock};
+
+    fn exit(intent: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(intent.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new("AAPL")?,
+                side: Side::Sell,
+                qty: Qty::parse("5")?,
+                limit: Price::parse("150")?,
+                purpose: Purpose::RiskExit,
+                protection: None,
+            },
+        }))
+    }
+
+    /// #258 round 1, major 1; DEC-160 4. `submit` asks `sequenced` before any exit in a
+    /// protected instrument goes out, so an exit there is never sent beside the resting legs: it
+    /// answers the loud stub instead, which slice 3a replaces with the sequence. That stub is a
+    /// denied exit once reachable, which is why nothing creates protection before exits through it
+    /// work (`AGENTS.md` rule 13, DEC-160 4). Once no protective order rests, the same exit is
+    /// submitted.
+    #[test]
+    fn an_exit_where_protection_rests_answers_the_sequence_stub() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_by_an_oco(&ports)?;
+        assert_eq!(
+            executor.run(exit("01JABCDEFGHJKMNPQRSTVWXYZ1")?, &ports),
+            Err(ExecutorError::Unimplemented { story: "E7-4" })
+        );
+        executor.commit_one(
+            concat!("Protection", "Changed"),
+            object(vec![
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("action", Value::Str("cancelled".to_owned())),
+                ("orders", Value::Str("md-oco-1".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                (
+                    "risk_clock",
+                    crate::payload::clock(RiskClock::from_secs(0))?,
+                ),
+            ])?,
+        )?;
+        let sent = executor.run(exit("01JABCDEFGHJKMNPQRSTVWXYZ2")?, &ports)?;
+        assert_eq!(submitted(&sent), 1, "with nothing resting the exit goes");
+        Ok(())
+    }
 }

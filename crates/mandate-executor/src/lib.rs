@@ -78,6 +78,7 @@
 mod batch;
 mod codec;
 mod error;
+mod fees;
 mod fold;
 mod gate;
 mod ids;
@@ -92,10 +93,11 @@ mod step;
 mod types;
 
 pub use error::{ExecutorError, JsonError};
+pub use fees::{FeeSchedule, fee_config, paper_only_fee_config};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use ports::{BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports};
-pub use protection::{LadderPrice, LadderReference};
+pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
 pub use state::{
     ExecutorState, FOLD_VERSION, IntentOutcome, IntentRecord, ObservedAccount, UnresolvedAppend,

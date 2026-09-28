@@ -49,6 +49,7 @@ pub struct ExecutorState {
     pub(crate) reservations: BTreeMap<ClientOrderId, Usd>,
     pub(crate) protection: BTreeMap<InstrumentId, Protection>,
     pub(crate) unprotected: Vec<UnprotectedInterval>,
+    pub(crate) copied: BTreeMap<EventId, EventId>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -160,6 +161,7 @@ impl ExecutorState {
             reservations: BTreeMap::new(),
             protection: BTreeMap::new(),
             unprotected: Vec::new(),
+            copied: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
@@ -237,21 +239,22 @@ impl ExecutorState {
         &self.reservations
     }
 
-    /// One instrument's resting protection and the quantity it covers. A stub until E7-4 folds
-    /// protection: it answers `Unimplemented` rather than "no protection", so a silent absence can
-    /// never reach an order path.
+    /// One instrument's resting protection and the quantity it covers, as `ProtectionChanged`
+    /// folds it.
     pub fn protection(
         &self,
-        _instrument: &InstrumentId,
+        instrument: &InstrumentId,
     ) -> Result<Option<&Protection>, ExecutorError> {
-        let _ = &self.protection;
-        Err(ExecutorError::Unimplemented { story: "E7-4" })
+        Ok(self.protection.get(instrument))
     }
 
     /// Σ protective sell quantity for one instrument, which §5.4 requires never to exceed the
-    /// position. A stub until E7-4, answering `Unimplemented` rather than zero.
-    pub fn protective_sell_qty(&self, _instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
-        Err(ExecutorError::Unimplemented { story: "E7-4" })
+    /// position.
+    pub fn protective_sell_qty(&self, instrument: &InstrumentId) -> Result<Qty, ExecutorError> {
+        Ok(self
+            .protection
+            .get(instrument)
+            .map_or(Qty::ZERO, |protection| protection.covered_qty))
     }
 
     /// Every unprotected interval the fold has seen, open and closed.
@@ -405,10 +408,9 @@ impl ExecutorState {
         self.started
     }
 
-    /// Whether the causation chain of a copied fact is recorded for `event`. A stub until E7-4,
-    /// answering `Unimplemented` rather than "not recorded".
-    pub fn copied_origin(&self, _event: &EventId) -> Result<Option<&EventId>, ExecutorError> {
-        Err(ExecutorError::Unimplemented { story: "E7-4" })
+    /// The origin a copied fact cites, as folded from its `causation_id` (journal spec §2).
+    pub fn copied_origin(&self, event: &EventId) -> Result<Option<&EventId>, ExecutorError> {
+        Ok(self.copied.get(event))
     }
 
     /// The account stream this state is the single writer of, named by its opaque ids alone
@@ -435,34 +437,6 @@ impl ExecutorState {
 /// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
 pub(crate) fn restriction_for(subject: &str) -> String {
     format!("reconciliation:{subject}")
-}
-
-/// The protection and copied-origin accessors answer their story's stub until E7-4 folds what
-/// they read, never a silent "none" an order path could take for an answer.
-#[cfg(test)]
-mod loud_stub_tests {
-    use mandate_accounting::InstrumentId;
-
-    use super::ExecutorState;
-    use crate::error::ExecutorError;
-    use crate::types::{AccountRef, AccountScope, EventId, WorkspaceId};
-
-    #[test]
-    fn the_unfolded_accessors_answer_their_stub() -> Result<(), ExecutorError> {
-        let state = ExecutorState::new(AccountScope {
-            account: AccountRef("acct-1".to_owned()),
-            workspace: WorkspaceId("ws1".to_owned()),
-        });
-        let stub = Err(ExecutorError::Unimplemented { story: "E7-4" });
-        let aapl = InstrumentId::new("AAPL")?;
-        assert_eq!(state.protection(&aapl).map(|_| ()), stub.clone());
-        assert_eq!(state.protective_sell_qty(&aapl).map(|_| ()), stub.clone());
-        assert_eq!(
-            state.copied_origin(&EventId("e-1".to_owned())).map(|_| ()),
-            stub
-        );
-        Ok(())
-    }
 }
 
 /// A restriction is the one an acknowledgment of its own subject lifts, so no two subjects share
@@ -537,7 +511,7 @@ mod tests {
             Order {
                 client_order_id: id("md-a"),
                 intent_id: None,
-                agent: AgentId("agent-a".to_owned()),
+                agent: Some(AgentId("agent-a".to_owned())),
                 instrument: instrument.clone(),
                 side: Side::Buy,
                 qty: Qty::parse("1").ok()?,

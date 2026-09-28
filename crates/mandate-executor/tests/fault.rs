@@ -26,7 +26,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use common::{
     ACCOUNT_STREAM, CrashPoint, FixedInstruments, FixedMandate, Shell, TestIds, broker_fill,
     broker_order, broker_position, clock, config, event, handoff, instrument, opening, ports,
-    price, protected_opening, qty, quote, risk_exit, snapshot, stream_opened, text, with_clock,
+    price, protected_opening, qty, quote, risk_exit, snapshot, stream_opened, text, usd,
+    with_clock,
 };
 use mandate_accounting::Side;
 use mandate_canon::Value;
@@ -34,6 +35,7 @@ use mandate_executor::{
     BrokerFill, BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerUpdate,
     ClientOrderId, EventId, Input, IntentId, Ports, ReconcileReason, ReconciliationVerdict,
 };
+use mandate_num::Usd;
 
 const AAPL: &str = FixedInstruments::LIQUID_EQUITY;
 const INTENT: &str = "01JABCDEFGHJKMNPQRSTVWXYZ0";
@@ -53,6 +55,10 @@ struct Truth {
     open: Vec<BrokerOrder>,
     fills: Vec<BrokerFill>,
     positions: Vec<BrokerPosition>,
+    /// The broker's cash once a fill since the last account snapshot has moved it; `None` keeps
+    /// the default account's. A reconciliation compares cash within a band of the fills since its
+    /// base (§11 step 4), so a truth that reports a fill must report the cash that fill moved.
+    cash: Option<Usd>,
 }
 
 impl Truth {
@@ -61,6 +67,9 @@ impl Truth {
         taken.open_orders = self.open.clone();
         taken.fills = self.fills.clone();
         taken.positions = self.positions.clone();
+        if let Some(cash) = self.cash {
+            taken.account.cash = cash;
+        }
         taken
     }
 }
@@ -502,6 +511,12 @@ fn resting_oco() -> BrokerOrder {
     )
 }
 
+/// The default account's cash plus the exit sell's proceeds, 10 × 154: what the broker holds once
+/// the exit has filled, from a base the startup snapshot recorded before it.
+fn cash_after_the_exit_sell() -> Usd {
+    usd("21540")
+}
+
 /// A risk exit of the protected position, crashed inside its cancel → confirm → submit sequence
 /// (points 9 and 10), restarted, and driven to the exit's fill.
 fn crash_one_protective_sequence(point: CrashPoint) {
@@ -521,6 +536,7 @@ fn crash_one_protective_sequence(point: CrashPoint) {
         open: vec![resting_oco()],
         fills: Vec::new(),
         positions: vec![broker_position(AAPL, "10")],
+        cash: None,
     };
 
     match point {
@@ -598,6 +614,7 @@ fn crash_one_protective_sequence(point: CrashPoint) {
         side: Side::Sell,
         ..broker_fill("f-exit", Some(&exit_id), "10", "154")
     }];
+    truth.cash = Some(cash_after_the_exit_sell());
     let started = shell
         .account_journal
         .iter()
@@ -721,6 +738,7 @@ fn crash_between_entry_fill_and_oco() {
         open: vec![partial()],
         fills: vec![broker_fill("f-1", Some(&id), "60", "150")],
         positions: vec![broker_position(AAPL, "60")],
+        cash: None,
     };
     shell.run(
         Input::BrokerSnapshot(truth.snapshot(&shell, ReconcileReason::Startup)),
@@ -828,6 +846,7 @@ fn crash_mid_reconciliation_before_the_compensating_event() {
         )],
         fills: vec![broker_fill("f-1", Some(&id), "4", "150")],
         positions: vec![broker_position(AAPL, "4")],
+        cash: None,
     };
     shell
         .step_crashing(

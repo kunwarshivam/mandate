@@ -7,6 +7,7 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::ports::Ports;
+use crate::protection::watched;
 use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -128,7 +129,8 @@ fn started(
 fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
-        Input::Journal(_) | Input::Market(_) => Ok(()),
+        Input::Journal(_) => copied_facts(),
+        Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
             release_held(batch)
@@ -162,7 +164,7 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
             duplicate(batch, &client_order_id)
         }
         BrokerOutcome::Absent { client_order_id } => absent(batch, &client_order_id),
-        BrokerOutcome::CancelAccepted { .. } => cancelled(),
+        BrokerOutcome::CancelAccepted { client_order_id } => cancelled(batch, &client_order_id),
         BrokerOutcome::Rejected(refused) => reject(batch, &refused),
         BrokerOutcome::Account(snapshot) => account(batch, &snapshot),
         BrokerOutcome::OpenOrders(_)
@@ -172,8 +174,64 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
     }
 }
 
-/// The cancel's confirmation, reconciliation, and the agent kill switch (trading-domain spec §5.4,
-/// §5.5, §11): the later slices of this stack.
+/// A journaled event from a followed stream is a fact the executor copies into the account stream
+/// with its `causation_id` — `AgentModeApplied` from `AgentModeChanged`, `TradingDayStarted`,
+/// `ClockAdvanced` crossing midnight New York, `OwnerAcknowledged` (journal spec §2). That copy is
+/// E7-4 slice 5's (the trading day, DEC-160); until it lands the input answers its stub, never a
+/// silent `Ok(())` that drops the fact (#244 round 1, the coordinator's ruling 5861479849).
+fn copied_facts() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
+}
+
+/// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
+/// slices of this stack.
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
+}
+
+#[cfg(test)]
+mod watch_call_tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_num::{Price, Qty};
+
+    use crate::error::ExecutorError;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees, protected_by_an_oco};
+    use crate::types::{Input, MarketObservation, RiskClock};
+
+    fn quote(name: &str) -> Result<Input, ExecutorError> {
+        let at = Price::parse("150")?;
+        Ok(Input::Market(MarketObservation {
+            instrument: InstrumentId::new(name)?,
+            bid: Some(at),
+            bid_size: Some(Qty::parse("100")?),
+            ask: Some(at),
+            last_trade: Some(at),
+            mark: Some(at),
+            sane: true,
+            observed_at: RiskClock::from_secs(0),
+        }))
+    }
+
+    /// #258 round 1, major 1: `handle` passes every quote to `watched`, so a quote in an
+    /// instrument whose protection rests answers the watchdog's stub (slice 4), and one elsewhere
+    /// passes.
+    #[test]
+    fn a_quote_where_protection_rests_reaches_the_watchdog_stub() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_by_an_oco(&ports)?;
+        assert_eq!(
+            executor.run(quote("AAPL")?, &ports),
+            Err(ExecutorError::Unimplemented { story: "E7-4" })
+        );
+        assert_eq!(executor.run(quote("MSFT")?, &ports), Ok(Vec::new()));
+        Ok(())
+    }
 }
