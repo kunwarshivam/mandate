@@ -279,12 +279,15 @@ fn every_owned_expectation_member_is_read() {
 /// lands, then validation's `rule` stub until E10-1's V-rules do (#225, round 1). The risk-day arm left
 /// this list when its read-every-key half was written, below, because a correct `risk_day` passes every
 /// MC-T case and would turn this test red on exactly the code that should make it pass (DEC-77).
+/// Once slice P makes `ValidatedMandate::new` real, each case passes validation and stops at its own
+/// family's stub instead, `goal::status` or `RiskState::open` (E6-4), so those names join the lists
+/// ahead of it (stream H's note on #124).
 #[test]
 fn the_goal_and_risk_state_arms_name_their_stub_rather_than_passing() {
     let fixture = fixture();
     for (kind, stubs) in [
-        ("goal", &["parser", "rule"][..]),
-        ("risk_state", &["parser", "rule"][..]),
+        ("goal", &["parser", "rule", "goal::status"][..]),
+        ("risk_state", &["parser", "rule", "RiskState::open"][..]),
     ] {
         let ids: Vec<String> = fixture["cases"]
             .as_array()
