@@ -583,13 +583,16 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
   `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
   `crates/mandate-approval/src/quiet.rs`, and `crates/mandate-approval/src/stepup.rs`
-  (`owner_command`, and `kill_switch`, whose answer has no refusing variant).
+  (`owner_command`, `kill_switch`, whose answer has no refusing variant, and `kill_switch_code`).
 - **Tests:** `crates/mandate-approval/tests/content.rs` (E8-1: the content object, its hash and
   code, the notification payload, quiet hours), `crates/mandate-approval/tests/budget.rs` (E8-2:
   the ask budget and suppressions), and `crates/mandate-approval/tests/properties.rs` (the sentinel
   scanner, the budget counter with its own DST table, and content separation), all pending, with
-  fixtures in `crates/mandate-approval/tests/common/mod.rs`. E8-3's admission, step-up,
-  re-validation and drift tests follow in their own tests PR (DEC-165 item 1).
+  fixtures in `crates/mandate-approval/tests/common/mod.rs`; for E8-3,
+  `crates/mandate-approval/tests/admission.rs` (checks 1 to 7, lateness, step-up, owner commands,
+  the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
+  and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
+  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles).
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness

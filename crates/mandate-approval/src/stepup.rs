@@ -3,6 +3,7 @@
 
 use std::collections::BTreeSet;
 
+use crate::content::ConfirmationCode;
 use crate::{ApprovalError, RiskClock};
 
 /// How long step-up evidence stays fresh, in seconds (mandate spec §6.4: "within the 5 minutes").
@@ -109,5 +110,29 @@ pub fn kill_switch(
     used: &BTreeSet<AssertionId>,
 ) -> Result<KillSwitchAuthority, ApprovalError> {
     let _ = (evidence, committed_at, environment, used);
+    Err(ApprovalError::Unimplemented { story: "E8-3" })
+}
+
+/// What a kill switch reaches, as the owner typed it (trading-domain spec §5.5). The runtime owns
+/// what each scope does; here it only binds the confirmation code.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KillScope {
+    Agent(String),
+    Connection(String),
+    Workspace,
+}
+
+/// The code `mandate agent kill` asks the owner to type, computed on the owner's host from the
+/// scope typed and the control stream's head (DEC-155 item 4): no network, identity provider,
+/// runtime, or model state. The head is the one the CLI reads anyway to append the command, so a
+/// code typed for one scope, or before another command landed, does not confirm a different one.
+///
+/// # Errors
+/// [`ApprovalError::Unimplemented`] until E8-3.
+pub fn kill_switch_code(
+    scope: &KillScope,
+    control_head: u64,
+) -> Result<ConfirmationCode, ApprovalError> {
+    let _ = (scope, control_head);
     Err(ApprovalError::Unimplemented { story: "E8-3" })
 }
