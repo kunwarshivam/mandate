@@ -21,13 +21,14 @@ mandate-builder.workspace = true
 mandate-canon.workspace = true
 mandate-executor.workspace = true
 mandate-journal.workspace = true
+mandate-marketdata.workspace = true
 mandate-num.workspace = true
 mandate-risk.workspace = true
 mandate-runtime.workspace = true
 mandate-spec.workspace = true
 mandate-time.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt", "time"] }
 
 [dev-dependencies]
-mandate-marketdata.workspace = true
 proptest.workspace = true

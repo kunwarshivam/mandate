@@ -72,8 +72,20 @@ impl Condition {
 
     /// True for the catch-all `purpose in [open, increase]` that W-005 warns about when a rule
     /// follows it and can therefore never match.
+    ///
+    /// Only a top-level `purpose in [...]` naming both purposes is one: rules see nothing but `open`
+    /// and `increase` actions, so that comparison matches every action a later rule could.
     pub fn is_catch_all(&self) -> bool {
-        false
+        match self {
+            Self::Compare {
+                field: ConditionField::Purpose,
+                op: Operator::In,
+                value: ConditionValue::List(members),
+            } => ["open", "increase"]
+                .iter()
+                .all(|purpose| members.iter().any(|member| member == purpose)),
+            _ => false,
+        }
     }
 }
 
@@ -463,6 +475,33 @@ mod tests {
             "a value wider than a ratio holds is refused, not rounded"
         );
         Ok(())
+    }
+
+    /// W-005's catch-all is a top-level `purpose in` naming both purposes, extra members allowed; any
+    /// other shape can leave an action for a later rule.
+    #[test]
+    fn a_catch_all_names_both_purposes_with_in() {
+        let list =
+            |items: &[&str]| ConditionValue::List(items.iter().map(|t| (*t).to_owned()).collect());
+        let both = purpose(Operator::In, list(&["increase", "open"]));
+        assert!(both.is_catch_all());
+        assert!(purpose(Operator::In, list(&["open", "increase", "open"])).is_catch_all());
+        for other in [
+            purpose(Operator::In, list(&["open"])),
+            purpose(Operator::In, list(&["increase"])),
+            purpose(Operator::In, list(&["increase", "regular"])),
+            purpose(Operator::NotIn, list(&["increase", "open"])),
+            purpose(Operator::Eq, ConditionValue::Text("open".to_owned())),
+            Condition::Compare {
+                field: ConditionField::Session,
+                op: Operator::In,
+                value: list(&["increase", "open"]),
+            },
+            Condition::All(vec![both.clone()]),
+            Condition::Not(Box::new(both.clone())),
+        ] {
+            assert!(!other.is_catch_all(), "{other:?}");
+        }
     }
 
     /// `all`, `any`, and `not` as written, the empty `all` true and the empty `any` false, and an
