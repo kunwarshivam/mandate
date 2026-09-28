@@ -1876,7 +1876,7 @@ mod sequence_tests {
             })),
             &ports,
         )?;
-        assert!(executor.state.protection.get(&aapl()?).is_none());
+        assert!(!executor.state.protection.contains_key(&aapl()?));
         assert_eq!(submitted(&filled_oco), 1, "the waiting exit goes");
         Ok(())
     }
@@ -1957,7 +1957,8 @@ mod sequence_tests {
     #[test]
     fn a_stop_only_placement_with_no_shape_answers_the_stub() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
-        for instruments in [&Everything as &dyn InstrumentSnapshot, &Coin] {
+        let snapshots: [&dyn InstrumentSnapshot; 2] = [&Everything, &Coin];
+        for instruments in snapshots {
             let ports = Ports {
                 ids: &Ids,
                 mandates: &Everything,
