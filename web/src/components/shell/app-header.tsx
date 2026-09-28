@@ -79,7 +79,8 @@ export function AppHeader() {
   const { ws, now } = useRuntime();
   const { role } = useRole();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
-  const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label);
+  // Deep pages keep their last three crumbs; the page's tabs and the sidebar carry the rest of the way back.
+  const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label).slice(-3);
   const seesAgents = can(role, "agents.view");
 
   return (
@@ -93,7 +94,7 @@ export function AppHeader() {
           <WorkspaceSwitcher />
         </div>
         <div className="hidden min-w-0 flex-1 md:flex">
-          <Breadcrumbs size="sm" className="mr-0">
+          <Breadcrumbs size="sm" className="mr-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate">
             {crumbs.flatMap((c, i) => [
               ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),
               i === crumbs.length - 1 ? (
