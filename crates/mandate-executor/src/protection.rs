@@ -97,7 +97,10 @@ pub(crate) fn awaits_cancel(
 /// §5.4's marketable exit sequence, before the gate: every resting protective order, attributed or
 /// not (DEC-160 3d), is cancelled by id (again on each ask), and the interval's start records the
 /// sequence so a restart resumes it. A passive exit or an add is not this sequence; a crypto add
-/// answers slice 5's stub. Nothing is denied here (rule 13).
+/// answers slice 5's stub, and an exit meeting its agent's own resting opening there answers
+/// slice 3b's (§5.3 rule 5 cancels that opening first), never skipping rule 5. Both are reachable
+/// only where protection rests, so not before slice 2 (the pin); nothing else is denied here
+/// (rule 13).
 pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -136,6 +139,18 @@ pub(crate) fn begin_exit(
     else {
         return Ok(());
     };
+    let own_opening = batch.view.orders.values().any(|order| {
+        order.purpose.adds_risk()
+            && order.agent.as_ref() == Some(&agent)
+            && order.instrument == instrument
+            && matches!(
+                order.state,
+                OrderState::Accepted | OrderState::PartiallyFilled
+            )
+    });
+    if own_opening {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
     if !batch.view.exiting.contains_key(&instrument) {
         let entry = match protection
             .resting
@@ -1981,6 +1996,46 @@ mod sequence_tests {
             executor.run(sell(EXIT, "4", "150", Purpose::RiskExit)?, &ports)?;
             executor.run(cancel_accepted(OCO), &ports)?;
             assert!(stub(&executor.run(filled(EXIT, "4")?, &ports)));
+        }
+        Ok(())
+    }
+
+    /// §5.3 rule 5 is slice 3b's: an exit meeting its own agent's resting opening where protection
+    /// rests answers the stub rather than cancelling the protection beside that opening; another
+    /// agent's opening, or none, starts the sequence as before.
+    #[test]
+    fn an_exit_beside_its_agents_resting_opening_answers_3bs_stub() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        for (agent, state, stubbed) in [
+            ("agent-a", "accepted", true),
+            ("agent-a", "partially_filled", true),
+            ("agent-a", "canceled", false),
+            ("agent-b", "accepted", false),
+        ] {
+            let mut executor = protected(&ports)?;
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text("md-buy-2")),
+                    ("agent", text(agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text("5")),
+                    ("limit", text("150")),
+                    ("purpose", text("increase")),
+                ],
+            )?;
+            committed(
+                &mut executor,
+                "OrderStateChanged",
+                vec![
+                    ("client_order_id", text("md-buy-2")),
+                    ("state", text(state)),
+                ],
+            )?;
+            let answer = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports);
+            assert_eq!(stub(&answer), stubbed, "{agent} {state}: {answer:?}");
         }
         Ok(())
     }
