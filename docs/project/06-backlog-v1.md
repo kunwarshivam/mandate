@@ -544,8 +544,20 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
-- **E17-1 slice (stream F, next):** V-003, V-034 to V-037, V-039, W-006, and `worst_case_stop_distance`
-  (DEC-161 item 1). MC-V05, MC-V53 to MC-V61, MC-V64, and MC-V65 pass once it lands.
+- **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
+  `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
+  locally; a status-only PR moves them to `passing` (DEC-77 item 3).
+- **Confirmation-screen PR: the stop distance and the figures disagree on precision** (#252 review,
+  minor 3). `worst_case_stop_distance` sums at a `Ratio`'s 24 places, while the four figures stop at
+  `Fraction`'s 9 (`out_of_range` past it, DEC-161 item 3). A document with a 10- to 24-place stop gets a
+  distance but no figures. The screen that shows both must pick one boundary.
+- **Blocks any production caller of `validate`: an unmentioned envelope path reads as confirmed**
+  (#252 review, minor 4; the coordinator's ruling there). `ProvenanceMap::at` defaults an unmentioned
+  path to `user_entered` and confirmed, and V-020 and V-022 read only the entries present, so a
+  document with no entries passes both, even with `admission: auto`. The fix lands in the
+  `ValidationContext::from_journal` implementation PR (DEC-169): an unmentioned envelope path is
+  unconfirmed, fires V-020, and an `auto` under it fires V-022. No production caller may use
+  `validate` or `ValidatedMandate::new` until then.
 - **Stream H:** `ConditionField::is_unit_bounded` and `mandate-builder`'s `well_typed` omit
   `thesis_confidence`, which §6.3 types "decimal in [0, 1]"; `validate` bounds it (DEC-161 item 5), so the
   order path's re-check is looser than the load check. Fix both with the builder's
