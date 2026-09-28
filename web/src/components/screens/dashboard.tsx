@@ -20,6 +20,9 @@ import { cn } from "@/lib/utils";
 import { AgentCard } from "./agent-card";
 import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 
+/** The rail beside the account chart shows this many requests; the rest are one link away. */
+const WAITING_SHOWN = 3;
+
 const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
 function lowerFirst(text: string): string {
@@ -65,6 +68,7 @@ function AlertsSummary({ ws }: { ws: Workspace }) {
  * what the agent asks, and when it is skipped if you do nothing. No urgency colour, no countdown.
  */
 function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: string }) {
+  const more = open.length - WAITING_SHOWN;
   return (
     <section aria-labelledby="waiting-title" data-slot="waiting" className="grid content-start gap-(--block-gap)">
       <h2 id="waiting-title" className="flex items-center gap-2.5 text-h2">
@@ -80,7 +84,7 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
         <p className="text-sm text-muted-foreground">Requests for your approval appear here, with their deadline.</p>
       ) : (
         <ul className="grid gap-2">
-          {open.map((a, i) => {
+          {open.slice(0, WAITING_SHOWN).map((a, i) => {
             const agent = findAgent(ws, a.agent_id);
             return (
               <li key={a.approval_id} className="reveal grid gap-3 rounded-2xl bg-lapis-soft px-4 py-4" style={{ "--i": i + 1 } as CSSProperties}>
@@ -100,6 +104,11 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
           })}
         </ul>
       )}
+      {more > 0 ? (
+        <SectionLink href="/approvals">
+          {more === 1 ? "1 more request" : `${more} more requests`}
+        </SectionLink>
+      ) : null}
     </section>
   );
 }
@@ -119,7 +128,7 @@ function Dashboard() {
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
-        <div data-slot="account-board" className="reveal grid min-w-0 gap-5">
+        <div data-slot="account-board" data-layout="main" className="reveal grid min-w-0 gap-5">
           {open.length > 0 ? (
             <Link
               href={open.length === 1 ? `/approvals/${open[0].approval_id}` : "/approvals"}
@@ -133,7 +142,7 @@ function Dashboard() {
           ) : null}
           <AccountEquityChart />
         </div>
-        <div className="grid content-start gap-6 lg:pt-1">
+        <div data-layout="rail" className="grid content-start gap-6 lg:pt-1">
           <Waiting ws={ws} open={open} now={now} />
           <AlertsSummary ws={ws} />
         </div>

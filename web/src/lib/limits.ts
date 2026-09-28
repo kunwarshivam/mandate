@@ -135,3 +135,25 @@ export function agentLimits(agent: Agent): AgentLimits {
     drawdown: max(ZERO, sub(H, E)),
   };
 }
+
+export interface NextLevel {
+  level: Level;
+  /** How far equity is from the level, in dollars. */
+  distance: Dec;
+  side: "below" | "above";
+}
+
+/**
+ * The next level where the agent's behaviour changes: the closest one below equity not yet reached,
+ * or, with none left below, a profit stop above. The high-water mark changes nothing, so it is skipped.
+ */
+export function nextLevel(limits: AgentLimits): NextLevel | null {
+  const E = limits.equity;
+  const below = limits.levels.filter((l) => !l.reached && l.kind !== "high_water_mark" && l.kind !== "profit_stop" && l.at < E);
+  if (below.length > 0) {
+    const level = below.reduce((a, b) => (b.at > a.at ? b : a));
+    return { level, distance: sub(E, level.at), side: "below" };
+  }
+  const stop = limits.levels.find((l) => l.kind === "profit_stop" && !l.reached);
+  return stop ? { level: stop, distance: sub(stop.at, E), side: "above" } : null;
+}

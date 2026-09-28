@@ -1,19 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight, ArrowsClockwise } from "@phosphor-icons/react";
+import { ArrowRight } from "@phosphor-icons/react";
 import { Deadline } from "@/components/approvals/deadline";
 import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
-import { Envelope } from "@/components/domain/envelope";
+import { Envelope, MandateCard } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
-import { ModeBadge } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
 import { Timeline } from "@/components/domain/timeline";
 import { price, quantity } from "@/lib/format";
-import { MODE_MEANING } from "@/lib/labels";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allOrders } from "@/lib/orders";
@@ -22,10 +20,14 @@ import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
 import { Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
+import { SideRail } from "./side-rail";
 
 /** A list row that opens a record: the whole row is the target, on hairlines rather than boxes. */
 const ROW_LINK =
   "press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring";
+
+/** The overview shows the latest few events; the Activity tab has them all. */
+const RECENT_ACTIVITY = 5;
 
 function AgentDetail({ agentId }: { agentId: string }) {
   const { ws, now } = useRuntime();
@@ -35,33 +37,30 @@ function AgentDetail({ agentId }: { agentId: string }) {
   const marketStale = ws.health.market_data.state !== "ok";
   const open = ws.approvals.filter((a) => a.agent_id === agent.agent_id).map((a) => approvalAt(a, now)).filter((a) => a.status === "delivered");
   const decisions = ws.decisions.filter((d) => d.agent_id === agent.agent_id);
+  const activity = ws.timeline[agent.agent_id] ?? [];
   const markAt = agent.positions[0]?.mark_as_of;
 
+  /*
+   * One story in the wide column, and only the mandate at a glance beside it. On a phone or tablet the
+   * card follows the chart; on a desktop it spans both rows of the story and stays in view.
+   */
   return (
     <AgentFrame agent={agent}>
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
-        <div className="reveal grid min-w-0 content-start gap-6">
-          <section aria-label="Mode" data-mode={agent.mode} data-slot="mode-field" className="grid gap-2">
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-              <ModeBadge mode={agent.mode} />
-              <span className="text-sm text-muted-foreground">{MODE_MEANING[agent.mode]}</span>
-            </p>
-            {agent.startup === "reconciling" ? (
-              <p role="status" data-slot="reconciling" className="flex items-center gap-2 text-sm font-medium">
-                <ArrowsClockwise className="size-4 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
-                Checking with the broker. Nothing is needed from you.
-              </p>
-            ) : null}
-          </section>
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-x-14">
+        <div data-layout="main" className="reveal grid min-w-0 content-start gap-6 lg:col-start-1 lg:row-start-1">
           <AgentEquityChart agent={agent} />
         </div>
 
-        <div className="grid content-start gap-(--section-gap) lg:pt-1">
+        <SideRail className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          <MandateCard agent={agent} />
+        </SideRail>
+
+        <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap) lg:col-start-1 lg:row-start-2">
           <section aria-labelledby="figures-title" data-slot="key-figures" className="grid gap-4">
             <h2 id="figures-title" className="text-h2">
               Key figures
             </h2>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-4">
               <div className="grid gap-1">
                 <dt className="text-sm text-muted-foreground">Capital</dt>
                 <dd className="text-figure">
@@ -115,11 +114,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
               </ul>
             </Section>
           ) : null}
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
-        <div className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap)">
           <Section title="Positions" action={<SectionLink href={agentHref(agent.agent_id, "positions")}>All positions</SectionLink>}>
             <PositionsTable
               positions={agent.positions}
@@ -144,17 +139,9 @@ function AgentDetail({ agentId }: { agentId: string }) {
               </ul>
             )}
           </Section>
-        </div>
 
-        <div className="grid grid-cols-1 content-start gap-(--section-gap)">
-          <Envelope agent={agent} />
-
-          <Section title="Mandate" action={<SectionLink href={agentHref(agent.agent_id, "mandate")}>Details</SectionLink>}>
-            <MandateSummary agent={agent} />
-          </Section>
-
-          <Section title="Activity">
-            <Timeline events={ws.timeline[agent.agent_id] ?? []} today={ws.now.slice(0, 10)} />
+          <Section title="Activity" action={<SectionLink href={agentHref(agent.agent_id, "activity")}>View all activity</SectionLink>}>
+            <Timeline events={activity.slice(0, RECENT_ACTIVITY)} today={ws.now.slice(0, 10)} />
           </Section>
         </div>
       </div>
@@ -260,11 +247,8 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       return (
         <div className="grid grid-cols-1 gap-(--section-gap)">
           <Envelope agent={agent} />
-          <Section
-            title="Mandate"
-            action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}
-          >
-              <MandateSummary agent={agent} />
+          <Section title="Mandate details" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>
+            <MandateSummary agent={agent} />
           </Section>
         </div>
       );
