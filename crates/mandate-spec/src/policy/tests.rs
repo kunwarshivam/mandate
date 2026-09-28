@@ -764,3 +764,24 @@ fn stating_the_platform_base_again_changes_nothing() -> Checked {
     }
     Ok(())
 }
+
+/// Two levels' sets, neither containing the other, meet as their intersection, not as whichever the
+/// fold met second; the other overlay rows use nested sets, where the two readings agree.
+#[test]
+fn overlapping_sets_meet_as_their_intersection() -> Checked {
+    let folded = overlay(&[
+        level(
+            LevelName::Platform,
+            vec![(PolicyKey::Channels, names(&["email", "phone"]))],
+        ),
+        level(
+            LevelName::Organization,
+            vec![(PolicyKey::Channels, names(&["phone", "slack"]))],
+        ),
+    ])?;
+    let got = folded.tightest().get(&PolicyKey::Channels);
+    if got != Some(&names(&["phone"])) {
+        return Err(format!("expected [phone] alone, got {got:?}"));
+    }
+    Ok(())
+}
