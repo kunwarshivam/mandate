@@ -107,7 +107,7 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
   const limits = agentLimits(agent);
   const scaled = limits.sizeFactor < ONE;
   return (
-    <section aria-label="Limits in dollars" className={cn("envelope rounded-xl p-[2px] pr-(--envelope-wall)", className)}>
+    <div data-slot="envelope" className={cn("envelope rounded-xl p-[2px] pr-(--envelope-wall)", className)}>
       <div className="grid gap-5 rounded-[calc(var(--radius-xl)-2px)] bg-card p-4 sm:p-5">
         {compact ? null : <EquityLevels equity={limits.equity} levels={limits.levels} />}
         <div className="grid gap-4">
@@ -139,6 +139,6 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
           Each limit acts when it is reached. Gaps, halts, and outages can move prices past any level before an order fills.
         </p>
       </div>
-    </section>
+    </div>
   );
 }
