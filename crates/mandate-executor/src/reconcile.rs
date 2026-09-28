@@ -478,7 +478,7 @@ fn restrict(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use mandate_accounting::{
         AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
     };
@@ -503,17 +503,18 @@ mod tests {
         WriterEpoch,
     };
 
-    /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
-    struct Ids;
+    /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
+    /// and alphanumeric like its, so a protective order can be named for one (§2.3).
+    pub(crate) struct Ids;
 
     impl IdGen for Ids {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-            EventId(format!("e-{}-{}-{ordinal}", epoch.0, head.0))
+            EventId(format!("e{}h{}o{ordinal}", epoch.0, head.0))
         }
     }
 
     /// A mandate covering everything, and whole-share equities.
-    struct Everything;
+    pub(crate) struct Everything;
 
     impl MandateView for Everything {
         fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
@@ -543,7 +544,7 @@ mod tests {
         }
     }
 
-    fn executor_config() -> ExecutorConfig {
+    pub(crate) fn executor_config() -> ExecutorConfig {
         ExecutorConfig {
             max_intent_age_s: 120,
             unknown_absent_lookups: 3,
@@ -558,7 +559,7 @@ mod tests {
         }
     }
 
-    fn fees() -> Result<Config, ExecutorError> {
+    pub(crate) fn fees() -> Result<Config, ExecutorError> {
         let date = |raw: &str| Date::parse(raw).map_err(ExecutorError::from);
         Ok(Config {
             equities: EquityFees {
@@ -576,7 +577,7 @@ mod tests {
         })
     }
 
-    fn aapl() -> Result<InstrumentId, ExecutorError> {
+    pub(crate) fn aapl() -> Result<InstrumentId, ExecutorError> {
         Ok(InstrumentId::new("AAPL")?)
     }
 
@@ -596,7 +597,7 @@ mod tests {
         })
     }
 
-    fn snapshot(reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+    pub(crate) fn snapshot(reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
         Ok(BrokerSnapshot {
             open_orders: Vec::new(),
             positions: Vec::new(),
@@ -625,14 +626,14 @@ mod tests {
 
     /// One executor over the journal it writes: every draft `handle` answers is committed and
     /// folded back, in order, as the shell does (journal spec §5.2).
-    struct Executor {
-        state: ExecutorState,
+    pub(crate) struct Executor {
+        pub(crate) state: ExecutorState,
         journal: Vec<FoldedEvent>,
         epoch: u64,
     }
 
     impl Executor {
-        fn opened(ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+        pub(crate) fn opened(ports: &Ports<'_>) -> Result<Self, ExecutorError> {
             let mut executor = Self {
                 state: ExecutorState::new(AccountScope {
                     account: AccountRef("acct-1".to_owned()),
@@ -649,7 +650,11 @@ mod tests {
             Ok(executor)
         }
 
-        fn commit_one(&mut self, event_type: &str, payload: Value) -> Result<(), ExecutorError> {
+        pub(crate) fn commit_one(
+            &mut self,
+            event_type: &str,
+            payload: Value,
+        ) -> Result<(), ExecutorError> {
             let seq = self.state.account_head().0.saturating_add(1);
             let event = FoldedEvent {
                 stream: self.state.account_stream(),
@@ -695,12 +700,16 @@ mod tests {
             Ok(effects)
         }
 
-        fn run(&mut self, input: Input, ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+        pub(crate) fn run(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+        ) -> Result<Vec<Effect>, ExecutorError> {
             self.run_keeping(input, ports, usize::MAX)
         }
 
         /// A crash and a restart: a new process folds the same journal and takes a new epoch.
-        fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+        pub(crate) fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
             let mut next = Self {
                 state: ExecutorState::new(AccountScope {
                     account: AccountRef("acct-1".to_owned()),
@@ -717,7 +726,10 @@ mod tests {
             Ok(next)
         }
 
-        fn snapshot(&self, reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+        pub(crate) fn snapshot(
+            &self,
+            reason: ReconcileReason,
+        ) -> Result<BrokerSnapshot, ExecutorError> {
             Ok(BrokerSnapshot {
                 taken_at_head: self.state.account_head(),
                 ..snapshot(reason)?
@@ -725,7 +737,7 @@ mod tests {
         }
     }
 
-    fn drafted(effects: &[Effect]) -> Vec<&str> {
+    pub(crate) fn drafted(effects: &[Effect]) -> Vec<&str> {
         effects
             .iter()
             .filter_map(|effect| match effect {
@@ -735,7 +747,7 @@ mod tests {
             .collect()
     }
 
-    fn submitted(effects: &[Effect]) -> usize {
+    pub(crate) fn submitted(effects: &[Effect]) -> usize {
         effects
             .iter()
             .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::Submit(_))))
