@@ -924,9 +924,6 @@ impl ExecutorConfig {
     };
 }
 
-/// §11's on-mismatch column, held by the constructors: every [`Unexplained`] kind is one
-/// [`DifferenceKind::adoptable`] refuses, every [`Adopted`] kind one it accepts, and each
-/// constructor records what its kind says.
 #[cfg(test)]
 mod config_tests {
     use super::ExecutorConfig;
@@ -961,6 +958,9 @@ mod config_tests {
     }
 }
 
+/// §11's on-mismatch column, held by the constructors: every [`Unexplained`] kind is one
+/// [`DifferenceKind::adoptable`] refuses, every [`Adopted`] kind one it accepts, and each
+/// constructor records what its kind says.
 #[cfg(test)]
 mod difference_tests {
     use super::{Adopted, Difference, DifferenceKind, Unexplained};

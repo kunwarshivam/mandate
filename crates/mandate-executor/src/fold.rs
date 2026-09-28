@@ -2000,6 +2000,22 @@ mod protection_tests {
         Ok(())
     }
 
+    /// #258 round 1, minor 3: an action the fold does not interpret is refused, never skipped.
+    #[test]
+    fn an_unknown_protection_action_is_refused() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        let before = stream.state.clone();
+        assert_eq!(
+            stream.protection("moved", "md-oco-1", "10"),
+            Err(ExecutorError::NonCanonicalPayload {
+                field: "action".to_owned()
+            })
+        );
+        assert_eq!(stream.state, before, "and nothing is folded");
+        Ok(())
+    }
+
     #[test]
     fn an_unprotected_interval_ends_only_its_own_open_one() -> Result<(), ExecutorError> {
         let mut stream = Stream::opened()?;

@@ -43,9 +43,15 @@ impl ClientOrderId {
     /// `md-r-<origin>` for the order that replaces one the broker replaced, derived from the
     /// `OrderStateChanged` event that recorded the replacement, never from a counter
     /// (trading-domain spec §5.7's `replaced` row). An intent-derived id has no hyphen after the
-    /// prefix, so the derivations can never meet.
+    /// prefix, so the derivations can never meet; and an origin that would make the id read back
+    /// as a protective order's (§2.3: everything before a `-p` that is itself an id of ours, as
+    /// `md-r-p1` would name `md-r`) is refused rather than escaped.
     pub fn for_replacement(origin: &EventId) -> Result<Self, ExecutorError> {
-        Self::parse(&format!("{PREFIX}r-{}", origin.0))
+        let id = Self::parse(&format!("{PREFIX}r-{}", origin.0))?;
+        if id.protected_entry().is_some() {
+            return Err(malformed(id.as_str()));
+        }
+        Ok(id)
     }
 
     /// `{entry}-p{protection}` for a protective order the platform places — a bracket's or OCO's
@@ -169,6 +175,46 @@ mod tests {
                 }),
                 "{raw:?}"
             );
+        }
+        Ok(())
+    }
+
+    /// #258 round 1, minor 1: the entry is everything before the **last** `-p`, and only when
+    /// that reads back as an id of ours.
+    #[test]
+    fn the_entry_is_read_back_from_the_last_protection_suffix_and_must_be_ours()
+    -> Result<(), ExecutorError> {
+        for (raw, entry) in [
+            ("md-a-p1-p2", Some("md-a-p1")),
+            ("md-a-p1-p2-sl", Some("md-a-p1")),
+            ("md-p1", None),
+            ("md-a", None),
+        ] {
+            assert_eq!(
+                ClientOrderId::parse(raw)?.protected_entry(),
+                entry.map(ClientOrderId::parse).transpose()?,
+                "{raw}"
+            );
+        }
+        Ok(())
+    }
+
+    /// #258 round 1, minor 2: no replacement id reads back as a protective order's.
+    #[test]
+    fn a_replacement_id_never_names_an_entry() -> Result<(), ExecutorError> {
+        for raw in ["p1", "e1-p2", "x-pq"] {
+            assert_eq!(
+                ClientOrderId::for_replacement(&EventId(raw.to_owned())),
+                Err(ExecutorError::MalformedClientOrderId {
+                    raw: format!("md-r-{raw}")
+                }),
+                "{raw:?}"
+            );
+        }
+        for raw in ["01JORIGIN", "e1-h5-o2"] {
+            let id = ClientOrderId::for_replacement(&EventId(raw.to_owned()))?;
+            assert_eq!(id.as_str(), format!("md-r-{raw}"));
+            assert_eq!(id.protected_entry(), None, "{raw:?}");
         }
         Ok(())
     }

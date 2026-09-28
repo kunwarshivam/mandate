@@ -2035,6 +2035,14 @@ pub(crate) mod tests {
         )?;
         assert_eq!(drafted(&confirmed), vec!["OrderStateChanged"]);
         assert!(
+            confirmed.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft)
+                    if draft.payload.get("cancel_confirmed") == Some(&Value::Bool(true))
+            )),
+            "the confirmation is journaled as one (#258 round 1, minor 3)"
+        );
+        assert!(
             !confirmed
                 .iter()
                 .any(|effect| matches!(effect, Effect::Broker(BrokerRequest::ListOpenOrders))),
