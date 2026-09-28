@@ -554,6 +554,12 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
+- **`ValidationContext::from_journal` (stream F, DEC-169):** the tests PR lands the `context` module's
+  stub and 17 `pending E10-1` tests; the implementation follows. Stream L's E7-10 (DEC-168) maps the
+  control-stream records (`AccountSnapshotRecorded`, `AgentDeployed`/`AgentStopped`,
+  `ConnectionEstablished`, `DisclosureAccepted`, `MandateVersionCreated`/`MandateConfirmed`,
+  `ConfigSnapshotRegistered`, `PlatformOperatorAction`) to `JournaledFact`; `AgentFlat` needs a source
+  there too (the account ledger's flat-in-every-instrument signal).
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
