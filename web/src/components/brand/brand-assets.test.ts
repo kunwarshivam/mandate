@@ -16,7 +16,7 @@ interface Image {
   at(x: number, y: number): Rgba;
 }
 
-/** Decodes the 8-bit RGBA, non-interlaced PNGs resvg writes. */
+/** Decodes the 8-bit RGBA, non-interlaced PNG files resvg writes. */
 function decodePng(png: Buffer): Image {
   expect(png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
   let offset = 8;
@@ -47,8 +47,8 @@ function decodePng(png: Buffer): Image {
       const c = i >= 4 && y > 0 ? pixels[(y - 1) * stride + i - 4] : 0;
       const p = a + b - c;
       const [pa, pb, pc] = [Math.abs(p - a), Math.abs(p - b), Math.abs(p - c)];
-      const paeth = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-      const predictor = [0, a, b, (a + b) >> 1, paeth][filter];
+      const nearest = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      const predictor = [0, a, b, (a + b) >> 1, nearest][filter];
       pixels[y * stride + i] = (line[i] + predictor) & 0xff;
     }
   }
@@ -113,7 +113,7 @@ describe("brand assets (npm run brand)", () => {
     for (const [, , p] of solid) expect(p).toEqual(opaque(NAVY));
   });
 
-  it("packs the three favicon PNGs, smallest first, into favicon.ico", async () => {
+  it("packs the three favicon PNG files, smallest first, into favicon.ico", async () => {
     const ico = await committed("favicon.ico");
     expect([ico.readUInt16LE(0), ico.readUInt16LE(2), ico.readUInt16LE(4)]).toEqual([0, 1, 3]);
     for (const [i, size] of [16, 32, 48].entries()) {
