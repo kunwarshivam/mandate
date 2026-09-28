@@ -105,7 +105,7 @@ pub fn hash(tag: &str) -> ContentHash {
 
 pub fn request() -> Request {
     Request {
-        id: ApprovalRef::of_requested_event(REQUEST_ID),
+        id: ApprovalRef::of_requested_event(REQUEST_ID).unwrap(),
         content: content(),
         content_hash: hash("request"),
         delivered: true,
@@ -135,7 +135,7 @@ pub fn step_up(assertion: &str, authenticated_at: i64) -> StepUp {
 pub fn grant() -> Response {
     Response {
         source: "01J9ZQ4Y8N6K3V5T2R1M0P7XWD".to_owned(),
-        approval: ApprovalRef::of_requested_event(REQUEST_ID),
+        approval: ApprovalRef::of_requested_event(REQUEST_ID).unwrap(),
         actor_kind: ActorKind::User,
         responder: user(OWNER),
         verdict: Verdict::Approve(Some(step_up("assertion-1", T0 + 5))),

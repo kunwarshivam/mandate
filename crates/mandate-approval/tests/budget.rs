@@ -32,7 +32,6 @@ fn permit(ledger: &AskLedger, instrument: &str, at: i64) -> AskPermit {
 
 /// MC-E25: the eleventh ask of a risk day is suppressed.
 #[test]
-#[ignore = "pending E8-2"]
 fn the_eleventh_ask_of_a_risk_day_is_suppressed() {
     assert_eq!(
         permit(&requested(9, DST_DAY), "asset-x", DST_DAY + 60),
@@ -46,7 +45,6 @@ fn the_eleventh_ask_of_a_risk_day_is_suppressed() {
 
 /// MC-E26, PB-16: the budget resets at New York midnight, across a DST change, not at UTC's.
 #[test]
-#[ignore = "pending E8-2"]
 fn the_budget_resets_at_new_york_midnight_across_a_dst_change() {
     let ledger = requested(10, DST_DAY);
     assert_eq!(
@@ -58,7 +56,6 @@ fn the_budget_resets_at_new_york_midnight_across_a_dst_change() {
 
 /// MC-E27: after an owner skip, the instrument waits for the next risk day or an applied version.
 #[test]
-#[ignore = "pending E8-2"]
 fn an_owner_skip_suppresses_the_instrument_until_the_next_day_or_version() {
     let mut ledger = AskLedger {
         events: vec![AskEvent::OwnerSkipped {
@@ -83,7 +80,6 @@ fn an_owner_skip_suppresses_the_instrument_until_the_next_day_or_version() {
 
 /// MC-E28: after a timeout, the instrument is not asked within the next `timeout_s`.
 #[test]
-#[ignore = "pending E8-2"]
 fn a_timeout_suppresses_the_instrument_for_one_window() {
     let ledger = AskLedger {
         events: vec![AskEvent::TimedOut {

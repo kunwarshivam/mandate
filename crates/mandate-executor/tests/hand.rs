@@ -2535,18 +2535,36 @@ fn a_reconciliation_ingests_a_missing_fill_before_it_compares_positions() {
     );
 }
 
-/// The two events of `RC-14`'s initial state from `first_seq` on: ten `AAPL` bought at 150, and
-/// one resting GTC OCO for them at 170 and 140, created on 2026-09-22 (so it expires on
-/// 2026-12-21, trading-domain spec §5.2).
+/// The events of `RC-14`'s initial state from `first_seq` on: ten `AAPL` bought at 150 by
+/// `common::AGENT`'s own order, filled, and one resting GTC OCO for them at 170 and 140, created on
+/// 2026-09-22 (so it expires on 2026-12-21, trading-domain spec §5.2). The buy is attributed, so
+/// the position has a single holder the OCO belongs to (DEC-160's leg-agent rule).
 fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEvent> {
     vec![
         event(
             ACCOUNT_STREAM,
             first_seq,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            first_seq.saturating_add(1),
             "FillApplied",
             with_clock(
                 &[
                     ("fill_id", text("f-0")),
+                    ("client_order_id", text("md-held-1")),
                     ("instrument", text(AAPL)),
                     ("side", text("buy")),
                     ("qty_gross", text("10")),
@@ -2557,7 +2575,19 @@ fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEven
         ),
         event(
             ACCOUNT_STREAM,
-            first_seq.saturating_add(1),
+            first_seq.saturating_add(2),
+            "OrderStateChanged",
+            with_clock(
+                &[
+                    ("client_order_id", text("md-held-1")),
+                    ("state", text("filled")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            first_seq.saturating_add(3),
             "ProtectionChanged",
             with_clock(
                 &[
@@ -2584,8 +2614,7 @@ fn protected_position(ports: &mandate_executor::Ports<'_>) -> Shell {
             .fold_one(&event)
             .expect("the protected position folds");
     }
-    let (shell, _) = shell.restart(ports);
-    shell
+    shell.restart_ready(ports)
 }
 
 #[test]
@@ -3302,7 +3331,7 @@ fn a_crypto_add_is_a_limit_ioc_inside_the_sequence() {
         ),
     );
     shell.fold_one(&protection).expect("the stop-limit folds");
-    let (mut shell, _) = shell.restart(&ports);
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
 
     let ran = shell.run(
@@ -3792,7 +3821,7 @@ fn an_account_kill_switch_uses_cancel_all_and_close_position() {
 #[ignore = "pending E7-4"]
 fn an_account_cancel_all_covers_unknown_orders() {
     let ids = TestIds;
-    let mandates = FixedMandate::covering(&[AAPL]);
+    let mandates = FixedMandate::covering(&[AAPL, CPHC]);
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
@@ -3931,13 +3960,33 @@ fn an_automated_flatten_sells_crypto_at_once() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let held = event(
+    let bought = event(
         ACCOUNT_STREAM,
         2,
+        "OrderSubmitted",
+        with_clock(
+            &[
+                ("client_order_id", text("md-held-btc")),
+                ("agent", text(common::AGENT)),
+                ("instrument", text(BTC)),
+                ("side", text("buy")),
+                ("qty", text("0.5")),
+                ("limit", text("60000")),
+            ],
+            10,
+        ),
+    );
+    shell
+        .fold_one(&bought)
+        .expect("the agent's own buy folds, so the sub-ledger is its (§5.5)");
+    let held = event(
+        ACCOUNT_STREAM,
+        3,
         "FillApplied",
         with_clock(
             &[
                 ("fill_id", text("f-0")),
+                ("client_order_id", text("md-held-btc")),
                 ("instrument", text(BTC)),
                 ("side", text("buy")),
                 ("qty_gross", text("0.5")),
@@ -3947,6 +3996,19 @@ fn an_automated_flatten_sells_crypto_at_once() {
         ),
     );
     shell.fold_one(&held).expect("the crypto position folds");
+    let done = event(
+        ACCOUNT_STREAM,
+        4,
+        "OrderStateChanged",
+        with_clock(
+            &[
+                ("client_order_id", text("md-held-btc")),
+                ("state", text("filled")),
+            ],
+            10,
+        ),
+    );
+    shell.fold_one(&done).expect("the buy's fill completes it");
     let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
 
@@ -4103,6 +4165,8 @@ fn a_protective_order_submits_with_no_buying_power() {
             &[
                 ("status", text("ACTIVE")),
                 ("buying_power", text("0")),
+                ("non_marginable_buying_power", text("0")),
+                ("accrued_fees", text("0")),
                 ("equity", text("0")),
                 ("cash", text("0")),
             ],
