@@ -198,6 +198,12 @@ const failingPasskey: Passkey = (_action, answer) => {
   return () => window.clearTimeout(id);
 };
 
+/** Answers "verified" even after being abandoned, as a browser's assertion may resolve late. */
+const latePasskey: Passkey = (_action, answer) => {
+  window.setTimeout(() => answer("verified"), PASSKEY_ANSWER_MS);
+  return () => {};
+};
+
 function stepUpDialog() {
   return screen.queryByRole("dialog", { name: "Confirm it is you" });
 }
@@ -327,6 +333,15 @@ const ENDINGS: Ending[] = [
     notice: "Passkey check canceled. Nothing was sent.",
     run: () => {
       press("Use passkey");
+      press("Use passkey");
+      press("Cancel");
+    },
+  },
+  {
+    ending: "Cancel before a late verified answer",
+    notice: "Passkey check canceled. Nothing was sent.",
+    passkey: latePasskey,
+    run: () => {
       press("Use passkey");
       press("Cancel");
     },
