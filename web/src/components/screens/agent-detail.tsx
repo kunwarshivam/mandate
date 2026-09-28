@@ -12,7 +12,7 @@ import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
 import { Timeline } from "@/components/domain/timeline";
-import { price, quantity, usd } from "@/lib/format";
+import { price, quantity } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";

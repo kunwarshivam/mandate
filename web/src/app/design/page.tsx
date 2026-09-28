@@ -81,7 +81,7 @@ const DO = [
 ];
 
 const DONT = [
-  "Gradients, glass, glows, or a shadow on anything that does not float.",
+  "Colour blends, glass, glows, or a shadow on anything that does not float.",
   "Capitals-only labels, heavy rules, or bands of colour as signage.",
   "Confetti, streaks, badges for trading, or any cue that rewards activity.",
   "Crimson anywhere but the kill switch, or brass for anything but the mandate.",

@@ -27,7 +27,7 @@ export interface MockChart {
 }
 
 /** Stands in for the time scale's pixel mapping: tests set the time under a pointer's x. */
-export const pointerTime = { at: (_x: number): number | null => null };
+export const pointerTime: { at: (x: number) => number | null } = { at: () => null };
 
 export const charts: MockChart[] = [];
 

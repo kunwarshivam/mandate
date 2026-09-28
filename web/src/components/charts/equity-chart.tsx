@@ -205,7 +205,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
   const market = useMarket();
   const { stale, asOf, now } = useStale();
   const [range, setRange] = useState<EquityRange>("1D");
-  const all = market.equity[agent.agent_id] ?? [];
+  const all = useMemo(() => market.equity[agent.agent_id] ?? [], [market.equity, agent.agent_id]);
   const points = useMemo(() => equityWindow(all, range, market.end), [all, range, market.end]);
   const levels = useMemo(() => mandateLevels(agent), [agent]);
   const { drawn, offChart } = useMemo(() => drawable(levels, points.map((p) => p.value)), [levels, points]);
