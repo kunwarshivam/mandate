@@ -1552,4 +1552,191 @@ mod sequence_tests {
         }
         Ok(())
     }
+
+    /// Every equity is crypto here, for the crypto sequence's stub (slice 5).
+    struct Coins;
+
+    impl InstrumentSnapshot for Coins {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::Crypto)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Fractional)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    fn order(
+        intent: &str,
+        name: &str,
+        side: Side,
+        limit: &str,
+        purpose: Purpose,
+    ) -> Result<Input, ExecutorError> {
+        Ok(Input::Intent(IntentHandoff {
+            intent_id: IntentId(EventId(intent.to_owned())),
+            agent: AgentId("agent-a".to_owned()),
+            body: IntentBody::Order {
+                instrument: InstrumentId::new(name)?,
+                side,
+                qty: Qty::parse("1")?,
+                limit: Price::parse(limit)?,
+                purpose,
+                protection: None,
+            },
+        }))
+    }
+
+    /// Neither an add nor a protective order starts the sequence: nothing is cancelled and no
+    /// interval opens. An equity add in a protected instrument is gated as usual (here held for the
+    /// startup reconciliation, never refused), while a crypto add there answers the stub of §5.4's
+    /// crypto sequence (slice 5). The interval's start names the orders it cancels.
+    #[test]
+    fn an_add_or_a_protective_order_starts_no_sequence() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for (side, limit, purpose) in [
+            (Side::Buy, "150", Purpose::Increase),
+            (Side::Sell, "150", Purpose::Protective),
+        ] {
+            let mut executor = protected(&ports)?;
+            let ran = executor.run(order(EXIT, "AAPL", side, limit, purpose)?, &ports);
+            let effects = ran.unwrap_or_default();
+            assert!(
+                actions(&effects).is_empty() && cancels(&effects).is_empty(),
+                "{purpose:?}: {:?}",
+                drafted(&effects)
+            );
+            assert!(executor.state.exiting.is_empty(), "{purpose:?}");
+        }
+        let mut executor = protected(&ports)?;
+        assert!(
+            executor
+                .run(
+                    order(EXIT, "AAPL", Side::Buy, "150", Purpose::Increase)?,
+                    &ports
+                )
+                .is_ok(),
+            "an equity add is not the crypto sequence"
+        );
+        let coins = Ports {
+            instruments: &Coins,
+            ..ports
+        };
+        let mut executor = protected(&coins)?;
+        assert!(stub(&executor.run(
+            order(EXIT, "AAPL", Side::Buy, "150", Purpose::Increase)?,
+            &coins
+        )));
+
+        let mut executor = protected(&ports)?;
+        let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(
+            protection_drafts(&started)
+                .first()
+                .and_then(|draft| draft.payload.get("orders"))
+                .and_then(Value::as_str),
+            Some(OCO)
+        );
+        Ok(())
+    }
+
+    /// A protective order sent while a sequence runs is not the ladder's: it goes at its own
+    /// limit, never at the exit's stub.
+    #[test]
+    fn a_protective_order_in_a_running_sequence_is_not_the_ladders() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(quote("150")?, &ports)?;
+        executor.run(sell(EXIT, "5", "150", Purpose::RiskExit)?, &ports)?;
+        let sent = executor.run(sell(SECOND, "5", "160", Purpose::Protective)?, &ports)?;
+        assert_eq!(
+            submissions(&sent)
+                .iter()
+                .map(|order| order.limit_price)
+                .collect::<Vec<_>>(),
+            vec![Some(Price::parse("160")?)]
+        );
+        Ok(())
+    }
+
+    /// The confirmation re-gates only the sequence's own waiting exits: an opening held in
+    /// another instrument stays held, gated no second time.
+    #[test]
+    fn a_confirmation_re_gates_only_its_own_instruments_waiting_exits() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(
+            order(SECOND, "MSFT", Side::Buy, "100", Purpose::Open)?,
+            &ports,
+        )?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        let released = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(
+            drafted(&released)
+                .iter()
+                .filter(|kind| **kind == "GateDecided")
+                .count(),
+            1,
+            "{:?}",
+            drafted(&released)
+        );
+        Ok(())
+    }
+
+    /// At the bound, an exit whose cancel is already outstanding is not asked to cancel again; the
+    /// owner is still alerted.
+    #[test]
+    fn the_bound_asks_no_second_cancel_of_an_exit_already_cancelling() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        executor.run(cancel_accepted(OCO), &ports)?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(format!("md-{EXIT}"))),
+                ("state", text("accepted")),
+                ("cancel_requested", Value::Bool(true)),
+            ],
+        )?;
+        let due = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        assert!(cancels(&due).is_empty(), "{:?}", drafted(&due));
+        assert_eq!(actions(&due), vec!["interval_limit"]);
+        Ok(())
+    }
 }

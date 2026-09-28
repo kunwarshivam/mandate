@@ -2132,6 +2132,35 @@ mod protection_tests {
         Ok(())
     }
 
+    /// §5.4's bound alerts one instrument's open interval, never another's.
+    #[test]
+    fn an_interval_limit_marks_only_its_own_open_interval() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        for (instrument, action) in [
+            ("MSFT", "unprotected_start"),
+            ("AAPL", "unprotected_start"),
+            ("AAPL", "interval_limit"),
+        ] {
+            stream.fold(
+                concat!("Protection", "Changed"),
+                vec![
+                    ("instrument", text(instrument)),
+                    ("action", text(action)),
+                    ("orders", text("")),
+                ],
+                None,
+            )?;
+        }
+        let alerted: Vec<(&str, bool)> = stream
+            .state
+            .unprotected
+            .iter()
+            .map(|interval| (interval.instrument.as_str(), interval.alerted))
+            .collect();
+        assert_eq!(alerted, vec![("MSFT", false), ("AAPL", true)]);
+        Ok(())
+    }
+
     #[test]
     fn an_unprotected_interval_ends_only_its_own_open_one() -> Result<(), ExecutorError> {
         let mut stream = Stream::opened()?;
