@@ -812,9 +812,7 @@ fn leg_agent(
     leg: &ClientOrderId,
 ) -> Option<AgentId> {
     let entry = leg
-        .as_str()
-        .rsplit_once("-p")
-        .and_then(|(entry, _)| ClientOrderId::parse(entry).ok())
+        .protected_entry()
         .and_then(|entry| state.orders.get(&entry));
     if let Some(entry) = entry {
         return Some(entry.agent.clone());

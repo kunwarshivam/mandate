@@ -48,11 +48,38 @@ impl ClientOrderId {
         Self::parse(&format!("{PREFIX}r-{}", origin.0))
     }
 
-    /// `md-p-<origin>` for a protective order submitted on its own — the OCO after a partial fill,
-    /// a re-placement before expiry, a crypto stop-limit — derived from the `ProtectionChanged`
-    /// draft that records it (trading-domain spec §5.4).
-    pub fn for_protection(origin: &EventId) -> Result<Self, ExecutorError> {
-        Self::parse(&format!("{PREFIX}p-{}", origin.0))
+    /// `{entry}-p{protection}` for a protective order the platform places — a bracket's or OCO's
+    /// parent, the OCO after a partial fill, a re-placement before expiry, a crypto stop-limit —
+    /// named for the entry it protects and derived from the `ProtectionChanged` that records it
+    /// (trading-domain spec §2.3, DEC-160). A re-placement keeps the entry and takes its own
+    /// event. The event's id must be alphanumeric, like an intent's, so the entry reads back as
+    /// everything before the last `-p`; anything else is refused rather than escaped.
+    pub fn for_protection(
+        entry: &ClientOrderId,
+        protection: &EventId,
+    ) -> Result<Self, ExecutorError> {
+        let raw = protection.0.as_str();
+        if raw.is_empty() || !raw.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return Err(malformed(raw));
+        }
+        Self::parse(&format!("{}-p{raw}", entry.as_str()))
+    }
+
+    /// A protective parent's leg: `…-tp` for the take-profit, `…-sl` for the stop (§2.3).
+    pub fn leg(&self, leg: Leg) -> Result<Self, ExecutorError> {
+        let suffix = match leg {
+            Leg::TakeProfit => "tp",
+            Leg::Stop => "sl",
+        };
+        Self::parse(&format!("{}-{suffix}", self.0))
+    }
+
+    /// The entry a protective order's id names — everything before its last `-p` — when that
+    /// reads back as an id of ours (§2.3); `None` for any other id.
+    pub fn protected_entry(&self) -> Option<Self> {
+        self.0
+            .rsplit_once("-p")
+            .and_then(|(entry, _)| Self::parse(entry).ok())
     }
 
     /// Reads an id back from the broker, validating the grammar: the platform prefix, then one or
@@ -77,6 +104,13 @@ impl ClientOrderId {
     }
 }
 
+/// Which leg of a protective parent an id names (trading-domain spec §2.3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Leg {
+    TakeProfit,
+    Stop,
+}
+
 fn malformed(raw: &str) -> ExecutorError {
     ExecutorError::MalformedClientOrderId {
         raw: raw.to_owned(),
@@ -94,7 +128,50 @@ impl ClientOrderId {
 
 #[cfg(test)]
 mod tests {
-    use super::ClientOrderId;
+    use super::{ClientOrderId, IntentId, Leg};
+    use crate::error::ExecutorError;
+    use crate::types::EventId;
+
+    #[test]
+    fn a_protective_order_is_named_for_its_entry_and_its_legs_for_it() -> Result<(), ExecutorError>
+    {
+        let entry = ClientOrderId::for_intent(&IntentId(EventId("01JENTRY".to_owned())))?;
+        let parent = ClientOrderId::for_protection(&entry, &EventId("01JPROT".to_owned()))?;
+        assert_eq!(parent.as_str(), "md-01JENTRY-p01JPROT");
+        assert_eq!(
+            parent.leg(Leg::TakeProfit)?.as_str(),
+            "md-01JENTRY-p01JPROT-tp"
+        );
+        assert_eq!(parent.leg(Leg::Stop)?.as_str(), "md-01JENTRY-p01JPROT-sl");
+        for id in [
+            parent.clone(),
+            parent.leg(Leg::TakeProfit)?,
+            parent.leg(Leg::Stop)?,
+        ] {
+            assert_eq!(
+                id.protected_entry(),
+                Some(entry.clone()),
+                "{id:?} names its entry"
+            );
+        }
+        assert_eq!(entry.protected_entry(), None, "an entry names no entry");
+        Ok(())
+    }
+
+    #[test]
+    fn a_protection_event_that_is_not_alphanumeric_is_refused() -> Result<(), ExecutorError> {
+        let entry = ClientOrderId::for_intent(&IntentId(EventId("01JENTRY".to_owned())))?;
+        for raw in ["", "e-1-2-0", "clock:ws1"] {
+            assert_eq!(
+                ClientOrderId::for_protection(&entry, &EventId(raw.to_owned())),
+                Err(ExecutorError::MalformedClientOrderId {
+                    raw: raw.to_owned()
+                }),
+                "{raw:?}"
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn the_wire_form_is_the_id_itself() {
