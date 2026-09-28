@@ -1,6 +1,6 @@
 //! The replay: one journaled event into the state, effect-free (journal spec §8).
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 
 use mandate_accounting::{InstrumentId, Side};
 use mandate_canon::Value;
@@ -16,6 +16,7 @@ use crate::payload::{
 };
 use crate::state::{
     Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
+    UnattributedLeg,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
@@ -119,7 +120,6 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
         "OwnerAcknowledged" => owner_acknowledged(state, payload),
         "ReconciliationRun" => {
             state.reconciled_through = Some(event.seq);
-            state.unattributed.clear();
             if let Some(cursor) = optional_text(payload, "checkpoint") {
                 state.checkpoint = Some(ActivityCursor(cursor.to_owned()));
             }
@@ -539,6 +539,7 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         Side::Buy => (SignedQty::from(quantity), notional.negated()),
         Side::Sell => (SignedQty::from(quantity).negated(), notional),
     };
+    let position_of = instrument.clone();
     let position = state.positions.entry(instrument).or_insert(SignedQty::ZERO);
     *position = position.checked_add(signed)?;
     state.cash_flow = state.cash_flow.checked_add(cash)?;
@@ -550,6 +551,7 @@ fn fill_applied(state: &mut ExecutorState, payload: &Value) -> Result<(), Execut
         order.filled_qty = order.filled_qty.checked_add(quantity)?;
     }
     state.fills.insert(fill);
+    reattribute(state, &position_of);
     Ok(())
 }
 
@@ -694,6 +696,7 @@ fn protection_changed(
         "cancelled" => {
             let orders = protective_orders(payload)?;
             let uncovered = optional_qty(payload, "qty")?;
+            state.unattributed.retain(|id, _| !orders.contains(id));
             if let Some(protection) = state.protection.get_mut(&instrument) {
                 protection.resting.retain(|id| !orders.contains(id));
                 if let Some(uncovered) = uncovered {
@@ -727,12 +730,11 @@ fn protection_changed(
     Ok(())
 }
 
-/// DEC-160's leg-agent rule: a protective order the broker created, which no `OrderSubmitted`
-/// recorded, joins the order set as a live sell of the covered quantity with a zero reservation,
-/// owned by the agent that holds the position. That is the entry order's agent when the leg's id
-/// names its entry (`md-<entry>-p…`), otherwise the position's single holder: the one agent whose
-/// own orders bought into the instrument. With no holder or several, it fails closed: the leg is
-/// attributed to no one and the instrument takes no new opening until a reconciliation has run.
+/// DEC-160's leg-agent rule (trading-domain spec §2.3, §5.4): a protective order the broker
+/// created, which no `OrderSubmitted` recorded, joins the order set as a live sell of the covered
+/// quantity with a zero reservation, owned by the entry's agent when its id names the entry, else by
+/// the position's single holder. With neither it is kept, by its own id, as unattributed: its
+/// instrument holds openings until it is attributed or gone, and nothing guesses an owner.
 fn legs(
     state: &mut ExecutorState,
     instrument: &InstrumentId,
@@ -744,35 +746,66 @@ fn legs(
         if state.orders.contains_key(id) {
             continue;
         }
-        let Some(agent) = leg_agent(state, instrument, id) else {
-            state.unattributed.insert(instrument.clone());
-            continue;
+        let leg = UnattributedLeg {
+            instrument: instrument.clone(),
+            covered,
+            created_on,
         };
-        state.orders.insert(
-            id.clone(),
-            Order {
-                client_order_id: id.clone(),
-                intent_id: None,
-                agent,
-                instrument: instrument.clone(),
-                side: Side::Sell,
-                qty: covered,
-                filled_qty: Qty::ZERO,
-                state: OrderState::Accepted,
-                attempt: 1,
-                purpose: Purpose::Protective,
-                absent_lookups: 0,
-                first_absence_at: None,
-                cancel_unconfirmed: false,
-                replaced_by: None,
-                created_on,
-            },
-        );
-        state.reservations.insert(id.clone(), Usd::ZERO);
+        match leg_agent(state, instrument, id) {
+            Some(agent) => attribute(state, id, &leg, agent),
+            None => {
+                state.unattributed.insert(id.clone(), leg);
+            }
+        }
     }
 }
 
-/// The agent a broker-created leg belongs to, or `None` when DEC-160's rule cannot name one.
+/// Retries DEC-160's rule for the unattributed legs in one instrument, after the fold changed who
+/// holds it: a leg that can now be named joins the order set and stops holding openings.
+fn reattribute(state: &mut ExecutorState, instrument: &InstrumentId) {
+    let waiting: Vec<(ClientOrderId, UnattributedLeg)> = state
+        .unattributed
+        .iter()
+        .filter(|(_, leg)| &leg.instrument == instrument)
+        .map(|(id, leg)| (id.clone(), leg.clone()))
+        .collect();
+    for (id, leg) in waiting {
+        if let Some(agent) = leg_agent(state, instrument, &id) {
+            state.unattributed.remove(&id);
+            attribute(state, &id, &leg, agent);
+        }
+    }
+}
+
+fn attribute(state: &mut ExecutorState, id: &ClientOrderId, leg: &UnattributedLeg, agent: AgentId) {
+    state.orders.insert(
+        id.clone(),
+        Order {
+            client_order_id: id.clone(),
+            intent_id: None,
+            agent,
+            instrument: leg.instrument.clone(),
+            side: Side::Sell,
+            qty: leg.covered,
+            filled_qty: Qty::ZERO,
+            state: OrderState::Accepted,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: leg.created_on,
+        },
+    );
+    state.reservations.insert(id.clone(), Usd::ZERO);
+}
+
+/// The agent a broker-created leg belongs to, or `None` when DEC-160's rule cannot name one: the
+/// agent of the entry the leg's id names (everything before its last `-p`, §2.3), else the one
+/// agent whose attributed lots — its own orders' fills, buys net of sells — make up the whole open
+/// quantity (§8.1). An agent that went flat holds nothing, and quantity no order of ours accounts
+/// for leaves no holder at all.
 fn leg_agent(
     state: &ExecutorState,
     instrument: &InstrumentId,
@@ -786,18 +819,27 @@ fn leg_agent(
     if let Some(entry) = entry {
         return Some(entry.agent.clone());
     }
-    let holders: BTreeSet<&AgentId> = state
+    let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
+    for order in state
         .orders
         .values()
-        .filter(|order| {
-            &order.instrument == instrument
-                && order.side == Side::Buy
-                && order.filled_qty > Qty::ZERO
-        })
-        .map(|order| &order.agent)
+        .filter(|order| &order.instrument == instrument)
+    {
+        let filled = SignedQty::from(order.filled_qty);
+        let signed = match order.side {
+            Side::Buy => filled,
+            Side::Sell => filled.negated(),
+        };
+        let held = lots.entry(&order.agent).or_insert(SignedQty::ZERO);
+        *held = held.checked_add(signed).ok()?;
+    }
+    let open = state.positions.get(instrument).copied()?;
+    let holders: Vec<(&AgentId, SignedQty)> = lots
+        .into_iter()
+        .filter(|(_, held)| *held != SignedQty::ZERO)
         .collect();
-    match holders.into_iter().collect::<Vec<_>>().as_slice() {
-        [only] => Some((*only).clone()),
+    match holders.as_slice() {
+        [(agent, held)] if *held == open => Some((*agent).clone()),
         _ => None,
     }
 }
@@ -1596,6 +1638,34 @@ mod protection_tests {
             )
         }
 
+        /// `agent`'s own sell of `qty` AAPL, submitted and filled at 160.
+        fn sold(&mut self, agent: &str, id: &str, qty: &str) -> Result<(), ExecutorError> {
+            self.fold(
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text(agent)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty", text(qty)),
+                    ("limit", text("160")),
+                ],
+                None,
+            )?;
+            self.fold(
+                "FillApplied",
+                vec![
+                    ("fill_id", text(format!("f-{id}"))),
+                    ("client_order_id", text(id)),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty_gross", text(qty)),
+                    ("price", text("160")),
+                ],
+                None,
+            )
+        }
+
         fn protection(
             &mut self,
             action: &str,
@@ -1687,7 +1757,7 @@ mod protection_tests {
     }
 
     #[test]
-    fn a_leg_with_no_holder_or_several_is_attributed_to_no_one_until_a_reconciliation()
+    fn a_leg_with_no_holder_or_several_is_kept_by_id_and_a_reconciliation_does_not_own_it()
     -> Result<(), ExecutorError> {
         for holders in [&[][..], &["agent-a", "agent-b"][..]] {
             let mut stream = Stream::opened()?;
@@ -1699,15 +1769,80 @@ mod protection_tests {
                 !stream.state.orders.contains_key(&id("md-oco-1")?),
                 "{holders:?}: the leg is never guessed onto an agent"
             );
-            assert!(stream.state.unattributed.contains(&aapl()?), "{holders:?}");
+            assert_eq!(
+                stream
+                    .state
+                    .unattributed
+                    .get(&id("md-oco-1")?)
+                    .map(|leg| (leg.instrument.clone(), leg.covered)),
+                Some((aapl()?, qty("10")?)),
+                "{holders:?}: kept by its own id, so an exit or a kill switch can cancel it"
+            );
             assert_eq!(
                 stream.state.protective_sell_qty(&aapl()?)?,
                 qty("10")?,
                 "{holders:?}: the protection itself still counts"
             );
             stream.fold("ReconciliationRun", vec![], None)?;
-            assert!(stream.state.unattributed.is_empty(), "{holders:?}");
+            assert!(
+                stream.state.unattributed.contains_key(&id("md-oco-1")?),
+                "{holders:?}: a reconciliation establishes presence, not ownership"
+            );
+            stream.protection("cancelled", "md-oco-1", "10")?;
+            assert!(
+                stream.state.unattributed.is_empty(),
+                "{holders:?}: a leg that is gone holds nothing"
+            );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_leg_is_attributed_once_one_agents_lots_make_up_the_open_quantity()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "5")?;
+        stream.bought("agent-b", "md-buy-2", "5")?;
+        stream.protection("placed", "md-oco-1", "10")?;
+        assert!(stream.state.unattributed.contains_key(&id("md-oco-1")?));
+        stream.sold("agent-b", "md-sell-1", "5")?;
+        assert!(
+            stream.state.unattributed.is_empty(),
+            "agent-b went flat, so agent-a's five are the whole position"
+        );
+        let order = stream
+            .state
+            .orders
+            .get(&id("md-oco-1")?)
+            .ok_or_else(|| missing("the attributed leg"))?;
+        assert_eq!(order.agent, AgentId("agent-a".to_owned()));
+        assert_eq!(
+            stream.state.reservations.get(&id("md-oco-1")?),
+            Some(&Usd::ZERO)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn quantity_no_order_of_ours_accounts_for_leaves_no_holder() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "5")?;
+        stream.fold(
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-outside")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("3")),
+                ("price", text("150")),
+            ],
+            None,
+        )?;
+        stream.protection("placed", "md-oco-1", "8")?;
+        assert!(
+            stream.state.unattributed.contains_key(&id("md-oco-1")?),
+            "agent-a's five are not the whole eight"
+        );
         Ok(())
     }
 
@@ -1869,7 +2004,7 @@ mod protection_tests {
             "OrderSubmitted",
             vec![
                 ("client_order_id", text("md-sell-1")),
-                ("agent", text("agent-c")),
+                ("agent", text("agent-a")),
                 ("instrument", text("AAPL")),
                 ("side", text("sell")),
                 ("qty", text("2")),
@@ -1922,7 +2057,8 @@ mod protection_tests {
         assert_eq!(
             order.agent,
             AgentId("agent-a".to_owned()),
-            "an unfilled buy, a filled sell and another instrument's buyer hold nothing here"
+            "an unfilled buy and another instrument's buyer hold nothing here, and the holder's own \
+             sell counts against its lots"
         );
         Ok(())
     }

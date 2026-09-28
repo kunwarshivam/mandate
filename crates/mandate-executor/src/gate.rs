@@ -149,11 +149,15 @@ pub(crate) fn account_stream_checks(
     })
 }
 
-/// DEC-160's leg-agent rule fails closed: a broker-created protective leg whose position has no
-/// single holder leaves its instrument **held** for openings, never denied, until a reconciliation
-/// has run. Exits pass (`AGENTS.md` rule 13).
+/// DEC-160's leg-agent rule fails closed: a broker-created protective leg no agent can be named for
+/// leaves its instrument **held** for openings, never denied, until the leg is attributed or gone;
+/// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check
+/// 4, before `add_blocked_by_protective_order`). Exits pass (`AGENTS.md` rule 13).
 fn unattributed_opening(state: &ExecutorState, instrument: &InstrumentId, adds: bool) -> bool {
-    adds && state.unattributed.contains(instrument)
+    adds && state
+        .unattributed
+        .values()
+        .any(|leg| &leg.instrument == instrument)
 }
 
 /// The startup reconciliation, last so a check that denies is reported first: an opening is
@@ -232,9 +236,12 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
 mod attribution_tests {
     use mandate_accounting::InstrumentId;
 
+    use mandate_num::Qty;
+
     use super::unattributed_opening;
     use crate::error::ExecutorError;
-    use crate::state::ExecutorState;
+    use crate::ids::ClientOrderId;
+    use crate::state::{ExecutorState, UnattributedLeg};
     use crate::types::{AccountRef, AccountScope, WorkspaceId};
 
     #[test]
@@ -249,7 +256,14 @@ mod attribution_tests {
             !unattributed_opening(&state, &aapl, true),
             "nothing unattributed holds nothing"
         );
-        state.unattributed.insert(aapl.clone());
+        state.unattributed.insert(
+            ClientOrderId::parse("md-oco-1")?,
+            UnattributedLeg {
+                instrument: aapl.clone(),
+                covered: Qty::parse("10")?,
+                created_on: None,
+            },
+        );
         assert!(
             unattributed_opening(&state, &aapl, true),
             "an opening in the unattributed instrument is held"
