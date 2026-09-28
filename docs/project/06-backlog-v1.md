@@ -959,3 +959,13 @@ From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round
   it builds a six-rung ladder `maxItems: 5` forbids. Draw 1 to 3 scale rungs, and pin the
   five-rung, 2-place ladder. (3) The function imports `combinations` inside its body; move the
   import to the top of `reference/mandate/fuzz.py`.
+
+From E6-4's slice L (stream H; the coordinator's ruling on #279, round 1, minor 3):
+
+- **The caller of `goal::status` pins the sane-and-fresh ask (stream G).** `GoalInputs::ask` values a
+  remainder against the minimum order, and `goal::status` cannot tell a bad tick from a real quote.
+  One print far below the market would make any remainder look worth less than the minimum and
+  finish the goal, and with `on_complete: release` that cancels protection and retires the agent
+  (§3.1). The order path's goal evaluation in `mandate-risk` passes only an ask from a quote that
+  passed §5.6's sane-and-fresh filter. It needs a test that a single bad tick never finishes a
+  `release` goal.

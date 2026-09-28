@@ -1,6 +1,6 @@
 # Owlhead colour: navy and brass
 
-The founder asked: "Are we sure about colors? Read colour theory and make the colours appropriate for a serious company." Three palettes were built on the principles below and compared side by side (see History), and the founder chose P1, navy and brass. It is now the only palette. This document gives the basis, the ramps and tokens, how they map onto Kumo, and how they measure.
+The founder asked: "Are we sure about colors? Read colour theory and make the colours appropriate for a serious company." Three palettes were built on the principles below and compared side by side (see History), and the founder chose P1, navy and brass ([DEC-202](../docs/project/04-decision-log.md#decisions)). It is now the only palette. DEC-202's six values are ramp steps here: navy #183D73 is navy-800, brass #AC7D1B brass-500, dark brass #634606 brass-700, the brass tint #FDF1DC brass-100, slate ink #181C21 slate-950, and off-white #F7FAFE slate-50, the card; the page is slate-100, so body text measures 16.35:1 on a card and 15.32:1 on the page. This document gives the basis, the ramps and tokens, how they map onto Kumo, and how they measure.
 
 - `src/lib/palette.ts` holds the ramps and the semantic tokens; `globals.css` declares the same values, and `tokens.test.ts` fails if the two drift.
 - `src/lib/contrast.ts` and `contrast-pairs.ts` hold the pairs and the measurements; `palette.test.ts` enforces everything this document claims, including every Kumo role in every surface scope.
