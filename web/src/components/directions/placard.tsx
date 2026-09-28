@@ -70,7 +70,7 @@ function AgentBand({ agent, index }: { agent: Agent; index: number }) {
   const rails = limits.rails.filter((r) => r.key === "gross" || r.key === "daily");
   return (
     <li className="d-reveal grid gap-1.5 md:grid-cols-[9.5rem_minmax(0,1fr)_minmax(0,1.15fr)]" style={stagger(index)}>
-      <div data-mode={agent.mode} className={cn("flex items-end px-4 py-1.5 md:py-4", MODE_FIELD[agent.mode])}>
+      <div data-mode={agent.mode} className={cn("flex items-end px-4 py-1.5 transition-colors duration-(--duration-hover) md:py-4", MODE_FIELD[agent.mode])}>
         <span className="font-display text-lg leading-[0.9] font-extrabold uppercase md:text-[1.75rem]">{MODE_LABEL[agent.mode]}</span>
       </div>
       <div className="grid content-start gap-2 bg-card px-4 py-4">
@@ -322,7 +322,7 @@ function Approval({ approvalId }: { approvalId: string }) {
           </div>
           <div className="grid gap-0.5">
             <dt className="text-sm text-muted-foreground">Mandate version</dt>
-            <dd className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</dd>
+            <dd translate="no" className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</dd>
           </div>
         </div>
         <div className="grid gap-0.5">
@@ -359,13 +359,13 @@ function Approval({ approvalId }: { approvalId: string }) {
       <Collapsible className="bg-card">
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-5 py-4 text-left font-bold">
           View model output
-          <ChevronDown className="size-5 transition-transform duration-(--duration-hover) group-data-[state=open]:rotate-180" aria-hidden />
+          <ChevronDown className="size-5 transition-transform duration-(--duration-hover) ease-(--d-ease-in-out) group-data-[state=open]:rotate-180" aria-hidden />
         </CollapsibleTrigger>
         <CollapsibleContent className="grid gap-4 px-5 pb-5">
           {approval.evidence.map((e) => (
             <figure key={e.model_id} className="grid gap-1.5">
               <figcaption className="text-sm text-muted-foreground">
-                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: {e.model_id} {e.version}, at{" "}
+                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: <span translate="no">{e.model_id} {e.version}</span>, at{" "}
                 {clock(e.produced_at)}
               </figcaption>
               <blockquote className="grid gap-0.5 bg-muted px-3 py-2 font-mono text-sm">

@@ -41,14 +41,16 @@ export function Figure({ value, className }: { value: string; className?: string
   const roll = personality === "roll";
   return (
     <span className={cn("relative inline-grid overflow-hidden", className)}>
+      <span className="sr-only">{value}</span>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={value}
+          aria-hidden
           className="[grid-area:1/1]"
           initial={roll ? { opacity: 0, transform: "translateY(60%)" } : { opacity: 0, filter: "blur(3px)" }}
           animate={roll ? { opacity: 1, transform: "translateY(0%)" } : { opacity: 1, filter: "blur(0px)" }}
           exit={roll ? { opacity: 0, transform: "translateY(-60%)" } : { opacity: 0, filter: "blur(3px)" }}
-          transition={roll ? { duration: 0.2, ease: [0.23, 1, 0.32, 1] } : { type: "spring", duration: 0.35, bounce: 0 }}
+          transition={roll ? { duration: 0.2, ease: [0.23, 1, 0.32, 1] } : { type: "spring", duration: 0.25, bounce: 0 }}
         >
           {value}
         </motion.span>

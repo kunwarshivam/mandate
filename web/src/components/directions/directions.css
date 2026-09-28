@@ -161,6 +161,13 @@
   box-shadow: 0 1px 0 oklch(0 0 0 / 0.25), 0 6px 14px -6px oklch(0.25 0.03 240 / 0.45);
 }
 
+[data-direction] :is(h1, h2, h3) {
+  text-wrap: balance;
+}
+[data-direction] p {
+  text-wrap: pretty;
+}
+
 /* Browser surfaces carry the direction too. */
 :root:has([data-direction]) {
   caret-color: var(--foreground);
@@ -179,6 +186,19 @@
   color: var(--foreground);
 }
 
+[data-direction] :is(a, button, summary) {
+  touch-action: manipulation;
+}
+:root:has([data-direction]) {
+  -webkit-tap-highlight-color: color-mix(in oklch, var(--ring) 20%, transparent);
+}
+/* Keyboard focus scrolls clear of the pinned response bar on phones. */
+@media (max-width: 39.99rem) {
+  :root:has([data-surface="approval"] [aria-label="Your response"]) {
+    scroll-padding-bottom: 16rem;
+  }
+}
+
 /* The framed phone view shows the app, not the harness. */
 :root:has([data-embed]) label:has(> select) {
   display: none;
@@ -192,13 +212,15 @@
   --d-ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* Press is deliberate and eases in over the press duration; release snaps back in 80ms. */
 .d-press {
   transition-property: transform, background-color, border-color, color, box-shadow;
-  transition-duration: var(--duration-press), var(--duration-hover), var(--duration-hover), var(--duration-hover), var(--duration-hover);
+  transition-duration: 80ms, var(--duration-hover), var(--duration-hover), var(--duration-hover), var(--duration-hover);
   transition-timing-function: var(--d-ease-out), ease, ease, ease, ease;
 }
 .d-press:active:not(:disabled) {
   transform: scale(0.97);
+  transition-duration: var(--duration-press), var(--duration-hover), var(--duration-hover), var(--duration-hover), var(--duration-hover);
 }
 
 /* List reveal: entrance from an already-visible default, interruptible CSS transitions. */
@@ -206,7 +228,7 @@
   transition-property: opacity, transform, clip-path;
   transition-duration: var(--duration-reveal);
   transition-timing-function: var(--d-ease-out);
-  transition-delay: calc(var(--i, 0) * 50ms);
+  transition-delay: calc(var(--i, 0) * 30ms);
 }
 [data-direction="placard"] .d-reveal {
   @starting-style {
@@ -214,10 +236,9 @@
   }
 }
 [data-direction="keel"] .d-reveal {
-  transition-delay: calc(var(--i, 0) * 40ms);
   @starting-style {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(6px);
   }
 }
 
@@ -227,7 +248,7 @@
   to { opacity: 0; }
 }
 .d-snap-mark {
-  animation: d-decay 700ms var(--d-ease-out) forwards;
+  animation: d-decay 500ms var(--d-ease-out) forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

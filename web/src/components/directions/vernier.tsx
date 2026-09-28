@@ -168,7 +168,7 @@ function AgentsTable() {
         {ws.agents.map((agent) => {
           const limits = agentLimits(agent);
           return (
-            <motion.li key={agent.agent_id} layout="position" className="grid gap-3 border-b border-border py-4">
+            <motion.li key={agent.agent_id} layout="position" transition={{ duration: 0.18, ease: [0.23, 1, 0.32, 1] }} className="grid gap-3 border-b border-border py-4">
               <div className="flex items-baseline justify-between gap-3">
                 <Link href={`/agents/${agent.agent_id}`} className="font-semibold underline-offset-4 hover:underline">
                   {agent.label}
@@ -227,7 +227,7 @@ function Dashboard() {
   if (ws.agents.length === 0) {
     return (
       <section aria-labelledby="v-empty" className="grid max-w-xl gap-4 border-t border-foreground/70 pt-6">
-        <h1 id="v-empty" className="text-3xl font-semibold tracking-tight [font-variation-settings:'wdth'_112]">
+        <h1 id="v-empty" className="text-3xl font-semibold [font-variation-settings:'wdth'_112]">
           No agents yet
         </h1>
         <p className="text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
@@ -240,7 +240,7 @@ function Dashboard() {
   return (
     <div className="grid gap-10">
       <header className="grid gap-5">
-        <h1 className="text-[2rem] leading-none font-semibold tracking-tight [font-variation-settings:'wdth'_112]">Dashboard</h1>
+        <h1 className="text-[2rem] leading-none font-semibold [font-variation-settings:'wdth'_112]">Dashboard</h1>
         <dl className="grid grid-cols-2 border-y border-foreground/70 sm:grid-cols-4">
           {(
             [
@@ -278,7 +278,7 @@ function Dashboard() {
                       </span>
                     </span>
                     <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
-                    <ArrowRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) group-hover:translate-x-0.5 sm:block" />
+                    <ArrowRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) [@media(hover:hover)]:group-hover:translate-x-0.5 sm:block" />
                   </Link>
                 </li>
               );
@@ -392,7 +392,7 @@ function Approval({ approvalId }: { approvalId: string }) {
         <ArrowLeft className="size-4" aria-hidden /> Approvals
       </Link>
       <header className="grid gap-1 border-t border-foreground/70 pt-3">
-        <h1 id="v-request" className="text-[2rem] leading-tight font-semibold tracking-tight [font-variation-settings:'wdth'_110]">
+        <h1 id="v-request" className="text-[2rem] leading-tight font-semibold [font-variation-settings:'wdth'_110]">
           Buy <span className="font-mono tabular">{quantity(b.qty)}</span> {b.symbol}
         </h1>
         <p className="text-lg">
@@ -409,7 +409,7 @@ function Approval({ approvalId }: { approvalId: string }) {
         </Row>
         <Row label="Purpose">{PURPOSE_LABEL[b.purpose]}</Row>
         <Row label="Mandate version">
-          <span className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</span>
+          <span translate="no" className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</span>
         </Row>
         <div className="grid gap-1 border-b border-border py-2.5">
           <dt className="text-sm text-muted-foreground">Why you are asked</dt>
@@ -450,13 +450,13 @@ function Approval({ approvalId }: { approvalId: string }) {
       <Collapsible className="border-y border-border">
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 py-3 text-left font-medium">
           View model output
-          <ChevronDown className="size-4 transition-transform duration-(--duration-hover) group-data-[state=open]:rotate-180" aria-hidden />
+          <ChevronDown className="size-4 transition-transform duration-(--duration-hover) ease-(--d-ease-in-out) group-data-[state=open]:rotate-180" aria-hidden />
         </CollapsibleTrigger>
         <CollapsibleContent className="grid gap-4 pb-4">
           {approval.evidence.map((e) => (
             <figure key={e.model_id} className="grid gap-1.5">
               <figcaption className="text-[0.8125rem] text-muted-foreground">
-                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: {e.model_id} {e.version}, at{" "}
+                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: <span translate="no">{e.model_id} {e.version}</span>, at{" "}
                 {clock(e.produced_at)}
               </figcaption>
               <blockquote className="grid gap-0.5 border-l border-foreground/40 pl-3 font-mono text-[0.8125rem]">

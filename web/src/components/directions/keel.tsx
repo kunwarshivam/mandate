@@ -30,7 +30,7 @@ const MODE_PILL: Record<AgentMode, string> = {
 
 function ModePill({ mode }: { mode: AgentMode }) {
   return (
-    <span data-mode={mode} className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-sm font-medium whitespace-nowrap", MODE_PILL[mode])}>
+    <span data-mode={mode} className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-sm font-medium whitespace-nowrap transition-colors duration-(--duration-hover)", MODE_PILL[mode])}>
       <span aria-hidden className={cn("size-2 rounded-full", mode === "normal" ? "bg-(--petrol)" : mode === "stopped" ? "bg-ink-foreground" : "bg-(--apricot)")} />
       {MODE_LABEL[mode]}
     </span>
@@ -63,7 +63,7 @@ function Meter({ label, used, cap }: { label: string; used: Dec; cap: Dec }) {
 function PanelTitle({ id, children, aside }: { id: string; children: ReactNode; aside?: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <h2 id={id} className="text-xl font-semibold tracking-tight">
+      <h2 id={id} className="text-xl font-semibold">
         {children}
       </h2>
       {aside}
@@ -88,7 +88,7 @@ function AgentModule({ agent, index }: { agent: Agent; index: number }) {
         <ModePill mode={agent.mode} />
       </div>
       <div className="grid gap-1">
-        <p className="font-display text-[2.25rem] leading-none font-semibold tracking-tight">
+        <p className="font-display text-[2.25rem] leading-none font-semibold tabular">
           <Figure value={usd(agent.state.equity)} />
         </p>
         <p className="text-sm text-muted-foreground">equity, of {usd(agent.mandate.capital.allocation_usd, 0)} allocated</p>
@@ -150,7 +150,7 @@ function Dashboard() {
   if (ws.agents.length === 0) {
     return (
       <section aria-labelledby="k-empty" className={cn(PANEL, "grid max-w-xl gap-4 p-8")}>
-        <h1 id="k-empty" className="text-3xl font-semibold tracking-tight">
+        <h1 id="k-empty" className="text-3xl font-semibold">
           No agents yet
         </h1>
         <p className="text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
@@ -165,13 +165,13 @@ function Dashboard() {
   }
   return (
     <div className="grid gap-6">
-      <h1 className="text-[2.5rem] leading-tight font-semibold tracking-tight">Dashboard</h1>
+      <h1 className="text-[2.5rem] leading-tight font-semibold">Dashboard</h1>
 
       <section aria-label="The account and what is waiting" className={cn(PANEL, "d-reveal grid overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)]")} style={stagger(0)}>
         <div className="grid content-start gap-4 bg-(--petrol) p-6 text-(--petrol-foreground)">
           <div className="grid gap-1">
             <h2 className="text-base font-medium">Account equity, {ws.connection.broker}</h2>
-            <p className="font-display text-[2.75rem] leading-none font-semibold tracking-tight">
+            <p className="font-display text-[2.75rem] leading-none font-semibold tabular">
               <Figure value={usd(ws.connection.account_equity)} />
             </p>
             <p className="text-sm">
@@ -317,7 +317,7 @@ function Approval({ approvalId }: { approvalId: string }) {
         <ArrowLeft className="size-4" aria-hidden /> Approvals
       </Link>
       <header className="d-reveal grid gap-1.5 px-1" style={stagger(0)}>
-        <h1 id="k-request" className="text-[2.5rem] leading-[1.05] font-semibold tracking-tight">
+        <h1 id="k-request" className="text-[2.5rem] leading-[1.05] font-semibold">
           Buy {quantity(b.qty)} {b.symbol}
           <span className="block text-muted-foreground">at {price(b.limit)}</span>
         </h1>
@@ -331,7 +331,7 @@ function Approval({ approvalId }: { approvalId: string }) {
           [
             ["Order value", <span key="v" className="font-mono tabular">{orderValue}</span>],
             ["Purpose", PURPOSE_LABEL[b.purpose]],
-            ["Mandate version", <span key="m" className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</span>],
+            ["Mandate version", <span key="m" translate="no" className="font-mono text-sm">{b.mandate_version.slice(7, 19)}</span>],
             ["Combined model score, not a probability of profit", <span key="s" className="font-mono tabular">{b.combined_score}</span>],
           ] as Array<[string, ReactNode]>
         ).map(([label, value]) => (
@@ -372,13 +372,13 @@ function Approval({ approvalId }: { approvalId: string }) {
       <Collapsible className={PANEL}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-5 py-4 text-left font-semibold">
           View model output
-          <ChevronDown className="size-4 transition-transform duration-(--duration-hover) group-data-[state=open]:rotate-180" aria-hidden />
+          <ChevronDown className="size-4 transition-transform duration-(--duration-hover) ease-(--d-ease-in-out) group-data-[state=open]:rotate-180" aria-hidden />
         </CollapsibleTrigger>
         <CollapsibleContent className="grid gap-4 border-t border-border px-5 py-4">
           {approval.evidence.map((e) => (
             <figure key={e.model_id} className="grid gap-1.5">
               <figcaption className="text-sm text-muted-foreground">
-                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: {e.model_id} {e.version}, at{" "}
+                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: <span translate="no">{e.model_id} {e.version}</span>, at{" "}
                 {clock(e.produced_at)}
               </figcaption>
               <blockquote className="grid gap-0.5 font-mono text-sm text-muted-foreground">

@@ -286,7 +286,7 @@ const MOTION: Record<Motion, Record<string, string>> = {
   roll: {
     "--duration-press": "140ms",
     "--duration-hover": "160ms",
-    "--duration-reveal": "260ms",
+    "--duration-reveal": "200ms",
     "--spring-sheet": "cubic-bezier(0.32, 0.72, 0, 1)",
     "--spring-sheet-duration": "280ms",
     "--spring-dialog": "cubic-bezier(0.23, 1, 0.32, 1)",
@@ -295,13 +295,13 @@ const MOTION: Record<Motion, Record<string, string>> = {
   settle: {
     "--duration-press": "160ms",
     "--duration-hover": "200ms",
-    "--duration-reveal": "320ms",
+    "--duration-reveal": "240ms",
     "--spring-sheet":
       "linear(0, 0.1423, 0.3889, 0.6083, 0.7675, 0.8706, 0.9324, 0.9671, 0.9854, 0.9943, 0.9984, 1, 1)",
-    "--spring-sheet-duration": "400ms",
+    "--spring-sheet-duration": "300ms",
     "--spring-dialog":
       "linear(0, 0.1784, 0.4749, 0.7182, 0.8736, 0.9569, 0.9943, 1.007, 1.0087, 1.0066, 1.004, 1.0021, 1.0009, 1.0003, 1)",
-    "--spring-dialog-duration": "360ms",
+    "--spring-dialog-duration": "280ms",
   },
 };
 
