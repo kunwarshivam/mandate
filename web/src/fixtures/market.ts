@@ -354,7 +354,7 @@ function symbolBars(symbol: string, assetClass: AssetClass, owner: Owner | undef
 }
 
 /** Walk minute by minute and read each symbol's last close at or before the minute. */
-function equityCurve(agent: Agent, symbols: Record<string, SymbolBars>, from: number, end: number): Point[] {
+function equityCurve(agent: Agent, symbols: Record<string, SymbolBars>, from: number, end: number, dayStart: number): Point[] {
   const syms = [...new Set(agent.fills.map((f) => f.instrument.symbol))];
   const cursor: Record<string, number> = Object.fromEntries(syms.map((s) => [s, 0]));
   const fills = agent.fills.map((f) => ({ time: floorMinute(unix(f.at)), f }));
@@ -381,9 +381,11 @@ function equityCurve(agent: Agent, symbols: Record<string, SymbolBars>, from: nu
     points.push({ time: t, value });
     holding.push(syms.some((s) => Math.abs(qty[s] ?? 0) > 1e-12));
   }
-  // The ledger rounds marked holdings to the cent; carrying that rounding ends the curve on the figure.
+  // The ledger rounds marked holdings to the cent. The rounding eases in over the day, so the curve
+  // starts the day on `equity_day_start` and ends on `equity`, and today's change matches `pnl_today`.
   const rounding = points.length > 0 ? Number(agent.state.equity) - points[points.length - 1].value : 0;
-  return points.map((p, i) => ({ time: p.time, value: round2(holding[i] ? p.value + rounding : p.value) }));
+  const ease = (t: number) => (t <= dayStart || end <= dayStart ? 0 : (t - dayStart) / (end - dayStart));
+  return points.map((p, i) => ({ time: p.time, value: round2(holding[i] ? p.value + rounding * ease(p.time) : p.value) }));
 }
 
 /** Hold each agent below its high-water mark by trimming the one symbol it holds, minute by minute. */
@@ -444,7 +446,8 @@ export function buildMarket(ws: Workspace): Market {
   for (const { symbol, assetClass, minute } of Object.values(built)) symbols[symbol] = { symbol, assetClass, minute, daily: dailyFrom(minute, assetClass, symbol) };
 
   const equity: Record<string, Point[]> = {};
-  for (const agent of ws.agents) equity[agent.agent_id] = equityCurve(agent, symbols, Math.max(start, floorMinute(unix(agent.deployed_at))), end);
+  const today = unix(`${ws.now.slice(0, 10)}T00:00:00-04:00`);
+  for (const agent of ws.agents) equity[agent.agent_id] = equityCurve(agent, symbols, Math.max(start, floorMinute(unix(agent.deployed_at))), end, today);
 
   const account: Point[] = [];
   for (let t = start, i = 0; t <= end; t += MINUTE, i++) {

@@ -151,12 +151,13 @@ describe("bars", () => {
 });
 
 describe("equity curves", () => {
-  it.each(ws.agents.map((a) => [a.label, a.agent_id] as const))("%s ends at its equity, starts the day at its day-start equity, and never passes its high-water mark", (_label, id) => {
+  it.each(ws.agents.map((a) => [a.label, a.agent_id] as const))("%s ends at its equity, starts the day at its day-start equity to the cent, moves today by its P&L today, and never passes its high-water mark", (_label, id) => {
     const a = agent(ws, id);
     const curve = market.equity[id];
-    expect(curve[curve.length - 1].value).toBeCloseTo(Number(a.state.equity), 1);
+    expect(curve[curve.length - 1].value).toBeCloseTo(Number(a.state.equity), 2);
     const dayStart = curve.find((p) => p.time === unixOf("2026-09-28T00:00:00-04:00"));
-    expect(dayStart?.value).toBeCloseTo(Number(a.state.equity_day_start), 1);
+    expect(dayStart?.value).toBeCloseTo(Number(a.state.equity_day_start), 2);
+    expect((curve[curve.length - 1].value - dayStart!.value).toFixed(2)).toBe(Number(a.pnl_today).toFixed(2));
     const peak = Math.max(...curve.map((p) => p.value));
     expect(peak).toBeLessThanOrEqual(Number(a.state.high_water_mark) + 0.01);
     expect(peak).toBeGreaterThan(Number(a.state.high_water_mark) - 0.5);
