@@ -27,9 +27,8 @@
 //! automated flatten does (DEC-158 option (c), `AGENTS.md` rule 13).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only (ES-21).
-//! E8-1's and E8-2's entry points are implemented: [`content_object`], [`content_hash`],
-//! [`confirmation_code`], [`notification_for`], [`notification_payload`], [`deliver_now`], and
-//! [`ask_permit`]. E8-3's still return [`ApprovalError::Unimplemented`] (DEC-77).
+//! Every entry point is implemented. Those whose answer is total return `Ok` for every input and
+//! keep the stub API's `Result`; none returns [`ApprovalError::Unimplemented`] any more.
 
 mod admit;
 mod budget;

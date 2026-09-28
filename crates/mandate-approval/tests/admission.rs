@@ -42,7 +42,6 @@ fn the_unchanged_fixture_is_admitted() {
 /// MC-E01, MC-E03: a timely grant from a listed user with fresh evidence is admitted; the same
 /// grant read after the deadline is not, so silence and lateness never admit.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_timely_grant_is_admitted_and_a_late_one_is_not() {
     assert_eq!(admitted(Some(&request()), &grant()), Admission::Admitted);
     let mut c = ctx();
@@ -55,7 +54,6 @@ fn a_timely_grant_is_admitted_and_a_late_one_is_not() {
 
 /// MC-E02, PX-7: a skip needs no step-up, and one skip ends the approval whatever the quorum.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_skip_needs_no_step_up_and_ignores_the_quorum() {
     let mut two = request();
     two.content.bound.approvers_required = NonZeroU8::new(2).unwrap();
@@ -71,7 +69,6 @@ fn a_skip_needs_no_step_up_and_ignores_the_quorum() {
 /// MC-E08, check 1: a response to an approval no longer pending is refused, and so is one that
 /// names another approval (a response copied onto a different request).
 #[test]
-#[ignore = "pending E8-3"]
 fn a_response_to_an_approval_not_pending_is_refused() {
     assert_eq!(
         admitted(None, &grant()),
@@ -100,7 +97,6 @@ fn a_response_to_an_approval_not_pending_is_refused() {
 
 /// MC-E04, PB-3, check 2: a response at exactly the deadline is late; a second before is not.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_response_at_exactly_the_deadline_is_late() {
     let mut at = grant();
     at.submitted_at = RiskClock(DEADLINE);
@@ -120,7 +116,6 @@ fn a_response_at_exactly_the_deadline_is_late() {
 
 /// MC-E05, PB-2, EI-15: lateness is judged at the later of `submitted_at` and the folded clock.
 #[test]
-#[ignore = "pending E8-3"]
 fn lateness_uses_the_later_of_submitted_and_the_folded_clock() {
     the_unchanged_fixture_is_admitted();
     let mut c = ctx();
@@ -140,7 +135,6 @@ fn lateness_uses_the_later_of_submitted_and_the_folded_clock() {
 
 /// MC-E09 to MC-E12, PB-10, EI-10: only a user listed in `approvers` can answer.
 #[test]
-#[ignore = "pending E8-3"]
 fn every_actor_but_a_listed_user_is_refused() {
     the_unchanged_fixture_is_admitted();
     for kind in [
@@ -173,7 +167,6 @@ fn every_actor_but_a_listed_user_is_refused() {
 
 /// PB-20, EI-16, check 4: a request no channel delivered cannot be granted or skipped.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_undelivered_request_is_refused() {
     the_unchanged_fixture_is_admitted();
     let mut r = request();
@@ -188,7 +181,6 @@ fn an_undelivered_request_is_refused() {
 
 /// MC-E07, PB-15, EI-14, check 5: a response must repeat the request's content hash.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_wrong_content_hash_is_refused() {
     the_unchanged_fixture_is_admitted();
     for response in [grant(), skip()] {
@@ -205,7 +197,6 @@ fn a_wrong_content_hash_is_refused() {
 
 /// MC-E13, check 6: a grant without step-up evidence is refused.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_without_step_up_is_refused() {
     the_unchanged_fixture_is_admitted();
     let r = mandate_approval::Response {
@@ -220,7 +211,6 @@ fn a_grant_without_step_up_is_refused() {
 
 /// MC-E14, PB-11: evidence is fresh for 300 s before the effective time, inclusive.
 #[test]
-#[ignore = "pending E8-3"]
 fn step_up_is_judged_at_the_effective_time_and_300_s_is_fresh() {
     let mut c = ctx();
     c.folded_clock = RiskClock(T0 + 200);
@@ -241,7 +231,6 @@ fn step_up_is_judged_at_the_effective_time_and_300_s_is_fresh() {
 
 /// MC-E15, PB-12: an assertion is used once per workspace.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_reused_assertion_is_refused() {
     the_unchanged_fixture_is_admitted();
     let mut c = ctx();
@@ -255,7 +244,6 @@ fn a_reused_assertion_is_refused() {
 
 /// MC-E16, PB-19: `CliConfirm` never satisfies a live stream.
 #[test]
-#[ignore = "pending E8-3"]
 fn cli_confirm_is_refused_for_a_live_stream() {
     the_unchanged_fixture_is_admitted();
     let mut c = ctx();
@@ -268,7 +256,6 @@ fn cli_confirm_is_refused_for_a_live_stream() {
 
 /// PB-22, check 7: a first grant of two is counted; a second distinct approver admits.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_first_grant_of_two_is_counted_and_a_second_approver_admits() {
     let mut r = request();
     r.content.bound.approvers_required = NonZeroU8::new(2).unwrap();
@@ -284,7 +271,6 @@ fn a_first_grant_of_two_is_counted_and_a_second_approver_admits() {
 
 /// PB-18: the same approver counts once.
 #[test]
-#[ignore = "pending E8-3"]
 fn same_approver_counts_once() {
     the_unchanged_fixture_is_admitted();
     let mut r = request();
@@ -302,7 +288,6 @@ fn same_approver_counts_once() {
 
 /// Mandate spec §6.4: with independent approval, the mandate's author cannot grant.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_author_cannot_grant_an_independent_approval() {
     let mut r = request();
     r.content.bound.independent_required = true;
@@ -324,7 +309,6 @@ fn the_author_cannot_grant_an_independent_approval() {
 
 /// DEC-156 item 2: the first failing check in the brief's order names the refusal.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_first_failing_admission_check_names_the_refusal() {
     let late_and_wrong = mandate_approval::Response {
         submitted_at: RiskClock(DEADLINE),
@@ -369,7 +353,6 @@ fn command(
 /// PX-4, PB-14: pause needs no step-up, however late it is read; resume, at the same moment,
 /// does.
 #[test]
-#[ignore = "pending E8-3"]
 fn pause_needs_no_step_up_and_resume_does() {
     assert_eq!(
         command(OwnerCommandKind::Pause, None, T0, T0 + 3600),
@@ -383,7 +366,6 @@ fn pause_needs_no_step_up_and_resume_does() {
 
 /// DEC-156 item 8, EI-11: resume, Stop, and acknowledge are judged when the runtime reads them.
 #[test]
-#[ignore = "pending E8-3"]
 fn resume_stop_and_acknowledge_are_judged_when_processed() {
     let evidence = step_up("assertion-1", T0);
     for kind in [
@@ -410,7 +392,6 @@ fn resume_stop_and_acknowledge_are_judged_when_processed() {
 /// DEC-156 item 8: an owner exit is judged when the owner committed it, so a late read applies it
 /// and evidence already stale at commit is refused.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_owner_exit_is_judged_when_the_owner_committed_it() {
     let evidence = step_up("assertion-1", T0);
     assert_eq!(
@@ -437,7 +418,6 @@ fn an_owner_exit_is_judged_when_the_owner_committed_it() {
 /// it still stops and flattens as an automated flatten does; with it, the owner-exit privileges
 /// apply too, however late it is read.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_kill_switch_without_step_up_still_stops_and_flattens() {
     let used: BTreeSet<AssertionId> = [AssertionId("assertion-used".to_owned())].into();
     let judge = |evidence: Option<mandate_approval::StepUp>, env| {
@@ -480,7 +460,6 @@ fn a_kill_switch_without_step_up_still_stops_and_flattens() {
 /// the control stream's head, so it is the same on every host for the same command and confirms
 /// neither another scope nor a command made after another one landed.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_kill_switch_code_is_bound_to_its_scope_and_the_control_head() {
     let code = |scope: &KillScope, head| answer("kill_switch_code", kill_switch_code(scope, head));
     let agent = KillScope::Agent("agent-1".to_owned());

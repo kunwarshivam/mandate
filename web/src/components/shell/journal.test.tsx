@@ -76,7 +76,7 @@ describe("command palette", () => {
   });
 
   it("offers no Stop… to a viewer", () => {
-    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", "viewer");
+    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role: "viewer" });
     act(() => {
       fireEvent.keyDown(window, { key: "k", ctrlKey: true });
     });

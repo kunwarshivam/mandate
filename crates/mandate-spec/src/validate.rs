@@ -20,7 +20,7 @@ use crate::document::{
     ConnectionId, Goal, LadderAction, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
     SignalModel, Source, pointer,
 };
-use crate::policy::{PolicyLevel, PolicyViolation};
+use crate::policy::{PolicyLevel, PolicyViolation, check, platform_base};
 use crate::{DecGrammar, SchemaDec, SpecError};
 
 /// A semantic rule of §4.1, by the code the spec gives it.
@@ -293,11 +293,11 @@ pub fn validate(
 /// their places. It is tighter than the 24 the risk state reports the factor at (§5.5, DEC-167).
 const SIZE_FACTOR_PLACES: usize = 12;
 
-const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
+pub(crate) const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
 /// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
 /// field". The empty pointer is the whole document, so it covers everything.
-fn covers(prefix: &str, path: &str) -> bool {
+pub(crate) fn covers(prefix: &str, path: &str) -> bool {
     path.strip_prefix(prefix)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
@@ -820,6 +820,10 @@ pub struct ValidatedMandate {
 impl ValidatedMandate {
     /// The document, if it breaks no rule and no policy above it.
     ///
+    /// The platform base (§4.3) is always the outermost level; `policies` are the levels below it, a
+    /// profile, the organization, and the workspace. An empty slice therefore still checks the base, so
+    /// no caller can skip policy by passing none (#263 round 1, reading 7).
+    ///
     /// `Err(Rejected)` carries the whole report and every policy violation rather than one code, so a
     /// caller can show the author everything at once.
     pub fn new(
@@ -827,8 +831,20 @@ impl ValidatedMandate {
         context: &ValidationContext,
         policies: &[PolicyLevel],
     ) -> Result<Self, Rejected> {
-        let _ = (&mandate, context, policies);
-        Err(Rejected::NotEvaluated(SpecError::Unimplemented))
+        let report = validate(&mandate, context)?;
+        let chain: Vec<PolicyLevel> = [platform_base()?]
+            .into_iter()
+            .chain(policies.iter().cloned())
+            .collect();
+        let policy = check(&mandate, &chain)?.violations;
+        if report.is_valid() && policy.is_empty() {
+            Ok(Self { mandate })
+        } else {
+            Err(Rejected::Rules {
+                report: Box::new(report),
+                policy,
+            })
+        }
     }
 
     pub fn mandate(&self) -> &Mandate {
@@ -935,4 +951,4 @@ pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

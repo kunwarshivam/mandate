@@ -52,7 +52,7 @@ describe("what each role may do", () => {
 describe("roles in the shell", () => {
   it("offers an approver Pause only, for the agent and the account", () => {
     setPathname(`/agents/${AGENT_IDS.lmn}`);
-    renderWithRuntime(<StopControl />, "normal", "approver");
+    renderWithRuntime(<StopControl />, "normal", { role: "approver" });
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     const sheet = screen.getByRole("dialog");
     const agent = within(sheet).getByRole("heading", { name: /This agent: Agent 3/ }).closest("section")!;
@@ -63,12 +63,12 @@ describe("roles in the shell", () => {
   });
 
   it.each<Role>(["viewer", "auditor"])("shows a %s no Stop control anywhere", (role) => {
-    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", role);
+    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role });
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
   });
 
   it("shows an auditor only the Audit group", () => {
-    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", "auditor");
+    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role: "auditor" });
     const hrefs = sidebarGroups();
     expect(hrefs.length).toBeGreaterThan(0);
     for (const href of hrefs) expect(href).toMatch(/^\/audit(\/|$)/);
@@ -78,7 +78,7 @@ describe("roles in the shell", () => {
   it("shows a viewer the request read-only, with no Approve or Skip", async () => {
     setPathname(`/approvals/${APPROVAL_IDS.swingXyz}`);
     const page = await approval.default({ params: Promise.resolve({ approvalId: APPROVAL_IDS.swingXyz }) });
-    renderWithRuntime(<AppShell>{page}</AppShell>, "normal", "viewer");
+    renderWithRuntime(<AppShell>{page}</AppShell>, "normal", { role: "viewer" });
     expect(document.querySelector("[data-slot=read-only]")).not.toBeNull();
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Skip/ })).toBeNull();

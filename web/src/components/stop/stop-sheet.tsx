@@ -118,6 +118,11 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
   const full = useCan("stop.full");
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [shownOpen, setShownOpen] = useState(open);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (!open) setPending(null);
+  }
   const popupRef = useRef<HTMLDivElement>(null);
   const contextAgent = agentId ? ws.agents.find((a) => a.agent_id === agentId) ?? null : null;
   const own = ws.external_positions;
@@ -279,6 +284,10 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
             onCancel={() => {
               setPending(null);
               setNotice("Passkey check canceled. Nothing was sent.");
+            }}
+            onFailed={() => {
+              setPending(null);
+              setNotice("Passkey check failed. Nothing was sent.");
             }}
           />
         </Dialog.Popup>

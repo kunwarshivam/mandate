@@ -1859,7 +1859,8 @@ pub(crate) mod tests {
         Ok(())
     }
 
-    /// `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) that its lots own.
+    /// `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) at 170 over 140 that its lots
+    /// own.
     pub(crate) fn protected_by_an_oco(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
         let mut executor = Executor::opened(ports)?;
         let clock = || crate::payload::clock(crate::types::RiskClock::from_secs(0));
@@ -1895,6 +1896,8 @@ pub(crate) mod tests {
                 ("action", text("placed")),
                 ("orders", text("md-oco-1")),
                 ("qty", text("10")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
                 ("risk_clock", clock()?),
             ])?,
         )?;
@@ -2033,7 +2036,11 @@ pub(crate) mod tests {
             })),
             &ports,
         )?;
-        assert_eq!(drafted(&confirmed), vec!["OrderStateChanged"]);
+        assert_eq!(
+            drafted(&confirmed),
+            vec!["OrderStateChanged", concat!("Protection", "Changed")],
+            "and, a protective order, it leaves the instrument's protection (slice 3a)"
+        );
         assert!(
             confirmed.iter().any(|effect| matches!(
                 effect,
