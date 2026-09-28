@@ -580,8 +580,7 @@ proves each pending test fails on them (DEC-110).
 
 - **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
   DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
-- **Code:** `mandate-approval` (layer 1; E8-1 and E8-2 implemented, E8-3's entry points stubs until
-  its implementation PR):
+- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
@@ -597,8 +596,9 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-approval/tests/admission.rs` (checks 1 to 7, lateness, step-up, owner commands,
   the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
-  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), pending
-  E8-3.
+  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), all
+  live. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
+  `i128` oracle, and `src/drift.rs` a drift too large to compute.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness
