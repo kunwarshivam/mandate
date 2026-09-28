@@ -1,6 +1,6 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { Dec } from "@/lib/decimal";
 import { direction, directionWord, signedUsd, usd } from "@/lib/format";
@@ -11,6 +11,8 @@ import { direction, directionWord, signedUsd, usd } from "@/lib/format";
  * value once, not the two copies that overlap while it changes.
  */
 export function AnimatedValue({ value, className }: { value: string; className?: string }) {
+  // MotionConfig's reducedMotion covers named transform keys only, not a raw `transform` string.
+  const shift = useReducedMotion() ? 0 : 40;
   return (
     <span className={cn("relative inline-grid overflow-hidden", className)}>
       <span className="sr-only">{value}</span>
@@ -18,9 +20,9 @@ export function AnimatedValue({ value, className }: { value: string; className?:
         <motion.span
           key={value}
           aria-hidden
-          initial={{ opacity: 0, transform: "translateY(40%)" }}
+          initial={{ opacity: 0, transform: `translateY(${shift}%)` }}
           animate={{ opacity: 1, transform: "translateY(0%)" }}
-          exit={{ opacity: 0, transform: "translateY(-40%)" }}
+          exit={{ opacity: 0, transform: `translateY(${-shift}%)` }}
           transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
           className="[grid-area:1/1]"
         >

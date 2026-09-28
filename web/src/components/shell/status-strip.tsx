@@ -14,7 +14,7 @@ interface Item {
 function items(ws: Workspace, now: string): Item[] {
   const h = ws.health;
   if (ws.status === "loading") {
-    return [{ key: "loading", state: "loading", text: "Connecting to your deployment" }];
+    return [{ key: "loading", state: "loading", text: "Connecting to your deployment…" }];
   }
   const md: Item =
     h.market_data.state === "ok"
@@ -53,7 +53,7 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       data-slot="status-strip"
       data-degraded={degraded > 0 ? "" : undefined}
       className={cn(
-        "flex items-center gap-x-4 gap-y-1 overflow-x-auto py-1.5 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none]",
+        "flex items-center gap-x-4 gap-y-1 overflow-x-auto py-1.5 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none] sm:flex-wrap sm:overflow-x-visible",
         degraded > 0 && "bg-muted",
         className,
       )}

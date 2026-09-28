@@ -1,6 +1,6 @@
 "use client";
 
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
@@ -9,6 +9,11 @@ import { type Level, type Rail, agentLimits } from "@/lib/limits";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 
+/** MotionConfig's reducedMotion covers named transform keys only, not a raw `transform` string. */
+function useMove() {
+  return { duration: useReducedMotion() ? 0 : 0.24, ease: EASE };
+}
+
 /**
  * A limit as a rail on the marigold mandate field: usage fills in ink toward the limit, an ink
  * post where the agent stops. It always sits on marigold, the colour of your mandate.
@@ -16,6 +21,7 @@ const EASE = [0.23, 1, 0.32, 1] as const;
 export function LimitRail({ rail, className }: { rail: Rail; className?: string }) {
   const share = Math.min(ratio(rail.used, rail.cap), 1);
   const over = rail.used > rail.cap;
+  const move = useMove();
   return (
     <div className={cn("grid gap-1.5", className)} data-slot="limit-rail" data-over={over ? "" : undefined}>
       <div className="flex items-baseline justify-between gap-3 text-sm">
@@ -29,7 +35,7 @@ export function LimitRail({ rail, className }: { rail: Rail; className?: string 
           className="absolute inset-y-0 left-0 w-full origin-left bg-marigold-foreground"
           initial={false}
           animate={{ transform: `scaleX(${share})` }}
-          transition={{ duration: 0.3, ease: EASE }}
+          transition={move}
         />
         <div className="absolute -inset-y-[3px] right-0 w-1 bg-marigold-foreground" aria-hidden />
       </div>
@@ -61,6 +67,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
   const rows = [...levels].reverse();
   const equityIndex = rows.findIndex((l) => l.at <= equity);
   const withEquity: Array<Level | "equity"> = [...rows];
+  const move = useMove();
   withEquity.splice(equityIndex === -1 ? rows.length : equityIndex, 0, "equity");
 
   return (
@@ -71,11 +78,13 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
           <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 bg-marigold-foreground", TICK[l.kind])} style={{ left: pos(l.at) }} />
         ))}
         <motion.span
-          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 bg-lapis ring-2 ring-marigold"
+          className="absolute inset-0"
           initial={false}
-          animate={{ left: pos(equity) }}
-          transition={{ duration: 0.3, ease: EASE }}
-        />
+          animate={{ transform: `translateX(${pos(equity)})` }}
+          transition={move}
+        >
+          <span className="absolute top-1/2 left-0 size-3.5 -translate-x-1/2 -translate-y-1/2 bg-lapis ring-2 ring-marigold" />
+        </motion.span>
       </div>
       <ol className="grid text-sm" aria-label="Equity levels, highest first">
         {withEquity.map((row) =>

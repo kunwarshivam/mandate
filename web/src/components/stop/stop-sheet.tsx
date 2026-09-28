@@ -131,7 +131,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           e.preventDefault();
           contentRef.current?.focus();
         }}
-        className="gap-0 overflow-y-auto outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+        className="gap-0 overflow-y-auto overscroll-contain outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
         closeClassName="text-ink-foreground hover:bg-ink-foreground/15 hover:text-ink-foreground"
         data-slot="stop-sheet"
       >
