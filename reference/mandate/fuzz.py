@@ -597,7 +597,7 @@ def fuzz_ladder_precision(n):
                 {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
         m["risk"]["drawdown_ladder"] = lad
         errs = semantic(m, ctx)[0]
-        fits = all(-reduce_mul(sub).as_tuple().exponent <= 24 or reduce_mul(sub) == reduce_mul(sub).quantize(D("1e-24"))
+        fits = all(reduce_mul(sub) == reduce_mul(sub).quantize(D("1e-24"))
                    for r in range(1, k + 1) for sub in combinations([D(f) for f in factors], r))
         places = sum(len(f) - 2 for f in factors)
         check("V-040" in errs or fits, "V-040: a valid ladder's size factor needs more than 24 places", factors)
