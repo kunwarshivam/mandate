@@ -66,7 +66,8 @@ pub enum JournaledFact {
         connection_id: ConnectionId,
         environment: Environment,
     },
-    /// `ConnectionRevoked`: the connection's environment is no longer known.
+    /// `ConnectionRevoked`: the connection's environment is no longer known, and neither is its equity,
+    /// so V-001 and V-002 both refuse until the connection is established and snapshotted again.
     ConnectionRevoked { connection_id: ConnectionId },
     /// `DisclosureAccepted`: a disclosure version the workspace accepted (V-005).
     DisclosureAccepted { version: Digest },
@@ -79,7 +80,9 @@ pub enum JournaledFact {
         allocation_usd: Usd,
         pinned: BTreeSet<AssetId>,
     },
-    /// `UniverseChanged`: an instrument admitted to, or removed from, an agent's working universe.
+    /// `UniverseChanged`: an instrument admitted to, or removed from, an agent's working universe. An
+    /// agent with no `AgentVersionActive` has no known connection, so its admitted instruments count as
+    /// claimed on every connection (V-006 fails closed, #262 round 1).
     UniverseChanged {
         agent: AgentId,
         instrument: AssetId,
@@ -201,6 +204,7 @@ impl Fold {
             }
             JournaledFact::ConnectionRevoked { connection_id } => {
                 self.environment.remove(connection_id);
+                self.equity.remove(connection_id);
             }
             JournaledFact::DisclosureAccepted { version } => {
                 self.disclosures.insert(*version);
@@ -306,10 +310,14 @@ impl Fold {
         let mut other_allocations_usd = Usd::ZERO;
         let mut claimed_by_other_agents = BTreeSet::new();
         for (id, state) in &self.agents {
+            if *id == args.agent {
+                continue;
+            }
             let Some((connection_id, _, allocation, pinned)) = &state.version else {
+                claimed_by_other_agents.extend(state.working.iter().cloned());
                 continue;
             };
-            if *id == args.agent || connection_id != ours {
+            if connection_id != ours {
                 continue;
             }
             if !state.retired {
@@ -433,11 +441,22 @@ fn walk(node: &Value, path: &str, given: &ProvenanceMap, added: &mut Vec<String>
         if covered {
             continue;
         }
-        if below {
+        if below && has_children(child) {
             walk(child, &child_path, given, added);
         } else {
             added.push(child_path);
         }
+    }
+}
+
+/// Whether the walk can descend into `node`. A recorded path below a scalar, or below an empty array
+/// or object, names nothing in the document, so the scalar itself is added rather than skipped
+/// (#262 round 1, the blocker).
+fn has_children(node: &Value) -> bool {
+    match node {
+        Value::Object(members) => !members.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        _ => false,
     }
 }
 
@@ -454,14 +473,232 @@ mod tests {
     use mandate_num::Usd;
     use mandate_time::Date;
 
+    use mandate_canon::Value;
+    use proptest::prelude::*;
+
     use super::{AgentId, ContextArgs, JournaledFact};
-    use crate::document::ConnectionId;
-    use crate::validate::ValidationContext;
+    use crate::Mandate;
+    use crate::document::{ConnectionId, Pointer, Provenance, Source};
     use crate::validate::tests::mandate;
+    use crate::validate::{ValidationContext, Violation, validate};
 
     #[test]
     fn an_agent_id_is_the_text_it_was_given() {
         assert_eq!(AgentId::new("agent_7").as_str(), "agent_7");
+    }
+
+    fn conn(id: &str) -> Result<ConnectionId, String> {
+        ConnectionId::parse(id).map_err(|e| e.to_string())
+    }
+
+    fn args(connection_id: ConnectionId) -> Result<ContextArgs, String> {
+        Ok(ContextArgs {
+            agent: AgentId::new("a"),
+            connection_id,
+            validation_date: Date::parse("2026-09-24").map_err(|e| e.to_string())?,
+            membership: None,
+            instrument_groups: BTreeMap::new(),
+            eligibility_failures: BTreeSet::new(),
+        })
+    }
+
+    fn records(draft: &Mandate, paths: &[&str]) -> Result<[JournaledFact; 2], String> {
+        let version = draft.version().map_err(|e| e.to_string())?;
+        Ok([
+            JournaledFact::MandateVersionCreated {
+                version,
+                sources: paths
+                    .iter()
+                    .map(|path| (Pointer::new(path), Source::UserEntered))
+                    .collect(),
+            },
+            JournaledFact::MandateConfirmed {
+                version,
+                confirmed_paths: paths.iter().map(|path| Pointer::new(path)).collect(),
+            },
+        ])
+    }
+
+    /// The reviewer's repro on #262: every field recorded and confirmed except `admission`, recorded
+    /// only through a path below it. The scalar is added unconfirmed, so V-020 and V-022 both fire.
+    #[test]
+    fn a_record_below_a_scalar_leaves_the_scalar_unconfirmed() -> Result<(), String> {
+        let draft = mandate(&[("/autonomy/admission", r#""auto""#)])?;
+        let recorded = [
+            "/name",
+            "/environment",
+            "/connection_id",
+            "/capital",
+            "/goal",
+            "/universe",
+            "/behavior",
+            "/protection",
+            "/risk",
+            "/notifications",
+            "/autonomy/rules",
+            "/autonomy/default",
+            "/autonomy/approval",
+            "/autonomy/admission/phantom",
+        ];
+        let context = ValidationContext::from_journal(
+            &draft,
+            args(conn("conn_alpaca_paper_01")?)?,
+            &records(&draft, &recorded)?,
+        )
+        .map_err(|e| e.to_string())?;
+        let admission = context
+            .provenance
+            .entries()
+            .get(&Pointer::new("/autonomy/admission"));
+        if admission
+            != Some(&Provenance {
+                source: Source::UserEntered,
+                confirmed: false,
+            })
+        {
+            return Err(format!(
+                "`/autonomy/admission` must be added unconfirmed, got {admission:?}"
+            ));
+        }
+        let report = validate(&draft, &context).map_err(|e| e.to_string())?;
+        for code in [Violation::V020, Violation::V022] {
+            if !report.violations.contains(&code) {
+                return Err(format!("{code} must fire, got {:?}", report.violations));
+            }
+        }
+        Ok(())
+    }
+
+    /// Every leaf of `value` below `path`, as the oracle enumerates it: its own walk, sharing nothing
+    /// with the fill's.
+    fn leaves(value: &Value, path: &str, out: &mut Vec<String>) {
+        match value {
+            Value::Object(members) if !members.is_empty() => {
+                for (key, child) in members {
+                    leaves(child, &format!("{path}/{}", key.as_str()), out);
+                }
+            }
+            Value::Array(items) if !items.is_empty() => {
+                for (index, child) in items.iter().enumerate() {
+                    leaves(child, &format!("{path}/{index}"), out);
+                }
+            }
+            _ => out.push(path.to_owned()),
+        }
+    }
+
+    const RECORDABLE: [&str; 18] = [
+        "",
+        "/name",
+        "/name/below",
+        "/autonomy",
+        "/autonomy/admission",
+        "/autonomy/admission/phantom",
+        "/autonomy/rules/0/when",
+        "/autonomy/rules/7",
+        "/risk/max_drawdown",
+        "/risk/max_drawdown/0",
+        "/risk/drawdown_ladder/1",
+        "/risk/drawdown_ladder/1/at/deeper",
+        "/behavior/signal_models/0/weight",
+        "/behavior/signal_models/0/params/1/value",
+        "/universe/pinned_instruments/5",
+        "/notifications/quiet_hours",
+        "/notifications/quiet_hours/start/x",
+        "/mandate_schema_version",
+    ];
+
+    proptest! {
+        /// Whatever paths the draft's record names, including paths below scalars and past the end
+        /// of arrays, every leaf of the document outside the system fields ends up covered by an entry
+        /// (DEC-169 item 5, the blocker of #262 round 1).
+        #[test]
+        fn every_document_path_is_covered_after_the_fill(
+            chosen in prop::collection::btree_set(prop::sample::select(RECORDABLE.to_vec()), 0..8),
+        ) {
+            let draft = mandate(&[]).map_err(TestCaseError::fail)?;
+            let paths: Vec<&str> = chosen.into_iter().collect();
+            let facts = records(&draft, &paths).map_err(TestCaseError::fail)?;
+            let context = ValidationContext::from_journal(
+                &draft,
+                args(conn("conn_alpaca_paper_01").map_err(TestCaseError::fail)?)
+                    .map_err(TestCaseError::fail)?,
+                &facts,
+            )
+            .map_err(|e| TestCaseError::fail(e.to_string()))?;
+            let document = draft.canonical().map_err(|e| TestCaseError::fail(e.to_string()))?;
+            let mut all = Vec::new();
+            leaves(&document, "", &mut all);
+            for leaf in all {
+                if leaf == "/mandate_schema_version" || leaf == "/source_text_ref" {
+                    continue;
+                }
+                let covered = context.provenance.entries().keys().any(|entry| {
+                    let entry = entry.as_str();
+                    leaf == entry
+                        || leaf.strip_prefix(entry).is_some_and(|rest| rest.starts_with('/'))
+                        || entry.is_empty()
+                });
+                prop_assert!(covered, "`{}` is covered by no entry, recorded {:?}", leaf, paths);
+            }
+        }
+    }
+
+    /// An agent known only by its working universe has no known connection; its claims count (V-006
+    /// fails closed, #262 round 1).
+    #[test]
+    fn an_agent_with_no_version_claims_what_it_admitted() -> Result<(), String> {
+        let admitted =
+            AssetId::parse("7b4a1c2e-aaaa-4a2b-9c3d-00000000000a").map_err(|e| e.to_string())?;
+        let facts = [JournaledFact::UniverseChanged {
+            agent: AgentId::new("b"),
+            instrument: admitted.clone(),
+            admitted: true,
+        }];
+        let read = ValidationContext::from_journal(
+            &mandate(&[])?,
+            args(conn("conn_alpaca_paper_01")?)?,
+            &facts,
+        )
+        .map_err(|e| e.to_string())?;
+        if read.claimed_by_other_agents != BTreeSet::from([admitted]) {
+            return Err(format!(
+                "b's admission must count, got {:?}",
+                read.claimed_by_other_agents
+            ));
+        }
+        Ok(())
+    }
+
+    /// A revoked connection's equity is no longer known, so V-002 sees 0 until a new snapshot
+    /// (#262 round 1).
+    #[test]
+    fn a_revoked_connection_has_no_equity() -> Result<(), String> {
+        let ours = conn("conn_alpaca_paper_01")?;
+        let snapshot = JournaledFact::AccountSnapshot {
+            connection_id: ours.clone(),
+            equity_usd: Usd::parse("25000").map_err(|e| e.to_string())?,
+        };
+        let revoked = JournaledFact::ConnectionRevoked {
+            connection_id: ours.clone(),
+        };
+        for (facts, wanted) in [
+            (vec![snapshot.clone(), revoked.clone()], Usd::ZERO),
+            (
+                vec![revoked, snapshot],
+                Usd::parse("25000").map_err(|e| e.to_string())?,
+            ),
+        ] {
+            let read = ValidationContext::from_journal(&mandate(&[])?, args(ours.clone())?, &facts)
+                .map_err(|e| e.to_string())?;
+            if read.account_equity_usd != wanted {
+                return Err(format!(
+                    "expected {wanted:?}, got {:?}",
+                    read.account_equity_usd
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// The claims half of the conservative retirement (#255 round 2, n1, required by the coordinator):
