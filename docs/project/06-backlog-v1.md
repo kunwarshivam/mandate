@@ -598,11 +598,6 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
-- **Stream H, before E6-4's goal implementation: pair the goal tests against constants** (#260 review,
-  the coordinator's ruling there). Once slice P makes `tests/goal.rs` reachable past validation, a
-  constant `goal::status` answering `Ok(Done{..})` passes 2 of its 9 tests and `Ok(Running)` passes 1.
-  Each needs its opposite pair so that no constant passes (#240's standard), in a tests correction
-  ahead of the goal implementation.
 - **`reference/mandate/ref.py`: `violates` reads a level's `null` as a limit** (#263 round 2). For
   `two_approver_above_usd` a level stating `null` should state nothing (DEC-128 item 30(b)); `ref.py`'s
   `violates` compares against it. Align the reference with the crate.
