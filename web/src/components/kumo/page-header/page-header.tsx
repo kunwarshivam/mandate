@@ -48,7 +48,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
             <h1 className="text-h1">{title}</h1>
             {environment ? <EnvironmentBadge environment={environment} /> : null}
           </div>
-          {description ? <p className="max-w-prose text-muted-foreground">{description}</p> : null}
+          {description ? <p className="max-w-measure text-muted-foreground">{description}</p> : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>

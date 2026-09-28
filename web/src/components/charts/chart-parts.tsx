@@ -29,7 +29,7 @@ export function useColourBlind(): boolean {
 
 /**
  * A quiet segmented control. The current range sits on a soft navy pill that glides to the next one
- * (a spring, about 300 ms; with reduced motion it jumps). Each option is a pressed-state button, so
+ * (a 300 ms spring; with reduced motion it jumps). Each option is a pressed-state button, so
  * the group reads as one control with one choice.
  */
 export function RangePicker<T extends string>({
@@ -64,7 +64,7 @@ export function RangePicker<T extends string>({
                 layoutId={pill}
                 aria-hidden
                 className="absolute inset-0 rounded-full bg-lapis-soft"
-                transition={{ type: "spring", duration: 0.3, bounce: 0.12 }}
+                transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
               />
             ) : null}
             <span className="relative">{o.label}</span>

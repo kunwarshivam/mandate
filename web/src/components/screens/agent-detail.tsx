@@ -106,7 +106,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
                         <span>
                           Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
                         </span>
-                        <ArrowRight className="size-4 shrink-0 self-center text-lapis transition-transform duration-(--duration-hover) group-hover:translate-x-0.5" aria-hidden />
+                        <ArrowRight className="size-4 shrink-0 self-center text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
                       </span>
                       <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
                     </Link>

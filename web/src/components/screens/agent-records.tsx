@@ -247,7 +247,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
           {unknown ? <SendingStopped symbol={order.instrument.symbol} /> : null}
         </p>
         {unknown ? (
-          <p className="max-w-prose text-sm" data-slot="unknown-order">
+          <p className="max-w-measure text-sm" data-slot="unknown-order">
             The broker has not answered for this order, so its state is unknown. Nothing else is sent in {order.instrument.symbol}, exits included, until the broker answers;
             the order counts as filled against every limit meanwhile. The kill switch still works.
           </p>
@@ -380,7 +380,7 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
             {stamp(decision.at)}
           </time>
         </p>
-        {decision.then ? <p className="max-w-prose text-sm">{decision.then}</p> : null}
+        {decision.then ? <p className="max-w-measure text-sm">{decision.then}</p> : null}
       </section>
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">

@@ -105,7 +105,7 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
   the rules.
 - **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, interactions under
-  300 ms, press to 0.97 with a faster release, lists rise in once with a 40 ms stagger, changed numbers
+  300 ms, press to 0.97 with a faster release, lists rise in once with a 30 ms stagger, changed numbers
   roll whole, and the equity line draws in once on load. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.
 - **Components.** Kumo components are imported one at a time (`@cloudflare/kumo/components/*`; the
   root barrel is lint-banned) and themed by `src/app/kumo-theme.css`. Blocks added with

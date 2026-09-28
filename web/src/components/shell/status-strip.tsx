@@ -55,8 +55,9 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       aria-label="System status"
       data-slot="status-strip"
       data-degraded={degraded > 0 ? "" : undefined}
+      tabIndex={0}
       className={cn(
-        "flex items-center gap-x-5 gap-y-1 overflow-x-auto py-2 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none] sm:flex-wrap sm:overflow-x-visible",
+        "flex items-center gap-x-5 gap-y-1 overflow-x-auto py-2 text-caption whitespace-nowrap text-muted-foreground outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-wrap sm:overflow-x-visible",
         degraded > 0 && "bg-background",
         className,
       )}

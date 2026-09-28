@@ -15,7 +15,7 @@ export function AccessDenied({ role }: { role: Role }) {
       <h1 id="denied-title" className="text-h1 sm:text-h1">
         Not available to your role
       </h1>
-      <p className="max-w-prose">
+      <p className="max-w-measure">
         {can(role, "agents.view")
           ? `As ${label.toLowerCase()}, you cannot open this screen. An owner or operator can.`
           : `As ${label.toLowerCase()}, you see the journal and its exports, and nothing that acts.`}

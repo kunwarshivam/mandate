@@ -41,7 +41,7 @@ The token is still called `lapis`: it is the account's colour, and the name keep
 | `--foreground` / `--muted-foreground` | slate-950 #181c21 / slate-700 #464c54 | Text / secondary text, labels, ages |
 | `--lapis-muted` / `--lapis-soft` / `--lapis-strong` / `--lapis-line` | navy-200 / navy-100 / navy-900 / navy-600 | Secondary text on navy / an approval or account notice / a pressed primary action / a line inside navy |
 | `--mandate-muted` / `--mandate-soft` | slate-700 / brass-50 | Secondary text on the mandate field / a mandate notice |
-| `--gain` / `--loss` | green-700 #225931 / red-700 #73353f | Text and candles only, always with a sign and the word ("+$123.45 gain") |
+| `--gain` / `--loss` | green-700 #225931 / red-700 #73353f | Text and candles only, always with a sign. Headline figures show the word too ("+$123.45 gain"); in table and list rows the word is read to screen readers |
 | `--warning` / `--info` and their `-soft` tints | amber-700 / blue-700, over the 100 steps | Status text on its tint. Warning is on no screen (see Kumo) |
 | `--gain-cvd` / `--loss-cvd` | cvd-blue-700 #1a5078 / cvd-orange-700 #6f3d16 | Gain and loss when colour-blind friendly is on |
 | `--hatch-ink` | navy-800 at 30% | The paper hatch lines |
@@ -77,7 +77,7 @@ No gradients of any kind (fills, text, masks, fades or glows). CI greps `src/` f
 | Caption | `text-caption` | 0.8125rem / 1.4 | 400 | 0 | Ages, disclosures, secondary facts |
 | Label | `text-label`, `field-label` | 0.8125rem / 1.35 | 500 | 0 | Field labels and chips, muted, sentence case |
 
-Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family). Identifiers use tabular figures and `translate="no"`. Reading text is held to about 65 characters. The root size is the browser's own, so the owner's setting carries.
+Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Mona Sans letters run narrower). The root size is the browser's own, so the owner's setting carries.
 
 The brand is not set in this face: the wordmark is drawn as outlines (see Brand).
 
@@ -108,6 +108,7 @@ Mobile first, from 360px. The phone has a top header (sidebar trigger, mark, pap
 |---|---|---|---|
 | `--nav-width` | Desktop side navigation (Kumo's `--sidebar-width`) | 14rem | 14rem |
 | `--content-max` | Widest content column | 68rem | 90rem |
+| `--container-measure` | Reading measure (`max-w-measure`): under 80 characters a line | 58ch | 58ch |
 | `--page-x` | Page padding at phone / tablet (40rem) / desktop (64rem) | 1.25rem / 1.75rem / 2.5rem | the same |
 | `--page-top` | Space above the first line of a screen | 1.5rem / 2.25rem (desktop) | the same |
 | `--page-bottom` | Space below the last section (desktop; phones clear the tab bar) | 4rem | the same |
@@ -141,7 +142,7 @@ Controls and panels are flat. Only what floats above the page casts a shadow: Ku
 - **Stop control.** An ink pill, 44px tall, with a filled octagon and "Stop". Opens the Stop sheet.
 - **Paper badge.** A navy-outlined pill over the navy hatch: `PAPER · simulated funds`. Below 30rem "simulated funds" becomes screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
 - **Side navigation.** Kumo's Sidebar on the slate background with no border, collapsible to icons. Its header carries the brand (see Brand) and the account below it. Groups: Home, Approvals and Alerts without a label; Agents; Accounts; Audit; Workspace. On an agent's pages the sidebar slides to that agent's sections (Overview, Positions, Orders, Decisions, Approvals, Mandate, Prove, Activity) with a link back to all agents. The current page is a soft tint with strong text; the approvals count is a navy pill.
-- **Tab bar.** Phones only: the page colour, a hairline above, five tabs 64px tall. The current tab's icon fills and sits on a pale navy pill that slides between tabs (a 350ms spring with 15% bounce; instant under reduced motion); its label turns navy.
+- **Tab bar.** Phones only: the page colour, a hairline above, five tabs 64px tall. The current tab's icon fills and sits on a pale navy pill that slides between tabs (a 300ms spring with 10% bounce; instant under reduced motion); its label turns navy.
 - **Page header.** The title with the paper badge beside it, an optional description, route tabs as links (the current one underlined in navy), and actions. Record screens (an agent, a request) always carry the badge in the title row.
 - **Command palette (⌘K).** "Stop…" is the first command for every role that may stop. Titles come from the screen list and owner-given agent labels; nothing typed is kept and there are no recents.
 - **Hero equity chart.** See Charts.
@@ -164,9 +165,9 @@ TradingView Lightweight Charts (`lightweight-charts`, Apache-2.0, pinned exactly
 
 - **One hero number.** Above the line: the value in the hero size, then the change from the start of the range with its sign, the word ("gain", "loss"), its colour, "today" or the range in words, and `[[DISCLOSURE-PERFORMANCE]]` beside it.
 - **Scrub.** Hold or hover on the line and the hero value, the change and the date follow the pointer, instantly (no roll while scrubbing). Let go and they return to now, where a live change rolls in. The crosshair is a hairline with no labels, because the hero figure reads it out. On touch, a horizontal drag scrubs and a vertical one still scrolls the page (`touch-pan-y`).
-- **Ranges.** 1D, 1W, 1M, 3M, 1Y and All as a quiet segmented control; the current range sits on a pale navy pill that glides to the next (a 300ms spring, a jump under reduced motion). A new range redraws the line in place.
+- **Ranges.** 1D, 1W, 1M, 3M, 1Y and All as a quiet segmented control; the current range sits on a pale navy pill that glides to the next (the same 300ms spring, a jump under reduced motion). A new range redraws the line in place.
 - **Draw-in.** On first load the line draws in from the left over 700ms. Under reduced motion it is simply there.
-- **Mandate levels.** The agent's daily loss limit, drawdown floor, lifetime floor, stop and take-profit are dashed brass price lines, each labelled on the axis in pale brass with dark brass text. The price scale widens to include them, and a compact legend below lists every level in words and says which are outside the range shown.
+- **Mandate levels.** The agent's daily loss limit, drawdown floor, lifetime floor, stop and take-profit are 1px brass price lines, each labelled on the axis in pale brass with dark brass text. When two levels sit closer than their labels are tall, the lower one keeps its line and drops its label. The price scale widens to include them, and a compact legend below lists every level in words and says which are outside the range shown.
 - **Stale.** When the latest point is old, its age is shown beside the date ("as of 14:02, 3 min ago"). Nothing is extrapolated.
 - **Flat.** The background is `ColorType.Solid`; an area's top and bottom colours are the same token; no series animates (`LastPriceAnimationMode.Disabled`). `charts.test.tsx` checks every builder for this, and that every chart colour is its token.
 - **Colour follows ownership.** Account equity is a 2px navy line over a pale navy fill; an agent's equity a 2px ink line over the page colour; mandate levels brass; a proposal an agent asks about in ink, dashed. Candles are gain and loss, or the blue and orange pair when colour-blind friendly is on; pre-market and after-hours candles are the border colour.
@@ -190,7 +191,7 @@ Emil Kowalski's rules: motion answers an action or shows what changed; it is qui
 | `--ease-spring` | `linear()` spring, about 10% overshoot | The step-up dialog settling in; never a deadline or a figure |
 | `--duration-press` / `--duration-release` | 140ms / 80ms | Press to scale 0.97; the release is faster than the press |
 | `--duration-hover` | 160ms | Colour changes on hover and on a mode change |
-| `--duration-reveal` + `--stagger` | 320ms, 40ms apart (at most 8 steps) | A list settles in once: each row rises 6px and fades in (`reveal`) |
+| `--duration-reveal` + `--stagger` | 240ms, 30ms apart (at most 8 steps) | A list settles in once: each row rises 6px and fades in (`reveal`) |
 | `--duration-number` | 240ms | A changed value rolls up and out; a stable screen-reader copy never animates |
 | `--duration-draw` | 700ms | The hero line draws in from the left on first load (`draw-in`) |
 | `--duration-sheet` | 320ms in, 200ms out | Stop sheet |
@@ -263,7 +264,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - Do give each screen one hero number, with its change, the word for it, "simulated" where it is paper, and its disclosure on the next line.
 - Do let space separate things; use a hairline before a box, and a box only when it carries a meaning.
 - Do draw every limit as a rail in dollars on the mandate field, with the point where it stops the agent marked and the headroom in words.
-- Do put a sign and the word beside every gain and loss, and `[[DISCLOSURE-PERFORMANCE]]` beside every P&L.
+- Do give every gain and loss its sign (and, on a headline figure, the word), and put `[[DISCLOSURE-PERFORMANCE]]` beside every P&L.
 - Do keep Stop in the header on every screen, and keep touch targets at 44px or more on phones.
 - Do use tabular figures wherever numbers line up or change.
 - Don't use crimson for anything but the kill switch, including errors and losses, or brass for anything but the mandate.

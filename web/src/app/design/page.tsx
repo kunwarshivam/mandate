@@ -51,7 +51,7 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
 const CHART_RULES: Array<[string, string, string]> = [
   ["bg-lapis", "The account", "Account equity: a 2 px navy line over a pale navy fill. The hero of Home."],
   ["bg-foreground", "An agent", "One agent's equity: a 2 px ink line over the page colour. The hero of an agent."],
-  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: dashed brass price lines, labelled on the axis in pale brass."],
+  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1px brass price lines, labelled on the axis in pale brass; a crowded label gives way and the legend names it."],
   ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, on a small neutral chart."],
   ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout. Blue when colour-blind friendly is on."],
   ["bg-loss", "Down candle", "A candle that closed below its open. Orange when colour-blind friendly is on."],
@@ -97,7 +97,7 @@ function Block({ title, lead, children }: { title: string; lead?: ReactNode; chi
         <h2 id={id} className="text-h2">
           {title}
         </h2>
-        {lead ? <p className="max-w-prose text-muted-foreground">{lead}</p> : null}
+        {lead ? <p className="max-w-measure text-muted-foreground">{lead}</p> : null}
       </div>
       {children}
     </section>
@@ -148,7 +148,7 @@ export default function DesignPage() {
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-2">
         <h1 className="text-h1">Design system</h1>
-        <p className="max-w-prose text-muted-foreground">
+        <p className="max-w-measure text-muted-foreground">
           Owlhead&apos;s calm system (DEC-204): one hero number per screen, a chart at the centre, generous space and few boxes, in the navy and brass palette. Colour values live in{" "}
           <code>src/lib/palette.ts</code> and <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code>{" "}
           and the palette&apos;s in <code>web/COLOR.md</code>.
@@ -171,7 +171,7 @@ export default function DesignPage() {
             </li>
           ))}
         </ul>
-        <p className="max-w-prose text-sm text-muted-foreground">
+        <p className="max-w-measure text-sm text-muted-foreground">
           Gains and losses are the only other hues, and only as text beside a sign and the word: <SignedMoney value="123.45" /> <SignedMoney value="-67.89" /> <Placeholder name="performance" />
         </p>
       </Block>
@@ -189,7 +189,7 @@ export default function DesignPage() {
             <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3rem_1fr] gap-3 rounded-xl bg-background p-2.5">
               <span className="size-12 rounded-lg ring-1 ring-border" style={{ background: t.value }} aria-hidden />
               <span className="grid min-w-0 content-center gap-0.5">
-                <span className="font-mono text-caption font-semibold">--{t.name}</span>
+                <code className="font-mono text-caption font-semibold">--{t.name}</code>
                 <span className="truncate font-mono text-label font-normal text-muted-foreground">
                   {t.value} {toHex(t.value)}
                 </span>
@@ -238,7 +238,7 @@ export default function DesignPage() {
           {spacingTokens.map((s) => (
             <tr key={s.name} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
-                {s.name}
+                <code>{s.name}</code>
               </th>
               <td className="py-2 pr-3 text-muted-foreground">{s.use}</td>
               <td className="py-2 pr-3 font-mono tabular">{s.calm}</td>
@@ -257,7 +257,7 @@ export default function DesignPage() {
           {radiusTokens.map((r) => (
             <tr key={r.name} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
-                {r.name}
+                <code>{r.name}</code>
               </th>
               <td className="py-2 pr-3 font-mono text-caption">{r.value}</td>
               <td className="py-2 text-muted-foreground">{r.use}</td>
@@ -437,12 +437,12 @@ export default function DesignPage() {
         <KumoSurfaces />
       </Block>
 
-      <Block title="Motion" lead="Motion answers an action or shows what changed. Most of it is under 300 ms; the equity line's draw-in, once on load, is the one longer moment. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">
+      <Block title="Motion" lead="Motion answers an action or shows what changed. Interactions stay under 300 ms; the equity line's draw-in, once on load, is the one longer moment. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">
         <Rows caption="Motion tokens" head={["Token", "Value", "Use"]} min="32rem">
           {motionTokens.map((m) => (
             <tr key={m.name} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
-                {m.name}
+                <code>{m.name}</code>
               </th>
               <td className="py-2 pr-3 font-mono text-caption">{m.value}</td>
               <td className="py-2 text-muted-foreground">{m.use}</td>

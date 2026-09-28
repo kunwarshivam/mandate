@@ -48,7 +48,7 @@ export function EmptyBoard() {
       <h1 id="empty-title" className="text-h1">
         No agents yet
       </h1>
-      <p className="max-w-prose text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
+      <p className="max-w-measure text-lg text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
       <Link
         href="/agents/new"
         className="press inline-flex h-12 w-fit items-center gap-2 rounded-full bg-lapis pr-5 pl-6 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -66,7 +66,7 @@ export function UnreachableNotice() {
     <div role="alert" data-slot="unreachable-notice" className="reveal grid max-w-2xl gap-4 pt-6 text-foreground sm:pt-12">
       <Plugs aria-hidden className="size-7 text-muted-foreground" />
       <h1 className="text-h1">Cannot reach your deployment</h1>
-      <div className="grid max-w-prose gap-3 text-base">
+      <div className="grid max-w-measure gap-3 text-base">
         <p>
           It last answered at {clock(ws.health.deployment.as_of)}. No agent data is shown, and none is kept on this device, so nothing here can be out of date.
         </p>

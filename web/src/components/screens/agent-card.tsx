@@ -61,8 +61,12 @@ export function AgentCard({
             </Heading>
             <ModeBadge mode={agent.mode} />
           </div>
-          <p className="truncate text-sm text-muted-foreground">
-            {agent.mandate.name} · <span className="font-mono tabular">{holdings(agent)}</span>
+          <p className="grid min-w-0 text-sm text-muted-foreground sm:block sm:truncate">
+            <span className="truncate">
+              {agent.mandate.name}
+              <span className="hidden sm:inline"> · </span>
+            </span>
+            <span className="font-mono break-words tabular">{holdings(agent)}</span>
           </p>
         </div>
         <div className="min-w-0">
@@ -83,7 +87,7 @@ export function AgentCard({
             <SignedMoney value={agent.pnl_today} showWord={false} /> <span className="text-muted-foreground">today</span>
           </p>
         </div>
-        <CaretRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) group-hover:translate-x-0.5 sm:block" />
+        <CaretRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5 sm:block" />
       </div>
 
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">

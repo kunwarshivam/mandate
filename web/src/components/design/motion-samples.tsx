@@ -59,7 +59,7 @@ export function MotionSamples() {
           </Button>
         </div>
       </Sample>
-      <Sample note="Reveal: each item rises 6 px and fades in, 320 ms, 40 ms apart; once, on first render" className="sm:col-span-2">
+      <Sample note="Reveal: each item rises 6 px and fades in, 240 ms, 30 ms apart; once, on first render" className="sm:col-span-2">
         <ul key={reveal} className="grid grid-cols-3 gap-3">
           {["bg-muted", "bg-card ring-1 ring-border", "bg-mandate"].map((c, i) => (
             <li key={c} className={`reveal h-14 rounded-xl ${c}`} style={{ "--i": i } as CSSProperties} />

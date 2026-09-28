@@ -83,7 +83,7 @@ function NotFound() {
       <h1 id="missing-title" className="text-h1">
         No request with this ID
       </h1>
-      <p className="max-w-prose text-muted-foreground">This workspace has no approval request with that ID.</p>
+      <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
       <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         See all approvals
       </LinkButton>

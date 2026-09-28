@@ -35,6 +35,7 @@ export const PAIRS: Pair[] = [
   { fg: "muted-foreground", bg: "card", kind: "body", use: "Secondary text on a card field" },
   { fg: "muted-foreground", bg: "muted", kind: "body", use: "Secondary text on a quiet field" },
   { fg: "muted-foreground", bg: "lapis-soft", kind: "body", use: "Secondary text in an account notice" },
+  { fg: "lapis", bg: "lapis-soft", kind: "body", use: "The current range and tab on their pale navy pill, a link in an approval card" },
   { fg: "muted-foreground", bg: "mandate-soft", kind: "body", use: "Secondary text in a mandate notice" },
   { fg: "primary", bg: "background", kind: "body", use: "Links on the page" },
   { fg: "primary", bg: "card", kind: "body", use: "Links on a card field" },

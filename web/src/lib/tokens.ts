@@ -93,7 +93,7 @@ export const motionTokens = [
   { name: "--ease-spring", value: "linear() spring, about 10% overshoot", use: "Dialogs settling in; never a deadline or a figure" },
   { name: "--duration-press / --duration-release", value: "140 ms / 80 ms", use: "Press to scale 0.97; the release is faster than the press" },
   { name: "--duration-hover", value: "160 ms", use: "Colour changes on hover and on a mode change" },
-  { name: "--duration-reveal", value: "320 ms, 40 ms stagger", use: "A list settles in once: rise 6 px and fade" },
+  { name: "--duration-reveal", value: "240 ms, 30 ms stagger", use: "A list settles in once: rise 6 px and fade" },
   { name: "--duration-number", value: "240 ms", use: "A figure that changes rolls to its new value; deadlines never move" },
   { name: "--duration-draw", value: "700 ms", use: "The equity line draws in from the left on first load" },
   { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet" },
@@ -104,6 +104,7 @@ export const motionTokens = [
 export const spacingTokens = [
   { name: "--nav-width", calm: "14rem", dense: "14rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
   { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
+  { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
   { name: "--page-top", calm: "1.5rem / 2.25rem", dense: "the same", use: "Space above the first line of a screen" },
   { name: "--section-gap", calm: "3rem / 3.5rem", dense: "2rem", use: "Between sections of a screen" },

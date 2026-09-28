@@ -91,7 +91,7 @@ const SECTION_ICON: Record<AgentSectionKey, IconType> = {
 const GROUPS: ScreenGroup[] = ["main", "agents", "accounts", "audit", "workspace"];
 
 function Icon({ icon: I }: { icon: IconType }) {
-  return <I className="size-4 shrink-0" />;
+  return <I className="size-4 shrink-0" aria-hidden />;
 }
 
 function isActive(pathname: string, href: string): boolean {

@@ -55,7 +55,7 @@ function AlertsSummary({ ws }: { ws: Workspace }) {
           {lines.length === 0 ? "Market data, broker, deployment and push relay are current, and no agent is restricted." : `${lines.join("; ")}.`}
         </span>
       </span>
-      <ArrowRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) group-hover:translate-x-0.5" />
+      <ArrowRight aria-hidden className="mt-1 size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" />
     </Link>
   );
 }
@@ -119,7 +119,18 @@ function Dashboard() {
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
-        <div data-slot="account-board" className="reveal min-w-0">
+        <div data-slot="account-board" className="reveal grid min-w-0 gap-5">
+          {open.length > 0 ? (
+            <Link
+              href={open.length === 1 ? `/approvals/${open[0].approval_id}` : "/approvals"}
+              data-slot="waiting-notice"
+              className="press -mb-1 flex min-h-11 w-fit max-w-full items-center gap-2.5 rounded-full bg-lapis-soft py-1.5 pr-4 pl-1.5 text-sm font-medium text-lapis outline-none hover:bg-lapis-muted focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
+            >
+              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-lapis font-mono text-label text-lapis-foreground tabular">{open.length}</span>
+              <span className="truncate">{open.length === 1 ? "Request waiting for you" : "Requests waiting for you"}</span>
+              <ArrowRight aria-hidden className="size-4 shrink-0" />
+            </Link>
+          ) : null}
           <AccountEquityChart />
         </div>
         <div className="grid content-start gap-6 lg:pt-1">

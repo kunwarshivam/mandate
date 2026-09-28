@@ -81,7 +81,7 @@ function Missing({ kind }: { kind: RecordKind }) {
   const agent = kind === "kill" || kind === "release";
   return (
     <section data-slot="record-missing" className="grid gap-4 pt-4">
-      <p className="max-w-prose text-muted-foreground">{agent ? "This workspace has no agent with that ID." : "This workspace has no broker connection with that ID."}</p>
+      <p className="max-w-measure text-muted-foreground">{agent ? "This workspace has no agent with that ID." : "This workspace has no broker connection with that ID."}</p>
       <Link href="/" className="press inline-flex h-11 w-fit items-center rounded-full border border-foreground/25 bg-card px-5 font-semibold hover:bg-background">
         Go to the dashboard
       </Link>

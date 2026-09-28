@@ -32,7 +32,7 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
             <span className="font-mono tabular">{price(approval.bound.limit)}</span>
           </span>
           {open ? (
-            <ArrowRight className="mt-1 size-4 shrink-0 text-lapis transition-transform duration-(--duration-hover) group-hover:translate-x-0.5" aria-hidden />
+            <ArrowRight className="mt-1 size-4 shrink-0 text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
           ) : (
             <span className="inline-flex h-6 items-center rounded-full bg-background px-2.5 text-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
           )}

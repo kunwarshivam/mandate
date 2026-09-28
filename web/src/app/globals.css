@@ -82,8 +82,8 @@
   --duration-press: 140ms;
   --duration-release: 80ms;
   --duration-hover: 160ms;
-  --duration-reveal: 320ms;
-  --stagger: 40ms;
+  --duration-reveal: 240ms;
+  --stagger: 30ms;
   --duration-number: 240ms;
   --duration-sheet: 320ms;
   --duration-sheet-exit: 200ms;
@@ -213,6 +213,9 @@ html:root[data-cvd="on"] {
   --text-lg: 1.125rem;
   --text-lg--line-height: calc(1.75 / 1.125);
 
+  /* ch is the width of a zero; Mona Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
+  --container-measure: 58ch;
+
   --radius-xs: 0.25rem;
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -255,6 +258,18 @@ html:root[data-cvd="on"] {
     scrollbar-color: var(--border) transparent;
     scrollbar-width: thin;
     -webkit-tap-highlight-color: transparent;
+    /* Keep a focused or anchored element clear of the sticky header, the tab bar, and the pinned response. */
+    scroll-padding-top: 5rem;
+    scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
+    @media (min-width: 64rem) {
+      scroll-padding-bottom: 1rem;
+    }
+    &:has([data-slot="approval-choices"]) {
+      scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 8rem);
+      @media (min-width: 64rem) {
+        scroll-padding-bottom: 8rem;
+      }
+    }
   }
   body {
     @apply bg-card text-foreground;
@@ -333,7 +348,7 @@ html:root[data-cvd="on"] {
 }
 
 /*
- * A list settles in the first time it renders: each row rises 6 px and fades in, 40 ms after the
+ * A list settles in the first time it renders: each row rises 6 px and fades in, 30 ms after the
  * one above. Set `--i` for the stagger. CSS transitions, so a re-render interrupts cleanly.
  */
 @utility reveal {

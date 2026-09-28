@@ -17,7 +17,7 @@ export function AgentNotFound() {
       <h1 id="missing-title" className="text-h1">
         No agent with this ID
       </h1>
-      <p className="max-w-prose text-muted-foreground">This workspace has no agent with that ID. It may belong to another workspace.</p>
+      <p className="max-w-measure text-muted-foreground">This workspace has no agent with that ID. It may belong to another workspace.</p>
       <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         See all agents
       </LinkButton>
@@ -32,7 +32,7 @@ export function RecordNotFound({ title, text, back }: { title: string; text: str
       <h2 id="record-missing-title" className="text-h1">
         {title}
       </h2>
-      <p className="max-w-prose text-muted-foreground">{text}</p>
+      <p className="max-w-measure text-muted-foreground">{text}</p>
       <LinkButton href={back.href} variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         {back.label}
       </LinkButton>

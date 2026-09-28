@@ -20,7 +20,7 @@ function Block({ title, lead, children }: { title: string; lead?: ReactNode; chi
         <h2 id={id} className="text-h1">
           {title}
         </h2>
-        {lead ? <p className="max-w-prose text-muted-foreground">{lead}</p> : null}
+        {lead ? <p className="max-w-measure text-muted-foreground">{lead}</p> : null}
       </div>
       {children}
     </section>
@@ -114,7 +114,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-3">
         <h1 className="text-h1 sm:text-h1">Palette</h1>
-        <p className="max-w-prose text-muted-foreground">
+        <p className="max-w-measure text-muted-foreground">
           Development only. {PALETTE.name}: {PALETTE.summary} The reasoning, citations and history are in <code>web/COLOR.md</code>.
         </p>
         <nav aria-label="Palette" className="flex flex-wrap items-center gap-(--seam)">

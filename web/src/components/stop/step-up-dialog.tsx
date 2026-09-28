@@ -93,12 +93,12 @@ export function StepUpDialog({
   return (
     <Dialog.Root open={open} onOpenChange={(next) => (next ? undefined : cancel())}>
       <Dialog.Portal>
-        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-0 z-[60] bg-ink/40" />
+        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-0 z-60 bg-ink/40" />
         <Dialog.Popup
           ref={focusOnMount}
           initialFocus={popupRef}
           data-slot="step-up-dialog"
-          className="fixed top-1/2 left-1/2 z-[60] grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-5 rounded-3xl border border-border bg-card p-6 text-foreground shadow-2xl outline-none"
+          className="fixed top-1/2 left-1/2 z-60 grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-5 rounded-3xl border border-border bg-card p-6 text-foreground shadow-2xl outline-none"
         >
           <div className="grid gap-1.5">
             <Dialog.Title className="flex items-center gap-2 pr-10 text-h1">
