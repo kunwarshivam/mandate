@@ -16,7 +16,7 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{base, obj, s, with, with_all};
+use common::{arr, base, obj, s, with, with_all};
 use mandate_canon::Value;
 use mandate_domain::Environment;
 use mandate_num::{Price, Qty, Usd};
@@ -66,6 +66,14 @@ fn accumulator(changes: &[(&str, Option<Value>)]) -> ValidatedMandate {
         ("/goal/max_spend_usd", Some(s("9000"))),
         ("/goal/end_date", Some(s("2026-12-31"))),
         ("/goal/on_complete", Some(s("hold_protected"))),
+        (
+            "/universe/pinned_instruments",
+            Some(arr(vec![obj(vec![
+                ("asset_id", s(GOAL_INSTRUMENT)),
+                ("symbol", s("AAA")),
+                ("asset_class", s("us_equity")),
+            ])])),
+        ),
     ];
     all.extend_from_slice(changes);
     let document = Mandate::parse(&with_all(&all)).expect("the accumulate goal parses");
@@ -384,12 +392,13 @@ fn a_zero_quantity_increment_is_rejected_rather_than_guessed() {
     let goal = accumulator(&[]);
     let mut zero = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
     zero.qty_increment = Qty::ZERO;
+    let answer = status(&goal, &zero);
     assert!(
         matches!(
-            status(&goal, &zero),
+            &answer,
             Err(SpecError::InvalidInput { what }) if what.contains("increment")
         ),
-        "a zero increment names itself rather than deciding the goal either way"
+        "a zero increment names itself rather than deciding the goal either way, got {answer:?}"
     );
 
     let mut smallest = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
