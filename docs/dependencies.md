@@ -11,8 +11,8 @@ entry in `xtask/layers.toml`.
 The web app's npm rows (`web/`, DEC-200) are one summary row per top-level framework. A row also
 covers the packages that framework's standard setup installs with it (TypeScript and ESLint with
 Next.js, `react-dom` with React, Testing Library with Vitest, and the `radix-ui`,
-`class-variance-authority`, `clsx`, `tailwind-merge`, and `lucide-react` packages the shadcn/ui
-components import); any other npm package needs its own row. `cargo xtask deps` reads only the
+`class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, and `tw-animate-css` packages
+the shadcn/ui components import); any other npm package needs its own row. `cargo xtask deps` reads only the
 cargo and python rows, so the npm rows are reviewed, not machine-checked; `web/package-lock.json`
 is the exact record.
 
@@ -49,3 +49,4 @@ is the exact record.
 | `shadcn/ui` | npm | `web/` | Accessible UI primitives copied into `web/` as source through the `shadcn` CLI, so the components are ours to review and change | Radix Themes, MUI, Chakra UI (packaged components that are harder to restyle and audit) | MIT | founder, DEC-200 |
 | `vitest` | npm | `web/` (dev) | Component and unit tests, with Testing Library | Jest (needs its own TypeScript and ESM transform) | MIT | founder, DEC-200 |
 | `@playwright/test` | npm | `web/` (dev) | End-to-end tests, added later | Cypress (runs inside the browser; Playwright drives Chromium, Firefox, and WebKit from one API) | Apache-2.0 | founder, DEC-200 |
+| `impeccable` | npm | `web/` (dev tool, run in CI by `.github/workflows/web.yml`, pinned `4.1.0`) | The Impeccable detector: `impeccable detect src/` fails the web workflow on UI anti-patterns and generic AI aesthetics (DEC-200). A JavaScript launcher with its engine as a per-platform optional dependency (`@impeccable/cli-linux-x64` in CI); telemetry off through `IMPECCABLE_NO_TELEMETRY` and `DO_NOT_TRACK` | Review passes by the vendored skills alone (nothing in CI); ESLint rules written for the project (no design rules exist to reuse) | Apache-2.0 | founder, DEC-200 |
