@@ -537,6 +537,34 @@ round 1), as the coordinator ruled there:
   same `mandate-canon` writer, so a non-canonical writer survives them. E10-3's status PR adds one
   assertion against `btc_accumulator`'s literal `sha256:9fb03f7e…` beside `mandate::version_vector`.
 
+- `tests/vocabulary.rs::every_error_variant_has_its_own_stable_code` lacks `(ParseError::Diverged, "diverged")`.
+  The code is pinned by the module test `a_mandate_changed_after_parsing_has_no_version`, but not in the
+  table that asserts one code per variant. Add the row in the next tests correction that touches the file
+  (#225, the coordinator's note after merge).
+
+From E10-1's slice-V implementation (DEC-161):
+
+- **E17-1 slice (stream F, next):** V-003, V-034 to V-037, V-039, W-006, and `worst_case_stop_distance`
+  (DEC-161 item 1). MC-V05, MC-V53 to MC-V61, MC-V64, and MC-V65 pass once it lands.
+- **Stream H:** `ConditionField::is_unit_bounded` and `mandate-builder`'s `well_typed` omit
+  `thesis_confidence`, which §6.3 types "decimal in [0, 1]"; `validate` bounds it (DEC-161 item 5), so the
+  order path's re-check is looser than the load check. Fix both with the builder's
+  `oracle_is_unit_bounded` in one change.
+- **`reference/mandate/ref.py`:** `PLATFORM_DEFAULTABLE` gives `leveraged_etp_disclosure_version` the value
+  `None`, which the reference reads as "any value"; §7 allows only `null` (DEC-161 item 8). Give the
+  reference a sentinel for "any value" so `None` can mean `null`.
+- **W-005 misses a wrapped catch-all** (#238 review, round 1, minor 1). `Condition::is_catch_all` reads only
+  a top-level `purpose in [increase, open]`, so `{"all": [{"field": "purpose", "op": "in", "value": ["open",
+  "increase"]}]}` and `{"all": []}`, which also match every action a later rule could, warn of nothing.
+  Warning-only, never blocking; widen it to any condition that holds for both purposes.
+- **`validate::tests::oracle_default_allowed` returns `true` for `/environment` whatever its value**
+  (#238 review, round 1, minor 1), so the V-020 property never exercises §7's `paper`-only bound there
+  (`v020_reads_the_source_the_confirmation_and_the_listed_value` does). Make the oracle check `paper` in a
+  later tests correction.
+- The worst-case figures multiply by `Fraction`, which holds nine places, so a schema-valid fraction with
+  ten or more is `out_of_range` (DEC-161 item 3). Move to an exact `Usd × Ratio` when `mandate-num` has
+  one (stream H's `UsdExact` is the candidate).
+
 From the independent review of E4-2's implementation ([#163](https://github.com/kunwarshivam/mandate/pull/163)
 round 2, verdict approve), whose first two minors are closed by the third tests correction
 (DEC-127 item 26) and whose third waits on another story:
@@ -597,6 +625,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
   agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
+- **E7-7, blocking the slice that lets the crossover drive an order:** bound the stored bars'
+  staleness. Check the span's last day against the run's `setup.now` (the last completed session
+  before it) and refuse coverage that ends earlier. Today `Bars::closes` reads no clock, so a
+  months-old dataset is trusted and feeds the signal. That is harmless only while every downstream
+  stage refuses (DEC-166; #241 review, round 1, minor 5).
+- **E7-7, unowned, blocking `tests/tracer.rs::outlier_close` (PB-15):** a market-data trust rule
+  that refuses a close too far from its neighbours. The shell may not judge one, because that is
+  price arithmetic (DEC-138 item 3, DEC-166 item 5). The test stays pending until an owner lands the
+  rule in `mandate-marketdata`, or until E6-8's mark-and-collar refuses the limit end to end
+  (the coordinator's ruling on #171).
 - **E7-7, when streams F and H land:** a drift check for
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
@@ -739,8 +777,8 @@ round 1, verdict approve; minor 2, deferred by the coordinator's ruling):
   passes `mandate-builder`'s `check_rules`/`well_typed` re-check and is refused mid-walk by
   `Condition::matches` with `too_precise`. It is still refused, so rule 3 holds, but DEC-152 (1)
   promises the whole rule set is re-checked before any rule is read. Stream F's V-023-at-load in
-  `mandate-spec::validate` refuses such a value up front, and the order path's `well_typed` gains
-  the same bound so both report it by name.
+  `mandate-spec::validate` refuses such a value up front (landed with E10-1's slice V, DEC-161 item 5),
+  and the order path's `well_typed` gains the same bound so both report it by name.
 - **E6-6:** drop or pin the `at.opening_auction` clause in `mandate-risk`'s `market_orders_barred`.
   The opening auction is always pre-market, which the clause for a US equity outside the regular
   session already bars, and crypto never has an auction, so the clause changes no decision and no

@@ -183,6 +183,8 @@ pub fn autonomy_name(autonomy: Autonomy) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use mandate_backtest::{BacktestError, Signal};
     use mandate_builder::BuilderError;
     use mandate_executor::{BrokerOutcome, BrokerUnknown, ConnectorError, ExecutorError};
@@ -421,6 +423,7 @@ mod tests {
             id: "quant.ma_crossover".to_owned(),
             version: "1.0.0".to_owned(),
             max_output_age_s: 86_400,
+            params: BTreeMap::new(),
         }
     }
 

@@ -8,13 +8,20 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_domain::{AssetClass, AssetId, Environment};
-use mandate_num::Usd;
+use mandate_canon::Value;
+use mandate_domain::{AssetClass, AssetId, AutonomyDecision, Environment};
+use mandate_num::{Fraction, NumError, Usd};
 use mandate_time::Date;
 
-use crate::document::{ConnectionId, Mandate, ModelId, ProvenanceMap};
+use crate::condition::{
+    Condition, ConditionField, ConditionValue, FieldKind, MAX_CONDITION_DEPTH, Operator,
+};
+use crate::document::{
+    ConnectionId, Goal, LadderAction, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
+    SignalModel, Source, pointer,
+};
 use crate::policy::{PolicyLevel, PolicyViolation};
-use crate::{SchemaDec, SpecError};
+use crate::{DecGrammar, SchemaDec, SpecError};
 
 /// A semantic rule of §4.1, by the code the spec gives it.
 ///
@@ -225,12 +232,498 @@ impl ValidationReport {
 /// Returns every code the document breaks, not the first. `Err` means the document could not be
 /// evaluated — a decimal outside the range of the arithmetic a rule needs — which is
 /// [`SpecError::OutOfRange`] naming the pointer, never a V-code (DEC-128 item 4).
+///
+/// A mandate whose public fields no longer match the document it was parsed from is refused with
+/// [`ParseError::Diverged`](crate::ParseError::Diverged): three rules read that document (V-009 the
+/// order of the sets, V-015 an invalid date, V-020 a listed default's value), and a report must describe
+/// the one mandate that would be hashed and enforced.
 pub fn validate(
     mandate: &Mandate,
     context: &ValidationContext,
 ) -> Result<ValidationReport, SpecError> {
-    let _ = (mandate, context);
-    Err(SpecError::Unimplemented)
+    let document = mandate.canonical()?;
+    let worst_case = worst_case(mandate)?;
+    let mut violations = BTreeSet::new();
+    account_rules(mandate, context, &worst_case, &mut violations)?;
+    document_rules(mandate, &document, &mut violations);
+    condition_rules(mandate, &mut violations);
+    provenance_rules(mandate, &document, context, &mut violations);
+    let rules = &mandate.autonomy.rules;
+    let warnings = [
+        (!context.eligibility_failures.is_empty(), Warning::W001),
+        (
+            worst_case
+                .one_position_at_stop_usd
+                .is_some_and(|loss| loss > worst_case.daily_loss_budget_usd),
+            Warning::W002,
+        ),
+        (!mandate.protection.enabled, Warning::W003),
+        (
+            rules
+                .iter()
+                .rev()
+                .skip(1)
+                .any(|rule| rule.when.is_catch_all()),
+            Warning::W005,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(fired, warning)| fired.then_some(warning))
+    .collect();
+    Ok(ValidationReport {
+        violations,
+        warnings,
+        worst_case,
+    })
+}
+
+/// The system fields, which carry no provenance rule (§7).
+const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
+
+/// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
+/// field". The empty pointer is the whole document, so it covers everything.
+fn covers(prefix: &str, path: &str) -> bool {
+    path.strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
+fn out_of_range(path: &str, cause: NumError) -> SpecError {
+    SpecError::OutOfRange {
+        path: Pointer::new(path),
+        cause,
+    }
+}
+
+fn usd(value: &SchemaDec, path: &str) -> Result<Usd, SpecError> {
+    value.to_usd().map_err(|cause| out_of_range(path, cause))
+}
+
+/// `amount × fraction`, exact, or [`SpecError::OutOfRange`] naming the fraction's field.
+fn times(amount: Usd, fraction: &SchemaDec, path: &str) -> Result<Usd, SpecError> {
+    Fraction::parse(fraction.as_str())
+        .and_then(|fraction| amount.times_fraction(fraction))
+        .map_err(|cause| out_of_range(path, cause))
+}
+
+/// §4.2's four figures, exact.
+fn worst_case(mandate: &Mandate) -> Result<WorstCase, SpecError> {
+    let allocation = usd(&mandate.capital.allocation_usd, "/capital/allocation_usd")?;
+    let risk = &mandate.risk;
+    let position = usd(&risk.max_position_usd, "/risk/max_position_usd")?.min(times(
+        allocation,
+        &risk.max_position_fraction,
+        "/risk/max_position_fraction",
+    )?);
+    let protection = &mandate.protection;
+    let one_position_at_stop_usd = match (protection.enabled, &protection.stop_distance) {
+        (true, Some(stop)) => {
+            let at_stop = times(position, stop, "/protection/stop_distance")?;
+            Some(match crypto_offset(mandate) {
+                Some(offset) => {
+                    let path = "/protection/crypto_stop_limit_offset";
+                    at_stop
+                        .checked_add(times(position, offset, path)?)
+                        .map_err(|cause| out_of_range(path, cause))?
+                }
+                None => at_stop,
+            })
+        }
+        _ => None,
+    };
+    Ok(WorstCase {
+        one_position_at_stop_usd,
+        daily_loss_budget_usd: times(allocation, &risk.max_daily_loss, "/risk/max_daily_loss")?,
+        flatten_trigger_loss_usd: times(allocation, &risk.max_drawdown, "/risk/max_drawdown")?,
+        lifetime_floor_loss_usd: times(
+            allocation,
+            &mandate.capital.max_loss_from_allocation,
+            "/capital/max_loss_from_allocation",
+        )?,
+    })
+}
+
+/// The crypto stop-limit offset a worst case adds: set, and the universe admits crypto (§4.2 W-002).
+fn crypto_offset(mandate: &Mandate) -> Option<&SchemaDec> {
+    mandate
+        .protection
+        .crypto_stop_limit_offset
+        .as_ref()
+        .filter(|_| mandate.universe.asset_classes.contains(&AssetClass::Crypto))
+}
+
+fn flag(violations: &mut BTreeSet<Violation>, broken: bool, violation: Violation) {
+    if broken {
+        violations.insert(violation);
+    }
+}
+
+/// The rules that read the account and the connection: V-001, V-002, V-005, V-006, V-007, V-024,
+/// V-030, V-031, and V-032.
+fn account_rules(
+    m: &Mandate,
+    ctx: &ValidationContext,
+    worst_case: &WorstCase,
+    out: &mut BTreeSet<Violation>,
+) -> Result<(), SpecError> {
+    let allocation_path = "/capital/allocation_usd";
+    let committed = ctx
+        .other_allocations_usd
+        .checked_add(usd(&m.capital.allocation_usd, allocation_path)?)
+        .map_err(|cause| out_of_range(allocation_path, cause))?;
+    flag(
+        out,
+        ctx.connection_environment
+            .is_some_and(|environment| environment != m.environment),
+        Violation::V001,
+    );
+    flag(out, committed > ctx.account_equity_usd, Violation::V002);
+    let universe = &m.universe;
+    flag(
+        out,
+        universe.leveraged_etps_enabled
+            && !universe
+                .leveraged_etp_disclosure_version
+                .is_some_and(|version| ctx.disclosures_accepted.contains(&version)),
+        Violation::V005,
+    );
+    let claimed: BTreeSet<Claim<'_>> = ctx
+        .claimed_by_other_agents
+        .iter()
+        .map(|asset| Claim::of(asset, ctx))
+        .collect();
+    flag(
+        out,
+        universe
+            .pinned_instruments
+            .iter()
+            .any(|instrument| claimed.contains(&Claim::of(&instrument.asset_id, ctx))),
+        Violation::V006,
+    );
+    if let Some(registry) = &ctx.registry {
+        flag(
+            out,
+            !m.behavior
+                .signal_models
+                .iter()
+                .all(|model| registered(model, registry)),
+            Violation::V007,
+        );
+    }
+    let approval = &m.autonomy.approval;
+    flag(
+        out,
+        ctx.approver_users < 1
+            || (approval.two_approver_above_usd.is_some() && ctx.approver_users < 2),
+        Violation::V024,
+    );
+    flag(
+        out,
+        m.goal
+            .end_date()
+            .is_some_and(|end| *end < ctx.validation_date),
+        Violation::V030,
+    );
+    flag(
+        out,
+        ctx.previous_version.as_ref().is_some_and(|previous| {
+            previous.environment != m.environment || previous.connection_id != m.connection_id
+        }),
+        Violation::V031,
+    );
+    flag(
+        out,
+        ctx.connection_loss_carry_usd >= worst_case.lifetime_floor_loss_usd,
+        Violation::V032,
+    );
+    Ok(())
+}
+
+/// What an instrument-group claim is on (trading spec §7.1): its group, or the instrument itself when
+/// it has none. Two variants rather than one string, so a group whose id happens to spell an asset id
+/// never claims that instrument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Claim<'a> {
+    Group(&'a GroupId),
+    Alone(&'a AssetId),
+}
+
+impl<'a> Claim<'a> {
+    fn of(asset: &'a AssetId, ctx: &'a ValidationContext) -> Self {
+        ctx.instrument_groups
+            .get(asset)
+            .map_or(Self::Alone(asset), Self::Group)
+    }
+}
+
+/// V-007: the id, version, and content hash are registered together, and the parameter keys, in the
+/// document's order, are exactly the declared ones in sorted order.
+fn registered(model: &SignalModel, registry: &BTreeMap<ModelId, RegisteredModel>) -> bool {
+    registry.get(&model.id).is_some_and(|entry| {
+        entry.version == model.version
+            && entry.content_hash == model.content_hash
+            && model
+                .params
+                .iter()
+                .map(|param| param.key.as_str())
+                .eq(entry.params.iter().map(String::as_str))
+    })
+}
+
+/// True when each item is strictly above the one before it: sorted and unique (V-009).
+fn ascending<'a>(items: impl IntoIterator<Item = &'a str>) -> bool {
+    let items: Vec<&str> = items.into_iter().collect();
+    items.windows(2).all(|pair| match pair {
+        [earlier, later] => earlier < later,
+        _ => true,
+    })
+}
+
+/// The strings of the array at `path` in the document as written. The typed sets are `BTreeSet`s,
+/// which have already sorted what V-009 must see unsorted.
+fn written<'a>(document: &'a Value, path: &str) -> Vec<&'a str> {
+    pointer(document, path)
+        .and_then(Value::as_array)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect()
+}
+
+/// The rules on the document's own shape: V-008 to V-016 and V-033.
+fn document_rules(m: &Mandate, document: &Value, out: &mut BTreeSet<Violation>) {
+    let protection = &m.protection;
+    flag(
+        out,
+        if protection.enabled {
+            m.universe.asset_classes.contains(&AssetClass::Crypto)
+                && protection.crypto_stop_limit_offset.is_none()
+        } else {
+            protection.stop_distance.is_some()
+                || protection.take_profit_distance.is_some()
+                || protection.crypto_stop_limit_offset.is_some()
+        },
+        Violation::V008,
+    );
+    let models = &m.behavior.signal_models;
+    let mut rule_ids = BTreeSet::new();
+    let sorted = ascending(
+        m.universe
+            .pinned_instruments
+            .iter()
+            .map(|instrument| instrument.asset_id.as_str()),
+    ) && ascending(models.iter().map(|model| model.id.as_str()))
+        && models
+            .iter()
+            .all(|model| ascending(model.params.iter().map(|param| param.key.as_str())))
+        && ascending(m.autonomy.approval.approvers.iter().map(|a| a.as_str()))
+        && [
+            "/behavior/cadence/event_sources",
+            "/notifications/channels",
+            "/universe/asset_classes",
+        ]
+        .iter()
+        .all(|path| ascending(written(document, path)))
+        && m.autonomy
+            .rules
+            .iter()
+            .all(|rule| rule_ids.insert(&rule.id));
+    flag(out, !sorted, Violation::V009);
+    let risk = &m.risk;
+    let ladder = &risk.drawdown_ladder;
+    flag(
+        out,
+        !ladder.windows(2).all(|pair| match pair {
+            [lower, upper] => lower.at < upper.at && lower.action <= upper.action,
+            _ => true,
+        }) || !ladder
+            .iter()
+            .all(|rung| (rung.action == LadderAction::ScaleSizes) == rung.factor.is_some()),
+        Violation::V010,
+    );
+    let flattens = ladder
+        .iter()
+        .filter(|rung| rung.action == LadderAction::FlattenAndPause)
+        .count();
+    flag(
+        out,
+        flattens != 1
+            || !ladder.last().is_some_and(|rung| {
+                rung.action == LadderAction::FlattenAndPause && rung.at == risk.max_drawdown
+            }),
+        Violation::V011,
+    );
+    flag(
+        out,
+        ladder
+            .first()
+            .is_some_and(|rung| risk.hysteresis >= rung.at),
+        Violation::V012,
+    );
+    flag(
+        out,
+        !(risk.max_order_usd <= risk.max_position_usd
+            && risk.max_position_usd <= risk.max_gross_exposure_usd
+            && risk.max_gross_exposure_usd <= m.capital.allocation_usd),
+        Violation::V013,
+    );
+    flag(
+        out,
+        m.capital.max_loss_from_allocation < risk.max_drawdown,
+        Violation::V014,
+    );
+    flag(
+        out,
+        pointer(document, "/goal/end_date")
+            .and_then(Value::as_str)
+            .is_some_and(|text| Date::parse(text).is_err()),
+        Violation::V015,
+    );
+    flag(
+        out,
+        m.notifications
+            .quiet_hours
+            .as_ref()
+            .is_some_and(|quiet| quiet.start == quiet.end),
+        Violation::V016,
+    );
+    flag(
+        out,
+        risk.scale_action == ScaleAction::TrimToTarget && matches!(m.goal, Goal::Accumulate { .. }),
+        Violation::V033,
+    );
+}
+
+/// V-017, V-018, and V-023, over every comparison of every rule.
+fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
+    for rule in &m.autonomy.rules {
+        for (comparison, depth) in rule.when.comparisons() {
+            flag(out, depth > MAX_CONDITION_DEPTH, Violation::V017);
+            if let Condition::Compare { field, op, value } = comparison {
+                flag(out, field.is_reserved(), Violation::V018);
+                flag(out, !well_typed(*field, *op, value), Violation::V023);
+            }
+        }
+    }
+}
+
+/// V-023 (§6.3). A decimal must also fit the exact type the order path compares it as, so a value the
+/// autonomy walk would refuse mid-walk is refused here instead, before any rule is read (DEC-161).
+fn well_typed(field: ConditionField, op: Operator, value: &ConditionValue) -> bool {
+    match (field.kind(), value) {
+        (FieldKind::Bool, ConditionValue::Bool(_)) => matches!(op, Operator::Eq | Operator::Ne),
+        (FieldKind::Decimal, ConditionValue::Decimal(decimal)) => {
+            !op.takes_list()
+                && decimal.to_ratio().is_ok()
+                && (!unit_bounded(field)
+                    || SchemaDec::parse(decimal.as_str(), DecGrammar::Fraction).is_ok())
+        }
+        (FieldKind::Enum | FieldKind::Text, ConditionValue::Text(member)) => {
+            matches!(op, Operator::Eq | Operator::Ne) && is_member(field, member)
+        }
+        (FieldKind::Enum | FieldKind::Text, ConditionValue::List(members)) => {
+            op.takes_list()
+                && !members.is_empty()
+                && members.iter().all(|member| is_member(field, member))
+        }
+        _ => false,
+    }
+}
+
+/// The fields §6.3 types "decimal in [0, 1]": `combined_score`, `drawdown`, and `thesis_confidence`
+/// (DEC-161: [`ConditionField::is_unit_bounded`] omits the third, and V-023 reads §6.3's table).
+fn unit_bounded(field: ConditionField) -> bool {
+    field.is_unit_bounded() || field == ConditionField::ThesisConfidence
+}
+
+/// Whether `member` is a value §6.3 lists for an enum field. An instrument takes any string.
+fn is_member(field: ConditionField, member: &str) -> bool {
+    match field {
+        ConditionField::Purpose => matches!(member, "open" | "increase"),
+        ConditionField::Session => {
+            matches!(member, "pre_market" | "regular" | "after_hours" | "crypto")
+        }
+        ConditionField::AssetClass => matches!(member, "us_equity" | "crypto"),
+        _ => field.kind() == FieldKind::Text,
+    }
+}
+
+/// V-020, V-022, and V-038, over the provenance map (§2.1, §7).
+///
+/// An entry speaks for its own path and everything under it, so an entry at `/autonomy` is about
+/// `/autonomy/default` too. V-022 and V-038 therefore read an entry on the path, under it, or above
+/// it: a proposal of the whole universe is a proposal of the pinned instruments (DEC-161).
+fn provenance_rules(
+    m: &Mandate,
+    document: &Value,
+    ctx: &ValidationContext,
+    out: &mut BTreeSet<Violation>,
+) {
+    let listed = platform_defaultable();
+    let entries = ctx.provenance.entries();
+    for (path, provenance) in entries {
+        let path = path.as_str();
+        if SYSTEM_FIELDS.iter().any(|system| covers(system, path)) {
+            continue;
+        }
+        let allowed = if provenance.source == Source::PlatformDefault {
+            listed
+                .iter()
+                .find(|(field, _)| covers(field, path))
+                .is_some_and(|(field, value)| {
+                    let single_user =
+                        *field != "/autonomy/approval/approvers" || ctx.workspace_users <= 1;
+                    single_user
+                        && value
+                            .is_none_or(|value| rendered(pointer(document, path)) == Some(value))
+                })
+        } else {
+            provenance.source.is_owner_sourced() && provenance.confirmed
+        };
+        flag(out, !allowed, Violation::V020);
+        flag(
+            out,
+            provenance.source == Source::PlatformProposed
+                && NEVER_PROPOSED
+                    .iter()
+                    .any(|never| covers(never, path) || covers(path, never)),
+            Violation::V038,
+        );
+    }
+    let autonomy = &m.autonomy;
+    let autos = [
+        (autonomy.default, "/autonomy/default".to_owned()),
+        (autonomy.admission, "/autonomy/admission".to_owned()),
+    ]
+    .into_iter()
+    .chain(
+        autonomy
+            .rules
+            .iter()
+            .enumerate()
+            .map(|(index, rule)| (rule.then, format!("/autonomy/rules/{index}/then"))),
+    )
+    .filter(|(decision, _)| *decision == AutonomyDecision::Auto);
+    for (_, auto) in autos {
+        flag(
+            out,
+            entries.iter().any(|(path, provenance)| {
+                (covers(path.as_str(), &auto) || covers(&auto, path.as_str()))
+                    && !(provenance.source == Source::UserEntered && provenance.confirmed)
+            }),
+            Violation::V022,
+        );
+    }
+}
+
+/// A scalar as §7's list writes it. The list fixes no value at `true`, so `true` renders as nothing and
+/// matches no listed value, which is the answer a `true` there must get.
+fn rendered(value: Option<&Value>) -> Option<&str> {
+    match value? {
+        Value::Str(text) => Some(text),
+        Value::Bool(false) => Some("false"),
+        Value::Null => Some("null"),
+        _ => None,
+    }
 }
 
 /// A mandate that passed the schema, every V-rule, and the policy hierarchy.
@@ -333,3 +826,6 @@ pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, 
     let _ = mandate;
     Err(SpecError::Unimplemented)
 }
+
+#[cfg(test)]
+mod tests;

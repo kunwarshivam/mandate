@@ -321,7 +321,12 @@ impl MandateSource for FixtureMandate {
                 id: "quant.ma_crossover".to_owned(),
                 version: "1.0.0".to_owned(),
                 max_output_age_s: 86_400,
+                params: BTreeMap::from([
+                    ("fast_periods".to_owned(), "5".to_owned()),
+                    ("slow_periods".to_owned(), "20".to_owned()),
+                ]),
             },
+            symbol: "AAPL".to_owned(),
         })
     }
 }
@@ -329,8 +334,8 @@ impl MandateSource for FixtureMandate {
 pub struct FixtureBars(pub World);
 
 impl Bars for FixtureBars {
-    fn closes(&self, instrument: &InstrumentId) -> Result<Vec<Price>, Cause> {
-        let _ = instrument;
+    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
+        let _ = symbol;
         self.0.called(Stage::MarketData);
         let close = Price::parse("255.2").map_err(|_| Cause::Absent { what: "a close" })?;
         Ok(vec![close; 25])
@@ -343,8 +348,8 @@ pub struct FixedSignal {
 }
 
 impl SignalModel for FixedSignal {
-    fn signal(&self, closes: &[Price]) -> Result<Signal, Cause> {
-        let _ = closes;
+    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause> {
+        let _ = (model, closes);
         self.world.called(Stage::Signal);
         Ok(self.signal)
     }
@@ -885,15 +890,15 @@ impl MandateSource for Stubbed {
 }
 
 impl Bars for Stubbed {
-    fn closes(&self, instrument: &InstrumentId) -> Result<Vec<Price>, Cause> {
-        let _ = instrument;
+    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause> {
+        let _ = symbol;
         self.refuse()
     }
 }
 
 impl SignalModel for Stubbed {
-    fn signal(&self, closes: &[Price]) -> Result<Signal, Cause> {
-        let _ = closes;
+    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause> {
+        let _ = (model, closes);
         self.refuse()
     }
 }

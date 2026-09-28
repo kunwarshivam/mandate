@@ -5,9 +5,9 @@
 //! `mandate_executor::Effect`, an `AppendOutcome` — so the shell's mappings in [`crate::map`] are
 //! tested over the values the real crates return, not over values the shell invented.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
-use mandate_accounting::InstrumentId;
 use mandate_backtest::Signal;
 use mandate_executor::{BrokerOutcome, BrokerRequest, ConnectorError};
 use mandate_journal::{AppendOutcome, Environment, StoredEvent};
@@ -147,6 +147,9 @@ pub struct Admitted {
     pub view: MandateView,
     pub environment: Environment,
     pub model: ModelRef,
+    /// The pinned instrument's ticker, which stored bars are keyed by. The same pinned entry gives
+    /// the view's one instrument id.
+    pub symbol: String,
 }
 
 /// A signal model as the mandate's envelope names it (mandate spec §8.1). The tracer feeds no model
@@ -157,6 +160,8 @@ pub struct ModelRef {
     pub version: String,
     /// How long an output stays fresh, in whole seconds (`max_output_age_s`).
     pub max_output_age_s: i64,
+    /// The model's `params`, key to value, exactly as the envelope states them.
+    pub params: BTreeMap<String, String>,
 }
 
 /// What the startup reconciliation found: whether the journal and the broker agree, and the
@@ -185,14 +190,15 @@ pub trait MandateSource {
     fn admitted(&self) -> Result<Admitted, Cause>;
 }
 
-/// Step 2: the closing prices of every stored daily bar of one instrument, oldest first.
+/// Step 2: the closing prices of every stored daily bar of the pinned instrument, by its ticker,
+/// oldest first.
 pub trait Bars {
-    fn closes(&self, instrument: &InstrumentId) -> Result<Vec<Price>, Cause>;
+    fn closes(&self, symbol: &str) -> Result<Vec<Price>, Cause>;
 }
 
-/// Step 3: the signal at the close of the last period in `closes`.
+/// Step 3: the signal of the envelope's `model` at the close of the last period in `closes`.
 pub trait SignalModel {
-    fn signal(&self, closes: &[Price]) -> Result<Signal, Cause>;
+    fn signal(&self, model: &ModelRef, closes: &[Price]) -> Result<Signal, Cause>;
 }
 
 /// Step 5's sizing. `Ok(None)` is the builder's own "hold", which is an answer, not a failure.
