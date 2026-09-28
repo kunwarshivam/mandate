@@ -625,6 +625,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
   agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
+- **E7-7, blocking the slice that lets the crossover drive an order:** bound the stored bars'
+  staleness. Check the span's last day against the run's `setup.now` (the last completed session
+  before it) and refuse coverage that ends earlier. Today `Bars::closes` reads no clock, so a
+  months-old dataset is trusted and feeds the signal. That is harmless only while every downstream
+  stage refuses (DEC-166; #241 review, round 1, minor 5).
+- **E7-7, unowned, blocking `tests/tracer.rs::outlier_close` (PB-15):** a market-data trust rule
+  that refuses a close too far from its neighbours. The shell may not judge one, because that is
+  price arithmetic (DEC-138 item 3, DEC-166 item 5). The test stays pending until an owner lands the
+  rule in `mandate-marketdata`, or until E6-8's mark-and-collar refuses the limit end to end
+  (the coordinator's ruling on #171).
 - **E7-7, when streams F and H land:** a drift check for
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules

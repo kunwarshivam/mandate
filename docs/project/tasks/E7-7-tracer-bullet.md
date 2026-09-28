@@ -524,6 +524,22 @@ zero orders — is the state the repository is actually in. The implementation P
 follows each upstream merge; the coordinator may split it per stage, one flipped adapter at a time,
 which is the cheapest way to find out which merge broke the integration.
 
+### Implementation slices (DEC-166)
+
+The implementation PR is sliced by upstream readiness. Each slice makes live only the adapters
+whose upstream is implemented and whose every input has a production source. Every other adapter
+keeps refusing.
+
+1. **Slice 1** ([#241](https://github.com/kunwarshivam/mandate/pull/241)): `StoredBars`,
+   `MovingAverage`, `AlpacaConnector`.
+2. **Next slices**, one adapter each as its sources land: the exit probes and the flatten planner,
+   validation, sizing and classification, the advisory gate, the journal, the sink, the executor
+   and reconciliation, and then the binary's paper transport. DEC-166 item 2 lists the source each
+   one waits on.
+3. **Before any slice lets the crossover drive an order:** the stored bars' staleness bound against
+   `setup.now` (backlog, "E7-7, blocking the slice that lets the crossover drive an order"). Until
+   it lands, `StoredBars` trusts a dataset however old.
+
 ### Reference cases
 
 The tracer introduces none and moves none. It cites these, read-only, as the cases that already
