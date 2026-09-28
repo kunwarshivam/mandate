@@ -222,7 +222,9 @@ describe("role-based route access (PX-11)", () => {
     const denied = screen.getByRole("main").querySelector("[data-slot=access-denied]")!;
     expect(denied).toHaveTextContent("you see the journal and its exports, and nothing that acts");
     expect(within(denied as HTMLElement).getByRole("link", { name: "Go to the audit" })).toHaveAttribute("href", "/audit");
-    expect(screen.getByRole("link", { name: "Owlhead, audit" })).toHaveAttribute("href", "/audit");
+    const home = screen.getAllByRole("link", { name: "Owlhead, audit" });
+    expect(home).toHaveLength(2);
+    for (const link of home) expect(link).toHaveAttribute("href", "/audit");
   });
 
   it.each(ROLE_IDS.filter((role) => can(role, "stop.open")).flatMap((role) => ["/", `/agents/${AGENT_IDS.btc}`].map((path) => [role, path] as const)))(
