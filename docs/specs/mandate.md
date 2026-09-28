@@ -20,6 +20,9 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-167](../project/04-decision-log.md#decisions)):** V-040 bounds the
+  precision of the ladder's scale factors, so no valid mandate can hold a size factor the order
+  builder or the risk state cannot compute exactly (§4.1, §5.5, §8.3).
 - **v0.6 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-98](../project/04-decision-log.md#decisions),
   [ADR-0002](../adr/0002-autonomous-ideation-and-retail.md), follow-ups
   [DEC-99](../project/04-decision-log.md#decisions) to [DEC-103](../project/04-decision-log.md#decisions),
@@ -289,6 +292,7 @@ and is recorded in `MandateConfirmed`.
 | V-037 | `universe.pinned` true requires that no signal model admits instruments: pinning the universe turns the research agent off (§2.3) |
 | V-038 | `universe.pinned_instruments`, `environment`, and `connection_id` are never `platform_proposed`: bring-your-own-strategy means the owner's own universe, and the research agent is the path for platform ideas (§7) |
 | V-039 | Every pinned instrument's `asset_class` is in `universe.asset_classes` |
+| V-040 | The `factor`s of the `scale_sizes` rungs have at most 12 fractional digits in total, so the size factor of every set of active rungs is exact at 12 places: the places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which is also within the 24 the risk state reports it at (§5.5; [DEC-167](../project/04-decision-log.md#decisions)) |
 
 ### 4.2 Warnings and the confirmation screen
 
