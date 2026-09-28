@@ -127,10 +127,33 @@ impl Mandate {
     /// The value at a pointer, for provenance (§2.1), policy reporting (§4.3), and classification
     /// (§9.2). `Ok(None)` when the pointer names nothing, which is a different answer from "this is
     /// not implemented" — hence the `Result`, so the stub cannot pass for "the field is absent".
+    ///
+    /// It reads the document as parsed, through [`Mandate::canonical`], so a mandate whose fields were
+    /// changed afterwards is `diverged` here too rather than answering from a document it no longer is.
     pub fn at(&self, path: &Pointer) -> Result<Option<Value>, ParseError> {
-        let _ = path;
-        Err(ParseError::Unimplemented)
+        Ok(pointer(&self.canonical()?, path.as_str()).cloned())
     }
+}
+
+/// The value at an RFC 6901 pointer. Canonical keys are `[a-z][a-z0-9_]*`, so no token needs the
+/// RFC's `~` escapes; an array index is digits with no leading zero, as the RFC says.
+pub(crate) fn pointer<'a>(document: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.is_empty() {
+        return Some(document);
+    }
+    path.strip_prefix('/')?
+        .split('/')
+        .try_fold(document, |node, token| match node {
+            Value::Array(items) => {
+                let canonical = token == "0" || !token.starts_with('0');
+                let digits = !token.is_empty() && token.bytes().all(|b| b.is_ascii_digit());
+                (canonical && digits)
+                    .then(|| token.parse::<usize>().ok())
+                    .flatten()
+                    .and_then(|index| items.get(index))
+            }
+            other => other.get(token),
+        })
 }
 
 /// The agent's name: lowercase and hyphens (§3).
@@ -148,6 +171,20 @@ impl AgentName {
 pub struct ConnectionId(String);
 
 impl ConnectionId {
+    /// The schema's `$defs/id`: one to 64 of `[A-Za-z0-9_-]`. A grammar check with no rule logic,
+    /// admitted under DEC-128 item 22 for the reason [`ModelId::parse`] was: V-031 compares against a
+    /// [`PreviousVersion`](crate::validate::PreviousVersion) the caller supplies, and a type nothing can
+    /// construct cannot be supplied (DEC-161).
+    pub fn parse(text: &str) -> Result<Self, ParseError> {
+        if parse::is_id(text) {
+            Ok(Self(text.to_owned()))
+        } else {
+            Err(ParseError::OffPattern {
+                path: Pointer::new("/connection_id"),
+            })
+        }
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }

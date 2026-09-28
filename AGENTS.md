@@ -107,7 +107,8 @@ missed mutants, and green CI (DEC-79):
 
 Start non-trivial work with the `mandate-mode` skill (`.cursor/skills/mandate-mode/SKILL.md`): it
 picks the playbook, lists the few decisions reserved for the founder, and routes to the skills
-vendored from pstack and cursor-team-kit (`.cursor/third_party/README.md`). Prove work with the
+vendored from pstack and cursor-team-kit, and for `web/` the design skills
+(`.cursor/third_party/README.md`). Prove work with the
 `verify-mandate` skill; its feature map says which code, tests, and commands cover each feature.
 Where a vendored skill conflicts with this file, this file wins.
 
@@ -172,7 +173,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   `release-assets.githubusercontent.com`), `static.rust-lang.org`, `index.crates.io`,
   `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
   behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
-  (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too.
+  (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
+  (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`, and
+  `registry.npmjs.org`, for `npm ci`; `install.sh` installs no Node.js and fetches from neither.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency

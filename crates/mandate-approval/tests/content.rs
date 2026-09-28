@@ -52,7 +52,6 @@ fn key_paths(value: &Value, prefix: &str, out: &mut Vec<String>) {
 /// E8-1, EI-14: the content is mandate spec §6.4's list as DEC-165 item 3 names it, at every
 /// nesting level, and nothing else, so no field can be dropped or added unseen.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_object_has_exactly_the_listed_fields() {
     let object_value = answer("content_object", content_object(&content()));
     let mut paths = Vec::new();
@@ -96,11 +95,31 @@ fn the_content_object_has_exactly_the_listed_fields() {
     .map(str::to_owned)
     .collect();
     assert_eq!(paths, expected);
+    let element_keys = |path: &[&str], keys: &[&str]| {
+        let items = path
+            .iter()
+            .try_fold(&object_value, |v, key| v.get(key))
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!items.is_empty(), "{path:?} has elements");
+        for (i, item) in items.iter().enumerate() {
+            let got: Vec<&str> = item
+                .as_object()
+                .map(|o| o.keys().map(|k| k.as_str()).collect())
+                .unwrap_or_default();
+            assert_eq!(
+                got, keys,
+                "{path:?}[{i}] has every key, not only the union's"
+            );
+        }
+    };
+    element_keys(&["evidence", "outputs"], &["artifact", "event_id", "label"]);
+    element_keys(&["risk_impact"], &["cap", "field", "value"]);
 }
 
 /// E8-1: the proposed action is the bound order, its side is `buy`, and its value is limit × qty.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_action_is_the_bound_order_and_its_value() {
     let object_value = answer("content_object", content_object(&content()));
     let field = |key| text(&object_value, &["action", key]);
@@ -124,7 +143,6 @@ fn the_action_is_the_bound_order_and_its_value() {
 /// E8-1 "risk impact": the six §6.3 figures at the request, each beside the mandate's own cap,
 /// in the fixture's order; facts about the order, never an estimate.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_risk_impact_lists_every_figure_with_its_cap() {
     let object_value = answer("content_object", content_object(&content()));
     let rendered: Vec<(Option<&str>, Option<&str>, Option<&str>)> = object_value
@@ -160,7 +178,6 @@ fn the_risk_impact_lists_every_figure_with_its_cap() {
 /// E8-1 and PX-10: the default is skip, stated in §6.4's words, and approve and skip are the only
 /// choices, in that order, with neither preselected.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_default_is_skip_and_approve_and_skip_have_equal_weight() {
     let object_value = answer("content_object", content_object(&content()));
     assert_eq!(
@@ -178,7 +195,6 @@ fn the_default_is_skip_and_approve_and_skip_have_equal_weight() {
 
 /// E8-1 and §6.4: the score and each output carry the spec's labels; theses stay references.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_score_and_the_evidence_carry_the_spec_labels() {
     let object_value = answer("content_object", content_object(&content()));
     assert_eq!(
@@ -217,7 +233,6 @@ fn the_score_and_the_evidence_carry_the_spec_labels() {
 /// FR-6.2, DEC-126: nothing in the content reads as advice. Owner-written rule text is not in the
 /// content yet (DEC-165 item 3); when it is, it is scanned apart from the platform's own text.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_never_carries_advice_wording() {
     let bytes = to_canonical(&answer("content_object", content_object(&content())));
     let text = String::from_utf8(bytes).unwrap().to_lowercase();
@@ -236,7 +251,6 @@ fn the_content_never_carries_advice_wording() {
 
 /// EI-14: the hash is SHA-256 of the canonical object (journal spec §4).
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_hash_is_the_sha256_of_the_canonical_object() {
     let object_value = answer("content_object", content_object(&content()));
     let hash = answer("content_hash", content_hash(&content()));
@@ -245,7 +259,6 @@ fn the_content_hash_is_the_sha256_of_the_canonical_object() {
 
 /// EI-14, PB-15: what the owner saw is what is bound, so every bound field moves the hash.
 #[test]
-#[ignore = "pending E8-1"]
 fn every_bound_field_moves_the_content_hash() {
     let base = answer("content_hash", content_hash(&content()));
     let mut changed = Vec::new();
@@ -275,7 +288,6 @@ fn every_bound_field_moves_the_content_hash() {
 
 /// DEC-155 item 4: `approvals show`'s code is bound to one content hash.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_confirmation_code_is_bound_to_the_content_hash() {
     let a = answer("confirmation_code", confirmation_code(&hash("a")));
     let again = answer("confirmation_code", confirmation_code(&hash("a")));
@@ -287,7 +299,6 @@ fn the_confirmation_code_is_bound_to_the_content_hash() {
 
 /// EI-9, PB-9, rule 6: a notification is the opaque id and one generic text, nothing else.
 #[test]
-#[ignore = "pending E8-1"]
 fn a_notification_is_the_opaque_id_and_one_generic_text() {
     let n = answer("notification_for", notification_for(&request()));
     let payload = answer("notification_payload", notification_payload(&n));
@@ -310,7 +321,6 @@ fn deliver(channel: Channel, at: i64) -> Delivery {
 
 /// MC-E29, PB-17, DEC-156 item 6: `cli_inbox` is delivered inside quiet hours.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_cli_inbox_is_delivered_inside_quiet_hours() {
     let two_am_edt = T0 - 8 * 3600;
     assert_eq!(deliver(Channel::CliInbox, two_am_edt), Delivery::Send);
@@ -323,7 +333,6 @@ fn the_cli_inbox_is_delivered_inside_quiet_hours() {
 /// MC-E30, PB-17: a push is suppressed from 23:00 and sent from 07:00 New York time, in both DST
 /// states.
 #[test]
-#[ignore = "pending E8-1"]
 fn a_push_is_suppressed_from_23_00_and_sent_from_07_00_in_both_dst_states() {
     for (eleven_pm, seven_am) in [
         (1_768_536_000, 1_768_564_800),

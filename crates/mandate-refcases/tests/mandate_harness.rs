@@ -266,23 +266,23 @@ fn every_owned_expectation_member_is_read() {
     );
 }
 
-/// The risk-day and goal arms fail with the DEC-77 message while their rules are stubs, and name the
+/// The goal and risk-state arms fail with the DEC-77 message while their rules are stubs, and name the
 /// stub rather than a comparison.
 ///
 /// The `trading_domain` suite proves its arms read each key by editing an expectation and requiring the
-/// case to fail. That test cannot be written for these two families yet: every MC-T and MC-L case fails
-/// on the stub regardless of what its expectations say, so an edited value would fail for the same
-/// reason as an unedited one and prove nothing. What is checkable now is the other half — that a stub
-/// is never mistaken for a pass — and the read-every-key half arrives with the implementation PR, where
-/// an edited `starts_at` or `then` must change the outcome.
+/// case to fail. That test cannot be written for these two families yet: every MC-L and MC-R case fails
+/// on a stub regardless of what its expectations say, so an edited value would fail for the same reason
+/// as an unedited one and prove nothing. What is checkable now is the other half — that a stub is never
+/// mistaken for a pass — and the read-every-key half arrives with each family's implementation PR.
 ///
 /// A goal or risk-state case stops at the first stub on its path: the parser until E10-1's parse
-/// lands, then validation's `rule` stub until E10-1's V-rules do (#225, round 1).
+/// lands, then validation's `rule` stub until E10-1's V-rules do (#225, round 1). The risk-day arm left
+/// this list when its read-every-key half was written, below, because a correct `risk_day` passes every
+/// MC-T case and would turn this test red on exactly the code that should make it pass (DEC-77).
 #[test]
-fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
+fn the_goal_and_risk_state_arms_name_their_stub_rather_than_passing() {
     let fixture = fixture();
     for (kind, stubs) in [
-        ("risk_day", &["risk_day"][..]),
         ("goal", &["parser", "rule"][..]),
         ("risk_state", &["parser", "rule"][..]),
     ] {
@@ -303,6 +303,62 @@ fn the_risk_day_and_goal_arms_name_their_stub_rather_than_passing() {
             );
         }
     }
+}
+
+/// Every MC-T case passes as the fixture states it, and fails, naming the member, when any one of its
+/// four expectations is edited.
+///
+/// This is the read-every-key half the stub test above promised for the risk-day arm. The two halves
+/// need each other: the pass alone would be satisfied by an arm that compared nothing, and the edits
+/// alone by an arm that failed everything, which is what the `risk_day` stub does. Each edit moves its
+/// member to a value no MC-T case can produce — a date in 2000, an instant at that date's UTC midnight,
+/// a length one hour longer — so the edited case can only fail on the member that was edited.
+#[test]
+fn every_risk_day_case_passes_and_fails_on_each_edited_expectation() {
+    let fixture = fixture();
+    let ids: Vec<String> = fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .filter(|c| c["kind"] == "risk_day")
+        .map(|c| c["id"].as_str().expect("an id").to_owned())
+        .collect();
+    assert_eq!(ids.len(), 5, "family T is five cases");
+    let mut edited = 0;
+    for id in &ids {
+        if let Err(failure) = run(fixture.clone(), id) {
+            panic!("{id} must pass as the fixture states it: {failure}");
+        }
+        for member in ["risk_day", "starts_at", "ends_at", "length_s"] {
+            let mut doctored = fixture.clone();
+            let expect = &mut doctored["cases"]
+                .as_array_mut()
+                .expect("a case list")
+                .iter_mut()
+                .find(|c| c["id"] == id.as_str())
+                .expect("the case")["expect"];
+            expect[member] = match member {
+                "risk_day" => json!("2000-01-01"),
+                "length_s" => json!(
+                    expect["length_s"]
+                        .as_u64()
+                        .and_then(|seconds| seconds.checked_add(3_600))
+                        .expect("a length in seconds")
+                ),
+                _ => json!("2000-01-01T00:00:00.000000000Z"),
+            };
+            let failure = run(doctored, id).expect_err("an edited expectation must fail the case");
+            assert!(
+                failure.starts_with(&format!("{member}: expected")),
+                "{id}: an edited `{member}` must fail on `{member}`, got: {failure}"
+            );
+            edited += 1;
+        }
+    }
+    assert_eq!(
+        edited, 20,
+        "four members of each of the five cases were edited"
+    );
 }
 
 /// Every field of every `risk_state` step is one the harness reads, and so is every field of `initial`.

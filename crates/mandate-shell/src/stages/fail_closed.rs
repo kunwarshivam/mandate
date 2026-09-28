@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use mandate_backtest::Signal;
 use mandate_canon::Value;
-use mandate_journal::Environment;
+use mandate_journal::{AppendOutcome, Environment, StoredEvent};
 use mandate_risk::{Check, CheckOutcome, Verdict};
 use mandate_runtime::{
     AgentId, Autonomy, Command, Effect, EventId, Initiator, Input, IntentBody, IntentHandoff,
@@ -20,12 +20,12 @@ use mandate_runtime::{
 };
 
 use super::doubles::{
-    FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, OneShare,
-    PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World, account_stream,
-    agent_stream, passed_checks, setup, stub,
+    FixedClassifier, FixedGate, FixedReconciler, FixedSignal, FixtureMandate, LedgerJournal,
+    OneShare, PaperExecutor, PlanlessExit, Script, ScriptedConnector, Stubbed, World,
+    account_stream, agent_stream, passed_checks, setup, stub,
 };
-use super::{ExitPath, MandateSource, Protection, Stage};
-use crate::adapters::{Sources, production};
+use super::{ExitPath, JournalWriter, MandateSource, Protection, Stage};
+use crate::adapters::{Disconnected, Sources, over};
 use crate::error::{Cause, ShellError};
 use crate::tracer::{Report, Session, run};
 
@@ -251,12 +251,12 @@ fn all_stubs_at_once_refuse_at_the_first_probe_and_place_nothing() -> Result<(),
 /// today at the first probe, and once the adapters are real at the protection probe or validation.
 #[test]
 fn the_production_stages_refuse_without_their_inputs() -> Result<(), String> {
-    let mut stages = production(Sources {
+    let mut stages = over(Sources {
         mandate: PathBuf::from("no-such-mandate.json"),
         dataset: PathBuf::from("no-such-dataset"),
         journal: None,
         agent: AgentId("tracer-aapl".to_owned()),
-        transport: (),
+        transport: Box::new(Disconnected),
     });
     let error = refusal(run_with(&mut stages)?)?;
     let stage = error.stage().ok_or(format!("{error}"))?;
@@ -411,6 +411,72 @@ fn a_submission_before_its_draft_never_reaches_the_broker() -> Result<(), String
     Ok(())
 }
 
+/// Rule 5, review round 1 minor 6: an append answered `Ambiguous` may or may not have committed,
+/// so it is never read as committed. Here the ledger really holds the `OrderSubmitted`, and the
+/// journal answers `Ambiguous` for it: the run stops at the journal and nothing is submitted.
+#[test]
+fn an_ambiguous_append_is_never_read_as_committed() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.journal = Box::new(AmbiguousOn {
+        inner: LedgerJournal(world.clone()),
+        event_type: "OrderSubmitted",
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert!(
+        matches!(
+            &error,
+            ShellError::Refused {
+                stage: Stage::Journal,
+                cause: Cause::Append {
+                    outcome: "Ambiguous"
+                },
+            }
+        ),
+        "{error:?}"
+    );
+    assert_eq!(world.ledger.borrow().count("OrderSubmitted"), 1);
+    assert_eq!(world.tally.borrow().submissions, 0);
+    Ok(())
+}
+
+/// The ledger journal, answering `Ambiguous` for any append carrying `event_type` after the
+/// ledger has committed it: the one answer a writer cannot read either way.
+struct AmbiguousOn {
+    inner: LedgerJournal,
+    event_type: &'static str,
+}
+
+impl JournalWriter for AmbiguousOn {
+    fn take_ownership(&mut self, stream: &str) -> Result<u64, Cause> {
+        self.inner.take_ownership(stream)
+    }
+
+    fn read(&self, stream: &str) -> Result<Vec<StoredEvent>, Cause> {
+        self.inner.read(stream)
+    }
+
+    fn append(
+        &mut self,
+        stream: &str,
+        expected_head: u64,
+        writer_epoch: u64,
+        drafts: &[Vec<u8>],
+    ) -> AppendOutcome {
+        let outcome = self
+            .inner
+            .append(stream, expected_head, writer_epoch, drafts);
+        let marker = format!("\"{}\"", self.event_type);
+        let carries = drafts
+            .iter()
+            .any(|draft| String::from_utf8_lossy(draft).contains(&marker));
+        match outcome {
+            AppendOutcome::Committed(_) if carries => AppendOutcome::Ambiguous,
+            other => other,
+        }
+    }
+}
+
 /// PB-11: an unknown outcome queries once, and one absence never resubmits.
 #[test]
 fn broker_unknown_then_absent_queries_and_never_resubmits() -> Result<(), String> {
@@ -441,6 +507,25 @@ fn an_uninterpretable_broker_answer_stops_and_is_not_handed_on() -> Result<(), S
     let error = refusal(run_with(&mut stages)?)?;
     assert_eq!(error.code(), "broker_answer_uninterpretable");
     assert!(error.to_string().contains("(wire)"), "{error}");
+    let tally = world.tally.borrow();
+    assert_eq!(tally.submissions, 1);
+    assert_eq!(tally.executor_broker_inputs, 0);
+    Ok(())
+}
+
+/// #241 review round 2, minor 3: a submission the connector refused before it left the process
+/// stops the run, is asked once, and is never handed to the executor or asked again.
+#[test]
+fn a_request_that_was_not_sent_stops_the_run_and_is_never_asked_again() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.connector = Box::new(ScriptedConnector {
+        world: world.clone(),
+        script: Script::NotSent,
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert_eq!(error.code(), "broker_answer_uninterpretable");
+    assert!(error.to_string().contains("(refused_path)"), "{error}");
     let tally = world.tally.borrow();
     assert_eq!(tally.submissions, 1);
     assert_eq!(tally.executor_broker_inputs, 0);
