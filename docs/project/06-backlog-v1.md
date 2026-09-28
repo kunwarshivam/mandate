@@ -866,3 +866,22 @@ From E6-2's builder slice (stream H; found while implementing §8.3, not by a re
   Both stay because `tests/vocabulary.rs` and `num::error_codes_are_stable` pin their codes, and an
   implementation PR may not edit a test. Drop each variant with its row in the next tests correction
   that touches those files (E6-2; the `NumError` half is the E4-2 row above).
+
+From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round 1):
+
+- **Add V-040's boundary pair to `mandate.yaml`, with the harness counts, in one approved change
+  (founder).** The rule's boundaries are two ladders: factors of 12 places in total (valid) and 13
+  (V-040). The 2¹³ × 5¹³ ladder, where the whole product fits and a subset does not, belongs there
+  too. For now all three are pinned in `reference/mandate/fuzz.py::fuzz_ladder_precision`, which runs
+  on every seed, and as in-module rows in `crates/mandate-spec/src/validate/tests.rs`. They are not
+  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (298
+  cases, 67 semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
+  those tests in separate PRs. The founder-owned YAML (ES-22) and the counts must change together.
+- **Three minors from #251's round 2, deferred by the freeze rule.** (1) `docs/specs/mandate.md`'s
+  front matter still says a change needs founder approval with no qualification; DEC-167 item 3
+  records that a stricter V-rule is agent-accepted under DEC-79, and the front matter should say so
+  in one clause. (2) `fuzz_ladder_precision` draws 1 to 4 scale rungs plus two fixed ones: it never
+  reaches the five-rung maximum that item 3's "five 2-place rungs still fit" relies on, and at four
+  it builds a six-rung ladder `maxItems: 5` forbids. Draw 1 to 3 scale rungs, and pin the
+  five-rung, 2-place ladder. (3) The function imports `combinations` inside its body; move the
+  import to the top of `reference/mandate/fuzz.py`.
