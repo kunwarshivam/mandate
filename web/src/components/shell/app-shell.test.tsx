@@ -62,15 +62,28 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the shell, with a typographic wordmark and no mark", () => {
+  it("names the product Owlhead in the shell, with the founder's mark and lockup inside the named links", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const home = screen.getAllByRole("link", { name: "Owlhead, dashboard" });
     expect(home.length).toBeGreaterThan(0);
-    for (const link of home) {
-      expect(link).toHaveTextContent("Owlhead");
-      expect(link.querySelector("svg")).toBeNull();
-    }
+    for (const link of home) expect(link.querySelector("[data-slot=owlhead-mark]")).toHaveAttribute("aria-hidden", "true");
+    const header = document.querySelector("[data-sidebar=header]");
+    expect(header).not.toBeNull();
+    const sidebarHome = home.find((link) => header?.contains(link));
+    expect(sidebarHome?.querySelector("[data-slot=owlhead-lockup]")).toHaveAttribute("aria-hidden", "true");
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
+  });
+
+  it("sets the sidebar header on a light surface, with the brand in navy and no lapis block", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
+    expect(header).toHaveClass("bg-background");
+    expect(header?.closest("[data-surface]")).toBeNull();
+    expect(header?.querySelector("[data-surface]")).toBeNull();
+    for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
+      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("rgb(24, 61, 115)");
+      expect(brand.closest("[data-surface]")).toBeNull();
+    }
   });
 
   it("offers no theme toggle: Placard is light only", () => {

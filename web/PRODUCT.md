@@ -91,10 +91,22 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   2026-09-28). "Mandate" stays the internal codename for code, crates and repo paths, and "mandate"
   stays the product's word for the owner's binding envelope ("Your mandate"). Every user-facing
   surface says Owlhead.
-- **Wordmark and mark.** The UI sets "OWLHEAD" as a typographic wordmark in the display face (Big
-  Shoulders Display 800, capitals), in the current text colour. There is no symbol: the old M mark
-  in `assets/brand/` no longer fits and is not used in the UI, and a new mark is follow-up work that
-  needs a founder-approved design. There is no favicon until that mark exists.
+- **Mark and wordmark (DEC-203).** The mark is the founder's artwork, traced into one flat
+  single-colour path (`src/components/brand/owlhead-mark.svg`); the shaded original is not used in
+  the UI. The wordmark is lowercase "owlhead" in P052 Roman, committed as outlines only
+  (`owlhead-wordmark.svg`): no font file is committed and the UI loads no font for it. The lockup is
+  the mark and the wordmark side by side. The old M mark in `assets/brand/` is the codename's and is
+  not used in the UI.
+- **Always navy on light** (the founder, 2026-09-28: "Can we flip it?"). The mark, wordmark and
+  lockup are navy #183D73 on a light surface, never off-white on a navy block, in every place they
+  appear: the shell, the favicon, the app icons and the share image. There is no dark-mode variant.
+- **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
+  in the page metadata or the share card.
+- **Palette (DEC-202).** "Navy and brass": navy #183D73, brass #AC7D1B as the one accent (rules,
+  borders, large type, never body text), dark brass #634606, brass tint #FDF1DC, slate ink #181C21
+  and off-white #F7FAFE, at about 60/30/10 neutrals, navy and brass. The brand assets take these
+  values from `src/lib/brand-palette.ts`, and the UI tokens are ramp steps of the same
+  palette (`COLOR.md`).
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro

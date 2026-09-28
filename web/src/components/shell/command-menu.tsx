@@ -86,8 +86,8 @@ export function CommandMenu() {
         className="press inline-flex h-11 shrink-0 items-center gap-2 border border-border bg-card px-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
       >
         <MagnifyingGlass className="size-4" aria-hidden />
-        <span className="max-md:sr-only">Go to…</span>
-        <kbd className="hidden border border-border px-1 font-mono text-label md:inline">⌘K</kbd>
+        <span className="max-lg:sr-only">Go to…</span>
+        <kbd className="hidden border border-border px-1 font-mono text-label lg:inline">⌘K</kbd>
       </button>
       <CommandPalette.Root<CommandGroup, Command>
         open={open}
