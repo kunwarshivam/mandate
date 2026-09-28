@@ -1,7 +1,7 @@
 import type { Point } from "@/fixtures/market";
 
 /**
- * Today's equity as one line, with the daily loss limit as a marigold rule. The vertical range
+ * Today's equity as one line, with the daily loss limit as a brass rule. The vertical range
  * always includes the limit, so the gap between them is to scale. Decoration: `label` says it.
  */
 export function Sparkline({ points, limit, label, width = 160, height = 40 }: { points: Point[]; limit: number | null; label: string; width?: number; height?: number }) {
@@ -17,7 +17,7 @@ export function Sparkline({ points, limit, label, width = 160, height = 40 }: { 
   const path = points.map((p) => `${x(p.time).toFixed(1)},${y(p.value).toFixed(1)}`).join(" ");
   return (
     <svg data-slot="sparkline" role="img" aria-label={label} viewBox={`0 0 ${width} ${height}`} width={width} height={height} className="block max-w-full">
-      {limit !== null ? <line data-slot="sparkline-limit" x1={0} x2={width} y1={y(limit)} y2={y(limit)} className="stroke-marigold" strokeWidth={2} /> : null}
+      {limit !== null ? <line data-slot="sparkline-limit" x1={0} x2={width} y1={y(limit)} y2={y(limit)} className="stroke-mandate-marker" strokeWidth={2} /> : null}
       <polyline points={path} fill="none" className="stroke-foreground" strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   );

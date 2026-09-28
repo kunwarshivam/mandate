@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { contrastRatio, parseOklch, toHex } from "./color";
+import { hatchInk } from "./palette";
 import { colorTokens, markPairs, textPairs, tokenValue } from "./tokens";
 
 const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
@@ -28,6 +29,13 @@ function sources(dir: string): string[] {
 describe("colour tokens", () => {
   it.each(colorTokens.map((t) => [t.name, t] as const))("%s matches globals.css", (_, token) => {
     expect(declared[token.name]).toBe(token.value);
+  });
+
+  it("declares the paper hatch from the palette, and no colour token the palette does not name", () => {
+    expect(declared["hatch-ink"]).toBe(hatchInk());
+    const named = new Set(colorTokens.map((t) => t.name));
+    const colours = Object.entries(declared).filter(([, v]) => /^oklch\(/.test(v)).map(([k]) => k);
+    expect(colours.filter((k) => !named.has(k as never) && k !== "hatch-ink")).toEqual([]);
   });
 
   it("every colour is OKLCH", () => {

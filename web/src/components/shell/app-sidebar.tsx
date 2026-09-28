@@ -231,7 +231,7 @@ export function AppSidebar() {
 
   return (
     <Sidebar aria-label="Main">
-      <Sidebar.Header data-surface="lapis" data-slot="account" className="border-b-0">
+      <Sidebar.Header data-surface="navy" data-slot="account" className="border-b-0">
         <div className="flex min-w-0 items-center gap-2.5">
           <Buildings className="size-5 shrink-0" aria-hidden />
           <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">

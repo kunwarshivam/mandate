@@ -1,14 +1,16 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { ColorType, LineStyle } from "lightweight-charts";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
+import { parseOklch, toHex } from "@/lib/color";
 import { toFixed } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { agentLimits } from "@/lib/limits";
+import { PALETTE } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, type Tone, areaOptions, baseOptions, candleOptions, lineOptions } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, type Tone, areaOptions, baseOptions, candleOptions, lineOptions, priceLineFor } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -17,6 +19,10 @@ const SWING = agentOf(AGENT_IDS.swing);
 const BTC = agentOf(AGENT_IDS.btc);
 const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
 const TONES: Tone[] = ["account", "agent", "neutral"];
+
+afterEach(() => {
+  delete document.documentElement.dataset.cvd;
+});
 
 /** Every `type` field in an options tree, however deep. */
 function typesIn(value: unknown): unknown[] {
@@ -53,7 +59,7 @@ describe("chart builders draw flat, solid colour", () => {
   });
 
   it("no builder sets a fill that varies", () => {
-    for (const options of [...TONES.map(areaOptions), ...TONES.map(lineOptions), candleOptions()]) {
+    for (const options of [...TONES.map(areaOptions), ...TONES.map(lineOptions), candleOptions(), candleOptions(true)]) {
       for (const t of typesIn(options)) expect(t).toBe(ColorType.Solid);
       if ("topColor" in options) expect(options.topColor).toBe(options.bottomColor);
     }
@@ -64,6 +70,37 @@ describe("chart builders draw flat, solid colour", () => {
     expect(candleOptions()).toMatchObject({ upColor: CHART_COLOR.gain, downColor: CHART_COLOR.loss });
     expect(CHART_COLOR.gain).not.toBe(CHART_COLOR.loss);
     expect(areaOptions("account").lineColor).toBe(CHART_COLOR.lapis);
+  });
+
+  it("every chart colour is its palette token, converted to hex", () => {
+    for (const [key, name] of Object.entries(CHART_TOKEN)) {
+      expect(CHART_COLOR[key as keyof typeof CHART_TOKEN], `${key} is ${name}`).toBe(toHex(PALETTE.tokens[name].value));
+    }
+  });
+
+  it("draws the account in navy, the mandate in brass, and the grid in tinted slate", () => {
+    expect(PALETTE.tokens.lapis.ref).toBe("navy-800");
+    expect(PALETTE.tokens["mandate-marker"].ref).toBe("brass-500");
+    expect(PALETTE.tokens["mandate-strong"].ref).toBe("brass-700");
+    const grid = baseOptions({ reducedMotion: false }).grid;
+    expect(grid?.horzLines?.color).toBe(CHART_COLOR.muted);
+    expect(grid?.vertLines?.color).toBe(CHART_COLOR.muted);
+    const slate = parseOklch(PALETTE.tokens.muted.value);
+    expect(slate.h).toBe(255);
+    expect(slate.c).toBeGreaterThan(0);
+  });
+
+  it("a mandate level is a brass line with a dark brass label, the account navy, a proposal ink", () => {
+    const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
+    expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mandateMarker, axisLabelColor: CHART_COLOR.mandateStrong, axisLabelTextColor: CHART_COLOR.card });
+    expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.lapis, axisLabelTextColor: CHART_COLOR.lapisForeground });
+    expect(priceLineFor(level("proposal"))).toMatchObject({ color: CHART_COLOR.ink, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Dashed });
+  });
+
+  it("candles turn blue and orange when colour-blind friendly is on", () => {
+    expect(candleOptions(true)).toMatchObject({ upColor: CHART_COLOR.gainCvd, downColor: CHART_COLOR.lossCvd, wickUpColor: CHART_COLOR.gainCvd, wickDownColor: CHART_COLOR.lossCvd });
+    expect(CHART_COLOR.gainCvd).not.toBe(CHART_COLOR.gain);
+    expect(CHART_COLOR.lossCvd).not.toBe(CHART_COLOR.loss);
   });
 });
 
@@ -81,7 +118,7 @@ describe("AgentEquityChart", () => {
       expect(level, String(line.id)).toBeDefined();
       expect(line.price).toBe(Number(toFixed(level!.at, 2)));
       expect(line.title).toBe(level!.label);
-      expect(line.color).toBe(CHART_COLOR.marigold);
+      expect(line.color).toBe(CHART_COLOR.mandateMarker);
       expect(line.lineStyle).toBe(LineStyle.Solid);
       expect(line.axisLabelVisible).toBe(true);
     }
@@ -126,7 +163,7 @@ describe("AgentEquityChart", () => {
 });
 
 describe("AccountEquityChart", () => {
-  it("ends at the broker's equity, in lapis, with the TradingView credit", () => {
+  it("ends at the broker's equity, in navy, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
     expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
@@ -160,15 +197,15 @@ describe("AccountEquityChart", () => {
 });
 
 describe("PositionChart", () => {
-  it("draws candles with average cost in lapis and the bracket in marigold, at the position's prices", () => {
+  it("draws candles with average cost in navy and the bracket in brass, at the position's prices", () => {
     const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
     const [series] = onlyChart(container).series;
     expect(series.type).toBe("Candlestick");
     const byId = new Map(series.priceLines.map((l) => [l.id, l]));
     const expected = {
       "avg-cost": { price: Number(XYZ.avg_cost), color: CHART_COLOR.lapis, title: "Average cost" },
-      stop: { price: Number(XYZ.protection.stop_price), color: CHART_COLOR.marigold, title: "Stop" },
-      "take-profit": { price: Number(XYZ.protection.take_profit_price), color: CHART_COLOR.marigold, title: "Take-profit" },
+      stop: { price: Number(XYZ.protection.stop_price), color: CHART_COLOR.mandateMarker, title: "Stop" },
+      "take-profit": { price: Number(XYZ.protection.take_profit_price), color: CHART_COLOR.mandateMarker, title: "Take-profit" },
     };
     const legend = [...container.querySelectorAll("[data-slot=level-legend] [data-level]")].map((li) => li.getAttribute("data-level"));
     expect(legend.sort()).toEqual(Object.keys(expected).sort());
@@ -192,6 +229,19 @@ describe("PositionChart", () => {
       expect(m.text).toMatch(/^(Buy|Sell) /);
       expect(m.color).toBe(CHART_COLOR.ink);
     }
+  });
+
+  it("redraws its candles in the colour-blind friendly pair when <html data-cvd> turns on", async () => {
+    const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
+    const before = onlyChart(container);
+    expect(before.series[0].options).toMatchObject({ upColor: CHART_COLOR.gain, downColor: CHART_COLOR.loss });
+    await act(async () => {
+      document.documentElement.dataset.cvd = "on";
+      await Promise.resolve();
+    });
+    expect(before.removed).toBe(true);
+    expect(onlyChart(container).series[0].options).toMatchObject({ upColor: CHART_COLOR.gainCvd, downColor: CHART_COLOR.lossCvd });
+    expect(liveCharts()).toHaveLength(1);
   });
 
   it("tells a crypto holder there is no session to wait for", () => {

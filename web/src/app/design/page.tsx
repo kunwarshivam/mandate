@@ -34,8 +34,14 @@ const SOURCES: Array<[RestrictionSource, string]> = [
 ];
 
 const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: string; className: string }> = [
-  { name: "Marigold", meaning: "mandate", means: "Your mandate", detail: "Limits, rails, and the envelope. Where the agent must stay.", className: "bg-marigold text-marigold-foreground" },
-  { name: "Lapis", meaning: "account", means: "The account", detail: "Its board, the paper hatch, the current page, primary actions.", className: "bg-lapis text-lapis-foreground" },
+  {
+    name: "Brass",
+    meaning: "mandate",
+    means: "Your mandate",
+    detail: "Limits, rails, and the envelope on a pale brass tint under a brass rule. Where the agent must stay.",
+    className: "border-t-4 border-mandate-edge bg-mandate text-mandate-strong",
+  },
+  { name: "Navy", meaning: "account", means: "The account", detail: "Its board, the paper hatch, primary actions.", className: "bg-lapis text-lapis-foreground" },
   { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
   { name: "Crimson", meaning: "kill", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
 ];
@@ -43,10 +49,10 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
 const CHART_RULES: Array<[string, string, string]> = [
   ["bg-lapis", "The account", "Account equity, and your average cost on a position."],
   ["bg-foreground", "An agent", "One agent's equity, a flat line over a muted fill."],
-  ["bg-marigold", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit, each a labelled line."],
+  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit, each a labelled brass line with a dark brass label."],
   ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, on a small neutral chart."],
-  ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout."],
-  ["bg-loss", "Down candle", "A candle that closed below its open."],
+  ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout. Blue when colour-blind friendly is on."],
+  ["bg-loss", "Down candle", "A candle that closed below its open. Orange when colour-blind friendly is on."],
 ];
 
 const SAMPLE_LEVELS: ChartLevel[] = [
@@ -120,14 +126,14 @@ export default function DesignPage() {
         </p>
       </Block>
 
-      <Block title="Paper hatch" lead="Paper is the account's state, so it wears lapis, hatched. The badge is in the header of every screen and never scrolls away.">
+      <Block title="Paper hatch" lead="Paper is the account's state, so it wears navy, hatched. The badge is in the header of every screen and never scrolls away.">
         <div className="flex flex-wrap items-center gap-3">
           <EnvironmentBadge environment="paper" />
           <div className="hatch h-16 w-40 border-2 border-lapis bg-card" aria-hidden />
         </div>
       </Block>
 
-      <Block title="Colour" lead="OKLCH. Every neutral is tinted toward lapis; nothing is pure grey, black, or white. Light only: dark mode is follow-up work.">
+      <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are slate, tinted toward navy; nothing is pure grey, black, or white. Light only: dark mode is follow-up work.">
         <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-3">
           {colorTokens.map((t) => (
             <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
@@ -144,10 +150,10 @@ export default function DesignPage() {
         </ul>
       </Block>
 
-      <Block title="Contrast" lead="Computed from the OKLCH values (sRGB, gamut clipped, WCAG 2.2 relative luminance). Reading pairs reach 4.5:1; marks reach 3:1.">
+      <Block title="Contrast" lead="Computed from the OKLCH values (sRGB, gamut clipped, WCAG 2.2 relative luminance), with APCA Lc from apca-w3. Reading pairs reach 4.5:1 and Lc 75; marks reach 3:1 and Lc 45. The Kumo role pairs are checked in each surface scope by the tests.">
         <Rows caption="Contrast ratios" head={["Pair", "Use", "Ratio"]}>
           {[...textPairs.map((p) => ({ ...p, min: 4.5 })), ...markPairs.map((p) => ({ ...p, min: 3 }))].map((p) => (
-            <tr key={`${p.fg}-${p.bg}`} className="border-b">
+            <tr key={`${p.fg}-${p.bg}-${p.kind}-${p.use}`} className="border-b">
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
                 {p.fg} / {p.bg}
               </th>
@@ -234,14 +240,14 @@ export default function DesignPage() {
                 <div className="grid grid-cols-[1fr_1.2fr_1.3fr] gap-(--seam)" aria-hidden>
                   <Skeleton className="h-16" />
                   <Skeleton className="h-16" />
-                  <Skeleton className="h-16 bg-marigold-soft" />
+                  <Skeleton className="h-16 bg-mandate-soft" />
                 </div>
                 <p className="text-sm text-muted-foreground">Skeleton fields in the shape of the screen, never a value from an earlier visit.</p>
               </li>
               <li className="grid gap-2 bg-lapis p-4 text-lapis-foreground">
                 <span className="label-caps text-lapis-muted">Empty</span>
                 <p className="font-display text-heading uppercase">No agents yet</p>
-                <p className="text-sm text-lapis-muted">An empty account is a lapis board with the one next step on it.</p>
+                <p className="text-sm text-lapis-muted">An empty account is a navy board with the one next step on it.</p>
               </li>
             </ul>
           </div>
@@ -315,8 +321,8 @@ export default function DesignPage() {
               <AsOf at="2026-09-28T14:05:18-04:00" now="2026-09-28T14:05:20-04:00" />
               <Deadline deadline="2026-09-28T14:14:58-04:00" now="2026-09-28T14:05:20-04:00" />
             </div>
-            <div className="grid content-start gap-4 bg-marigold p-4 text-marigold-foreground">
-              <h3 className="text-heading">Your mandate</h3>
+            <div className="grid content-start gap-4 border-t-4 border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground">
+              <h3 className="text-heading text-mandate-strong">Your mandate</h3>
               <LimitRail rail={{ key: "a", label: "Total holdings", used: dec("1618.09"), cap: dec("2000"), atCap: "No new buys" }} />
               <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
               <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />

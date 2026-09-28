@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { type Market, buildMarket } from "@/fixtures/market";
 import { useRuntime } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,21 @@ import { type ChartLevel, usdLabel } from "./options";
 export function useMarket(): Market {
   const { ws } = useRuntime();
   return useMemo(() => buildMarket(ws), [ws]);
+}
+
+function watchCvd(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-cvd"] });
+  return () => observer.disconnect();
+}
+
+/** Canvas cannot follow the CSS remap, so charts read the colour-blind friendly flag from `<html data-cvd>`. */
+export function useColourBlind(): boolean {
+  return useSyncExternalStore(
+    watchCvd,
+    () => document.documentElement.dataset.cvd === "on",
+    () => false,
+  );
 }
 
 export function RangePicker<T extends string>({
@@ -46,7 +61,7 @@ export function RangePicker<T extends string>({
 }
 
 const SWATCH = {
-  mandate: "bg-marigold",
+  mandate: "bg-mandate-marker",
   account: "bg-lapis",
   proposal: "bg-ink",
 } as const;

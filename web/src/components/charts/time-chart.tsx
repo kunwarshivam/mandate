@@ -16,6 +16,7 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { cn } from "@/lib/utils";
+import { useColourBlind } from "./chart-parts";
 import {
   type ChartLevel,
   type ChartMarker,
@@ -95,6 +96,7 @@ export function TimeChart({
   className?: string;
 }) {
   const reducedMotion = useReducedMotion() ?? false;
+  const colourBlind = useColourBlind();
   const [readout, setReadout] = useState<Readout | null>(null);
   const [failedFor, setFailedFor] = useState<ChartSeries | null>(null);
   const summaryId = useId();
@@ -108,7 +110,7 @@ export function TimeChart({
         chart = createChart(el, baseOptions({ reducedMotion, compact, valueFormat }));
         let api: ISeriesApi<SeriesType>;
         if (series.kind === "candles") {
-          const candles = chart.addSeries(CandlestickSeries, candleOptions());
+          const candles = chart.addSeries(CandlestickSeries, candleOptions(colourBlind));
           candles.setData(candleData(series.bars));
           api = candles;
         } else if (series.kind === "area") {
@@ -132,9 +134,10 @@ export function TimeChart({
       }
       return () => {
         chart?.remove();
+        chart = null;
       };
     },
-    [series, levels, markers, reducedMotion, compact, valueFormat],
+    [series, levels, markers, reducedMotion, compact, valueFormat, colourBlind],
   );
 
   const failed = failedFor === series;

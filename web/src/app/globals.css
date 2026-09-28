@@ -4,34 +4,52 @@
 @import "./placard-kumo.css";
 
 /*
- * Placard (web/DESIGN.md). Colour values live in src/lib/tokens.ts as well; tokens.test.ts fails
- * when the two drift. Colour carries four meanings and nothing else: marigold is your mandate,
- * lapis is the account, ink is a stopped agent and the Stop control, crimson is the kill switch.
- * Light only: dark mode is follow-up work, not a half-designed theme.
+ * Placard in navy and brass (web/DESIGN.md, web/COLOR.md). Every value is a ramp step from
+ * src/lib/palette.ts; tokens.test.ts fails when the two drift. Colour carries four meanings and
+ * nothing else: the mandate tokens are your mandate, lapis (navy) is the account, ink is a stopped
+ * agent and the Stop control, crimson is the kill switch. Light only: dark mode is follow-up work.
  */
 :root {
-  --background: oklch(0.975 0.005 250);
-  --card: oklch(0.995 0.002 250);
-  --muted: oklch(0.935 0.01 250);
-  --border: oklch(0.8 0.02 255);
-  --foreground: oklch(0.21 0.035 258);
-  --muted-foreground: oklch(0.44 0.035 258);
-  --primary: oklch(0.36 0.1 258);
-  --primary-foreground: oklch(0.975 0.005 250);
-  --lapis: oklch(0.36 0.1 258);
-  --lapis-foreground: oklch(0.975 0.005 250);
-  --lapis-muted: oklch(0.84 0.03 255);
-  --lapis-soft: oklch(0.93 0.03 255);
-  --marigold: oklch(0.85 0.155 84);
-  --marigold-foreground: oklch(0.21 0.035 258);
-  --marigold-muted: oklch(0.36 0.05 70);
-  --marigold-soft: oklch(0.955 0.05 90);
-  --ink: oklch(0.21 0.035 258);
-  --ink-foreground: oklch(0.975 0.005 250);
-  --crimson: oklch(0.47 0.19 27);
-  --crimson-foreground: oklch(0.985 0.004 250);
-  --gain: oklch(0.44 0.11 155);
-  --loss: oklch(0.49 0.18 10);
+  --background: oklch(0.962 0.008 255);
+  --card: oklch(0.985 0.006 255);
+  --muted: oklch(0.925 0.01 255);
+  --border: oklch(0.865 0.012 255);
+  --foreground: oklch(0.225 0.012 255);
+  --muted-foreground: oklch(0.415 0.015 255);
+  --primary: oklch(0.365 0.102 258);
+  --primary-foreground: oklch(0.985 0.006 255);
+  --lapis: oklch(0.365 0.102 258);
+  --lapis-foreground: oklch(0.985 0.006 255);
+  --lapis-muted: oklch(0.925 0.035 258);
+  --lapis-soft: oklch(0.962 0.017 258);
+  --lapis-strong: oklch(0.295 0.087 258);
+  --lapis-line: oklch(0.52 0.125 258);
+  --mandate: oklch(0.962 0.03 80);
+  --mandate-foreground: oklch(0.225 0.012 255);
+  --mandate-muted: oklch(0.415 0.015 255);
+  --mandate-strong: oklch(0.415 0.083 80);
+  --mandate-marker: oklch(0.62 0.12 80);
+  --mandate-edge: oklch(0.62 0.12 80);
+  --mandate-soft: oklch(0.985 0.013 80);
+  --selection: oklch(0.925 0.054 80);
+  --ink: oklch(0.225 0.012 255);
+  --ink-foreground: oklch(0.985 0.006 255);
+  --ink-line: oklch(0.415 0.015 255);
+  --crimson: oklch(0.415 0.164 27);
+  --crimson-foreground: oklch(0.985 0.006 255);
+  --gain: oklch(0.415 0.087 150);
+  --loss: oklch(0.415 0.087 12);
+  --warning: oklch(0.415 0.087 70);
+  --info: oklch(0.415 0.087 258);
+  --gain-soft: oklch(0.962 0.017 150);
+  --loss-soft: oklch(0.962 0.017 12);
+  --warning-soft: oklch(0.962 0.017 70);
+  --info-soft: oklch(0.962 0.017 258);
+  --gain-cvd: oklch(0.415 0.087 245);
+  --loss-cvd: oklch(0.415 0.087 55);
+  --gain-cvd-soft: oklch(0.962 0.017 245);
+  --loss-cvd-soft: oklch(0.962 0.017 55);
+  --hatch-ink: oklch(0.365 0.102 258 / 0.3);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -44,8 +62,6 @@
   --input: var(--border);
   --ring: var(--lapis);
   --radius: 0rem;
-
-  --hatch-ink: oklch(0.36 0.1 258 / 0.3);
 
   /* Layout: the gutters the founder asked to tighten (DESIGN.md, Space). */
   --nav-width: 12rem;
@@ -71,6 +87,17 @@
   --duration-dialog-exit: 150ms;
 
   color-scheme: light;
+}
+
+/*
+ * Colour-blind friendly (web/COLOR.md): gain and loss become blue and orange, which stay apart under
+ * deuteranopia and protanopia. Charts read the same attribute, since a canvas cannot read CSS.
+ */
+html:root[data-cvd="on"] {
+  --gain: var(--gain-cvd);
+  --loss: var(--loss-cvd);
+  --gain-soft: var(--gain-cvd-soft);
+  --loss-soft: var(--loss-cvd-soft);
 }
 
 @media (min-width: 40rem) {
@@ -109,16 +136,28 @@
   --color-lapis-foreground: var(--lapis-foreground);
   --color-lapis-muted: var(--lapis-muted);
   --color-lapis-soft: var(--lapis-soft);
-  --color-marigold: var(--marigold);
-  --color-marigold-foreground: var(--marigold-foreground);
-  --color-marigold-muted: var(--marigold-muted);
-  --color-marigold-soft: var(--marigold-soft);
+  --color-lapis-strong: var(--lapis-strong);
+  --color-lapis-line: var(--lapis-line);
+  --color-mandate: var(--mandate);
+  --color-mandate-foreground: var(--mandate-foreground);
+  --color-mandate-muted: var(--mandate-muted);
+  --color-mandate-strong: var(--mandate-strong);
+  --color-mandate-marker: var(--mandate-marker);
+  --color-mandate-edge: var(--mandate-edge);
+  --color-mandate-soft: var(--mandate-soft);
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
+  --color-ink-line: var(--ink-line);
   --color-crimson: var(--crimson);
   --color-crimson-foreground: var(--crimson-foreground);
   --color-gain: var(--gain);
   --color-loss: var(--loss);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-gain-soft: var(--gain-soft);
+  --color-loss-soft: var(--loss-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-info-soft: var(--info-soft);
 
   --font-display: "Big Shoulders Display Variable", ui-sans-serif, system-ui, sans-serif;
   --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
@@ -214,8 +253,8 @@
     outline-offset: 2px;
   }
   ::selection {
-    background-color: var(--marigold);
-    color: var(--marigold-foreground);
+    background-color: var(--selection);
+    color: var(--foreground);
   }
   .font-mono {
     font-variant-numeric: tabular-nums;
@@ -279,8 +318,8 @@
 }
 
 /*
- * The paper hatch: diagonal lapis lines on the account's own colour, the signature of simulated
- * funds. An SVG tile masks a flat token colour (DEC-200: flat colour only).
+ * The paper hatch: diagonal lines in the account's navy, the signature of simulated funds. An SVG
+ * tile masks a flat token colour (DEC-200: flat colour only).
  */
 @utility hatch {
   position: relative;

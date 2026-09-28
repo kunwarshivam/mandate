@@ -18,36 +18,37 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { toHex } from "@/lib/color";
-import { colorTokens } from "@/lib/tokens";
+import { PALETTE, type TokenName } from "@/lib/palette";
 
 /**
  * Placard for TradingView Lightweight Charts. Canvas cannot read CSS variables, so the tokens are
  * converted to hex once. Every fill is one flat colour: an area's top and bottom colours are the
  * same, the background is solid, and there is no animation.
  */
-function token(name: string): string {
-  const found = colorTokens.find((t) => t.name === name);
-  if (!found) throw new Error(`no colour token ${name}`);
-  return toHex(found.value);
-}
+export const CHART_TOKEN = {
+  card: "card",
+  background: "background",
+  foreground: "foreground",
+  muted: "muted",
+  mutedForeground: "muted-foreground",
+  border: "border",
+  lapis: "lapis",
+  lapisSoft: "lapis-soft",
+  lapisForeground: "lapis-foreground",
+  mandateMarker: "mandate-marker",
+  mandateStrong: "mandate-strong",
+  gain: "gain",
+  loss: "loss",
+  gainCvd: "gain-cvd",
+  lossCvd: "loss-cvd",
+  ink: "ink",
+  inkForeground: "ink-foreground",
+} as const satisfies Record<string, TokenName>;
 
-export const CHART_COLOR = {
-  card: token("card"),
-  background: token("background"),
-  foreground: token("foreground"),
-  muted: token("muted"),
-  mutedForeground: token("muted-foreground"),
-  border: token("border"),
-  lapis: token("lapis"),
-  lapisSoft: token("lapis-soft"),
-  lapisForeground: token("lapis-foreground"),
-  marigold: token("marigold"),
-  marigoldForeground: token("marigold-foreground"),
-  gain: token("gain"),
-  loss: token("loss"),
-  ink: token("ink"),
-  inkForeground: token("ink-foreground"),
-} as const;
+export const CHART_COLOR = Object.fromEntries(Object.entries(CHART_TOKEN).map(([key, name]) => [key, toHex(PALETTE.tokens[name].value)])) as Record<
+  keyof typeof CHART_TOKEN,
+  string
+>;
 
 export const CHART_FONT = "'Atkinson Hyperlegible Next Variable', ui-sans-serif, system-ui, sans-serif";
 
@@ -170,12 +171,15 @@ export function lineOptions(tone: Tone): LineSeriesPartialOptions {
   };
 }
 
-export function candleOptions(): CandlestickSeriesPartialOptions {
+/** Gain and loss candles, in blue and orange when colour-blind friendly is on. */
+export function candleOptions(colourBlind = false): CandlestickSeriesPartialOptions {
+  const up = colourBlind ? CHART_COLOR.gainCvd : CHART_COLOR.gain;
+  const down = colourBlind ? CHART_COLOR.lossCvd : CHART_COLOR.loss;
   return {
-    upColor: CHART_COLOR.gain,
-    downColor: CHART_COLOR.loss,
-    wickUpColor: CHART_COLOR.gain,
-    wickDownColor: CHART_COLOR.loss,
+    upColor: up,
+    downColor: down,
+    wickUpColor: up,
+    wickDownColor: down,
     borderVisible: false,
     priceLineVisible: true,
     priceLineColor: CHART_COLOR.foreground,
@@ -199,8 +203,8 @@ export function candleData(bars: Array<Bar | DailyBar>): CandlestickData<Time>[]
 }
 
 /**
- * Who a level belongs to decides its colour: marigold for the mandate (limits, protection), lapis
- * for the account (average cost), ink for a proposal the owner is asked about.
+ * Who a level belongs to decides its colour: a brass line for the mandate (limits, protection),
+ * navy for the account (average cost), ink for a proposal the owner is asked about.
  */
 export type LevelTone = "mandate" | "account" | "proposal";
 
@@ -213,18 +217,33 @@ export interface ChartLevel {
   meaning?: string;
 }
 
+/** The line and its axis label. A brass line is a mark; its label is dark brass so card text reads on it. */
+function levelColours(tone: LevelTone): { line: string; label: string; text: string } {
+  switch (tone) {
+    case "mandate":
+      return { line: CHART_COLOR.mandateMarker, label: CHART_COLOR.mandateStrong, text: CHART_COLOR.card };
+    case "account":
+      return { line: CHART_COLOR.lapis, label: CHART_COLOR.lapis, text: CHART_COLOR.lapisForeground };
+    case "proposal":
+      return { line: CHART_COLOR.ink, label: CHART_COLOR.ink, text: CHART_COLOR.inkForeground };
+    default: {
+      const unhandled: never = tone;
+      throw new Error(`unhandled level tone ${String(unhandled)}`);
+    }
+  }
+}
+
 export function priceLineFor(level: ChartLevel): CreatePriceLineOptions {
-  const color = level.tone === "mandate" ? CHART_COLOR.marigold : level.tone === "account" ? CHART_COLOR.lapis : CHART_COLOR.ink;
-  const text = level.tone === "mandate" ? CHART_COLOR.marigoldForeground : level.tone === "account" ? CHART_COLOR.lapisForeground : CHART_COLOR.inkForeground;
+  const { line, label, text } = levelColours(level.tone);
   return {
     id: level.key,
     price: level.price,
-    color,
+    color: line,
     lineWidth: 2,
     lineStyle: level.tone === "proposal" ? LineStyle.Dashed : LineStyle.Solid,
     lineVisible: true,
     axisLabelVisible: true,
-    axisLabelColor: color,
+    axisLabelColor: label,
     axisLabelTextColor: text,
     title: level.label,
   };

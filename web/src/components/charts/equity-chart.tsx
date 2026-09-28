@@ -48,7 +48,7 @@ export function unmanagedEquity(ws: Workspace): string {
 }
 
 /**
- * The account in lapis, on paper: every agent's equity together, plus what no agent manages. The
+ * The account in navy, on paper: every agent's equity together, plus what no agent manages. The
  * fixture holds that part flat, so the chart ends at the broker's figure and moves with the agents.
  */
 export function AccountEquityChart() {

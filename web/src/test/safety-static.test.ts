@@ -109,6 +109,6 @@ describe("flat fills over Kumo", () => {
 
   it("keeps crimson for the kill switch alone", () => {
     const crimson = SOURCES.filter((f) => /crimson/.test(readFileSync(f, "utf8"))).map((f) => relative(WEB, f));
-    for (const f of crimson) expect(f).toMatch(/kill-switch-button|stop-sheet|lib\/tokens|design\//);
+    for (const f of crimson) expect(f).toMatch(/kill-switch-button|stop-sheet|lib\/(tokens|palette|contrast-pairs)\.ts|design\//);
   });
 });

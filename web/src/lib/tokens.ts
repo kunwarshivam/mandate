@@ -1,78 +1,71 @@
 /**
- * The Placard colour tokens, one entry per CSS custom property in `globals.css` (the test
- * `tokens.test.ts` keeps the two in step). The design page and the contrast checks read this file.
- * Placard is light only; dark mode is follow-up work (web/DESIGN.md).
+ * The Placard colour tokens in navy and brass, one entry per CSS custom property in `globals.css`
+ * (the test `tokens.test.ts` keeps the two in step). Values come from `palette.ts`; this file adds
+ * what each token means. The design page and the contrast checks read it. Placard is light only;
+ * dark mode is follow-up work (web/DESIGN.md).
  */
+import { PAIRS } from "./contrast-pairs";
+import { PALETTE, type RampRef, TOKEN_NAMES, type TokenName } from "./palette";
 
-export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result";
+export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result" | "status";
 
 export interface ColorToken {
-  name: string;
+  name: TokenName;
   meaning: Meaning;
   role: string;
   value: string;
+  ref: RampRef;
 }
 
-export const colorTokens: ColorToken[] = [
-  { name: "background", meaning: "surface", role: "Page: a cool, barely tinted white", value: "oklch(0.975 0.005 250)" },
-  { name: "card", meaning: "surface", role: "Fields that hold reading text: sheets, dialogs, agent identity", value: "oklch(0.995 0.002 250)" },
-  { name: "muted", meaning: "surface", role: "Quiet fields: a running agent's mode, system notices, skeletons", value: "oklch(0.935 0.01 250)" },
-  { name: "border", meaning: "surface", role: "Hairlines between rows", value: "oklch(0.8 0.02 255)" },
-  { name: "foreground", meaning: "text", role: "Text and 2 px rules", value: "oklch(0.21 0.035 258)" },
-  { name: "muted-foreground", meaning: "text", role: "Secondary text, labels, ages", value: "oklch(0.44 0.035 258)" },
-  { name: "primary", meaning: "account", role: "Lapis as the primary action, links, and focus", value: "oklch(0.36 0.1 258)" },
-  { name: "primary-foreground", meaning: "account", role: "Text on a primary action", value: "oklch(0.975 0.005 250)" },
-  { name: "lapis", meaning: "account", role: "The account: its board, its connection, paper hatch, the current page", value: "oklch(0.36 0.1 258)" },
-  { name: "lapis-foreground", meaning: "account", role: "Text on lapis", value: "oklch(0.975 0.005 250)" },
-  { name: "lapis-muted", meaning: "account", role: "Secondary text on lapis", value: "oklch(0.84 0.03 255)" },
-  { name: "lapis-soft", meaning: "account", role: "An account notice: reconciliation, unknown order, activity at the broker", value: "oklch(0.93 0.03 255)" },
-  { name: "marigold", meaning: "mandate", role: "Your mandate: limits, rails, and the envelope", value: "oklch(0.85 0.155 84)" },
-  { name: "marigold-foreground", meaning: "mandate", role: "Text and rail fill on marigold", value: "oklch(0.21 0.035 258)" },
-  { name: "marigold-muted", meaning: "mandate", role: "Secondary text on marigold", value: "oklch(0.36 0.05 70)" },
-  { name: "marigold-soft", meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)", value: "oklch(0.955 0.05 90)" },
-  { name: "ink", meaning: "stopped", role: "A stopped or paused agent, and the Stop control", value: "oklch(0.21 0.035 258)" },
-  { name: "ink-foreground", meaning: "stopped", role: "Text on ink", value: "oklch(0.975 0.005 250)" },
-  { name: "crimson", meaning: "kill", role: "The kill switch, and nothing else", value: "oklch(0.47 0.19 27)" },
-  { name: "crimson-foreground", meaning: "kill", role: "Text on crimson", value: "oklch(0.985 0.004 250)" },
-  { name: "gain", meaning: "result", role: "A gain as text, always with a plus sign and the word", value: "oklch(0.44 0.11 155)" },
-  { name: "loss", meaning: "result", role: "A loss as text, always with a minus sign and the word", value: "oklch(0.49 0.18 10)" },
-];
+export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> = {
+  background: { meaning: "surface", role: "Page: slate, barely tinted toward navy" },
+  card: { meaning: "surface", role: "Fields that hold reading text: sheets, dialogs, agent identity, charts" },
+  muted: { meaning: "surface", role: "Quiet fields: a running agent's mode, system notices, skeletons, chart grid" },
+  border: { meaning: "surface", role: "Hairlines between rows" },
+  foreground: { meaning: "text", role: "Text and 2 px rules" },
+  "muted-foreground": { meaning: "text", role: "Secondary text, labels, ages" },
+  primary: { meaning: "account", role: "Navy as the primary action, links, and focus" },
+  "primary-foreground": { meaning: "account", role: "Text on a primary action" },
+  lapis: { meaning: "account", role: "The account, in navy: its board, its connection, the paper hatch, its chart line" },
+  "lapis-foreground": { meaning: "account", role: "Text on navy" },
+  "lapis-muted": { meaning: "account", role: "Secondary text on navy and on ink" },
+  "lapis-soft": { meaning: "account", role: "An account notice: reconciliation, unknown order, activity at the broker" },
+  "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside a navy surface" },
+  "lapis-line": { meaning: "account", role: "Hairlines inside a navy surface" },
+  mandate: { meaning: "mandate", role: "Your mandate: the pale brass tint the envelope, limits and rails sit on" },
+  "mandate-foreground": { meaning: "mandate", role: "Text on the mandate tint" },
+  "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate tint" },
+  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label" },
+  "mandate-marker": { meaning: "mandate", role: "Rail fill, level marks, and mandate price lines on charts" },
+  "mandate-edge": { meaning: "mandate", role: "The 4 px brass rule on top of the mandate tint" },
+  "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
+  selection: { meaning: "mandate", role: "Selected text" },
+  ink: { meaning: "stopped", role: "A stopped or paused agent, and the Stop control" },
+  "ink-foreground": { meaning: "stopped", role: "Text on ink" },
+  "ink-line": { meaning: "stopped", role: "Hairlines inside an ink surface" },
+  crimson: { meaning: "kill", role: "The kill switch, and nothing else" },
+  "crimson-foreground": { meaning: "kill", role: "Text on crimson" },
+  gain: { meaning: "result", role: "A gain as text, always with a plus sign and the word; an up candle" },
+  loss: { meaning: "result", role: "A loss as text, always with a minus sign and the word; a down candle" },
+  warning: { meaning: "status", role: "Warning, amber: Kumo's warning role, on no screen yet" },
+  info: { meaning: "status", role: "Info text, in the brand hue: Kumo's info role" },
+  "gain-soft": { meaning: "status", role: "Success tint" },
+  "loss-soft": { meaning: "status", role: "Loss tint" },
+  "warning-soft": { meaning: "status", role: "Warning tint" },
+  "info-soft": { meaning: "status", role: "Info tint" },
+  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on (blue)" },
+  "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on (orange)" },
+  "gain-cvd-soft": { meaning: "status", role: "Success tint when colour-blind friendly is on" },
+  "loss-cvd-soft": { meaning: "status", role: "Loss tint when colour-blind friendly is on" },
+};
+
+export const colorTokens: ColorToken[] = TOKEN_NAMES.map((name) => ({ name, ...TOKEN_ROLES[name], ...PALETTE.tokens[name] }));
 
 /** Text/background pairs that carry reading text. Each must reach WCAG AA (4.5:1). */
-export const textPairs: Array<{ fg: string; bg: string; use: string }> = [
-  { fg: "foreground", bg: "background", use: "Body text on the page" },
-  { fg: "foreground", bg: "card", use: "Body text on a card field" },
-  { fg: "foreground", bg: "muted", use: "Text on a quiet field" },
-  { fg: "foreground", bg: "lapis-soft", use: "Account notice text" },
-  { fg: "foreground", bg: "marigold-soft", use: "Notice text when your mandate acted" },
-  { fg: "muted-foreground", bg: "background", use: "Secondary text on the page" },
-  { fg: "muted-foreground", bg: "card", use: "Secondary text on a card field" },
-  { fg: "muted-foreground", bg: "muted", use: "Secondary text on a quiet field" },
-  { fg: "muted-foreground", bg: "lapis-soft", use: "Secondary text in an account notice" },
-  { fg: "muted-foreground", bg: "marigold-soft", use: "Secondary text in a mandate notice" },
-  { fg: "primary", bg: "background", use: "Links on the page" },
-  { fg: "primary", bg: "card", use: "Links on a card field" },
-  { fg: "primary-foreground", bg: "primary", use: "Primary action label" },
-  { fg: "lapis-foreground", bg: "lapis", use: "Text on the account board" },
-  { fg: "lapis-muted", bg: "lapis", use: "Secondary text on the account board" },
-  { fg: "marigold", bg: "lapis", use: "A mode that is not normal, on the account board" },
-  { fg: "marigold-foreground", bg: "marigold", use: "Text on the mandate field" },
-  { fg: "marigold-muted", bg: "marigold", use: "Secondary text on the mandate field" },
-  { fg: "ink-foreground", bg: "ink", use: "Stopped mode label, Stop control label" },
-  { fg: "crimson-foreground", bg: "crimson", use: "Kill switch label" },
-  { fg: "gain", bg: "card", use: "Gains on a card field" },
-  { fg: "gain", bg: "background", use: "Gains on the page" },
-  { fg: "loss", bg: "card", use: "Losses on a card field" },
-  { fg: "loss", bg: "background", use: "Losses on the page" },
-];
+export const textPairs = PAIRS.filter((p) => p.kind !== "mark");
 
 /** Non-text marks that must reach 3:1 against their surface (WCAG 1.4.11). */
-export const markPairs: Array<{ fg: string; bg: string; use: string }> = [
-  { fg: "marigold-foreground", bg: "marigold", use: "Rail fill and limit wall on the mandate field" },
-  { fg: "ink", bg: "background", use: "An ink mode field against the page" },
-  { fg: "lapis", bg: "card", use: "Paper badge border, focus ring" },
-  { fg: "crimson", bg: "card", use: "Kill switch against a sheet" },
-];
+export const markPairs = PAIRS.filter((p) => p.kind === "mark");
 
 export function tokenValue(name: string): string {
   const token = colorTokens.find((t) => t.name === name);

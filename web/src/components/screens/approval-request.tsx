@@ -157,12 +157,12 @@ function Request({ approvalId }: { approvalId: string }) {
         </div>
       </header>
 
-      <section aria-labelledby="risk-title" className="reveal grid gap-4 bg-marigold px-3 py-3 text-marigold-foreground sm:px-4 sm:py-4" style={{ "--i": 1 } as CSSProperties}>
+      <section aria-labelledby="risk-title" className="reveal grid gap-4 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4 sm:pt-3 sm:pb-4" style={{ "--i": 1 } as CSSProperties}>
         <div className="grid gap-1">
-          <h2 id="risk-title" className="text-heading">
+          <h2 id="risk-title" className="text-heading text-mandate-strong">
             Risk impact in dollars
           </h2>
-          <p className="text-sm text-marigold-muted">Measured against your mandate, as if this order fills.</p>
+          <p className="text-sm text-mandate-muted">Measured against your mandate, as if this order fills.</p>
         </div>
         {capped.length > 0 ? (
           <div className="grid gap-4">
@@ -172,7 +172,7 @@ function Request({ approvalId }: { approvalId: string }) {
           </div>
         ) : null}
         {uncapped.length > 0 ? (
-          <dl className="grid gap-2 border-t border-marigold-foreground/25 pt-3">
+          <dl className="grid gap-2 border-t border-mandate-strong/25 pt-3">
             {uncapped.map((f) => (
               <RiskFigureRow key={f.field} figure={f} />
             ))}

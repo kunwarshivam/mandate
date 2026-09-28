@@ -20,7 +20,7 @@ import { describeRestriction } from "@/lib/restrictions";
 
 /**
  * An agent as a sign band: its mode field (read from across the room), its identity and money on
- * a card field, and your mandate on marigold. Restrictions follow on their own fields, each in the
+ * a card field, and your mandate on its own field. Restrictions follow on their own fields, each in the
  * colour of whoever imposed it. Fields sit on seams, never inside one another. The whole band opens
  * the agent; its name is the link.
  */
@@ -81,7 +81,7 @@ export function AgentCard({
               Today
               {daily ? (
                 <>
-                  <span className="ml-1.5 inline-block h-0.5 w-3 bg-marigold" />
+                  <span className="ml-1.5 inline-block h-0.5 w-3 bg-mandate-marker" />
                   Daily loss limit
                 </>
               ) : null}
@@ -119,8 +119,8 @@ export function AgentCard({
         </p>
       </div>
 
-      <div className="grid content-start gap-3 bg-marigold px-3 py-3 text-marigold-foreground sm:px-4">
-        <p className="font-display text-base leading-none font-extrabold uppercase">Your mandate</p>
+      <div className="grid content-start gap-3 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4">
+        <p className="font-display text-base leading-none font-extrabold text-mandate-strong uppercase">Your mandate</p>
         {rails.map((rail) => (
           <LimitRail key={rail.key} rail={rail} />
         ))}

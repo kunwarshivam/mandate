@@ -179,7 +179,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Section title="Protection">
-          <p className={cn("flex items-start gap-2 px-3 py-2.5 text-sm sm:px-4", unprotected ? "bg-muted font-bold" : "bg-marigold-soft")} data-slot="protection">
+          <p className={cn("flex items-start gap-2 px-3 py-2.5 text-sm sm:px-4", unprotected ? "bg-muted font-bold" : "bg-mandate-soft")} data-slot="protection">
             <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
             {protectionText(position)}
           </p>
