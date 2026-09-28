@@ -944,22 +944,6 @@ impl Shell {
     /// `CompensatingEvent`. The run is asserted to draft only its record, the positions it
     /// observed, the account snapshot when an account was already reported, and that adoption
     /// when such an order exists, so a case's own subject is never changed behind its back.
-    /// The payload of the last `ProtectionChanged placed` on the account stream that names `id`,
-    /// which is how `ready()` describes a resting protective order as the broker holds it: a GTC
-    /// OCO at its take-profit with its stop as the child leg, or a stop-limit for crypto.
-    fn placed_protection(&self, id: &str) -> Option<&Value> {
-        self.account_journal
-            .iter()
-            .rev()
-            .filter(|event| event.event_type == "ProtectionChanged")
-            .map(|event| &event.payload)
-            .find(|payload| {
-                matches!(payload.get("action"), Some(Value::Str(action)) if action == "placed")
-                    && matches!(payload.get("orders"), Some(Value::Str(orders))
-                        if orders.split([',', ' ']).any(|named| named == id))
-            })
-    }
-
     pub fn ready(&mut self, ports: &Ports<'_>) {
         let reported = self.state.observed_account().is_some();
         let in_doubt = self
