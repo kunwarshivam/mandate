@@ -78,29 +78,30 @@ development.
 
 The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
-and dense), in the navy and brass palette and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
+and dense), in Ink and Gold, light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
 treatments, and the do and don't list; `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.
 
-- **Colour means one thing each** (navy and brass, `web/COLOR.md`). Brass is your mandate, navy is
-  the account, ink is a stopped agent and the Stop control, crimson is the kill switch and nothing
-  else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
-  once in `src/lib/palette.ts`, mirrored in `src/app/globals.css`; `tokens.test.ts` and
-  `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA.
+- **Colour means one thing each** (Ink and Gold, `web/COLOR.md`). Gold is your mandate and the
+  account's line, ink is the account's actions, a stopped agent and the Stop control, crimson is
+  the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
+  once in `src/lib/palette.ts`, for both themes, mirrored in `src/app/globals.css`; `tokens.test.ts`
+  and `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA in either theme.
 - **APCA is dev only.** `apca-w3` (its own limited licence) and its AGPL-3.0 dependency
   `colorparsley` are dev dependencies used only by the contrast tests (`src/test/apca.ts`). Lint
   bans them in app code, and `npm run build` ends with `scripts/no-apca.mjs`, which fails if either
   reached `.next`. `/design` and `/palette` show WCAG ratios only.
-- **Light only.** Dark mode is follow-up work; there is no theme toggle.
+- **Light and dark.** Light, Dark or System from the theme menu in the header, kept in the
+  `owlhead-theme` cookie. The dark theme is tokens alone: there is no `dark:` class in `src/`.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
 - **Type.** Mona Sans for everything, in sentence case, with tabular figures and a plain zero;
   weight 600 at most. Self-hosted through `@fontsource-variable/mona-sans`.
 - **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
-  (DEC-203), always navy on a light surface, with no tagline; the "navy and brass" palette is
-  DEC-202. `npm run brand` regenerates the favicons, app icons, share image and manifest in
+  (DEC-203), ink on light and off-white on dark (DEC-204), with no tagline. The icons, favicons and
+  share image are the ink mark on off-white. `npm run brand` regenerates the favicons, app icons, share image and manifest in
   `public/` from `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`; commit its output,
   because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
   the rules.

@@ -97,16 +97,18 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   (`owlhead-wordmark.svg`): no font file is committed and the UI loads no font for it. The lockup is
   the mark and the wordmark side by side. The old M mark in `assets/brand/` is the codename's and is
   not used in the UI.
-- **Always navy on light** (the founder, 2026-09-28: "Can we flip it?"). The mark, wordmark and
-  lockup are navy #183D73 on a light surface, never off-white on a navy block, in every place they
-  appear: the shell, the favicon, the app icons and the share image. There is no dark-mode variant.
+- **Ink on light, off-white on dark** (DEC-204, amending DEC-203). In the app the mark, wordmark
+  and lockup take the type colour: ink #14161A on the light theme, off-white on the dark one. The
+  favicon, app icons and share image are the ink mark on an off-white tile, the same in every
+  browser theme. The brand is never gold and never on a coloured block.
 - **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
   in the page metadata or the share card.
-- **Palette (DEC-202).** "Navy and brass": navy #183D73, brass #AC7D1B as the one accent (rules,
-  borders, large type, never body text), dark brass #634606, brass tint #FDF1DC, slate ink #181C21
-  and off-white #F7FAFE, at about 60/30/10 neutrals, navy and brass. The brand assets take these
-  values from `src/lib/brand-palette.ts`, and the UI tokens are ramp steps of the same
-  palette (`COLOR.md`).
+- **Palette (DEC-204).** Ink and Gold, light and dark: ink #14161A type on paper #FDFCFA in light
+  mode and the reverse in dark (night #0B0D11); gold #AB7D13 as the one accent (lines, rails,
+  marks; never body text, never a block), dark gold #6A4D08 for gold as text, gold tint #FFF6E6
+  for the mandate's field; crimson for the kill switch alone. About 60/30/10 paper, ink and gold.
+  The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
+  UI palette (`COLOR.md`).
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
