@@ -413,10 +413,14 @@ mod tests {
         AssetClass, Bar, CorporateActions, DatasetId, DayRange, Feed, Kind, Records, Split,
         SplitRatio, Symbol,
     };
-    use mandate_num::Price;
+    use mandate_num::{Price, Qty};
     use mandate_time::{Date, UtcNanos};
 
-    use mandate_executor::{BrokerRequest, ConnectorError};
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_executor::{
+        BrokerRequest, ClientOrderId, ConnectorError, EventId, IntentId, OrderType, Purpose,
+        SubmitOrder, TimeInForce,
+    };
 
     use super::{Disconnected, MovingAverage, StoredBars, split_inside, trusted};
     use crate::error::Cause;
@@ -587,8 +591,30 @@ mod tests {
     /// Review round 1, major 3: the only connector the shipped binary holds refuses every request
     /// before it leaves the process.
     #[test]
-    fn the_disconnected_connector_sends_nothing() {
-        for request in [BrokerRequest::GetAccount, BrokerRequest::ListPositions] {
+    fn the_disconnected_connector_sends_nothing() -> Result<(), String> {
+        let submit = BrokerRequest::Submit(SubmitOrder {
+            client_order_id: ClientOrderId::for_intent(&IntentId(EventId(
+                "01KFDZ3GXS0000000000000000".to_owned(),
+            )))
+            .map_err(|e| e.to_string())?,
+            instrument: InstrumentId::new("b0b6dd9d-8b9b-48a9-ba46-b9d54906e415")
+                .map_err(|e| e.to_string())?,
+            side: Side::Buy,
+            qty: Qty::parse("1").map_err(|e| e.to_string())?,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::Day,
+            limit_price: Some(Price::parse("255.2").map_err(|e| e.to_string())?),
+            stop_price: None,
+            bracket: None,
+            oco: None,
+            extended_hours: false,
+            purpose: Purpose::Open,
+        });
+        for request in [
+            submit,
+            BrokerRequest::GetAccount,
+            BrokerRequest::ListPositions,
+        ] {
             assert_eq!(
                 Disconnected.call(&request),
                 Err(ConnectorError::NotSent {
@@ -596,6 +622,7 @@ mod tests {
                 })
             );
         }
+        Ok(())
     }
 
     #[test]
@@ -791,6 +818,46 @@ mod tests {
             MovingAverage.signal(&crossed, &up),
             Err(Cause::Backtest(BacktestError::StrategyWindowsCrossed))
         ));
+        Ok(())
+    }
+
+    /// #241 review round 2, minor 1: the fast window is the one the envelope states. Over these 20
+    /// closes (14 at 101, one at 0.01, five at 100.5) the slow average is 95.8255: the last 5
+    /// average 100.5, above it, but the last 6 average 83.7517 and the last 15 average 94.1007,
+    /// both below it. So a fast window of 5 says `Long` and one of 6 or 15 says `Flat`.
+    #[test]
+    fn the_fast_window_is_the_one_the_envelope_states() -> Result<(), String> {
+        let mut closes = vec!["101".to_owned(); 14];
+        closes.push("0.01".to_owned());
+        closes.extend(vec!["100.5".to_owned(); 5]);
+        let closes = prices(&closes)?;
+        let with = |fast: &str| {
+            MovingAverage.signal(
+                &model(
+                    "quant.ma_crossover",
+                    &[("fast_periods", fast), ("slow_periods", "20")],
+                ),
+                &closes,
+            )
+        };
+        assert!(matches!(with("5"), Ok(Signal::Long)), "{:?}", with("5"));
+        assert!(matches!(with("6"), Ok(Signal::Flat)), "{:?}", with("6"));
+        assert!(matches!(with("15"), Ok(Signal::Flat)), "{:?}", with("15"));
+        Ok(())
+    }
+
+    /// #241 review round 2, minor 3: a partition on disk that the manifest does not list is never
+    /// read. `inspect` reports it as unlisted, so the whole dataset is refused before any partition
+    /// is read, and the stray close cannot reach the windows.
+    #[test]
+    fn a_partition_the_manifest_does_not_list_is_never_read() -> Result<(), String> {
+        let scratch = Scratch::new("unlisted")?;
+        let dir = aapl(&scratch.0, &[], &[])?;
+        let listed = dir.join(partition_name(day("2026-08-26")?));
+        let stray = dir.join(partition_name(day("2026-08-29")?));
+        fs::copy(&listed, &stray).map_err(|e| e.to_string())?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        assert_eq!(what, "a partition cannot be trusted");
         Ok(())
     }
 
