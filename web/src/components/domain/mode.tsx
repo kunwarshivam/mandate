@@ -1,7 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { CircleCheck, CirclePause, CircleSlash, LogOut } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";

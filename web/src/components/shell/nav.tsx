@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { Gauge, Inbox, ScrollText, Settings2, Workflow } from "lucide-react";
 
 export const NAV = [

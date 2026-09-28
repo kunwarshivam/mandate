@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import type { HealthState, Workspace } from "@/fixtures/types";
 import { ago, clock } from "@/lib/format";
 import { FixtureTag } from "@/components/domain/placeholders";

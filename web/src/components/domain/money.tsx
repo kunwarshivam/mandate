@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "motion/react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import type { Dec } from "@/lib/decimal";
 import { direction, directionWord, signedUsd, usd } from "@/lib/format";
 

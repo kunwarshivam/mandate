@@ -1,4 +1,4 @@
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import type { Environment } from "@/fixtures/types";
 
 /** Shown wherever an agent, a connection, or money appears (brief §5, rule 8). */

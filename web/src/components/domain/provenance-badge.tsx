@@ -1,4 +1,4 @@
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import type { FieldProvenance } from "@/fixtures/types";
 import { PROVENANCE_LABEL, isPlatformAuthored } from "@/lib/labels";

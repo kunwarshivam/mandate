@@ -1,4 +1,4 @@
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { ago, clock } from "@/lib/format";
 
 /** "as of 14:02:11, 3 min ago". A stale value keeps its figure and says how old it is. */
