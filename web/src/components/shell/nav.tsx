@@ -21,7 +21,7 @@ function isActive(pathname: string, href: string): boolean {
 
 /**
  * Phones keep a bottom tab bar; the sidebar opens as a sheet from the header. The current tab's
- * icon fills and sits on a soft navy pill that glides between tabs; with reduced motion it jumps.
+ * icon fills and sits on a pale gold pill that glides between tabs; with reduced motion it jumps.
  */
 export function TabNav({ approvals }: { approvals: number }) {
   const pathname = usePathname();

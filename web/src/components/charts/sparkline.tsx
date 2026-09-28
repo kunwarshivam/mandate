@@ -2,7 +2,7 @@ import { cn } from "@/lib/utils";
 import type { Point } from "@/fixtures/market";
 
 /**
- * Today's equity as one line, with the daily loss limit as a brass rule. The vertical range
+ * Today's equity as one line, with the daily loss limit as a gold rule. The vertical range
  * always includes the limit, so the gap between them is to scale. It stretches to its column and
  * keeps its strokes hairline-true. Decoration: `label` says it.
  */

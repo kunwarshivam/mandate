@@ -43,7 +43,7 @@ export function useChartMode(): ThemeMode {
 }
 
 /**
- * A quiet segmented control. The current range sits on a soft navy pill that glides to the next one
+ * A quiet segmented control. The current range sits on a pale gold pill that glides to the next one
  * (a 300 ms spring; with reduced motion it jumps). Each option is a pressed-state button, so
  * the group reads as one control with one choice.
  */

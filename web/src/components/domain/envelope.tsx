@@ -113,7 +113,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
 }
 
 /**
- * The envelope: an agent's limits in dollars on one soft brass field, the colour of your mandate.
+ * The envelope: an agent's limits in dollars on one pale gold field, the colour of your mandate.
  * Everything inside sits directly on the field; nothing is boxed inside it.
  */
 export function Envelope({ agent, compact = false, className }: { agent: Agent; compact?: boolean; className?: string }) {

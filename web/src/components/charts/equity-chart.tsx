@@ -156,7 +156,7 @@ function EquityHero({
 }
 
 /**
- * The account in navy, on paper: every agent's equity together, plus what no agent manages. The
+ * The account as a gold line, on paper: every agent's equity together, plus what no agent manages. The
  * fixture holds that part flat, so the chart ends at the broker's figure and moves with the agents.
  */
 export function AccountEquityChart() {
@@ -200,7 +200,7 @@ export function AccountEquityChart() {
   );
 }
 
-/** One agent's equity with its mandate's levels drawn as labelled brass lines and listed in words. */
+/** One agent's equity with its mandate's levels drawn as labelled dashed lines and listed in words. */
 export function AgentEquityChart({ agent }: { agent: Agent }) {
   const market = useMarket();
   const { stale, asOf, now } = useStale();

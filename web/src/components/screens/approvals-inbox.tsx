@@ -13,7 +13,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "./common";
 
-/** Open requests sit on a soft navy tint you can act on; resolved ones recede to muted type, with their status as a label. */
+/** Open requests sit on a pale gold tint you can act on; resolved ones recede to muted type, with their status as a label. */
 function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
   const open = approval.status === "delivered";
   return (

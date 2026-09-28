@@ -74,21 +74,39 @@ describe("Owlhead", () => {
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
-  it("sets the sidebar header on a light surface, with the brand in navy and no lapis block", () => {
+  it("sets the sidebar header on the page's own surface, with the brand in the logo colour and no account block", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
     expect(header).toHaveClass("bg-background");
     expect(header?.closest("[data-surface]")).toBeNull();
     expect(header?.querySelector("[data-surface]")).toBeNull();
     for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
-      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("rgb(24, 61, 115)");
+      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
       expect(brand.closest("[data-surface]")).toBeNull();
     }
   });
 
-  it("offers no theme toggle: the UI is light only", () => {
-    renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(screen.queryByRole("button", { name: /theme/i })).toBeNull();
+  it("offers light, dark and system from the theme menu, and a choice sets the mode and the cookie", async () => {
+    const root = document.documentElement;
+    try {
+      renderWithRuntime(<AppShell>{null}</AppShell>);
+      const triggers = screen.getAllByRole("button", { name: "Theme" });
+      expect(triggers.length).toBe(2);
+      fireEvent.click(triggers[0]);
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Light", "Dark", "System"]);
+      fireEvent.click(within(menu).getByRole("menuitem", { name: "Dark" }));
+      expect(root.dataset.mode).toBe("dark");
+      expect(root.classList.contains("dark")).toBe(true);
+      expect(root.dataset.themePref).toBe("dark");
+      expect(document.cookie).toContain("owlhead-theme=dark");
+    } finally {
+      document.cookie = "owlhead-theme=; path=/; max-age=0";
+      delete root.dataset.mode;
+      delete root.dataset.themePref;
+      root.classList.remove("dark");
+      root.style.colorScheme = "";
+    }
   });
 });
 

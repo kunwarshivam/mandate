@@ -261,8 +261,9 @@ export function candleData(bars: Array<Bar | DailyBar>): CandlestickData<Time>[]
 }
 
 /**
- * Who a level belongs to decides its colour: a brass line for the mandate (limits, protection),
- * navy for the account (average cost), ink for a proposal the owner is asked about.
+ * Who a level belongs to decides its look: a dashed grey line with a gold label for the mandate
+ * (limits, protection), a solid gold line for the account (average cost), a dashed ink line for a
+ * proposal the owner is asked about. The mandate's line stays grey so it never reads as the account's.
  */
 export type LevelTone = "mandate" | "account" | "proposal";
 
@@ -275,7 +276,7 @@ export interface ChartLevel {
   meaning?: string;
 }
 
-/** The line and its axis label. A brass line is a mark; its label is a pale brass tag in dark brass type. */
+/** The line and its axis label. A mandate level's label is a pale gold tag in dark gold type. */
 function levelColours(tone: LevelTone): { line: string; label: string; text: string } {
   switch (tone) {
     case "mandate":

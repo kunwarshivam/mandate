@@ -221,8 +221,8 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
 }
 
 /**
- * Kumo's Sidebar, quiet: the page's slate tone with no rule, so the content column carries the
- * weight. The header carries the navy Owlhead brand and the account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
+ * Kumo's Sidebar, quiet: the page's paper tone with no rule, so the content column carries the
+ * weight. The header carries the Owlhead brand in ink (off-white in dark) and the account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
  * holds back the header or the Stop control.
  */
 export function AppSidebar() {
