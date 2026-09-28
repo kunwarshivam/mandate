@@ -4352,6 +4352,23 @@ fn an_unknown_order_holds_an_exit_in_that_instrument_alone() {
         held.submissions().is_empty(),
         "an Unknown order in the same instrument is one of the four holds rule 13 names"
     );
+    let gate = held.draft("GateDecided").map(|draft| {
+        (
+            draft
+                .payload
+                .get("verdict")
+                .and_then(mandate_canon::Value::as_str),
+            draft
+                .payload
+                .get("reason_code")
+                .and_then(mandate_canon::Value::as_str),
+        )
+    });
+    assert_eq!(
+        gate,
+        Some((Some("hold"), Some("unknown_order_in_flight"))),
+        "held for the Unknown, and named so"
+    );
 
     let elsewhere = shell.run(
         handoff(
