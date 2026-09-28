@@ -147,7 +147,7 @@ Lightweight Charts draws on a canvas, which cannot read CSS variables, so `src/c
 ## Usage rules
 
 - **60/30/10.** Neutrals fill the page, cards and quiet fields. Navy is the account board, the account block in the navigation, primary actions and links. Brass is the rule on top of the mandate panel, the rail fills, the level marks, the mandate labels and the chart levels, and nothing else.
-- **One meaning per colour.** A colour never appears outside its meaning. Crimson appears only in the Stop sheet, and a test fails if any other product file uses it. Loss is text and markers only, never a fill and never crimson.
+- **One meaning per colour.** A colour never appears outside its meaning. Crimson is the kill switch alone: the kill-switch choices in the Stop sheet and the switch on the kill-switch record screens. A test fails if any other product file uses it. Loss is text and markers only, never a fill and never crimson.
 - **No colour without words.** Gains and losses carry a sign and a word. Modes carry a label and an icon. A restriction carries a tag naming who imposed it. A chart level carries its name on the axis and in the legend.
 - **Never coloured:** system states (stale, unreachable, loading, errors), deadlines, Approve and Skip, provenance, and decoration.
 - **Warning is reserved.** No screen uses it, and a test keeps it off every screen, including Kumo's `warning` and `alert` variants. When a warning is first needed, it gets an icon and the word "Warning" on its tint, outside the mandate panel.
