@@ -362,6 +362,10 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
 /// shows each member it knows is compared, which an arm that read a member and ignored its value would
 /// pass the sweep and fail here.
 ///
+/// A non-empty name set (`restrictions`, `instrument_restrictions`, `pending`) is edited name by name,
+/// for the same reason as the journal below: `edited` replaces a list's first element only, so a second
+/// name was never swept (#276 review, and the coordinator's ruling there).
+///
 /// A non-empty journal is edited member by member in every event, not by replacing its first event:
 /// replacing the first event left every later event's members unswept, so a fold that journalled the
 /// right first event and a wrong second one could not be told from a right one here (#271 review, note
@@ -397,16 +401,16 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
         for (index, members) in steps.iter().enumerate() {
             for member in members {
                 let step = format!("step {}:", index.saturating_add(1));
-                let events = fixture["cases"]
+                let listed = fixture["cases"]
                     .as_array()
                     .expect("a case list")
                     .iter()
                     .find(|c| c["id"] == id.as_str())
                     .expect("the case")["steps"][index]["expect"][member]
                     .as_array()
-                    .filter(|_| member == "journal")
                     .cloned()
                     .unwrap_or_default();
+                let events: &[Json] = if member == "journal" { &listed } else { &[] };
                 for (position, event) in events.iter().enumerate() {
                     for key in event.as_object().expect("a journal event").keys() {
                         let mut doctored = fixture.clone();
@@ -427,7 +431,26 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
                         edits += 1;
                     }
                 }
-                if !events.is_empty() {
+                let names: &[Json] = if member == "journal" { &[] } else { &listed };
+                for (position, name) in names.iter().enumerate() {
+                    let mut doctored = fixture.clone();
+                    let value = &mut doctored["cases"]
+                        .as_array_mut()
+                        .expect("a case list")
+                        .iter_mut()
+                        .find(|c| c["id"] == id.as_str())
+                        .expect("the case")["steps"][index]["expect"][member][position];
+                    *value = edited(name);
+                    let failure =
+                        run(doctored, id).expect_err("an edited listed name must fail the case");
+                    assert!(
+                        failure.contains(&step) && failure.contains(member.as_str()),
+                        "{id}: an edited name {} of `{member}` at {step} must fail there, naming it, got: {failure}",
+                        position.saturating_add(1)
+                    );
+                    edits += 1;
+                }
+                if !listed.is_empty() {
                     continue;
                 }
                 let mut doctored = fixture.clone();
@@ -449,9 +472,10 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
         }
     }
     assert_eq!(
-        edits, 1_912,
-        "every member of every step of the 24 cases was edited once, and every member of every one of \
-         the 138 journal events in place of the journal's first event alone"
+        edits, 1_939,
+        "every member of every step of the 24 cases was edited once, every member of every one of the \
+         138 journal events, and every one of the 106 names the three name sets list, each in place of \
+         its list's first element alone"
     );
 }
 
