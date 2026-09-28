@@ -11,7 +11,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@fontsource-variable/archivo": "^5.3.0",
+    "@fontsource-variable/atkinson-hyperlegible-next": "^5.3.0",
+    "@fontsource-variable/azeret-mono": "^5.3.0",
+    "@fontsource-variable/big-shoulders-display": "^5.3.0",
     "@fontsource-variable/bricolage-grotesque": "^5.3.0",
+    "@fontsource-variable/funnel-display": "^5.3.0",
+    "@fontsource-variable/funnel-sans": "^5.3.0",
     "@fontsource-variable/hanken-grotesk": "^5.3.0",
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "class-variance-authority": "^0.7.1",
