@@ -92,3 +92,8 @@
 'MC-N25' = { status = "passing", story = "E17-3" }
 'MC-N27' = { status = "passing", story = "E17-9" }
 'MC-N28' = { status = "passing", story = "E17-9" }
+'MC-T01' = { status = "passing", story = "E6-4" }
+'MC-T02' = { status = "passing", story = "E6-4" }
+'MC-T03' = { status = "passing", story = "E6-4" }
+'MC-T04' = { status = "passing", story = "E6-4" }
+'MC-T05' = { status = "passing", story = "E6-4" }
