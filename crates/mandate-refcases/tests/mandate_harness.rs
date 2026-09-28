@@ -314,7 +314,6 @@ fn the_goal_and_risk_state_arms_name_their_stub_rather_than_passing() {
 /// member to a value no MC-T case can produce — a date in 2000, an instant at that date's UTC midnight,
 /// a length one hour longer — so the edited case can only fail on the member that was edited.
 #[test]
-#[ignore = "pending E6-4"]
 fn every_risk_day_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
     let ids: Vec<String> = fixture["cases"]

@@ -575,7 +575,6 @@ fn reconcile_mismatch_pauses() {
 
 /// The connector type the manual run uses is the one CI drives, over any transport.
 #[test]
-#[ignore = "pending E7-7"]
 fn the_connector_is_the_alpaca_client_over_the_given_transport() {
     let transport = Scripted::new(Broker::Fresh);
     let seen = Rc::clone(&transport.seen);

@@ -13,10 +13,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
-use mandate_num::{Price, Qty, Ratio, Usd};
-use mandate_time::{Date, UtcNanos};
+use mandate_num::{NumError, Price, Qty, Ratio, Rounding, Usd, UsdExact};
+use mandate_time::{Date, TimeError, UtcNanos, new_york_date_and_hour, new_york_midnight};
 
-use crate::document::{LadderAction, OnComplete};
+use crate::document::{LadderAction, OnComplete, Pointer};
 use crate::validate::ValidatedMandate;
 use crate::{SchemaDec, SpecError};
 
@@ -519,9 +519,27 @@ pub struct RiskDay {
 }
 
 /// The risk day containing an instant, and its bounds.
+///
+/// The day is the New York calendar date of `at`, and its bounds are that date's midnight and the next
+/// date's, so the boundary instant is the first of the day it opens. `length_s` is the distance between
+/// the two bounds rather than a count kept beside them, which is how a daylight-saving day comes out at
+/// 23 or 25 hours without the rule naming either (America/New_York changes at 02:00, so both midnights
+/// always exist).
 pub fn risk_day(at: UtcNanos) -> Result<RiskDay, SpecError> {
-    let _ = at;
-    Err(SpecError::Unimplemented)
+    let (day, _) = new_york_date_and_hour(at)?;
+    let starts_at = new_york_midnight(day)?;
+    let ends_at = new_york_midnight(day.next()?)?;
+    let length_s = ends_at
+        .secs()
+        .checked_sub(starts_at.secs())
+        .and_then(|seconds| u32::try_from(seconds).ok())
+        .ok_or(TimeError::OutOfRange)?;
+    Ok(RiskDay {
+        day,
+        starts_at,
+        ends_at,
+        length_s,
+    })
 }
 
 /// Breach-time confirmation (§5.6), kept as its own type because three limits and one goal condition
@@ -551,8 +569,20 @@ impl Confirmation {
         elapsed_s: u64,
         need_s: u32,
     ) -> Result<bool, SpecError> {
-        let _ = (breached, elapsed_s, need_s);
-        Err(SpecError::Unimplemented)
+        let need_s = u64::from(need_s);
+        if self.breached_at_last_input {
+            self.accumulated_s = add_seconds(self.accumulated_s, elapsed_s)?;
+        } else {
+            self.false_run_s = add_seconds(self.false_run_s, elapsed_s)?;
+            if self.false_run_s >= need_s {
+                self.accumulated_s = 0;
+            }
+        }
+        if breached {
+            self.false_run_s = 0;
+        }
+        self.breached_at_last_input = breached;
+        Ok(breached && self.accumulated_s >= need_s)
     }
 
     /// True while breach time is accumulating, which is what a step reports as `pending`.
@@ -579,15 +609,33 @@ pub fn size_factor(
     ladder: &[crate::document::LadderRung],
     active: &BTreeMap<u8, u64>,
 ) -> Result<Ratio, SpecError> {
-    let _ = (ladder, active);
-    Err(SpecError::Unimplemented)
+    let mut product = UsdExact::one();
+    for index in active.keys() {
+        let factor = ladder
+            .get(usize::from(*index))
+            .and_then(|rung| rung.factor.as_ref())
+            .ok_or(SpecError::InvalidInput {
+                what: "an active rung that is not a scale_sizes rung of this ladder",
+            })?;
+        product = product.checked_mul(decimal(
+            factor,
+            &format!("/risk/drawdown_ladder/{index}/factor"),
+        )?)?;
+    }
+    Ok(Ratio::parse(&narrow(product)?.to_string())?)
 }
 
 /// The order §5.8 lifts scale rungs in after a reset: highest `at` first, each after
 /// `scale_lift_after_s` of session time, so sizes return in steps rather than at once.
 pub fn reset_lift_order(ladder: &[crate::document::LadderRung]) -> Result<Vec<u8>, SpecError> {
-    let _ = ladder;
-    Err(SpecError::Unimplemented)
+    let mut scale = ladder
+        .iter()
+        .enumerate()
+        .filter(|(_, rung)| rung.action == LadderAction::ScaleSizes)
+        .map(|(index, rung)| Ok((rung_index(index)?, &rung.at)))
+        .collect::<Result<Vec<(u8, &SchemaDec)>, SpecError>>()?;
+    scale.sort_by(|(_, left), (_, right)| right.cmp(left));
+    Ok(scale.into_iter().map(|(index, _)| index).collect())
 }
 
 /// Every limit's condition at a state, and whether its 1.25x hard level is reached (§5.2, §5.6).
@@ -597,4 +645,203 @@ pub fn conditions(
 ) -> Result<BTreeMap<LimitKey, (bool, bool)>, SpecError> {
     let _ = (mandate, snapshot);
     Err(SpecError::Unimplemented)
+}
+
+fn decimal(value: &SchemaDec, path: &str) -> Result<UsdExact, SpecError> {
+    UsdExact::parse(value.as_str()).map_err(|cause| SpecError::OutOfRange {
+        path: Pointer::new(path),
+        cause,
+    })
+}
+
+fn rung_index(index: usize) -> Result<u8, SpecError> {
+    u8::try_from(index).map_err(|_| SpecError::InvalidInput {
+        what: "a ladder rung past index 255",
+    })
+}
+
+fn add_seconds(total: u64, more: u64) -> Result<u64, SpecError> {
+    total
+        .checked_add(more)
+        .ok_or(SpecError::Num(NumError::Overflow))
+}
+
+/// An exact value as a [`Usd`], or [`NumError::TooPrecise`] if it needs more places than one holds.
+fn narrow(value: UsdExact) -> Result<Usd, SpecError> {
+    let narrowed = value.round(28, Rounding::HalfEven)?;
+    if UsdExact::of(narrowed) == value {
+        Ok(narrowed)
+    } else {
+        Err(SpecError::Num(NumError::TooPrecise))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use super::*;
+    use crate::DecGrammar;
+    use crate::document::LadderRung;
+
+    type Checked = Result<(), Box<dyn Error>>;
+
+    fn rung(
+        at: &str,
+        action: LadderAction,
+        factor: Option<&str>,
+    ) -> Result<LadderRung, Box<dyn Error>> {
+        Ok(LadderRung {
+            at: SchemaDec::parse(at, DecGrammar::OpenFraction)?,
+            action,
+            factor: factor
+                .map(|text| SchemaDec::parse(text, DecGrammar::OpenFraction))
+                .transpose()?,
+        })
+    }
+
+    /// 0.02 at 0.75, 0.04 at 0.5, then the two stricter rungs: the ladder `common::base()` carries.
+    fn ladder() -> Result<Vec<LadderRung>, Box<dyn Error>> {
+        Ok(vec![
+            rung("0.02", LadderAction::ScaleSizes, Some("0.75"))?,
+            rung("0.04", LadderAction::ScaleSizes, Some("0.5"))?,
+            rung("0.06", LadderAction::ExitsOnly, None)?,
+            rung("0.08", LadderAction::FlattenAndPause, None)?,
+        ])
+    }
+
+    fn active(indices: &[u8]) -> BTreeMap<u8, u64> {
+        indices.iter().map(|index| (*index, 0)).collect()
+    }
+
+    /// No active rung leaves orders at full size, one leaves its own factor, and two multiply, with
+    /// the durations beside the keys playing no part (§5.5).
+    #[test]
+    fn the_size_factor_is_one_the_factor_or_the_product() -> Checked {
+        let ladder = ladder()?;
+        assert_eq!(size_factor(&ladder, &BTreeMap::new())?, Ratio::parse("1")?);
+        assert_eq!(size_factor(&ladder, &active(&[1]))?, Ratio::parse("0.5")?);
+        assert_eq!(
+            size_factor(&ladder, &active(&[0, 1]))?,
+            Ratio::parse("0.375")?
+        );
+        let long_active = BTreeMap::from([(0, 86_400), (1, 3)]);
+        assert_eq!(size_factor(&ladder, &long_active)?, Ratio::parse("0.375")?);
+        Ok(())
+    }
+
+    /// A key that is not a `scale_sizes` rung of this ladder has no factor, so it is refused rather
+    /// than read as one.
+    #[test]
+    fn a_rung_with_no_factor_or_no_rung_at_all_is_refused() -> Checked {
+        let ladder = ladder()?;
+        for key in [2, 3, 4, 255] {
+            assert!(
+                matches!(
+                    size_factor(&ladder, &active(&[key])),
+                    Err(SpecError::InvalidInput { .. })
+                ),
+                "rung {key} has no factor"
+            );
+        }
+        Ok(())
+    }
+
+    /// A product that needs more places than a `Usd` holds is an error, never a rounded factor: three
+    /// 12-place factors multiply to 36 places.
+    #[test]
+    fn a_product_too_precise_to_hold_is_an_error() -> Checked {
+        let ladder = vec![
+            rung("0.01", LadderAction::ScaleSizes, Some("0.999999999999"))?,
+            rung("0.02", LadderAction::ScaleSizes, Some("0.999999999999"))?,
+            rung("0.03", LadderAction::ScaleSizes, Some("0.999999999999"))?,
+        ];
+        assert_eq!(
+            size_factor(&ladder, &active(&[0, 1])),
+            Ok(Ratio::parse("0.999999999998000000000001")?),
+            "two factors need 24 places, which a ratio holds"
+        );
+        assert_eq!(
+            size_factor(&ladder, &active(&[0, 1, 2])),
+            Err(SpecError::Num(NumError::TooPrecise))
+        );
+        Ok(())
+    }
+
+    /// After a reset the scale rungs lift highest `at` first; the stricter rungs are not in the queue,
+    /// and rungs at the same level keep ladder order (§5.8).
+    #[test]
+    fn scale_rungs_lift_from_the_highest_level_down() -> Checked {
+        assert_eq!(reset_lift_order(&ladder()?)?, vec![1, 0]);
+        let unordered = vec![
+            rung("0.03", LadderAction::ScaleSizes, Some("0.5"))?,
+            rung("0.05", LadderAction::ScaleSizes, Some("0.5"))?,
+            rung("0.01", LadderAction::ScaleSizes, Some("0.5"))?,
+            rung("0.05", LadderAction::ScaleSizes, Some("0.9"))?,
+            rung("0.07", LadderAction::ExitsOnly, None)?,
+        ];
+        assert_eq!(reset_lift_order(&unordered)?, vec![1, 3, 0, 2]);
+        assert_eq!(reset_lift_order(&[])?, Vec::<u8>::new());
+        Ok(())
+    }
+
+    /// A rung past index 255 cannot be named as `drawdown_ladder[i]` in a `u8`, so it is refused.
+    #[test]
+    fn a_ladder_past_two_hundred_and_fifty_six_rungs_is_refused() -> Checked {
+        let long = vec![rung("0.01", LadderAction::ScaleSizes, Some("0.5"))?; 257];
+        assert!(matches!(
+            reset_lift_order(&long),
+            Err(SpecError::InvalidInput { .. })
+        ));
+        assert_eq!(
+            reset_lift_order(long.get(..256).ok_or("256 rungs")?)?.len(),
+            256
+        );
+        Ok(())
+    }
+
+    /// Breach time that cannot be summed is an error, never a clock that stands still (DEC-137).
+    #[test]
+    fn breach_time_past_the_largest_count_is_an_error() -> Checked {
+        let mut confirmation = Confirmation::default();
+        assert!(!confirmation.update(true, 0, 60)?);
+        assert!(confirmation.update(true, u64::MAX, 60)?);
+        assert_eq!(
+            confirmation.update(true, 1, 60),
+            Err(SpecError::Num(NumError::Overflow)),
+            "the second interval would take breach time past u64::MAX"
+        );
+        let mut quiet = Confirmation::default();
+        assert!(!quiet.update(false, u64::MAX, 60)?);
+        assert_eq!(
+            quiet.update(false, 1, 60),
+            Err(SpecError::Num(NumError::Overflow)),
+            "and so would the time spent out of breach"
+        );
+        Ok(())
+    }
+
+    /// Zero seconds confirms on the first breaching input, and exactly the window confirms (§5.6).
+    #[test]
+    fn the_window_is_reached_at_exactly_its_length() -> Checked {
+        let mut instant = Confirmation::default();
+        assert!(instant.update(true, 0, 0)?);
+        let mut timed = Confirmation::default();
+        assert!(!timed.update(true, 5, 60)?);
+        assert!(!timed.update(true, 59, 60)?);
+        assert!(timed.is_pending());
+        assert_eq!(timed.accumulated_s(), 59);
+        assert!(timed.update(true, 1, 60)?);
+        let mut recovered = Confirmation::default();
+        assert!(!recovered.update(true, 0, 60)?);
+        assert!(!recovered.update(false, 30, 60)?);
+        assert!(!recovered.update(false, 60, 60)?);
+        assert_eq!(
+            recovered.accumulated_s(),
+            0,
+            "a full window out of breach resets the 30 s banked before it"
+        );
+        assert!(!recovered.is_pending());
+        Ok(())
+    }
 }
