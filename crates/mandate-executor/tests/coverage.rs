@@ -632,7 +632,7 @@ fn a_held_exit_is_released_at_the_first_tick_its_hold_has_cleared() {
             Side::Buy,
             "10",
             "0",
-            "accepted",
+            "canceled",
         )))),
         &ports,
     );
