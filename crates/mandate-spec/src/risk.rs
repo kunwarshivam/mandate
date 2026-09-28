@@ -559,6 +559,10 @@ impl Confirmation {
     /// Credits `elapsed_s` by the condition at the interval's start, then takes this input's
     /// condition. `Ok(true)` when the limit triggers here.
     ///
+    /// `true` is a trigger at this input, not a latch: a later window out of breach resets breach time
+    /// and the answer is `false` again. Holding a latched limit is the risk state's (§5.8), and nothing
+    /// may re-derive "still latched" from this answer.
+    ///
     /// # Errors
     /// A step that cannot be decided is an error, not a silent `false`: the breach clock a rung
     /// reads cannot be allowed to stand still because the sum did not fit or because E6-4 has not
@@ -602,6 +606,10 @@ pub fn hard_wait_s(breach_confirm_s: u32) -> u32 {
 
 /// The size factor: the product of the active `scale_sizes` rungs' factors (§5.5).
 ///
+/// The product is exact. One that needs more than the 24 places a size factor is reported at is
+/// `out_of_range` naming the ladder, never a rounded factor; V-040 keeps a validated mandate from ever
+/// reaching it (DEC-167).
+///
 /// Only the keys of `active` matter here; the durations beside them are §5.5's trim guard, which is
 /// the gate's. The factor lives on [`Snapshot`] because it is folded risk state, and `mandate-risk`
 /// reads it there rather than recomputing it (the coordinator's ruling on #136).
@@ -622,7 +630,14 @@ pub fn size_factor(
             &format!("/risk/drawdown_ladder/{index}/factor"),
         )?)?;
     }
-    Ok(Ratio::parse(&narrow(product)?.to_string())?)
+    let exact = narrow(product, SIZE_FACTOR_PLACES).map_err(|error| match error {
+        SpecError::Num(cause) => SpecError::OutOfRange {
+            path: Pointer::new("/risk/drawdown_ladder"),
+            cause,
+        },
+        other => other,
+    })?;
+    Ok(Ratio::parse(&exact.to_string())?)
 }
 
 /// The order §5.8 lifts scale rungs in after a reset: highest `at` first, each after
@@ -666,9 +681,13 @@ fn add_seconds(total: u64, more: u64) -> Result<u64, SpecError> {
         .ok_or(SpecError::Num(NumError::Overflow))
 }
 
-/// An exact value as a [`Usd`], or [`NumError::TooPrecise`] if it needs more places than one holds.
-fn narrow(value: UsdExact) -> Result<Usd, SpecError> {
-    let narrowed = value.round(28, Rounding::HalfEven)?;
+/// The places a size factor is reported at: `Ratio`'s 24, which V-040 bounds the ladder's factors by.
+const SIZE_FACTOR_PLACES: u32 = 24;
+
+/// An exact value as a [`Usd`] of at most `places` places, or [`NumError::TooPrecise`] if it needs
+/// more: the check is that rounding at `places` changes nothing.
+fn narrow(value: UsdExact, places: u32) -> Result<Usd, SpecError> {
+    let narrowed = value.round(places, Rounding::HalfEven)?;
     if UsdExact::of(narrowed) == value {
         Ok(narrowed)
     } else {
@@ -679,6 +698,8 @@ fn narrow(value: UsdExact) -> Result<Usd, SpecError> {
 #[cfg(test)]
 mod tests {
     use std::error::Error;
+
+    use proptest::prelude::*;
 
     use super::*;
     use crate::DecGrammar;
@@ -763,7 +784,11 @@ mod tests {
         );
         assert_eq!(
             size_factor(&ladder, &active(&[0, 1, 2])),
-            Err(SpecError::Num(NumError::TooPrecise))
+            Err(SpecError::OutOfRange {
+                path: Pointer::new("/risk/drawdown_ladder"),
+                cause: NumError::TooPrecise
+            }),
+            "V-040 refuses this ladder, so the fold never sees it; the error names the ladder anyway"
         );
         Ok(())
     }
@@ -843,5 +868,56 @@ mod tests {
         );
         assert!(!recovered.is_pending());
         Ok(())
+    }
+
+    /// The inputs at which breach time reaches the window, recomputed declaratively (§5.6): the time
+    /// in breach since the last input that closed a quiet run of at least the window, where a quiet run
+    /// is the unbroken stretch of intervals that start out of breach. Shares no state with
+    /// [`Confirmation`], which keeps two running counters instead.
+    fn triggers(inputs: &[(bool, u64)], need: u64) -> Vec<bool> {
+        let start_breached = |k: usize| {
+            k.checked_sub(1)
+                .and_then(|previous| inputs.get(previous))
+                .is_some_and(|(breached, _)| *breached)
+        };
+        let gap = |k: usize| inputs.get(k).map_or(0, |(_, seconds)| *seconds);
+        let quiet_run_ending_at = |j: usize| -> u64 {
+            (0..=j)
+                .rev()
+                .take_while(|k| !start_breached(*k))
+                .map(gap)
+                .sum()
+        };
+        (0..inputs.len())
+            .map(|i| {
+                let last_reset = (0..=i)
+                    .filter(|j| !start_breached(*j) && quiet_run_ending_at(*j) >= need)
+                    .max();
+                let first = last_reset.map_or(0, |j| j.saturating_add(1));
+                let breach: u64 = (first..=i).filter(|k| start_breached(*k)).map(gap).sum();
+                inputs.get(i).is_some_and(|(breached, _)| *breached) && breach >= need
+            })
+            .collect()
+    }
+
+    proptest! {
+        /// Every input's answer, not only the first trigger, matches the declarative recomputation,
+        /// zero-length intervals included (the #245 review, minor 4).
+        #[test]
+        fn every_answer_matches_a_declarative_recomputation(
+            inputs in prop::collection::vec((any::<bool>(), 0_u64..90), 1..24),
+            need in prop::sample::select(vec![0_u32, 1, 30, 60, 300]),
+        ) {
+            let mut confirmation = Confirmation::default();
+            let mut answers = Vec::new();
+            for (breached, seconds) in &inputs {
+                answers.push(
+                    confirmation
+                        .update(*breached, *seconds, need)
+                        .map_err(|e| TestCaseError::fail(e.to_string()))?,
+                );
+            }
+            prop_assert_eq!(answers, triggers(&inputs, u64::from(need)), "over {:?}", inputs);
+        }
     }
 }
