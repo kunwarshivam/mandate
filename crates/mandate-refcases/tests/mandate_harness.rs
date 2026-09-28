@@ -266,46 +266,154 @@ fn every_owned_expectation_member_is_read() {
     );
 }
 
-/// The goal and risk-state arms fail with the DEC-77 message while their rules are stubs, and name the
-/// stub rather than a comparison.
+/// The owned cases of one kind, by id.
+fn ids_of(fixture: &Json, kind: &str) -> Vec<String> {
+    fixture["cases"]
+        .as_array()
+        .expect("a case list")
+        .iter()
+        .filter(|c| c["kind"] == kind)
+        .map(|c| c["id"].as_str().expect("an id").to_owned())
+        .collect()
+}
+
+/// A value no expectation of these families can hold, in the shape of the one it replaces: a string
+/// becomes a name no rule writes, a boolean flips, a number moves, and a list's first member becomes one
+/// no case lists, keeping its size so a comparison by size alone cannot pass it (an empty list gains that
+/// member instead). The edited case can therefore only fail on the member that was edited.
+fn edited(value: &Json) -> Json {
+    match value {
+        Json::Bool(flag) => Json::Bool(!flag),
+        Json::Number(number) => json!(number.as_u64().expect("a count").saturating_add(3_600)),
+        Json::Array(items) => {
+            let stranger = if items.first().is_some_and(Json::is_object) {
+                json!({"type": "NotAnEvent"})
+            } else {
+                json!("not_a_name")
+            };
+            let mut items = items.clone();
+            match items.first_mut() {
+                Some(first) => *first = stranger,
+                None => items.push(stranger),
+            }
+            Json::Array(items)
+        }
+        _ => json!("0.123456789"),
+    }
+}
+
+/// Every MC-L case passes as the fixture states it, and fails, naming the member, when any one of its
+/// expectations is edited.
 ///
-/// The `trading_domain` suite proves its arms read each key by editing an expectation and requiring the
-/// case to fail. That test cannot be written for these two families yet: every MC-L and MC-R case fails
-/// on a stub regardless of what its expectations say, so an edited value would fail for the same reason
-/// as an unedited one and prove nothing. What is checkable now is the other half — that a stub is never
-/// mistaken for a pass — and the read-every-key half arrives with each family's implementation PR.
-///
-/// A goal or risk-state case stops at the first stub on its path: the parser until E10-1's parse
-/// lands, then validation's `rule` stub until E10-1's V-rules do (#225, round 1). The risk-day arm left
-/// this list when its read-every-key half was written, below, because a correct `risk_day` passes every
-/// MC-T case and would turn this test red on exactly the code that should make it pass (DEC-77).
-/// Once slice P makes `ValidatedMandate::new` real, each case passes validation and stops at its own
-/// family's stub instead, `goal::status` or `RiskState::open` (E6-4), so those names join the lists
-/// ahead of it (stream H's note on #124).
+/// This is the goal arm's read-every-key half, which the stub test it replaces could not state: every
+/// MC-L case failed at a stub whatever its expectations said. A stub is still never a pass: `cargo xtask
+/// ci pending` requires this test to fail at one until E6-4's `goal::status` lands (DEC-137), which is
+/// the check the removed test made, and which that test could not keep making once E10-1's slice P moved
+/// the stub these cases stop at (DEC-77).
 #[test]
-fn the_goal_and_risk_state_arms_name_their_stub_rather_than_passing() {
+#[ignore = "pending E6-4"]
+fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
-    for (kind, stubs) in [
-        ("goal", &["parser", "rule", "goal::status"][..]),
-        ("risk_state", &["parser", "rule", "RiskState::open"][..]),
-    ] {
-        let ids: Vec<String> = fixture["cases"]
+    let ids = ids_of(&fixture, "goal");
+    assert_eq!(ids.len(), 5, "family L is five cases");
+    let mut edits = 0;
+    for id in &ids {
+        if let Err(failure) = run(fixture.clone(), id) {
+            panic!("{id} must pass as the fixture states it: {failure}");
+        }
+        let members: Vec<String> = fixture["cases"]
             .as_array()
             .expect("a case list")
             .iter()
-            .filter(|c| c["kind"] == kind)
-            .map(|c| c["id"].as_str().expect("an id").to_owned())
+            .find(|c| c["id"] == id.as_str())
+            .and_then(|c| c["expect"].as_object())
+            .expect("an expectation")
+            .keys()
+            .cloned()
             .collect();
-        assert!(!ids.is_empty(), "the fixture carries {kind} cases");
-        for id in ids {
-            let failure = run(fixture.clone(), &id).expect_err("a stub is never a pass");
+        for member in members {
+            let mut doctored = fixture.clone();
+            let expect = &mut doctored["cases"]
+                .as_array_mut()
+                .expect("a case list")
+                .iter_mut()
+                .find(|c| c["id"] == id.as_str())
+                .expect("the case")["expect"];
+            expect[&member] = edited(&expect[&member]);
+            let failure = run(doctored, id).expect_err("an edited expectation must fail the case");
             assert!(
-                failure.contains("not implemented yet")
-                    && stubs.iter().any(|stub| failure.contains(stub)),
-                "{id}: the failure must name the stub it stopped at, got: {failure}"
+                failure.contains(&member),
+                "{id}: an edited `{member}` must fail on `{member}`, got: {failure}"
             );
+            edits += 1;
         }
     }
+    assert_eq!(
+        edits, 17,
+        "four members of each done case and one of the running one"
+    );
+}
+
+/// Every MC-R case passes as the fixture states it, and fails, naming the member and its step, when any
+/// one expectation of any one step is edited.
+///
+/// The risk-state arm's read-every-key half, for the reason the goal test above gives. The member sweep
+/// in `every_owned_expectation_member_is_read` shows a member the harness does not know is refused; this
+/// shows each member it knows is compared, which an arm that read a member and ignored its value would
+/// pass the sweep and fail here.
+#[test]
+#[ignore = "pending E6-4"]
+fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
+    let fixture = fixture();
+    let ids = ids_of(&fixture, "risk_state");
+    assert_eq!(ids.len(), 24, "family R is 24 cases");
+    let mut edits = 0;
+    for id in &ids {
+        if let Err(failure) = run(fixture.clone(), id) {
+            panic!("{id} must pass as the fixture states it: {failure}");
+        }
+        let steps: Vec<Vec<String>> = fixture["cases"]
+            .as_array()
+            .expect("a case list")
+            .iter()
+            .find(|c| c["id"] == id.as_str())
+            .and_then(|c| c["steps"].as_array())
+            .expect("a step list")
+            .iter()
+            .map(|step| {
+                step["expect"]
+                    .as_object()
+                    .expect("a step expectation")
+                    .keys()
+                    .cloned()
+                    .collect()
+            })
+            .collect();
+        for (index, members) in steps.iter().enumerate() {
+            for member in members {
+                let mut doctored = fixture.clone();
+                let expect = &mut doctored["cases"]
+                    .as_array_mut()
+                    .expect("a case list")
+                    .iter_mut()
+                    .find(|c| c["id"] == id.as_str())
+                    .expect("the case")["steps"][index]["expect"];
+                expect[member] = edited(&expect[member]);
+                let failure =
+                    run(doctored, id).expect_err("an edited expectation must fail the case");
+                let step = format!("step {}:", index.saturating_add(1));
+                assert!(
+                    failure.contains(&step) && failure.contains(member.as_str()),
+                    "{id}: an edited `{member}` at {step} must fail there, naming it, got: {failure}"
+                );
+                edits += 1;
+            }
+        }
+    }
+    assert_eq!(
+        edits, 1_560,
+        "every member of every step of the 24 cases was edited once"
+    );
 }
 
 /// Every MC-T case passes as the fixture states it, and fails, naming the member, when any one of its
