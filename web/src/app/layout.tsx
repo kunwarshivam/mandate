@@ -6,6 +6,7 @@ import "./globals.css";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
+import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
 import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { getColourBlind, getScenario, getThemePref } from "@/lib/get-workspace";
@@ -42,8 +43,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#FDFCFA" },
-    { media: "(prefers-color-scheme: dark)", color: "#0B0D11" },
+    { media: "(prefers-color-scheme: light)", color: OFF_WHITE },
+    { media: "(prefers-color-scheme: dark)", color: NIGHT },
   ],
   colorScheme: "light dark",
 };

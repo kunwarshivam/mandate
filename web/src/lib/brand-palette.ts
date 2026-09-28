@@ -1,11 +1,20 @@
-/** The founder's "ink and gold" palette (DEC-202). `scripts/brand-assets.mjs` uses the same values. */
+/**
+ * The brand's colours, taken from the Ink and Gold palette (DEC-204) so the two cannot drift.
+ * `scripts/brand-assets.mjs` writes the ink and off-white as literals; `brand-assets.test.ts` holds
+ * them equal.
+ */
+import { toHex } from "./color";
+import { PALETTE, PALETTE_DARK, type Palette, type TokenName } from "./palette";
+
+const hex = (palette: Palette, token: TokenName) => toHex(palette.tokens[token].value).toUpperCase();
+
 export const BRAND_PALETTE = [
-  { name: "Navy", hex: "#111417", role: "Ink: the brand, text, and the mark, always on a light surface" },
-  { name: "Brass", hex: "#D8A93B", role: "Gold: the one accent, for rules, fills and markers. Never body text" },
-  { name: "Dark brass", hex: "#8A600A", role: "Dark gold: gold as text, and text on the gold tint" },
-  { name: "Brass tint", hex: "#FDF3D9", role: "Gold tint: a notice field" },
-  { name: "Slate ink", hex: "#111417", role: "Text" },
-  { name: "Off-white", hex: "#FDFCFA", role: "The page; the tile behind the app icons and the share image" },
+  { name: "Ink", hex: hex(PALETTE, "foreground"), role: "The mark and the type on a light surface, and the primary action" },
+  { name: "Off-white", hex: hex(PALETTE, "card"), role: "The mark on a dark surface; the tile behind the app icons and the share image" },
+  { name: "Gold", hex: hex(PALETTE, "mandate-marker"), role: "The one accent: your mandate's rules and markers, and the account's line. Never text, never a block" },
+  { name: "Dark gold", hex: hex(PALETTE, "mandate-strong"), role: "Gold as text on a light surface" },
+  { name: "Gold tint", hex: hex(PALETTE, "mandate"), role: "Your mandate's field" },
+  { name: "Night", hex: hex(PALETTE_DARK, "background"), role: "The page in dark mode" },
 ] as const;
 
 export type BrandColorName = (typeof BRAND_PALETTE)[number]["name"];
@@ -16,8 +25,9 @@ export function brandHex(name: BrandColorName): string {
   return color.hex;
 }
 
-export const NAVY = brandHex("Navy");
+export const INK = brandHex("Ink");
 export const OFF_WHITE = brandHex("Off-white");
+export const NIGHT = brandHex("Night");
 
 function luminance(hex: string): number {
   const channels = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);

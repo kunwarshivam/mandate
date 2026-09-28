@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Generates the favicon, app icons, Open Graph image, and web manifest in `public/` from the brand
- * sources (DEC-203): `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`. Run with
+ * sources (DEC-203, amended by DEC-204): `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`. Run with
  * `npm run brand` and commit the output; `brand-assets.test.ts` regenerates into a temporary
  * directory and fails when the committed files differ.
  */
@@ -15,8 +15,9 @@ export const MARK_SOURCE = path.join(WEB, "src/components/brand/owlhead-mark.svg
 export const OG_SOURCE = path.join(WEB, "brand/og-image.svg");
 export const PUBLIC_DIR = path.join(WEB, "public");
 
-export const NAVY = "#183D73";
-export const OFF_WHITE = "#F7FAFE";
+/** Ink and off-white from the palette (src/lib/brand-palette.ts); the icons are ink on off-white in every mode. */
+export const INK = "#14161A";
+export const OFF_WHITE = "#FDFCFA";
 
 const FAVICON_PNG_SIZES = [16, 32, 48];
 const TILE = 1000;
@@ -62,7 +63,7 @@ function bounds(points) {
 
 const round = (n) => Number(n.toFixed(4));
 
-/** The navy mark on an off-white square, its bounding box centred and scaled to `scale` tile units. */
+/** The ink mark on an off-white square, its bounding box centred and scaled to `scale` tile units. */
 function tileSvg(d, scale) {
   const b = bounds(markPoints(d));
   const tx = round(TILE / 2 - ((b.minX + b.maxX) / 2) * scale);
@@ -70,7 +71,7 @@ function tileSvg(d, scale) {
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TILE} ${TILE}">` +
     `<rect width="${TILE}" height="${TILE}" fill="${OFF_WHITE}"/>` +
-    `<path fill="${NAVY}" fill-rule="evenodd" transform="translate(${tx} ${ty}) scale(${round(scale)})" d="${d}"/></svg>`
+    `<path fill="${INK}" fill-rule="evenodd" transform="translate(${tx} ${ty}) scale(${round(scale)})" d="${d}"/></svg>`
   );
 }
 

@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { metadata, viewport } from "@/app/layout";
+import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
 import { PUBLIC_DIR } from "../../../scripts/brand-assets.mjs";
 
 function urls(value: unknown): string[] {
@@ -20,11 +21,14 @@ describe("root layout metadata (DEC-203)", () => {
     for (const url of referenced) expect(existsSync(path.join(PUBLIC_DIR, url)), url).toBe(true);
   });
 
-  it("shares a generic Owlhead card at owlhead.ai, on off-white", () => {
+  it("shares a generic Owlhead card at owlhead.ai, and colours the browser chrome off-white in light and night in dark", () => {
     expect(String(metadata.metadataBase)).toBe("https://owlhead.ai/");
     expect(metadata.openGraph).toMatchObject({ title: "Owlhead", images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" }] });
     expect(metadata.twitter).toMatchObject({ card: "summary_large_image", title: "Owlhead", images: [{ url: "/og-image.png", alt: "Owlhead" }] });
-    expect(viewport.themeColor).toBe("#F7FAFE");
+    expect(viewport.themeColor).toEqual([
+      { media: "(prefers-color-scheme: light)", color: OFF_WHITE },
+      { media: "(prefers-color-scheme: dark)", color: NIGHT },
+    ]);
   });
 
   it("carries no description or tagline", () => {
