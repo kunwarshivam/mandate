@@ -95,9 +95,9 @@ describe("D1 dashboard", () => {
 describe("D2 agent detail", () => {
   it("draws limits as rails in dollars and the profit stop as a level, never a rail", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />);
-    const envelope = within(within(main()).getByRole("region", { name: "Limits in dollars" })).getByText(
-      (_, el) => el?.getAttribute("data-slot") === "envelope",
-    );
+    const envelope = within(main()).getByRole("region", { name: "Your mandate" });
+    expect(envelope).toHaveAttribute("data-slot", "envelope");
+    expect(envelope).toHaveTextContent("Limits in dollars");
     const rails = [...envelope.querySelectorAll("[data-slot=limit-rail]")];
     expect(rails.length).toBeGreaterThan(0);
     for (const rail of rails) expect(rail).toHaveTextContent(/\$[\d,]+\.\d{2} of \$[\d,]+\.\d{2}/);

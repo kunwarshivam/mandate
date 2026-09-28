@@ -85,15 +85,15 @@ export function MandateSummary({ agent }: { agent: Agent }) {
 
   return (
     <div className="grid gap-4">
-      <blockquote className="border-l-2 border-primary/60 pl-3 text-sm">
-        <p className="text-caption text-muted-foreground">Your description</p>
+      <blockquote className="grid gap-1 border-l-2 border-foreground pl-3 text-sm">
+        <p className="label-caps text-muted-foreground">Your description</p>
         <p>“{m.behavior.description}”</p>
       </blockquote>
-      <dl className="grid divide-y divide-border/60 text-sm">
+      <dl className="grid divide-y text-sm">
         {rows.map((row) => {
           const p = provenance(row.path);
           return (
-            <div key={row.label} className="grid gap-1 py-2.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+            <div key={row.label} className="grid gap-1 py-2 sm:grid-cols-[10rem_1fr] sm:gap-3">
               <dt className="text-muted-foreground">{row.label}</dt>
               <dd className="grid gap-1">
                 <span className="flex flex-wrap items-center gap-2">

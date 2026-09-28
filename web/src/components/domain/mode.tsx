@@ -70,14 +70,28 @@ export function SourceTag({ source, className }: { source: RestrictionSource; cl
  * The §4.3 mode banner: every active restriction with what it blocks, how it ends, and who acts.
  * Opening actions are explained here rather than hidden. Fields sit on seams, never nested.
  */
-export function ModeBanner({ mode, restrictions, className }: { mode: AgentMode; restrictions: ActiveRestriction[]; className?: string }) {
+export function ModeBanner({
+  mode,
+  restrictions,
+  showMode = true,
+  className,
+}: {
+  mode: AgentMode;
+  restrictions: ActiveRestriction[];
+  /** Off where the mode already stands as its own field right above, so it is not said twice. */
+  showMode?: boolean;
+  className?: string;
+}) {
   if (mode === "normal" && restrictions.length === 0) return null;
+  if (!showMode && restrictions.length === 0) return null;
   return (
     <section aria-label="Restrictions" data-slot="mode-banner" className={cn("reveal grid gap-(--seam) text-foreground", className)}>
-      <div data-mode={mode} className={cn("flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-(--duration-hover)", MODE_FIELD[mode])}>
-        <p className="font-display text-heading uppercase">{MODE_LABEL[mode]}</p>
-        <p className="font-medium">{MODE_MEANING[mode]}</p>
-      </div>
+      {showMode ? (
+        <div data-mode={mode} className={cn("flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-(--duration-hover)", MODE_FIELD[mode])}>
+          <p className="font-display text-heading uppercase">{MODE_LABEL[mode]}</p>
+          <p className="font-medium">{MODE_MEANING[mode]}</p>
+        </div>
+      ) : null}
       {restrictions.length > 0 ? (
         <ul className="grid gap-(--seam)">
           {restrictions.map((r) => {

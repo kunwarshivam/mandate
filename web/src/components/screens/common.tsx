@@ -1,8 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { Unplug } from "lucide-react";
+import { ArrowRight, Unplug } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { clock } from "@/lib/format";
@@ -23,7 +24,7 @@ export function PageHeader({ title, lead, children, className }: { title: string
 export function Section({ title, action, children, className, id }: { title: string; action?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   const headingId = id ?? `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
-    <section aria-labelledby={headingId} className={cn("grid content-start gap-(--block-gap)", className)}>
+    <section aria-labelledby={headingId} className={cn("grid grid-cols-1 content-start gap-(--block-gap)", className)}>
       <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-1.5">
         <h2 id={headingId} className="text-heading">
           {title}
@@ -37,6 +38,24 @@ export function Section({ title, action, children, className, id }: { title: str
 
 export function Panel({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("bg-card p-3 sm:p-4", className)}>{children}</div>;
+}
+
+/** No agents yet: the account board, empty, with the one next step. */
+export function EmptyBoard() {
+  return (
+    <section data-slot="empty" aria-labelledby="empty-title" className="reveal grid max-w-3xl content-start gap-4 bg-lapis p-4 text-lapis-foreground sm:p-6">
+      <h1 id="empty-title" className="text-title sm:text-display">
+        No agents yet
+      </h1>
+      <p className="max-w-prose text-lapis-muted">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
+      <Link
+        href="/agents/new"
+        className="press inline-flex h-11 w-fit items-center gap-2 bg-card px-4 font-bold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-card focus-visible:ring-offset-2 focus-visible:ring-offset-lapis"
+      >
+        Describe your first agent <ArrowRight aria-hidden className="size-4" />
+      </Link>
+    </section>
+  );
 }
 
 /** The deployment did not answer: no agent data is shown and nothing is kept on this device. */
@@ -64,13 +83,13 @@ export function UnreachableNotice() {
 export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
   return (
     <div className="grid gap-(--section-gap)" aria-busy="true" aria-label="Loading" data-slot="skeleton">
-      <div className="grid gap-(--seam) lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-(--seam) lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <Skeleton className="h-52 bg-lapis-soft" />
         <Skeleton className="h-52" />
       </div>
       <div className="grid gap-(--seam)">
         {Array.from({ length: rows }, (_, i) => (
-          <div key={i} className="grid gap-(--seam) md:grid-cols-[9.5rem_minmax(0,1fr)_minmax(0,1.15fr)]">
+          <div key={i} className="grid gap-(--seam) md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1.1fr)]">
             <Skeleton className="h-10 md:h-44" />
             <Skeleton className="h-44" />
             <Skeleton className="h-44 bg-marigold-soft" />

@@ -1,6 +1,8 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Deadline } from "@/components/approvals/deadline";
 import type { Approval } from "@/fixtures/types";
@@ -10,26 +12,31 @@ import { APPROVAL_STATUS_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { PageHeader, Section, WorkspaceGate } from "./common";
 
-function Row({ approval, now, label }: { approval: Approval; now: string; label: string }) {
+/** Open requests are card fields you can act on; resolved ones recede to muted, with their status as a label. */
+function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
   const open = approval.status === "delivered";
   return (
-    <li>
+    <li className="reveal grid" style={{ "--i": Math.min(index, 6) } as CSSProperties}>
       <Link
         href={`/approvals/${approval.approval_id}`}
         data-status={approval.status}
-        className={cn("press grid gap-1.5 rounded-xl border bg-card p-4 hover:border-primary/50", open && "shadow-whisper")}
+        className={cn("press grid gap-1.5 px-3 py-3 sm:px-4", open ? "bg-card hover:bg-muted" : "bg-muted text-muted-foreground hover:text-foreground")}
       >
-        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-          <span className="font-medium">
+        <span className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          <span className={cn(open ? "font-bold text-foreground" : "font-medium")}>
             {label}: buy <span className="font-mono tabular">{quantity(approval.bound.qty)}</span> {approval.bound.symbol} at a limit of{" "}
             <span className="font-mono tabular">{price(approval.bound.limit)}</span>
           </span>
-          <span className="text-caption text-muted-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
+          {open ? (
+            <ArrowRight className="size-4 shrink-0" aria-hidden />
+          ) : (
+            <span className="inline-flex h-6 items-center bg-card px-1.5 label-caps text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
+          )}
         </span>
         {open ? (
           <Deadline deadline={approval.deadline} now={now} className="text-muted-foreground" />
         ) : (
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm">
             {approval.resolution ? `${approval.resolution.at.slice(0, 10) === now.slice(0, 10) ? clock(approval.resolution.at) : dateLabel(approval.resolution.at)}: ${approval.resolution.text}` : null}
           </span>
         )}
@@ -46,30 +53,32 @@ function Inbox() {
   const label = (a: Approval) => findAgent(ws, a.agent_id)?.label ?? "An agent";
 
   return (
-    <div className="grid gap-10">
-      <PageHeader title="Approvals" lead="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." />
-      <Section title="Open, by deadline">
-        {open.length === 0 ? (
-          <p className="text-muted-foreground">Nothing is waiting for you.</p>
-        ) : (
-          <ul className="grid gap-2">
-            {open.map((a) => (
-              <Row key={a.approval_id} approval={a} now={now} label={label(a)} />
-            ))}
-          </ul>
-        )}
-      </Section>
-      <Section title="Resolved">
-        {resolved.length === 0 ? (
-          <p className="text-muted-foreground">No resolved requests yet.</p>
-        ) : (
-          <ul className="grid gap-2">
-            {resolved.map((a) => (
-              <Row key={a.approval_id} approval={a} now={now} label={label(a)} />
-            ))}
-          </ul>
-        )}
-      </Section>
+    <div className="grid max-w-4xl grid-cols-1 gap-(--section-gap)">
+      <PageHeader title="Approvals" lead="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
+      <div className="grid grid-cols-1 gap-(--section-gap)">
+        <Section title="Open, by deadline">
+          {open.length === 0 ? (
+            <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">Nothing is waiting for you.</p>
+          ) : (
+            <ul className="grid gap-(--seam)">
+              {open.map((a, i) => (
+                <Row key={a.approval_id} approval={a} now={now} label={label(a)} index={i} />
+              ))}
+            </ul>
+          )}
+        </Section>
+        <Section title="Resolved">
+          {resolved.length === 0 ? (
+            <p className="text-muted-foreground">No resolved requests yet.</p>
+          ) : (
+            <ul className="grid gap-(--seam)">
+              {resolved.map((a, i) => (
+                <Row key={a.approval_id} approval={a} now={now} label={label(a)} index={open.length + i} />
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
     </div>
   );
 }

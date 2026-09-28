@@ -1,20 +1,23 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
-import type { Approval } from "@/fixtures/types";
+import { LimitRail } from "@/components/domain/envelope";
+import type { Approval, RiskFigure } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
-import { dec, mul } from "@/lib/decimal";
+import { dec, max, mul, sub, ZERO } from "@/lib/decimal";
 import { clock, price, quantity, usd } from "@/lib/format";
 import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL } from "@/lib/labels";
 import { type ApprovalResponse, approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { Panel, WorkspaceGate } from "./common";
+import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "press h-12 w-full text-base font-semibold";
+const CHOICE = "h-12 w-full text-base";
+const BACK = "inline-flex h-11 w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground lg:h-8";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
   if (response.phase === "sent") {
@@ -41,8 +44,8 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
 function Outcome({ approval }: { approval: Approval }) {
   if (approval.status === "delivered" || !approval.resolution) return null;
   return (
-    <section aria-label="Outcome" data-status={approval.status} className="grid gap-1 rounded-xl border bg-muted/60 p-4">
-      <p className="font-semibold">{APPROVAL_STATUS_LABEL[approval.status]}</p>
+    <section aria-label="Outcome" data-status={approval.status} className="reveal grid gap-1 border-t-4 border-foreground bg-muted px-3 py-3 sm:px-4">
+      <p className="font-display text-heading uppercase">{APPROVAL_STATUS_LABEL[approval.status]}</p>
       <p className="text-sm">
         {clock(approval.resolution.at)}: {approval.resolution.text}
       </p>
@@ -50,112 +53,142 @@ function Outcome({ approval }: { approval: Approval }) {
   );
 }
 
+function RiskFigureRow({ figure }: { figure: RiskFigure }) {
+  const label = RISK_FIGURE_LABEL[figure.field];
+  if (!figure.cap) {
+    return (
+      <div className="flex items-baseline justify-between gap-4 text-sm">
+        <dt className="font-bold">{label}</dt>
+        <dd className="text-right font-mono font-bold tabular">{usd(figure.value)}</dd>
+      </div>
+    );
+  }
+  const used = dec(figure.value);
+  const cap = dec(figure.cap);
+  const over = used > cap;
+  return (
+    <LimitRail
+      rail={{ key: figure.field, label, used, cap, atCap: "" }}
+      caption={over ? `The ${RISK_CAP_LABEL[figure.field]} is ${usd(cap)}.` : `${usd(max(sub(cap, used), ZERO))} under the ${RISK_CAP_LABEL[figure.field]}.`}
+    />
+  );
+}
+
+function NotFound() {
+  return (
+    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
+      <h1 id="missing-title" className="text-title sm:text-display">
+        No request with this ID
+      </h1>
+      <p className="max-w-prose">This workspace has no approval request with that ID.</p>
+      <Button asChild variant="outline" size="lg" className="w-fit">
+        <Link href="/approvals">See all approvals</Link>
+      </Button>
+    </section>
+  );
+}
+
 function Request({ approvalId }: { approvalId: string }) {
   const { ws, now, responses, respond } = useRuntime();
   const raw = ws.approvals.find((a) => a.approval_id === approvalId);
-  if (!raw) {
-    return (
-      <Panel className="max-w-xl">
-        <h1 className="text-heading">No request with this ID</h1>
-        <p className="mt-2 text-muted-foreground">This workspace has no approval request with that ID.</p>
-        <Link href="/approvals" className="mt-4 inline-block text-primary underline-offset-4 hover:underline">
-          See all approvals
-        </Link>
-      </Panel>
-    );
-  }
+  if (!raw) return <NotFound />;
   const approval = approvalAt(raw, now);
   const agent = findAgent(ws, approval.agent_id);
   const response = responses[approval.approval_id];
   const b = approval.bound;
   const orderValue = usd(mul(dec(b.qty), dec(b.limit)));
   const open = approval.status === "delivered";
+  const capped = approval.risk_impact.filter((f) => f.cap);
+  const uncapped = approval.risk_impact.filter((f) => !f.cap);
 
   return (
-    <article className="mx-auto grid w-full max-w-2xl gap-6" aria-labelledby="request-title">
-      <Link href="/approvals" className="inline-flex w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+    <article className="grid w-full max-w-3xl grid-cols-1 gap-(--seam)" aria-labelledby="request-title">
+      <Link href="/approvals" className={BACK}>
         <ArrowLeft className="size-4" aria-hidden />
         Approvals
       </Link>
 
-      <header className="grid gap-2">
-        <h1 id="request-title" className="text-heading text-muted-foreground">
+      <header className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
+        <h1 id="request-title" className="label-caps text-muted-foreground">
           Approval request
         </h1>
         <p className="text-sm text-muted-foreground">
           {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) proposes:
         </p>
-        <p className="font-display text-title sm:text-display">
-          Buy <span className="font-mono tabular">{quantity(b.qty)}</span> {b.symbol} at a limit of <span className="font-mono tabular">{price(b.limit)}</span>
+        <p className="font-display text-title leading-[0.95] font-bold uppercase sm:text-display">
+          Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol} at a limit of <span className="tabular">{price(b.limit)}</span>
         </p>
-      </header>
-
-      <Panel className="grid gap-4">
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm sm:grid-cols-3">
+        <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-3 text-sm sm:grid-cols-3">
           <div>
-            <dt className="text-caption text-muted-foreground">Order value</dt>
+            <dt className="label-caps text-muted-foreground">Order value</dt>
             <dd className="font-mono tabular">{orderValue}</dd>
           </div>
           <div>
-            <dt className="text-caption text-muted-foreground">Purpose</dt>
+            <dt className="label-caps text-muted-foreground">Purpose</dt>
             <dd>{PURPOSE_LABEL[b.purpose]}</dd>
           </div>
           <div>
-            <dt className="text-caption text-muted-foreground">Mandate version</dt>
+            <dt className="label-caps text-muted-foreground">Mandate version</dt>
             <dd className="font-mono text-caption">{b.mandate_version.slice(7, 19)}</dd>
           </div>
         </dl>
-        <div className="grid gap-1 border-t pt-4">
-          <p className="text-caption text-muted-foreground">Why you are asked</p>
+        <div className="grid gap-0.5 border-t pt-3">
+          <p className="label-caps text-muted-foreground">Why you are asked</p>
           <p>{approval.trigger}</p>
         </div>
-        <div className="grid gap-1 border-t pt-4">
+        <div className="grid gap-0.5 border-t pt-3">
           <p className="text-caption text-muted-foreground">Combined model score, not a probability of profit</p>
           <p className="font-mono tabular">{b.combined_score}</p>
         </div>
-      </Panel>
+      </header>
 
-      <section aria-labelledby="risk-title" className="grid gap-2">
-        <h2 id="risk-title" className="text-heading">
-          Risk impact in dollars
-        </h2>
-        <Panel className="py-1 sm:py-1">
-          <dl className="divide-y divide-border/60 text-sm">
-            {approval.risk_impact.map((f) => (
-              <div key={f.field} className="flex items-baseline justify-between gap-4 py-3">
-                <dt>{RISK_FIGURE_LABEL[f.field]}</dt>
-                <dd className="text-right font-mono tabular">
-                  {usd(f.value)}
-                  {f.cap ? (
-                    <span className="block font-sans text-caption text-muted-foreground">
-                      of the {usd(f.cap)} {RISK_CAP_LABEL[f.field]}
-                    </span>
-                  ) : null}
-                </dd>
-              </div>
+      <section aria-labelledby="risk-title" className="reveal grid gap-4 bg-marigold px-3 py-3 text-marigold-foreground sm:px-4 sm:py-4" style={{ "--i": 1 } as CSSProperties}>
+        <div className="grid gap-1">
+          <h2 id="risk-title" className="text-heading">
+            Risk impact in dollars
+          </h2>
+          <p className="text-sm text-marigold-muted">Measured against your mandate, as if this order fills.</p>
+        </div>
+        {capped.length > 0 ? (
+          <div className="grid gap-4">
+            {capped.map((f) => (
+              <RiskFigureRow key={f.field} figure={f} />
+            ))}
+          </div>
+        ) : null}
+        {uncapped.length > 0 ? (
+          <dl className="grid gap-2 border-t border-marigold-foreground/25 pt-3">
+            {uncapped.map((f) => (
+              <RiskFigureRow key={f.field} figure={f} />
             ))}
           </dl>
-        </Panel>
+        ) : null}
       </section>
 
       {approval.approvers_required > 1 ? (
-        <p className="text-sm">
+        <p className="bg-card px-3 py-3 text-sm sm:px-4">
           Needs {approval.approvers_required} approvers. Approved so far:{" "}
           {approval.approvals_so_far.length === 0 ? "nobody" : approval.approvals_so_far.map((a) => `${a.user_label} at ${clock(a.at)}`).join(", ")}.
         </p>
       ) : null}
 
-      <Collapsible className="rounded-xl border bg-card">
-        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left font-medium outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+      <Collapsible className="bg-card">
+        <CollapsibleTrigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
           View model output
-          <ChevronDown className="size-4 transition-transform duration-200 group-data-[state=open]:rotate-180" aria-hidden />
+          <ChevronDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[state=open]:rotate-180" aria-hidden />
         </CollapsibleTrigger>
-        <CollapsibleContent className="grid gap-3 px-4 pb-4">
+        <CollapsibleContent className="grid gap-(--seam) px-3 pb-3 sm:px-4 sm:pb-4">
           {approval.evidence.map((e) => (
-            <figure key={e.model_id} className="grid gap-1.5 rounded-lg bg-muted/60 p-3">
-              <figcaption className="text-caption text-muted-foreground">
-                {e.author === "owner_selected" ? "Output of software you selected" : <span className="text-orchid-text">Platform-authored</span>}: {e.model_id} {e.version}, at{" "}
-                {clock(e.produced_at)}
+            <figure key={e.model_id} className="grid gap-1.5 bg-muted p-3">
+              <figcaption className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+                {e.author === "owner_selected" ? (
+                  "Output of software you selected"
+                ) : (
+                  <span className="inline-flex h-6 items-center border-2 border-dashed border-foreground px-1.5 label-caps text-foreground">Platform-authored</span>
+                )}
+                <span>
+                  {e.model_id} {e.version}, at {clock(e.produced_at)}
+                </span>
               </figcaption>
               <blockquote className="grid gap-0.5 font-mono text-caption">
                 {e.lines.map((line) => (
@@ -168,15 +201,18 @@ function Request({ approvalId }: { approvalId: string }) {
       </Collapsible>
 
       {open ? (
-        <section aria-label="Your response" className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 grid gap-3 border-t bg-background px-4 py-4 sm:static sm:mx-0 sm:rounded-xl sm:border sm:bg-card sm:px-5">
-          <p className="font-medium">If you do nothing, this action is skipped.</p>
+        <section
+          aria-label="Your response"
+          className="sticky bottom-[calc(3.5rem+2px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-2 border-t-2 border-foreground bg-muted px-(--page-x) py-3 lg:static lg:mx-0 lg:border-t-4 lg:px-4 lg:py-4"
+        >
+          <p className="font-display text-xl leading-none font-extrabold uppercase lg:text-heading">If you do nothing, this action is skipped.</p>
           <Deadline deadline={approval.deadline} now={now} />
           {response ? (
             <div role="status" aria-live="polite">
               <ResponseStatus approval={approval} response={response} />
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-3" data-slot="approval-choices">
+            <div className="grid grid-cols-2 gap-(--seam) pt-1" data-slot="approval-choices">
               <Button variant="outline" size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "approve")}>
                 Approve
               </Button>

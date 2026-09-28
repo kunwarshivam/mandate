@@ -1,122 +1,119 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
-import { motion } from "motion/react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Deadline } from "@/components/approvals/deadline";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
+import { ModeBadge } from "@/components/domain/mode";
 import { SignedMoney } from "@/components/domain/money";
 import { findAgent } from "@/fixtures/workspace";
 import { price, quantity, usd } from "@/lib/format";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { AgentCard } from "./agent-card";
-import { Panel, Section, WorkspaceGate } from "./common";
-
-const stagger = {
-  hidden: {},
-  shown: { transition: { staggerChildren: 0.04 } },
-};
-const rise = {
-  hidden: { opacity: 0, y: 6 },
-  shown: { opacity: 1, y: 0, transition: { duration: 0.24, ease: [0.25, 1, 0.5, 1] as const } },
-};
-
-function EmptyWorkspace() {
-  return (
-    <section
-      className="envelope grid min-h-[22rem] place-items-end rounded-2xl p-3 pr-[calc(var(--envelope-wall)+0.75rem)] sm:p-4 sm:pr-[calc(var(--envelope-wall)+1rem)]"
-      aria-labelledby="empty-title"
-    >
-      <div className="grid w-full max-w-xl gap-4 rounded-xl bg-card p-5 sm:p-6">
-        <h1 id="empty-title" className="text-title">
-          No agents yet
-        </h1>
-        <p className="text-muted-foreground">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
-        <Button asChild size="lg" className="press h-11 w-fit px-5 text-base">
-          <Link href="/agents/new">Describe your first agent</Link>
-        </Button>
-      </div>
-    </section>
-  );
-}
+import { EmptyBoard, Panel, Section, WorkspaceGate } from "./common";
 
 function Dashboard() {
   const { ws, now } = useRuntime();
-  if (ws.agents.length === 0) return <EmptyWorkspace />;
-  const open = ws.approvals.map((a) => approvalAt(a, now)).filter((a) => a.status === "delivered").sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
+  if (ws.agents.length === 0) return <EmptyBoard />;
+  const open = ws.approvals
+    .map((a) => approvalAt(a, now))
+    .filter((a) => a.status === "delivered")
+    .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
   const marketStale = ws.health.market_data.state !== "ok";
-  const active = ws.agents.filter((a) => a.mode !== "stopped").length;
+  const running = ws.agents.filter((a) => a.mode !== "stopped").length;
   const positions = ws.agents.flatMap((a) => a.positions.map((p) => ({ agent: a, p })));
 
   return (
-    <div className="grid gap-10">
-      <section
-        className="envelope rounded-2xl p-2.5 pr-[calc(var(--envelope-wall)+0.625rem)] sm:p-3 sm:pr-[calc(var(--envelope-wall)+0.75rem)]"
-        aria-labelledby="dashboard-title"
-      >
-        <div className="grid gap-4 rounded-xl bg-card p-5 sm:grid-cols-[1fr_auto] sm:items-end sm:p-6">
-          <div className="grid gap-2">
-            <h1 id="dashboard-title" className="text-title sm:text-display">
-              Dashboard
-            </h1>
-            <p className="text-muted-foreground">
-              {ws.agents.length} {ws.agents.length === 1 ? "agent" : "agents"} on {ws.connection.broker}, {active} running.{" "}
-              {open.length === 0 ? "Nothing is waiting for you." : `${open.length} ${open.length === 1 ? "request is" : "requests are"} waiting for you.`}
+    <div className="grid grid-cols-1 gap-(--section-gap)">
+      <div className="grid grid-cols-1 gap-(--seam) lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+        <header data-slot="account-board" className="reveal grid content-start gap-4 bg-lapis px-4 pt-4 pb-3 text-lapis-foreground sm:px-5 sm:pt-5">
+          <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+            <h1 className="text-display">Dashboard</h1>
+            <p className="text-lapis-muted">
+              {ws.connection.broker}, <span className="font-mono tabular">{usd(ws.connection.account_equity)}</span> equity
             </p>
           </div>
-          {open.length > 0 ? (
-            <Button asChild variant="outline" size="lg" className="press h-10 w-fit px-4">
-              <Link href="/approvals">Open approvals</Link>
-            </Button>
-          ) : null}
-        </div>
-      </section>
+          <table className="w-full border-collapse">
+            <caption className="sr-only">Agents and their modes</caption>
+            <thead className="sr-only">
+              <tr>
+                <th scope="col">Agent</th>
+                <th scope="col">Mandate</th>
+                <th scope="col">Mode</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ws.agents.map((a) => (
+                <tr key={a.agent_id} className="border-t border-lapis-muted/40">
+                  <th scope="row" className="py-2 pr-3 text-left font-display text-xl leading-none font-bold uppercase">
+                    {a.label}
+                  </th>
+                  <td className="py-2 pr-3 text-sm text-lapis-muted">{a.mandate.name}</td>
+                  <td className="py-2 text-right">
+                    <ModeBadge mode={a.mode} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-sm text-lapis-muted">
+            {running} of {ws.agents.length} running
+          </p>
+        </header>
 
-      {open.length > 0 ? (
-        <Section title="Waiting for you">
-          <ul className="grid gap-2">
-            {open.map((a) => {
-              const agent = findAgent(ws, a.agent_id);
-              return (
-                <li key={a.approval_id}>
-                  <Link
-                    href={`/approvals/${a.approval_id}`}
-                    className="press grid gap-1 rounded-xl border bg-card p-4 shadow-whisper hover:border-primary/50 sm:grid-cols-[1fr_auto] sm:items-center sm:gap-4"
-                  >
-                    <span className="font-medium">
+        <section aria-labelledby="waiting-title" data-slot="waiting" className="reveal grid content-start gap-3 bg-card px-4 py-4 sm:px-5 sm:py-5" style={{ "--i": 1 } as CSSProperties}>
+          <h2 id="waiting-title" className="text-heading">
+            {open.length === 0 ? "Nothing waiting" : open.length === 1 ? "1 request waiting" : `${open.length} requests waiting`}
+          </h2>
+          {open.length === 0 ? (
+            <p className="text-muted-foreground">Requests for your approval appear here, with their deadline.</p>
+          ) : (
+            <ul className="grid gap-3">
+              {open.map((a) => {
+                const agent = findAgent(ws, a.agent_id);
+                return (
+                  <li key={a.approval_id} className="grid gap-2 border-t-2 border-foreground pt-2.5">
+                    <p className="font-bold">
                       {agent?.label ?? "An agent"} asks to buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of{" "}
                       <span className="font-mono tabular">{price(a.bound.limit)}</span>
-                    </span>
+                    </p>
                     <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </Section>
-      ) : null}
+                    <Button asChild size="lg" className="w-fit">
+                      <Link href={`/approvals/${a.approval_id}`}>
+                        Open request <ArrowRight aria-hidden />
+                      </Link>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      </div>
 
       <Section title="Agents">
-        <motion.div variants={stagger} initial="hidden" animate="shown" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {ws.agents.map((agent) => (
-            <motion.div key={agent.agent_id} variants={rise} className="grid">
-              <AgentCard agent={agent} now={now} marketStale={marketStale} />
-            </motion.div>
+        <ul className="grid gap-(--block-gap)">
+          {ws.agents.map((agent, i) => (
+            <li key={agent.agent_id} className="grid">
+              <AgentCard agent={agent} now={now} marketStale={marketStale} index={i + 2} />
+            </li>
           ))}
-        </motion.div>
+        </ul>
       </Section>
 
-      <div className="grid gap-10 lg:grid-cols-[3fr_2fr]">
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Section title="Recent gate decisions">
-          <Panel className="py-1 sm:py-1">
+          <Panel className="py-0.5 sm:py-0.5">
             {ws.decisions.length === 0 ? (
-              <p className="py-3 text-sm text-muted-foreground">No decisions yet.</p>
+              <p className="py-2.5 text-sm text-muted-foreground">No decisions yet.</p>
             ) : (
-              <ul className="divide-y divide-border/60">
+              <ol>
                 {ws.decisions.slice(0, 6).map((d) => (
                   <GateDecisionRow key={d.event_id} decision={d} agent={findAgent(ws, d.agent_id)} showAgent />
                 ))}
-              </ul>
+              </ol>
             )}
           </Panel>
         </Section>
@@ -129,21 +126,23 @@ function Dashboard() {
               <table className="w-full text-sm">
                 <caption className="sr-only">Positions across agents</caption>
                 <thead>
-                  <tr className="border-b text-left text-caption text-muted-foreground">
-                    <th scope="col" className="pb-2 font-medium">Holding</th>
-                    <th scope="col" className="pb-2 text-right font-medium">Value</th>
-                    <th scope="col" className="pb-2 text-right font-medium">Unrealized</th>
+                  <tr className="border-b-2 border-foreground text-left">
+                    <th scope="col" className="pb-1.5 label-caps">Holding</th>
+                    <th scope="col" className="pb-1.5 text-right label-caps">Value</th>
+                    <th scope="col" className="pb-1.5 text-right label-caps">Unrealized</th>
                   </tr>
                 </thead>
                 <tbody>
                   {positions.map(({ agent, p }) => (
-                    <tr key={`${agent.agent_id}-${p.instrument.asset_id}`} className="border-b border-border/60 last:border-b-0">
-                      <th scope="row" className="py-2.5 text-left font-normal">
-                        <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
+                    <tr key={`${agent.agent_id}-${p.instrument.asset_id}`} className="border-b last:border-b-0">
+                      <th scope="row" className="py-2 text-left font-normal">
+                        <span className="font-bold">
+                          <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
+                        </span>
                         <span className="block text-caption text-muted-foreground">{agent.label}</span>
                       </th>
-                      <td className="py-2.5 text-right font-mono tabular">{usd(p.market_value)}</td>
-                      <td className="py-2.5 text-right">
+                      <td className="py-2 text-right align-top font-mono tabular">{usd(p.market_value)}</td>
+                      <td className="py-2 text-right align-top">
                         <SignedMoney value={p.unrealized_pnl} showWord={false} />
                       </td>
                     </tr>
@@ -152,9 +151,8 @@ function Dashboard() {
               </table>
             )}
             {ws.external_positions.length > 0 ? (
-              <p className="mt-4 border-t pt-3 text-caption text-muted-foreground">
-                Also on the account, not managed by any agent:{" "}
-                {ws.external_positions.map((e) => `${quantity(e.qty)} ${e.instrument.symbol}`).join(", ")}.
+              <p className="mt-3 border-t pt-2.5 text-caption text-muted-foreground">
+                Also on the account, not managed by any agent: {ws.external_positions.map((e) => `${quantity(e.qty)} ${e.instrument.symbol}`).join(", ")}.
               </p>
             ) : null}
           </Panel>
