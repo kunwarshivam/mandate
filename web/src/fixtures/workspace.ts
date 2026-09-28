@@ -3,6 +3,7 @@
  * internally consistent (equity = allocation + realized + market value − cost basis) and to sit
  * inside every limit they are not meant to break; none is a performance record.
  */
+import { add, dec, toFixed } from "@/lib/decimal";
 import { BTC_HISTORY, LMN_HISTORY, SWING_HISTORY } from "./history";
 import { INSTRUMENTS, btcAccumulator, lmnCore, provenance, twoStockSwing } from "./mandates";
 import type { Agent, Approval, CancelReason, GateDecision, Health, Scenario, TimelineEvent, Workspace } from "./types";
@@ -472,6 +473,13 @@ const healthy: Health = {
   relay: { state: "ok", as_of: t("14:05:10") },
 };
 
+/** Cash and the owner's own ABC shares: the part of the broker's equity that no agent manages. */
+const UNMANAGED_EQUITY = "3412.8";
+
+function brokerEquity(agents: Agent[]): string {
+  return toFixed(add(dec(UNMANAGED_EQUITY), ...agents.map((a) => dec(a.state.equity))), 2);
+}
+
 function base(scenario: Scenario): Workspace {
   return structuredClone({
     scenario,
@@ -479,7 +487,7 @@ function base(scenario: Scenario): Workspace {
     journal: "answers",
     now: NOW,
     environment: "paper",
-    connection: { connection_id: "conn_alpaca_paper_01", broker: "Alpaca paper", account_equity: "25000", day_trading_regime: "intraday_margin" },
+    connection: { connection_id: "conn_alpaca_paper_01", broker: "Alpaca paper", account_equity: brokerEquity([btc, swing, lmn]), day_trading_regime: "intraday_margin" },
     health: healthy,
     agents: [btc, swing, lmn],
     approvals: [pendingSwing, ...resolved],
@@ -579,6 +587,7 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       b.pnl_today = "-70";
       b.state = { ...b.state, equity: "9530", equity_day_start: "9600", size_factor: "0.5" };
       b.positions[0] = { ...b.positions[0], mark: "51843.58", market_value: "6221.23", unrealized_pnl: "-445.44" };
+      ws.connection.account_equity = brokerEquity(ws.agents);
       const canceled = b.orders.filter((o) => o.purpose !== "protective");
       b.orders = b.orders.filter((o) => o.purpose === "protective");
       b.past_orders.unshift(

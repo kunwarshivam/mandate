@@ -362,6 +362,7 @@ function equityCurve(agent: Agent, symbols: Record<string, SymbolBars>, from: nu
   let cash = Number(agent.state.capital_base);
   const qty: Record<string, number> = {};
   const points: Point[] = [];
+  const holding: boolean[] = [];
   for (let t = from; t <= end; t += MINUTE) {
     while (fi < fills.length && fills[fi].time <= t) {
       const { f } = fills[fi++];
@@ -378,8 +379,11 @@ function equityCurve(agent: Agent, symbols: Record<string, SymbolBars>, from: nu
       value += (qty[s] ?? 0) * px;
     }
     points.push({ time: t, value });
+    holding.push(syms.some((s) => Math.abs(qty[s] ?? 0) > 1e-12));
   }
-  return points;
+  // The ledger rounds marked holdings to the cent; carrying that rounding ends the curve on the figure.
+  const rounding = points.length > 0 ? Number(agent.state.equity) - points[points.length - 1].value : 0;
+  return points.map((p, i) => ({ time: p.time, value: round2(holding[i] ? p.value + rounding : p.value) }));
 }
 
 /** Hold each agent below its high-water mark by trimming the one symbol it holds, minute by minute. */
