@@ -1,64 +1,36 @@
 "use client";
 
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { GearSix, House, Robot, Scroll, Tray } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Gauge, Inbox, ScrollText, Settings2, Workflow } from "lucide-react";
+import { type Capability, useRole, can } from "@/lib/roles";
 
-export const NAV = [
-  { href: "/", label: "Dashboard", icon: Gauge },
-  { href: "/approvals", label: "Approvals", icon: Inbox },
-  { href: "/agents", label: "Agents", icon: Workflow },
-  { href: "/audit", label: "Audit", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings2 },
-] as const;
+const TABS: ReadonlyArray<{ href: string; label: string; icon: ComponentType<{ className?: string }>; needs: Capability }> = [
+  { href: "/", label: "Home", icon: House, needs: "agents.view" },
+  { href: "/approvals", label: "Approvals", icon: Tray, needs: "agents.view" },
+  { href: "/agents", label: "Agents", icon: Robot, needs: "agents.view" },
+  { href: "/audit", label: "Audit", icon: Scroll, needs: "audit.view" },
+  { href: "/settings", label: "Workspace", icon: GearSix, needs: "workspace.view" },
+];
 
 function isActive(pathname: string, href: string): boolean {
   return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
 }
 
-/** The approvals badge carries a count and nothing else. */
-function Count({ n }: { n: number }) {
-  if (n === 0) return null;
-  return (
-    <span data-slot="approvals-count" className="ml-auto inline-flex h-6 min-w-6 items-center justify-center bg-foreground px-1.5 font-mono text-caption font-bold text-background tabular">
-      {n}
-      <span className="sr-only"> open</span>
-    </span>
-  );
-}
-
-export function SideNav({ approvals }: { approvals: number }) {
-  const pathname = usePathname();
-  return (
-    <nav aria-label="Main" className="grid">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = isActive(pathname, href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex h-11 items-center gap-3 px-4 font-medium text-foreground transition-colors duration-(--duration-hover) hover:bg-muted",
-              active && "bg-lapis font-bold text-lapis-foreground hover:bg-lapis",
-            )}
-          >
-            <Icon className="size-4" aria-hidden />
-            {label}
-            {href === "/approvals" ? <Count n={approvals} /> : null}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
+/** Phones keep a bottom tab bar; the sidebar opens as a sheet from the header. */
 export function TabNav({ approvals }: { approvals: number }) {
   const pathname = usePathname();
+  const { role } = useRole();
+  const tabs = TABS.filter((t) => can(role, t.needs));
   return (
-    <nav aria-label="Main" className="grid grid-cols-5 border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)]">
-      {NAV.map(({ href, label, icon: Icon }) => {
+    <nav
+      aria-label="Main"
+      className="grid border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)]"
+      style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
+    >
+      {tabs.map(({ href, label, icon: Icon }) => {
         const active = isActive(pathname, href);
         return (
           <Link
@@ -73,7 +45,10 @@ export function TabNav({ approvals }: { approvals: number }) {
             <span className="relative">
               <Icon className="size-5" aria-hidden />
               {href === "/approvals" && approvals > 0 ? (
-                <span data-slot="approvals-count" className="absolute -top-2 -right-3 inline-flex h-4.5 min-w-4.5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular">
+                <span
+                  data-slot="approvals-count"
+                  className="absolute -top-2 -right-3 inline-flex h-4.5 min-w-4.5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular"
+                >
                   {approvals}
                   <span className="sr-only"> open</span>
                 </span>

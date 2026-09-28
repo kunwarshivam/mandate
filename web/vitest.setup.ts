@@ -18,7 +18,12 @@ afterEach(() => {
   cleanup();
 });
 
-if (!window.matchMedia) {
+const dom = typeof window !== "undefined";
+
+// jsdom runs no CSS animations, so Base UI would keep closed popups mounted waiting for their exit.
+if (dom) Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true });
+
+if (dom && !window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: (query: string) => ({
@@ -39,10 +44,14 @@ class ResizeObserverStub {
   unobserve() {}
   disconnect() {}
 }
-if (!("ResizeObserver" in window)) {
+if (dom && !("ResizeObserver" in window)) {
   Object.defineProperty(window, "ResizeObserver", { writable: true, value: ResizeObserverStub });
 }
 
-if (!Element.prototype.scrollIntoView) {
+if (dom && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
+}
+
+if (dom && !Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
 }

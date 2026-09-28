@@ -469,9 +469,10 @@ function base(scenario: Scenario): Workspace {
   return structuredClone({
     scenario,
     status: "ready",
+    journal: "answers",
     now: NOW,
     environment: "paper",
-    connection: { connection_id: "conn_alpaca_paper_01", broker: "Alpaca paper", account_equity: "25000", day_trading_regime: "intraday_margin" },
+    connection: { connection_id: "con_01JB3K7M9Q2W4E6R8T0Y1V3X5P", broker: "Alpaca paper", account_equity: "25000", day_trading_regime: "intraday_margin" },
     health: healthy,
     agents: [btc, swing, lmn],
     approvals: [pendingSwing, ...resolved],
@@ -505,6 +506,7 @@ export const SCENARIOS: Array<{ id: Scenario; label: string }> = [
   { id: "unknown-order", label: "Unknown order" },
   { id: "unreachable", label: "Deployment unreachable" },
   { id: "approvals", label: "Pending approvals" },
+  { id: "result-unknown", label: "Result unknown" },
 ];
 
 export function isScenario(value: unknown): value is Scenario {
@@ -633,6 +635,8 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
     case "approvals":
       ws.approvals = [pendingSwing, pendingBtc, pendingLmn, ...resolved];
       return ws;
+    case "result-unknown":
+      return { ...ws, journal: "silent" };
     default: {
       const unhandled: never = scenario;
       throw new Error(`unhandled scenario ${String(unhandled)}`);

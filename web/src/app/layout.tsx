@@ -7,6 +7,7 @@ import "./globals.css";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
+import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { getScenario } from "@/lib/get-workspace";
 import { scenariosEnabled } from "@/lib/scenario";
@@ -30,14 +31,18 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const scenario = await getScenario();
   const workspace = buildWorkspace(scenario);
   return (
-    <html lang="en">
+    <html lang="en" data-mode="light" data-theme="placard">
       <body>
-        <Providers key={scenario} workspace={workspace}>
-          <AppShell>
-            <ViewTransition>{children}</ViewTransition>
-          </AppShell>
-          {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} /> : null}
-        </Providers>
+        <div className="isolate">
+          <RoleProvider>
+            <Providers key={scenario} workspace={workspace}>
+              <AppShell>
+                <ViewTransition>{children}</ViewTransition>
+              </AppShell>
+              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} /> : null}
+            </Providers>
+          </RoleProvider>
+        </div>
       </body>
     </html>
   );

@@ -1,5 +1,36 @@
 import type { CommandKind } from "@/lib/mock-runtime";
 
+/**
+ * The kill switch in each scope (D10) and release (D11) are confirmed on record screens, which are
+ * pages (brief §4.1): the Stop sheet links to them and never sends these itself.
+ */
+export type RecordKind = Extract<CommandKind, "kill" | "release" | "stop_all" | "close_all">;
+export type SheetKind = Exclude<CommandKind, RecordKind>;
+
+export const RECORD_KINDS = ["kill", "release", "stop_all", "close_all"] as const satisfies readonly RecordKind[];
+
+export function isRecordKind(kind: CommandKind): kind is RecordKind {
+  return (RECORD_KINDS as readonly CommandKind[]).includes(kind);
+}
+
+/** Agent scope takes an agent ID; account scope takes the connection ID. Both are opaque. */
+export function recordHref(kind: RecordKind, id: string): string {
+  switch (kind) {
+    case "kill":
+      return `/agents/${id}/kill-switch`;
+    case "release":
+      return `/agents/${id}/release`;
+    case "stop_all":
+      return `/connections/${id}/stop-all`;
+    case "close_all":
+      return `/connections/${id}/close-all`;
+    default: {
+      const unhandled: never = kind;
+      throw new Error(`unhandled command ${String(unhandled)}`);
+    }
+  }
+}
+
 /** Pause removes permissions and can be undone, so it alone skips step-up (PX-4 (b)). */
 export function needsStepUp(kind: CommandKind): boolean {
   return kind !== "pause" && kind !== "pause_all";
