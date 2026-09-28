@@ -7,7 +7,7 @@ import { StopSheet } from "@/components/stop/stop-sheet";
 
 /**
  * The Stop control is always rendered and never disabled. It does not wait for the dashboard or any
- * model to load (brief §5, rule 13).
+ * model to load (brief §5, rule 13). Ink, because ink is what a stopped agent looks like.
  */
 export function StopControl() {
   const [open, setOpen] = useState(false);
@@ -20,9 +20,9 @@ export function StopControl() {
         onClick={() => setOpen(true)}
         data-slot="stop-control"
         aria-haspopup="dialog"
-        className="press inline-flex h-9 items-center gap-2 rounded-lg bg-ink px-3.5 text-sm font-semibold text-ink-foreground shadow-whisper outline-none hover:bg-ink/90 focus-visible:ring-3 focus-visible:ring-ring/60"
+        className="press inline-flex h-11 items-center gap-2 bg-ink px-4 font-bold text-ink-foreground outline-none hover:bg-ink/85 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
       >
-        <Octagon className="size-4" aria-hidden />
+        <Octagon className="size-4.5" aria-hidden />
         Stop
       </button>
       <StopSheet open={open} onOpenChange={setOpen} agentId={match ? match[1] : null} />

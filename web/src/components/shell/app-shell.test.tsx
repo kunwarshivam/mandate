@@ -15,7 +15,6 @@ import { SCENARIOS } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AppShell } from "./app-shell";
-import { THEME_KEY } from "./theme-toggle";
 
 const ROUTES: Array<[string, ComponentType]> = [
   ["/", dashboard.default],
@@ -57,7 +56,7 @@ describe("every screen in every scenario", () => {
   it("keeps page titles generic: no agent names, tickers, or amounts", () => {
     const titles = [dashboard, agents, agentsNew, approvals, audit, settings, design].map(({ metadata }) => {
       const title = metadata.title;
-      return typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Mandate$/, "") : String(title);
+      return typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
     });
     for (const title of titles) expect(title).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);
   });
@@ -75,6 +74,24 @@ describe("status strip", () => {
   it("says the deployment is unreachable and hides agent data", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "unreachable");
     expect(screen.getByRole("region", { name: "System status" })).toHaveTextContent("Deployment unreachable since 13:58:02; agent data hidden");
+  });
+});
+
+describe("Owlhead", () => {
+  it("names the product Owlhead in the shell, with a typographic wordmark and no mark", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const home = screen.getAllByRole("link", { name: "Owlhead, dashboard" });
+    expect(home.length).toBeGreaterThan(0);
+    for (const link of home) {
+      expect(link).toHaveTextContent("Owlhead");
+      expect(link.querySelector("svg")).toBeNull();
+    }
+    expect(document.body.textContent).not.toMatch(/\bMandate\b/);
+  });
+
+  it("offers no theme toggle: Placard is light only", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(screen.queryByRole("button", { name: /theme/i })).toBeNull();
   });
 });
 
@@ -104,19 +121,17 @@ describe("browser storage", () => {
     vi.useRealTimers();
   });
 
-  it.each(SCENARIO_IDS)("writes nothing but the theme in the %s scenario", (scenario) => {
+  it.each(SCENARIO_IDS)("writes nothing to browser storage in the %s scenario", (scenario) => {
     renderWithRuntime(
       <AppShell>
         <dashboard.default />
       </AppShell>,
       scenario,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Use (dark|light) theme/ }));
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /Pause all agents/ }));
     act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
 
-    expect(writes.map(([, key]) => key)).toEqual([THEME_KEY]);
-    expect(writes.every(([store]) => store === window.localStorage)).toBe(true);
+    expect(writes).toEqual([]);
   });
 });

@@ -35,11 +35,12 @@ function items(ws: Workspace, now: string): Item[] {
   return [md, deployment, broker, relay];
 }
 
-const DOT: Record<Item["state"], string> = {
-  ok: "bg-lagoon",
-  stale: "bg-persimmon",
-  down: "bg-rose",
-  loading: "bg-muted-foreground/40",
+/** System health carries no meaning colour: a healthy line is quiet, a degraded one is labelled. */
+const STATE_LABEL: Record<Item["state"], string | null> = {
+  ok: null,
+  loading: null,
+  stale: "Stale",
+  down: "Down",
 };
 
 export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
@@ -50,19 +51,33 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       role="region"
       aria-label="System status"
       data-slot="status-strip"
-      className={cn("flex items-center gap-x-5 gap-y-1 overflow-x-auto px-4 py-2 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none]", className)}
+      data-degraded={degraded > 0 ? "" : undefined}
+      className={cn(
+        "flex items-center gap-x-4 gap-y-1 overflow-x-auto py-1.5 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none]",
+        degraded > 0 && "bg-muted",
+        className,
+      )}
     >
       {degraded > 0 ? (
-        <span className="font-semibold text-foreground" data-slot="degraded-count">
+        <span className="font-bold text-foreground" data-slot="degraded-count">
           {degraded} degraded
         </span>
       ) : null}
-      {list.map((i) => (
-        <span key={i.key} data-state={i.state} className={cn("inline-flex items-center gap-1.5", i.state !== "ok" && i.state !== "loading" && "text-foreground")}>
-          <span className={cn("size-1.5 shrink-0 rounded-full", DOT[i.state])} aria-hidden />
-          {i.text}
-        </span>
-      ))}
+      {list.map((i) => {
+        const label = STATE_LABEL[i.state];
+        return (
+          <span key={i.key} data-state={i.state} className={cn("inline-flex items-center gap-1.5", label && "font-medium text-foreground")}>
+            {label ? (
+              <span className="border-2 border-foreground px-1 label-caps" aria-hidden>
+                {label}
+              </span>
+            ) : (
+              <span className={cn("size-1.5 shrink-0", i.state === "ok" ? "bg-muted-foreground" : "bg-border")} aria-hidden />
+            )}
+            {i.text}
+          </span>
+        );
+      })}
       <FixtureTag className="ml-auto" />
     </div>
   );

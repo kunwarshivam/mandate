@@ -5,8 +5,15 @@ import type { ActiveRestriction, AgentMode, RestrictionCode } from "@/fixtures/t
  * and alerts read this one table, so every restriction says what it blocks, how it ends, and who
  * can end it.
  */
+/**
+ * Who imposed a restriction decides its colour (web/DESIGN.md): your mandate is marigold, the
+ * account is lapis, your own stop is ink, and market data carries no meaning colour.
+ */
+export type RestrictionSource = "mandate" | "account" | "owner" | "market";
+
 export interface RestrictionText {
   label: string;
+  source: RestrictionSource;
   /** The effective mode the restriction imposes; null when it narrows without a mode change. */
   mode: AgentMode | null;
   blocks: string;
@@ -17,6 +24,7 @@ export interface RestrictionText {
 export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   drawdown_scale_sizes: {
     label: "Drawdown: sizes scaled",
+    source: "mandate",
     mode: null,
     blocks: "Full-size buys",
     endsWhen: "Drawdown recovers past the hysteresis and stays there for the scale-lift time",
@@ -24,6 +32,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   drawdown_exits_only: {
     label: "Drawdown: exits only",
+    source: "mandate",
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You acknowledge it with step-up, which resets the high-water mark",
@@ -31,6 +40,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   drawdown_flatten: {
     label: "Drawdown: flattened",
+    source: "mandate",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You acknowledge it once the agent is flat",
@@ -38,6 +48,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   daily_loss: {
     label: "Daily loss limit",
+    source: "mandate",
     mode: "exits_only",
     blocks: "Openings and increases (every new order except protection after a flatten)",
     endsWhen: "A new risk day plus the minimum time; after a flatten, also your acknowledgment once flat",
@@ -45,6 +56,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   hard_breach: {
     label: "Hard limit reached",
+    source: "mandate",
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "A sane quote below the hard level, or the limit latches",
@@ -52,6 +64,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   lifetime_floor: {
     label: "Lifetime floor",
+    source: "mandate",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "Only a mandate version that loosens the floor, with independent approval",
@@ -59,13 +72,15 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   goal_complete: {
     label: "Goal complete",
+    source: "mandate",
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You release or close the positions",
     whoActs: "You",
   },
   external_activity: {
-    label: "Activity outside Mandate on the account",
+    label: "Activity outside Owlhead on the account",
+    source: "account",
     mode: "exits_only",
     blocks: "Openings and increases on the account",
     endsWhen: "You acknowledge the activity",
@@ -73,6 +88,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   account_closing_only: {
     label: "Account closing only",
+    source: "account",
     mode: "exits_only",
     blocks: "Openings and increases",
     endsWhen: "You acknowledge it and the account refreshes",
@@ -80,6 +96,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   account_blocked: {
     label: "Account blocked",
+    source: "account",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You acknowledge it and the account refreshes",
@@ -87,6 +104,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   reconciliation_mismatch: {
     label: "Ledger and broker disagree",
+    source: "account",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You review the difference and acknowledge it with step-up",
@@ -94,6 +112,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   startup_reconciliation: {
     label: "Checking with the broker",
+    source: "account",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "The reconciliation run confirms the ledger matches the broker",
@@ -101,6 +120,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   leverage_check_failed: {
     label: "Account is not at 1×",
+    source: "account",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "The account is set to 1× at the broker",
@@ -108,6 +128,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   owner_pause: {
     label: "Paused by you",
+    source: "owner",
     mode: "paused",
     blocks: "Every new order except protection",
     endsWhen: "You resume the agent, with step-up",
@@ -115,6 +136,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   stopped: {
     label: "Stopped",
+    source: "owner",
     mode: "stopped",
     blocks: "Everything",
     endsWhen: "Never; stopping is final",
@@ -122,6 +144,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   stale_mark: {
     label: "Stale price",
+    source: "market",
     mode: null,
     blocks: "Openings in this instrument",
     endsWhen: "A sane price arrives",
@@ -129,6 +152,7 @@ export const RESTRICTIONS: Record<RestrictionCode, RestrictionText> = {
   },
   removed_instrument: {
     label: "Instrument removed",
+    source: "mandate",
     mode: null,
     blocks: "Openings in this instrument",
     endsWhen: "A version re-adds it",
@@ -140,3 +164,10 @@ export function describeRestriction(r: ActiveRestriction): RestrictionText & { t
   const text = RESTRICTIONS[r.code];
   return { ...text, title: r.symbol ? `${text.label}: ${r.symbol}` : text.label };
 }
+
+export const SOURCE_LABEL: Record<RestrictionSource, string> = {
+  mandate: "Your mandate",
+  account: "The account",
+  owner: "You",
+  market: "Market data",
+};

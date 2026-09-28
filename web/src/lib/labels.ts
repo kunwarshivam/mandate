@@ -14,7 +14,7 @@ export const MODE_MEANING: Record<AgentMode, string> = {
   stopped: "Ended. Places no orders.",
 };
 
-/** Mandate spec §2.1. Orchid marks what the platform, not the owner, authored. */
+/** Mandate spec §2.1. A dashed badge marks what the platform, not the owner, authored. */
 export const PROVENANCE_LABEL: Record<Provenance, string> = {
   user_stated: "You said",
   user_entered: "You entered",

@@ -1,87 +1,116 @@
 /**
- * The colour tokens, one entry per CSS custom property in `globals.css` (the test
+ * The Placard colour tokens, one entry per CSS custom property in `globals.css` (the test
  * `tokens.test.ts` keeps the two in step). The design page and the contrast checks read this file.
+ * Placard is light only; dark mode is follow-up work (web/DESIGN.md).
  */
 
-export type Theme = "light" | "dark";
+export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result";
 
 export interface ColorToken {
   name: string;
+  meaning: Meaning;
   role: string;
-  light: string;
-  dark: string;
+  value: string;
 }
 
 export const colorTokens: ColorToken[] = [
-  { name: "background", role: "Porcelain (light) and midnight (dark) page surface", light: "oklch(0.985 0.006 255)", dark: "oklch(0.17 0.035 268)" },
-  { name: "card", role: "Raised surface: cards, sheets, dialogs", light: "oklch(0.998 0.003 255)", dark: "oklch(0.205 0.04 268)" },
-  { name: "muted", role: "Sunken surface: rails, table stripes, skeletons", light: "oklch(0.955 0.012 262)", dark: "oklch(0.25 0.045 268)" },
-  { name: "border", role: "Hairlines and dividers", light: "oklch(0.905 0.016 262)", dark: "oklch(0.32 0.045 268)" },
-  { name: "foreground", role: "Body text", light: "oklch(0.235 0.035 268)", dark: "oklch(0.955 0.008 260)" },
-  { name: "muted-foreground", role: "Secondary text, labels, ages", light: "oklch(0.47 0.035 266)", dark: "oklch(0.76 0.03 262)" },
-  { name: "primary", role: "Ultramarine: primary actions, links, focus", light: "oklch(0.52 0.22 268)", dark: "oklch(0.74 0.14 268)" },
-  { name: "primary-foreground", role: "Text on ultramarine", light: "oklch(0.985 0.006 255)", dark: "oklch(0.17 0.035 268)" },
-  { name: "ultramarine", role: "Brand hue as a fill: rails, envelope, charts", light: "oklch(0.52 0.22 268)", dark: "oklch(0.62 0.2 268)" },
-  { name: "persimmon", role: "Warm accent fill: limit walls, the paper hatch", light: "oklch(0.72 0.17 48)", dark: "oklch(0.74 0.16 50)" },
-  { name: "persimmon-text", role: "Persimmon as text", light: "oklch(0.52 0.15 42)", dark: "oklch(0.8 0.13 52)" },
-  { name: "lagoon", role: "Information and gains as a fill", light: "oklch(0.74 0.12 195)", dark: "oklch(0.74 0.12 195)" },
-  { name: "lagoon-text", role: "Gains and information as text", light: "oklch(0.48 0.085 205)", dark: "oklch(0.82 0.1 195)" },
-  { name: "orchid", role: "Platform-authored labels as a fill (sparingly)", light: "oklch(0.7 0.15 330)", dark: "oklch(0.7 0.15 330)" },
-  { name: "orchid-text", role: "Platform-authored labels as text", light: "oklch(0.5 0.17 330)", dark: "oklch(0.82 0.11 330)" },
-  { name: "rose", role: "Losses as a fill", light: "oklch(0.63 0.2 15)", dark: "oklch(0.66 0.18 15)" },
-  { name: "rose-text", role: "Losses as text (always with a minus sign and the word)", light: "oklch(0.51 0.19 15)", dark: "oklch(0.8 0.12 15)" },
-  { name: "crimson", role: "The kill switch, and nothing else", light: "oklch(0.47 0.19 27)", dark: "oklch(0.55 0.2 27)" },
-  { name: "crimson-foreground", role: "Text on crimson", light: "oklch(0.985 0.006 255)", dark: "oklch(0.985 0.006 255)" },
-  { name: "ink", role: "Stop control surface (brand ink #171717 in light, ivory in dark)", light: "oklch(0.205 0 0)", dark: "oklch(0.97 0.011 88)" },
-  { name: "ink-foreground", role: "Text on the Stop control", light: "oklch(0.97 0.011 88)", dark: "oklch(0.205 0 0)" },
-  { name: "notice", role: "Mode banner surface (paused, restricted)", light: "oklch(0.965 0.03 70)", dark: "oklch(0.26 0.05 55)" },
-  { name: "notice-border", role: "Mode banner edge", light: "oklch(0.82 0.1 60)", dark: "oklch(0.5 0.1 55)" },
+  { name: "background", meaning: "surface", role: "Page: a cool, barely tinted white", value: "oklch(0.975 0.005 250)" },
+  { name: "card", meaning: "surface", role: "Fields that hold reading text: sheets, dialogs, agent identity", value: "oklch(0.995 0.002 250)" },
+  { name: "muted", meaning: "surface", role: "Quiet fields: a running agent's mode, system notices, skeletons", value: "oklch(0.935 0.01 250)" },
+  { name: "border", meaning: "surface", role: "Hairlines between rows", value: "oklch(0.8 0.02 255)" },
+  { name: "foreground", meaning: "text", role: "Text and 2 px rules", value: "oklch(0.21 0.035 258)" },
+  { name: "muted-foreground", meaning: "text", role: "Secondary text, labels, ages", value: "oklch(0.44 0.035 258)" },
+  { name: "primary", meaning: "account", role: "Lapis as the primary action, links, and focus", value: "oklch(0.36 0.1 258)" },
+  { name: "primary-foreground", meaning: "account", role: "Text on a primary action", value: "oklch(0.975 0.005 250)" },
+  { name: "lapis", meaning: "account", role: "The account: its board, its connection, paper hatch, the current page", value: "oklch(0.36 0.1 258)" },
+  { name: "lapis-foreground", meaning: "account", role: "Text on lapis", value: "oklch(0.975 0.005 250)" },
+  { name: "lapis-muted", meaning: "account", role: "Secondary text on lapis", value: "oklch(0.84 0.03 255)" },
+  { name: "lapis-soft", meaning: "account", role: "An account notice: reconciliation, unknown order, activity at the broker", value: "oklch(0.93 0.03 255)" },
+  { name: "marigold", meaning: "mandate", role: "Your mandate: limits, rails, and the envelope", value: "oklch(0.85 0.155 84)" },
+  { name: "marigold-foreground", meaning: "mandate", role: "Text and rail fill on marigold", value: "oklch(0.21 0.035 258)" },
+  { name: "marigold-muted", meaning: "mandate", role: "Secondary text on marigold", value: "oklch(0.36 0.05 70)" },
+  { name: "marigold-soft", meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)", value: "oklch(0.955 0.05 90)" },
+  { name: "ink", meaning: "stopped", role: "A stopped or paused agent, and the Stop control", value: "oklch(0.21 0.035 258)" },
+  { name: "ink-foreground", meaning: "stopped", role: "Text on ink", value: "oklch(0.975 0.005 250)" },
+  { name: "crimson", meaning: "kill", role: "The kill switch, and nothing else", value: "oklch(0.47 0.19 27)" },
+  { name: "crimson-foreground", meaning: "kill", role: "Text on crimson", value: "oklch(0.985 0.004 250)" },
+  { name: "gain", meaning: "result", role: "A gain as text, always with a plus sign and the word", value: "oklch(0.44 0.11 155)" },
+  { name: "loss", meaning: "result", role: "A loss as text, always with a minus sign and the word", value: "oklch(0.49 0.18 10)" },
 ];
 
 /** Text/background pairs that carry reading text. Each must reach WCAG AA (4.5:1). */
 export const textPairs: Array<{ fg: string; bg: string; use: string }> = [
   { fg: "foreground", bg: "background", use: "Body text on the page" },
-  { fg: "foreground", bg: "card", use: "Body text on cards" },
-  { fg: "foreground", bg: "muted", use: "Body text on sunken surfaces" },
-  { fg: "foreground", bg: "notice", use: "Mode banner text" },
+  { fg: "foreground", bg: "card", use: "Body text on a card field" },
+  { fg: "foreground", bg: "muted", use: "Text on a quiet field" },
+  { fg: "foreground", bg: "lapis-soft", use: "Account notice text" },
+  { fg: "foreground", bg: "marigold-soft", use: "Notice text when your mandate acted" },
   { fg: "muted-foreground", bg: "background", use: "Secondary text on the page" },
-  { fg: "muted-foreground", bg: "card", use: "Secondary text on cards" },
-  { fg: "muted-foreground", bg: "muted", use: "Secondary text on sunken surfaces" },
+  { fg: "muted-foreground", bg: "card", use: "Secondary text on a card field" },
+  { fg: "muted-foreground", bg: "muted", use: "Secondary text on a quiet field" },
+  { fg: "muted-foreground", bg: "lapis-soft", use: "Secondary text in an account notice" },
+  { fg: "muted-foreground", bg: "marigold-soft", use: "Secondary text in a mandate notice" },
   { fg: "primary", bg: "background", use: "Links on the page" },
-  { fg: "primary", bg: "card", use: "Links on cards" },
-  { fg: "primary-foreground", bg: "primary", use: "Primary button label" },
-  { fg: "persimmon-text", bg: "card", use: "Persimmon labels" },
-  { fg: "lagoon-text", bg: "card", use: "Gains on cards" },
-  { fg: "lagoon-text", bg: "background", use: "Gains on the page" },
-  { fg: "orchid-text", bg: "card", use: "Platform-authored labels" },
-  { fg: "rose-text", bg: "card", use: "Losses on cards" },
-  { fg: "rose-text", bg: "background", use: "Losses on the page" },
+  { fg: "primary", bg: "card", use: "Links on a card field" },
+  { fg: "primary-foreground", bg: "primary", use: "Primary action label" },
+  { fg: "lapis-foreground", bg: "lapis", use: "Text on the account board" },
+  { fg: "lapis-muted", bg: "lapis", use: "Secondary text on the account board" },
+  { fg: "marigold", bg: "lapis", use: "A mode that is not normal, on the account board" },
+  { fg: "marigold-foreground", bg: "marigold", use: "Text on the mandate field" },
+  { fg: "marigold-muted", bg: "marigold", use: "Secondary text on the mandate field" },
+  { fg: "ink-foreground", bg: "ink", use: "Stopped mode label, Stop control label" },
   { fg: "crimson-foreground", bg: "crimson", use: "Kill switch label" },
-  { fg: "ink-foreground", bg: "ink", use: "Stop control label" },
+  { fg: "gain", bg: "card", use: "Gains on a card field" },
+  { fg: "gain", bg: "background", use: "Gains on the page" },
+  { fg: "loss", bg: "card", use: "Losses on a card field" },
+  { fg: "loss", bg: "background", use: "Losses on the page" },
 ];
 
-export function tokenValue(name: string, theme: Theme): string {
+/** Non-text marks that must reach 3:1 against their surface (WCAG 1.4.11). */
+export const markPairs: Array<{ fg: string; bg: string; use: string }> = [
+  { fg: "marigold-foreground", bg: "marigold", use: "Rail fill and limit wall on the mandate field" },
+  { fg: "ink", bg: "background", use: "An ink mode field against the page" },
+  { fg: "lapis", bg: "card", use: "Paper badge border, focus ring" },
+  { fg: "crimson", bg: "card", use: "Kill switch against a sheet" },
+];
+
+export function tokenValue(name: string): string {
   const token = colorTokens.find((t) => t.name === name);
   if (!token) throw new Error(`unknown token ${name}`);
-  return token[theme];
+  return token.value;
 }
 
 export const typeScale = [
-  { role: "display", className: "text-display", sample: "$10,123.45", spec: "Bricolage Grotesque 650, 2.5rem / 1.05, −0.02em, tabular" },
-  { role: "title", className: "text-title", sample: "Agent detail", spec: "Bricolage Grotesque 600, 1.75rem / 1.1, −0.015em" },
-  { role: "heading", className: "text-heading", sample: "Limits in dollars", spec: "Bricolage Grotesque 600, 1.25rem / 1.2, −0.01em" },
-  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Hanken Grotesk 400, 1rem / 1.55" },
-  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Hanken Grotesk 400, 0.875rem / 1.5" },
-  { role: "caption", className: "text-caption", sample: "as of 14:02:11, 3 min ago", spec: "Hanken Grotesk 500, 0.8125rem / 1.4" },
-  { role: "figure", className: "font-mono tabular-nums", sample: "0.015 BTC/USD @ $56,700.00", spec: "JetBrains Mono 450, tabular figures, slashed zero" },
+  { role: "display", className: "font-display text-display uppercase", sample: "Dashboard", spec: "Big Shoulders Display 800, 3rem / 0.9, capitals" },
+  { role: "title", className: "font-display text-title uppercase", sample: "Agent 2", spec: "Big Shoulders Display 800, 2rem / 0.95, capitals" },
+  { role: "heading", className: "font-display text-heading uppercase", sample: "Your mandate", spec: "Big Shoulders Display 800, 1.5rem / 1, capitals" },
+  { role: "figure", className: "font-display text-[2.75rem] leading-none font-bold tabular", sample: "$10,123.45", spec: "Big Shoulders Display 700, 2.75rem, tabular figures" },
+  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Atkinson Hyperlegible Next 400, 1rem (17 px) / 1.5, sentence case" },
+  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Atkinson Hyperlegible Next 400, 0.875rem / 1.45" },
+  { role: "caption", className: "text-caption", sample: "as of 14:02:11, 3 min ago", spec: "Atkinson Hyperlegible Next 400, 0.8125rem / 1.35" },
+  { role: "label", className: "label-caps", sample: "Your mandate", spec: "Atkinson Hyperlegible Next 700, 0.75rem, capitals (field labels only)" },
+  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Atkinson Hyperlegible Next, tabular figures" },
 ];
 
 export const motionTokens = [
-  { name: "--ease-out-quart", value: "cubic-bezier(0.25, 1, 0.5, 1)", use: "Hover, press, reveals" },
-  { name: "--ease-in-out", value: "cubic-bezier(0.65, 0, 0.35, 1)", use: "Two-way changes (expand, collapse)" },
-  { name: "--spring-sheet", value: "400ms linear(…) from spring(stiffness 380, damping 36)", use: "Stop sheet" },
-  { name: "--spring-dialog", value: "450ms linear(…) from spring(stiffness 520, damping 38)", use: "Dialogs (step-up)" },
-  { name: "--duration-press", value: "150ms", use: "Press feedback (scale 0.98)" },
-  { name: "--duration-hover", value: "180ms", use: "Hover colour and border" },
-  { name: "--duration-reveal", value: "240ms", use: "List reveals, 40 ms stagger" },
+  { name: "--ease-out", value: "cubic-bezier(0.23, 1, 0.32, 1)", use: "Entrances, press, reveals, number changes" },
+  { name: "--ease-in-out", value: "cubic-bezier(0.77, 0, 0.175, 1)", use: "Things that move on screen: chevrons, expand and collapse" },
+  { name: "--ease-drawer", value: "cubic-bezier(0.32, 0.72, 0, 1)", use: "The Stop sheet" },
+  { name: "--duration-press / --duration-release", value: "140 ms / 80 ms", use: "Press to scale 0.97; the release is faster than the press" },
+  { name: "--duration-hover", value: "160 ms", use: "Colour changes on hover and on a mode change" },
+  { name: "--duration-reveal", value: "200 ms, 30 ms stagger", use: "A field wipes in from its leading edge, once" },
+  { name: "--duration-sheet", value: "280 ms in, 200 ms out", use: "Stop sheet" },
+  { name: "--duration-dialog", value: "220 ms in, 150 ms out", use: "Step-up dialog" },
+];
+
+/** The gutters before and after the founder's "reduce gutter space" (2026-09-28). */
+export const spacingTokens = [
+  { name: "--sidebar-width", before: "15rem", after: "12rem", use: "Desktop side navigation" },
+  { name: "--content-max", before: "72rem", after: "90rem", use: "Widest content column" },
+  { name: "--page-x", before: "1rem / 1.5rem / 2rem", after: "0.75rem / 1rem / 1.5rem", use: "Page padding at phone / tablet / desktop" },
+  { name: "--page-top", before: "1.5rem", after: "1rem / 1.25rem", use: "Space above the page title" },
+  { name: "--page-bottom", before: "4rem (desktop)", after: "2.5rem (desktop)", use: "Space below the last section" },
+  { name: "--section-gap", before: "2.5rem", after: "1.5rem", use: "Between sections of a screen" },
+  { name: "--block-gap", before: "1rem to 1.5rem", after: "0.75rem", use: "Between a heading and its content, and between rows of fields" },
+  { name: "--seam", before: "1rem (card gaps)", after: "0.375rem", use: "Between adjacent colour fields" },
 ];

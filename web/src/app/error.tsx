@@ -6,11 +6,11 @@
  */
 export default function ErrorScreen({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
   return (
-    <section role="alert" className="grid max-w-2xl gap-3 rounded-xl border border-notice-border bg-notice p-5">
-      <h1 className="text-heading">This screen failed to display</h1>
+    <section role="alert" className="grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
+      <h1 className="text-title sm:text-display">This screen failed to display</h1>
       <p>Nothing was sent or changed: displaying a screen never places or cancels an order. The Stop control in the header still works.</p>
       <p>
-        <button type="button" onClick={reset} className="press rounded-lg border bg-card px-4 py-2 font-medium hover:bg-muted">
+        <button type="button" onClick={reset} className="press inline-flex h-11 items-center border-2 border-foreground bg-card px-4 font-bold hover:bg-background">
           Display it again
         </button>
       </p>
