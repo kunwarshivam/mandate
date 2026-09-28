@@ -14,10 +14,11 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::{int, text};
+use crate::protection::protection_cancelled;
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
-    Mode, OrderState, StatusMapping,
+    Mode, OrderState, Purpose, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -265,6 +266,16 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
 /// executor did not derive, or does not carry, asks for a reconciliation rather than being
 /// dropped.
 pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
+    let unattributed = ClientOrderId::parse(raw).ok().and_then(|id| {
+        batch
+            .view
+            .unattributed
+            .get(&id)
+            .map(|leg| (id, leg.instrument.clone()))
+    });
+    if let Some((id, instrument)) = unattributed {
+        return protection_cancelled(batch, &instrument, &id);
+    }
     let Some(id) = known(batch, Some(raw)) else {
         batch.request_reconciliation();
         return Ok(());
@@ -275,6 +286,15 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         OrderState::Canceled,
         vec![("cancel_confirmed", Value::Bool(true))],
     )?;
+    let protective = batch
+        .view
+        .orders
+        .get(&id)
+        .filter(|order| order.purpose == Purpose::Protective)
+        .map(|order| order.instrument.clone());
+    if let Some(instrument) = protective {
+        protection_cancelled(batch, &instrument, &id)?;
+    }
     Ok(())
 }
 

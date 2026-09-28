@@ -15,12 +15,12 @@ use crate::payload::{
     required_text, usd,
 };
 use crate::state::{
-    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
-    UnattributedLeg,
+    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, ObservedAccount,
+    OrderDetail, UnattributedLeg,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
-    OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock, SubmitOrder,
+    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, OcoLegs,
+    Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock, SubmitOrder,
     TimeInForce, UnprotectedInterval,
 };
 
@@ -344,7 +344,19 @@ fn request_of(
         limit_price: optional_price(payload, "limit")?,
         stop_price: optional_price(payload, "stop_price")?,
         bracket: None,
-        oco: None,
+        oco: match (
+            optional_text(payload, "order_class"),
+            optional_price(payload, "take_profit")?,
+            optional_price(payload, "stop")?,
+        ) {
+            (Some("oco"), Some(take_profit), Some(stop)) => Some(OcoLegs {
+                take_profit,
+                stop,
+                qty: qty(payload, "qty")?,
+            }),
+            (Some("oco"), _, _) => return Err(refused("order_class")),
+            _ => None,
+        },
         extended_hours: flag(payload, "extended_hours"),
         purpose: optional_text(payload, "purpose").map_or(Ok(Purpose::Open), purpose_of)?,
     })
@@ -720,13 +732,48 @@ fn protection_changed(
                 }
             }
         }
-        "unprotected_start" => state.unprotected.push(UnprotectedInterval {
-            instrument,
-            started_at: at,
-            ended_at: None,
-            alerted: false,
-        }),
+        "unprotected_start" => {
+            if let (Some(intent), Some(entry), Some(agent)) = (
+                optional_text(payload, "intent_id"),
+                optional_text(payload, "entry"),
+                optional_text(payload, "agent"),
+            ) {
+                let prices = optional_price(payload, "stop")?
+                    .map(|stop| -> Result<ProtectionPrices, ExecutorError> {
+                        Ok(ProtectionPrices {
+                            stop,
+                            take_profit: optional_price(payload, "take_profit")?,
+                        })
+                    })
+                    .transpose()?;
+                state.exiting.insert(
+                    instrument.clone(),
+                    ExitSequence {
+                        intent: IntentId(EventId(intent.to_owned())),
+                        entry: ClientOrderId::parse(entry)?,
+                        agent: AgentId(agent.to_owned()),
+                        prices,
+                    },
+                );
+            }
+            state.unprotected.push(UnprotectedInterval {
+                instrument,
+                started_at: at,
+                ended_at: None,
+                alerted: false,
+            });
+        }
+        "interval_limit" => {
+            if let Some(open) = state
+                .unprotected
+                .iter_mut()
+                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
+            {
+                open.alerted = true;
+            }
+        }
         "unprotected_end" => {
+            state.exiting.remove(&instrument);
             if let Some(open) = state
                 .unprotected
                 .iter_mut()

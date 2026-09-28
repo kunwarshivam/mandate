@@ -9,8 +9,9 @@ use mandate_time::Date;
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
-    OrderState, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody,
+    MarketObservation, Mode, Order, OrderState, Protection, ProtectionPrices, RiskClock, Seq,
+    SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -52,6 +53,12 @@ pub struct ExecutorState {
     pub(crate) unprotected: Vec<UnprotectedInterval>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
     pub(crate) unattributed: BTreeMap<ClientOrderId, UnattributedLeg>,
+    /// The marketable exit sequence each instrument is in, from its `unprotected_start` to its
+    /// `unprotected_end` (§5.4).
+    pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
+    /// The latest quote per instrument. Process-local, like the latest tick: a quote is an input,
+    /// never journaled, and only what it decides is.
+    pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -165,6 +172,8 @@ impl ExecutorState {
             unprotected: Vec::new(),
             copied: BTreeMap::new(),
             unattributed: BTreeMap::new(),
+            exiting: BTreeMap::new(),
+            quotes: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
@@ -434,6 +443,17 @@ impl ExecutorState {
             .max(self.now)
             .unwrap_or(RiskClock::from_secs(0))
     }
+}
+
+/// One marketable exit sequence (§5.4): the exit intent it runs for, the entry and agent a
+/// re-placement is named for, and the prices it re-places at, all as its `unprotected_start`
+/// journaled them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExitSequence {
+    pub(crate) intent: IntentId,
+    pub(crate) entry: ClientOrderId,
+    pub(crate) agent: AgentId,
+    pub(crate) prices: Option<ProtectionPrices>,
 }
 
 /// A protective leg the broker created that DEC-160's rule could not attribute: kept by its own

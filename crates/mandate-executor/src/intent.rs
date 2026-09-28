@@ -10,7 +10,7 @@ use crate::error::ExecutorError;
 use crate::gate::{Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
-use crate::protection::sequenced;
+use crate::protection::{awaits_cancel, begin_exit, sequenced};
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
@@ -77,6 +77,7 @@ pub(crate) fn gate_and_submit(
     if too_old(batch, intent) {
         return abandon(batch, intent, "intent_too_old");
     }
+    begin_exit(batch, intent)?;
     if gate(batch, intent, true)? == ALLOW {
         submit(batch, intent)?;
     }
@@ -137,7 +138,7 @@ fn gate(
     Ok(verdict)
 }
 
-fn intent_of(
+pub(crate) fn intent_of(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
 ) -> Result<(AgentId, IntentBody), ExecutorError> {
@@ -165,6 +166,9 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
+    if awaits_cancel(&batch.view, &instrument, purpose) {
+        return Ok(());
+    }
     sequenced(&batch.view, &instrument, purpose)?;
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
@@ -197,6 +201,20 @@ pub(crate) fn send(
     agent: &AgentId,
     attempt: u32,
 ) -> Result<(), ExecutorError> {
+    journal_submission(batch, &request, intent, agent, attempt)?;
+    batch.broker(BrokerRequest::Submit(request));
+    Ok(())
+}
+
+/// `OrderSubmitted` naming every field of `request`, without describing the request yet, for a
+/// sequence that records more before it acts (a re-placement's `ProtectionChanged`).
+pub(crate) fn journal_submission(
+    batch: &mut Batch<'_, '_>,
+    request: &SubmitOrder,
+    intent: Option<&IntentId>,
+    agent: &AgentId,
+    attempt: u32,
+) -> Result<(), ExecutorError> {
     let mut pairs = vec![
         ("client_order_id", text(request.client_order_id.as_str())),
         ("agent", text(agent.0.clone())),
@@ -218,8 +236,12 @@ pub(crate) fn send(
     if let Some(stop) = request.stop_price {
         pairs.push(("stop_price", text(stop.to_string())));
     }
+    if let Some(oco) = &request.oco {
+        pairs.push(("order_class", text("oco")));
+        pairs.push(("take_profit", text(oco.take_profit.to_string())));
+        pairs.push(("stop", text(oco.stop.to_string())));
+    }
     batch.journal("OrderSubmitted", None, pairs)?;
-    batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
 

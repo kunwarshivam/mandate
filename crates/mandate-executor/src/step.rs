@@ -7,7 +7,7 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::ports::Ports;
-use crate::protection::watched;
+use crate::protection::{bound, settle, watched};
 use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -56,9 +56,15 @@ pub fn handle(
     if let Input::Tick(at) = &input {
         state.now = state.now.max(Some(*at));
     }
+    if let Input::Market(observation) = &input {
+        state
+            .quotes
+            .insert(observation.instrument.clone(), observation.clone());
+    }
     let head = state.account_head();
     let mut batch = Batch::new(state, ports)?;
     step(&mut batch, input.clone())?;
+    settle(&mut batch)?;
     let effects = batch.effects;
     let drafts: Vec<_> = effects
         .iter()
@@ -133,7 +139,8 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
-            release_held(batch)
+            release_held(batch)?;
+            bound(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
         Input::Broker(Err(_)) => silence(batch),
