@@ -230,15 +230,17 @@ fn the_overlay_narrows_auto_to_ask_without_a_new_version() {
     let result = check(&mandate, &forbidden).expect("evaluable");
     assert!(!result.overlay.auto_allowed());
     assert_eq!(
-        result
-            .overlay
-            .narrow(mandate_domain::AutonomyDecision::Auto),
+        result.overlay.narrow(
+            mandate_spec::policy::AddingPurpose::Open,
+            mandate_domain::AutonomyDecision::Auto
+        ),
         mandate_domain::AutonomyDecision::Ask
     );
     assert_eq!(
-        result
-            .overlay
-            .narrow(mandate_domain::AutonomyDecision::Deny),
+        result.overlay.narrow(
+            mandate_spec::policy::AddingPurpose::Open,
+            mandate_domain::AutonomyDecision::Deny
+        ),
         mandate_domain::AutonomyDecision::Deny,
         "and it never loosens a deny"
     );

@@ -4,10 +4,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_domain::AutonomyDecision;
+use mandate_domain::{AutonomyDecision, Purpose};
 
 use super::{
-    LevelName, PolicyKey, PolicyLevel, PolicyOverlay, PolicyValue, check,
+    AddingPurpose, LevelName, PolicyKey, PolicyLevel, PolicyOverlay, PolicyValue, check,
     internal_research_profile, platform_base, retail_profile, values_of,
 };
 use crate::validate::tests::{context, mandate};
@@ -197,6 +197,12 @@ fn the_derived_keys_read_what_section_four_three_names() -> Checked {
             )],
             PolicyKey::Channels,
             names(&["email", "phone", "slack", "sms", "telegram", "web_push"]),
+        ),
+        (
+            "a stated two-approver threshold",
+            vec![("/autonomy/approval/two_approver_above_usd", r#""700""#)],
+            PolicyKey::TwoApproverAboveUsd,
+            dec("700")?,
         ),
         (
             "leveraged ETPs",
@@ -458,14 +464,24 @@ fn auto_is_allowed_unless_a_level_forbids_it() -> Checked {
         if folded.auto_allowed() != allowed {
             return Err(format!("{levels:?}: expected auto_allowed {allowed}"));
         }
-        let narrowed = folded.narrow(AutonomyDecision::Auto);
-        let wanted = if allowed {
-            AutonomyDecision::Auto
-        } else {
-            AutonomyDecision::Ask
-        };
-        if narrowed != wanted {
-            return Err(format!("{levels:?}: auto narrowed to {narrowed:?}"));
+        for adds in [AddingPurpose::Open, AddingPurpose::Increase] {
+            let auto = if allowed {
+                AutonomyDecision::Auto
+            } else {
+                AutonomyDecision::Ask
+            };
+            for (given, wanted) in [
+                (AutonomyDecision::Auto, auto),
+                (AutonomyDecision::Ask, AutonomyDecision::Ask),
+                (AutonomyDecision::Deny, AutonomyDecision::Deny),
+            ] {
+                let narrowed = folded.narrow(adds, given);
+                if narrowed != wanted {
+                    return Err(format!(
+                        "{levels:?}, {adds:?}: {given:?} narrowed to {narrowed:?}, not {wanted:?}"
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -658,6 +674,92 @@ fn the_three_platform_levels_are_exactly_section_four_three() -> Checked {
     for (got, values) in rows {
         if got.name != LevelName::Platform || got.values != values {
             return Err(format!("expected a platform level {values:?}, got {got:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// Only an action that adds risk can be narrowed: each of the four exit purposes §6.2 step 3 makes
+/// built-in AUTO is refused by the type, and the two adding purposes map to themselves (AGENTS.md rules
+/// 2 and 13, #263 round 1).
+#[test]
+fn no_exit_purpose_can_be_narrowed() -> Checked {
+    for exit in [
+        Purpose::RiskExit,
+        Purpose::Protective,
+        Purpose::DiscretionaryExit,
+        Purpose::OwnerExit,
+    ] {
+        if AddingPurpose::try_from(exit) != Err(exit) {
+            return Err(format!("{exit:?} must not become an AddingPurpose"));
+        }
+    }
+    for (purpose, adds) in [
+        (Purpose::Open, AddingPurpose::Open),
+        (Purpose::Increase, AddingPurpose::Increase),
+    ] {
+        if AddingPurpose::try_from(purpose) != Ok(adds) {
+            return Err(format!("{purpose:?} must be {adds:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// A chain holds only ancestors: a level named `Mandate` is refused, never compared as an ancestor
+/// whose ceiling the overlay would then drop (#263 round 1, minor 4).
+#[test]
+fn a_mandate_level_in_the_chain_is_refused() -> Checked {
+    let chain = [level(
+        LevelName::Mandate,
+        vec![(PolicyKey::MaxDrawdown, dec("0.01")?)],
+    )];
+    match check(&mandate(&[])?, &chain) {
+        Err(SpecError::InvalidInput { .. }) => Ok(()),
+        other => Err(format!("expected invalid_input, got {other:?}")),
+    }
+}
+
+/// The platform base is always the outermost level of `ValidatedMandate::new`, so an empty chain still
+/// checks it: no caller can skip policy by passing none (#263, reading 7).
+#[test]
+fn an_empty_chain_still_checks_the_platform_base() -> Checked {
+    let ctx = context()?;
+    let loose = mandate(&[("/capital/max_loss_from_allocation", r#""0.6""#)])?;
+    match ValidatedMandate::new(loose, &ctx, &[]) {
+        Err(Rejected::Rules { report, policy })
+            if report.is_valid()
+                && policy
+                    .iter()
+                    .map(|v| (v.key, v.limit_level))
+                    .collect::<Vec<_>>()
+                    == vec![(PolicyKey::MaxLossFromAllocation, LevelName::Platform)] =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "0.6 is above the platform base's 0.5, got {other:?}"
+        )),
+    }
+}
+
+/// Passing the platform base again changes nothing: the fold is idempotent, so a caller that states
+/// the base gets exactly what one that leaves it out gets (the coordinator's ruling on #263).
+#[test]
+fn stating_the_platform_base_again_changes_nothing() -> Checked {
+    let ctx = context()?;
+    let base = platform_base().map_err(|e| e.to_string())?;
+    for patches in [
+        vec![],
+        vec![("/capital/max_loss_from_allocation", r#""0.6""#)],
+        vec![("/risk/max_order_usd", r#""2000""#)],
+    ] {
+        let without = ValidatedMandate::new(mandate(&patches)?, &ctx, &[]);
+        let with_base =
+            ValidatedMandate::new(mandate(&patches)?, &ctx, std::slice::from_ref(&base));
+        if without != with_base {
+            return Err(format!(
+                "{patches:?}: {without:?} differs from {with_base:?}"
+            ));
         }
     }
     Ok(())

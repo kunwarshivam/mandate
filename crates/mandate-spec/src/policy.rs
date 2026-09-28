@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use core::cmp::Ordering;
 
-use mandate_domain::{AutonomyDecision, Environment};
+use mandate_domain::{AutonomyDecision, Environment, Purpose};
 
 use crate::document::{Channel, LadderAction, Mandate};
 use crate::{DecGrammar, SchemaDec, SpecError};
@@ -278,8 +278,15 @@ impl PolicyOverlay {
         self.tightest.get(&PolicyKey::AutoAllowed) != Some(&PolicyValue::Flag(false))
     }
 
-    /// `auto` narrowed to `ask` where the overlay forbids it, and otherwise unchanged.
-    pub fn narrow(&self, decision: AutonomyDecision) -> AutonomyDecision {
+    /// `auto` narrowed to `ask` where the overlay forbids it, and otherwise unchanged: `ask` and
+    /// `deny` are never raised, whatever the overlay says.
+    ///
+    /// Only an action that adds risk can be narrowed, and the type says so: `adds` is an
+    /// [`AddingPurpose`], which has no exit variant, so a `risk_exit`, `protective`,
+    /// `discretionary_exit`, or `owner_exit` AUTO (§6.2 step 3) cannot be passed here at all.
+    /// AGENTS.md rules 2 and 13: reducing risk never needs approval (#263 round 1).
+    pub fn narrow(&self, adds: AddingPurpose, decision: AutonomyDecision) -> AutonomyDecision {
+        let _ = adds;
         if decision == AutonomyDecision::Auto && !self.auto_allowed() {
             AutonomyDecision::Ask
         } else {
@@ -292,12 +299,40 @@ impl PolicyOverlay {
     }
 }
 
+/// The purpose of an action that adds risk (§6.1): the only actions the overlay may narrow. There is
+/// no exit variant, so an exit's built-in AUTO can never reach [`PolicyOverlay::narrow`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AddingPurpose {
+    Open,
+    Increase,
+}
+
+impl TryFrom<Purpose> for AddingPurpose {
+    /// The purpose given back: an exit, which no policy may narrow.
+    type Error = Purpose;
+
+    fn try_from(purpose: Purpose) -> Result<Self, Purpose> {
+        match purpose {
+            Purpose::Open => Ok(Self::Open),
+            Purpose::Increase => Ok(Self::Increase),
+            Purpose::DiscretionaryExit
+            | Purpose::OwnerExit
+            | Purpose::RiskExit
+            | Purpose::Protective => Err(purpose),
+        }
+    }
+}
+
 /// The mandate's own values for every key §4.3 constrains, which is what the chain compares against.
 ///
 /// A key the mandate has no value for is [`PolicyValue::Absent`]: the research keys without a research
 /// agent, and the two nullable maximums, where absence is itself the violation
 /// ([`PolicyKey::absence_violates`]). `stagger_window_s` and `independent_approval_required` are not
 /// mandate fields, so a mandate never states them.
+///
+/// `signal_model_types` is every model's type prefix. [`ModelId::parse`](crate::document::ModelId::parse)
+/// admits only `fast.`, `llm.`, and `quant.` ids, so every id has one; were one missing, the whole id
+/// would stand in and fail every set it is checked against rather than shrink this one.
 pub fn values_of(mandate: &Mandate) -> Result<BTreeMap<PolicyKey, PolicyValue>, SpecError> {
     let risk = &mandate.risk;
     let behavior = &mandate.behavior;
@@ -441,7 +476,7 @@ pub fn values_of(mandate: &Mandate) -> Result<BTreeMap<PolicyKey, PolicyValue>, 
             PolicyKey::SignalModelTypes,
             set(models
                 .iter()
-                .filter_map(|model| model.id.model_type())
+                .map(|model| model.id.model_type().unwrap_or(model.id.as_str()))
                 .collect()),
         ),
         (PolicyKey::GoalTypes, set(vec![mandate.goal.type_name()])),
@@ -539,9 +574,6 @@ fn stricter<'a>(
     first: &'a PolicyValue,
     second: &'a PolicyValue,
 ) -> Result<&'a PolicyValue, SpecError> {
-    if key.kind() == KeyKind::Set {
-        return Err(mismatch());
-    }
     Ok(if violates(key, first, second)? {
         second
     } else {
@@ -570,7 +602,16 @@ fn tighten(
 /// states, the violation names the **nearest** ancestor that states the key and is broken, and at most
 /// one violation is reported per key and level. A level's `Absent` value states nothing. The overlay
 /// is the tightest stated value per key over the levels, not the mandate.
+///
+/// A level named [`LevelName::Mandate`] in `levels` is refused with `invalid_input`: it would be
+/// compared as an ancestor yet never folded into the overlay, so its ceiling would bind at save time
+/// and vanish at runtime (#263 round 1).
 pub fn check(mandate: &Mandate, levels: &[PolicyLevel]) -> Result<PolicyResult, SpecError> {
+    if levels.iter().any(|level| level.name == LevelName::Mandate) {
+        return Err(SpecError::InvalidInput {
+            what: "a policy chain holds only ancestors; the mandate level is the document itself",
+        });
+    }
     let own = PolicyLevel {
         name: LevelName::Mandate,
         values: values_of(mandate)?,

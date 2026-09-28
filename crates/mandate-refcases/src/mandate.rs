@@ -1596,3 +1596,149 @@ fn spec<T>(result: Result<T, SpecError>, what: &str) -> Result<T, String> {
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::policy_case;
+    use crate::{Json, read_fixture};
+
+    fn fixture() -> Result<Json, String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        read_fixture(&dir, "mandate.json").map(|f| (*f).clone())
+    }
+
+    /// A value no fixture member holds in its place: another decimal, the other flag, another integer,
+    /// a decimal for a `null`, and a set naming nothing real.
+    fn other_value(value: &Json) -> Json {
+        match value {
+            Json::Bool(flag) => Json::Bool(!flag),
+            Json::Number(n) => Json::from(n.as_u64().unwrap_or(0).saturating_add(1234)),
+            Json::String(_) => Json::String("99999".to_owned()),
+            Json::Array(_) => Json::Array(vec![Json::String("zzz".to_owned())]),
+            _ => Json::String("1".to_owned()),
+        }
+    }
+
+    fn other_level(level: &Json) -> Json {
+        let next = match level.as_str() {
+            Some("platform") => "organization",
+            Some("organization") => "workspace",
+            Some("workspace") => "mandate",
+            _ => "platform",
+        };
+        Json::String(next.to_owned())
+    }
+
+    fn other_key(key: &Json) -> Json {
+        let next = if key.as_str() == Some("allocation_usd") {
+            "max_order_usd"
+        } else {
+            "allocation_usd"
+        };
+        Json::String(next.to_owned())
+    }
+
+    /// `value` with the member at `pointer` replaced, or an error naming the pointer.
+    fn with(value: &Json, pointer: &str, new: Json) -> Result<Json, String> {
+        let mut edited = value.clone();
+        let slot = edited
+            .pointer_mut(pointer)
+            .ok_or_else(|| format!("`{pointer}` names nothing"))?;
+        *slot = new;
+        Ok(edited)
+    }
+
+    /// Every edit of one case's `expect`: `valid` flipped, each member of each violation changed,
+    /// each violation dropped, and one violation added. Each must make the case fail.
+    fn edits(expect: &Json) -> Result<Vec<(String, Json)>, String> {
+        let mut out = Vec::new();
+        let valid = expect
+            .get("valid")
+            .and_then(Json::as_bool)
+            .ok_or("`valid` is not a flag")?;
+        out.push((
+            "valid flipped".to_owned(),
+            with(expect, "/valid", Json::Bool(!valid))?,
+        ));
+        let violations = expect
+            .get("violations")
+            .and_then(Json::as_array)
+            .cloned()
+            .ok_or("`violations` is not a list")?;
+        for (index, violation) in violations.iter().enumerate() {
+            for member in ["key", "level", "value", "limit_level", "limit"] {
+                let old = violation
+                    .get(member)
+                    .ok_or_else(|| format!("violation {index} has no `{member}`"))?;
+                let new = match member {
+                    "key" => other_key(old),
+                    "level" | "limit_level" => other_level(old),
+                    _ => other_value(old),
+                };
+                out.push((
+                    format!("violation {index} `{member}` edited"),
+                    with(expect, &format!("/violations/{index}/{member}"), new)?,
+                ));
+            }
+            let rest: Vec<Json> = violations
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, kept)| kept.clone())
+                .collect();
+            out.push((
+                format!("violation {index} dropped"),
+                with(expect, "/violations", Json::Array(rest))?,
+            ));
+        }
+        let mut more = violations.clone();
+        more.push(serde_json::json!({
+            "key": "max_order_usd", "level": "mandate", "value": "1",
+            "limit_level": "platform", "limit": "1"
+        }));
+        out.push((
+            "a violation added".to_owned(),
+            with(expect, "/violations", Json::Array(more))?,
+        ));
+        Ok(out)
+    }
+
+    /// Every MC-P case passes as the fixture states it, and fails on every edit of its expectation:
+    /// the `policy` arm compares `valid`, every member of every violation, and the whole set both ways
+    /// (#263 round 1, major 2; the risk-day arm's `every_risk_day_case_passes_and_fails_on_each_edited_expectation`
+    /// is the pattern).
+    #[test]
+    fn every_policy_case_passes_and_fails_on_each_edited_expectation() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases: Vec<Json> = fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .ok_or("a case list")?
+            .iter()
+            .filter(|case| case.get("kind").and_then(Json::as_str) == Some("policy"))
+            .cloned()
+            .collect();
+        if cases.len() != 22 {
+            return Err(format!("family P is 22 cases, found {}", cases.len()));
+        }
+        let mut edited = 0usize;
+        for case in &cases {
+            let id = case.get("id").and_then(Json::as_str).unwrap_or("?");
+            policy_case(&fixture, case).map_err(|e| format!("{id} must pass as stated: {e}"))?;
+            let expect = case.get("expect").ok_or("a case with no `expect`")?;
+            for (what, edited_expect) in edits(expect)? {
+                let doctored = with(case, "/expect", edited_expect)?;
+                if policy_case(&fixture, &doctored).is_ok() {
+                    return Err(format!("{id}: {what}, and the case still passed"));
+                }
+                edited = edited.saturating_add(1);
+            }
+        }
+        if edited < 22 * 2 {
+            return Err(format!("only {edited} edits were tried"));
+        }
+        Ok(())
+    }
+}
