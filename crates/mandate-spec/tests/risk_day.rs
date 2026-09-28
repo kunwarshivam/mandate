@@ -28,7 +28,6 @@ fn date(text: &str) -> Date {
 /// them. That is the whole of §5.4's first sentence, and it is why the DST days come out at 23 and 25
 /// hours without the rule naming either number.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_five_reference_days_are_midnight_to_midnight_in_new_york() {
     for (instant, day, seconds) in [
         ("2026-03-08T04:59:59.000000000Z", "2026-03-07", 86_400),
@@ -71,7 +70,6 @@ fn the_five_reference_days_are_midnight_to_midnight_in_new_york() {
 /// four boundaries are covered: the midnight that opens the short day and the one that closes it, and the
 /// midnight that opens the long day and the one that closes it.
 #[test]
-#[ignore = "pending E6-4"]
 fn midnight_belongs_to_the_day_it_opens() {
     for (before, boundary, opening) in [
         (
@@ -120,7 +118,6 @@ fn midnight_belongs_to_the_day_it_opens() {
 /// 90000 s, and their sum is the year. A rule that got the DST direction backwards would still produce
 /// one short and one long day, so the test also names which date is which.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_year_is_tiled_by_days_of_which_exactly_two_are_not_twenty_four_hours() {
     let mut day = date("2026-01-01");
     let mut total: u64 = 0;
@@ -173,7 +170,6 @@ proptest! {
     /// "the risk day containing an instant" means, and it is checked without reference to how the
     /// boundary was found.
     #[test]
-    #[ignore = "pending E6-4"]
     fn an_instant_lies_in_its_own_day_and_the_days_abut(offset_s in 0i64..(3 * 365 * 86_400)) {
         let instant = UtcNanos::from_parts(
             at("2026-01-01T05:00:00.000000000Z").secs().saturating_add(offset_s),
