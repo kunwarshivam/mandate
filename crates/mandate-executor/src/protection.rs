@@ -15,19 +15,15 @@ use crate::payload::text;
 use crate::ports::Ports;
 use crate::state::{ExecutorState, ExitSequence, IntentOutcome};
 use crate::types::{
-    BrokerRequest, ExitTier, IntentBody, MarketObservation, OcoLegs, OrderState, OrderType,
-    Purpose, RiskClock, SubmitOrder, TimeInForce,
+    BrokerRequest, EventId, ExitTier, IntentBody, MarketObservation, OcoLegs, OrderState,
+    OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
-/// The stub still standing at §5.4's order path after slice 3a: an **add** in an instrument whose
-/// protection rests (a new bracket, slice 2's) and a **passive** exit there (a new OCO keeping the
-/// stop, slice 3b's). A marketable exit takes [`begin_exit`] instead and never reaches it, and a
-/// protective order is the re-placement itself.
-///
-/// **`AGENTS.md` rule 13:** the passive exit answering this stub would be a denied exit once
-/// reachable. Nothing creates protection on an unprotected position before slice 2 — the pin
-/// `no_protection_is_created_on_an_unprotected_position` holds that — so no instrument is protected
-/// while the stub stands, and slice 2 lands no earlier than 3a, 3b and 4 (DEC-160).
+/// §5.4's stub after slice 3a: an **add** (slice 2) or a **passive** exit (slice 3b) where
+/// protection rests; a marketable exit runs [`begin_exit`] instead. Rule 13: the passive exit here
+/// would be a denied exit once reachable, so the pin
+/// `no_protection_is_created_on_an_unprotected_position` keeps every instrument unprotected until
+/// slice 2, which lands after 3a, 3b and 4 (DEC-160).
 pub(crate) fn sequenced(
     state: &ExecutorState,
     instrument: &InstrumentId,
@@ -39,10 +35,9 @@ pub(crate) fn sequenced(
     Ok(())
 }
 
-/// A quote is kept as the instrument's latest observation (the shell's [`crate::handle`] does
-/// that before the step). The one it may not pass is the triggered-stop watchdog's input (§5.4,
-/// slice 4): a sane mark at or below a resting stop. Until slice 4 that answers its stub; the
-/// refusal is of this quote's step alone, so no exit, cancel or reconciliation waits on it.
+/// The triggered-stop watchdog's input (§5.4, slice 4) — a sane mark at or below a resting stop —
+/// answers its stub; every other quote passes, kept as the latest by [`crate::handle`]. The refusal
+/// is this step's alone: no exit, cancel or reconciliation waits on it.
 pub(crate) fn watched(
     state: &ExecutorState,
     observation: &MarketObservation,
@@ -61,33 +56,32 @@ pub(crate) fn watched(
     Ok(())
 }
 
-/// The limit a sequence's exit is submitted at (§5.4, §5.6). The ladder prices an exit in a
-/// running sequence from the latest quote, in an instrument whose exit tier the snapshot knows;
-/// until slice 4 that exit answers the ladder's own stub, and every other order goes at its
-/// intent's limit. Reachable only where protection rested, which the pin
-/// `no_protection_is_created_on_an_unprotected_position` keeps from happening before slice 2.
+/// The limit a sequence's exit is submitted at (§5.4, §5.6): the ladder's, from the latest quote,
+/// where the snapshot knows the exit tier — its stub until slice 4 (#174 ruling (A)); every other
+/// order goes at its intent's limit. Reached only where protection rested (the pin above).
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
     purpose: Purpose,
     limit: Price,
 ) -> Result<Price, ExecutorError> {
-    if purpose.adds_risk()
-        || purpose == Purpose::Protective
-        || !batch.view.exiting.contains_key(instrument)
-    {
-        return Ok(limit);
+    let tier = batch.ports.instruments.exit_tier(instrument);
+    match (tier, batch.view.quotes.get(instrument)) {
+        (Some(tier), Some(quote))
+            if exits(purpose) && batch.view.exiting.contains_key(instrument) =>
+        {
+            ladder_price(tier, std::slice::from_ref(quote), 0, batch.at(), None)
+                .map(|rung| rung.limit)
+        }
+        _ => Ok(limit),
     }
-    let (Some(tier), Some(quote)) = (
-        batch.ports.instruments.exit_tier(instrument),
-        batch.view.quotes.get(instrument),
-    ) else {
-        return Ok(limit);
-    };
-    ladder_price(tier, std::slice::from_ref(quote), 0, batch.at(), None).map(|rung| rung.limit)
 }
 
-/// Whether protective orders rest in `instrument`.
+/// Whether the purpose reduces risk other than as a protective order itself.
+fn exits(purpose: Purpose) -> bool {
+    purpose != Purpose::Protective && !purpose.adds_risk()
+}
+
 fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state
         .protection
@@ -95,25 +89,21 @@ fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
         .is_some_and(|protection| !protection.resting.is_empty())
 }
 
-/// Whether an exit waits for its sequence's cancels to be confirmed: nothing is submitted beside
-/// a protective order that has not been confirmed gone (§5.4).
+/// Whether an exit waits for its sequence's cancels: nothing is submitted beside a protective
+/// order not yet confirmed gone (§5.4).
 pub(crate) fn awaits_cancel(
     state: &ExecutorState,
     instrument: &InstrumentId,
     purpose: Purpose,
 ) -> bool {
-    purpose != Purpose::Protective
-        && !purpose.adds_risk()
-        && state.exiting.contains_key(instrument)
-        && rests(state, instrument)
+    exits(purpose) && state.exiting.contains_key(instrument) && rests(state, instrument)
 }
 
-/// §5.4's marketable exit sequence, its first half, before the gate runs: the exit's instrument
-/// has every resting protective order cancelled — attributed or not (DEC-160 3d) — with the
-/// interval journaled from its start and the sequence (intent, entry, agent, prices) recorded
-/// there, so a restart resumes it from the journal. Asked again after a restart, the cancels are
-/// sent again. A passive exit (a sell limit above the latest bid) and an add are not this
-/// sequence. Nothing is denied here (`AGENTS.md` rule 13).
+/// §5.4's marketable exit sequence, before the gate: every resting protective order in the
+/// instrument, attributed or not (DEC-160 3d), is cancelled by id, and the interval's start
+/// records the sequence (intent, entry, agent, prices) so a restart resumes it; asked again, the
+/// cancels are sent again. A passive exit (limit above the latest bid) and an add are not this
+/// sequence, and a crypto add answers slice 5's stub. Nothing is denied here (rule 13).
 pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -128,27 +118,25 @@ pub(crate) fn begin_exit(
     else {
         return Ok(());
     };
-    if purpose.adds_risk()
-        && batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto)
-        && rests(&batch.view, &instrument)
-    {
+    let crypto = batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto);
+    if purpose.adds_risk() && crypto && rests(&batch.view, &instrument) {
         return Err(ExecutorError::Unimplemented { story: "E7-4" });
     }
-    let passive = batch
+    let bid = batch
         .view
         .quotes
         .get(&instrument)
-        .and_then(|quote| quote.bid)
-        .is_some_and(|bid| limit > bid);
-    if purpose == Purpose::Protective || purpose.adds_risk() || passive {
-        return Ok(());
-    }
-    let Some(protection) = batch.view.protection.get(&instrument).cloned() else {
+        .and_then(|quote| quote.bid);
+    let resting = batch
+        .view
+        .protection
+        .get(&instrument)
+        .filter(|protection| !protection.resting.is_empty())
+        .cloned();
+    let Some(protection) = resting.filter(|_| exits(purpose) && bid.is_none_or(|bid| limit <= bid))
+    else {
         return Ok(());
     };
-    if protection.resting.is_empty() {
-        return Ok(());
-    }
     if !batch.view.exiting.contains_key(&instrument) {
         let entry = match protection
             .resting
@@ -159,8 +147,6 @@ pub(crate) fn begin_exit(
             None => ClientOrderId::for_intent(intent)?,
         };
         let mut pairs = vec![
-            ("instrument", text(instrument.as_str())),
-            ("action", text("unprotected_start")),
             ("orders", text(named(&protection.resting))),
             ("intent_id", text(intent.0.0.clone())),
             ("entry", text(entry.as_str())),
@@ -172,24 +158,10 @@ pub(crate) fn begin_exit(
                 pairs.push(("take_profit", text(take_profit.to_string())));
             }
         }
-        batch.journal("ProtectionChanged", None, pairs)?;
-    }
-    for id in &protection.resting {
-        let asking = batch
-            .view
-            .orders
-            .get(id)
-            .is_some_and(|order| !order.cancel_unconfirmed && !order.state.is_terminal());
-        if asking {
-            transition(
-                batch,
-                id,
-                OrderState::PendingCancel,
-                vec![("cancel_requested", Value::Bool(true))],
-            )?;
-        }
+        changed(batch, &instrument, "unprotected_start", pairs)?;
     }
     for id in protection.resting {
+        ask_cancel(batch, &id)?;
         batch.broker(BrokerRequest::Cancel {
             client_order_id: id,
         });
@@ -197,36 +169,58 @@ pub(crate) fn begin_exit(
     Ok(())
 }
 
-/// A protective order's cancel confirmed (§5.4): it leaves the instrument's protection, and once
-/// none rests the sequence's waiting exits are gated again on that fresh state and submitted.
+/// Moves a live order with no cancel outstanding to `PendingCancel`; whether it did.
+fn ask_cancel(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<bool, ExecutorError> {
+    let live = batch
+        .view
+        .orders
+        .get(id)
+        .is_some_and(|order| !order.cancel_unconfirmed && !order.state.is_terminal());
+    if live {
+        let requested = vec![("cancel_requested", Value::Bool(true))];
+        transition(batch, id, OrderState::PendingCancel, requested)?;
+    }
+    Ok(live)
+}
+
+/// Journals one `ProtectionChanged` for `instrument` (journal spec §9).
+fn changed(
+    batch: &mut Batch<'_, '_>,
+    instrument: &InstrumentId,
+    action: &str,
+    mut pairs: Vec<(&'static str, Value)>,
+) -> Result<EventId, ExecutorError> {
+    pairs.push(("instrument", text(instrument.as_str())));
+    pairs.push(("action", text(action)));
+    batch.journal("ProtectionChanged", None, pairs)
+}
+
+/// A protective order's confirmed cancel (§5.4): it leaves the protection, and once none rests
+/// the instrument's waiting exits are gated again on that fresh state and submitted.
 pub(crate) fn protection_cancelled(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
     id: &ClientOrderId,
 ) -> Result<(), ExecutorError> {
-    batch.journal(
-        "ProtectionChanged",
-        None,
-        vec![
-            ("instrument", text(instrument.as_str())),
-            ("action", text("cancelled")),
-            ("orders", text(id.as_str())),
-        ],
+    changed(
+        batch,
+        instrument,
+        "cancelled",
+        vec![("orders", text(id.as_str()))],
     )?;
     if rests(&batch.view, instrument) {
         return Ok(());
     }
-    let waiting: Vec<IntentId> = batch
-        .view
+    let view = &batch.view;
+    let waiting: Vec<IntentId> = view
         .intents
         .values()
         .filter(|record| record.outcome == IntentOutcome::Received)
         .map(|record| record.intent_id.clone())
         .filter(|intent| {
-            ClientOrderId::for_intent(intent).is_ok_and(|id| !batch.view.orders.contains_key(&id))
-                && batch.view.bodies.get(intent).is_some_and(|body| {
-                    matches!(body, IntentBody::Order { instrument: named, .. } if named == instrument)
-                })
+            ClientOrderId::for_intent(intent).is_ok_and(|id| !view.orders.contains_key(&id))
+                && matches!(view.bodies.get(intent),
+                    Some(IntentBody::Order { instrument: named, .. }) if named == instrument)
         })
         .collect();
     for intent in waiting {
@@ -235,11 +229,10 @@ pub(crate) fn protection_cancelled(
     Ok(())
 }
 
-/// The sequence's last step (§5.4): once no protective order rests and the exit is finished — its
-/// order terminal, or its intent denied or abandoned — protection is re-placed for whatever the
-/// position still holds, at the prices the sequence recorded, and the interval ends. A flat
-/// position ends it with nothing to place; a sequence with no take-profit to re-use (crypto's,
-/// slice 5) stays open, bounded and alerted by [`bound`].
+/// The sequence's end (§5.4): once nothing rests and the exit is finished (terminal, denied or
+/// abandoned), protection is re-placed for what the position holds at the recorded prices and the
+/// interval ends; a flat position places nothing. A sequence with no take-profit to re-use
+/// (crypto, slice 5) stays open, bounded and alerted by [`bound`].
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
         .view
@@ -251,11 +244,8 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         if rests(&batch.view, &instrument) {
             continue;
         }
-        let finished = match batch
-            .view
-            .orders
-            .get(&ClientOrderId::for_intent(&sequence.intent)?)
-        {
+        let exit = ClientOrderId::for_intent(&sequence.intent)?;
+        let finished = match batch.view.orders.get(&exit) {
             Some(order) => order.state.is_terminal(),
             None => batch
                 .view
@@ -286,18 +276,8 @@ fn replace(
         .get(instrument)
         .copied()
         .unwrap_or(SignedQty::ZERO);
-    let end = |batch: &mut Batch<'_, '_>| {
-        batch.journal(
-            "ProtectionChanged",
-            None,
-            vec![
-                ("instrument", text(instrument.as_str())),
-                ("action", text("unprotected_end")),
-            ],
-        )
-    };
     if held == SignedQty::ZERO || held.is_negative() {
-        end(batch)?;
+        changed(batch, instrument, "unprotected_end", Vec::new())?;
         return Ok(());
     }
     let Some((stop, take_profit)) = sequence.prices.and_then(|prices| {
@@ -327,26 +307,20 @@ fn replace(
         purpose: Purpose::Protective,
     };
     journal_submission(batch, &request, None, &sequence.agent, 1)?;
-    batch.journal(
-        "ProtectionChanged",
-        None,
-        vec![
-            ("instrument", text(instrument.as_str())),
-            ("action", text("placed")),
-            ("orders", text(request.client_order_id.as_str())),
-            ("qty", text(qty.to_string())),
-            ("stop", text(stop.to_string())),
-            ("take_profit", text(take_profit.to_string())),
-        ],
-    )?;
-    end(batch)?;
+    let placed = vec![
+        ("orders", text(request.client_order_id.as_str())),
+        ("qty", text(qty.to_string())),
+        ("stop", text(stop.to_string())),
+        ("take_profit", text(take_profit.to_string())),
+    ];
+    changed(batch, instrument, "placed", placed)?;
+    changed(batch, instrument, "unprotected_end", Vec::new())?;
     batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
 
-/// §5.4's bounded interval: one open for `max_unprotected_s` has the sequence's working exit
-/// cancelled — its confirmation then re-places protection through [`settle`] — and the owner
-/// alerted, once, under a record the fold marks alerted.
+/// §5.4's bound: an interval open for `max_unprotected_s` has its working exit cancelled (whose
+/// confirmation re-places protection through [`settle`]) and the owner alerted once.
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
@@ -366,33 +340,16 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
             .view
             .exiting
             .get(&instrument)
-            .map(|sequence| ClientOrderId::for_intent(&sequence.intent))
-            .transpose()?;
-        if let Some(id) = exit
-            && batch
-                .view
-                .orders
-                .get(&id)
-                .is_some_and(|order| !order.state.is_terminal() && !order.cancel_unconfirmed)
-        {
-            transition(
-                batch,
-                &id,
-                OrderState::PendingCancel,
-                vec![("cancel_requested", Value::Bool(true))],
-            )?;
-            batch.broker(BrokerRequest::Cancel {
-                client_order_id: id,
-            });
+            .map(|sequence| sequence.intent.clone());
+        if let Some(intent) = exit {
+            let id = ClientOrderId::for_intent(&intent)?;
+            if ask_cancel(batch, &id)? {
+                batch.broker(BrokerRequest::Cancel {
+                    client_order_id: id,
+                });
+            }
         }
-        let alerted = batch.journal(
-            "ProtectionChanged",
-            None,
-            vec![
-                ("instrument", text(instrument.as_str())),
-                ("action", text("interval_limit")),
-            ],
-        )?;
+        let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted, "unprotected_interval_limit");
     }
     Ok(())
@@ -545,7 +502,7 @@ mod stub_tests {
     /// What a source may hold of each construction, per file; any file not named holds none.
     /// `None` is any count: the fold, which journals nothing and only reads an event back, and
     /// this module's own writer of the protection event.
-    const ALLOWED: [(&str, &str, Option<usize>); 7] = [
+    const ALLOWED: [(&str, &str, Option<usize>); 8] = [
         (
             "crates/mandate-executor/src/types.rs",
             "BracketLegs {",
@@ -560,9 +517,10 @@ mod stub_tests {
         ),
         (
             "crates/mandate-executor/src/protection.rs",
-            "text(\"placed\")",
+            "\"placed\"",
             Some(1),
         ),
+        ("crates/mandate-executor/src/fold.rs", "\"placed\"", None),
         (
             "crates/mandate-executor/src/fold.rs",
             "\"ProtectionChanged\"",
@@ -587,7 +545,7 @@ mod stub_tests {
     /// bracketed `SubmitOrder` (its only `BracketLegs` is the type's own definition), nothing
     /// builds the OCO a partial fill takes (the one OCO built is the re-placement a running exit
     /// sequence makes, which needs protection already resting, and the fold reads one back), and
-    /// only this module writes the protection event, one `placed` among it. Only the production
+    /// only this module writes the protection event, one `"placed"` among it. Only the production
     /// part of each file is read, up to its first test module. Slice 2 deletes this pin, landing
     /// no earlier than 3a, 3b and 4 (DEC-160).
     #[test]
@@ -604,7 +562,7 @@ mod stub_tests {
         let needles = [
             "BracketLegs {",
             "OcoLegs {",
-            "text(\"placed\")",
+            "\"placed\"",
             "\"ProtectionChanged\"",
         ];
         for path in found {
@@ -617,7 +575,8 @@ mod stub_tests {
                 .replace('\\', "/");
             for needle in needles {
                 let count = if relative.ends_with(".py") {
-                    production.matches(needle.trim_matches('"')).count()
+                    let event = needle == "\"ProtectionChanged\"";
+                    usize::from(event) * production.matches(needle.trim_matches('"')).count()
                 } else {
                     production.matches(needle).count()
                 };
