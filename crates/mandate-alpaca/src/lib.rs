@@ -26,6 +26,13 @@
 //! endpoint in [`http::ENDPOINTS`] and no way to add one at runtime (ES-23, `AGENTS.md` rule 8:
 //! no custody of funds). Live credentials would come only from the vault, and that path is M13's.
 //!
+//! # Reference data (E7-8)
+//!
+//! [`TradingClient::asset`] reads one instrument's asset record from the paper trading host, and
+//! [`DataClient::latest_quote`] reads its latest quote from [`data::DATA_HOST`], the one other
+//! host compiled in (ES-23), through a request type and a transport trait of its own so neither
+//! host can be sent the other's request (DEC-168).
+//!
 //! # Credentials and personal data
 //!
 //! Credentials are read through an injected lookup, held as `SecretString`, sent only as headers
@@ -46,15 +53,21 @@
 //! the increment allows is a typed [`error::WireError`] with a stable code.
 
 pub mod client;
+pub mod data;
 pub mod error;
 pub mod http;
+pub mod read;
 pub mod record;
 pub mod wire;
 
 pub use client::{Pause, RetryPolicy, TokioPause, TradingClient};
-pub use error::{ClientError, CredentialsError, HttpSetupError, TransportError, WireError};
+pub use data::{DATA_HOST, DataClient, DataTransport, QuoteRequest};
+pub use error::{
+    ClientError, CredentialsError, HttpSetupError, ReadError, TransportError, WireError,
+};
 pub use http::{
     AlpacaPaperHttp, Credentials, ENDPOINTS, Endpoint, HttpRequest, KEY_ID_VAR, Method, PAPER_HOST,
     Response, SECRET_VAR, TradingTransport, endpoint_for, is_paper_trading_path,
 };
+pub use read::{Asset, AssetSnapshot, Exchange, Feed, LatestQuote};
 pub use record::{Direction, INLINE_LIMIT, RecordedBody, RecordedExchange};

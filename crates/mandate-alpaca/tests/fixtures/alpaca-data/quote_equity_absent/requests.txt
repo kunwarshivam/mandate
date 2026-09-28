@@ -1,0 +1,1 @@
+GET /v2/stocks/XYZQ/quotes/latest?feed=iex
