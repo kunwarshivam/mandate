@@ -482,7 +482,33 @@ fn order_state_changed(
             }
         }
     }
+    let ended = (next.is_terminal() && order.purpose == Purpose::Protective)
+        .then(|| (order.instrument.clone(), order.qty));
+    if let Some((instrument, qty)) = ended {
+        leaves_protection(state, &instrument, &id, qty);
+    }
     Ok(())
+}
+
+/// A protective order gone by any path — confirmed cancel, fill, expiry, reject — leaves its
+/// instrument's protection with the quantity it covered, and the protection goes with its last
+/// order (§5.4), so nothing waits on, or counts, an order the broker no longer holds.
+fn leaves_protection(
+    state: &mut ExecutorState,
+    instrument: &InstrumentId,
+    id: &ClientOrderId,
+    qty: Qty,
+) {
+    let Some(protection) = state.protection.get_mut(instrument) else {
+        return;
+    };
+    if protection.resting.contains(id) {
+        protection.resting.retain(|resting| resting != id);
+        protection.covered_qty = protection.covered_qty.checked_sub(qty).unwrap_or(Qty::ZERO);
+    }
+    if protection.resting.is_empty() {
+        state.protection.remove(instrument);
+    }
 }
 
 /// `OrderAbandoned` ends an intent. An intent abandoned before it was ever submitted has no order
