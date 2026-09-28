@@ -5,7 +5,7 @@ import * as agentRoute from "@/app/agents/[agentId]/page";
 import * as approvalRoute from "@/app/approvals/[approvalId]/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
-import { clock } from "@/lib/format";
+import { clock, price } from "@/lib/format";
 import { PURPOSE_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
@@ -205,6 +205,7 @@ describe("D5 inbox and D6 request", () => {
     const required = [
       `Buy ${approval.bound.qty}`,
       approval.bound.symbol,
+      `at a limit of ${price(approval.bound.limit)}`,
       "Order value",
       PURPOSE_LABEL[approval.bound.purpose],
       approval.bound.mandate_version.slice(7, 19),
@@ -217,6 +218,7 @@ describe("D5 inbox and D6 request", () => {
       "Needs 2 approvers. Approved so far:",
     ];
     for (const text of required) expect(main().textContent, text).toContain(text);
+    expect(main().querySelector("[data-slot=deadline]")).toHaveTextContent(/if you do nothing \(\d+ min left\)/);
   });
 
   it("records with the response whether model output was opened first", () => {
