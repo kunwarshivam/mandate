@@ -64,8 +64,8 @@ pub enum Violation {
     V037,
     V038,
     V039,
-    /// The `scale_sizes` factors' fractional digits sum past the 24 places a size factor is reported
-    /// at, so some set of active rungs would have a size factor the risk state cannot hold (DEC-167).
+    /// The `scale_sizes` factors' fractional digits sum past 12, so some set of active rungs would
+    /// have a size factor the order builder cannot multiply by exactly (DEC-167).
     V040,
 }
 
@@ -282,9 +282,10 @@ pub fn validate(
 }
 
 /// The system fields, which carry no provenance rule (§7).
-/// The places a size factor is reported at, `Ratio`'s 24 (§5.5), which V-040 bounds the scale factors'
-/// digits by: the product of any set of them has at most the sum of their places.
-const SIZE_FACTOR_PLACES: usize = 24;
+/// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
+/// V-040 bounds the scale factors' digits by: the product of any set of them has at most the sum of
+/// their places. It is tighter than the 24 the risk state reports the factor at (§5.5, DEC-167).
+const SIZE_FACTOR_PLACES: usize = 12;
 
 const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
