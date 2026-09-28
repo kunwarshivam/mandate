@@ -20,15 +20,17 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mandate_canon::Digest;
+use mandate_canon::{Digest, Value};
 use mandate_domain::{AssetId, Environment};
 use mandate_num::Usd;
 use mandate_time::Date;
 
 use crate::Mandate;
 use crate::SpecError;
-use crate::document::{ConnectionId, ModelId, ProvenanceMap};
-use crate::validate::{GroupId, RegisteredModel, ValidationContext};
+use crate::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
+use crate::validate::{
+    GroupId, PreviousVersion, RegisteredModel, SYSTEM_FIELDS, ValidationContext, covers,
+};
 
 /// An agent, as the journal names it. Opaque: the context compares agents and never reads the id.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -134,9 +136,251 @@ impl ValidationContext {
         args: ContextArgs,
         facts: impl IntoIterator<Item = &'a JournaledFact>,
     ) -> Result<Self, SpecError> {
-        let _ = (draft, args, facts.into_iter().count());
-        Err(SpecError::Unimplemented)
+        let mut fold = Fold::default();
+        for fact in facts {
+            fold.apply(fact);
+        }
+        let mut context = fold.context(args)?;
+        context.provenance = completed(&draft.canonical()?, &context.provenance);
+        Ok(context)
     }
+}
+
+/// An agent as the fold last saw it.
+#[derive(Debug, Default)]
+struct AgentState {
+    /// The version in force: its connection, environment, allocation, and pinned instruments.
+    version: Option<(ConnectionId, Environment, Usd, BTreeSet<AssetId>)>,
+    retired: bool,
+    flat_since_retired: bool,
+    working: BTreeSet<AssetId>,
+}
+
+#[derive(Debug, Default)]
+struct Fold {
+    equity: BTreeMap<ConnectionId, Usd>,
+    environment: BTreeMap<ConnectionId, Environment>,
+    disclosures: BTreeSet<Digest>,
+    agents: BTreeMap<AgentId, AgentState>,
+    retirements: Vec<(ConnectionId, Date, Usd)>,
+    registry: BTreeMap<ModelId, RegisteredModel>,
+}
+
+impl Fold {
+    fn apply(&mut self, fact: &JournaledFact) {
+        match fact {
+            JournaledFact::AccountSnapshot {
+                connection_id,
+                equity_usd,
+            } => {
+                self.equity.insert(connection_id.clone(), *equity_usd);
+            }
+            JournaledFact::ConnectionEstablished {
+                connection_id,
+                environment,
+            } => {
+                self.environment.insert(connection_id.clone(), *environment);
+            }
+            JournaledFact::ConnectionRevoked { connection_id } => {
+                self.environment.remove(connection_id);
+            }
+            JournaledFact::DisclosureAccepted { version } => {
+                self.disclosures.insert(*version);
+            }
+            JournaledFact::AgentVersionActive {
+                agent,
+                connection_id,
+                environment,
+                allocation_usd,
+                pinned,
+            } => {
+                let state = self.agents.entry(agent.clone()).or_default();
+                state.version = Some((
+                    connection_id.clone(),
+                    *environment,
+                    *allocation_usd,
+                    pinned.clone(),
+                ));
+                state.retired = false;
+                state.flat_since_retired = false;
+            }
+            JournaledFact::UniverseChanged {
+                agent,
+                instrument,
+                admitted,
+            } => {
+                let working = &mut self.agents.entry(agent.clone()).or_default().working;
+                if *admitted {
+                    working.insert(instrument.clone());
+                } else {
+                    working.remove(instrument);
+                }
+            }
+            JournaledFact::AgentStopped {
+                agent,
+                connection_id,
+                retired_on,
+                loss_added_usd,
+            } => {
+                let state = self.agents.entry(agent.clone()).or_default();
+                state.retired = true;
+                state.flat_since_retired = false;
+                self.retirements
+                    .push((connection_id.clone(), *retired_on, *loss_added_usd));
+            }
+            JournaledFact::AgentFlat { agent } => {
+                let state = self.agents.entry(agent.clone()).or_default();
+                state.flat_since_retired = state.retired;
+            }
+            JournaledFact::ModelRegistered { id, model } => {
+                self.registry.insert(id.clone(), model.clone());
+            }
+            JournaledFact::ModelWithdrawn { id } => {
+                self.registry.remove(id);
+            }
+        }
+    }
+
+    fn context(self, args: ContextArgs) -> Result<ValidationContext, SpecError> {
+        let ours = &args.connection_id;
+        let mut other_allocations_usd = Usd::ZERO;
+        let mut claimed_by_other_agents = BTreeSet::new();
+        for (id, state) in &self.agents {
+            let Some((connection_id, _, allocation, pinned)) = &state.version else {
+                continue;
+            };
+            if *id == args.agent || connection_id != ours {
+                continue;
+            }
+            if !state.retired {
+                other_allocations_usd = other_allocations_usd.checked_add(*allocation)?;
+            }
+            if !state.flat_since_retired {
+                claimed_by_other_agents.extend(pinned.iter().cloned());
+                claimed_by_other_agents.extend(state.working.iter().cloned());
+            }
+        }
+        let mut connection_loss_carry_usd = Usd::ZERO;
+        for (connection_id, retired_on, loss) in &self.retirements {
+            let counted = connection_id == ours
+                && within(*retired_on, args.validation_date, LOSS_CARRY_DAYS)
+                && !loss.is_negative();
+            if counted {
+                connection_loss_carry_usd = connection_loss_carry_usd.checked_add(*loss)?;
+            }
+        }
+        let previous_version = self
+            .agents
+            .get(&args.agent)
+            .and_then(|state| state.version.as_ref())
+            .map(|(connection_id, environment, _, _)| PreviousVersion {
+                environment: *environment,
+                connection_id: connection_id.clone(),
+            });
+        let membership = args.membership.unwrap_or(Membership {
+            workspace_users: 0,
+            approver_users: 0,
+        });
+        Ok(ValidationContext {
+            account_equity_usd: self.equity.get(ours).copied().unwrap_or(Usd::ZERO),
+            other_allocations_usd,
+            validation_date: args.validation_date,
+            registry: Some(self.registry),
+            provenance: args.provenance,
+            workspace_users: membership.workspace_users,
+            approver_users: membership.approver_users,
+            disclosures_accepted: self.disclosures,
+            instrument_groups: args.instrument_groups,
+            claimed_by_other_agents,
+            connection_environment: Some(
+                self.environment
+                    .get(ours)
+                    .copied()
+                    .unwrap_or(Environment::Live),
+            ),
+            connection_loss_carry_usd,
+            eligibility_failures: args.eligibility_failures,
+            previous_version,
+        })
+    }
+}
+
+/// Whether `retired_on` is at most `days` days before `today`, or after it. A date `Date` cannot step
+/// past counts as inside, so the carry never drops a loss it cannot place.
+fn within(retired_on: Date, today: Date, days: u32) -> bool {
+    let mut reached = retired_on;
+    for _ in 0..days {
+        if reached >= today {
+            return true;
+        }
+        match reached.next() {
+            Ok(next) => reached = next,
+            Err(_) => return true,
+        }
+    }
+    reached >= today
+}
+
+/// `given`, with a `user_entered`, unconfirmed entry added for every part of `document` no entry
+/// covers (DEC-169 item 5). The walk stops at a path an entry covers, descends only into a member or
+/// item with an entry somewhere below it, and never adds a system field.
+fn completed(document: &Value, given: &ProvenanceMap) -> ProvenanceMap {
+    let mut entries = given.entries().clone();
+    let mut added = Vec::new();
+    walk(document, "", given, &mut added);
+    for path in added {
+        entries.insert(
+            Pointer::new(&path),
+            Provenance {
+                source: Source::UserEntered,
+                confirmed: false,
+            },
+        );
+    }
+    ProvenanceMap::new(entries)
+}
+
+fn walk(node: &Value, path: &str, given: &ProvenanceMap, added: &mut Vec<String>) {
+    let children: Vec<(String, &Value)> = match node {
+        Value::Object(members) => members
+            .iter()
+            .map(|(key, child)| (format!("{path}/{}", escaped(key.as_str())), child))
+            .collect(),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, child)| (format!("{path}/{index}"), child))
+            .collect(),
+        _ => Vec::new(),
+    };
+    for (child_path, child) in children {
+        if SYSTEM_FIELDS
+            .iter()
+            .any(|system| covers(system, &child_path))
+        {
+            continue;
+        }
+        let entries = given.entries().keys().map(Pointer::as_str);
+        let mut covered = false;
+        let mut below = false;
+        for entry in entries {
+            covered = covered || covers(entry, &child_path);
+            below = below || covers(&child_path, entry);
+        }
+        if covered {
+            continue;
+        }
+        if below {
+            walk(child, &child_path, given, added);
+        } else {
+            added.push(child_path);
+        }
+    }
+}
+
+/// A member name as an RFC 6901 reference token.
+fn escaped(key: &str) -> String {
+    key.replace('~', "~0").replace('/', "~1")
 }
 
 #[cfg(test)]

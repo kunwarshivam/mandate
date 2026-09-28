@@ -278,11 +278,11 @@ pub fn validate(
 }
 
 /// The system fields, which carry no provenance rule (§7).
-const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
+pub(crate) const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
 /// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
 /// field". The empty pointer is the whole document, so it covers everything.
-fn covers(prefix: &str, path: &str) -> bool {
+pub(crate) fn covers(prefix: &str, path: &str) -> bool {
     path.strip_prefix(prefix)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
