@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, useRef, useState } from "react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { ChevronDown, CircleAlert, Unplug } from "lucide-react";
 import { ModeBadge } from "@/components/domain/mode";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -124,7 +124,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           e.preventDefault();
           contentRef.current?.focus();
         }}
-        className="w-full gap-0 overflow-y-auto outline-none sm:max-w-md"
+        className="gap-0 overflow-y-auto outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
         data-slot="stop-sheet"
       >
         <SheetHeader className="gap-1 border-b p-5 pr-12">

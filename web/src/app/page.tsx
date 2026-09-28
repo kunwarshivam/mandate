@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { Stub } from "@/components/screens/stub";
 
-export const metadata: Metadata = { title: "Dashboard" };
+/** The root layout's title template does not apply to its own segment. */
+export const metadata: Metadata = { title: { absolute: "Dashboard · Mandate" } };
 
 export default function DashboardPage() {
   return (

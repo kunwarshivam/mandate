@@ -10,7 +10,7 @@ import { SCENARIO_COOKIE } from "@/lib/scenario";
 export function ScenarioSwitcher({ scenario }: { scenario: Scenario }) {
   const router = useRouter();
   return (
-    <label className="fixed bottom-20 left-3 z-40 flex items-center gap-2 rounded-lg border bg-card/95 py-1 pr-1 pl-2.5 text-caption shadow-whisper backdrop-blur lg:bottom-3">
+    <label className="fixed right-3 bottom-20 z-40 flex items-center gap-2 rounded-lg border bg-card/95 py-1 pr-1 pl-2.5 text-caption shadow-whisper backdrop-blur lg:bottom-3">
       <FlaskConical className="size-3.5 text-muted-foreground" aria-hidden />
       <span className="text-muted-foreground">Scenario</span>
       <select

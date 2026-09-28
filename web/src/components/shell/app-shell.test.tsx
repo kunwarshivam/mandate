@@ -55,7 +55,10 @@ describe("every screen in every scenario", () => {
   );
 
   it("keeps page titles generic: no agent names, tickers, or amounts", () => {
-    const titles = [dashboard, agents, agentsNew, approvals, audit, settings, design].map((m) => String(m.metadata.title));
+    const titles = [dashboard, agents, agentsNew, approvals, audit, settings, design].map(({ metadata }) => {
+      const title = metadata.title;
+      return typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Mandate$/, "") : String(title);
+    });
     for (const title of titles) expect(title).toMatch(/^[A-Z][a-z]+( [a-z]+)*$/);
   });
 });
