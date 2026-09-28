@@ -671,6 +671,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   `client_order_id` instead of reading `legs[].id` only. Until both land, DEC-160's ID branch receives
   no input, and every leg is attributed by the single holder or is unattributed
   ([DEC-160](04-decision-log.md#decisions), #243 round 1).
+- **E7-4 slices 2 and 3 (stream K):** `properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`
+  wants the `ProtectionChanged placed` at or after the entry's completion with no lag. That is right
+  on the normal path (§5.4's legs activate at completion), but a re-placement after a
+  cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
+  allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected

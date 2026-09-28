@@ -611,6 +611,8 @@ struct BrokerSide {
     filled_units: i128,
     acknowledged: bool,
     cancelled: bool,
+    /// The purpose the submission carried, so a protective order is told from the agent's own.
+    purpose: Purpose,
 }
 
 impl BrokerModel {
@@ -634,6 +636,7 @@ impl BrokerModel {
                     filled_units: 0,
                     acknowledged: false,
                     cancelled: false,
+                    purpose: order.purpose,
                 },
             );
             self.order_of_arrival.push(id);
@@ -643,6 +646,21 @@ impl BrokerModel {
                 self.cancels_asked.push(client_order_id.as_str().to_owned());
             }
         }
+    }
+
+    /// Whether an agent kill switch must now cancel something at this broker: a working,
+    /// acknowledged order of the agent's own whose cancel has not already been asked for. A
+    /// protective order is not one: an automated switch leaves protection in place until the
+    /// session (§5.5), so it may cancel none (#244 round 3, major 1).
+    fn must_cancel_at_a_switch(&self) -> bool {
+        self.order_of_arrival.iter().any(|id| {
+            self.working(id)
+                && self
+                    .orders
+                    .get(id)
+                    .is_some_and(|o| o.acknowledged && o.purpose != Purpose::Protective)
+                && !self.cancels_asked.contains(id)
+        })
     }
 
     fn working(&self, id: &str) -> bool {
@@ -928,11 +946,7 @@ fn play(script: &[Step]) -> Run {
                 );
             }
             Step::KillSwitch => {
-                kill_working.push(broker.order_of_arrival.iter().any(|id| {
-                    broker.working(id)
-                        && broker.orders.get(id).is_some_and(|o| o.acknowledged)
-                        && !broker.cancels_asked.contains(id)
-                }));
+                kill_working.push(broker.must_cancel_at_a_switch());
                 let ran = record(
                     shell.run(
                         Input::Command(Command::KillSwitch {
@@ -2697,5 +2711,85 @@ fn an_unknown_order_in_the_leads_instrument_before_the_completion_is_skipped() {
     assert!(
         !may_hold_protection(&script, &run.drafts, 0),
         "and nothing holds protection before the first draft, so the scope is not a blanket skip"
+    );
+}
+
+/// #244 round 3, major 1: the reviewer's script `PREFIX + PROTECTED_LEAD + [Wait, Wait, Cancelled,
+/// Acknowledge, KillSwitch]`. At the switch the prefix's buy is filled, the lead's entry remainder is
+/// cancelled at the bracket timeout, and the only working acknowledged order is the OCO §5.4 then
+/// submits for the filled share. `play` cannot reach that state on this code (the OCO's producer is
+/// E7-4's), so the broker the script leaves at the switch is built directly: it asks the switch to
+/// cancel nothing, while the same broker holding the agent's own working buy does.
+#[test]
+fn a_resting_protective_order_is_not_one_the_kill_switch_must_cancel() {
+    let side = |instrument: &str, side, qty_units, filled_units, cancelled, purpose| BrokerSide {
+        instrument: instrument.to_owned(),
+        side,
+        qty_units,
+        filled_units,
+        acknowledged: true,
+        cancelled,
+        purpose,
+    };
+    let mut broker = BrokerModel::default();
+    let unit = 1_000_000_000;
+    for (id, order) in [
+        (
+            "md-prefix",
+            side(
+                AAPL,
+                mandate_accounting::Side::Buy,
+                unit,
+                unit,
+                false,
+                Purpose::Open,
+            ),
+        ),
+        (
+            "md-entry",
+            side(
+                CPHC,
+                mandate_accounting::Side::Buy,
+                2 * unit,
+                unit,
+                true,
+                Purpose::Open,
+            ),
+        ),
+        (
+            "md-entry-p1",
+            side(
+                CPHC,
+                mandate_accounting::Side::Sell,
+                unit,
+                0,
+                false,
+                Purpose::Protective,
+            ),
+        ),
+    ] {
+        broker.orders.insert(id.to_owned(), order);
+        broker.order_of_arrival.push(id.to_owned());
+    }
+    broker.cancels_asked.push("md-entry".to_owned());
+    assert!(
+        !broker.must_cancel_at_a_switch(),
+        "only the OCO works, and an automated switch may leave it in place (§5.5)"
+    );
+    broker.orders.insert(
+        "md-own".to_owned(),
+        side(
+            CPHC,
+            mandate_accounting::Side::Buy,
+            unit,
+            0,
+            false,
+            Purpose::Open,
+        ),
+    );
+    broker.order_of_arrival.push("md-own".to_owned());
+    assert!(
+        broker.must_cancel_at_a_switch(),
+        "the agent's own working buy is still one the switch must cancel"
     );
 }
