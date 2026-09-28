@@ -49,7 +49,7 @@ export function BrandSpecimen() {
 
       <div className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
         <Tile label="Clear space: a quarter of the mark's height" className="sm:col-span-2">
-          <div className="border border-dashed border-muted-foreground" style={{ padding: `${48 * LOCKUP_GAP}px` }}>
+          <div className="border border-dashed border-muted-foreground" style={{ padding: `${48 * LOCKUP_GAP}px`, color: NAVY }}>
             <OwlheadLockup className="block h-12 w-auto" title="" />
           </div>
         </Tile>
