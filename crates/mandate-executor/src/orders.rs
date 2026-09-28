@@ -14,10 +14,11 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::{int, text};
+use crate::protection::protection_cancelled;
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
-    Mode, OrderState, StatusMapping,
+    Mode, OrderState, Purpose, StatusMapping,
 };
 
 /// Trading-domain spec §5.7's broker status table. It is **total**: every value the table names
@@ -274,6 +275,15 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         OrderState::Canceled,
         vec![("cancel_confirmed", Value::Bool(true))],
     )?;
+    let protective = batch
+        .view
+        .orders
+        .get(&id)
+        .filter(|order| order.purpose == Purpose::Protective)
+        .map(|order| order.instrument.clone());
+    if let Some(instrument) = protective {
+        protection_cancelled(batch, &instrument, &id)?;
+    }
     Ok(())
 }
 

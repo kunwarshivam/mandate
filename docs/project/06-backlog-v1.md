@@ -554,12 +554,19 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
-- **`ValidationContext::from_journal` (stream F, DEC-169):** the tests PR lands the `context` module's
-  stub and 17 `pending E10-1` tests; the implementation follows. Stream L's E7-10 (DEC-168) maps the
-  control-stream records (`AccountSnapshotRecorded`, `AgentDeployed`/`AgentStopped`,
-  `ConnectionEstablished`, `DisclosureAccepted`, `MandateVersionCreated`/`MandateConfirmed`,
-  `ConfigSnapshotRegistered`, `PlatformOperatorAction`) to `JournaledFact`; `AgentFlat` needs a source
-  there too (the account ledger's flat-in-every-instrument signal).
+- **Stream H, before E6-4's goal implementation: pair the goal tests against constants** (#260 review,
+  the coordinator's ruling there). Once slice P makes `tests/goal.rs` reachable past validation, a
+  constant `goal::status` answering `Ok(Done{..})` passes 2 of its 9 tests and `Ok(Running)` passes 1.
+  Each needs its opposite pair so that no constant passes (#240's standard), in a tests correction
+  ahead of the goal implementation.
+- **`ValidationContext::from_journal` (stream F, DEC-169):** implemented; its 17 tests are live.
+  Stream L's E7-10 (DEC-168) maps the records to `JournaledFact`: `AccountSnapshotRecorded`,
+  `ConnectionEstablished`, `ConnectionRevoked`, `DisclosureAccepted`, `AgentDeployed` and
+  `MandateVersionApplied` (both `AgentVersionActive`), `UniverseChanged`, `AgentStopped`,
+  `ConfigSnapshotRegistered`, `PlatformOperatorAction` (`model_withdrawn`), `MandateVersionCreated`, and
+  `MandateConfirmed`. `AgentFlat` needs a source there too (the account ledger's flat-in-every-instrument
+  signal). A record left unmapped is a fact the fold never sees, so the mapper's completeness is what
+  covers the facts that only add (DEC-169 item 2).
 - **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
   `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
   locally; a status-only PR moves them to `passing` (DEC-77 item 3).
@@ -706,6 +713,21 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   on the normal path (§5.4's legs activate at completion), but a re-placement after a
   cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
   allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
+- **E7-4 slice 2's tests correction (stream K):** a `properties` oracle expects `OwnerAlertSent`
+  among the executor's drafts, but it is a control-stream event the executor never writes; the
+  executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
+  Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
+- **E7-4 slice 3b (stream K), from #258's round 2 (comment 5862870455):** (1) pin with tests the
+  three fail-open paths whose code is right but unclaimed: `reconcile::agents` counting an ownerless
+  order as `""`, `orders::unmapped`'s ownerless (`Some(None)`) arm, and `reattribute` without its
+  instrument filter; (2) make the pins' `sources()` skip `#[cfg(test)]` regions and drop the
+  `concat!` idiom that dodges them.
+- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
+  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
+  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
+  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
+  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
+  slice reads buying power from it.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
