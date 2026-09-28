@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { Agent } from "@/fixtures/types";
@@ -18,7 +19,7 @@ function useMove() {
  * A limit as a rail on the marigold mandate field: usage fills in ink toward the limit, an ink
  * post where the agent stops. It always sits on marigold, the colour of your mandate.
  */
-export function LimitRail({ rail, className }: { rail: Rail; className?: string }) {
+export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: ReactNode; className?: string }) {
   const share = Math.min(ratio(rail.used, rail.cap), 1);
   const over = rail.used > rail.cap;
   const move = useMove();
@@ -41,7 +42,7 @@ export function LimitRail({ rail, className }: { rail: Rail; className?: string 
       </div>
       <p className="text-caption text-marigold-muted">
         {over ? <span className="font-bold text-marigold-foreground">Over the limit. </span> : null}
-        {usd(sub(rail.cap, rail.used) > 0n ? sub(rail.cap, rail.used) : 0n)} headroom. At the limit: {rail.atCap.toLowerCase()}.
+        {caption ?? `${usd(sub(rail.cap, rail.used) > 0n ? sub(rail.cap, rail.used) : 0n)} headroom. At the limit: ${rail.atCap.toLowerCase()}.`}
       </p>
     </div>
   );
@@ -72,7 +73,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
 
   return (
     <div className="grid gap-4">
-      <div className="relative h-8" aria-hidden>
+      <div className="relative h-8 overflow-hidden" aria-hidden>
         <div className="absolute inset-x-0 top-1/2 h-0.5 bg-marigold-foreground/30" />
         {levels.map((l) => (
           <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 bg-marigold-foreground", TICK[l.kind])} style={{ left: pos(l.at) }} />
@@ -120,9 +121,12 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
   const scaled = limits.sizeFactor < ONE;
   return (
     <section aria-labelledby={`envelope-${agent.agent_id}`} data-slot="envelope" className={cn("grid gap-5 bg-marigold p-4 text-marigold-foreground", className)}>
-      <h2 id={`envelope-${agent.agent_id}`} className="text-heading">
-        Your mandate
-      </h2>
+      <div className="grid gap-1">
+        <h2 id={`envelope-${agent.agent_id}`} className="text-heading">
+          Your mandate
+        </h2>
+        <p className="text-sm text-marigold-muted">{compact ? "Limits in dollars." : "Limits in dollars, and the levels where the agent's behaviour changes."}</p>
+      </div>
       {compact ? null : <EquityLevels equity={limits.equity} levels={limits.levels} />}
       <div className="grid gap-4">
         {limits.rails.map((rail) => (

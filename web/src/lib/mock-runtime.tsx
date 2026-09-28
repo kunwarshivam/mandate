@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, Iso, Workspace } from "@/fixtures/types";
+import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, Environment, Iso, Workspace } from "@/fixtures/types";
 import { clock } from "./format";
 import { RESTRICTIONS } from "./restrictions";
 
@@ -13,21 +13,49 @@ import { RESTRICTIONS } from "./restrictions";
 
 export type CommandKind = "pause" | "resume" | "stop" | "kill" | "release" | "pause_all" | "stop_all" | "close_all";
 
+/**
+ * What a record screen showed when the owner confirmed, sent with the command so the journal keeps
+ * it (brief §4.1). `shown` is every line on the screen, in order; nothing on a record screen collapses.
+ * `modes` is each agent's mode badge as it read.
+ */
+export interface CommandRecord {
+  screen: "D10" | "D11";
+  environment: Environment;
+  title: string;
+  shown: string[];
+  modes: Array<{ agent: string; badge: string }>;
+}
+
 export interface Command {
   id: string;
   kind: CommandKind;
   agentId: string | null;
-  phase: "sent" | "recorded" | "undelivered";
+  /** `unknown`: the deployment took the command but no journal entry came back. */
+  phase: "sent" | "recorded" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
+  record?: CommandRecord;
+}
+
+/**
+ * What D6 showed when the owner responded (brief §4.1). `shown` is every line of the request as it
+ * was fixed at first render. D6 lets model output sit behind "View model output", so the record says
+ * whether the owner opened it, and when they did, its lines follow in `shown`.
+ */
+export interface ApprovalRecord {
+  screen: "D6";
+  environment: Environment;
+  shown: string[];
+  modelOutputExpanded: boolean;
 }
 
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  phase: "sent" | "recorded" | "decided";
+  phase: "sent" | "recorded" | "decided" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
+  record: ApprovalRecord;
 }
 
 interface Runtime {
@@ -36,8 +64,8 @@ interface Runtime {
   reachable: boolean;
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
-  send: (kind: CommandKind, agentId: string | null) => Command;
-  respond: (approvalId: string, response: "approve" | "skip") => void;
+  send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
+  respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
 }
 
 const RuntimeContext = createContext<Runtime | null>(null);
@@ -194,6 +222,7 @@ export function RuntimeProvider({
   const nowRef = useRef(initial.now);
   const counter = useRef(0);
   const reachable = initial.status !== "unreachable";
+  const silent = initial.journal === "silent";
 
   useEffect(() => {
     if (!tick) return;
@@ -207,9 +236,9 @@ export function RuntimeProvider({
   }, [initial.now, tick]);
 
   const send = useCallback(
-    (kind: CommandKind, agentId: string | null): Command => {
+    (kind: CommandKind, agentId: string | null, record?: CommandRecord): Command => {
       counter.current += 1;
-      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current };
+      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       setCommands((list) => [...list, command]);
       window.setTimeout(() => {
         const at = nowRef.current;
@@ -217,20 +246,28 @@ export function RuntimeProvider({
           setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "undelivered" } : c)));
           return;
         }
+        if (silent) {
+          setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "unknown" } : c)));
+          return;
+        }
         setWs((current) => applyCommand(current, command, at));
         setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "recorded", recordedAt: at } : c)));
       }, recordAfterMs);
       return command;
     },
-    [reachable, recordAfterMs],
+    [reachable, silent, recordAfterMs],
   );
 
   const respond = useCallback(
-    (approvalId: string, response: "approve" | "skip") => {
-      const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current };
+    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => {
+      const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (silent) {
+          setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "unknown" } }));
+          return;
+        }
         setWs((current) => applyResponse(current, entry, at, "recorded"));
         setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "recorded", recordedAt: at } }));
         if (response === "skip") return;
@@ -241,7 +278,7 @@ export function RuntimeProvider({
         }, recordAfterMs * 0.75);
       }, recordAfterMs);
     },
-    [recordAfterMs],
+    [silent, recordAfterMs],
   );
 
   const value = useMemo(

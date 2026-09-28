@@ -1,6 +1,7 @@
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./placard-kumo.css";
 
 /*
  * Placard (web/DESIGN.md). Colour values live in src/lib/tokens.ts as well; tokens.test.ts fails
@@ -47,7 +48,7 @@
   --hatch-ink: oklch(0.36 0.1 258 / 0.3);
 
   /* Layout: the gutters the founder asked to tighten (DESIGN.md, Space). */
-  --sidebar-width: 12rem;
+  --nav-width: 12rem;
   --content-max: 90rem;
   --page-x: 0.75rem;
   --page-top: 1rem;
@@ -151,6 +152,27 @@
   --ease-out: var(--ease-out);
   --ease-in-out: var(--ease-in-out);
   --ease-drawer: var(--ease-drawer);
+
+  /* Kumo sets a pixel type scale for a 14 px product; Placard keeps rem so the owner's size holds. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(1.75 / 1.125);
+
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 0 #0000;
+  --shadow-lg: 0 0 #0000;
+  --shadow-xl: 0 0 #0000;
+  --shadow-2xl: 0 0 #0000;
+
+  --color-white: var(--card);
+  --color-black: var(--ink);
 }
 
 @layer base {
@@ -200,22 +222,35 @@
   }
 }
 
-/* shadcn Sheet and Dialog keep their markup; only their timing is ours. */
-[data-slot="sheet-content"] {
-  --tw-duration: var(--duration-sheet);
-  --tw-ease: var(--ease-drawer);
+/* Base UI marks the entering and leaving frames; the Stop sheet and step-up dialog time them. */
+[data-slot="stop-sheet"] {
+  transition: transform var(--duration-sheet) var(--ease-drawer);
 }
-[data-slot="sheet-content"][data-state="closed"] {
-  --tw-duration: var(--duration-sheet-exit);
-  --tw-ease: var(--ease-out);
+[data-slot="stop-sheet"][data-starting-style],
+[data-slot="stop-sheet"][data-ending-style] {
+  transform: translateX(100%);
 }
-[data-slot="dialog-content"] {
-  --tw-duration: var(--duration-dialog);
-  --tw-ease: var(--ease-out);
+[data-slot="stop-sheet"][data-ending-style] {
+  transition-duration: var(--duration-sheet-exit);
+  transition-timing-function: var(--ease-out);
 }
-[data-slot="dialog-content"][data-state="closed"] {
-  --tw-duration: var(--duration-dialog-exit);
-  --tw-ease: var(--ease-out);
+[data-slot="step-up-dialog"] {
+  transition: opacity var(--duration-dialog) var(--ease-out), transform var(--duration-dialog) var(--ease-out);
+}
+[data-slot="step-up-dialog"][data-starting-style],
+[data-slot="step-up-dialog"][data-ending-style] {
+  opacity: 0;
+  transform: scale(0.97);
+}
+[data-slot="step-up-dialog"][data-ending-style] {
+  transition-duration: var(--duration-dialog-exit);
+}
+[data-slot="sheet-backdrop"] {
+  transition: opacity var(--duration-sheet) var(--ease-out);
+}
+[data-slot="sheet-backdrop"][data-starting-style],
+[data-slot="sheet-backdrop"][data-ending-style] {
+  opacity: 0;
 }
 
 /* Pressing eases in over the press duration; letting go springs back faster. */
@@ -282,13 +317,12 @@
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    --tw-enter-translate-x: 0 !important;
-    --tw-enter-translate-y: 0 !important;
-    --tw-exit-translate-x: 0 !important;
-    --tw-exit-translate-y: 0 !important;
-    --tw-enter-scale: 1 !important;
-    --tw-exit-scale: 1 !important;
     scroll-behavior: auto !important;
+  }
+  [data-slot="stop-sheet"],
+  [data-slot="step-up-dialog"],
+  [data-slot="sheet-backdrop"] {
+    transition: none !important;
   }
   [data-slot="skeleton"] {
     animation: none !important;

@@ -3,11 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StopControl } from "@/components/shell/stop-control";
 import { StopSheet } from "@/components/stop/stop-sheet";
 import type { Scenario } from "@/fixtures/types";
-import { AGENT_IDS, SCENARIOS } from "@/fixtures/workspace";
-import { type CommandKind, useRuntime } from "@/lib/mock-runtime";
+import { AGENT_IDS, SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { heldPasskey, watchConsole } from "@/test/passkey";
+import { ENDINGS, RuntimeCommands, entries, expectNothingSent, expectSentThenRecorded, log, modes, press, recordedCount, stepUpDialog } from "@/test/step-up";
+import { type RecordKind, type SheetKind, recordHref } from "./commands";
 import { PASSKEY_ANSWER_MS, type Passkey, type PasskeyResult, mockPasskey } from "./step-up-dialog";
 
 function openSheet() {
@@ -15,18 +16,17 @@ function openSheet() {
   return screen.getByRole("dialog");
 }
 
+/** Buttons act in the sheet; links open a record screen. Both are choices, in the order shown. */
+function choices(section: HTMLElement) {
+  return Array.from(section.querySelectorAll<HTMLElement>("[data-tone]"));
+}
+
 function choiceTitles(section: HTMLElement) {
-  return within(section)
-    .getAllByRole("button")
-    .map((b) => b.querySelector("span")?.textContent ?? "");
+  return choices(section).map((b) => b.querySelector("span")?.textContent ?? "");
 }
 
 function section(sheet: HTMLElement, heading: RegExp) {
   return within(sheet).getByRole("heading", { name: heading }).closest("section")!;
-}
-
-function log(sheet: HTMLElement) {
-  return within(sheet).getByRole("status");
 }
 
 beforeEach(() => {
@@ -67,7 +67,7 @@ describe("Stop sheet choices", () => {
     renderWithRuntime(<StopControl />, "unknown-order");
     const agent = section(openSheet(), /This agent: Agent 2/);
     expect(agent).toHaveTextContent("An order has an unknown state");
-    expect(within(agent).getByRole("button", { name: /Kill switch: close and stop/ })).not.toBeDisabled();
+    expect(within(agent).getByRole("link", { name: /Kill switch: close and stop/ })).toHaveAttribute("href", recordHref("kill", AGENT_IDS.swing));
   });
 
   it("explains a reconciliation hold without asking anything of the owner", () => {
@@ -82,7 +82,7 @@ describe("Stop sheet choices", () => {
     expect(isDisabled(control)).toBe(false);
     const sheet = openSheet();
     for (const button of within(sheet).getAllByRole("button")) expect(isDisabled(button), button.textContent ?? "").toBe(false);
-    expect(within(sheet).getByRole("button", { name: /Stop all agents on this account/ })).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: /Stop all agents on this account/ })).toHaveAttribute("href");
   });
 
   it("focuses the sheet and the passkey dialog themselves, never an action", () => {
@@ -102,10 +102,49 @@ describe("Stop sheet choices", () => {
   });
 });
 
+
+/** D10 and D11 are record screens, so pages: the sheet is the chooser and links to them (brief §4.1). */
+const LINKS: Array<{ kind: RecordKind; path: string; choice: RegExp; target: () => string }> = [
+  { kind: "kill", path: `/agents/${AGENT_IDS.lmn}`, choice: /^Kill switch: cancel and stop/, target: () => AGENT_IDS.lmn },
+  { kind: "kill", path: `/agents/${AGENT_IDS.btc}`, choice: /^Kill switch: close and stop/, target: () => AGENT_IDS.btc },
+  { kind: "release", path: `/agents/${AGENT_IDS.btc}`, choice: /^Stop and release positions to me/, target: () => AGENT_IDS.btc },
+  { kind: "stop_all", path: "/", choice: /^Stop all agents on this account/, target: () => buildWorkspace("normal").connection.connection_id },
+  { kind: "close_all", path: "/", choice: /^Close everything on this account/, target: () => buildWorkspace("normal").connection.connection_id },
+];
+
+describe("the kill switch and release open their record screens", () => {
+  it.each(LINKS.map((l) => [l.choice.source, l] as const))("%s links to its page, sends nothing, and closes the sheet", (_, l) => {
+    setPathname(l.path);
+    renderWithRuntime(
+      <>
+        <StopControl />
+        <RuntimeCommands />
+      </>,
+    );
+    const sheet = openSheet();
+    const link = within(sheet).getByRole("link", { name: l.choice });
+    expect(link).toHaveAttribute("href", recordHref(l.kind, l.target()));
+    expect(link).toHaveTextContent("Opens the full list to confirm with your passkey.");
+    fireEvent.click(link);
+    expect(stepUpDialog()).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+    expect(recordedCount()).toBe(0);
+  });
+
+  it("uses opaque IDs in every record link", () => {
+    setPathname(`/agents/${AGENT_IDS.btc}`);
+    renderWithRuntime(<StopControl />);
+    const hrefs = Array.from(openSheet().querySelectorAll("a[data-tone]"), (a) => a.getAttribute("href") ?? "");
+    expect(hrefs).toHaveLength(4);
+    for (const href of hrefs) expect(href).toMatch(/^\/(agents\/agt|connections\/con)_[0-9A-HJKMNP-TV-Z]{26}\/[a-z-]+$/);
+  });
+});
+
 /**
- * Every command the sheet can send, where it is offered, and what the owner must see. `stepUp` is
- * the one line G3 shows, or null for the two pauses (PX-4 (b)). Keyed by command so a new command
- * does not compile until it has a row here.
+ * Every command the sheet itself sends, where it is offered, and what the owner must see. `stepUp`
+ * is the one line G3 shows, or null for the two pauses (PX-4 (b)). Keyed by command so a new
+ * command does not compile until it has a row here or in the record screens' table.
  */
 interface Case {
   name: string;
@@ -141,83 +180,11 @@ const CASES = {
       recorded: "Agent 3 is stopped.",
     },
   ],
-  kill: [
-    {
-      name: "Kill switch, flat agent",
-      path: `/agents/${AGENT_IDS.lmn}`,
-      scenario: "normal",
-      choice: /^Kill switch: cancel and stop/,
-      stepUp: "Kill switch for Agent 3: cancel its orders, sell its positions, and end it.",
-      recorded: "Agent 3: orders canceled, positions sold, agent stopped.",
-    },
-    {
-      name: "Kill switch, agent holding positions",
-      path: `/agents/${AGENT_IDS.btc}`,
-      scenario: "normal",
-      choice: /^Kill switch: close and stop/,
-      stepUp: "Kill switch for Agent 1: cancel its orders, sell its positions, and end it.",
-      recorded: "Agent 1: orders canceled, positions sold, agent stopped.",
-    },
-  ],
-  release: [
-    {
-      name: "Stop and release positions to me",
-      path: `/agents/${AGENT_IDS.btc}`,
-      scenario: "normal",
-      choice: /^Stop and release positions to me/,
-      stepUp: "Stop Agent 1 and release 1 position to you, without protection.",
-      recorded: "Agent 1 is stopped; its positions are yours and unprotected.",
-    },
-  ],
-  stop_all: [
-    {
-      name: "Stop all agents on this account",
-      path: "/",
-      scenario: "normal",
-      choice: /^Stop all agents on this account/,
-      stepUp: "Stop all agents on this account: each agent's kill switch. Your own holdings stay.",
-      recorded: "Every agent on this account is stopped by its kill switch.",
-    },
-  ],
-  close_all: [
-    {
-      name: "Close everything on this account",
-      path: "/",
-      scenario: "normal",
-      choice: /^Close everything on this account/,
-      stepUp: "Close everything on this account: cancel every order and close every position, including ones no agent manages.",
-      recorded: "Every order on this account is canceled, every position closed, and every agent stopped.",
-    },
-  ],
-} satisfies Record<CommandKind, Case[]>;
+} satisfies Record<SheetKind, Case[]>;
 
 const ALL: Case[] = Object.values(CASES).flat();
 const STEP_UP = ALL.filter((c): c is Case & { stepUp: string } => c.stepUp !== null);
 const NO_STEP_UP = ALL.filter((c) => c.stepUp === null);
-
-const failingPasskey: Passkey = (_action, answer) => {
-  const id = window.setTimeout(() => answer("failed"), PASSKEY_ANSWER_MS);
-  return () => window.clearTimeout(id);
-};
-
-/** Answers "verified" even after being abandoned, as a browser's assertion may resolve late. */
-const latePasskey: Passkey = (_action, answer) => {
-  window.setTimeout(() => answer("verified"), PASSKEY_ANSWER_MS);
-  return () => {};
-};
-
-function stepUpDialog() {
-  return screen.queryByRole("dialog", { name: "Confirm it is you" });
-}
-
-function entries(sheet: HTMLElement) {
-  return log(sheet).querySelectorAll("[data-phase]");
-}
-
-/** The modes the sheet shows for every agent in view: they change only once the runtime records a command. */
-function modes(sheet: HTMLElement) {
-  return Array.from(sheet.querySelectorAll("[data-slot=mode-badge]"), (b) => b.getAttribute("data-mode"));
-}
 
 function start(c: Case, options?: { passkey?: Passkey }, ui = <StopControl />) {
   setPathname(c.path);
@@ -228,53 +195,16 @@ function start(c: Case, options?: { passkey?: Passkey }, ui = <StopControl />) {
   return { sheet, before, view };
 }
 
-function press(name: "Use passkey" | "Cancel" | "Close") {
-  fireEvent.click(within(stepUpDialog()!).getByRole("button", { name }));
-}
-
-/** Nothing reached the runtime: no entry now or later, and every agent keeps its mode. */
-function expectNothingSent(sheet: HTMLElement, before: Array<string | null>) {
-  expect(entries(sheet)).toHaveLength(0);
-  act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
-  expect(entries(sheet)).toHaveLength(0);
-  expect(modes(sheet)).toEqual(before);
-}
-
-/** Rule 5: "sent" first, the recorded state only once the runtime records it, and exactly one command. */
-function expectSentThenRecorded(sheet: HTMLElement, before: Array<string | null>, c: Case) {
-  expect(entries(sheet)).toHaveLength(1);
-  expect(entries(sheet)[0]).toHaveAttribute("data-phase", "sent");
-  expect(log(sheet)).toHaveTextContent("Sent; waiting for the runtime to record it.");
-  expect(log(sheet)).not.toHaveTextContent("Recorded");
-  expect(log(sheet)).not.toHaveTextContent(c.recorded);
-  expect(modes(sheet)).toEqual(before);
-
-  act(() => vi.advanceTimersByTime(RECORD_AFTER_MS - 1));
-  expect(entries(sheet)[0]).toHaveAttribute("data-phase", "sent");
-  expect(modes(sheet)).toEqual(before);
-
-  act(() => vi.advanceTimersByTime(1));
-  expect(entries(sheet)).toHaveLength(1);
-  expect(entries(sheet)[0]).toHaveAttribute("data-phase", "recorded");
-  expect(log(sheet)).toHaveTextContent(new RegExp(`Recorded at \\d{2}:\\d{2}:\\d{2}\\. ${literal(c.recorded)}`));
-  expect(log(sheet)).not.toHaveTextContent("Sent; waiting");
-  expect(modes(sheet)).not.toEqual(before);
-}
-
-function literal(text: string) {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 describe("Pause needs no step-up (PX-4 (b))", () => {
   it.each(NO_STEP_UP.map((c) => [c.name, c] as const))("%s is sent at once, then shown recorded only after the runtime records it", (_, c) => {
     const { sheet, before } = start(c);
     expect(stepUpDialog()).toBeNull();
-    expectSentThenRecorded(sheet, before, c);
+    expectSentThenRecorded(sheet, before, c.recorded);
     expect(stepUpDialog()).toBeNull();
   });
 });
 
-describe("every other command needs a passkey first (PX-4, PX-12, DEC-136)", () => {
+describe("every other command in the sheet needs a passkey first (PX-4, DEC-136)", () => {
   it.each(STEP_UP.map((c) => [c.name, c] as const))("%s opens the passkey check naming the action, and sends nothing while it waits", (_, c) => {
     const { sheet, before } = start(c);
     const dialog = stepUpDialog();
@@ -293,107 +223,6 @@ describe("every other command needs a passkey first (PX-4, PX-12, DEC-136)", () 
     expect(passkey).toHaveBeenCalledWith(c.stepUp, expect.any(Function));
   });
 });
-
-interface Ending {
-  ending: string;
-  notice: string;
-  passkey?: Passkey;
-  run: () => void;
-}
-
-const ENDINGS: Ending[] = [
-  {
-    ending: "Cancel",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => press("Cancel"),
-  },
-  {
-    ending: "Escape",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => fireEvent.keyDown(stepUpDialog()!, { key: "Escape" }),
-  },
-  {
-    ending: "Cancel while the passkey is being asked",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => {
-      press("Use passkey");
-      act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS - 1));
-      press("Cancel");
-    },
-  },
-  {
-    ending: "Escape while the passkey is being asked",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => {
-      press("Use passkey");
-      act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS - 1));
-      fireEvent.keyDown(stepUpDialog()!, { key: "Escape" });
-    },
-  },
-  {
-    ending: "Cancel after pressing Use passkey twice",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => {
-      press("Use passkey");
-      press("Use passkey");
-      press("Cancel");
-    },
-  },
-  {
-    ending: "Cancel before a late verified answer",
-    notice: "Passkey check canceled. Nothing was sent.",
-    passkey: latePasskey,
-    run: () => {
-      press("Use passkey");
-      press("Cancel");
-    },
-  },
-  {
-    ending: "the dialog's Close button",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => press("Close"),
-  },
-  {
-    ending: "the Close button before a late verified answer",
-    notice: "Passkey check canceled. Nothing was sent.",
-    passkey: latePasskey,
-    run: () => {
-      press("Use passkey");
-      press("Close");
-    },
-  },
-  {
-    ending: "a click outside the dialog",
-    notice: "Passkey check canceled. Nothing was sent.",
-    run: () => clickOutside(),
-  },
-  {
-    ending: "a click outside before a late verified answer",
-    notice: "Passkey check canceled. Nothing was sent.",
-    passkey: latePasskey,
-    run: () => {
-      press("Use passkey");
-      clickOutside();
-    },
-  },
-  {
-    ending: "a failed passkey check",
-    notice: "Passkey check failed. Nothing was sent.",
-    passkey: failingPasskey,
-    run: () => {
-      press("Use passkey");
-      act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
-    },
-  },
-];
-
-/** Radix listens for a press outside only after the dialog's first tick, and dismisses on the click that ends it. */
-function clickOutside() {
-  act(() => vi.advanceTimersByTime(0));
-  const overlay = document.querySelector("[data-slot=dialog-overlay]")!;
-  fireEvent.pointerDown(overlay);
-  fireEvent.click(overlay);
-}
 
 describe("a cancelled or failed passkey check never becomes an action (G3, P4)", () => {
   it.each(STEP_UP.flatMap((c) => ENDINGS.map((e) => [c.name, e.ending, c, e] as const)))("%s, ended by %s, sends nothing and says so", (_, __, c, e) => {
@@ -415,7 +244,7 @@ describe("after a verified passkey, the command is sent and never shown as done 
     expect(entries(sheet)).toHaveLength(0);
     act(() => vi.advanceTimersByTime(1));
     expect(stepUpDialog()).toBeNull();
-    expectSentThenRecorded(sheet, before, c);
+    expectSentThenRecorded(sheet, before, c.recorded);
   });
 
   it.each(STEP_UP.map((c) => [c.name, c] as const))("%s is sent once when Use passkey is pressed twice", (_, c) => {
@@ -427,12 +256,6 @@ describe("after a verified passkey, the command is sent and never shown as done 
   });
 });
 
-/** What the runtime recorded, rendered beside the Stop control so it outlives it. */
-function RuntimeCommands() {
-  const { commands } = useRuntime();
-  return <output data-slot="runtime-commands">{commands.length}</output>;
-}
-
 function Tree({ stop }: { stop: boolean }) {
   return (
     <>
@@ -440,10 +263,6 @@ function Tree({ stop }: { stop: boolean }) {
       <RuntimeCommands />
     </>
   );
-}
-
-function recordedCount() {
-  return Number(document.querySelector("[data-slot=runtime-commands]")?.textContent);
 }
 
 describe("unmounting mid-passkey abandons the request, and a late answer never becomes an action (P4)", () => {

@@ -80,10 +80,10 @@ describe("Owlhead", () => {
 });
 
 describe("approvals badge", () => {
-  it("shows a count and nothing else", () => {
+  it("shows a count and nothing else, in the sidebar, the header, and the phone tab bar", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const counts = document.querySelectorAll("[data-slot=approvals-count]");
-    expect(counts.length).toBe(2);
+    expect(counts.length).toBe(3);
     for (const c of counts) expect(c.textContent).toMatch(/^\d+ open$/);
   });
 });

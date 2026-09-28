@@ -1,15 +1,12 @@
 import type { Metadata } from "next";
-import { Stub } from "@/components/screens/stub";
+import { notFound } from "next/navigation";
+import { RegistryScreen } from "@/components/screens/account-screens";
+import { findScreen } from "@/lib/screens";
 
-export const metadata: Metadata = { title: "Describe an agent" };
+export const metadata: Metadata = { title: "New agent" };
 
 export default function NewAgentPage() {
-  return (
-    <Stub title="Describe an agent">
-      <p>
-        Not built in this slice. You will describe what the agent should do in your own words, review every field the compiler drafts with where it came from, and confirm
-        each section before anything deploys to paper.
-      </p>
-    </Stub>
-  );
+  const screen = findScreen("/agents/new");
+  if (!screen) notFound();
+  return <RegistryScreen screen={screen} />;
 }

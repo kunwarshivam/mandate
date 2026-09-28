@@ -1,8 +1,8 @@
 "use client";
 
 import { type CSSProperties, type ReactNode, useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Dialog } from "@cloudflare/kumo/primitives/dialog";
 import { ModeBadge } from "@/components/domain/mode";
 import { Money } from "@/components/domain/money";
 import type { AgentMode } from "@/fixtures/types";
@@ -26,24 +26,22 @@ export function MotionSamples() {
   return (
     <div className="grid gap-(--seam) sm:grid-cols-2">
       <Sample note="Press: scale 0.97 over 140 ms; release in 80 ms">
-        <Button variant="outline" size="lg" className="w-fit">
+        <Button variant="outline" size="lg" className="press h-11 w-fit">
           Press and hold
         </Button>
       </Sample>
       <Sample note="Sheet: 280 ms on the drawer curve in, 200 ms out">
-        <Sheet>
-          <SheetTrigger asChild>
-            <Button variant="outline" size="lg" className="w-fit">
-              Open a sample sheet
-            </Button>
-          </SheetTrigger>
-          <SheetContent className="sm:max-w-md">
-            <SheetHeader>
-              <SheetTitle>Sample sheet</SheetTitle>
-              <SheetDescription>Enters on the drawer curve; leaves faster on ease-out.</SheetDescription>
-            </SheetHeader>
-          </SheetContent>
-        </Sheet>
+        <Dialog.Root>
+          <Dialog.Trigger render={<Button variant="outline" size="lg" className="h-11 w-fit" />}>Open a sample sheet</Dialog.Trigger>
+          <Dialog.Portal>
+            <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-0 z-50 bg-ink/40" />
+            <Dialog.Popup data-slot="stop-sheet" className="fixed inset-y-0 right-0 z-50 grid w-full content-start gap-2 border-l-2 border-foreground bg-card p-4 outline-none sm:max-w-md">
+              <Dialog.Title className="text-heading">Sample sheet</Dialog.Title>
+              <Dialog.Description className="text-muted-foreground">Enters on the drawer curve; leaves faster on ease-out.</Dialog.Description>
+              <Dialog.Close render={<Button variant="secondary" className="h-11 w-fit" />}>Close</Dialog.Close>
+            </Dialog.Popup>
+          </Dialog.Portal>
+        </Dialog.Root>
       </Sample>
       <Sample note="Mode change: the field changes colour over 160 ms and its width follows, 200 ms">
         <div className="flex items-center gap-3">

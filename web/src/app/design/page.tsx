@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import type { CSSProperties, ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Skeleton } from "@/components/domain/skeleton";
 import { Deadline } from "@/components/approvals/deadline";
+import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
@@ -238,22 +239,24 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Components" lead="shadcn/ui primitives in Placard tokens. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
+      <Block title="Components" lead="Kumo components in Placard tokens: square, flat, no shadows. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
             <h3 className="text-heading">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="lg">Primary</Button>
-              <Button size="lg" variant="outline">
+              <Button size="lg" variant="primary" className="h-11">
+                Primary
+              </Button>
+              <Button size="lg" variant="secondary" className="h-11">
+                Secondary
+              </Button>
+              <Button size="lg" variant="outline" className="h-11">
                 Outline
               </Button>
-              <Button size="lg" variant="ghost">
+              <Button size="lg" variant="ghost" className="h-11">
                 Ghost
               </Button>
-              <Button size="lg" variant="link">
-                Link
-              </Button>
-              <Button size="lg" variant="outline" disabled>
+              <Button size="lg" variant="outline" className="h-11" disabled>
                 Disabled
               </Button>
             </div>
@@ -263,7 +266,7 @@ export default function DesignPage() {
                 Kill switch (crimson, only here)
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">Approve and Skip use the same outline variant and size, side by side, with nothing preselected.</p>
+            <p className="text-sm text-muted-foreground">Approve and Skip use the same secondary variant and size, side by side, with nothing preselected.</p>
           </div>
           <div className="grid gap-(--block-gap)">
             <h3 className="text-heading">Labels</h3>
@@ -301,6 +304,13 @@ export default function DesignPage() {
             </div>
           </div>
         </div>
+      </Block>
+
+      <Block
+        title="Kumo surfaces, flattened"
+        lead="Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, masks on scrolling regions, and a shimmer on skeletons. Placard flattens every one (DEC-200); a browser test reads the computed styles of these specimens."
+      >
+        <KumoSurfaces />
       </Block>
 
       <Block title="Motion" lead="Motion answers an action or shows what changed, and never lasts past 300 ms. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">

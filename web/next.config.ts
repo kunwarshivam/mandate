@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   devIndicators: false,
   agentRules: false,
+  experimental: {
+    optimizePackageImports: ["@cloudflare/kumo", "@phosphor-icons/react"],
+  },
   async headers() {
     return [
       {
