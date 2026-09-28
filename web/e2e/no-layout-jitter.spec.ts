@@ -38,9 +38,7 @@ for (const { scenario, initialAge, ages } of CASES) {
     await page.clock.pauseAt(START);
     await page.goto(`/?scenario=${scenario}`);
     await page.waitForFunction(() => Object.keys(document.querySelector("header") ?? {}).some((k) => k.startsWith("__reactFiber")));
-    if (scenario !== "normal") {
-      test.skip((await page.locator("[data-slot=status-strip][data-degraded]").count()) === 0, "scenarios are served by `next dev` only");
-    }
+    await expect(page.locator("[data-slot=status-strip][data-degraded]")).toHaveCount(scenario === "normal" ? 0 : 1);
 
     let elapsed = 0;
     const baseline = new Map<number, Awaited<ReturnType<typeof layoutAt>>>();

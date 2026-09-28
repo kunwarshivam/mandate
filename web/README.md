@@ -24,24 +24,27 @@ npm test
 npm run build && npm start
 
 npx playwright install --with-deps --only-shell chromium   # once
-npm run build && npm run test:e2e
+npm run test:e2e
 ```
 
-The e2e suite (`e2e/`, Playwright, Chromium only) starts the production build with `npm start` and
-reads computed styles: no route, overlay, or Kumo surface may paint a gradient or a mask, and each
+The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`
+with `OWLHEAD_E2E_SCENARIOS=1` and starts it with `npm start`. That is the production build with the
+scenario switch on, so a spec can load `?scenario=stale`. It reads computed styles: no route, overlay, or Kumo surface may paint a gradient or a mask, and each
 Kumo override in `src/app/kumo-theme.css` must hold in the browser (DEC-200). Locally it reuses a
-server already on port 4317. The browser download comes from `cdn.playwright.dev`.
+server already on port 4317, which may be `npm run dev`. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
 analytics, no session replay, and no service worker.
 
-### Scenarios (development only)
+### Scenarios (development and the e2e build only)
 
 `npm run dev` shows a scenario switcher at the bottom right. It sets the `mandate-scenario` cookie,
 and `?scenario=<id>` on any URL does the same. The scenarios are `normal`, `empty`, `loading`,
 `stale`, `paused`, `drawdown`, `reconciliation`, `unknown-order`, `unreachable`, `approvals`, and
 `result-unknown` (the deployment takes requests but never journals them). A production build always
-renders `normal`.
+renders `normal`: it ignores the parameter and the cookie, and does not contain the switcher, which
+`npm run build` checks (`scripts/no-scenarios.mjs`). The e2e build takes the parameter and the cookie
+but shows no switcher. `OWLHEAD_E2E_SCENARIOS` is read when the app is built, not when it starts.
 
 The same panel switches the workspace role (owner, operator, approver, viewer, auditor; PX-11). The
 role lives in React state only and resets on reload: approvers may pause but not stop, viewers and

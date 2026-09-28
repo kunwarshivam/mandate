@@ -10,7 +10,7 @@ import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
 import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { getColourBlind, getScenario, getThemePref } from "@/lib/get-workspace";
-import { scenariosEnabled } from "@/lib/scenario";
+import { scenarioSwitcherShown } from "@/lib/scenario";
 import { THEME_SCRIPT } from "@/lib/theme";
 
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
@@ -77,7 +77,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <AppShell>
                 <ViewTransition>{children}</ViewTransition>
               </AppShell>
-              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
+              {scenarioSwitcherShown ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
             </Providers>
           </RoleProvider>
         </div>
