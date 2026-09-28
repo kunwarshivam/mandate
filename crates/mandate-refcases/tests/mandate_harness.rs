@@ -311,7 +311,6 @@ fn edited(value: &Json) -> Json {
 /// the check the removed test made, and which that test could not keep making once E10-1's slice P moved
 /// the stub these cases stop at (DEC-77).
 #[test]
-#[ignore = "pending E6-4"]
 fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
     let ids = ids_of(&fixture, "goal");
