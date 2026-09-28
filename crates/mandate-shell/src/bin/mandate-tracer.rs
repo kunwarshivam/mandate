@@ -7,13 +7,14 @@
 //! ```
 //!
 //! A refusal exits non-zero and prints its stable reason code and message on one line of stderr.
-//! In this tests PR every stage is a stub, so every run refuses with `exit_path_unavailable`.
+//! Until the exit probes are real every run refuses with `exit_path_unavailable`, before any
+//! request, so the binary holds no transport and reads no credential yet (DEC-166 item 3).
 
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mandate_runtime::{AgentId, ConnectionId, Deployment, WorkspaceId};
-use mandate_shell::adapters::{Sources, production};
+use mandate_shell::adapters::{Disconnected, Sources, over};
 use mandate_shell::{Report, Setup, ShellError, cli, host, run};
 use mandate_time::UtcNanos;
 
@@ -57,12 +58,12 @@ fn tracer() -> Result<Report, ShellError> {
         place_one_order: args.place_one_order,
         new_cycle: args.new_cycle,
     };
-    let mut stages = production(Sources {
+    let mut stages = over(Sources {
         mandate: args.mandate,
         dataset: args.dataset,
         journal: args.journal,
         agent: AgentId(cli::AGENT.to_owned()),
-        transport: (),
+        transport: Box::new(Disconnected),
     });
     run(&mut stages, &setup)
 }
