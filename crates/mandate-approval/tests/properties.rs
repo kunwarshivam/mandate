@@ -46,13 +46,15 @@ fn fail<E: std::fmt::Debug>(what: &str) -> impl FnOnce(E) -> TestCaseError + '_ 
     move |e| TestCaseError::fail(format!("{what} answers, not {e:?}"))
 }
 
+/// The journal's event-id shape, which `ApprovalRef` accepts and nothing else (DEC-165 item 13).
+const ULID: &str = "[0-7][0-9A-HJKMNP-TV-Z]{25}";
+
 /// EI-9, PB-9: no notification payload carries any sentinel from the request it points at.
 #[test]
-#[ignore = "pending E8-1"]
 fn no_notification_carries_a_sentinel() {
-    check((0u32..1_000_000, "[0-9A-HJKMNP-TV-Z]{26}"), |(n, id)| {
+    check((0u32..1_000_000, ULID), |(n, id)| {
         let mut r = request();
-        r.id = ApprovalRef::of_requested_event(&id);
+        r.id = ApprovalRef::of_requested_event(&id).unwrap();
         r.content.bound.instrument = format!("sentinelinstrument{n}");
         r.content.bound.qty = Qty::parse(&format!("777{n}")).unwrap();
         r.content.bound.limit = Price::parse(&format!("31337.{n}1")).unwrap();
@@ -102,7 +104,6 @@ enum Step {
 
 /// EI-13, PB-16: the budget and both suppressions match the counter, across both 2026 DST changes.
 #[test]
-#[ignore = "pending E8-2"]
 fn the_ask_budget_matches_the_counter() {
     let start = prop::sample::select(vec![1_772_935_200i64, 1_793_487_600]);
     let step = prop_oneof![
@@ -178,7 +179,6 @@ fn the_ask_budget_matches_the_counter() {
 
 /// EI-14: two requests share a content hash exactly when their content is equal.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_hash_separates_every_bound_field() {
     check((0u8..14, 1u32..1000), |(field, n)| {
         let base = content();

@@ -1,24 +1,29 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { Dec } from "@/lib/decimal";
 import { direction, directionWord, signedUsd, usd } from "@/lib/format";
 
 /**
- * Money is right-aligned tabular mono. A changed value swaps whole, with a short cross-blur;
- * nothing counts up through intermediate figures that were never true.
+ * A changed value rolls whole: the old figure leaves upward as the new one arrives, 200 ms. Nothing
+ * counts up through intermediate figures that were never true. Assistive technology reads the
+ * value once, not the two copies that overlap while it changes.
  */
 export function AnimatedValue({ value, className }: { value: string; className?: string }) {
+  // MotionConfig's reducedMotion covers named transform keys only, not a raw `transform` string.
+  const shift = useReducedMotion() ? 0 : 40;
   return (
-    <span className={cn("relative inline-grid", className)}>
+    <span className={cn("relative inline-grid overflow-hidden", className)}>
+      <span className="sr-only">{value}</span>
       <AnimatePresence initial={false} mode="popLayout">
         <motion.span
           key={value}
-          initial={{ opacity: 0, filter: "blur(2px)", y: 2 }}
-          animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
-          exit={{ opacity: 0, filter: "blur(2px)", y: -2 }}
-          transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+          aria-hidden
+          initial={{ opacity: 0, transform: `translateY(${shift}%)` }}
+          animate={{ opacity: 1, transform: "translateY(0%)" }}
+          exit={{ opacity: 0, transform: `translateY(${-shift}%)` }}
+          transition={{ duration: 0.2, ease: [0.23, 1, 0.32, 1] }}
           className="[grid-area:1/1]"
         >
           {value}
@@ -38,15 +43,14 @@ export function SignedMoney({ value, className, showWord = true }: { value: stri
   return (
     <span
       data-direction={d}
-      className={cn(
-        "inline-flex items-baseline gap-1.5 font-mono tabular",
-        d === "gain" && "text-lagoon-text",
-        d === "loss" && "text-rose-text",
-        className,
-      )}
+      className={cn("inline-flex items-baseline gap-1.5 font-mono tabular", d === "gain" && "text-gain", d === "loss" && "text-loss", className)}
     >
       <AnimatedValue value={signedUsd(value)} />
-      {showWord ? <span className="font-sans text-caption font-medium">{directionWord(value)}</span> : <span className="sr-only">{directionWord(value)}</span>}
+      {showWord ? (
+        <span className="font-sans text-[max(0.8em,0.75rem)] font-bold">{directionWord(value)}</span>
+      ) : (
+        <span className="sr-only">{directionWord(value)}</span>
+      )}
     </span>
   );
 }

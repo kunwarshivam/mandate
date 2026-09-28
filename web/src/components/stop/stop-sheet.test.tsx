@@ -53,7 +53,7 @@ describe("Stop sheet choices", () => {
     renderWithRuntime(<StopControl />);
     const account = section(openSheet(), /Everything on this account/);
     expect(choiceTitles(account)).toEqual(["Pause all agents on this account", "Stop all agents on this account", "Close everything on this account"]);
-    expect(account).toHaveTextContent("including ones Mandate did not place");
+    expect(account).toHaveTextContent("including ones Owlhead did not place");
     expect(account).toHaveTextContent("including your own 20 ABC");
   });
 

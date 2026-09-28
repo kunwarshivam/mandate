@@ -51,27 +51,27 @@ export function StepUpDialog({
           e.preventDefault();
           contentRef.current?.focus();
         }}
-        className="gap-5 p-5 sm:max-w-md"
+        className="gap-4 p-4 sm:max-w-md"
         data-slot="step-up"
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-heading">
-            <Fingerprint className="size-5 text-primary" aria-hidden />
+          <DialogTitle className="flex items-center gap-2 pr-10 text-title">
+            <Fingerprint className="size-6 shrink-0 text-primary" aria-hidden />
             Confirm it is you
           </DialogTitle>
           <DialogDescription>Use your passkey to authorize this one action. Paper account; simulated funds.</DialogDescription>
         </DialogHeader>
-        <p className="rounded-lg bg-muted p-3 text-sm font-medium text-foreground" data-slot="step-up-action">
+        <p className="border-t-2 border-foreground bg-muted px-3 py-2.5 font-bold text-foreground" data-slot="step-up-action">
           {action}
         </p>
-        <p role="status" aria-live="polite" className="min-h-5 text-sm text-muted-foreground">
-          {waiting ? "Waiting for your passkey…" : ""}
-        </p>
-        <DialogFooter className="-mx-5 -mb-5 p-5">
-          <Button variant="outline" size="lg" className="press min-w-28" onClick={cancel}>
+        <DialogFooter>
+          <p role="status" aria-live="polite" className="text-sm text-muted-foreground sm:mr-auto sm:self-center">
+            {waiting ? "Waiting for your passkey…" : ""}
+          </p>
+          <Button variant="outline" size="lg" className="min-w-28" onClick={cancel}>
             Cancel
           </Button>
-          <Button size="lg" className="press min-w-28" onClick={verify}>
+          <Button size="lg" className="min-w-28" onClick={verify}>
             Use passkey
           </Button>
         </DialogFooter>

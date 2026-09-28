@@ -3,7 +3,7 @@
 import { type ReactNode, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { ChevronDown, CircleAlert, Unplug } from "lucide-react";
-import { ModeBadge } from "@/components/domain/mode";
+import { ModeBadge, SourceTag } from "@/components/domain/mode";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
@@ -15,11 +15,12 @@ import { StepUpDialog } from "./step-up-dialog";
 
 type Tone = "ink" | "outline" | "kill" | "kill-outline";
 
+/** Pausing is ink, like a paused agent; the kill switch is the only crimson in the product. */
 const TONE: Record<Tone, string> = {
-  ink: "bg-ink text-ink-foreground hover:bg-ink/90",
-  outline: "border border-border bg-card text-foreground hover:bg-muted",
+  ink: "bg-ink text-ink-foreground hover:bg-ink/85",
+  outline: "border-2 border-foreground bg-card text-foreground hover:bg-muted",
   kill: "bg-crimson text-crimson-foreground hover:bg-crimson/90",
-  "kill-outline": "border-2 border-crimson bg-card text-foreground hover:bg-crimson/10",
+  "kill-outline": "border-2 border-crimson bg-card text-foreground hover:bg-muted",
 };
 
 /** Every choice stays enabled in every state: loading, stale, unreachable, or mid-command. */
@@ -29,10 +30,10 @@ function Choice({ tone, title, children, onClick }: { tone: Tone; title: string;
       type="button"
       data-tone={tone}
       onClick={onClick}
-      className={cn("press grid w-full gap-1 rounded-lg px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50", TONE[tone])}
+      className={cn("press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone])}
     >
-      <span className="font-semibold">{title}</span>
-      {children ? <span className={cn("text-sm", tone === "ink" || tone === "kill" ? "opacity-90" : "text-muted-foreground")}>{children}</span> : null}
+      <span className="text-base font-bold">{title}</span>
+      {children ? <span className={cn("text-sm", tone === "ink" || tone === "kill" ? "" : "text-muted-foreground")}>{children}</span> : null}
     </button>
   );
 }
@@ -44,14 +45,14 @@ interface Pending {
 
 function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandKind, agent: Agent) => void }) {
   if (agent.mode === "stopped") {
-    return <p className="text-sm text-muted-foreground">Stopped. There is nothing more to stop for this agent.</p>;
+    return <p className="bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
   }
   const holding = agent.positions.length > 0;
   const ownerPaused = agent.restrictions.some((r) => r.code === "owner_pause");
   const reconciling = agent.startup === "reconciling";
   const unknown = agent.orders.some((o) => o.state === "Unknown");
   return (
-    <div className="grid gap-2.5">
+    <div className="grid gap-(--seam)">
       {agent.mode === "paused" ? null : (
         <Choice tone="ink" title={`Pause ${agent.label}`} onClick={() => choose("pause", agent)}>
           No new orders. Resting protection stays. You can resume later.
@@ -63,11 +64,17 @@ function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandK
         </Choice>
       ) : null}
       {reconciling ? (
-        <p className="rounded-lg bg-muted px-4 py-3 text-sm">Checking with the broker. It resumes on its own once the check confirms; nothing is needed from you.</p>
+        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+          <SourceTag source="account" />
+          Checking with the broker. It resumes on its own once the check confirms; nothing is needed from you.
+        </p>
       ) : null}
       {unknown ? (
-        <p className="flex gap-2 rounded-lg bg-notice px-4 py-3 text-sm ring-1 ring-notice-border">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+          <span className="flex items-center gap-2">
+            <SourceTag source="account" />
+            <CircleAlert className="size-4 shrink-0" aria-hidden />
+          </span>
           An order has an unknown state. Exits in that instrument are held until the broker answers; the kill switch still works.
         </p>
       ) : null}
@@ -124,19 +131,20 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           e.preventDefault();
           contentRef.current?.focus();
         }}
-        className="gap-0 overflow-y-auto outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+        className="gap-0 overflow-y-auto overscroll-contain outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+        closeClassName="text-ink-foreground hover:bg-ink-foreground/15 hover:text-ink-foreground"
         data-slot="stop-sheet"
       >
-        <SheetHeader className="gap-1 border-b p-5 pr-12">
-          <SheetTitle className="font-display text-title">Stop</SheetTitle>
-          <SheetDescription>Pausing is the least drastic and comes first. Paper account; simulated funds.</SheetDescription>
+        <SheetHeader className="gap-1.5 bg-ink px-4 pt-4 pb-4 pr-14 text-ink-foreground">
+          <SheetTitle className="text-display text-ink-foreground">Stop</SheetTitle>
+          <SheetDescription className="text-ink-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</SheetDescription>
         </SheetHeader>
 
-        <div className="grid gap-6 p-5">
+        <div className="grid gap-(--section-gap) p-4">
           {reachable ? null : (
-            <Alert className="gap-1.5 border-notice-border bg-notice px-4 py-3 text-foreground" data-slot="unreachable">
+            <Alert className="gap-1.5 rounded-none border-0 border-t-4 border-foreground bg-muted px-4 py-3 text-foreground" data-slot="unreachable">
               <Unplug aria-hidden />
-              <AlertTitle className="font-semibold">Cannot reach your deployment</AlertTitle>
+              <AlertTitle className="text-base font-bold">Cannot reach your deployment</AlertTitle>
               <AlertDescription className="grid gap-2 text-foreground">
                 <p>
                   It has not answered since {clock(ws.health.deployment.as_of)}. A request from here cannot be delivered, and the screen will say so rather than show it as done.
@@ -150,35 +158,37 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           )}
 
           {ws.status === "loading" ? (
-            <p className="rounded-lg bg-muted p-4 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
+            <p className="bg-muted px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
           ) : null}
 
           {contextAgent ? (
-            <section className="grid gap-3" aria-labelledby="stop-this-agent">
-              <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 text-heading">
+            <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
+              <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
                 This agent: {contextAgent.label}
                 <ModeBadge mode={contextAgent.mode} />
               </h3>
               <AgentChoices agent={contextAgent} choose={choose} />
             </section>
           ) : ws.agents.length > 0 ? (
-            <section className="grid gap-2" aria-labelledby="stop-one-agent">
-              <h3 id="stop-one-agent" className="text-heading">
+            <section className="grid" aria-labelledby="stop-one-agent">
+              <h3 id="stop-one-agent" className="border-b-2 border-foreground pb-1.5 text-heading">
                 One agent
               </h3>
               {ws.agents.map((agent) => (
-                <Collapsible key={agent.agent_id} className="rounded-lg border">
-                  <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 rounded-lg px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
+                <Collapsible key={agent.agent_id} className="border-b">
+                  <CollapsibleTrigger className="group flex min-h-14 w-full items-center justify-between gap-3 px-1 py-2.5 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring">
                     <span className="grid">
-                      <span className="font-semibold">{agent.label}</span>
-                      <span className="text-caption text-muted-foreground">{agent.mandate.name}</span>
+                      <span className="font-bold">{agent.label}</span>
+                      <span className="text-caption text-muted-foreground" translate="no">
+                        {agent.mandate.name}
+                      </span>
                     </span>
                     <span className="flex items-center gap-2">
                       <ModeBadge mode={agent.mode} />
-                      <ChevronDown className="size-4 transition-transform duration-200 group-data-[state=open]:rotate-180" aria-hidden />
+                      <ChevronDown className="size-5 transition-transform duration-200 ease-(--ease-in-out) group-data-[state=open]:rotate-180" aria-hidden />
                     </span>
                   </CollapsibleTrigger>
-                  <CollapsibleContent className="px-3 pb-3">
+                  <CollapsibleContent className="pb-3">
                     <AgentChoices agent={agent} choose={choose} />
                   </CollapsibleContent>
                 </Collapsible>
@@ -186,11 +196,14 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
             </section>
           ) : null}
 
-          <section className="grid gap-2.5" aria-labelledby="stop-account">
-            <h3 id="stop-account" className="text-heading">
+          <section className="grid gap-(--seam)" aria-labelledby="stop-account">
+            <h3 id="stop-account" className="flex items-baseline justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
               Everything on this account
             </h3>
-            <p className="text-caption text-muted-foreground">{ws.connection.broker}</p>
+            <p className="mb-1 flex items-center gap-2 text-caption text-muted-foreground">
+              <span className="bg-lapis px-1.5 label-caps text-lapis-foreground">Account</span>
+              {ws.connection.broker}
+            </p>
             <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
               No new orders from any agent. Resting protection stays. No passkey needed.
             </Choice>
@@ -201,7 +214,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               <span className="grid gap-1">
                 <span>The broker&apos;s cancel-all and close-all. It:</span>
                 <span className="grid list-disc gap-0.5 pl-4 [&>span]:list-item">
-                  <span>cancels every open order on the account, including ones Mandate did not place;</span>
+                  <span>cancels every open order on the account, including ones Owlhead did not place;</span>
                   <span>
                     closes every position, including your own
                     {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages;
@@ -215,10 +228,10 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
           <section aria-label="What happened" className="grid gap-2">
             <div role="status" aria-live="polite" className="grid gap-2">
-              {notice ? <p className="rounded-lg bg-muted px-4 py-3 text-sm">{notice}</p> : null}
+              {notice ? <p className="bg-muted px-4 py-3 text-sm">{notice}</p> : null}
               {commands.map((c) => (
-                <p key={c.id} data-phase={c.phase} className="rounded-lg border px-4 py-3 text-sm">
-                  <span className="font-medium">{commandTitle(c.kind, labelFor(c.agentId))}.</span>{" "}
+                <p key={c.id} data-phase={c.phase} className="reveal border-t-2 border-foreground bg-muted px-4 py-3 text-sm">
+                  <span className="font-bold">{commandTitle(c.kind, labelFor(c.agentId))}.</span>{" "}
                   {c.phase === "sent" ? "Sent; waiting for the runtime to record it." : null}
                   {c.phase === "recorded" ? `Recorded at ${clock(c.recordedAt ?? now)}. ${recordedLine(c.kind, labelFor(c.agentId))}` : null}
                   {c.phase === "undelivered"

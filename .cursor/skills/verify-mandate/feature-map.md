@@ -499,7 +499,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
-  else); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
+  else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
+  journaled facts with refusing defaults, DEC-169); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
   `mandate-builder`, and the research agent share). The exact arithmetic stays in `mandate-num`
   (ES-04).
 - **Tests:** `crates/mandate-spec/tests/dec.rs` (live: every grammar's own values, the four things
@@ -515,6 +516,9 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
   carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
   `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
+  `crates/mandate-spec/tests/context.rs` (the context from journaled facts: each field's source and
+  refusing default, the base refused without any one required fact, and a property against an oracle
+  that reads the journal backwards),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
   `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
   PR. Planted bugs per test: the task brief.
@@ -576,7 +580,8 @@ proves each pending test fails on them (DEC-110).
 
 - **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
   DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
-- **Code:** `mandate-approval` (new, layer 1, stubs until the implementation PR):
+- **Code:** `mandate-approval` (layer 1; E8-1 and E8-2 implemented, E8-3's entry points stubs until
+  its implementation PR):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
@@ -587,12 +592,13 @@ proves each pending test fails on them (DEC-110).
 - **Tests:** `crates/mandate-approval/tests/content.rs` (E8-1: the content object, its hash and
   code, the notification payload, quiet hours), `crates/mandate-approval/tests/budget.rs` (E8-2:
   the ask budget and suppressions), and `crates/mandate-approval/tests/properties.rs` (the sentinel
-  scanner, the budget counter with its own DST table, and content separation), all pending, with
+  scanner, the budget counter with its own DST table, and content separation), all live, with
   fixtures in `crates/mandate-approval/tests/common/mod.rs`; for E8-3,
   `crates/mandate-approval/tests/admission.rs` (checks 1 to 7, lateness, step-up, owner commands,
   the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
-  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles).
+  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), pending
+  E8-3.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness
