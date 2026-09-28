@@ -79,4 +79,7 @@ pub enum ApprovalError {
     /// §4.4). A caller reads it as "do not ask", never as a reason to act.
     #[error("the {what} cannot be represented")]
     Unrepresentable { what: &'static str },
+    /// An approval reference was asked for from text that is not an event id's ULID.
+    #[error("an approval reference must be an ApprovalRequested event id")]
+    NotAnEventId,
 }
