@@ -12,6 +12,7 @@ import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { AppShell } from "./app-shell";
+import { hiddenToTheRight } from "./status-strip";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
 
@@ -58,6 +59,17 @@ describe("status strip", () => {
   it("says the deployment is unreachable and hides agent data", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "unreachable");
     expect(screen.getByRole("region", { name: "System status" })).toHaveTextContent("Deployment unreachable since 13:58:02; agent data hidden");
+  });
+
+  it("counts the items that end past its visible right edge, for the phone cue", () => {
+    expect(hiddenToTheRight([80, 200, 300.4], 300)).toBe(0);
+    expect(hiddenToTheRight([80, 301, 420], 300)).toBe(2);
+    expect(hiddenToTheRight([], 300)).toBe(0);
+  });
+
+  it("shows no cue while every item is in view", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
+    expect(document.querySelector("[data-slot=status-more]")).toBeNull();
   });
 });
 

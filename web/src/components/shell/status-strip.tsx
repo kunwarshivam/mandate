@@ -1,6 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { CaretRight } from "@phosphor-icons/react";
+import { useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { HealthState, Workspace } from "@/fixtures/types";
 import { clock } from "@/lib/format";
@@ -56,50 +58,93 @@ const STATE_LABEL: Record<Item["state"], string | null> = {
   down: "Down",
 };
 
+/** How many items end past the strip's visible right edge, the half pixel absorbing subpixel layout. */
+export function hiddenToTheRight(itemRights: readonly number[], visibleRight: number): number {
+  return itemRights.filter((right) => right > visibleRight + 0.5).length;
+}
+
 /**
  * One line at a fixed height whatever the text says: the market age changes every few seconds, and
- * a strip that rewrapped would move the whole page. Phones scroll it sideways; wider screens clip
- * each item with an ellipsis, healthy ones first.
+ * a strip that rewrapped would move the whole page. Phones scroll it sideways, with a flat "+N" cue
+ * at the right edge while items lie past it; wider screens clip each item with an ellipsis, healthy
+ * ones first. The cue overlays the strip, so it appearing or going moves nothing.
  */
 export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
   const list = items(ws, now);
   const degraded = list.filter((i) => i.state === "stale" || i.state === "down").length;
+  const strip = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState(0);
+  const reduceMotion = useReducedMotion();
+
+  useLayoutEffect(() => {
+    const el = strip.current;
+    if (!el) return;
+    const measure = () =>
+      setHidden(hiddenToTheRight(Array.from(el.children, (c) => c.getBoundingClientRect().right), el.getBoundingClientRect().right));
+    measure();
+    const resize = new ResizeObserver(measure);
+    for (const node of [el, ...el.children]) resize.observe(node);
+    el.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      resize.disconnect();
+      el.removeEventListener("scroll", measure);
+    };
+  }, [list.length, degraded]);
+
   return (
-    <div
-      role="region"
-      aria-label="System status"
-      data-slot="status-strip"
-      data-degraded={degraded > 0 ? "" : undefined}
-      tabIndex={0}
-      className={cn(
-        "flex h-9 shrink-0 items-center gap-x-5 overflow-x-auto overflow-y-hidden text-caption whitespace-nowrap text-muted-foreground tabular outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:overflow-x-hidden",
-        degraded > 0 && "bg-background",
-        className,
-      )}
-    >
-      {degraded > 0 ? (
-        <span className="shrink-0 font-semibold text-foreground" data-slot="degraded-count">
-          {degraded} degraded
-        </span>
-      ) : null}
-      {list.map((i) => {
-        const label = STATE_LABEL[i.state];
-        return (
-          <span
-            key={i.key}
-            data-state={i.state}
-            className={cn("shrink-0 sm:min-w-0 sm:truncate", label ? "font-medium text-foreground sm:shrink" : "sm:shrink-[4]")}
-          >
-            {label ? (
-              <span className="mr-1.5 rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
-                {label}
-              </span>
-            ) : null}
-            {i.text}
+    <div className={cn("relative shrink-0", degraded > 0 && "bg-background")}>
+      <div
+        ref={strip}
+        role="region"
+        aria-label="System status"
+        data-slot="status-strip"
+        data-degraded={degraded > 0 ? "" : undefined}
+        tabIndex={0}
+        className={cn(
+          "flex h-9 items-center gap-x-5 overflow-x-auto overflow-y-hidden text-caption whitespace-nowrap text-muted-foreground tabular outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:overflow-x-hidden",
+          className,
+        )}
+      >
+        {degraded > 0 ? (
+          <span className="shrink-0 font-semibold text-foreground" data-slot="degraded-count">
+            {degraded} degraded
           </span>
-        );
-      })}
-      <FixtureTag className="ml-auto" />
+        ) : null}
+        {list.map((i) => {
+          const label = STATE_LABEL[i.state];
+          return (
+            <span
+              key={i.key}
+              data-state={i.state}
+              className={cn("shrink-0 sm:min-w-0 sm:truncate", label ? "font-medium text-foreground sm:shrink" : "sm:shrink-[4]")}
+            >
+              {label ? (
+                <span className="mr-1.5 rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
+                  {label}
+                </span>
+              ) : null}
+              {i.text}
+            </span>
+          );
+        })}
+        <FixtureTag className="ml-auto" />
+      </div>
+      {hidden > 0 ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-hidden
+          data-slot="status-more"
+          onClick={() => strip.current?.scrollBy({ left: strip.current.clientWidth * 0.8, behavior: reduceMotion ? "auto" : "smooth" })}
+          className={cn(
+            "absolute inset-y-0 right-0 flex min-w-11 items-center justify-center gap-0.5 border-l border-border px-2 text-caption font-semibold text-foreground tabular sm:hidden",
+            degraded > 0 ? "bg-background" : "bg-card",
+          )}
+        >
+          +{hidden}
+          <CaretRight className="size-3.5" weight="bold" />
+        </button>
+      ) : null}
     </div>
   );
 }
