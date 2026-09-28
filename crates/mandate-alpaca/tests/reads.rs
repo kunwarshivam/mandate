@@ -225,7 +225,6 @@ fn sent_urls(transport: &FakeDataTransport) -> Vec<String> {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_equity_asset_is_read_into_its_eligibility_fields_and_stamped_with_the_clock() {
     let now = instant("2026-09-28T13:00:00Z");
     let relisted = text_of("asset_equity")
@@ -267,7 +266,6 @@ async fn an_equity_asset_is_read_into_its_eligibility_fields_and_stamped_with_th
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn a_crypto_asset_is_read_on_its_slash_free_path_with_its_order_constraints() {
     let now = instant("2026-09-28T13:00:00Z");
     let (client, transport) = trading([reply(200, "asset_crypto", 0)], now);
@@ -287,7 +285,6 @@ async fn a_crypto_asset_is_read_on_its_slash_free_path_with_its_order_constraint
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_asset_the_broker_does_not_have_is_absent() {
     let now = instant("2026-09-28T13:00:00Z");
     let (client, transport) = trading(
@@ -314,7 +311,6 @@ async fn an_asset_the_broker_does_not_have_is_absent() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_asset_record_about_another_instrument_is_refused() {
     let now = instant("2026-09-28T13:00:00Z");
     let (client, _) = trading(
@@ -333,7 +329,6 @@ async fn an_asset_record_about_another_instrument_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_overloaded_or_failing_broker_leaves_the_asset_unread() {
     let now = instant("2026-09-28T13:00:00Z");
     let (client, _) = trading(
@@ -371,7 +366,6 @@ async fn an_overloaded_or_failing_broker_leaves_the_asset_unread() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn an_uninterpretable_equity_asset_record_is_refused_field_by_field() {
     let base = text_of("asset_equity");
     let aapl_id = instrument("AAPL");
@@ -440,7 +434,6 @@ fn an_uninterpretable_equity_asset_record_is_refused_field_by_field() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn an_uninterpretable_crypto_asset_record_is_refused_field_by_field() {
     let base = text_of("asset_crypto");
     let pair = instrument("BTC/USD");
@@ -488,7 +481,6 @@ fn an_uninterpretable_crypto_asset_record_is_refused_field_by_field() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn the_exchange_codes_the_spec_names_are_read_and_any_other_is_other() {
     let base = text_of("asset_equity");
     let aapl_id = instrument("AAPL");
@@ -518,7 +510,6 @@ fn the_exchange_codes_the_spec_names_are_read_and_any_other_is_other() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn the_status_and_the_ipo_and_ptp_attributes_are_read() {
     let base = text_of("asset_equity");
     let aapl_id = instrument("AAPL");
@@ -560,7 +551,6 @@ fn the_status_and_the_ipo_and_ptp_attributes_are_read() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn an_asset_snapshot_older_than_its_bound_is_refused() {
     let loaded_at = instant("2026-09-28T13:00:00.5Z");
     let snapshot = AssetSnapshot {
@@ -601,7 +591,6 @@ fn an_asset_snapshot_older_than_its_bound_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_equity_latest_quote_is_read_exactly_on_the_iex_feed() {
     let now = shifted(instant(EQUITY_QUOTE_AT), 5_000_000_000);
     let moved = data_text_of("quote_equity")
@@ -637,7 +626,6 @@ async fn an_equity_latest_quote_is_read_exactly_on_the_iex_feed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn a_crypto_latest_quote_is_read_exactly_on_the_crypto_feed() {
     let now = shifted(instant(CRYPTO_QUOTE_AT), 1);
     let (client, transport) = data([data_reply("quote_crypto")], now);
@@ -655,7 +643,6 @@ async fn a_crypto_latest_quote_is_read_exactly_on_the_crypto_feed() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn a_missing_quote_is_absent() {
     let now = shifted(instant(EQUITY_QUOTE_AT), 1);
     let (client, _) = data(
@@ -714,7 +701,6 @@ async fn a_missing_quote_is_absent() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn an_uninterpretable_equity_quote_is_refused_field_by_field() {
     let base = data_text_of("quote_equity");
     let aapl_id = instrument("AAPL");
@@ -771,7 +757,6 @@ fn an_uninterpretable_equity_quote_is_refused_field_by_field() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn an_uninterpretable_crypto_quote_is_refused_field_by_field() {
     let base = data_text_of("quote_crypto");
     let pair = instrument("BTC/USD");
@@ -809,7 +794,6 @@ fn an_uninterpretable_crypto_quote_is_refused_field_by_field() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn a_quote_with_a_side_with_no_price_is_refused() {
     let equity = data_text_of("quote_equity");
     let aapl_id = instrument("AAPL");
@@ -845,7 +829,6 @@ fn a_quote_with_a_side_with_no_price_is_refused() {
 }
 
 #[test]
-#[ignore = "pending E7-8"]
 fn a_quote_about_another_instrument_is_refused() {
     let equity = data_text_of("quote_equity");
     assert_eq!(
@@ -869,7 +852,6 @@ fn a_quote_about_another_instrument_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn a_quote_older_than_the_bound_is_refused() {
     let stamped = instant(EQUITY_QUOTE_AT);
     let bound = i128::try_from(MAX_AGE.as_nanos()).expect("fits");
@@ -899,7 +881,6 @@ async fn a_quote_older_than_the_bound_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn a_quote_stamped_after_the_clock_is_refused() {
     let stamped = instant(CRYPTO_QUOTE_AT);
     let (client, _) = data([data_reply("quote_crypto")], stamped);
@@ -917,7 +898,6 @@ async fn a_quote_stamped_after_the_clock_is_refused() {
 }
 
 #[tokio::test]
-#[ignore = "pending E7-8"]
 async fn an_overloaded_or_failing_data_host_leaves_the_quote_unread() {
     let now = shifted(instant(EQUITY_QUOTE_AT), 1);
     let (client, transport) = data(
@@ -990,7 +970,6 @@ proptest! {
     /// `mandate-num` from its own canonical text and judges the age on whole nanoseconds since
     /// the epoch, not with anything the crate computes.
     #[test]
-    #[ignore = "pending E7-8"]
     fn a_quote_reads_as_its_own_numbers_or_is_refused_for_the_oracles_reason(
         bid in number_token(),
         ask in number_token(),

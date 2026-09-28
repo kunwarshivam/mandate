@@ -524,7 +524,11 @@ fn a_request_that_was_not_sent_stops_the_run_and_is_never_asked_again() -> Resul
         script: Script::NotSent,
     });
     let error = refusal(run_with(&mut stages)?)?;
-    assert_eq!(error.code(), "broker_answer_uninterpretable");
+    assert_eq!(
+        error.code(),
+        "broker_request_not_sent",
+        "a request that never left is not an answer the broker gave (#248 review, minor 2)"
+    );
     assert!(error.to_string().contains("(refused_path)"), "{error}");
     let tally = world.tally.borrow();
     assert_eq!(tally.submissions, 1);

@@ -18,7 +18,7 @@ use mandate_accounting::InstrumentId;
 
 use crate::error::{ClientError, ReadError, TransportError, WireError};
 use crate::http::{HttpRequest, Method, Response, TradingTransport};
-use crate::read::AssetSnapshot;
+use crate::read::{self, AssetSnapshot};
 use crate::wire;
 
 /// Tells the time and waits between retries. The client paces against `now`, so a `pause` must
@@ -85,7 +85,7 @@ impl Default for RetryPolicy {
 #[derive(Debug)]
 pub struct TradingClient<T, P> {
     transport: T,
-    _pause: P,
+    pause: P,
     _retry: RetryPolicy,
 }
 
@@ -93,7 +93,7 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     pub fn new(transport: T, pause: P, retry: RetryPolicy) -> Self {
         Self {
             transport,
-            _pause: pause,
+            pause,
             _retry: retry,
         }
     }
@@ -197,8 +197,15 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
     /// of the broker's reference data, not a [`BrokerRequest`]: the executor's vocabulary is
     /// stream K's and this read does not change it.
     pub async fn asset(&self, instrument: &InstrumentId) -> Result<AssetSnapshot, ReadError> {
-        let _ = (&self.transport, &self._pause, instrument);
-        Err(ReadError::Unimplemented { story: "E7-8" })
+        let response = self
+            .transport
+            .send(&HttpRequest::asset(instrument)?)
+            .await?;
+        reference_status(response.status)?;
+        Ok(AssetSnapshot {
+            asset: read::asset(instrument, &response.body)?,
+            loaded_at: self.pause.now(),
+        })
     }
 
     /// Cancels one of our orders. Alpaca cancels by **its** order id, so the order is looked up by
@@ -291,6 +298,19 @@ const ACTIVITIES: &str = "/v2/account/activities?activity_types=FILL&direction=a
 /// What Alpaca answers, with a `422`, for a `client_order_id` it already holds (the recorded
 /// `submit_duplicate_client_order_id` scenario).
 const DUPLICATE_CLIENT_ORDER_ID: &str = "client_order_id must be unique";
+
+/// The status of a reference-data read (E7-8): a success is read; a `404` is
+/// [`ReadError::Absent`]; a `429` or a `5xx` is [`ReadError::Overloaded`]; anything else is
+/// [`ReadError::UnexpectedStatus`]. None of them is retried here, and none is a fact about the
+/// instrument (DEC-168 item 4).
+pub(crate) fn reference_status(status: u16) -> Result<(), ReadError> {
+    match status {
+        200..=299 => Ok(()),
+        404 => Err(ReadError::Absent),
+        429 | 500..=599 => Err(ReadError::Overloaded),
+        status => Err(ReadError::UnexpectedStatus { status }),
+    }
+}
 
 /// Settles one order-bearing answer: a success parses into `found`; a broker that is overloaded
 /// or failing is an unknown outcome, never a rejection (interpretation 10); the broker refusing
