@@ -49,7 +49,9 @@ async function expectPinned(page: Page, state: string) {
   });
   const { box } = found;
   expect(found.scrollY, `${state}: the page scrolled`).toBeGreaterThan(0);
-  expect(box.top, `${state}: the sidebar's top edge`).toBeGreaterThanOrEqual(0);
+  // Scrolled to the end, the rail stops at its wrapper's bottom edge; the wrapper's height is fractional
+  // and the scroll range whole pixels, so the rail can sit up to half a pixel above the viewport's top.
+  expect(box.top, `${state}: the sidebar's top edge`).toBeGreaterThanOrEqual(-0.5);
   expect(box.top, `${state}: the sidebar's top edge`).toBeLessThanOrEqual(1);
   expect(box.bottom, `${state}: the sidebar's bottom edge`).toBeLessThanOrEqual(HEIGHT);
   expect(box.bottom, `${state}: the sidebar's bottom edge`).toBeGreaterThanOrEqual(HEIGHT - 1);
