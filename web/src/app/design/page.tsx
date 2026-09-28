@@ -104,8 +104,9 @@ export default function DesignPage() {
       <header className="grid gap-1.5">
         <h1 className="text-title sm:text-display">Design system</h1>
         <p className="max-w-prose text-muted-foreground">
-          Placard, Owlhead&apos;s visual system: transit signage read at a glance by someone in a hurry. Colour values live in <code>src/lib/tokens.ts</code> and{" "}
-          <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA. The written rules are in <code>web/DESIGN.md</code>.
+          Placard, Owlhead&apos;s visual system: transit signage read at a glance by someone in a hurry. Colour values live in <code>src/lib/palette.ts</code> and{" "}
+          <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code> and the palette&apos;s in{" "}
+          <code>web/COLOR.md</code>.
         </p>
       </header>
 

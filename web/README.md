@@ -39,6 +39,10 @@ The same panel switches the workspace role (owner, operator, approver, viewer, a
 role lives in React state only and resets on reload: approvers may pause but not stop, viewers and
 auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group.
 
+It also turns on colour-blind friendly gains and losses (the `mandate-cvd` cookie; `?cvd=1` or
+`?cvd=0`, or Alt+Shift+C), and links to `/palette`, the palette reference, which exists only in
+development.
+
 ## The mock-data rule
 
 - Every figure comes from typed fixtures in `src/fixtures/`, which mirror
@@ -67,10 +71,11 @@ rules that constrain visuals. `/design` (not linked from the navigation) renders
 their OKLCH values and computed contrast, the type scale, the spacing before and after the gutter
 change, every state treatment, the components, and motion samples.
 
-- **Colour means one thing each.** Marigold is your mandate, lapis is the account, ink is a stopped
-  agent and the Stop control, crimson is the kill switch and nothing else. Gains and losses are the
-  only other hues, as text beside a sign and the word. Values live once in `src/lib/tokens.ts`,
-  mirrored in `src/app/globals.css`; `tokens.test.ts` fails if they drift or a pair drops below AA.
+- **Colour means one thing each** (navy and brass, `web/COLOR.md`). Brass is your mandate, navy is
+  the account, ink is a stopped agent and the Stop control, crimson is the kill switch and nothing
+  else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
+  once in `src/lib/palette.ts`, mirrored in `src/app/globals.css`; `tokens.test.ts` and
+  `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA.
 - **Light only.** Dark mode is follow-up work; there is no theme toggle.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
