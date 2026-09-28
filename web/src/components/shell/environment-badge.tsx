@@ -8,7 +8,7 @@ import type { Environment } from "@/fixtures/types";
 export function EnvironmentBadge({ environment, className }: { environment: Environment; className?: string }) {
   if (environment === "live") {
     return (
-      <span data-slot="environment-badge" className={cn("inline-flex h-8 items-center bg-foreground px-2.5 text-background label-caps", className)}>
+      <span data-slot="environment-badge" className={cn("inline-flex h-8 items-center bg-foreground px-2.5 text-background field-label", className)}>
         LIVE
       </span>
     );
@@ -16,9 +16,9 @@ export function EnvironmentBadge({ environment, className }: { environment: Envi
   return (
     <span
       data-slot="environment-badge"
-      className={cn("hatch inline-flex h-8 items-center gap-1.5 border-2 border-lapis bg-card px-2 text-caption whitespace-nowrap text-foreground", className)}
+      className={cn("hatch inline-flex h-8 items-center gap-1.5 border border-lapis bg-card px-2 text-caption whitespace-nowrap text-foreground", className)}
     >
-      <span className="label-caps">PAPER</span>
+      <span className="field-label">PAPER</span>
       <span aria-hidden className="max-[30rem]:hidden">·</span>
       <span className="font-medium max-[30rem]:sr-only">simulated funds</span>
     </span>

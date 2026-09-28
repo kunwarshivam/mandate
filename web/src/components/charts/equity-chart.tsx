@@ -31,7 +31,7 @@ function Change({ points, range }: { points: Point[]; range: EquityRange }) {
   const change = points[points.length - 1].value - points[0].value;
   return (
     <span className="inline-flex flex-wrap items-baseline gap-1.5 text-sm">
-      <SignedMoney value={change.toFixed(2)} className="font-bold" />
+      <SignedMoney value={change.toFixed(2)} className="font-semibold" />
       <span className="text-muted-foreground">{RANGE_WORDS[range]}</span>
     </span>
   );
@@ -67,10 +67,10 @@ export function AccountEquityChart() {
     <section aria-labelledby="account-equity-title" data-slot="account-equity" className="reveal grid content-start gap-3 bg-card px-4 py-4 sm:px-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="grid gap-1">
-          <h2 id="account-equity-title" className="text-heading">
+          <h2 id="account-equity-title" className="text-h2">
             Account equity
           </h2>
-          <p className="font-display text-[2.25rem] leading-none font-bold tabular" data-slot="account-equity-value">
+          <p className="text-[2.25rem] leading-none font-semibold tabular" data-slot="account-equity-value">
             {usdLabel(last)}
           </p>
           <Change points={points} range={range} />
@@ -105,7 +105,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
     <section aria-labelledby="agent-equity-title" data-slot="agent-equity" className="reveal grid content-start gap-3 bg-card px-3 py-3 sm:px-4 sm:py-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="grid gap-1">
-          <h2 id="agent-equity-title" className="text-heading">
+          <h2 id="agent-equity-title" className="text-h2">
             Equity against your mandate
           </h2>
           <Change points={points} range={range} />

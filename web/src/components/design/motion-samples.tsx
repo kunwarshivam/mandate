@@ -36,7 +36,7 @@ export function MotionSamples() {
           <Dialog.Portal>
             <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-0 z-50 bg-ink/40" />
             <Dialog.Popup data-slot="stop-sheet" className="fixed inset-y-0 right-0 z-50 grid w-full content-start gap-2 border-l-2 border-foreground bg-card p-4 outline-none sm:max-w-md">
-              <Dialog.Title className="text-heading">Sample sheet</Dialog.Title>
+              <Dialog.Title className="text-h2">Sample sheet</Dialog.Title>
               <Dialog.Description className="text-muted-foreground">Enters on the drawer curve; leaves faster on ease-out.</Dialog.Description>
               <Dialog.Close render={<Button variant="secondary" className="h-11 w-fit" />}>Close</Dialog.Close>
             </Dialog.Popup>
@@ -53,7 +53,7 @@ export function MotionSamples() {
       </Sample>
       <Sample note="Number change: the whole value rolls up and out, 200 ms">
         <div className="flex items-center gap-3">
-          <Money value={VALUES[value]} className="font-display text-3xl font-bold" />
+          <Money value={VALUES[value]} className="text-3xl font-semibold" />
           <Button variant="ghost" onClick={() => setValue((v) => (v + 1) % VALUES.length)}>
             New value
           </Button>

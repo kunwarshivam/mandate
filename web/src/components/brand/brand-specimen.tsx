@@ -21,7 +21,7 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
   return (
     <figure className={`grid content-between gap-3 bg-card p-4 ${className ?? ""}`}>
       <div className="flex min-h-20 items-center">{children}</div>
-      <figcaption className="label-caps text-muted-foreground">{label}</figcaption>
+      <figcaption className="field-label text-muted-foreground">{label}</figcaption>
     </figure>
   );
 }
@@ -31,7 +31,7 @@ export function BrandSpecimen() {
   return (
     <div className="grid gap-(--block-gap)">
       <div data-slot="brand-surface" className="grid gap-6 border p-5" style={{ background: OFF_WHITE, color: NAVY }}>
-        <span className="label-caps">On off-white</span>
+        <span className="field-label">On off-white</span>
         <div className="flex flex-wrap items-end gap-8">
           <OwlheadMark className="h-16 w-auto" />
           <OwlheadWordmark className="h-10 w-auto" />
@@ -59,7 +59,7 @@ export function BrandSpecimen() {
 
       <div className="grid gap-(--seam) lg:grid-cols-2">
         <div className="grid content-start gap-2 bg-card p-4">
-          <h3 className="text-heading">Do</h3>
+          <h3 className="text-h2">Do</h3>
           <ul className="grid gap-1.5 text-sm">
             {DO.map((d) => (
               <li key={d}>{d}</li>
@@ -67,7 +67,7 @@ export function BrandSpecimen() {
           </ul>
         </div>
         <div className="grid content-start gap-2 bg-card p-4">
-          <h3 className="text-heading">Don&apos;t</h3>
+          <h3 className="text-h2">Don&apos;t</h3>
           <ul className="grid gap-1.5 text-sm">
             {DONT.map((d) => (
               <li key={d}>{d}</li>
@@ -81,7 +81,7 @@ export function BrandSpecimen() {
           <li key={c.name} data-slot="brand-color" className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
             <span className="h-14 border" style={{ background: c.hex }} aria-hidden />
             <span className="grid min-w-0 content-center gap-0.5">
-              <span className="text-caption font-bold">
+              <span className="text-caption font-semibold">
                 {c.name} <span className="font-mono">{c.hex}</span>
               </span>
               <span className="text-label font-normal text-muted-foreground">{c.role}</span>

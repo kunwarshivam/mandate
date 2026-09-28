@@ -23,7 +23,7 @@ export function Timeline({ events, today }: { events: TimelineEvent[]; today: st
             <time dateTime={e.at} className="font-mono tabular">
               {e.at.slice(0, 10) === today ? clock(e.at) : `${dateLabel(e.at)}, ${clock(e.at).slice(0, 5)}`}
             </time>
-            <span className="label-caps text-foreground">{KIND_LABEL[e.kind]}</span>
+            <span className="field-label text-foreground">{KIND_LABEL[e.kind]}</span>
           </p>
           <p className="text-sm">{e.text}</p>
         </li>

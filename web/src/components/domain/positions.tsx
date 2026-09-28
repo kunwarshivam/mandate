@@ -28,7 +28,7 @@ export function protectionText(p: Position): string {
   }
 }
 
-const TH = "py-2 pr-3 label-caps";
+const TH = "py-2 pr-3 field-label";
 
 /** A link over its whole row or card: the row is the target, the text is the accessible name. */
 export const STRETCHED_LINK = "outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring focus-visible:after:ring-inset";
@@ -50,7 +50,7 @@ export function PositionsTable({
       <table className="w-full min-w-[34rem] text-sm">
         <caption className="sr-only">Positions</caption>
         <thead>
-          <tr className="border-b-2 border-foreground text-left">
+          <tr className="border-b border-foreground text-left">
             <th scope="col" className={TH}>Instrument</th>
             <th scope="col" className={cn(TH, "text-right")}>Quantity</th>
             <th scope="col" className={cn(TH, "text-right")}>Mark</th>
@@ -63,7 +63,7 @@ export function PositionsTable({
             const stale = staleSymbols.has(p.instrument.symbol);
             return (
               <tr key={p.instrument.asset_id} className={cn("border-b align-top last:border-b-0", hrefFor && "relative hover:bg-muted")}>
-                <th scope="row" className="py-2.5 pr-3 text-left font-bold">
+                <th scope="row" className="py-2.5 pr-3 text-left font-semibold">
                   {hrefFor ? (
                     <Link href={hrefFor(p)} className={cn("underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
                       {p.instrument.symbol}
@@ -107,7 +107,7 @@ export function orderPriceText(o: AnyOrder): string {
 /** Nothing more is sent in the instrument while an order's state is unknown: the stopped treatment. */
 export function SendingStopped({ symbol }: { symbol: string }) {
   return (
-    <span data-slot="sending-stopped" className="inline-flex h-6 items-center bg-ink px-1.5 label-caps text-ink-foreground">
+    <span data-slot="sending-stopped" className="inline-flex h-6 items-center bg-ink px-1.5 field-label text-ink-foreground">
       Sending stopped in {symbol}
     </span>
   );
@@ -136,7 +136,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
             className={cn("grid gap-1 px-3 py-2.5 sm:px-4", unknown ? "bg-lapis-soft" : "bg-card", hrefFor && "relative", hrefFor && !unknown && "hover:bg-muted")}
           >
             <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <span className="font-bold">
+              <span className="font-semibold">
                 {hrefFor ? (
                   <Link href={hrefFor(o)} className={cn("underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
                     {title}
@@ -149,7 +149,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
               <span className="flex flex-wrap items-center gap-1.5">
                 {unknown ? <SourceTag source="account" /> : null}
                 {unknown ? <SendingStopped symbol={o.instrument.symbol} /> : null}
-                <span className={cn("inline-flex h-6 items-center px-1.5 label-caps", unknown ? "bg-card ring-2 ring-foreground ring-inset" : past ? "bg-muted" : "text-muted-foreground")}>
+                <span className={cn("inline-flex h-6 items-center px-1.5 field-label", unknown ? "bg-card ring-2 ring-foreground ring-inset" : past ? "bg-muted" : "text-muted-foreground")}>
                   {ORDER_STATE_LABEL[o.state]}
                 </span>
               </span>

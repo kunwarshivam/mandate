@@ -50,7 +50,7 @@ export const CHART_COLOR = Object.fromEntries(Object.entries(CHART_TOKEN).map(([
   string
 >;
 
-export const CHART_FONT = "'Owlhead Figures', 'Atkinson Hyperlegible Next Variable', ui-sans-serif, system-ui, sans-serif";
+export const CHART_FONT = "'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif";
 
 const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const ET_DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });

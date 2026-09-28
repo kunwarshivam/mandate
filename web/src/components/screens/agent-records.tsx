@@ -38,7 +38,7 @@ function Facts({ children, className }: { children: ReactNode; className?: strin
 function Fact({ term, children, wide }: { term: string; children: ReactNode; wide?: boolean }) {
   return (
     <div className={cn("grid content-start gap-0.5", wide && "col-span-2 sm:col-span-3")}>
-      <dt className="label-caps text-muted-foreground">{term}</dt>
+      <dt className="field-label text-muted-foreground">{term}</dt>
       <dd>{children}</dd>
     </div>
   );
@@ -47,7 +47,7 @@ function Fact({ term, children, wide }: { term: string; children: ReactNode; wid
 function RelatedLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <li>
-      <Link href={href} className="press flex min-h-11 items-center justify-between gap-3 bg-card px-3 py-2.5 font-bold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4">
+      <Link href={href} className="press flex min-h-11 items-center justify-between gap-3 bg-card px-3 py-2.5 font-semibold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4">
         {children}
         <ArrowRight className="size-4 shrink-0" aria-hidden />
       </Link>
@@ -55,7 +55,7 @@ function RelatedLink({ href, children }: { href: string; children: ReactNode }) 
   );
 }
 
-const TH = "py-2 pr-3 label-caps";
+const TH = "py-2 pr-3 field-label";
 
 /** Executions as journaled, newest first, each linked to the order it filled. */
 function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: Fill[]; showOrder?: boolean }) {
@@ -66,7 +66,7 @@ function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: F
       <table className="w-full min-w-[30rem] text-sm" data-slot="fills">
         <caption className="sr-only">Fills</caption>
         <thead>
-          <tr className="border-b-2 border-foreground text-left">
+          <tr className="border-b border-foreground text-left">
             <th scope="col" className={TH}>Time</th>
             <th scope="col" className={TH}>Side</th>
             <th scope="col" className={cn(TH, "text-right")}>Quantity</th>
@@ -81,13 +81,13 @@ function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: F
               <td className="py-2.5 pr-3 font-mono text-caption tabular">
                 <time dateTime={f.at}>{stamp(f.at)}</time>
               </td>
-              <td className="py-2.5 pr-3 font-bold">{f.side === "buy" ? "Buy" : "Sell"}</td>
+              <td className="py-2.5 pr-3 font-semibold">{f.side === "buy" ? "Buy" : "Sell"}</td>
               <td className="py-2.5 pr-3 text-right font-mono tabular">{quantity(f.qty)}</td>
               <td className="py-2.5 pr-3 text-right font-mono tabular">{price(f.price)}</td>
               <td className={cn("py-2.5 text-right font-mono tabular", showOrder && "pr-3")}>{usd(mul(dec(f.qty), dec(f.price)))}</td>
               {showOrder ? (
                 <td className="py-2.5 text-right">
-                  <Link href={orderHref(agent.agent_id, f.client_order_id)} className="font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+                  <Link href={orderHref(agent.agent_id, f.client_order_id)} className="font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
                     View order
                   </Link>
                 </td>
@@ -140,7 +140,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
       <section aria-label="Figures" className="reveal grid gap-3 bg-card px-3 py-3 sm:px-4 sm:py-4">
         <Facts>
           <Fact term="Quantity">
-            <span className="font-mono text-lg font-bold tabular">{quantity(position.qty)}</span>
+            <span className="font-mono text-lg font-semibold tabular">{quantity(position.qty)}</span>
           </Fact>
           <Fact term="Average cost">
             <span className="font-mono tabular">{price(position.avg_cost)}</span>
@@ -155,10 +155,10 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
             <Money value={position.market_value} />
           </Fact>
           <Fact term="Unrealized, simulated">
-            <SignedMoney value={position.unrealized_pnl} className="font-bold" />
+            <SignedMoney value={position.unrealized_pnl} className="font-semibold" />
           </Fact>
           <Fact term="Realized here, simulated">
-            <SignedMoney value={toFixed(realized, 2)} className="font-bold" />
+            <SignedMoney value={toFixed(realized, 2)} className="font-semibold" />
           </Fact>
         </Facts>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -182,7 +182,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Section title="Protection">
-          <p className={cn("flex items-start gap-2 px-3 py-2.5 text-sm sm:px-4", unprotected ? "bg-muted font-bold" : "bg-mandate-soft")} data-slot="protection">
+          <p className={cn("flex items-start gap-2 px-3 py-2.5 text-sm sm:px-4", unprotected ? "bg-muted font-semibold" : "bg-mandate-soft")} data-slot="protection">
             <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
             {protectionText(position)}
           </p>
@@ -240,7 +240,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
     >
       <section aria-label="Order" data-state={order.state} className={cn("reveal grid gap-3 px-3 py-3 sm:px-4 sm:py-4", unknown ? "bg-lapis-soft" : "bg-card")}>
         <p className="flex flex-wrap items-center gap-2">
-          <span data-slot="order-state" className={cn("inline-flex h-7 items-center px-2 label-caps", unknown ? "bg-card ring-2 ring-foreground ring-inset" : "bg-muted")}>
+          <span data-slot="order-state" className={cn("inline-flex h-7 items-center px-2 field-label", unknown ? "bg-card ring-2 ring-foreground ring-inset" : "bg-muted")}>
             {ORDER_STATE_LABEL[order.state]}
           </span>
           {unknown ? <SourceTag source="account" /> : null}
@@ -299,7 +299,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
                     <time dateTime={s.at} className="font-mono tabular">
                       {stamp(s.at)}
                     </time>
-                    <span className="label-caps text-foreground">{ORDER_STATE_LABEL[s.state]}</span>
+                    <span className="field-label text-foreground">{ORDER_STATE_LABEL[s.state]}</span>
                   </p>
                   <p className="text-sm">{s.text}</p>
                 </li>
@@ -368,11 +368,11 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-7 items-center px-2 label-caps", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-2 ring-foreground ring-inset")}
+            className={cn("inline-flex h-7 items-center px-2 field-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-2 ring-foreground ring-inset")}
           >
             {verdictLabel(decision)}
           </span>
-          <span className="font-bold">{actionSentence(decision.action)}</span>
+          <span className="font-semibold">{actionSentence(decision.action)}</span>
           <span className="text-sm text-muted-foreground">{PURPOSE_LABEL[decision.action.purpose]}</span>
         </p>
         <p className="text-caption text-muted-foreground">
@@ -389,8 +389,8 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
             {checks.map((c) => (
               <li key={c.key} data-check={c.key} data-result={c.result} className={cn("grid gap-1 px-3 py-2.5 sm:px-4", c.result === "not_run" ? "bg-muted" : "bg-card")}>
                 <p className="flex flex-wrap items-center justify-between gap-2">
-                  <span className={cn("font-bold", c.result === "not_run" && "text-muted-foreground")}>{c.label}</span>
-                  <span className={cn("inline-flex h-6 items-center px-1.5 label-caps", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
+                  <span className={cn("font-semibold", c.result === "not_run" && "text-muted-foreground")}>{c.label}</span>
+                  <span className={cn("inline-flex h-6 items-center px-1.5 field-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
                 </p>
                 <p className="text-sm text-muted-foreground">{c.rule}</p>
               </li>

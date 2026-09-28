@@ -27,7 +27,7 @@ export function KillSwitchButton({
   );
   const body = (
     <>
-      <span className="text-base font-bold">{title}</span>
+      <span className="text-base font-semibold">{title}</span>
       {children ? <span className={cn("text-sm", appearance === "filled" ? "" : "text-muted-foreground")}>{children}</span> : null}
     </>
   );

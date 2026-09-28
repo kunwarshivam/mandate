@@ -52,20 +52,20 @@ export function AgentCard({
       style={{ "--i": Math.min(index, 6) } as CSSProperties}
     >
       <div data-slot="mode-field" className={cn("flex items-center px-3 py-1.5 transition-colors duration-(--duration-hover) sm:px-4 md:items-end md:py-3", MODE_FIELD[agent.mode])}>
-        <p className="font-display text-lg leading-[0.9] font-extrabold uppercase md:text-[1.625rem]">{MODE_LABEL[agent.mode]}</p>
+        <p className="text-lg font-semibold md:text-[1.625rem]">{MODE_LABEL[agent.mode]}</p>
       </div>
 
       <div className="grid content-start gap-2 bg-card px-3 py-3 sm:px-4">
         <header className="flex flex-wrap items-baseline justify-between gap-x-3">
-          <Heading id={`agent-${agent.agent_id}`} className="text-heading">
+          <Heading id={`agent-${agent.agent_id}`} className="text-h2">
             <Link href={`/agents/${agent.agent_id}`} className={cn("decoration-2 underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
               {agent.label}
             </Link>
           </Heading>
           <span className="text-sm text-muted-foreground">{agent.mandate.name}</span>
         </header>
-        <p className="font-display text-[2.5rem] leading-none font-bold">
-          <Money value={agent.state.equity} className="font-display" />
+        <p className="text-[2.5rem] leading-none font-semibold">
+          <Money value={agent.state.equity} className="" />
         </p>
         <p className="text-sm text-muted-foreground">
           Equity, of <span className="font-mono tabular">{usd(agent.mandate.capital.allocation_usd, 0)}</span> capital
@@ -94,7 +94,7 @@ export function AgentCard({
             <Placeholder name="performance" />
           </p>
           <p className="flex flex-wrap items-baseline justify-between gap-x-3">
-            <SignedMoney value={agent.pnl_total} className="font-bold" />
+            <SignedMoney value={agent.pnl_total} className="font-semibold" />
             <span className="text-caption text-muted-foreground">
               today <SignedMoney value={agent.pnl_today} showWord={false} className="text-caption" />
             </span>
@@ -119,8 +119,8 @@ export function AgentCard({
         </p>
       </div>
 
-      <div className="grid content-start gap-3 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4">
-        <p className="font-display text-base leading-none font-extrabold text-mandate-strong uppercase">Your mandate</p>
+      <div className="grid content-start gap-3 border-t border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4">
+        <p className="text-base leading-none font-semibold text-mandate-strong">Your mandate</p>
         {rails.map((rail) => (
           <LimitRail key={rail.key} rail={rail} />
         ))}
@@ -134,7 +134,7 @@ export function AgentCard({
               <li key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 py-2 text-sm sm:px-4", SOURCE_FIELD[d.source])}>
                 <SourceTag source={d.source} className="self-center" />
                 <span>
-                  <span className="font-bold">{d.title}.</span> Blocks {d.blocks.toLowerCase()}. Ends when: {d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.
+                  <span className="font-semibold">{d.title}.</span> Blocks {d.blocks.toLowerCase()}. Ends when: {d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.
                 </span>
               </li>
             );

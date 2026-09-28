@@ -35,7 +35,7 @@ function WorkspaceSwitcher() {
       <DropdownMenu.Trigger
         render={<button type="button" />}
         aria-label={`Workspace: ${current.label}`}
-        className="press inline-flex h-11 max-w-48 shrink-0 items-center gap-1.5 px-2 text-sm font-bold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
+        className="press inline-flex h-11 max-w-48 shrink-0 items-center gap-1.5 px-2 text-sm font-semibold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
       >
         <Briefcase className="size-5 shrink-0 xl:hidden" aria-hidden />
         <span className="truncate max-xl:sr-only">{current.label}</span>

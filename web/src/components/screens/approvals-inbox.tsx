@@ -24,14 +24,14 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
         className={cn("press grid gap-1.5 px-3 py-3 sm:px-4", open ? "bg-card hover:bg-muted" : "bg-muted text-muted-foreground hover:text-foreground")}
       >
         <span className={cn("flex justify-between gap-x-3 gap-y-1", open ? "items-start" : "flex-wrap items-center")}>
-          <span className={cn("min-w-0", open ? "font-bold text-foreground" : "font-medium")}>
+          <span className={cn("min-w-0", open ? "font-semibold text-foreground" : "font-medium")}>
             {label}: buy <span className="font-mono tabular">{quantity(approval.bound.qty)}</span> {approval.bound.symbol} at a limit of{" "}
             <span className="font-mono tabular">{price(approval.bound.limit)}</span>
           </span>
           {open ? (
             <ArrowRight className="mt-1 size-4 shrink-0" aria-hidden />
           ) : (
-            <span className="inline-flex h-6 items-center bg-card px-1.5 label-caps text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
+            <span className="inline-flex h-6 items-center bg-card px-1.5 field-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
           )}
         </span>
         {open ? (

@@ -32,7 +32,7 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
       data-slot="mode-badge"
       data-mode={mode}
       className={cn(
-        "inline-flex h-7 w-fit shrink-0 items-center gap-1.5 px-2 whitespace-nowrap label-caps transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
+        "inline-flex h-7 w-fit shrink-0 items-center gap-1.5 px-2 whitespace-nowrap field-label transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
         MODE_FIELD[mode],
         className,
       )}
@@ -60,7 +60,7 @@ export const SOURCE_TAG: Record<RestrictionSource, string> = {
 
 export function SourceTag({ source, className }: { source: RestrictionSource; className?: string }) {
   return (
-    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center px-1.5 label-caps", SOURCE_TAG[source], className)}>
+    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center px-1.5 field-label", SOURCE_TAG[source], className)}>
       {SOURCE_LABEL[source]}
     </span>
   );
@@ -88,7 +88,7 @@ export function ModeBanner({
     <section aria-label="Restrictions" data-slot="mode-banner" className={cn("reveal grid gap-(--seam) text-foreground", className)}>
       {showMode ? (
         <div data-mode={mode} className={cn("flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-(--duration-hover)", MODE_FIELD[mode])}>
-          <p className="font-display text-heading uppercase">{MODE_LABEL[mode]}</p>
+          <p className="text-h2">{MODE_LABEL[mode]}</p>
           <p className="font-medium">{MODE_MEANING[mode]}</p>
         </div>
       ) : null}
@@ -100,7 +100,7 @@ export function ModeBanner({
               <li key={`${r.code}-${r.symbol ?? ""}`} data-source={text.source} className={cn("grid gap-2 px-4 py-3", SOURCE_FIELD[text.source])}>
                 <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <SourceTag source={text.source} />
-                  <span className="font-bold">{text.title}</span>
+                  <span className="font-semibold">{text.title}</span>
                   <span className="text-muted-foreground">since {clock(r.since)}</span>
                 </p>
                 <dl className="grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-[auto_1fr]">

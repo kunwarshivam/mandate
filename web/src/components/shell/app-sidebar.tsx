@@ -106,7 +106,7 @@ export function ApprovalsCount({ n, className }: { n: number; className?: string
   return (
     <span
       data-slot="approvals-count"
-      className={`inline-flex h-5 min-w-5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular ${className ?? ""}`}
+      className={`inline-flex h-5 min-w-5 items-center justify-center bg-foreground px-1 font-mono text-label font-semibold text-background tabular ${className ?? ""}`}
     >
       {n}
       <span className="sr-only"> open</span>
@@ -249,8 +249,8 @@ export function AppSidebar() {
         <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-3 pb-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
           <Buildings className="size-5 shrink-0" aria-hidden />
           <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">
-            <span className="label-caps text-muted-foreground">Account</span>
-            <span className="truncate text-sm font-bold">{ws.connection.broker}</span>
+            <span className="field-label text-muted-foreground">Account</span>
+            <span className="truncate text-sm font-semibold">{ws.connection.broker}</span>
           </div>
         </div>
       </Sidebar.Header>

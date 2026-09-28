@@ -1,8 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { ViewTransition } from "react";
-import "@fontsource-variable/big-shoulders-display";
-import "@fontsource-variable/atkinson-hyperlegible-next";
+import "@fontsource-variable/mona-sans";
 import "./globals.css";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
 import { Providers } from "@/components/providers";
@@ -50,7 +49,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   const workspace = buildWorkspace(scenario);
   const colourBlind = await getColourBlind();
   return (
-    <html lang="en" data-mode="light" data-theme="placard" data-cvd={colourBlind ? "on" : undefined}>
+    <html lang="en" data-mode="light" data-theme="owlhead" data-cvd={colourBlind ? "on" : undefined}>
       <body>
         <div className="isolate">
           <RoleProvider>

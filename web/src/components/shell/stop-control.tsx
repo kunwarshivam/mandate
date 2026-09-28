@@ -38,7 +38,7 @@ export function StopControl({ compact = false }: { compact?: boolean }) {
         onClick={() => setOpen(true)}
         data-slot="stop-control"
         aria-haspopup="dialog"
-        className="press inline-flex h-11 shrink-0 items-center gap-2 bg-ink px-4 font-bold text-ink-foreground outline-none hover:bg-ink/85 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 data-[compact=true]:px-3"
+        className="press inline-flex h-11 shrink-0 items-center gap-2 bg-ink px-4 font-semibold text-ink-foreground outline-none hover:bg-ink/85 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 data-[compact=true]:px-3"
         data-compact={compact}
       >
         <Octagon className="size-4.5" weight="bold" aria-hidden />

@@ -151,7 +151,7 @@ export function TimeChart({
         {shown ? (
           <>
             <span>{shown.time}</span>
-            <span className="font-bold text-foreground">{shown.text}</span>
+            <span className="font-semibold text-foreground">{shown.text}</span>
           </>
         ) : null}
       </p>

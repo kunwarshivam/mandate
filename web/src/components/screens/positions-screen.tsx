@@ -28,7 +28,7 @@ function Positions() {
             id={`positions-${agent.agent_id}`}
             title={agent.label}
             action={
-              <Link href={`/agents/${agent.agent_id}`} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+              <Link href={`/agents/${agent.agent_id}`} className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
                 Open agent
               </Link>
             }
@@ -50,7 +50,7 @@ function Positions() {
             <p className="text-sm text-muted-foreground">No agent manages these. Stop choices leave them alone, except Close everything on this account.</p>
             <ul className="grid gap-1">
               {ws.external_positions.map((p) => (
-                <li key={p.instrument.asset_id} className="flex items-baseline gap-2 font-bold">
+                <li key={p.instrument.asset_id} className="flex items-baseline gap-2 font-semibold">
                   <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
                 </li>
               ))}

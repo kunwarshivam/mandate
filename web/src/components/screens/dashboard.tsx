@@ -46,10 +46,10 @@ function AlertsSummary({ ws }: { ws: Workspace }) {
       data-count={lines.length}
       className={cn(
         "press flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-5",
-        lines.length === 0 ? "bg-card hover:bg-muted" : "border-t-4 border-foreground bg-muted hover:bg-card",
+        lines.length === 0 ? "bg-card hover:bg-muted" : "border-t border-foreground bg-muted hover:bg-card",
       )}
     >
-      <span className="font-bold">{lines.length === 0 ? "No alerts" : lines.length === 1 ? "1 alert" : `${lines.length} alerts`}</span>
+      <span className="font-semibold">{lines.length === 0 ? "No alerts" : lines.length === 1 ? "1 alert" : `${lines.length} alerts`}</span>
       <span className="min-w-0 flex-1 text-sm text-muted-foreground">
         {lines.length === 0 ? "Market data, broker, deployment and push relay are current, and no agent is restricted." : `${lines.join("; ")}.`}
       </span>
@@ -75,7 +75,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 gap-(--seam) lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <header data-slot="account-board" className="reveal grid content-start gap-4 bg-lapis px-4 pt-4 pb-3 text-lapis-foreground sm:px-5 sm:pt-5">
           <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
-            <h1 className="text-display">Dashboard</h1>
+            <h1 className="text-h1">Dashboard</h1>
             <p className="text-lapis-muted">
               {ws.connection.broker}, <span className="font-mono tabular">{usd(ws.connection.account_equity)}</span> equity
             </p>
@@ -92,7 +92,7 @@ function Dashboard() {
             <tbody>
               {ws.agents.map((a) => (
                 <tr key={a.agent_id} className="border-t border-lapis-muted/40">
-                  <th scope="row" className="py-2 pr-3 text-left font-display text-xl leading-none font-bold uppercase">
+                  <th scope="row" className="py-2 pr-3 text-left text-xl leading-none font-semibold">
                     {a.label}
                   </th>
                   <td className="py-2 pr-3 text-sm text-lapis-muted">{a.mandate.name}</td>
@@ -109,7 +109,7 @@ function Dashboard() {
         </header>
 
         <section aria-labelledby="waiting-title" data-slot="waiting" className="reveal grid content-start gap-3 bg-card px-4 py-4 sm:px-5 sm:py-5" style={{ "--i": 1 } as CSSProperties}>
-          <h2 id="waiting-title" className="text-heading">
+          <h2 id="waiting-title" className="text-h2">
             {open.length === 0 ? "Nothing waiting" : open.length === 1 ? "1 request waiting" : `${open.length} requests waiting`}
           </h2>
           {open.length === 0 ? (
@@ -119,8 +119,8 @@ function Dashboard() {
               {open.map((a) => {
                 const agent = findAgent(ws, a.agent_id);
                 return (
-                  <li key={a.approval_id} className="grid gap-2 border-t-2 border-foreground pt-2.5">
-                    <p className="font-bold">
+                  <li key={a.approval_id} className="grid gap-2 border-t border-foreground pt-2.5">
+                    <p className="font-semibold">
                       {agent?.label ?? "An agent"} asks to buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of{" "}
                       <span className="font-mono tabular">{price(a.bound.limit)}</span>
                     </p>
@@ -156,7 +156,7 @@ function Dashboard() {
           title="Recent gate decisions"
           action={
             canAudit ? (
-              <Link href="/audit/decisions" className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+              <Link href="/audit/decisions" className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
                 All decisions
               </Link>
             ) : undefined
@@ -178,7 +178,7 @@ function Dashboard() {
         <Section
           title="Positions"
           action={
-            <Link href="/positions" className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+            <Link href="/positions" className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
               All positions
             </Link>
           }
@@ -190,17 +190,17 @@ function Dashboard() {
               <table className="w-full text-sm">
                 <caption className="sr-only">Positions across agents</caption>
                 <thead>
-                  <tr className="border-b-2 border-foreground text-left">
-                    <th scope="col" className="pb-1.5 label-caps">Holding</th>
-                    <th scope="col" className="pb-1.5 text-right label-caps">Value</th>
-                    <th scope="col" className="pb-1.5 text-right label-caps">Unrealized</th>
+                  <tr className="border-b border-foreground text-left">
+                    <th scope="col" className="pb-1.5 field-label">Holding</th>
+                    <th scope="col" className="pb-1.5 text-right field-label">Value</th>
+                    <th scope="col" className="pb-1.5 text-right field-label">Unrealized</th>
                   </tr>
                 </thead>
                 <tbody>
                   {positions.map(({ agent, p }) => (
                     <tr key={`${agent.agent_id}-${p.instrument.asset_id}`} className="relative border-b last:border-b-0 hover:bg-muted">
                       <th scope="row" className="py-2 text-left font-normal">
-                        <Link href={positionHref(agent.agent_id, p.instrument.asset_id)} className={cn("font-bold underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
+                        <Link href={positionHref(agent.agent_id, p.instrument.asset_id)} className={cn("font-semibold underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
                           <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
                         </Link>
                         <span className="block text-caption text-muted-foreground">{agent.label}</span>

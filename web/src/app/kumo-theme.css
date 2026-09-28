@@ -1,5 +1,5 @@
 /*
- * Kumo, dressed as Placard in navy and brass (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
+ * Kumo in Owlhead's calm system, navy and brass (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
  * its roles inside `@layer base`; these rules are unlayered, so they win without `!important`.
  * Every role points at a semantic token from globals.css, never at a raw colour.
  *
@@ -10,7 +10,7 @@
  * to navy; its red badge is ink, never red.
  */
 :root,
-[data-theme="placard"] {
+[data-theme="owlhead"] {
   --text-color-kumo-default: var(--foreground);
   --text-color-kumo-strong: var(--foreground);
   --text-color-kumo-inverse: var(--card);
@@ -28,9 +28,9 @@
   --text-color-kumo-badge-neutral-subtle: var(--foreground);
   --text-color-kumo-badge-inverted: var(--card);
 
-  --color-kumo-canvas: var(--background);
-  --color-kumo-elevated: var(--background);
-  --color-kumo-recessed: var(--muted);
+  --color-kumo-canvas: var(--card);
+  --color-kumo-elevated: var(--card);
+  --color-kumo-recessed: var(--background);
   --color-kumo-base: var(--card);
   --color-kumo-tint: var(--muted);
   --color-kumo-contrast: var(--ink);
@@ -122,16 +122,28 @@
   color: var(--ink-foreground);
 }
 
-/* Square corners. The arbitrary radii are not theme-driven, so they need naming here. */
-.rounded,
-.rounded-full,
-.rounded-\[5px\],
-.rounded-\[10px\],
-.rounded-tl-\[5px\],
-.rounded-tr-\[5px\],
-.rounded-bl-\[5px\],
+/*
+ * Kumo's arbitrary radii are not theme-driven; they join the radius scale here, so a control and
+ * the sheet around it round by the same steps (web/DESIGN.md, Shape).
+ */
+.rounded-\[5px\] {
+  border-radius: var(--radius-sm);
+}
+.rounded-tl-\[5px\] {
+  border-top-left-radius: var(--radius-sm);
+}
+.rounded-tr-\[5px\] {
+  border-top-right-radius: var(--radius-sm);
+}
+.rounded-bl-\[5px\] {
+  border-bottom-left-radius: var(--radius-sm);
+}
 .rounded-br-\[5px\] {
-  border-radius: 0;
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.rounded-\[10px\] {
+  border-radius: var(--radius-lg);
 }
 
 /*
@@ -146,12 +158,6 @@
   background-image: none;
   background-color: var(--color-kumo-brand);
   box-shadow: none;
-}
-
-/* No drop shadows. The shadow-edge hairline stays: it is drawn in the border colour. */
-.shadow,
-[class*="shadow-[0_20px"] {
-  --tw-shadow: 0 0 #0000;
 }
 
 [class*="linear-to-"] {

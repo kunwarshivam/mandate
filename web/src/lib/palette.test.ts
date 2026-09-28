@@ -10,7 +10,7 @@ import { LIGHTNESS, PALETTE, RAMPS, STEPS, TOKEN_NAMES, TOKEN_REFS } from "./pal
 
 const SRC = resolve(process.cwd(), "src");
 const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
-const kumoCss = readFileSync(join(SRC, "app/placard-kumo.css"), "utf8");
+const kumoCss = readFileSync(join(SRC, "app/kumo-theme.css"), "utf8");
 const kumoTheme = readFileSync(resolve(process.cwd(), "node_modules/@cloudflare/kumo/dist/styles/theme-kumo.css"), "utf8");
 const t = PALETTE.tokens;
 
@@ -49,7 +49,7 @@ function resolveScope(declared: Record<string, string>, inherited: Record<string
   return out;
 }
 
-const root = resolveScope({ ...declarations(css, ":root"), ...declarations(kumoCss, ':root,\n[data-theme="placard"]') }, {});
+const root = resolveScope({ ...declarations(css, ":root"), ...declarations(kumoCss, ':root,\n[data-theme="owlhead"]') }, {});
 const SCOPES: Record<KumoScope, Record<string, string>> = {
   root,
   navy: resolveScope(declarations(kumoCss, '[data-surface="navy"]'), root),
@@ -306,7 +306,7 @@ describe("colour usage in components", () => {
   });
 
   it("uses only one palette: no marigold, no second token set, no palette switch", () => {
-    const all = [...files, { path: "app/globals.css", text: css }, { path: "app/placard-kumo.css", text: kumoCss }];
+    const all = [...files, { path: "app/globals.css", text: css }, { path: "app/kumo-theme.css", text: kumoCss }];
     expect(all.filter((f) => /marigold/i.test(f.text)).map((f) => f.path)).toEqual([]);
     expect(all.filter((f) => /data-palette|PALETTE_COOKIE|PALETTE_PARAM|\?palette=|KeyP\b/.test(f.text)).map((f) => f.path)).toEqual([]);
   });

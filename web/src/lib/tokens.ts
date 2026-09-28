@@ -1,7 +1,7 @@
 /**
- * The Placard colour tokens in navy and brass, one entry per CSS custom property in `globals.css`
+ * The colour tokens in navy and brass (DEC-202), one entry per CSS custom property in `globals.css`
  * (the test `tokens.test.ts` keeps the two in step). Values come from `palette.ts`; this file adds
- * what each token means. The design page and the contrast checks read it. Placard is light only;
+ * what each token means. The design page and the contrast checks read it. The UI is light only;
  * dark mode is follow-up work (web/DESIGN.md).
  */
 import { PAIRS } from "./contrast-pairs";
@@ -74,36 +74,48 @@ export function tokenValue(name: string): string {
 }
 
 export const typeScale = [
-  { role: "display", className: "font-display text-display uppercase", sample: "Dashboard", spec: "Big Shoulders Display 800, 3rem / 0.9, capitals" },
-  { role: "title", className: "font-display text-title uppercase", sample: "Agent 2", spec: "Big Shoulders Display 800, 2rem / 0.95, capitals" },
-  { role: "heading", className: "font-display text-heading uppercase", sample: "Your mandate", spec: "Big Shoulders Display 800, 1.5rem / 1, capitals" },
-  { role: "figure", className: "font-display text-[2.75rem] leading-none font-bold tabular", sample: "$10,123.45", spec: "Big Shoulders Display 700, 2.75rem, tabular figures" },
-  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Atkinson Hyperlegible Next 400, 1rem (17 px) / 1.5, sentence case" },
-  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Atkinson Hyperlegible Next 400, 0.875rem / 1.45" },
-  { role: "caption", className: "text-caption", sample: "as of 14:02:11, 3 min ago", spec: "Atkinson Hyperlegible Next 400, 0.8125rem / 1.35" },
-  { role: "label", className: "label-caps", sample: "Your mandate", spec: "Atkinson Hyperlegible Next 700, 0.75rem, capitals (field labels only)" },
-  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Atkinson Hyperlegible Next, with its digits from Public Sans for a plain zero; tabular figures" },
+  { role: "hero", className: "text-hero tabular", sample: "$24,987.50", spec: "Mona Sans 600, 2.5 to 3.5rem / 1.05, -0.035em, tabular figures. One per screen" },
+  { role: "h1", className: "text-h1", sample: "Approval request", spec: "Mona Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
+  { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Mona Sans 600, 1.25rem / 1.3, -0.01em. A section" },
+  { role: "h3", className: "text-h3", sample: "Working orders", spec: "Mona Sans 600, 1rem / 1.4. A group inside a section" },
+  { role: "figure", className: "text-figure tabular", sample: "$1,203.10", spec: "Mona Sans 500, 1.375rem / 1.2, tabular figures. Key figures beside the hero" },
+  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Mona Sans 400, 1rem / 1.5, sentence case" },
+  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Mona Sans 400, 0.875rem / 1.43" },
+  { role: "caption", className: "text-caption text-muted-foreground", sample: "as of 14:02:11, 3 min ago", spec: "Mona Sans 400, 0.8125rem / 1.4, muted" },
+  { role: "label", className: "field-label", sample: "Daily loss limit", spec: "Mona Sans 500, 0.8125rem / 1.35, muted, sentence case (no capitals-only labels)" },
+  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Mona Sans with tabular figures and its own plain zero" },
 ];
 
 export const motionTokens = [
   { name: "--ease-out", value: "cubic-bezier(0.23, 1, 0.32, 1)", use: "Entrances, press, reveals, number changes" },
-  { name: "--ease-in-out", value: "cubic-bezier(0.77, 0, 0.175, 1)", use: "Things that move on screen: chevrons, expand and collapse" },
+  { name: "--ease-in-out", value: "cubic-bezier(0.77, 0, 0.175, 1)", use: "Things that move on screen: chevrons, the range pill" },
   { name: "--ease-drawer", value: "cubic-bezier(0.32, 0.72, 0, 1)", use: "The Stop sheet" },
+  { name: "--ease-spring", value: "linear() spring, about 10% overshoot", use: "Dialogs settling in; never a deadline or a figure" },
   { name: "--duration-press / --duration-release", value: "140 ms / 80 ms", use: "Press to scale 0.97; the release is faster than the press" },
   { name: "--duration-hover", value: "160 ms", use: "Colour changes on hover and on a mode change" },
-  { name: "--duration-reveal", value: "200 ms, 30 ms stagger", use: "A field wipes in from its leading edge, once" },
-  { name: "--duration-sheet", value: "280 ms in, 200 ms out", use: "Stop sheet" },
-  { name: "--duration-dialog", value: "220 ms in, 150 ms out", use: "Step-up dialog" },
+  { name: "--duration-reveal", value: "320 ms, 40 ms stagger", use: "A list settles in once: rise 6 px and fade" },
+  { name: "--duration-number", value: "240 ms", use: "A figure that changes rolls to its new value; deadlines never move" },
+  { name: "--duration-draw", value: "700 ms", use: "The equity line draws in from the left on first load" },
+  { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet" },
+  { name: "--duration-dialog", value: "240 ms in, 150 ms out", use: "Step-up dialog" },
 ];
 
-/** The gutters before and after the founder's "reduce gutter space" (2026-09-28). */
+/** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--nav-width", before: "15rem", after: "12rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
-  { name: "--content-max", before: "72rem", after: "90rem", use: "Widest content column" },
-  { name: "--page-x", before: "1rem / 1.5rem / 2rem", after: "0.75rem / 1rem / 1.5rem", use: "Page padding at phone / tablet / desktop" },
-  { name: "--page-top", before: "1.5rem", after: "1rem / 1.25rem", use: "Space above the page title" },
-  { name: "--page-bottom", before: "4rem (desktop)", after: "2.5rem (desktop)", use: "Space below the last section" },
-  { name: "--section-gap", before: "2.5rem", after: "1.5rem", use: "Between sections of a screen" },
-  { name: "--block-gap", before: "1rem to 1.5rem", after: "0.75rem", use: "Between a heading and its content, and between rows of fields" },
-  { name: "--seam", before: "1rem (card gaps)", after: "0.375rem", use: "Between adjacent colour fields" },
+  { name: "--nav-width", calm: "14rem", dense: "14rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
+  { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
+  { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
+  { name: "--page-top", calm: "1.5rem / 2.25rem", dense: "the same", use: "Space above the first line of a screen" },
+  { name: "--section-gap", calm: "3rem / 3.5rem", dense: "2rem", use: "Between sections of a screen" },
+  { name: "--block-gap", calm: "1rem", dense: "0.75rem", use: "Between a heading and its content" },
+  { name: "--row-y", calm: "1rem", dense: "0.5rem", use: "Vertical padding of a list or table row" },
+  { name: "--tab-bar", calm: "4rem", dense: "4rem", use: "The phone tab bar, plus the safe area" },
+];
+
+export const radiusTokens = [
+  { name: "--radius-sm", value: "0.375rem", use: "Chips, badges, the range pill's thumb" },
+  { name: "--radius-md", value: "0.5rem", use: "Buttons, inputs, menu items" },
+  { name: "--radius-lg", value: "0.75rem", use: "Popovers, menus, the few panels that remain" },
+  { name: "--radius-xl", value: "1rem", use: "Sheets and dialogs" },
+  { name: "full", value: "9999px", use: "The Stop control, the paper badge, the tab bar's current mark" },
 ];

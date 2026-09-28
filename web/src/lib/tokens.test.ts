@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHART_FONT } from "@/components/charts/options";
 import { contrastRatio, parseOklch, toHex } from "./color";
@@ -13,7 +13,7 @@ function block(selector: string): Record<string, string> {
   if (start < 0) throw new Error(`no ${selector} block`);
   const body = css.slice(start, css.indexOf("}", start));
   const vars: Record<string, string> = {};
-  for (const m of body.matchAll(/--([a-z-]+):\s*([^;]+);/g)) vars[m[1]] = m[2].trim();
+  for (const m of body.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)) vars[m[1]] = m[2].trim();
   return vars;
 }
 
@@ -84,28 +84,45 @@ describe("colour tokens", () => {
     }
   });
 
-  it("uses no rounded corners", () => {
-    for (const m of css.matchAll(/--radius[a-z0-9-]*:\s*([^;]+);/g)) expect(m[1].trim()).toBe("0rem");
+  it("rounds only by the radius scale, and never rounds past a pill", () => {
+    const theme = block("@theme inline");
+    const radii = Object.entries(theme).filter(([k]) => /^radius-/.test(k));
+    expect(radii.map(([k]) => k)).toEqual(["radius-xs", "radius-sm", "radius-md", "radius-lg", "radius-xl", "radius-2xl", "radius-3xl", "radius-4xl"]);
+    const rem = radii.map(([, v]) => Number(/^([\d.]+)rem$/.exec(v)?.[1]));
+    for (let i = 1; i < rem.length; i++) expect(rem[i]).toBeGreaterThan(rem[i - 1]);
+    expect(declared.radius).toBe(theme["radius-md"]);
+  });
+
+  it("casts no shadow on a control: only floating layers have one", () => {
+    const theme = block("@theme inline");
+    for (const k of ["shadow-2xs", "shadow-xs", "shadow-sm"]) expect(theme[k], k).toBe("0 0 #0000");
+    for (const k of ["shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl"]) expect(theme[k], k).not.toMatch(/oklch\(|rgb|#[0-9a-f]{3,6}\b/i);
   });
 });
 
 describe("figures with a plain zero", () => {
   const theme = block("@theme inline");
-  const faces = Array.from(css.matchAll(/@font-face\s*\{([^}]*)\}/g), (m) => m[1]).filter((f) => f.includes('font-family: "Owlhead Figures"'));
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
 
-  it("sets the figures class and the body in the plain-zero face first, then Atkinson", () => {
-    for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Owlhead Figures", "Atkinson Hyperlegible Next Variable",/);
-    expect(CHART_FONT).toMatch(/^'Owlhead Figures', 'Atkinson Hyperlegible Next Variable',/);
+  it("sets the body, the figures class and the charts in one face, Mona Sans, with no second family", () => {
+    for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Mona Sans Variable", ui-sans-serif,/);
+    expect(CHART_FONT).toMatch(/^'Mona Sans Variable', ui-sans-serif,/);
+    expect(Object.keys(pkg.dependencies).filter((d) => d.startsWith("@fontsource"))).toEqual(["@fontsource-variable/mona-sans"]);
+    expect(css).not.toMatch(/@font-face/);
   });
 
-  it("takes only the ten digits from Public Sans, scaled to Atkinson's figure height", () => {
-    expect(faces).toHaveLength(2);
-    for (const face of faces) {
-      expect(face).toMatch(/unicode-range:\s*U\+0030-0039;/);
-      expect(face).toMatch(/size-adjust:\s*92\.4%;/);
-      const src = /url\("([^"]+)"\)/.exec(face)?.[1] ?? "";
-      expect(src).toMatch(/@fontsource-variable\/public-sans\/files\/public-sans-latin-wght-(normal|italic)\.woff2$/);
-      expect(existsSync(resolve(dirname(resolve(process.cwd(), "src/app/globals.css")), src)), src).toBe(true);
+  it("ships the face self-hosted from the package, with no font from a third-party host", () => {
+    const file = resolve(process.cwd(), "node_modules/@fontsource-variable/mona-sans/files/mona-sans-latin-wght-normal.woff2");
+    expect(existsSync(file)).toBe(true);
+    const layout = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
+    expect(layout).toContain('import "@fontsource-variable/mona-sans";');
+    expect(layout).not.toMatch(/next\/font|fonts\.googleapis|fonts\.gstatic/);
+  });
+
+  it("uses weights 400 to 600 only: no heavy display weights", () => {
+    for (const [k, v] of Object.entries(theme).filter(([k]) => k.endsWith("--font-weight"))) expect(Number(v), k).toBeLessThanOrEqual(600);
+    for (const file of sources(resolve(process.cwd(), "src")).filter((f) => !/\/(design|palette)\//.test(f))) {
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/\bfont-(bold|extrabold|black)\b/);
     }
   });
 

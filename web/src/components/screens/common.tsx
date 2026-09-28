@@ -12,8 +12,8 @@ export function Section({ title, action, children, className, id }: { title: str
   const headingId = id ?? `section-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <section aria-labelledby={headingId} className={cn("grid grid-cols-1 content-start gap-(--block-gap)", className)}>
-      <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-1.5">
-        <h2 id={headingId} className="text-heading">
+      <div className="flex items-baseline justify-between gap-3 border-b border-foreground pb-1.5">
+        <h2 id={headingId} className="text-h2">
           {title}
         </h2>
         {action}
@@ -31,13 +31,13 @@ export function Panel({ children, className }: { children: ReactNode; className?
 export function EmptyBoard() {
   return (
     <section data-slot="empty" aria-labelledby="empty-title" className="reveal grid max-w-3xl content-start gap-4 bg-lapis p-4 text-lapis-foreground sm:p-6">
-      <h1 id="empty-title" className="text-title sm:text-display">
+      <h1 id="empty-title" className="text-h1 sm:text-h1">
         No agents yet
       </h1>
       <p className="max-w-prose text-lapis-muted">An agent trades on paper within a mandate you describe and confirm, field by field.</p>
       <Link
         href="/agents/new"
-        className="press inline-flex h-11 w-fit items-center gap-2 bg-card px-4 font-bold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-card focus-visible:ring-offset-2 focus-visible:ring-offset-lapis"
+        className="press inline-flex h-11 w-fit items-center gap-2 bg-card px-4 font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-card focus-visible:ring-offset-2 focus-visible:ring-offset-lapis"
       >
         Describe your first agent <ArrowRight aria-hidden className="size-4" />
       </Link>
@@ -49,9 +49,9 @@ export function EmptyBoard() {
 export function UnreachableNotice() {
   const { ws } = useRuntime();
   return (
-    <div role="alert" data-slot="unreachable-notice" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 text-foreground sm:p-6">
+    <div role="alert" data-slot="unreachable-notice" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 text-foreground sm:p-6">
       <Plugs aria-hidden className="size-6" />
-      <h1 className="text-title sm:text-display">Cannot reach your deployment</h1>
+      <h1 className="text-h1 sm:text-h1">Cannot reach your deployment</h1>
       <div className="grid max-w-prose gap-2 text-base text-foreground">
         <p>
           It last answered at {clock(ws.health.deployment.as_of)}. No agent data is shown, and none is kept on this device, so nothing here can be out of date.

@@ -45,7 +45,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="grid min-w-0 gap-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="text-title sm:text-display">{title}</h1>
+            <h1 className="text-h1 sm:text-h1">{title}</h1>
             {environment ? <EnvironmentBadge environment={environment} /> : null}
           </div>
           {description ? <p className="max-w-prose text-muted-foreground">{description}</p> : null}
@@ -54,7 +54,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
       </div>
       {children}
       {tabs && tabs.length > 0 ? (
-        <nav aria-label={tabsLabel} className="-mx-(--page-x) overflow-x-auto border-b-2 border-foreground px-(--page-x) lg:mx-0 lg:px-0">
+        <nav aria-label={tabsLabel} className="-mx-(--page-x) overflow-x-auto border-b border-foreground px-(--page-x) lg:mx-0 lg:px-0">
           <ul className="flex min-w-max gap-1">
             {tabs.map((tab) => {
               const current = isCurrent(pathname, tab.href, tabs);
@@ -65,7 +65,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
                     aria-current={current ? "page" : undefined}
                     className={cn(
                       "relative inline-flex h-11 items-center px-3 text-sm font-medium text-muted-foreground outline-none transition-colors duration-(--duration-hover) hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-bold text-foreground after:absolute after:inset-x-0 after:-bottom-0.5 after:h-1 after:bg-lapis",
+                      current && "font-semibold text-foreground after:absolute after:inset-x-0 after:-bottom-0.5 after:h-1 after:bg-lapis",
                     )}
                   >
                     {tab.label}

@@ -5,7 +5,7 @@ import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderH
 
 /**
  * DEC-200: flat fills only. Kumo paints linear gradients and masks in several components, and
- * `src/app/placard-kumo.css` flattens them. jsdom computes no styles, so these checks run in
+ * `src/app/kumo-theme.css` flattens them. jsdom computes no styles, so these checks run in
  * Chromium against the production build.
  */
 

@@ -45,36 +45,36 @@ function AgentDetail({ agentId }: { agentId: string }) {
               MODE_FIELD[agent.mode],
             )}
           >
-            <p className="font-display text-[1.625rem] leading-[0.9] font-extrabold uppercase md:text-[2rem]">{MODE_LABEL[agent.mode]}</p>
+            <p className="text-[1.625rem] font-semibold md:text-[2rem]">{MODE_LABEL[agent.mode]}</p>
             <p className="text-sm font-medium">{MODE_MEANING[agent.mode]}</p>
           </div>
           <div className="grid gap-3 bg-card px-3 py-3 sm:px-4 sm:py-4">
             {agent.startup === "reconciling" ? (
-              <p role="status" data-slot="reconciling" className="flex items-center gap-2 font-bold">
+              <p role="status" data-slot="reconciling" className="flex items-center gap-2 font-semibold">
                 <ArrowsClockwise className="size-4 shrink-0" aria-hidden />
                 Checking with the broker. Nothing is needed from you.
               </p>
             ) : null}
             <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-[auto_auto_auto] sm:justify-start sm:gap-x-8">
               <div className="col-span-2 sm:col-span-1">
-                <dt className="label-caps text-muted-foreground">Equity</dt>
-                <dd className="font-display text-[2.25rem] leading-none font-bold">
-                  <Money value={agent.state.equity} className="font-display" />
+                <dt className="field-label text-muted-foreground">Equity</dt>
+                <dd className="text-[2.25rem] leading-none font-semibold">
+                  <Money value={agent.state.equity} className="" />
                 </dd>
                 <dd className="text-caption text-muted-foreground">
                   of <span className="font-mono tabular">{usd(agent.mandate.capital.allocation_usd, 0)}</span> capital
                 </dd>
               </div>
               <div>
-                <dt className="label-caps text-muted-foreground">Paper P&amp;L, simulated</dt>
+                <dt className="field-label text-muted-foreground">Paper P&amp;L, simulated</dt>
                 <dd>
-                  <SignedMoney value={agent.pnl_total} className="font-bold" />
+                  <SignedMoney value={agent.pnl_total} className="font-semibold" />
                 </dd>
               </div>
               <div>
-                <dt className="label-caps text-muted-foreground">Today</dt>
+                <dt className="field-label text-muted-foreground">Today</dt>
                 <dd>
-                  <SignedMoney value={agent.pnl_today} className="font-bold" />
+                  <SignedMoney value={agent.pnl_today} className="font-semibold" />
                 </dd>
               </div>
             </dl>
@@ -105,7 +105,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
           <Section
             title="Working orders"
             action={
-              <Link href={agentHref(agent.agent_id, "orders")} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+              <Link href={agentHref(agent.agent_id, "orders")} className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
                 All orders
               </Link>
             }
@@ -121,7 +121,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
                 {open.map((a) => (
                   <li key={a.approval_id}>
                     <Link href={`/approvals/${a.approval_id}`} className="press group grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-                      <span className="flex items-baseline justify-between gap-3 font-bold">
+                      <span className="flex items-baseline justify-between gap-3 font-semibold">
                         <span>
                           Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
                         </span>
@@ -183,7 +183,7 @@ function AgentApprovals({ agent }: { agent: Agent }) {
       {all.map((a) => (
         <li key={a.approval_id}>
           <Link href={`/approvals/${a.approval_id}`} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-            <span className="flex items-baseline justify-between gap-3 font-bold">
+            <span className="flex items-baseline justify-between gap-3 font-semibold">
               <span>
                 Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
               </span>
@@ -271,7 +271,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
           <Section
             title="Mandate"
             action={
-              <Link href={agentHref(agent.agent_id, "mandate/versions")} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+              <Link href={agentHref(agent.agent_id, "mandate/versions")} className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
                 Versions
               </Link>
             }
@@ -289,7 +289,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
             {AGENT_SECTIONS.filter((s) => s.parent === "prove").map((s) => (
               <li key={s.key}>
                 <Link href={agentHref(agent.agent_id, s.key)} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-                  <span className="flex items-center justify-between gap-3 font-bold">
+                  <span className="flex items-center justify-between gap-3 font-semibold">
                     {s.label}
                     <ArrowRight className="size-4 shrink-0" aria-hidden />
                   </span>

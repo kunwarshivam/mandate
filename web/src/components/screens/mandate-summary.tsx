@@ -86,7 +86,7 @@ export function MandateSummary({ agent }: { agent: Agent }) {
   return (
     <div className="grid gap-4">
       <blockquote className="grid gap-1 border-l-2 border-foreground pl-3 text-sm">
-        <p className="label-caps text-muted-foreground">Your description</p>
+        <p className="field-label text-muted-foreground">Your description</p>
         <p>“{m.behavior.description}”</p>
       </blockquote>
       <dl className="@container grid divide-y text-sm">

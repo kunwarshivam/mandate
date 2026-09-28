@@ -16,8 +16,8 @@ function Block({ title, lead, children }: { title: string; lead?: ReactNode; chi
   const id = `palette-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <section className="grid gap-(--block-gap)" aria-labelledby={id}>
-      <div className="grid gap-1 border-b-2 border-foreground pb-2">
-        <h2 id={id} className="text-title">
+      <div className="grid gap-1 border-b border-foreground pb-2">
+        <h2 id={id} className="text-h1">
           {title}
         </h2>
         {lead ? <p className="max-w-prose text-muted-foreground">{lead}</p> : null}
@@ -28,7 +28,7 @@ function Block({ title, lead, children }: { title: string; lead?: ReactNode; chi
 }
 
 function Verdict({ pass }: { pass: boolean }) {
-  return pass ? <span>Pass</span> : <span className="bg-ink px-1.5 label-caps text-ink-foreground">Fails</span>;
+  return pass ? <span>Pass</span> : <span className="bg-ink px-1.5 field-label text-ink-foreground">Fails</span>;
 }
 
 const VISION_LABEL: Record<Vision, string> = { normal: "Normal", deuteranopia: "Deuteranopia", protanopia: "Protanopia", tritanopia: "Tritanopia" };
@@ -44,12 +44,12 @@ function Preview() {
   return (
     <div className="grid content-start gap-(--seam) bg-background p-(--seam) text-foreground sm:grid-cols-2">
       <div className="grid gap-1 bg-lapis px-3 py-3 text-lapis-foreground">
-        <span className="label-caps text-lapis-muted">Account · paper</span>
-        <span className="font-display text-[2rem] leading-none font-bold tabular">$10,123.45</span>
+        <span className="field-label text-lapis-muted">Account · paper</span>
+        <span className="text-[2rem] leading-none font-semibold tabular">$10,123.45</span>
         <span className="text-sm text-lapis-muted">Two agents running inside their mandates.</span>
       </div>
-      <div className="grid gap-3 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground">
-        <p className="font-display text-base leading-none font-extrabold text-mandate-strong uppercase">Your mandate</p>
+      <div className="grid gap-3 border-t border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground">
+        <p className="text-base leading-none font-semibold text-mandate-strong">Your mandate</p>
         <LimitRail rail={{ key: "hold", label: "Total holdings", used: dec("1608.09"), cap: dec("2000"), atCap: "No new buys" }} />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 bg-card px-3 py-3 text-sm">
@@ -60,13 +60,13 @@ function Preview() {
       <div className="grid gap-2 bg-mandate-soft px-3 py-2 text-sm">
         <p className="flex flex-wrap items-center gap-2">
           <SourceTag source="mandate" />
-          <span className="font-bold">Drawdown ladder</span>
+          <span className="font-semibold">Drawdown ladder</span>
           <span className="text-muted-foreground">since 14:02</span>
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2 bg-card px-3 py-3 sm:col-span-2">
         <EnvironmentBadge environment="paper" />
-        <span className="inline-flex h-8 items-center bg-ink px-3 text-sm font-bold text-ink-foreground">Stop</span>
+        <span className="inline-flex h-8 items-center bg-ink px-3 text-sm font-semibold text-ink-foreground">Stop</span>
         <span className="text-sm text-muted-foreground">The kill switch has a colour of its own, used nowhere else; it appears in the Stop sheet.</span>
       </div>
     </div>
@@ -85,7 +85,7 @@ function KumoScopes() {
           className="grid gap-2 px-3 py-3"
           style={{ background: "var(--color-kumo-base)", color: "var(--text-color-kumo-default)", borderTop: "4px solid var(--color-kumo-line)" }}
         >
-          <span className="font-bold" style={{ color: "var(--text-color-kumo-strong)" }}>
+          <span className="font-semibold" style={{ color: "var(--text-color-kumo-strong)" }}>
             {SCOPE_LABEL[scope]}
           </span>
           <span className="text-sm" style={{ color: "var(--text-color-kumo-subtle)" }}>
@@ -113,7 +113,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
   return (
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-3">
-        <h1 className="text-title sm:text-display">Palette</h1>
+        <h1 className="text-h1 sm:text-h1">Palette</h1>
         <p className="max-w-prose text-muted-foreground">
           Development only. {PALETTE.name}: {PALETTE.summary} The reasoning, citations and history are in <code>web/COLOR.md</code>.
         </p>
@@ -138,12 +138,12 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
           <table className="w-full min-w-[60rem] text-caption">
             <caption className="sr-only">Colour ramps</caption>
             <thead>
-              <tr className="border-b-2 border-foreground text-left">
-                <th scope="col" className="py-2 pr-3 label-caps">
+              <tr className="border-b border-foreground text-left">
+                <th scope="col" className="py-2 pr-3 field-label">
                   Ramp
                 </th>
                 {STEPS.map((s) => (
-                  <th key={s} scope="col" className="px-0.5 py-2 label-caps">
+                  <th key={s} scope="col" className="px-0.5 py-2 field-label">
                     {s}
                   </th>
                 ))}
@@ -153,7 +153,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
               {Object.values(RAMPS).map((ramp) => (
                 <tr key={ramp.id} className="border-b align-top">
                   <th scope="row" className="py-2 pr-3 text-left font-normal">
-                    <span className="block font-bold">{ramp.name}</span>
+                    <span className="block font-semibold">{ramp.name}</span>
                     <span className="block text-muted-foreground">
                       h {ramp.hue}. {ramp.use}
                     </span>
@@ -184,9 +184,9 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
           <table className="w-full min-w-[48rem] text-sm">
             <caption className="sr-only">Semantic tokens</caption>
             <thead>
-              <tr className="border-b-2 border-foreground text-left">
+              <tr className="border-b border-foreground text-left">
                 {["Swatch", "Token", "Ramp step", "OKLCH", "Hex", "Role"].map((h) => (
-                  <th key={h} scope="col" className="py-2 pr-3 label-caps">
+                  <th key={h} scope="col" className="py-2 pr-3 field-label">
                     {h}
                   </th>
                 ))}
@@ -198,7 +198,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
                   <td className="w-12 py-1.5 pr-3">
                     <Swatch color={`var(--${n})`} className="h-6" />
                   </td>
-                  <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-bold">
+                  <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-semibold">
                     --{n}
                   </th>
                   <td className="py-1.5 pr-3 font-mono text-caption">{PALETTE.tokens[n].ref}</td>
@@ -209,9 +209,9 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
               ))}
               <tr className="border-b">
                 <td className="py-1.5 pr-3">
-                  <span className="hatch block h-6 border-2 border-lapis bg-card" aria-hidden />
+                  <span className="hatch block h-6 border border-lapis bg-card" aria-hidden />
                 </td>
-                <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-bold">
+                <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-semibold">
                   --hatch-ink
                 </th>
                 <td className="py-1.5 pr-3 font-mono text-caption">
@@ -234,9 +234,9 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
           <table className="w-full min-w-[46rem] text-sm">
             <caption className="sr-only">Contrast by pair</caption>
             <thead>
-              <tr className="border-b-2 border-foreground text-left">
+              <tr className="border-b border-foreground text-left">
                 {["Sample", "Pair", "Use", "Kind", "WCAG", "Result"].map((h) => (
-                  <th key={h} scope="col" className="py-2 pr-3 label-caps">
+                  <th key={h} scope="col" className="py-2 pr-3 field-label">
                     {h}
                   </th>
                 ))}
@@ -246,7 +246,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
               {contrast.map((r) => (
                 <tr key={`${r.fg}-${r.bg}-${r.kind}-${r.use}`} className="border-b">
                   <td className="py-1.5 pr-3">
-                    <span className="inline-flex h-7 w-14 items-center justify-center border font-bold" style={{ background: `var(--${r.bg})`, color: `var(--${r.fg})` }}>
+                    <span className="inline-flex h-7 w-14 items-center justify-center border font-semibold" style={{ background: `var(--${r.bg})`, color: `var(--${r.fg})` }}>
                       {r.kind === "mark" ? <span className="block h-3 w-8" style={{ background: `var(--${r.fg})` }} /> : "Aa"}
                     </span>
                   </td>
@@ -274,16 +274,16 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
           <table className="w-full min-w-[56rem] text-sm">
             <caption className="sr-only">Colour-vision checks</caption>
             <thead>
-              <tr className="border-b-2 border-foreground text-left">
-                <th scope="col" className="py-2 pr-3 label-caps">
+              <tr className="border-b border-foreground text-left">
+                <th scope="col" className="py-2 pr-3 field-label">
                   Check
                 </th>
                 {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
-                  <th key={v} scope="col" className="py-2 pr-3 label-caps">
+                  <th key={v} scope="col" className="py-2 pr-3 field-label">
                     {VISION_LABEL[v]}
                   </th>
                 ))}
-                <th scope="col" className="py-2 label-caps">
+                <th scope="col" className="py-2 field-label">
                   Result
                 </th>
               </tr>
@@ -295,7 +295,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
                 return (
                   <tr key={`${c.a}-${c.b}`} className="border-b align-top">
                     <th scope="row" className="py-2 pr-3 text-left font-normal">
-                      <span className="block font-bold">{c.what}</span>
+                      <span className="block font-semibold">{c.what}</span>
                       <span className="block font-mono text-caption text-muted-foreground">
                         {c.a} / {c.b}
                       </span>

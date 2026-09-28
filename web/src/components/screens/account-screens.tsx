@@ -29,9 +29,9 @@ function Alerts() {
         <ul className="grid gap-(--seam)">
           {health.map((h) => (
             <li key={h.key} data-state={h.state} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 bg-card px-3 py-3 sm:px-4">
-              <span className="font-bold">{HEALTH_LABEL[h.key]}</span>
+              <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
               <span className="text-sm">
-                {h.state === "ok" ? null : <span className="mr-2 border-2 border-foreground px-1 label-caps">{STATE_WORD[h.state]}</span>}
+                {h.state === "ok" ? null : <span className="mr-2 border border-foreground px-1 field-label">{STATE_WORD[h.state]}</span>}
                 <span className="text-muted-foreground">
                   as of <span className="font-mono tabular">{clock(h.as_of)}</span>, {ago(h.as_of, now)}
                 </span>
@@ -52,7 +52,7 @@ function Alerts() {
                   <Link href={`/agents/${agent.agent_id}`} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
                     <span className="flex flex-wrap items-center gap-2">
                       <SourceTag source={text.source} />
-                      <span className="font-bold">
+                      <span className="font-semibold">
                         {agent.label}: {text.label}
                         {r.symbol ? ` (${r.symbol})` : ""}
                       </span>
@@ -157,7 +157,7 @@ export function SectionIndexScreen({ title, purpose, prefix }: { title: string; 
         {screensIn(prefix).map((s) => (
           <li key={s.key}>
             <Link href={s.href} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-              <span className="flex items-center justify-between gap-3 font-bold">
+              <span className="flex items-center justify-between gap-3 font-semibold">
                 {s.label}
                 <span className="flex items-center gap-2 text-caption font-normal text-muted-foreground">
                   {s.built ? null : "Next slice"}

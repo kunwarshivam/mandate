@@ -72,7 +72,7 @@ describe("banned parts", () => {
 });
 
 describe("flat fills over Kumo", () => {
-  const css = readFileSync(join(SRC, "app", "placard-kumo.css"), "utf8");
+  const css = readFileSync(join(SRC, "app", "kumo-theme.css"), "utf8");
   const kumo = files(join(WEB, "node_modules", "@cloudflare", "kumo", "dist"))
     .filter((f) => /\.(js|css)$/.test(f))
     .map((f) => readFileSync(f, "utf8"))
@@ -103,8 +103,15 @@ describe("flat fills over Kumo", () => {
     expect(body).toMatch(/box-shadow:\s*none/);
   });
 
-  it("squares every corner Kumo rounds", () => {
-    for (const selector of [".rounded", ".rounded-full", ".rounded-\\[5px\\]", ".rounded-\\[10px\\]"]) expect(css).toContain(selector);
+  it("puts every arbitrary radius Kumo ships on the radius scale", () => {
+    const arbitrary = new Set(Array.from(kumo.matchAll(/\brounded(?:-[trbl]{1,2})?-\[(\d+)px\]/g), (m) => m[0]));
+    expect(arbitrary.size).toBeGreaterThan(0);
+    for (const cls of arbitrary) {
+      const selector = `.${cls.replace("[", "\\[").replace("]", "\\]")}`;
+      const rule = css.slice(css.indexOf(`${selector} {`));
+      expect(css, cls).toContain(`${selector} {`);
+      expect(rule.slice(0, rule.indexOf("}")), cls).toMatch(/radius:\s*var\(--radius-(sm|lg)\)/);
+    }
   });
 
   it("keeps crimson for the kill switch alone", () => {

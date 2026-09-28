@@ -13,8 +13,8 @@ import { AGENT_SECTIONS, agentHref } from "@/lib/screens";
 
 export function AgentNotFound() {
   return (
-    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <h1 id="missing-title" className="text-title sm:text-display">
+    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 sm:p-6">
+      <h1 id="missing-title" className="text-h1 sm:text-h1">
         No agent with this ID
       </h1>
       <p className="max-w-prose">This workspace has no agent with that ID. It may belong to another workspace.</p>
@@ -28,8 +28,8 @@ export function AgentNotFound() {
 /** A record the agent does not have, with the way back to the list it would be in. */
 export function RecordNotFound({ title, text, back }: { title: string; text: string; back: { href: string; label: string } }) {
   return (
-    <section aria-labelledby="record-missing-title" data-slot="record-missing" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <h2 id="record-missing-title" className="text-title">
+    <section aria-labelledby="record-missing-title" data-slot="record-missing" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 sm:p-6">
+      <h2 id="record-missing-title" className="text-h1">
         {title}
       </h2>
       <p className="max-w-prose">{text}</p>
@@ -68,7 +68,7 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
               type="button"
               onClick={() => window.dispatchEvent(new Event(OPEN_STOP_EVENT))}
               aria-haspopup="dialog"
-              className="press inline-flex h-11 items-center gap-2 border-2 border-ink bg-card px-3 font-bold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press inline-flex h-11 items-center gap-2 border border-ink bg-card px-3 font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <Octagon className="size-4" weight="bold" aria-hidden />
               Stop this agent…

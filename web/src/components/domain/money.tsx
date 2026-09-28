@@ -47,7 +47,7 @@ export function SignedMoney({ value, className, showWord = true }: { value: stri
     >
       <AnimatedValue value={signedUsd(value)} />
       {showWord ? (
-        <span className="font-sans text-[max(0.8em,0.75rem)] font-bold">{directionWord(value)}</span>
+        <span className="font-sans text-[max(0.8em,0.75rem)] font-semibold">{directionWord(value)}</span>
       ) : (
         <span className="sr-only">{directionWord(value)}</span>
       )}

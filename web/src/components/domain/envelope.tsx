@@ -27,9 +27,9 @@ export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: 
   return (
     <div className={cn("grid gap-1.5", className)} data-slot="limit-rail" data-over={over ? "" : undefined}>
       <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="font-bold">{rail.label}</span>
+        <span className="font-semibold">{rail.label}</span>
         <span className="text-right font-mono tabular">
-          <span className="font-bold">{usd(rail.used)}</span> <span className="text-mandate-muted">of {usd(rail.cap)}</span>
+          <span className="font-semibold">{usd(rail.used)}</span> <span className="text-mandate-muted">of {usd(rail.cap)}</span>
         </span>
       </div>
       <div role="img" aria-label={`${rail.label}: ${usd(rail.used)} of a ${usd(rail.cap)} limit`} className="relative h-3 bg-mandate-marker/15">
@@ -42,7 +42,7 @@ export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: 
         <div className="absolute -inset-y-[3px] right-0 w-1 bg-mandate-strong" aria-hidden />
       </div>
       <p className="text-caption text-mandate-muted">
-        {over ? <span className="font-bold text-mandate-strong">Over the limit. </span> : null}
+        {over ? <span className="font-semibold text-mandate-strong">Over the limit. </span> : null}
         {caption ?? `${usd(sub(rail.cap, rail.used) > 0n ? sub(rail.cap, rail.used) : 0n)} headroom. At the limit: ${rail.atCap.toLowerCase()}.`}
       </p>
     </div>
@@ -92,8 +92,8 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
         {withEquity.map((row) =>
           row === "equity" ? (
             <li key="equity" className="my-1 grid grid-cols-[7.5rem_1fr] items-baseline gap-3 bg-lapis px-2 py-2 text-lapis-foreground sm:grid-cols-[8.5rem_1fr_auto]">
-              <span className="text-right font-mono font-bold tabular">{usd(equity)}</span>
-              <span className="font-bold">Equity now</span>
+              <span className="text-right font-mono font-semibold tabular">{usd(equity)}</span>
+              <span className="font-semibold">Equity now</span>
               <span className="hidden text-caption text-lapis-muted sm:block">Fixture value</span>
             </li>
           ) : (
@@ -102,7 +102,7 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
               <span className="flex items-center gap-2">
                 <span className={cn("shrink-0 bg-mandate-marker", TICK[row.kind])} aria-hidden />
                 {row.label}
-                {row.reached ? <span className="bg-ink px-1.5 label-caps text-ink-foreground">Reached</span> : null}
+                {row.reached ? <span className="bg-ink px-1.5 field-label text-ink-foreground">Reached</span> : null}
               </span>
               <span className="col-start-2 text-caption text-mandate-muted sm:col-start-auto sm:text-right">{row.action}</span>
             </li>
@@ -121,9 +121,9 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
   const limits = agentLimits(agent);
   const scaled = limits.sizeFactor < ONE;
   return (
-    <section aria-labelledby={`envelope-${agent.agent_id}`} data-slot="envelope" className={cn("grid gap-5 border-t-4 border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground", className)}>
+    <section aria-labelledby={`envelope-${agent.agent_id}`} data-slot="envelope" className={cn("grid gap-5 border-t border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground", className)}>
       <div className="grid gap-1">
-        <h2 id={`envelope-${agent.agent_id}`} className="text-heading text-mandate-strong">
+        <h2 id={`envelope-${agent.agent_id}`} className="text-h2 text-mandate-strong">
           Your mandate
         </h2>
         <p className="text-sm text-mandate-muted">{compact ? "Limits in dollars." : "Limits in dollars, and the levels where the agent's behaviour changes."}</p>
@@ -138,20 +138,20 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-mandate-muted">Largest order</dt>
-          <dd className="font-mono font-bold tabular">
+          <dd className="font-mono font-semibold tabular">
             {usd(limits.orderCap)}
-            {scaled ? <span className="ml-1.5 bg-ink px-1.5 font-sans label-caps text-ink-foreground">Sizes scaled</span> : null}
+            {scaled ? <span className="ml-1.5 bg-ink px-1.5 font-sans field-label text-ink-foreground">Sizes scaled</span> : null}
           </dd>
         </div>
         <div>
           <dt className="text-mandate-muted">Orders today</dt>
-          <dd className="font-mono font-bold tabular">
+          <dd className="font-mono font-semibold tabular">
             {limits.ordersToday} of {limits.ordersCap}
           </dd>
         </div>
       </dl>
       {agent.state.pending.map((p) => (
-        <p key={p.limit} className="text-sm font-bold">
+        <p key={p.limit} className="text-sm font-semibold">
           Confirming a breach of {p.limit}: {p.seconds_in_breach} s of {p.confirm_after_s} s.
         </p>
       ))}

@@ -27,7 +27,7 @@ export function TabNav({ approvals }: { approvals: number }) {
   return (
     <nav
       aria-label="Main"
-      className="grid border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)]"
+      className="grid border-t border-foreground bg-card pb-[env(safe-area-inset-bottom)]"
       style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
     >
       {tabs.map(({ href, label, icon: Icon }) => {
@@ -39,7 +39,7 @@ export function TabNav({ approvals }: { approvals: number }) {
             aria-current={active ? "page" : undefined}
             className={cn(
               "press relative grid h-14 min-w-0 place-items-center content-center gap-0.5 px-0.5 text-[0.6875rem] leading-tight font-medium text-muted-foreground",
-              active && "font-bold text-foreground",
+              active && "font-semibold text-foreground",
             )}
           >
             <span className="relative">
@@ -47,7 +47,7 @@ export function TabNav({ approvals }: { approvals: number }) {
               {href === "/approvals" && approvals > 0 ? (
                 <span
                   data-slot="approvals-count"
-                  className="absolute -top-2 -right-3 inline-flex h-4.5 min-w-4.5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular"
+                  className="absolute -top-2 -right-3 inline-flex h-4.5 min-w-4.5 items-center justify-center bg-foreground px-1 font-mono text-label font-semibold text-background tabular"
                 >
                   {approvals}
                   <span className="sr-only"> open</span>

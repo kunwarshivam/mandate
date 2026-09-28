@@ -55,8 +55,8 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
 function Outcome({ approval }: { approval: Approval }) {
   if (approval.status === "delivered" || !approval.resolution) return null;
   return (
-    <section aria-label="Outcome" data-status={approval.status} className="reveal grid gap-1 border-t-4 border-foreground bg-muted px-3 py-3 sm:px-4">
-      <p className="font-display text-heading uppercase">{APPROVAL_STATUS_LABEL[approval.status]}</p>
+    <section aria-label="Outcome" data-status={approval.status} className="reveal grid gap-1 border-t border-foreground bg-muted px-3 py-3 sm:px-4">
+      <p className="text-h2">{APPROVAL_STATUS_LABEL[approval.status]}</p>
       <p className="text-sm">
         {clock(approval.resolution.at)}: {approval.resolution.text}
       </p>
@@ -69,8 +69,8 @@ function RiskFigureRow({ figure }: { figure: RiskFigure }) {
   if (!figure.cap) {
     return (
       <div className="flex items-baseline justify-between gap-4 text-sm">
-        <dt className="font-bold">{label}</dt>
-        <dd className="text-right font-mono font-bold tabular">{usd(figure.value)}</dd>
+        <dt className="font-semibold">{label}</dt>
+        <dd className="text-right font-mono font-semibold tabular">{usd(figure.value)}</dd>
       </div>
     );
   }
@@ -79,8 +79,8 @@ function RiskFigureRow({ figure }: { figure: RiskFigure }) {
 
 function NotFound() {
   return (
-    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <h1 id="missing-title" className="text-title sm:text-display">
+    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 sm:p-6">
+      <h1 id="missing-title" className="text-h1 sm:text-h1">
         No request with this ID
       </h1>
       <p className="max-w-prose">This workspace has no approval request with that ID.</p>
@@ -176,32 +176,32 @@ function Request({ approvalId }: { approvalId: string }) {
       <div data-slot="record" className="grid grid-cols-1 gap-(--seam)">
         <header className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h1 id="request-title" className="label-caps text-muted-foreground">
+            <h1 id="request-title" className="field-label text-muted-foreground">
               Approval request
             </h1>
             <EnvironmentBadge environment={snap.environment} />
           </div>
           <p className="text-sm text-muted-foreground">{snap.proposer}</p>
-          <p className="font-display text-title leading-[0.95] font-bold uppercase sm:text-display">
+          <p className="text-h1 font-semibold sm:text-h1">
             Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol} at a limit of <span className="tabular">{price(b.limit)}</span>
           </p>
           <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-3 text-sm sm:grid-cols-3">
             <div>
-              <dt className="label-caps text-muted-foreground">Order value</dt>
+              <dt className="field-label text-muted-foreground">Order value</dt>
               <dd className="font-mono tabular">{orderValueOf(a)}</dd>
             </div>
             <div>
-              <dt className="label-caps text-muted-foreground">Purpose</dt>
+              <dt className="field-label text-muted-foreground">Purpose</dt>
               <dd>{PURPOSE_LABEL[b.purpose]}</dd>
             </div>
             <div>
-              <dt className="label-caps text-muted-foreground">Mandate version</dt>
+              <dt className="field-label text-muted-foreground">Mandate version</dt>
               <dd className="font-mono text-caption">{b.mandate_version.slice(7, 19)}</dd>
             </div>
           </dl>
           <ApprovalChart approval={a} className="border-t pt-3" />
           <div className="grid gap-0.5 border-t pt-3">
-            <p className="label-caps text-muted-foreground">Why you are asked</p>
+            <p className="field-label text-muted-foreground">Why you are asked</p>
             <p>{a.trigger}</p>
           </div>
           <div className="grid gap-0.5 border-t pt-3">
@@ -210,9 +210,9 @@ function Request({ approvalId }: { approvalId: string }) {
           </div>
         </header>
 
-        <section aria-labelledby="risk-title" className="reveal grid gap-4 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4 sm:pt-3 sm:pb-4" style={{ "--i": 1 } as CSSProperties}>
+        <section aria-labelledby="risk-title" className="reveal grid gap-4 border-t border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4 sm:pt-3 sm:pb-4" style={{ "--i": 1 } as CSSProperties}>
           <div className="grid gap-1">
-            <h2 id="risk-title" className="text-heading text-mandate-strong">
+            <h2 id="risk-title" className="text-h2 text-mandate-strong">
               Risk impact in dollars
             </h2>
             <p className="text-sm text-mandate-muted">Measured against your mandate, as if this order fills.</p>
@@ -240,7 +240,7 @@ function Request({ approvalId }: { approvalId: string }) {
         ) : null}
 
         <Collapsible.Root className="bg-card" onOpenChange={(opened) => (opened ? setModelOutputExpanded(true) : undefined)}>
-          <Collapsible.Trigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
+          <Collapsible.Trigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
             View model output
             <CaretDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
           </Collapsible.Trigger>
@@ -251,7 +251,7 @@ function Request({ approvalId }: { approvalId: string }) {
                   {e.author === "owner_selected" ? (
                     authorText(e.author)
                   ) : (
-                    <span className="inline-flex h-6 items-center border-2 border-dashed border-foreground px-1.5 label-caps text-foreground">{authorText(e.author)}</span>
+                    <span className="inline-flex h-6 items-center border border-dashed border-foreground px-1.5 field-label text-foreground">{authorText(e.author)}</span>
                   )}
                   <span>
                     {e.model_id} {e.version}, at {clock(e.produced_at)}
@@ -271,9 +271,9 @@ function Request({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(3.5rem+2px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-2 border-t-2 border-foreground bg-muted px-(--page-x) py-3 lg:static lg:mx-0 lg:border-t-4 lg:px-4 lg:py-4"
+          className="sticky bottom-[calc(3.5rem+2px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-2 border-t border-foreground bg-muted px-(--page-x) py-3 lg:static lg:mx-0 lg:border-t lg:px-4 lg:py-4"
         >
-          <p className="font-display text-xl leading-none font-extrabold uppercase lg:text-heading">If you do nothing, this action is skipped.</p>
+          <p className="text-xl leading-none font-semibold lg:text-h2">If you do nothing, this action is skipped.</p>
           <Deadline deadline={a.deadline} now={now} />
           {response ? null : !canRespond ? (
             <p className="text-sm" data-slot="read-only">
@@ -281,7 +281,7 @@ function Request({ approvalId }: { approvalId: string }) {
             </p>
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
-              <p className="text-sm font-bold">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
+              <p className="text-sm font-semibold">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
               <Button variant="outline" size="lg" className="h-11 w-fit" onClick={refresh}>
                 Show the current version
               </Button>
@@ -300,8 +300,8 @@ function Request({ approvalId }: { approvalId: string }) {
       ) : null}
 
       {response ? (
-        <section aria-labelledby="after-response" data-slot="after-confirm" className="grid gap-2 border-2 border-dashed border-foreground bg-background px-3 py-3 sm:px-4">
-          <h2 id="after-response" className="text-heading">
+        <section aria-labelledby="after-response" data-slot="after-confirm" className="grid gap-2 border border-dashed border-foreground bg-background px-3 py-3 sm:px-4">
+          <h2 id="after-response" className="text-h2">
             After you responded
           </h2>
           <p className="text-sm text-muted-foreground">Live progress. It is not part of the request above.</p>

@@ -41,7 +41,7 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
     meaning: "mandate",
     means: "Your mandate",
     detail: "Limits, rails, and the envelope on a pale brass tint under a brass rule. Where the agent must stay.",
-    className: "border-t-4 border-mandate-edge bg-mandate text-mandate-strong",
+    className: "border-t border-mandate-edge bg-mandate text-mandate-strong",
   },
   { name: "Navy", meaning: "account", means: "The account", detail: "Its board, the paper hatch, primary actions.", className: "bg-lapis text-lapis-foreground" },
   { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
@@ -69,8 +69,8 @@ function Block({ title, lead, children }: { title: string; lead?: string; childr
   const id = `design-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <section className="grid gap-(--block-gap)" aria-labelledby={id}>
-      <div className="grid gap-1 border-b-2 border-foreground pb-2">
-        <h2 id={id} className="text-title">
+      <div className="grid gap-1 border-b border-foreground pb-2">
+        <h2 id={id} className="text-h1">
           {title}
         </h2>
         {lead ? <p className="max-w-prose text-muted-foreground">{lead}</p> : null}
@@ -86,9 +86,9 @@ function Rows({ caption, head, children, min = "36rem" }: { caption: string; hea
       <table className="w-full text-sm" style={{ minWidth: min }}>
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className="border-b-2 border-foreground text-left">
+          <tr className="border-b border-foreground text-left">
             {head.map((h, i) => (
-              <th key={h} scope="col" className={i === head.length - 1 && head.length > 3 ? "py-2 text-right label-caps" : "py-2 pr-3 label-caps"}>
+              <th key={h} scope="col" className={i === head.length - 1 && head.length > 3 ? "py-2 text-right field-label" : "py-2 pr-3 field-label"}>
                 {h}
               </th>
             ))}
@@ -104,7 +104,7 @@ export default function DesignPage() {
   return (
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-1.5">
-        <h1 className="text-title sm:text-display">Design system</h1>
+        <h1 className="text-h1 sm:text-h1">Design system</h1>
         <p className="max-w-prose text-muted-foreground">
           Placard, Owlhead&apos;s visual system: transit signage read at a glance by someone in a hurry. Colour values live in <code>src/lib/palette.ts</code> and{" "}
           <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code> and the palette&apos;s in{" "}
@@ -120,9 +120,9 @@ export default function DesignPage() {
         <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
           {MEANINGS.map((m, i) => (
             <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 p-4 ${m.className}`} style={{ "--i": i } as CSSProperties}>
-              <span className="label-caps">{m.name}</span>
+              <span className="field-label">{m.name}</span>
               <span className="grid gap-1">
-                <span className="font-display text-title uppercase">{m.means}</span>
+                <span className="text-h1">{m.means}</span>
                 <span className="text-sm">{m.detail}</span>
               </span>
             </li>
@@ -136,7 +136,7 @@ export default function DesignPage() {
       <Block title="Paper hatch" lead="Paper is the account's state, so it wears navy, hatched. The badge is in the header of every screen and never scrolls away.">
         <div className="flex flex-wrap items-center gap-3">
           <EnvironmentBadge environment="paper" />
-          <div className="hatch h-16 w-40 border-2 border-lapis bg-card" aria-hidden />
+          <div className="hatch h-16 w-40 border border-lapis bg-card" aria-hidden />
         </div>
       </Block>
 
@@ -146,7 +146,7 @@ export default function DesignPage() {
             <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
               <span className="h-14 border" style={{ background: t.value }} aria-hidden />
               <span className="grid min-w-0 content-center gap-0.5">
-                <span className="font-mono text-caption font-bold">--{t.name}</span>
+                <span className="font-mono text-caption font-semibold">--{t.name}</span>
                 <span className="truncate font-mono text-label font-normal text-muted-foreground">
                   {t.value} {toHex(t.value)}
                 </span>
@@ -177,7 +177,7 @@ export default function DesignPage() {
         <ul className="grid">
           {typeScale.map((t) => (
             <li key={t.role} className="grid gap-1 border-b py-3 sm:grid-cols-[7rem_1fr] sm:items-baseline">
-              <span className="label-caps text-muted-foreground">{t.role}</span>
+              <span className="field-label text-muted-foreground">{t.role}</span>
               <span className="grid gap-1">
                 <span className={t.className}>{t.sample}</span>
                 <span className="text-caption text-muted-foreground">{t.spec}</span>
@@ -195,8 +195,8 @@ export default function DesignPage() {
                 {s.name}
               </th>
               <td className="py-2 pr-3 text-muted-foreground">{s.use}</td>
-              <td className="py-2 pr-3 font-mono tabular text-muted-foreground line-through decoration-1">{s.before}</td>
-              <td className="py-2 text-right font-mono font-bold tabular">{s.after}</td>
+              <td className="py-2 pr-3 font-mono tabular">{s.calm}</td>
+              <td className="py-2 text-right font-mono tabular">{s.dense}</td>
             </tr>
           ))}
         </Rows>
@@ -206,44 +206,44 @@ export default function DesignPage() {
       <Block title="States" lead="Every state has one flat treatment. Agent modes are fields; a restriction wears the colour of whoever imposed it; system states carry no meaning colour.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">Agent modes</h3>
+            <h3 className="text-h2">Agent modes</h3>
             <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
               {MODES.map((m) => (
                 <li key={m} className={`grid min-h-28 content-between gap-3 p-4 transition-colors duration-(--duration-hover) ${MODE_FIELD[m]}`}>
-                  <span className="font-display text-title uppercase">{MODE_LABEL[m]}</span>
+                  <span className="text-h1">{MODE_LABEL[m]}</span>
                   <span className="text-sm">{MODE_MEANING[m]}</span>
                 </li>
               ))}
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">Restrictions, by who imposed them</h3>
+            <h3 className="text-h2">Restrictions, by who imposed them</h3>
             <ul className="grid gap-(--seam) sm:grid-cols-2">
               {SOURCES.map(([s, text]) => (
                 <li key={s} className={`grid gap-2 px-4 py-3 ${SOURCE_FIELD[s]}`}>
                   <SourceTag source={s} />
                   <span className="text-sm">
-                    <span className="font-bold">{SOURCE_LABEL[s]}.</span> {text}
+                    <span className="font-semibold">{SOURCE_LABEL[s]}.</span> {text}
                   </span>
                 </li>
               ))}
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">System states</h3>
+            <h3 className="text-h2">System states</h3>
             <ul className="grid gap-(--seam) lg:grid-cols-2">
               <li className="grid gap-2 bg-card p-4">
-                <span className="label-caps text-muted-foreground">Stale</span>
+                <span className="field-label text-muted-foreground">Stale</span>
                 <AsOf at="2026-09-28T14:02:11-04:00" now="2026-09-28T14:05:20-04:00" stale />
                 <p className="text-sm text-muted-foreground">The figure stays, labelled with its age. The status strip turns muted and counts what is degraded.</p>
               </li>
-              <li className="grid gap-2 border-t-4 border-foreground bg-muted p-4">
-                <span className="label-caps text-muted-foreground">Unreachable and error</span>
-                <p className="font-display text-heading uppercase">Cannot reach your deployment</p>
+              <li className="grid gap-2 border-t border-foreground bg-muted p-4">
+                <span className="field-label text-muted-foreground">Unreachable and error</span>
+                <p className="text-h2">Cannot reach your deployment</p>
                 <p className="text-sm">A muted field under a heavy ink rule. No agent data is shown, and none is kept on this device.</p>
               </li>
               <li className="grid gap-2 bg-card p-4">
-                <span className="label-caps text-muted-foreground">Loading</span>
+                <span className="field-label text-muted-foreground">Loading</span>
                 <div className="grid grid-cols-[1fr_1.2fr_1.3fr] gap-(--seam)" aria-hidden>
                   <Skeleton className="h-16" />
                   <Skeleton className="h-16" />
@@ -252,14 +252,14 @@ export default function DesignPage() {
                 <p className="text-sm text-muted-foreground">Skeleton fields in the shape of the screen, never a value from an earlier visit.</p>
               </li>
               <li className="grid gap-2 bg-lapis p-4 text-lapis-foreground">
-                <span className="label-caps text-lapis-muted">Empty</span>
-                <p className="font-display text-heading uppercase">No agents yet</p>
+                <span className="field-label text-lapis-muted">Empty</span>
+                <p className="text-h2">No agents yet</p>
                 <p className="text-sm text-lapis-muted">An empty account is a navy board with the one next step on it.</p>
               </li>
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">Mode banner</h3>
+            <h3 className="text-h2">Mode banner</h3>
             <ModeBanner
               mode="exits_only"
               restrictions={[
@@ -274,7 +274,7 @@ export default function DesignPage() {
       <Block title="Components" lead="Kumo components in Placard tokens: square, flat, no shadows. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">Actions</h3>
+            <h3 className="text-h2">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
               <Button size="lg" variant="primary" className="h-11">
                 Primary
@@ -294,14 +294,14 @@ export default function DesignPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <StopControl />
-              <span data-meaning="kill" className="inline-flex h-11 items-center bg-crimson px-4 font-bold text-crimson-foreground">
+              <span data-meaning="kill" className="inline-flex h-11 items-center bg-crimson px-4 font-semibold text-crimson-foreground">
                 Kill switch (crimson, only here)
               </span>
             </div>
             <p className="text-sm text-muted-foreground">Approve and Skip use the same secondary variant and size, side by side, with nothing preselected.</p>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-heading">Labels</h3>
+            <h3 className="text-h2">Labels</h3>
             <div className="flex flex-wrap items-center gap-2">
               {MODES.map((m) => (
                 <ModeBadge key={m} mode={m} />
@@ -321,7 +321,7 @@ export default function DesignPage() {
           </div>
           <div className="grid gap-(--seam) lg:grid-cols-2">
             <div className="grid content-start gap-3 bg-card p-4">
-              <h3 className="text-heading">Figures</h3>
+              <h3 className="text-h2">Figures</h3>
               <SignedMoney value="123.45" />
               <SignedMoney value="-67.89" />
               <SignedMoney value="0" />
@@ -329,8 +329,8 @@ export default function DesignPage() {
               <AsOf at="2026-09-28T14:05:18-04:00" now="2026-09-28T14:05:20-04:00" />
               <Deadline deadline="2026-09-28T14:14:58-04:00" now="2026-09-28T14:05:20-04:00" />
             </div>
-            <div className="grid content-start gap-4 border-t-4 border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground">
-              <h3 className="text-heading text-mandate-strong">Your mandate</h3>
+            <div className="grid content-start gap-4 border-t border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground">
+              <h3 className="text-h2 text-mandate-strong">Your mandate</h3>
               <LimitRail rail={{ key: "a", label: "Total holdings", used: dec("1618.09"), cap: dec("2000"), atCap: "No new buys" }} />
               <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
               <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
@@ -346,7 +346,7 @@ export default function DesignPage() {
               <li key={name} className="grid grid-cols-[1rem_minmax(0,1fr)] items-baseline gap-2">
                 <span aria-hidden className={`size-4 self-center ${swatch}`} />
                 <span>
-                  <span className="font-bold">{name}</span>: {use}
+                  <span className="font-semibold">{name}</span>: {use}
                 </span>
               </li>
             ))}

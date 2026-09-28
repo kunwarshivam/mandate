@@ -7,7 +7,7 @@ export function AsOf({ at, now, stale, className }: { at: string; now: string; s
     <span data-stale={stale ? "true" : undefined} className={cn("inline-flex flex-wrap items-center gap-1.5 text-caption text-muted-foreground", stale && "font-medium text-foreground", className)}>
       {stale ? (
         <>
-          <span className="border-2 border-foreground px-1 label-caps">
+          <span className="border border-foreground px-1 field-label">
             Stale<span className="sr-only">:</span>
           </span>{" "}
         </>

@@ -23,16 +23,16 @@ export function GateDecisionRow({ decision, agent, showAgent = false, href }: { 
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-6 items-center px-1.5 label-caps", allowed ? "bg-muted text-foreground" : "bg-card text-foreground ring-2 ring-foreground ring-inset")}
+            className={cn("inline-flex h-6 items-center px-1.5 field-label", allowed ? "bg-muted text-foreground" : "bg-card text-foreground ring-2 ring-foreground ring-inset")}
           >
             {label}
           </span>
           {href ? (
-            <Link href={href} className={cn("font-bold underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
+            <Link href={href} className={cn("font-semibold underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
               {actionSentence(decision.action)}
             </Link>
           ) : (
-            <span className="font-bold">{actionSentence(decision.action)}</span>
+            <span className="font-semibold">{actionSentence(decision.action)}</span>
           )}
           <span className="text-caption text-muted-foreground">
             {PURPOSE_LABEL[decision.action.purpose]}
