@@ -16,12 +16,14 @@ export type CommandKind = "pause" | "resume" | "stop" | "kill" | "release" | "pa
 /**
  * What a record screen showed when the owner confirmed, sent with the command so the journal keeps
  * it (brief §4.1). `shown` is every line on the screen, in order; nothing on a record screen collapses.
+ * `modes` is each agent's mode badge as it read.
  */
 export interface CommandRecord {
   screen: "D10" | "D11";
   environment: Environment;
   title: string;
   shown: string[];
+  modes: Array<{ agent: string; badge: string }>;
 }
 
 export interface Command {
@@ -35,9 +37,15 @@ export interface Command {
   record?: CommandRecord;
 }
 
-/** D6 lets model output sit behind "View model output"; the response records whether the owner opened it before responding. */
+/**
+ * What D6 showed when the owner responded (brief §4.1). `shown` is every line of the request as it
+ * was fixed at first render. D6 lets model output sit behind "View model output", so the record says
+ * whether the owner opened it, and when they did, its lines follow in `shown`.
+ */
 export interface ApprovalRecord {
   screen: "D6";
+  environment: Environment;
+  shown: string[];
   modelOutputExpanded: boolean;
 }
 

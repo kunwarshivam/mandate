@@ -33,9 +33,19 @@ export function entries(root: HTMLElement) {
   return log(root).querySelectorAll("[data-phase]");
 }
 
-/** The modes shown for every agent in view: they change only once the runtime records a command. */
+/**
+ * The latest mode shown for every agent in view: it changes only once the runtime records a command.
+ * A record screen's own badges are frozen, so once something is sent the latest are under "After you
+ * confirmed".
+ */
 export function modes(root: HTMLElement) {
-  return Array.from(root.querySelectorAll("[data-slot=mode-badge]"), (b) => b.getAttribute("data-mode"));
+  const live = root.querySelector("[data-slot=after-confirm]") ?? root;
+  return Array.from(live.querySelectorAll("[data-slot=mode-badge]"), (b) => b.getAttribute("data-mode"));
+}
+
+/** A record screen's frozen record: everything the owner confirms, and nothing live. */
+export function recordRegion(root: ParentNode = document): HTMLElement {
+  return root.querySelector<HTMLElement>("[data-slot=record]")!;
 }
 
 export function literal(text: string) {

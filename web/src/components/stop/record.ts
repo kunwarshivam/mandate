@@ -1,7 +1,8 @@
 import { orderPriceText, protectionText } from "@/components/domain/positions";
-import type { Agent, ExternalPosition, Position, WorkingOrder, Workspace } from "@/fixtures/types";
+import type { Agent, AgentMode, Environment, ExternalPosition, Position, WorkingOrder, Workspace } from "@/fixtures/types";
 import { quantity } from "@/lib/format";
-import { ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
+import { MODE_LABEL, ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
+import type { CommandRecord } from "@/lib/mock-runtime";
 import { type RecordKind, stepUpLine } from "./commands";
 
 export interface RecordList {
@@ -18,6 +19,7 @@ export interface RecordList {
  */
 export interface StopRecord {
   kind: RecordKind;
+  environment: Environment;
   title: string;
   /** The agent's label, or "Account" for the whole account; used in the status lines. */
   label: string;
@@ -29,10 +31,19 @@ export interface StopRecord {
   /** Why there is nothing to confirm, or null when the action can be taken. */
   nothingToDo: string | null;
   agentId: string | null;
-  agentIds: string[];
+  /** Each agent's mode as the screen shows it, fixed with everything else. */
+  modes: AgentModeLine[];
   stepUp: string;
   back: { href: string; label: string };
 }
+
+export interface AgentModeLine {
+  agentId: string;
+  label: string;
+  mode: AgentMode;
+}
+
+export const MODES_HEADING = "Mode of each agent";
 
 /** Titles are fixed per screen so the heading and its environment render before any data. */
 export const RECORD_TITLE: Record<RecordKind, string> = {
@@ -67,6 +78,10 @@ function sellsStock(positions: Position[]): boolean {
 
 const STOPPED = "Stopped. There is nothing more to stop for this agent.";
 
+function modesOf(ws: Workspace, agents: Agent[]): Pick<StopRecord, "environment" | "modes"> {
+  return { environment: ws.environment, modes: agents.map((a) => ({ agentId: a.agent_id, label: a.label, mode: a.mode })) };
+}
+
 function killRecord(ws: Workspace, agent: Agent): StopRecord {
   const others = ws.agents.filter((a) => a.agent_id !== agent.agent_id);
   return {
@@ -95,7 +110,7 @@ function killRecord(ws: Workspace, agent: Agent): StopRecord {
     afterwards: `${agent.label} is stopped for good, and its approval requests are canceled. Each step is journaled and shown below as it is recorded.`,
     nothingToDo: agent.mode === "stopped" ? STOPPED : null,
     agentId: agent.agent_id,
-    agentIds: [agent.agent_id],
+    ...modesOf(ws, [agent]),
     stepUp: stepUpLine("kill", agent.label, agent.positions.length),
     back: { href: `/agents/${agent.agent_id}`, label: agent.label },
   };
@@ -123,7 +138,7 @@ function releaseRecord(ws: Workspace, agent: Agent): StopRecord {
     afterwards: `${agent.label} is stopped for good, and its approval requests are canceled. The released positions join your own holdings.`,
     nothingToDo: agent.mode === "stopped" ? STOPPED : agent.positions.length === 0 ? "It holds no positions, so there is nothing to release." : null,
     agentId: agent.agent_id,
-    agentIds: [agent.agent_id],
+    ...modesOf(ws, [agent]),
     stepUp: stepUpLine("release", agent.label, agent.positions.length),
     back: { href: `/agents/${agent.agent_id}`, label: agent.label },
   };
@@ -160,7 +175,7 @@ function stopAllRecord(ws: Workspace): StopRecord {
     afterwards: "Every agent on this account is stopped for good, and their approval requests are canceled. Each step is journaled and shown below as it is recorded.",
     nothingToDo: active.length === 0 ? "Every agent on this account is already stopped." : null,
     agentId: null,
-    agentIds: ws.agents.map((a) => a.agent_id),
+    ...modesOf(ws, ws.agents),
     stepUp: stepUpLine("stop_all", "", 0),
     back: { href: "/", label: "Dashboard" },
   };
@@ -196,7 +211,7 @@ function closeAllRecord(ws: Workspace): StopRecord {
     afterwards: "Every order is canceled, every position closed, your own holdings included, and every agent stopped. Each step is journaled and shown below as it is recorded.",
     nothingToDo: null,
     agentId: null,
-    agentIds: ws.agents.map((a) => a.agent_id),
+    ...modesOf(ws, ws.agents),
     stepUp: stepUpLine("close_all", "", 0),
     back: { href: "/", label: "Dashboard" },
   };
@@ -231,5 +246,23 @@ export function recordLines(record: StopRecord): string[] {
     ...(record.warning ? [record.warning] : []),
     ...record.lists.flatMap((l) => [l.heading, ...(l.items.length > 0 ? l.items : [l.empty]), ...(l.note ? [l.note] : [])]),
     record.afterwards,
+    MODES_HEADING,
+    ...record.modes.map(modeLine),
   ];
+}
+
+/** A mode as its badge reads, beside the agent's label. */
+export function modeLine(m: AgentModeLine): string {
+  return `${m.label}: ${MODE_LABEL[m.mode]}`;
+}
+
+/** What the journal keeps with the command: the screen's lines and each mode badge, exactly as shown. */
+export function commandRecord(record: StopRecord): CommandRecord {
+  return {
+    screen: record.kind === "release" ? "D11" : "D10",
+    environment: record.environment,
+    title: record.title,
+    shown: recordLines(record),
+    modes: record.modes.map((m) => ({ agent: m.label, badge: MODE_LABEL[m.mode] })),
+  };
 }
