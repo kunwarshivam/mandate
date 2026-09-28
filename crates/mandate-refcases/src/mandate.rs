@@ -17,16 +17,18 @@ use std::sync::Arc;
 
 use mandate_canon::Digest;
 use mandate_canon::Value;
-use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
+use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
 use mandate_num::{Price, Qty, Usd};
-use mandate_spec::document::{ModelId, ProvenanceMap};
+use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
 use mandate_spec::risk::LiftReason;
 use mandate_spec::risk::{
     self, ApplyResult, Input, KillScope, Latch, Opening, RemovalReason, RestrictionReason,
     RiskEvent, StopReason, TriggerReason, UniverseChange,
 };
-use mandate_spec::validate::{RegisteredModel, ValidatedMandate, ValidationContext};
+use mandate_spec::validate::{
+    self, GroupId, PreviousVersion, RegisteredModel, ValidatedMandate, ValidationContext,
+};
 use mandate_spec::{DecGrammar, Mandate, MandateVersion, SchemaDec, SpecError};
 use mandate_time::{Date, ExchangeCalendar, Session, UtcNanos};
 
@@ -486,9 +488,180 @@ fn not_implemented(what: &str) -> String {
 }
 
 /// `kind: semantic` — every V-code and W-code, and the four worst-case figures (§4.1, §4.2).
+///
+/// The codes are compared as whole sets, so a missing code and an extra one both fail, and all four
+/// figures are compared by value, `null` meaning "no stop to lose at" rather than zero.
 fn semantic_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = patched(fixture, case)?;
-    Err(not_implemented("`mandate_spec::validate`"))
+    let mandate = must_parse(&patched(fixture, case)?)?;
+    let context = semantic_context(fixture, at_of(case, "context")?)?;
+    let report = spec(validate::validate(&mandate, &context), "validate")?;
+    let expect = at_of(case, "expect")?;
+    let codes = |codes: Vec<&str>| codes.into_iter().map(str::to_owned).collect();
+    expect_set(
+        expect,
+        "violations",
+        codes(report.violations.iter().map(|v| v.code()).collect()),
+    )?;
+    expect_set(
+        expect,
+        "warnings",
+        codes(report.warnings.iter().map(|w| w.code()).collect()),
+    )?;
+    let figures = at_of(expect, "worst_case")?;
+    unknown_members(figures, WORST_CASE_KEYS)
+        .map_err(|unknown| format!("`worst_case` members not interpreted: {unknown}"))?;
+    let worst = &report.worst_case;
+    for (key, actual) in [
+        ("one_position_at_stop_usd", worst.one_position_at_stop_usd),
+        ("daily_loss_budget_usd", Some(worst.daily_loss_budget_usd)),
+        (
+            "flatten_trigger_loss_usd",
+            Some(worst.flatten_trigger_loss_usd),
+        ),
+        (
+            "lifetime_floor_loss_usd",
+            Some(worst.lifetime_floor_loss_usd),
+        ),
+    ] {
+        let wanted = match at(figures, key)? {
+            Json::Null => None,
+            value => Some(num(Usd::parse(&text_of(value, key)?), key)?),
+        };
+        expect_eq(key, actual, wanted)?;
+    }
+    Ok(())
+}
+
+/// The four figures of §4.2 a `semantic` case states.
+const WORST_CASE_KEYS: &[&str] = &[
+    "one_position_at_stop_usd",
+    "daily_loss_budget_usd",
+    "flatten_trigger_loss_usd",
+    "lifetime_floor_loss_usd",
+];
+
+/// Every member a `semantic` case's `context` may state; each replaces its default. A member not listed
+/// fails the case, naming it, so a context the fixture grows cannot be silently ignored (DEC-85).
+const CONTEXT_KEYS: &[&str] = &[
+    "provenance",
+    "other_allocations_usd",
+    "disclosures_accepted",
+    "connection_environment",
+    "connection_loss_carry_usd",
+    "instrument_groups",
+    "claimed_by_other_agents",
+    "workspace_users",
+    "approver_users",
+    "previous_version",
+    "eligibility_failures",
+];
+
+/// `validation_context_defaults` with the case's `context` laid over it.
+fn semantic_context(fixture: &Json, stated: &Json) -> Result<ValidationContext, String> {
+    unknown_members(stated, CONTEXT_KEYS)
+        .map_err(|unknown| format!("`context` members not interpreted: {unknown}"))?;
+    let mut context = context_defaults(fixture)?;
+    let usd = |key: &str| num(Usd::parse(str_at(stated, key)?), key);
+    let assets = |key: &str| -> Result<BTreeSet<AssetId>, String> {
+        list_at(stated, key)?
+            .iter()
+            .map(|item| asset_id(&text_of(item, key)?))
+            .collect()
+    };
+    for key in stated.as_object().map(|m| m.keys()).into_iter().flatten() {
+        match key.as_str() {
+            "provenance" => context.provenance = provenance(at_of(stated, key)?)?,
+            "other_allocations_usd" => context.other_allocations_usd = usd(key)?,
+            "connection_loss_carry_usd" => context.connection_loss_carry_usd = usd(key)?,
+            "disclosures_accepted" => {
+                context.disclosures_accepted = list_at(stated, key)?
+                    .iter()
+                    .map(|item| digest(&text_of(item, key)?))
+                    .collect::<Result<_, String>>()?;
+            }
+            "connection_environment" => {
+                context.connection_environment = Some(environment(str_at(stated, key)?)?);
+            }
+            "instrument_groups" => {
+                context.instrument_groups = at_of(stated, key)?
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .map(|(asset, group)| {
+                        Ok((asset_id(asset)?, GroupId::new(&text_of(group, key)?)))
+                    })
+                    .collect::<Result<_, String>>()?;
+            }
+            "claimed_by_other_agents" => context.claimed_by_other_agents = assets(key)?,
+            "eligibility_failures" => context.eligibility_failures = assets(key)?,
+            "workspace_users" => context.workspace_users = u32_of(stated, key)?,
+            "approver_users" => context.approver_users = u32_of(stated, key)?,
+            "previous_version" => {
+                let previous = at_of(stated, key)?;
+                unknown_members(previous, &["environment", "connection_id"])
+                    .map_err(|unknown| format!("`previous_version` members: {unknown}"))?;
+                context.previous_version = Some(PreviousVersion {
+                    environment: environment(str_at(previous, "environment")?)?,
+                    connection_id: ConnectionId::parse(str_at(previous, "connection_id")?)
+                        .map_err(|e| format!("`previous_version.connection_id`: {}", e.code()))?,
+                });
+            }
+            other => return Err(format!("`context.{other}` is not interpreted")),
+        }
+    }
+    Ok(context)
+}
+
+/// The §2.1 map: each pointer's `source` and `confirmed`, and nothing else.
+fn provenance(stated: &Json) -> Result<ProvenanceMap, String> {
+    let entries = stated
+        .as_object()
+        .ok_or("`provenance` is not an object")?
+        .iter()
+        .map(|(path, entry)| {
+            unknown_members(entry, &["source", "confirmed"])
+                .map_err(|unknown| format!("provenance `{path}` members: {unknown}"))?;
+            let source = match str_at(entry, "source")? {
+                "user_stated" => Source::UserStated,
+                "user_entered" => Source::UserEntered,
+                "template_structure" => Source::TemplateStructure,
+                "platform_proposed" => Source::PlatformProposed,
+                "platform_default" => Source::PlatformDefault,
+                other => return Err(format!("provenance `{path}`: unknown source `{other}`")),
+            };
+            let confirmed = at(entry, "confirmed")?
+                .as_bool()
+                .ok_or_else(|| format!("provenance `{path}`: `confirmed` is not a boolean"))?;
+            Ok((Pointer::new(path), Provenance { source, confirmed }))
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(ProvenanceMap::new(entries))
+}
+
+/// A context value that must be a JSON string: an id, a digest, an amount, or a group.
+fn text_of(value: &Json, what: &str) -> Result<String, String> {
+    value
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("`{what}` holds something that is not a string"))
+}
+
+fn environment(text: &str) -> Result<Environment, String> {
+    match text {
+        "paper" => Ok(Environment::Paper),
+        "live" => Ok(Environment::Live),
+        other => Err(format!("`{other}` is not an environment")),
+    }
+}
+
+fn asset_id(text: &str) -> Result<AssetId, String> {
+    AssetId::parse(text).map_err(|e| format!("`{text}`: {}", e.code()))
+}
+
+fn digest(text: &str) -> Result<Digest, String> {
+    text.strip_prefix("sha256:")
+        .and_then(Digest::from_hex)
+        .ok_or_else(|| format!("`{text}` is not a sha256 digest"))
 }
 
 /// `kind: policy` — the nearest broken ancestor, per key kind (§4.3).
