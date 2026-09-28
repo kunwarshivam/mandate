@@ -21,6 +21,7 @@ use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession,
 use mandate_num::{Price, Qty, Usd};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
+use mandate_spec::policy::{self, LevelName, PolicyKey, PolicyLevel, PolicyValue};
 use mandate_spec::risk::LiftReason;
 use mandate_spec::risk::{
     self, ApplyResult, Input, KillScope, Latch, Opening, RemovalReason, RestrictionReason,
@@ -665,9 +666,173 @@ fn digest(text: &str) -> Result<Digest, String> {
 }
 
 /// `kind: policy` — the nearest broken ancestor, per key kind (§4.3).
+///
+/// Every level of `policies` is read whole: its `level` and every member of `values`, an unknown key
+/// failing the case by name. The violations are compared as a multiset of whole records (key, level,
+/// value, the nearest broken ancestor, and its limit), each value read through the same parse as the
+/// levels, so a decimal compares by value; `valid` must agree with whether any was reported.
 fn policy_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = patched(fixture, case)?;
-    Err(not_implemented("`mandate_spec::policy::check`"))
+    let mandate = must_parse(&patched(fixture, case)?)?;
+    let levels = list_at(case, "policies")?
+        .iter()
+        .map(policy_level)
+        .collect::<Result<Vec<_>, String>>()?;
+    let result = spec(policy::check(&mandate, &levels), "policy::check")?;
+    let expect = at_of(case, "expect")?;
+    let valid = at(expect, "valid")?
+        .as_bool()
+        .ok_or("`expect.valid` is not a boolean")?;
+    expect_eq("valid", result.violations.is_empty(), valid)?;
+    let wanted = list_at(expect, "violations")?
+        .iter()
+        .map(|violation| {
+            unknown_members(violation, VIOLATION_KEYS)
+                .map_err(|unknown| format!("violation members not interpreted: {unknown}"))?;
+            Ok((
+                policy_key(str_at(violation, "key")?)?,
+                level_name(str_at(violation, "level")?)?,
+                policy_value(at(violation, "value")?)?,
+                level_name(str_at(violation, "limit_level")?)?,
+                policy_value(at(violation, "limit")?)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut unmatched: Vec<_> = result
+        .violations
+        .iter()
+        .map(|v| {
+            (
+                v.key,
+                v.level,
+                v.value.clone(),
+                v.limit_level,
+                v.limit.clone(),
+            )
+        })
+        .collect();
+    for record in &wanted {
+        let position = unmatched
+            .iter()
+            .position(|got| got == record)
+            .ok_or_else(|| {
+                format!(
+                    "violations: expected {wanted:?}, got {:?}",
+                    result.violations
+                )
+            })?;
+        unmatched.swap_remove(position);
+    }
+    ensure(unmatched.is_empty(), || {
+        format!("violations: expected {wanted:?}, also got {unmatched:?}")
+    })
+}
+
+/// The members a `policy` case's violation states.
+const VIOLATION_KEYS: &[&str] = &["key", "level", "value", "limit_level", "limit"];
+
+/// Every key §4.3 names, looked up by its spelling so an unknown one fails by name.
+const POLICY_KEYS: &[PolicyKey] = &[
+    PolicyKey::AllocationUsd,
+    PolicyKey::MaxLossFromAllocation,
+    PolicyKey::MaxPositionUsd,
+    PolicyKey::MaxPositionFraction,
+    PolicyKey::MaxGrossExposureUsd,
+    PolicyKey::MaxOrderUsd,
+    PolicyKey::MaxOrdersPerDay,
+    PolicyKey::MaxDailyLoss,
+    PolicyKey::MaxDrawdown,
+    PolicyKey::BreachConfirmS,
+    PolicyKey::MaxOutputAgeS,
+    PolicyKey::ExitThreshold,
+    PolicyKey::StopDistanceMax,
+    PolicyKey::ExitsOnlyAtMax,
+    PolicyKey::TwoApproverAboveUsd,
+    PolicyKey::MaxInstruments,
+    PolicyKey::ResearchWeight,
+    PolicyKey::ResearchCostCapUsdPerDay,
+    PolicyKey::MaxRevisionsPerLineage,
+    PolicyKey::EntryThreshold,
+    PolicyKey::RebalanceBand,
+    PolicyKey::Hysteresis,
+    PolicyKey::CadenceIntervalS,
+    PolicyKey::ApprovalTimeoutS,
+    PolicyKey::ReentryCooldownS,
+    PolicyKey::DailyBreachMinS,
+    PolicyKey::ScaleLiftAfterS,
+    PolicyKey::ResearchIntervalS,
+    PolicyKey::StaggerWindowS,
+    PolicyKey::LeveragedEtpsAllowed,
+    PolicyKey::AutoAllowed,
+    PolicyKey::ResearchAgentAllowed,
+    PolicyKey::AdmissionAutoAllowed,
+    PolicyKey::ProtectionRequired,
+    PolicyKey::IndependentApprovalRequired,
+    PolicyKey::AssetClasses,
+    PolicyKey::SignalModelTypes,
+    PolicyKey::GoalTypes,
+    PolicyKey::Channels,
+    PolicyKey::Environments,
+];
+
+fn policy_key(text: &str) -> Result<PolicyKey, String> {
+    POLICY_KEYS
+        .iter()
+        .copied()
+        .find(|key| key.as_str() == text)
+        .ok_or_else(|| format!("`{text}` is not a policy key"))
+}
+
+fn level_name(text: &str) -> Result<LevelName, String> {
+    [
+        LevelName::Platform,
+        LevelName::Organization,
+        LevelName::Workspace,
+        LevelName::Mandate,
+    ]
+    .into_iter()
+    .find(|name| name.as_str() == text)
+    .ok_or_else(|| format!("`{text}` is not a policy level"))
+}
+
+/// A policy value as the fixture writes it: a decimal string, an integer, a flag, a list of names, or
+/// `null` for a mandate that states nothing.
+fn policy_value(value: &Json) -> Result<PolicyValue, String> {
+    Ok(match value {
+        Json::Null => PolicyValue::Absent,
+        Json::Bool(flag) => PolicyValue::Flag(*flag),
+        Json::Number(_) => PolicyValue::Integer(
+            value
+                .as_u64()
+                .ok_or("a policy integer is not a non-negative integer")?,
+        ),
+        Json::String(text) => PolicyValue::Decimal(
+            SchemaDec::parse(text, DecGrammar::Decimal)
+                .map_err(|_| format!("`{text}` is not a policy decimal"))?,
+        ),
+        Json::Array(items) => PolicyValue::Set(
+            items
+                .iter()
+                .map(|item| text_of(item, "a policy set member"))
+                .collect::<Result<_, _>>()?,
+        ),
+        Json::Object(_) => return Err("a policy value is an object".to_owned()),
+    })
+}
+
+/// One level of a case's chain: its name and every value it states.
+fn policy_level(level: &Json) -> Result<PolicyLevel, String> {
+    unknown_members(level, &["level", "values"])
+        .map_err(|unknown| format!("policy level members not interpreted: {unknown}"))?;
+    let values = at(level, "values")?
+        .as_object()
+        .ok_or("`values` is not an object")?
+        .iter()
+        .map(|(key, value)| Ok((policy_key(key)?, policy_value(value)?)))
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    Ok(PolicyLevel {
+        name: level_name(str_at(level, "level")?)?,
+        values,
+    })
 }
 
 /// `kind: change` — the classification, the changed paths, both version hashes, and step-up (§9.2).
@@ -1430,4 +1595,150 @@ fn spec<T>(result: Result<T, SpecError>, what: &str) -> Result<T, String> {
             format!("`{what}`: {e} ({})", e.code())
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::policy_case;
+    use crate::{Json, read_fixture};
+
+    fn fixture() -> Result<Json, String> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
+        read_fixture(&dir, "mandate.json").map(|f| (*f).clone())
+    }
+
+    /// A value no fixture member holds in its place: another decimal, the other flag, another integer,
+    /// a decimal for a `null`, and a set naming nothing real.
+    fn other_value(value: &Json) -> Json {
+        match value {
+            Json::Bool(flag) => Json::Bool(!flag),
+            Json::Number(n) => Json::from(n.as_u64().unwrap_or(0).saturating_add(1234)),
+            Json::String(_) => Json::String("99999".to_owned()),
+            Json::Array(_) => Json::Array(vec![Json::String("zzz".to_owned())]),
+            _ => Json::String("1".to_owned()),
+        }
+    }
+
+    fn other_level(level: &Json) -> Json {
+        let next = match level.as_str() {
+            Some("platform") => "organization",
+            Some("organization") => "workspace",
+            Some("workspace") => "mandate",
+            _ => "platform",
+        };
+        Json::String(next.to_owned())
+    }
+
+    fn other_key(key: &Json) -> Json {
+        let next = if key.as_str() == Some("allocation_usd") {
+            "max_order_usd"
+        } else {
+            "allocation_usd"
+        };
+        Json::String(next.to_owned())
+    }
+
+    /// `value` with the member at `pointer` replaced, or an error naming the pointer.
+    fn with(value: &Json, pointer: &str, new: Json) -> Result<Json, String> {
+        let mut edited = value.clone();
+        let slot = edited
+            .pointer_mut(pointer)
+            .ok_or_else(|| format!("`{pointer}` names nothing"))?;
+        *slot = new;
+        Ok(edited)
+    }
+
+    /// Every edit of one case's `expect`: `valid` flipped, each member of each violation changed,
+    /// each violation dropped, and one violation added. Each must make the case fail.
+    fn edits(expect: &Json) -> Result<Vec<(String, Json)>, String> {
+        let mut out = Vec::new();
+        let valid = expect
+            .get("valid")
+            .and_then(Json::as_bool)
+            .ok_or("`valid` is not a flag")?;
+        out.push((
+            "valid flipped".to_owned(),
+            with(expect, "/valid", Json::Bool(!valid))?,
+        ));
+        let violations = expect
+            .get("violations")
+            .and_then(Json::as_array)
+            .cloned()
+            .ok_or("`violations` is not a list")?;
+        for (index, violation) in violations.iter().enumerate() {
+            for member in ["key", "level", "value", "limit_level", "limit"] {
+                let old = violation
+                    .get(member)
+                    .ok_or_else(|| format!("violation {index} has no `{member}`"))?;
+                let new = match member {
+                    "key" => other_key(old),
+                    "level" | "limit_level" => other_level(old),
+                    _ => other_value(old),
+                };
+                out.push((
+                    format!("violation {index} `{member}` edited"),
+                    with(expect, &format!("/violations/{index}/{member}"), new)?,
+                ));
+            }
+            let rest: Vec<Json> = violations
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, kept)| kept.clone())
+                .collect();
+            out.push((
+                format!("violation {index} dropped"),
+                with(expect, "/violations", Json::Array(rest))?,
+            ));
+        }
+        let mut more = violations.clone();
+        more.push(serde_json::json!({
+            "key": "max_order_usd", "level": "mandate", "value": "1",
+            "limit_level": "platform", "limit": "1"
+        }));
+        out.push((
+            "a violation added".to_owned(),
+            with(expect, "/violations", Json::Array(more))?,
+        ));
+        Ok(out)
+    }
+
+    /// Every MC-P case passes as the fixture states it, and fails on every edit of its expectation:
+    /// the `policy` arm compares `valid`, every member of every violation, and the whole set both ways
+    /// (#263 round 1, major 2; the risk-day arm's `every_risk_day_case_passes_and_fails_on_each_edited_expectation`
+    /// is the pattern).
+    #[test]
+    fn every_policy_case_passes_and_fails_on_each_edited_expectation() -> Result<(), String> {
+        let fixture = fixture()?;
+        let cases: Vec<Json> = fixture
+            .get("cases")
+            .and_then(Json::as_array)
+            .ok_or("a case list")?
+            .iter()
+            .filter(|case| case.get("kind").and_then(Json::as_str) == Some("policy"))
+            .cloned()
+            .collect();
+        if cases.len() != 22 {
+            return Err(format!("family P is 22 cases, found {}", cases.len()));
+        }
+        let mut edited = 0usize;
+        for case in &cases {
+            let id = case.get("id").and_then(Json::as_str).unwrap_or("?");
+            policy_case(&fixture, case).map_err(|e| format!("{id} must pass as stated: {e}"))?;
+            let expect = case.get("expect").ok_or("a case with no `expect`")?;
+            for (what, edited_expect) in edits(expect)? {
+                let doctored = with(case, "/expect", edited_expect)?;
+                if policy_case(&fixture, &doctored).is_ok() {
+                    return Err(format!("{id}: {what}, and the case still passed"));
+                }
+                edited = edited.saturating_add(1);
+            }
+        }
+        if edited < 22 * 2 {
+            return Err(format!("only {edited} edits were tried"));
+        }
+        Ok(())
+    }
 }
