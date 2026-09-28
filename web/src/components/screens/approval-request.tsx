@@ -168,7 +168,7 @@ function Request({ approvalId }: { approvalId: string }) {
       </Collapsible>
 
       {open ? (
-        <section aria-label="Your response" className="sticky bottom-16 z-10 -mx-4 grid gap-3 border-t bg-background/95 px-4 py-4 backdrop-blur sm:static sm:mx-0 sm:rounded-xl sm:border sm:bg-card sm:px-5 lg:bottom-0">
+        <section aria-label="Your response" className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 grid gap-3 border-t bg-background px-4 py-4 sm:static sm:mx-0 sm:rounded-xl sm:border sm:bg-card sm:px-5">
           <p className="font-medium">If you do nothing, this action is skipped.</p>
           <Deadline deadline={approval.deadline} now={now} />
           {response ? (
