@@ -1,7 +1,7 @@
 //! Property tests for the paper trading connector, against oracles written separately from the
 //! crate ([task brief](../../../docs/project/tasks/M6-K-executor-and-connector.md)).
 //!
-//! 1. **A path oracle** decides membership of the seven endpoints by splitting the path into
+//! 1. **A path oracle** decides membership of the eight read and write paths (seven, and E7-8's asset read) by splitting the path into
 //!    segments and comparing them, rather than by the crate's prefix walk, so the two agreeing
 //!    means something.
 //! 2. **A redaction oracle** walks the recorded bodies as `serde_json` values and looks for the
@@ -47,6 +47,7 @@ fn oracle_allows(path_and_query: &str) -> bool {
         ["", "v2", "positions", symbol] => one(symbol),
         ["", "v2", "account"] => true,
         ["", "v2", "account", "activities"] => true,
+        ["", "v2", "assets", symbol] => one(symbol),
         _ => false,
     }
 }
@@ -114,6 +115,8 @@ fn candidate_path() -> impl Strategy<Value = String> {
         "[A-Za-z0-9./:?=&%_-]{0,40}".prop_map(|rest| format!("/v2/orders/{rest}")),
         "[A-Za-z0-9./:?=&%_-]{0,40}".prop_map(|rest| format!("/v2/positions/{rest}")),
         "[A-Za-z0-9./:?=&%_-]{0,40}".prop_map(|rest| format!("/v2/account{rest}")),
+        "[A-Za-z0-9./:?=&%_-]{0,40}".prop_map(|rest| format!("/v2/assets{rest}")),
+        prop::sample::select(DOT_LIKE.as_slice()).prop_map(|s| format!("/v2/assets/{s}")),
         "[A-Za-z0-9./:?=&%_ -]{0,30}".prop_map(|rest| rest.to_owned()),
     ]
 }
@@ -174,7 +177,7 @@ fn plant_personal_data(value: &mut serde_json::Value) {
 }
 
 proptest! {
-    /// ES-23: every request this client can build targets the paper host and one of the seven
+    /// ES-23: every request this client can build targets the paper host and one of the
     /// endpoints, whatever a symbol or an order id contains.
     #[test]
     fn every_request_the_client_can_build_targets_the_paper_host(path in candidate_path()) {

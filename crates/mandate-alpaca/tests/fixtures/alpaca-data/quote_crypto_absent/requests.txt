@@ -1,0 +1,1 @@
+GET /v1beta3/crypto/us/latest/quotes?symbols=ETH%2FBTC
