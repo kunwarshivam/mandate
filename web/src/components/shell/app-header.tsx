@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
 import { Sidebar } from "@cloudflare/kumo/components/sidebar";
 import { Bell, CaretUpDown, Tray, UserCircle } from "@phosphor-icons/react";
+import { canOpen, homeFor } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { can, useRole } from "@/lib/roles";
 import { crumbsFor } from "@/lib/screens";
@@ -80,14 +81,17 @@ export function AppHeader() {
   const { role } = useRole();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
   // Deep pages keep their last three crumbs; the page's tabs and the sidebar carry the rest of the way back.
-  const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label).slice(-3);
+  const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label)
+    .filter((c) => canOpen(role, c.href))
+    .slice(-3);
   const seesAgents = can(role, "agents.view");
+  const home = homeFor(role);
 
   return (
     <header className="sticky top-0 z-30 border-b bg-background">
       <div className="flex h-14 items-center gap-1 px-(--page-x) sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
-        <Link href="/" className="shrink-0 px-1 text-foreground" aria-label="Owlhead, dashboard">
+        <Link href={home.href} className="shrink-0 px-1 text-foreground" aria-label={`Owlhead, ${home.label}`}>
           <Wordmark className="text-xl sm:text-2xl" />
         </Link>
         <div className="hidden lg:block">

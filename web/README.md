@@ -22,7 +22,15 @@ npm run lint
 npm run typecheck
 npm test
 npm run build && npm start
+
+npx playwright install --with-deps --only-shell chromium   # once
+npm run build && npm run test:e2e
 ```
+
+The e2e suite (`e2e/`, Playwright, Chromium only) starts the production build with `npm start` and
+reads computed styles: no route, overlay, or Kumo surface may paint a gradient or a mask, and each
+Kumo override in `src/app/placard-kumo.css` must hold in the browser (DEC-200). Locally it reuses a
+server already on port 4317. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
 analytics, no session replay, and no service worker.
@@ -37,7 +45,8 @@ renders `normal`.
 
 The same panel switches the workspace role (owner, operator, approver, viewer, auditor; PX-11). The
 role lives in React state only and resets on reload: approvers may pause but not stop, viewers and
-auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group.
+auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group;
+any other route renders "Not available to your role" for them instead of the page.
 
 It also turns on colour-blind friendly gains and losses (the `mandate-cvd` cookie; `?cvd=1` or
 `?cvd=0`, or Alt+Shift+C), and links to `/palette`, the palette reference, which exists only in

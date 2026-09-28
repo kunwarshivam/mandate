@@ -487,7 +487,7 @@ function base(scenario: Scenario): Workspace {
     journal: "answers",
     now: NOW,
     environment: "paper",
-    connection: { connection_id: "conn_alpaca_paper_01", broker: "Alpaca paper", account_equity: brokerEquity([btc, swing, lmn]), day_trading_regime: "intraday_margin" },
+    connection: { connection_id: "con_01JB3K7M9Q2W4E6R8T0Y1V3X5P", broker: "Alpaca paper", account_equity: brokerEquity([btc, swing, lmn]), day_trading_regime: "intraday_margin" },
     health: healthy,
     agents: [btc, swing, lmn],
     approvals: [pendingSwing, ...resolved],
