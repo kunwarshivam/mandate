@@ -353,6 +353,10 @@ pub struct Protection {
     pub instrument: InstrumentId,
     pub resting: Vec<ClientOrderId>,
     pub covered_qty: Qty,
+    /// The prices the last placement rested at: its stop, and its take-profit unless crypto's
+    /// (§5.4, DEC-36). A passive exit keeps this stop, and a re-placement re-uses both; `None`
+    /// when a placement named no stop, which nothing can re-place from.
+    pub prices: Option<ProtectionPrices>,
 }
 
 /// One interval in which an instrument's position was not fully covered, journaled from start to

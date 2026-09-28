@@ -20,8 +20,8 @@ use crate::state::{
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
-    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
-    UnprotectedInterval,
+    OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock, SubmitOrder,
+    TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -681,6 +681,14 @@ fn protection_changed(
         "placed" => {
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
+            let prices = optional_price(payload, "stop")?
+                .map(|stop| -> Result<ProtectionPrices, ExecutorError> {
+                    Ok(ProtectionPrices {
+                        stop,
+                        take_profit: optional_price(payload, "take_profit")?,
+                    })
+                })
+                .transpose()?;
             legs(state, &instrument, &orders, covered, created_on(payload)?);
             let protection = state
                 .protection
@@ -689,8 +697,10 @@ fn protection_changed(
                     instrument,
                     resting: Vec::new(),
                     covered_qty: Qty::ZERO,
+                    prices: None,
                 });
             protection.resting.extend(orders);
+            protection.prices = prices.or(protection.prices);
             protection.covered_qty = protection.covered_qty.checked_add(covered)?;
         }
         "cancelled" => {
@@ -1555,7 +1565,7 @@ mod buying_power_tests {
 mod protection_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_canon::Value;
-    use mandate_num::{Qty, Usd};
+    use mandate_num::{Price, Qty, Usd};
     use mandate_time::Date;
 
     use super::fold;
@@ -1564,8 +1574,8 @@ mod protection_tests {
     use crate::payload::{clock, object, text};
     use crate::state::ExecutorState;
     use crate::types::{
-        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OrderState, Purpose, RiskClock,
-        Seq, WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OrderState, ProtectionPrices,
+        Purpose, RiskClock, Seq, WorkspaceId,
     };
 
     /// One paper account stream, folded event by event.
@@ -1734,6 +1744,64 @@ mod protection_tests {
             assert_eq!(stream.state.reservations.get(&id(leg)?), Some(&Usd::ZERO));
         }
         assert!(stream.state.unattributed.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_placement_folds_its_prices_and_a_later_one_without_prices_keeps_them()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let aapl = aapl()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-oco-1")),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+            None,
+        )?;
+        let placed = Some(ProtectionPrices {
+            stop: Price::parse("140")?,
+            take_profit: Some(Price::parse("170")?),
+        });
+        let prices = |stream: &Stream| {
+            stream
+                .state
+                .protection
+                .get(&aapl)
+                .and_then(|protection| protection.prices)
+        };
+        assert_eq!(prices(&stream), placed);
+        stream.protection("placed", "md-oco-2", "4")?;
+        assert_eq!(
+            prices(&stream),
+            placed,
+            "a placement that names no stop keeps the prices it cannot replace"
+        );
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-sl-3")),
+                ("qty", text("1")),
+                ("stop", text("135")),
+            ],
+            None,
+        )?;
+        assert_eq!(
+            prices(&stream),
+            Some(ProtectionPrices {
+                stop: Price::parse("135")?,
+                take_profit: None,
+            }),
+            "the latest placement's own prices, a stop without a take-profit included"
+        );
         Ok(())
     }
 

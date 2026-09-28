@@ -271,6 +271,7 @@ mod stub_tests {
                 instrument: aapl.clone(),
                 resting: Vec::new(),
                 covered_qty: Qty::parse("10")?,
+                prices: None,
             },
         );
         Ok((state, aapl))
@@ -430,6 +431,7 @@ mod probe_tests {
                     instrument: instrument.clone(),
                     resting: Vec::new(),
                     covered_qty: Qty::parse(covered)?,
+                    prices: None,
                 },
             );
         }
