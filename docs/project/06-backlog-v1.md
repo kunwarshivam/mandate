@@ -193,6 +193,24 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   error, zero orders reach the connector and nothing is journaled as submitted; and a manual paper run
   places exactly one order, journals its intent before sending it, and refuses any host that is not
   Alpaca's paper host.
+- **E7-8 (Must, M6)** As the founder, I want the tracer to read an instrument's asset record and its
+  latest quote from Alpaca, so that sizing, the collar and the executor's instrument snapshot have a
+  production source ([DEC-168](04-decision-log.md#decisions), the coordinator's ruling on #171).
+  *Accepted when:* `TradingClient::asset` reads trading-domain §3.1's fields from `GET /v2/assets/{symbol}`
+  and `DataClient::latest_quote` reads the IEX or crypto latest quote from the data host, both as exact
+  values; a missing, unreadable, one-sided, other-instrument or stale answer is a typed refusal and
+  never a value (rule 3); the data host is reachable only through its own request type; and the tests
+  in `crates/mandate-alpaca/tests/reads.rs` pass against the recorded fixtures with no network.
+- **E7-9 (Must, M6)** As the founder, I want the agent-stream payload schemas registered in
+  `mandate-journal`, so that the tracer's journal records parse against the journal spec's vectors
+  (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
+  and the executor write has a registered schema, tested first against the journal spec's vectors.
+- **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
+  to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
+  (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
+  `AgentDeployed`, `AgentStopped`, `ConnectionEstablished`, `DisclosureAccepted`,
+  `MandateVersionCreated`, `MandateConfirmed`, `ConfigSnapshotRegistered` and
+  `PlatformOperatorAction` have registered schemas, and each maps to its `JournaledFact`, tests first.
 
 ### E8 Escalation and approvals
 
@@ -580,11 +598,6 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
-- **Stream H, before E6-4's goal implementation: pair the goal tests against constants** (#260 review,
-  the coordinator's ruling there). Once slice P makes `tests/goal.rs` reachable past validation, a
-  constant `goal::status` answering `Ok(Done{..})` passes 2 of its 9 tests and `Ok(Running)` passes 1.
-  Each needs its opposite pair so that no constant passes (#240's standard), in a tests correction
-  ahead of the goal implementation.
 - **`reference/mandate/ref.py`: `violates` reads a level's `null` as a limit** (#263 round 2). For
   `two_approver_above_usd` a level stating `null` should state nothing (DEC-128 item 30(b)); `ref.py`'s
   `violates` compares against it. Align the reference with the crate.
