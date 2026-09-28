@@ -62,13 +62,13 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the shell, with a typographic wordmark and no mark", () => {
+  it("names the product Owlhead in the shell, with the founder's mark and lockup inside the named link", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const home = screen.getAllByRole("link", { name: "Owlhead, dashboard" });
     expect(home.length).toBeGreaterThan(0);
     for (const link of home) {
-      expect(link).toHaveTextContent("Owlhead");
-      expect(link.querySelector("svg")).toBeNull();
+      expect(link.querySelector("[data-slot=owlhead-mark]")).toHaveAttribute("aria-hidden", "true");
+      expect(link.querySelector("[data-slot=owlhead-lockup]")).toHaveAttribute("aria-hidden", "true");
     }
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
