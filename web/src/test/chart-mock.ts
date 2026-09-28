@@ -11,6 +11,8 @@ export interface MockSeries {
   data: unknown[];
   priceLines: CreatePriceLineOptions[];
   markers: SeriesMarker<Time>[];
+  /** What `addSeries` returned; crosshair events key their data by it. */
+  api: unknown;
 }
 
 export interface MockChart {
@@ -24,8 +26,12 @@ export interface MockChart {
 
 export const charts: MockChart[] = [];
 
+/** Set `failNext` to make the next chart throw on creation, as a browser without canvas would. */
+export const chartControl = { failNext: false };
+
 export function resetCharts() {
   charts.length = 0;
+  chartControl.failNext = false;
 }
 
 /** The chart drawn into a canvas container, the latest one if it was redrawn. */
@@ -55,13 +61,18 @@ function seriesApi(record: MockSeries) {
 
 export const mockChartModule = {
   createChart(el: HTMLElement, options: Record<string, unknown> = {}) {
+    if (chartControl.failNext) {
+      chartControl.failNext = false;
+      throw new Error("canvas is not available");
+    }
     const chart: MockChart = { el, options, series: [], removed: false, fitted: false, crosshair: [] };
     charts.push(chart);
     return {
       addSeries(definition: { type: string }, seriesOptions: Record<string, unknown> = {}) {
-        const record: MockSeries = { type: definition.type, options: { ...seriesOptions }, data: [], priceLines: [], markers: [] };
+        const record: MockSeries = { type: definition.type, options: { ...seriesOptions }, data: [], priceLines: [], markers: [], api: null };
+        record.api = seriesApi(record);
         chart.series.push(record);
-        return seriesApi(record);
+        return record.api;
       },
       applyOptions(next: Record<string, unknown>) {
         Object.assign(chart.options, next);
