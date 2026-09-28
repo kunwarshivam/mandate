@@ -21,3 +21,8 @@ npm-debug.log*
 # `next dev` writes these when it detects a coding agent; the repository's own rulebook is /AGENTS.md
 /AGENTS.md
 /CLAUDE.md
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/

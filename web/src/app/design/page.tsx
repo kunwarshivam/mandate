@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Skeleton } from "@/components/domain/skeleton";
 import { Deadline } from "@/components/approvals/deadline";
+import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
@@ -303,6 +304,13 @@ export default function DesignPage() {
             </div>
           </div>
         </div>
+      </Block>
+
+      <Block
+        title="Kumo surfaces, flattened"
+        lead="Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, masks on scrolling regions, and a shimmer on skeletons. Placard flattens every one (DEC-200); a browser test reads the computed styles of these specimens."
+      >
+        <KumoSurfaces />
       </Block>
 
       <Block title="Motion" lead="Motion answers an action or shows what changed, and never lasts past 300 ms. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">

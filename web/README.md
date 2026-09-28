@@ -22,7 +22,15 @@ npm run lint
 npm run typecheck
 npm test
 npm run build && npm start
+
+npx playwright install --with-deps --only-shell chromium   # once
+npm run build && npm run test:e2e
 ```
+
+The e2e suite (`e2e/`, Playwright, Chromium only) starts the production build with `npm start` and
+reads computed styles: no route, overlay, or Kumo surface may paint a gradient or a mask, and each
+Kumo override in `src/app/placard-kumo.css` must hold in the browser (DEC-200). Locally it reuses a
+server already on port 4317. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
 analytics, no session replay, and no service worker.
