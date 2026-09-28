@@ -21,9 +21,10 @@ import { toHex } from "@/lib/color";
 import { PALETTE, type TokenName } from "@/lib/palette";
 
 /**
- * Placard for TradingView Lightweight Charts. Canvas cannot read CSS variables, so the tokens are
- * converted to hex once. Every fill is one flat colour: an area's top and bottom colours are the
- * same, the background is solid, and there is no animation.
+ * TradingView Lightweight Charts in the calm system. Canvas cannot read CSS variables, so the tokens
+ * are converted to hex once. Every fill is one flat colour: an area's top and bottom colours are the
+ * same and the background is solid. The library animates nothing; the one motion, the line drawing
+ * in on first load, is a CSS clip on the canvas's container (`draw-in`).
  */
 export const CHART_TOKEN = {
   card: "card",
@@ -102,9 +103,16 @@ export interface BaseOptionsInput {
   /** A small chart with no axes and no interaction (the approval screen on a phone). */
   compact?: boolean;
   valueFormat?: (value: number) => string;
+  /**
+   * A hero chart that the owner scrubs: no grid, no pan or zoom (the range tabs choose the window),
+   * a hairline crosshair with no labels because the hero figure above reads it out. `axis` keeps
+   * the price scale for the mandate levels' labels.
+   */
+  hero?: { axis: boolean };
 }
 
-export function baseOptions({ reducedMotion, compact = false, valueFormat = usdLabel }: BaseOptionsInput): DeepPartial<ChartOptions> {
+export function baseOptions({ reducedMotion, compact = false, valueFormat = usdLabel, hero }: BaseOptionsInput): DeepPartial<ChartOptions> {
+  if (hero) return heroOptions(valueFormat, hero.axis);
   return {
     autoSize: true,
     layout: {
@@ -142,12 +150,50 @@ export function baseOptions({ reducedMotion, compact = false, valueFormat = usdL
   };
 }
 
+function heroOptions(valueFormat: (value: number) => string, axis: boolean): DeepPartial<ChartOptions> {
+  return {
+    autoSize: true,
+    layout: {
+      background: { type: ColorType.Solid, color: CHART_COLOR.card },
+      textColor: CHART_COLOR.mutedForeground,
+      fontFamily: CHART_FONT,
+      fontSize: 12,
+      attributionLogo: false,
+    },
+    grid: {
+      vertLines: { color: CHART_COLOR.muted, style: LineStyle.Solid, visible: false },
+      horzLines: { color: CHART_COLOR.muted, style: LineStyle.Solid, visible: false },
+    },
+    rightPriceScale: { visible: axis, borderVisible: false, scaleMargins: { top: 0.16, bottom: 0.12 } },
+    leftPriceScale: { visible: false },
+    timeScale: {
+      visible: true,
+      borderVisible: false,
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: tickMark,
+      fixLeftEdge: true,
+      fixRightEdge: true,
+      lockVisibleTimeRangeOnResize: true,
+    },
+    crosshair: {
+      mode: CrosshairMode.Magnet,
+      vertLine: { color: CHART_COLOR.mutedForeground, width: 1, style: LineStyle.Solid, labelVisible: false },
+      horzLine: { visible: false, labelVisible: false },
+    },
+    localization: { locale: "en-US", timeFormatter: formatTime, priceFormatter: valueFormat },
+    handleScroll: false,
+    handleScale: false,
+    kineticScroll: { mouse: false, touch: false },
+  };
+}
+
 export type Tone = "account" | "agent" | "neutral";
 
 /** A flat area: the fill is one colour from the line down to the axis. */
 export function areaOptions(tone: Tone): AreaSeriesPartialOptions {
   const line = tone === "account" ? CHART_COLOR.lapis : tone === "agent" ? CHART_COLOR.foreground : CHART_COLOR.mutedForeground;
-  const fill = tone === "account" ? CHART_COLOR.lapisSoft : CHART_COLOR.muted;
+  const fill = tone === "account" ? CHART_COLOR.lapisSoft : tone === "agent" ? CHART_COLOR.background : CHART_COLOR.muted;
   return {
     lineColor: line,
     lineWidth: 2,
@@ -239,7 +285,7 @@ export function priceLineFor(level: ChartLevel): CreatePriceLineOptions {
     id: level.key,
     price: level.price,
     color: line,
-    lineWidth: 2,
+    lineWidth: 1,
     lineStyle: level.tone === "proposal" ? LineStyle.Dashed : LineStyle.Solid,
     lineVisible: true,
     axisLabelVisible: true,

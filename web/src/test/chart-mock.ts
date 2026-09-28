@@ -22,7 +22,12 @@ export interface MockChart {
   removed: boolean;
   fitted: boolean;
   crosshair: Array<(param: MouseEventParams<Time>) => void>;
+  /** Where the app last pinned the crosshair (touch scrubbing), or `null` once it cleared it. */
+  pinned: { price: number; time: Time } | null;
 }
+
+/** Stands in for the time scale's pixel mapping: tests set the time under a pointer's x. */
+export const pointerTime = { at: (_x: number): number | null => null };
 
 export const charts: MockChart[] = [];
 
@@ -32,6 +37,7 @@ export const chartControl = { failNext: false };
 export function resetCharts() {
   charts.length = 0;
   chartControl.failNext = false;
+  pointerTime.at = () => null;
 }
 
 /** The chart drawn into a canvas container, the latest one if it was redrawn. */
@@ -65,7 +71,7 @@ export const mockChartModule = {
       chartControl.failNext = false;
       throw new Error("canvas is not available");
     }
-    const chart: MockChart = { el, options, series: [], removed: false, fitted: false, crosshair: [] };
+    const chart: MockChart = { el, options, series: [], removed: false, fitted: false, crosshair: [], pinned: null };
     charts.push(chart);
     return {
       addSeries(definition: { type: string }, seriesOptions: Record<string, unknown> = {}) {
@@ -82,10 +88,19 @@ export const mockChartModule = {
           fitContent() {
             chart.fitted = true;
           },
+          coordinateToTime(x: number) {
+            return pointerTime.at(x);
+          },
         };
       },
       subscribeCrosshairMove(handler: (param: MouseEventParams<Time>) => void) {
         chart.crosshair.push(handler);
+      },
+      setCrosshairPosition(price: number, time: Time) {
+        chart.pinned = { price, time };
+      },
+      clearCrosshairPosition() {
+        chart.pinned = null;
       },
       remove() {
         chart.removed = true;

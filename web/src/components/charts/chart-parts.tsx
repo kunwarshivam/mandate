@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useSyncExternalStore } from "react";
+import { useId, useMemo, useSyncExternalStore } from "react";
+import { motion } from "motion/react";
 import { type Market, buildMarket } from "@/fixtures/market";
 import { useRuntime } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
@@ -26,6 +27,11 @@ export function useColourBlind(): boolean {
   );
 }
 
+/**
+ * A quiet segmented control. The current range sits on a soft navy pill that glides to the next one
+ * (a spring, about 300 ms; with reduced motion it jumps). Each option is a pressed-state button, so
+ * the group reads as one control with one choice.
+ */
 export function RangePicker<T extends string>({
   label,
   value,
@@ -37,8 +43,9 @@ export function RangePicker<T extends string>({
   options: ReadonlyArray<{ id: T; label: string }>;
   onChange: (value: T) => void;
 }) {
+  const pill = useId();
   return (
-    <div role="group" aria-label={label} data-slot="range-picker" className="inline-flex border border-foreground">
+    <div role="group" aria-label={label} data-slot="range-picker" className="flex w-full max-w-md items-center justify-between gap-1 sm:w-auto sm:justify-start">
       {options.map((o) => {
         const on = o.id === value;
         return (
@@ -48,11 +55,19 @@ export function RangePicker<T extends string>({
             aria-pressed={on}
             onClick={() => onChange(o.id)}
             className={cn(
-              "h-9 min-w-11 px-2 text-sm font-semibold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset max-sm:h-11",
-              on ? "bg-foreground text-background" : "bg-card text-foreground hover:bg-muted",
+              "press relative h-11 min-w-11 flex-1 rounded-full px-3 font-mono text-sm font-medium tabular outline-none focus-visible:ring-3 focus-visible:ring-ring sm:h-9 sm:flex-none",
+              on ? "text-lapis" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            {o.label}
+            {on ? (
+              <motion.span
+                layoutId={pill}
+                aria-hidden
+                className="absolute inset-0 rounded-full bg-lapis-soft"
+                transition={{ type: "spring", duration: 0.3, bounce: 0.12 }}
+              />
+            ) : null}
+            <span className="relative">{o.label}</span>
           </button>
         );
       })}
@@ -71,12 +86,12 @@ export function LevelLegend({ levels, offChart = [], format = usdLabel, classNam
   const all = [...levels.map((l) => ({ l, drawn: true })), ...offChart.map((l) => ({ l, drawn: false }))].sort((a, b) => b.l.price - a.l.price);
   if (all.length === 0) return null;
   return (
-    <ul data-slot="level-legend" className={cn("grid gap-1 text-sm", className)}>
+    <ul data-slot="level-legend" className={cn("grid gap-2 text-sm", className)}>
       {all.map(({ l, drawn }) => (
         <li key={l.key} data-level={l.key} data-drawn={drawn} className="grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-baseline gap-2">
-          <span aria-hidden className={cn("size-3 self-center", SWATCH[l.tone])} />
+          <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-full", SWATCH[l.tone])} />
           <span>
-            <span className="font-semibold">{l.label}</span>
+            <span className="font-medium">{l.label}</span>
             {l.meaning ? <span className="text-muted-foreground">: {l.meaning}</span> : null}
             {drawn ? null : <span className="text-muted-foreground"> (outside the range shown)</span>}
           </span>
@@ -91,8 +106,7 @@ export function LevelLegend({ levels, offChart = [], format = usdLabel, classNam
 export function ChartSkeleton({ height = 280, label = "Loading chart" }: { height?: number; label?: string }) {
   return (
     <div data-slot="chart-skeleton" aria-busy="true" className="grid gap-1.5">
-      <span className="h-5" />
-      <div className="w-full bg-muted" style={{ height }} role="img" aria-label={label} />
+      <div className="w-full rounded-lg bg-background" style={{ height }} role="img" aria-label={label} />
     </div>
   );
 }
@@ -102,7 +116,7 @@ export function ChartCredit({ className }: { className?: string }) {
   return (
     <p data-slot="chart-credit" className={cn("text-caption text-muted-foreground", className)}>
       Charts:{" "}
-      <a href="https://www.tradingview.com/" className="underline underline-offset-2 hover:text-foreground" rel="noreferrer" target="_blank">
+      <a href="https://www.tradingview.com/" className="underline decoration-border hover:text-foreground hover:decoration-current" rel="noreferrer" target="_blank">
         TradingView Lightweight Charts™
       </a>
     </p>

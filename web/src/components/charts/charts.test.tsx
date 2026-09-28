@@ -7,10 +7,10 @@ import { toFixed } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { agentLimits } from "@/lib/limits";
 import { PALETTE } from "@/lib/palette";
-import { type MockChart, chartControl, chartIn, liveCharts } from "@/test/chart-mock";
+import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, CHART_TOKEN, type ChartLevel, type Tone, areaOptions, baseOptions, candleOptions, lineOptions, priceLineFor } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, type Tone, areaOptions, baseOptions, candleOptions, lineOptions, priceLineFor, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -183,16 +183,109 @@ describe("AccountEquityChart", () => {
     expect(Number(unmanagedEquity(ws))).toBeGreaterThan(0);
   });
 
-  it("reads the crosshair out in Eastern time", () => {
+});
+
+describe("the hero chart scrubs", () => {
+  type Datum = { time: number; value: number };
+  const hover = (chart: MockChart, p: Datum) =>
+    act(() => chart.crosshair[0]({ time: p.time, point: { x: 10, y: 10 }, seriesData: new Map([[chart.series[0].api, p]]) } as never));
+  const leave = (chart: MockChart) => act(() => chart.crosshair[0]({ seriesData: new Map() } as never));
+  const hero = (container: HTMLElement) => ({
+    value: container.querySelector("[data-slot=account-equity-value], [data-slot=agent-equity-value]")!,
+    change: container.querySelector("[data-slot=hero-change]")!,
+    when: container.querySelector("[data-slot=hero-when]")!,
+    section: container.querySelector("section")!,
+  });
+
+  it("moves the hero figure, its change, and the time to the point under the pointer", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const chart = onlyChart(container);
-    const time = Date.parse("2026-09-28T14:03:00-04:00") / 1000;
-    act(() => chart.crosshair[0]({ time, seriesData: new Map([[chart.series[0].api, { time, value: 24987.5 }]]) } as never));
-    const readout = container.querySelector("[data-slot=time-chart] > p[aria-hidden]");
-    expect(readout).toHaveTextContent("Sep 28, 14:03 ET");
-    expect(readout).toHaveTextContent("$24,987.50");
-    act(() => chart.crosshair[0]({ seriesData: new Map() } as never));
-    expect(readout).not.toHaveTextContent("$24,987.50");
+    const data = chart.series[0].data as Datum[];
+    const point = data[Math.floor(data.length / 2)];
+    hover(chart, point);
+    const h = hero(container);
+    expect(h.value.textContent).toBe(usdLabel(point.value));
+    expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
+    expect(h.section).toHaveAttribute("data-scrubbing");
+    const change = Math.round((point.value - data[0].value) * 100) / 100;
+    expect(h.change.querySelector("[data-direction]")).toHaveTextContent(usdLabel(Math.abs(change)).replace("\u2212", ""));
+  });
+
+  it("returns to now when the pointer leaves the line", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    hover(chart, data[3]);
+    leave(chart);
+    const h = hero(container);
+    expect(h.value).toHaveTextContent(usd(WS.connection.account_equity));
+    expect(h.when).toHaveTextContent("today");
+    expect(h.section).not.toHaveAttribute("data-scrubbing");
+  });
+
+  it("keeps the sign, the word, and the performance disclosure on a scrubbed gain and a scrubbed loss", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const low = data.reduce((a, b) => (b.value < a.value ? b : a));
+    const high = data.reduce((a, b) => (b.value > a.value ? b : a));
+    expect(low.value).toBeLessThan(data[0].value);
+    expect(high.value).toBeGreaterThan(data[0].value);
+    for (const [point, sign, word] of [
+      [low, "\u2212", "loss"],
+      [high, "+", "gain"],
+    ] as const) {
+      hover(chart, point);
+      const signed = hero(container).change.querySelector("[data-direction]")!;
+      expect(signed).toHaveAttribute("data-direction", word);
+      expect(signed.textContent).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(hero(container).section.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+    }
+  });
+
+  it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
+    const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const target = data[Math.floor(data.length / 3)];
+    pointerTime.at = () => target.time + 7;
+    const canvas = container.querySelector<HTMLElement>("[data-slot=chart-canvas]")!;
+    fireEvent.pointerDown(canvas, { pointerType: "touch", clientX: 40 });
+    expect(chart.pinned).toEqual({ price: target.value, time: target.time });
+    expect(hero(container).value.textContent).toBe(usdLabel(target.value));
+    fireEvent.pointerUp(canvas, { pointerType: "touch", clientX: 40 });
+    expect(chart.pinned).toBeNull();
+    expect(hero(container).value).toHaveTextContent(usdLabel(data.at(-1)!.value));
+  });
+
+  it("updates a scrubbed figure at once, never through the roll a live change uses", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    expect(hero(container).value.querySelector("[data-instant]")).toBeNull();
+    hover(chart, (chart.series[0].data as Datum[])[5]);
+    expect(hero(container).value.querySelector("[data-instant]")).not.toBeNull();
+    expect(hero(container).change.querySelector("[data-instant]")).not.toBeNull();
+  });
+
+  it("draws the line in on first load, and says a range longer than the history starts with it", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    expect(container.querySelector("[data-slot=chart-canvas]")).toHaveAttribute("data-draw-in");
+    const picker = within(screen.getByRole("group", { name: "Account equity range" }));
+    expect(picker.getAllByRole("button").map((b) => b.textContent)).toEqual(["1D", "1W", "1M", "3M", "1Y", "All"]);
+    fireEvent.click(picker.getByRole("button", { name: "1Y" }));
+    expect(hero(container).when).toHaveTextContent(/^since Sep 2\d$/);
+    fireEvent.click(picker.getByRole("button", { name: "1D" }));
+    expect(hero(container).when).toHaveTextContent("today");
+  });
+
+  it("keeps a hero chart still: no pan, no zoom, and no labels on the crosshair", () => {
+    const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
+    expect(onlyChart(container).options).toMatchObject({
+      handleScroll: false,
+      handleScale: false,
+      kineticScroll: { touch: false, mouse: false },
+      crosshair: { vertLine: { labelVisible: false }, horzLine: { visible: false } },
+    });
   });
 });
 
