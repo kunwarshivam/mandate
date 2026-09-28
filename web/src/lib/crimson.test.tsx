@@ -14,7 +14,7 @@ import { colorTokens, tokenValue } from "./tokens";
 /** Crimson is the kill switch and nothing else (web/DESIGN.md): the sheet's kill-switch links and the record screens' switches. */
 const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Activate the kill switch|Stop all agents on this account|Close everything on this account)/;
 
-const CRIMSON_VALUE = /oklch\(\s*0\.47[\s_]+0\.19[\s_]+27\b/;
+const CRIMSON_VALUE = /oklch\(\s*0\.415[\s_]+0\.164[\s_]+27\b/;
 const CRIMSON_NAME = /-crimson\b/;
 
 const root = resolve(process.cwd(), "src");
@@ -73,11 +73,12 @@ describe("crimson in the source", () => {
     expect(naming.sort()).toEqual([...allowed].sort());
   });
 
-  it("has its value written only in the token files", () => {
+  it("has its value written only in the stylesheet; palette.ts builds it from the crimson ramp", () => {
     const writing = sources(root)
       .filter((file) => CRIMSON_VALUE.test(readFileSync(file, "utf8")))
       .map((file) => relative(root, file));
-    expect(writing.sort()).toEqual(["app/globals.css", "lib/tokens.ts"]);
+    expect(writing).toEqual(["app/globals.css"]);
+    expect(tokenValue("crimson")).toMatch(CRIMSON_VALUE);
   });
 
   it("is read only by the crimson utilities, never aliased by another variable", () => {

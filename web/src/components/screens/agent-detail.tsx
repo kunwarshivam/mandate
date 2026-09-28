@@ -1,91 +1,33 @@
 "use client";
 
-import type { ReactNode } from "react";
 import Link from "next/link";
-import { ArrowRight, ArrowsClockwise, Octagon } from "@phosphor-icons/react";
+import { ArrowRight, ArrowsClockwise } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { LinkButton } from "@cloudflare/kumo/components/button";
 import { Deadline } from "@/components/approvals/deadline";
+import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { Envelope } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
-import { MODE_FIELD, ModeBanner } from "@/components/domain/mode";
+import { MODE_FIELD } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
 import { Timeline } from "@/components/domain/timeline";
 import { price, quantity, usd } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
-import { PageHeader } from "@/components/kumo/page-header/page-header";
-import { OPEN_STOP_EVENT } from "@/components/shell/stop-control";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { useCan } from "@/lib/roles";
-import { AGENT_SECTIONS, type AgentSectionKey, agentHref } from "@/lib/screens";
+import { allOrders } from "@/lib/orders";
+import { AGENT_SECTIONS, type AgentSectionKey, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
+import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
 import { Panel, Section, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
 
-function NotFound() {
-  return (
-    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <h1 id="missing-title" className="text-title sm:text-display">
-        No agent with this ID
-      </h1>
-      <p className="max-w-prose">This workspace has no agent with that ID. It may belong to another workspace.</p>
-      <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit">
-        See all agents
-      </LinkButton>
-    </section>
-  );
-}
-
-const TOP_SECTIONS = AGENT_SECTIONS.filter((s) => !s.parent);
-
-/**
- * Every agent screen shares this frame: the owner's label for the agent as the title, the paper
- * badge beside it, route tabs, and a Stop scoped to this agent. The document title stays generic.
- */
-function AgentFrame({ agent, children }: { agent: Agent; children: ReactNode }) {
-  const canStop = useCan("stop.open");
-  return (
-    <div className="grid grid-cols-1 gap-(--section-gap)">
-      <PageHeader
-        title={agent.label}
-        environment={useRuntime().ws.environment}
-        description={agent.mandate.name}
-        tabs={TOP_SECTIONS.map((s) => ({ href: agentHref(agent.agent_id, s.key), label: s.label }))}
-        tabsLabel="Agent sections"
-        className="mb-0"
-        actions={
-          canStop ? (
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new Event(OPEN_STOP_EVENT))}
-              aria-haspopup="dialog"
-              className="press inline-flex h-11 items-center gap-2 border-2 border-ink bg-card px-3 font-bold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
-            >
-              <Octagon className="size-4" weight="bold" aria-hidden />
-              Stop this agent…
-            </button>
-          ) : null
-        }
-      >
-        <ModeBanner mode={agent.mode} restrictions={agent.restrictions} showMode={false} />
-      </PageHeader>
-      {children}
-    </div>
-  );
-}
-
-function useAgent(agentId: string): Agent | undefined {
-  return useRuntime().ws.agents.find((a) => a.agent_id === agentId);
-}
-
 function AgentDetail({ agentId }: { agentId: string }) {
   const { ws, now } = useRuntime();
   const agent = useAgent(agentId);
-  if (!agent) return <NotFound />;
+  if (!agent) return <AgentNotFound />;
   const staleSymbols = new Set(agent.restrictions.filter((r) => r.code === "stale_mark").map((r) => r.symbol ?? ""));
   const marketStale = ws.health.market_data.state !== "ok";
   const open = ws.approvals.filter((a) => a.agent_id === agent.agent_id).map((a) => approvalAt(a, now)).filter((a) => a.status === "delivered");
@@ -142,6 +84,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
             </p>
           </div>
         </section>
+        <AgentEquityChart agent={agent} />
       </div>
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
@@ -150,12 +93,24 @@ function AgentDetail({ agentId }: { agentId: string }) {
 
           <Section title="Positions">
             <Panel>
-              <PositionsTable positions={agent.positions} now={now} staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols} />
+              <PositionsTable
+                positions={agent.positions}
+                now={now}
+                staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols}
+                hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)}
+              />
             </Panel>
           </Section>
 
-          <Section title="Working orders">
-            <OrdersTable orders={agent.orders} />
+          <Section
+            title="Working orders"
+            action={
+              <Link href={agentHref(agent.agent_id, "orders")} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+                All orders
+              </Link>
+            }
+          >
+            <OrdersTable orders={agent.orders} hrefFor={(o) => orderHref(agent.agent_id, o.client_order_id)} />
           </Section>
         </div>
 
@@ -193,7 +148,7 @@ function AgentDetail({ agentId }: { agentId: string }) {
               ) : (
                 <ul>
                   {decisions.map((d) => (
-                    <GateDecisionRow key={d.event_id} decision={d} agent={agent} />
+                    <GateDecisionRow key={d.event_id} decision={d} agent={agent} href={decisionHref(agent.agent_id, d.event_id)} />
                   ))}
                 </ul>
               )}
@@ -270,14 +225,19 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       return (
         <Section title="Positions">
           <Panel>
-            <PositionsTable positions={agent.positions} now={now} staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols} />
+            <PositionsTable
+                positions={agent.positions}
+                now={now}
+                staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols}
+                hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)}
+              />
           </Panel>
         </Section>
       );
     case "orders":
       return (
         <Section title="Orders">
-          <OrdersTable orders={agent.orders} />
+          <OrdersTable orders={allOrders(agent)} hrefFor={(o) => orderHref(agent.agent_id, o.client_order_id)} empty="No orders yet." />
         </Section>
       );
     case "decisions": {
@@ -290,7 +250,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
             ) : (
               <ul>
                 {decisions.map((d) => (
-                  <GateDecisionRow key={d.event_id} decision={d} agent={agent} />
+                  <GateDecisionRow key={d.event_id} decision={d} agent={agent} href={decisionHref(agent.agent_id, d.event_id)} />
                 ))}
               </ul>
             )}
@@ -308,7 +268,14 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       return (
         <div className="grid grid-cols-1 gap-(--section-gap)">
           <Envelope agent={agent} />
-          <Section title="Mandate">
+          <Section
+            title="Mandate"
+            action={
+              <Link href={agentHref(agent.agent_id, "mandate/versions")} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+                Versions
+              </Link>
+            }
+          >
             <Panel>
               <MandateSummary agent={agent} />
             </Panel>
@@ -356,7 +323,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
 
 function AgentSection({ agentId, section }: { agentId: string; section: AgentSectionKey }) {
   const agent = useAgent(agentId);
-  if (!agent) return <NotFound />;
+  if (!agent) return <AgentNotFound />;
   return (
     <AgentFrame agent={agent}>
       <SectionBody agent={agent} section={section} />

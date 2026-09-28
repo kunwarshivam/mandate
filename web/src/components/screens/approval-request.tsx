@@ -7,6 +7,7 @@ import { Button, LinkButton } from "@cloudflare/kumo/components/button";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { LimitRail } from "@/components/domain/envelope";
+import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, Environment, ModelOutput, RiskFigure, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
@@ -94,16 +95,16 @@ function NotFound() {
 interface RequestSnapshot {
   environment: Environment;
   proposer: string;
-  approval: Pick<Approval, "deadline" | "bound" | "trigger" | "risk_impact" | "evidence" | "approvers_required" | "approvals_so_far">;
+  approval: Pick<Approval, "requested_at" | "deadline" | "bound" | "trigger" | "risk_impact" | "evidence" | "approvers_required" | "approvals_so_far">;
 }
 
 function snapshotOf(ws: Workspace, approval: Approval): RequestSnapshot {
   const agent = findAgent(ws, approval.agent_id);
-  const { deadline, bound, trigger, risk_impact, evidence, approvers_required, approvals_so_far } = approval;
+  const { requested_at, deadline, bound, trigger, risk_impact, evidence, approvers_required, approvals_so_far } = approval;
   return {
     environment: ws.environment,
     proposer: `${agent?.label ?? "An agent"} (${agent?.mandate.name ?? "unknown mandate"}) proposes:`,
-    approval: { deadline, bound, trigger, risk_impact, evidence, approvers_required, approvals_so_far },
+    approval: { requested_at, deadline, bound, trigger, risk_impact, evidence, approvers_required, approvals_so_far },
   };
 }
 
@@ -198,6 +199,7 @@ function Request({ approvalId }: { approvalId: string }) {
               <dd className="font-mono text-caption">{b.mandate_version.slice(7, 19)}</dd>
             </div>
           </dl>
+          <ApprovalChart approval={a} className="border-t pt-3" />
           <div className="grid gap-0.5 border-t pt-3">
             <p className="label-caps text-muted-foreground">Why you are asked</p>
             <p>{a.trigger}</p>
@@ -208,12 +210,12 @@ function Request({ approvalId }: { approvalId: string }) {
           </div>
         </header>
 
-        <section aria-labelledby="risk-title" className="reveal grid gap-4 bg-marigold px-3 py-3 text-marigold-foreground sm:px-4 sm:py-4" style={{ "--i": 1 } as CSSProperties}>
+        <section aria-labelledby="risk-title" className="reveal grid gap-4 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4 sm:pt-3 sm:pb-4" style={{ "--i": 1 } as CSSProperties}>
           <div className="grid gap-1">
-            <h2 id="risk-title" className="text-heading">
+            <h2 id="risk-title" className="text-heading text-mandate-strong">
               Risk impact in dollars
             </h2>
-            <p className="text-sm text-marigold-muted">Measured against your mandate, as if this order fills.</p>
+            <p className="text-sm text-mandate-muted">Measured against your mandate, as if this order fills.</p>
           </div>
           {capped.length > 0 ? (
             <div className="grid gap-4">
@@ -223,7 +225,7 @@ function Request({ approvalId }: { approvalId: string }) {
             </div>
           ) : null}
           {uncapped.length > 0 ? (
-            <dl className="grid gap-2 border-t border-marigold-foreground/25 pt-3">
+            <dl className="grid gap-2 border-t border-mandate-strong/25 pt-3">
               {uncapped.map((f) => (
                 <RiskFigureRow key={f.field} figure={f} />
               ))}

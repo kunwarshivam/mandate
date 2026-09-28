@@ -77,7 +77,7 @@ export function ScreenSkeleton({ rows = 3 }: { rows?: number }) {
           <div key={i} className="grid gap-(--seam) md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1.1fr)]">
             <Skeleton className="h-10 md:h-44" />
             <Skeleton className="h-44" />
-            <Skeleton className="h-44 bg-marigold-soft" />
+            <Skeleton className="h-44 bg-mandate-soft" />
           </div>
         ))}
       </div>

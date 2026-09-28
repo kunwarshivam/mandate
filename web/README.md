@@ -48,6 +48,10 @@ role lives in React state only and resets on reload: approvers may pause but not
 auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group;
 any other route renders "Not available to your role" for them instead of the page.
 
+It also turns on colour-blind friendly gains and losses (the `mandate-cvd` cookie; `?cvd=1` or
+`?cvd=0`, or Alt+Shift+C), and links to `/palette`, the palette reference, which exists only in
+development.
+
 ## The mock-data rule
 
 - Every figure comes from typed fixtures in `src/fixtures/`, which mirror
@@ -61,8 +65,14 @@ any other route renders "Not available to your role" for them instead of the pag
   optimistic result.
 - Nothing about approvals, positions, or mandates is written to `localStorage`,
   `sessionStorage`, or a cache. The app stores nothing in the browser.
+- Charts draw seeded, deterministic fixture bars and equity (`src/fixtures/market.ts`), consistent
+  with the fixture's fills, positions and equity. They are TradingView Lightweight Charts
+  (Apache-2.0); the credit is in `web/NOTICE`, under the dashboard's account chart and on `/design`.
 - Compliance text appears only as the placeholders `[[DISCLOSURE-PERFORMANCE]]`,
-  `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`.
+  `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`. Every P&L figure (a signed gain or loss,
+  or a dollar figure labelled realized, unrealized, P&L, gain or loss) has
+  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item; `src/app/disclosure.test.tsx`
+  renders every route in every scenario and fails otherwise.
 
 ## Design system
 
@@ -73,15 +83,26 @@ rules that constrain visuals. `/design` (not linked from the navigation) renders
 their OKLCH values and computed contrast, the type scale, the spacing before and after the gutter
 change, every state treatment, the components, and motion samples.
 
-- **Colour means one thing each.** Marigold is your mandate, lapis is the account, ink is a stopped
-  agent and the Stop control, crimson is the kill switch and nothing else. Gains and losses are the
-  only other hues, as text beside a sign and the word. Values live once in `src/lib/tokens.ts`,
-  mirrored in `src/app/globals.css`; `tokens.test.ts` fails if they drift or a pair drops below AA.
+- **Colour means one thing each** (navy and brass, `web/COLOR.md`). Brass is your mandate, navy is
+  the account, ink is a stopped agent and the Stop control, crimson is the kill switch and nothing
+  else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
+  once in `src/lib/palette.ts`, mirrored in `src/app/globals.css`; `tokens.test.ts` and
+  `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA.
+- **APCA is dev only.** `apca-w3` (its own limited licence) and its AGPL-3.0 dependency
+  `colorparsley` are dev dependencies used only by the contrast tests (`src/test/apca.ts`). Lint
+  bans them in app code, and `npm run build` ends with `scripts/no-apca.mjs`, which fails if either
+  reached `.next`. `/design` and `/palette` show WCAG ratios only.
 - **Light only.** Dark mode is follow-up work; there is no theme toggle.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
 - **Type.** Big Shoulders Display for headings and big figures, in capitals; Atkinson Hyperlegible
   Next for everything read, in sentence case. Self-hosted through `@fontsource-variable/*`.
+- **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
+  (DEC-203), always navy on a light surface, with no tagline; the "navy and brass" palette is
+  DEC-202. `npm run brand` regenerates the favicons, app icons, share image and manifest in
+  `public/` from `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`; commit its output,
+  because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
+  the rules.
 - **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, nothing past 300 ms,
   press to 0.97 with a faster release, fields wipe in once with a 30 ms stagger, changed numbers roll
   whole. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.

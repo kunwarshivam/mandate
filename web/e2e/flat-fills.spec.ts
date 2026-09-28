@@ -1,7 +1,7 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 import { recordHref } from "../src/components/stop/commands";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "../src/fixtures/workspace";
-import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref } from "../src/lib/screens";
+import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref } from "../src/lib/screens";
 
 /**
  * DEC-200: flat fills only. Kumo paints linear gradients and masks in several components, and
@@ -9,7 +9,11 @@ import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref } from "../src/lib/sc
  * Chromium against the production build.
  */
 
-const CONNECTION = buildWorkspace("normal").connection.connection_id;
+const WS = buildWorkspace("normal");
+const CONNECTION = WS.connection.connection_id;
+const SWING = WS.agents.find((a) => a.agent_id === AGENT_IDS.swing)!;
+const BTC = WS.agents.find((a) => a.agent_id === AGENT_IDS.btc)!;
+const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
 
 const ROUTES = [
   ...new Set([
@@ -19,6 +23,12 @@ const ROUTES = [
     ...AGENT_SECTIONS.map((s) => agentHref(AGENT_IDS.swing, s.key)),
     agentHref(AGENT_IDS.btc, "overview"),
     `/approvals/${APPROVAL_IDS.swingXyz}`,
+    positionHref(AGENT_IDS.swing, XYZ.instrument.asset_id),
+    `${positionHref(AGENT_IDS.swing, XYZ.instrument.asset_id)}/close`,
+    positionHref(AGENT_IDS.btc, BTC.positions[0].instrument.asset_id),
+    orderHref(AGENT_IDS.swing, SWING.orders[0].client_order_id),
+    orderHref(AGENT_IDS.swing, SWING.past_orders[0].client_order_id),
+    decisionHref(AGENT_IDS.swing, WS.decisions.find((d) => d.agent_id === AGENT_IDS.swing)!.event_id),
     recordHref("kill", AGENT_IDS.btc),
     recordHref("release", AGENT_IDS.btc),
     recordHref("stop_all", CONNECTION),

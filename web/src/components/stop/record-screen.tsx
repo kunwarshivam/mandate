@@ -149,7 +149,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
               {shown.scope}
             </p>
             {shown.warning ? (
-              <p role="note" data-slot="release-warning" className="border-t-4 border-foreground bg-marigold px-3 py-3 font-bold text-marigold-foreground sm:px-4">
+              <p role="note" data-slot="release-warning" className="border-t-4 border-mandate-edge bg-mandate px-3 py-3 font-bold text-mandate-foreground sm:px-4">
                 {shown.warning}
               </p>
             ) : null}

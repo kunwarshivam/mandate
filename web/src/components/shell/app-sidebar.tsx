@@ -1,6 +1,7 @@
 "use client";
 
 import type { ComponentType } from "react";
+import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@cloudflare/kumo/components/sidebar";
 import {
@@ -38,9 +39,11 @@ import {
   Users,
 } from "@phosphor-icons/react";
 import type { Agent } from "@/fixtures/types";
+import { homeFor } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { can, useRole } from "@/lib/roles";
 import { AGENT_SECTIONS, type AgentSection, type AgentSectionKey, GROUP_LABEL, GROUP_NEEDS, SCREENS, type ScreenGroup, agentHref } from "@/lib/screens";
+import { SidebarBrand } from "./brand";
 import { agentIdFrom } from "./stop-control";
 
 type IconType = ComponentType<{ className?: string }>;
@@ -50,6 +53,7 @@ const SCREEN_ICON: Record<string, IconType> = {
   approvals: Tray,
   alerts: Bell,
   agents: Robot,
+  positions: Stack,
   "agents-new": Plus,
   connections: Plugs,
   "audit-trace": Path,
@@ -216,8 +220,9 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
 }
 
 /**
- * Kumo's Sidebar in Placard. The lapis header is the account. Inside an agent, the sidebar slides
- * to that agent's sections; loading agent data never holds back the header or the Stop control.
+ * Kumo's Sidebar in Placard. The header is a light surface carrying the navy Owlhead brand and the
+ * account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
+ * holds back the header or the Stop control.
  */
 export function AppSidebar() {
   const pathname = usePathname();
@@ -227,14 +232,24 @@ export function AppSidebar() {
   const agent = agentId ? ws.agents.find((a) => a.agent_id === agentId) : undefined;
   const openApprovals = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
   const agentScoped = agentId !== null && can(role, "agents.view");
+  const home = homeFor(role);
 
   return (
     <Sidebar aria-label="Main">
-      <Sidebar.Header data-surface="lapis" data-slot="account" className="border-b-0">
-        <div className="flex min-w-0 items-center gap-2.5">
+      <Sidebar.Header data-slot="brand" className="h-auto flex-col items-stretch gap-0 bg-background px-0">
+        <div className="flex h-14 shrink-0 items-center px-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+          <Link
+            href={home.href}
+            className="inline-flex min-h-11 items-center outline-none focus-visible:ring-3 focus-visible:ring-ring"
+            aria-label={`Owlhead, ${home.label}`}
+          >
+            <SidebarBrand />
+          </Link>
+        </div>
+        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-3 pb-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
           <Buildings className="size-5 shrink-0" aria-hidden />
           <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">
-            <span className="label-caps text-lapis-muted">Account</span>
+            <span className="label-caps text-muted-foreground">Account</span>
             <span className="truncate text-sm font-bold">{ws.connection.broker}</span>
           </div>
         </div>
