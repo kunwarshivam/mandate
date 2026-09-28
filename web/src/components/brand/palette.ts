@@ -1,11 +1,11 @@
 /** The founder's "navy and brass" palette (DEC-202). `scripts/brand-assets.mjs` uses the same values. */
 export const BRAND_PALETTE = [
-  { name: "Navy", hex: "#183D73", role: "The brand; the mark on light surfaces; the tile behind the app icons" },
+  { name: "Navy", hex: "#183D73", role: "The brand; the mark, always on a light surface" },
   { name: "Brass", hex: "#AC7D1B", role: "The one accent: rules, borders, large type. Never body text" },
   { name: "Dark brass", hex: "#634606", role: "Brass as text, and text on the brass tint" },
   { name: "Brass tint", hex: "#FDF1DC", role: "A brass notice field" },
   { name: "Slate ink", hex: "#181C21", role: "Text" },
-  { name: "Off-white", hex: "#F7FAFE", role: "The page; the mark on navy" },
+  { name: "Off-white", hex: "#F7FAFE", role: "The page; the tile behind the app icons and the share image" },
 ] as const;
 
 export type BrandColorName = (typeof BRAND_PALETTE)[number]["name"];

@@ -3,7 +3,7 @@
   "short_name": "Owlhead",
   "start_url": "/",
   "display": "standalone",
-  "theme_color": "#183D73",
+  "theme_color": "#F7FAFE",
   "background_color": "#F7FAFE",
   "icons": [
     {

@@ -2,19 +2,15 @@ import type { ReactNode } from "react";
 import { LOCKUP_GAP, OwlheadLockup, OwlheadMark, OwlheadWordmark } from "./Logo";
 import { BRAND_PALETTE, NAVY, OFF_WHITE, hexContrast } from "./palette";
 
-const SURFACES = [
-  { name: "On navy", background: NAVY, color: OFF_WHITE },
-  { name: "On off-white", background: OFF_WHITE, color: NAVY },
-] as const;
-
 const DO = [
-  "Navy on light surfaces, off-white on navy: one colour at a time.",
+  "Navy on a light surface, always: one colour at a time.",
   "The mark alone where the lockup does not fit: a phone header, a collapsed sidebar, a favicon.",
   "Clear space of a quarter of the mark's height on every side, the same as the gap inside the lockup.",
   "The committed SVGs or the Logo components, scaled as a whole.",
 ];
 
 const DONT = [
+  "Reverse it: no off-white mark on a navy block or any other dark fill, in the UI, the app icons, or the share image.",
   "Recolour it: no brass mark, no second colour, no colour fade, shadow, or outline.",
   "Stretch, rotate, crop, or redraw it, or rebuild the wordmark in live type or another face.",
   "Use the founder's shaded original in product UI: the UI is flat colour (DEC-200).",
@@ -34,17 +30,13 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
 export function BrandSpecimen() {
   return (
     <div className="grid gap-(--block-gap)">
-      <div className="grid gap-(--seam) lg:grid-cols-2">
-        {SURFACES.map((s) => (
-          <div key={s.name} data-slot="brand-surface" className="grid gap-6 border p-5" style={{ background: s.background, color: s.color }}>
-            <span className="label-caps">{s.name}</span>
-            <div className="flex flex-wrap items-end gap-8">
-              <OwlheadMark className="h-16 w-auto" />
-              <OwlheadWordmark className="h-10 w-auto" />
-            </div>
-            <OwlheadLockup className="h-12 w-auto max-w-full self-start" />
-          </div>
-        ))}
+      <div data-slot="brand-surface" className="grid gap-6 border p-5" style={{ background: OFF_WHITE, color: NAVY }}>
+        <span className="label-caps">On off-white</span>
+        <div className="flex flex-wrap items-end gap-8">
+          <OwlheadMark className="h-16 w-auto" />
+          <OwlheadWordmark className="h-10 w-auto" />
+          <OwlheadLockup className="h-12 w-auto max-w-full" />
+        </div>
       </div>
 
       <div className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">

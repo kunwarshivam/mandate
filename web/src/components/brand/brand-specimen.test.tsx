@@ -3,14 +3,13 @@ import { describe, expect, it } from "vitest";
 import { BrandSpecimen } from "./brand-specimen";
 
 describe("/design brand specimen", () => {
-  it("shows the mark, wordmark, and lockup on navy and on off-white", () => {
+  it("shows the mark, wordmark, and lockup in navy on off-white, and never reversed on navy", () => {
     const { container } = render(<BrandSpecimen />);
     const surfaces = container.querySelectorAll<HTMLElement>("[data-slot=brand-surface]");
-    expect([...surfaces].map((s) => [s.style.background, s.style.color])).toEqual([
-      ["rgb(24, 61, 115)", "rgb(247, 250, 254)"],
-      ["rgb(247, 250, 254)", "rgb(24, 61, 115)"],
-    ]);
-    for (const s of surfaces) expect(within(s).getAllByRole("img", { name: "Owlhead" })).toHaveLength(3);
+    expect([...surfaces].map((s) => [s.style.background, s.style.color])).toEqual([["rgb(247, 250, 254)", "rgb(24, 61, 115)"]]);
+    expect(within(surfaces[0]).getAllByRole("img", { name: "Owlhead" })).toHaveLength(3);
+    const navyFills = [...container.querySelectorAll<HTMLElement>("[style]")].filter((el) => el.style.background === "rgb(24, 61, 115)" && !el.closest("[data-slot=brand-color]"));
+    expect(navyFills).toEqual([]);
   });
 
   it("lists the six palette values with their contrast", () => {

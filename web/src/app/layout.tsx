@@ -12,7 +12,6 @@ import { buildWorkspace } from "@/fixtures/workspace";
 import { getScenario } from "@/lib/get-workspace";
 import { scenariosEnabled } from "@/lib/scenario";
 
-const DESCRIPTION = "Autonomous trading agents under a mandate you set. Paper trading only.";
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
 
 /**
@@ -24,7 +23,6 @@ export const metadata: Metadata = {
   metadataBase: new URL("https://owlhead.ai"),
   applicationName: "Owlhead",
   title: { template: "%s · Owlhead", default: "Owlhead" },
-  description: DESCRIPTION,
   robots: { index: false, follow: false },
   referrer: "no-referrer",
   icons: {
@@ -38,12 +36,12 @@ export const metadata: Metadata = {
     apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
   },
   manifest: "/site.webmanifest",
-  openGraph: { type: "website", siteName: "Owlhead", title: "Owlhead", description: DESCRIPTION, url: "/", images: [SHARE_IMAGE] },
-  twitter: { card: "summary_large_image", title: "Owlhead", description: DESCRIPTION, images: [SHARE_IMAGE] },
+  openGraph: { type: "website", siteName: "Owlhead", title: "Owlhead", url: "/", images: [SHARE_IMAGE] },
+  twitter: { card: "summary_large_image", title: "Owlhead", images: [SHARE_IMAGE] },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#183D73",
+  themeColor: "#F7FAFE",
   colorScheme: "light",
 };
 

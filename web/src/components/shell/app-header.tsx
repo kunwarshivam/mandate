@@ -91,7 +91,7 @@ export function AppHeader() {
     <header className="sticky top-0 z-30 border-b bg-background">
       <div className="flex h-14 items-center gap-1 px-(--page-x) sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
-        <Link href={home.href} className="shrink-0 px-1 text-foreground" aria-label={`Owlhead, ${home.label}`}>
+        <Link href={home.href} className="shrink-0 px-1 text-foreground lg:hidden" aria-label={`Owlhead, ${home.label}`}>
           <Wordmark className="text-xl sm:text-2xl" />
         </Link>
         <div className="hidden lg:block">

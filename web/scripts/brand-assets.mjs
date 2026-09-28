@@ -69,15 +69,15 @@ function faviconSvg(d) {
   );
 }
 
-/** The off-white mark on a navy square, its bounding box centred and scaled to `scale` tile units. */
+/** The navy mark on an off-white square, its bounding box centred and scaled to `scale` tile units. */
 function tileSvg(d, scale) {
   const b = bounds(markPoints(d));
   const tx = round(TILE / 2 - ((b.minX + b.maxX) / 2) * scale);
   const ty = round(TILE / 2 - ((b.minY + b.maxY) / 2) * scale);
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${TILE} ${TILE}">` +
-    `<rect width="${TILE}" height="${TILE}" fill="${NAVY}"/>` +
-    `<path fill="${OFF_WHITE}" fill-rule="evenodd" transform="translate(${tx} ${ty}) scale(${round(scale)})" d="${d}"/></svg>`
+    `<rect width="${TILE}" height="${TILE}" fill="${OFF_WHITE}"/>` +
+    `<path fill="${NAVY}" fill-rule="evenodd" transform="translate(${tx} ${ty}) scale(${round(scale)})" d="${d}"/></svg>`
   );
 }
 
@@ -132,7 +132,7 @@ function manifest() {
       short_name: "Owlhead",
       start_url: "/",
       display: "standalone",
-      theme_color: NAVY,
+      theme_color: OFF_WHITE,
       background_color: OFF_WHITE,
       icons: [icon("/pwa-192.png", 192, "any"), icon("/pwa-512.png", 512, "any"), icon("/pwa-maskable-512.png", 512, "maskable")],
     },

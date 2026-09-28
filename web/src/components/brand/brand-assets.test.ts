@@ -130,7 +130,7 @@ describe("brand assets (npm run brand)", () => {
     ["pwa-192.png", 192],
     ["pwa-512.png", 512],
     ["pwa-maskable-512.png", 512],
-  ])("renders %s as the off-white mark centred on a navy %ipx square", async (name, size) => {
+  ])("renders %s as the navy mark centred on an off-white %ipx square", async (name, size) => {
     const image = await png(name);
     expect([image.width, image.height]).toEqual([size, size]);
     for (const [x, y] of [
@@ -139,8 +139,8 @@ describe("brand assets (npm run brand)", () => {
       [0, size - 1],
       [size - 1, size - 1],
     ])
-      expect(image.at(x, y)).toEqual(opaque(NAVY));
-    const mark = pixels(image).filter(([, , p]) => p.join() === opaque(OFF_WHITE).join());
+      expect(image.at(x, y)).toEqual(opaque(OFF_WHITE));
+    const mark = pixels(image).filter(([, , p]) => p.join() === opaque(NAVY).join());
     expect(mark.length).toBeGreaterThan(0);
     const ys = mark.map(([, y]) => y);
     const xs = mark.map(([x]) => x);
@@ -155,25 +155,33 @@ describe("brand assets (npm run brand)", () => {
     const centre = (image.width - 1) / 2;
     const radius = image.width * 0.4;
     for (const [x, y, p] of pixels(image)) {
-      if (Math.hypot(x - centre, y - centre) > radius) expect(p).toEqual(opaque(NAVY));
+      if (Math.hypot(x - centre, y - centre) > radius) expect(p).toEqual(opaque(OFF_WHITE));
     }
   });
 
-  it("renders og-image.png at 1200 by 630: navy, the off-white mark and wordmark, the brass rule", async () => {
+  it("renders og-image.png at 1200 by 630: off-white, the navy mark and wordmark, and nothing else", async () => {
     const image = await png("og-image.png");
     expect([image.width, image.height]).toEqual([1200, 630]);
-    expect(image.at(10, 10)).toEqual(opaque(NAVY));
-    expect(image.at(1190, 620)).toEqual(opaque(NAVY));
-    expect(image.at(800, 351)).toEqual(opaque(brandHex("Brass")));
-    const offWhite = pixels(image).filter(([, , p]) => p.join() === opaque(OFF_WHITE).join());
-    expect(offWhite.some(([x, y]) => x < 355 && y > 140 && y < 400)).toBe(true);
-    expect(offWhite.some(([x, y]) => x > 455 && y < 262)).toBe(true);
-    expect(offWhite.some(([x, y]) => x > 455 && y > 400)).toBe(true);
+    const all = pixels(image);
+    const navy = all.filter(([, , p]) => p.join() === opaque(NAVY).join());
+    const xs = navy.map(([x]) => x);
+    const ys = navy.map(([, y]) => y);
+    const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    expect(Math.abs(left - (1199 - right))).toBeLessThanOrEqual(30);
+    expect(Math.abs(top - (629 - bottom))).toBeLessThanOrEqual(4);
+    expect(navy.some(([x, y]) => x < 345 && y > 190 && y < 450)).toBe(true);
+    expect(navy.some(([x, y]) => x > 445 && y > 190 && y < 312)).toBe(true);
+    const ink = all.filter(([, , p]) => p.join() !== opaque(OFF_WHITE).join());
+    expect(ink.some(([x, y]) => x > 445 && y > 330)).toBe(false);
+    for (const [, , p] of ink) expect(p[3]).toBe(255);
+    const [bg, fg] = [rgb(OFF_WHITE), rgb(NAVY)];
+    for (const [, , p] of ink) for (const c of [0, 1, 2]) expect(p[c]).toBeGreaterThanOrEqual(Math.min(bg[c], fg[c]));
+    expect(all.some(([, , p]) => p.join() === opaque(brandHex("Brass")).join())).toBe(false);
   });
 
   it("describes the installed app in site.webmanifest", async () => {
     const manifest = JSON.parse((await committed("site.webmanifest")).toString("utf8"));
-    expect(manifest).toMatchObject({ name: "Owlhead", short_name: "Owlhead", theme_color: "#183D73", background_color: "#F7FAFE", display: "standalone" });
+    expect(manifest).toMatchObject({ name: "Owlhead", short_name: "Owlhead", theme_color: "#F7FAFE", background_color: "#F7FAFE", display: "standalone" });
     expect(manifest.icons.map((i: { src: string }) => i.src)).toEqual(["/pwa-192.png", "/pwa-512.png", "/pwa-maskable-512.png"]);
   });
 

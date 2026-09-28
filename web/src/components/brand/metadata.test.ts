@@ -20,10 +20,16 @@ describe("root layout metadata (DEC-203)", () => {
     for (const url of referenced) expect(existsSync(path.join(PUBLIC_DIR, url)), url).toBe(true);
   });
 
-  it("shares a generic Owlhead card at owlhead.ai, in navy", () => {
+  it("shares a generic Owlhead card at owlhead.ai, on off-white", () => {
     expect(String(metadata.metadataBase)).toBe("https://owlhead.ai/");
     expect(metadata.openGraph).toMatchObject({ title: "Owlhead", images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" }] });
     expect(metadata.twitter).toMatchObject({ card: "summary_large_image", title: "Owlhead", images: [{ url: "/og-image.png", alt: "Owlhead" }] });
-    expect(viewport.themeColor).toBe("#183D73");
+    expect(viewport.themeColor).toBe("#F7FAFE");
+  });
+
+  it("carries no description or tagline", () => {
+    expect(metadata.description).toBeUndefined();
+    expect(metadata.openGraph).not.toHaveProperty("description");
+    expect(metadata.twitter).not.toHaveProperty("description");
   });
 });
