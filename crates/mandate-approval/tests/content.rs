@@ -368,7 +368,9 @@ fn an_approval_ref_displays_only_its_event_id() {
 
 /// Live, rule 6 at rung 1 (#250 review, DEC-165 item 13): only the journal's ULID shape becomes an
 /// approval reference, so free text such as a symbol, a price, or an account id never reaches a
-/// payload through it. Each refusal differs from a valid id in one property only.
+/// payload through it. After the three free-text rows, each refused id differs from a valid one in
+/// one property only, except the non-ASCII row: it has 26 characters but 27 bytes, because no
+/// string of 26 bytes can be both non-ASCII and 26 characters long.
 #[test]
 fn only_a_ulid_shaped_event_id_becomes_an_approval_ref() {
     for accepted in [

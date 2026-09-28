@@ -729,6 +729,21 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   on the normal path (§5.4's legs activate at completion), but a re-placement after a
   cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
   allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
+- **E7-4 slice 2's tests correction (stream K):** a `properties` oracle expects `OwnerAlertSent`
+  among the executor's drafts, but it is a control-stream event the executor never writes; the
+  executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
+  Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
+- **E7-4 slice 3b (stream K), from #258's round 2 (comment 5862870455):** (1) pin with tests the
+  three fail-open paths whose code is right but unclaimed: `reconcile::agents` counting an ownerless
+  order as `""`, `orders::unmapped`'s ownerless (`Some(None)`) arm, and `reattribute` without its
+  instrument filter; (2) make the pins' `sources()` skip `#[cfg(test)]` regions and drop the
+  `concat!` idiom that dodges them.
+- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
+  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
+  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
+  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
+  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
+  slice reads buying power from it.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
