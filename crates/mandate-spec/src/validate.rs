@@ -914,4 +914,4 @@ pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

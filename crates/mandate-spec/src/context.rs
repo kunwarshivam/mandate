@@ -448,10 +448,71 @@ fn escaped(key: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentId;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use mandate_domain::{AssetId, Environment};
+    use mandate_num::Usd;
+    use mandate_time::Date;
+
+    use super::{AgentId, ContextArgs, JournaledFact};
+    use crate::document::ConnectionId;
+    use crate::validate::ValidationContext;
+    use crate::validate::tests::mandate;
 
     #[test]
     fn an_agent_id_is_the_text_it_was_given() {
         assert_eq!(AgentId::new("agent_7").as_str(), "agent_7");
+    }
+
+    /// The claims half of the conservative retirement (#255 round 2, n1, required by the coordinator):
+    /// a stop naming another connection than the agent's version does not retire it, so a later
+    /// `AgentFlat` releases nothing, and V-006 still sees the instrument it pins as claimed.
+    #[test]
+    fn a_stop_on_another_connection_then_flat_keeps_the_claims() -> Result<(), String> {
+        let ours = ConnectionId::parse("conn_alpaca_paper_01").map_err(|e| e.to_string())?;
+        let theirs = ConnectionId::parse("conn_alpaca_paper_02").map_err(|e| e.to_string())?;
+        let pinned =
+            AssetId::parse("7b4a1c2e-aaaa-4a2b-9c3d-00000000000a").map_err(|e| e.to_string())?;
+        let date = Date::parse("2026-09-24").map_err(|e| e.to_string())?;
+        let b = AgentId::new("b");
+        let facts = [
+            JournaledFact::AgentVersionActive {
+                agent: b.clone(),
+                connection_id: ours.clone(),
+                environment: Environment::Paper,
+                allocation_usd: Usd::parse("3000").map_err(|e| e.to_string())?,
+                pinned: BTreeSet::from([pinned.clone()]),
+            },
+            JournaledFact::AgentStopped {
+                agent: b.clone(),
+                connection_id: theirs,
+                retired_on: date,
+                loss_added_usd: Usd::ZERO,
+            },
+            JournaledFact::AgentFlat { agent: b },
+        ];
+        let args = ContextArgs {
+            agent: AgentId::new("a"),
+            connection_id: ours,
+            validation_date: date,
+            membership: None,
+            instrument_groups: BTreeMap::new(),
+            eligibility_failures: BTreeSet::new(),
+        };
+        let read = ValidationContext::from_journal(&mandate(&[])?, args, &facts)
+            .map_err(|e| e.to_string())?;
+        if read.claimed_by_other_agents != BTreeSet::from([pinned]) {
+            return Err(format!(
+                "b's claim must stand, got {:?}",
+                read.claimed_by_other_agents
+            ));
+        }
+        if read.other_allocations_usd != Usd::parse("3000").map_err(|e| e.to_string())? {
+            return Err(format!(
+                "b's allocation must stand, got {:?}",
+                read.other_allocations_usd
+            ));
+        }
+        Ok(())
     }
 }

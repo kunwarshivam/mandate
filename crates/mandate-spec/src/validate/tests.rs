@@ -118,7 +118,7 @@ fn document(patches: &[(&str, &str)]) -> Result<Value, String> {
     Ok(document)
 }
 
-fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
+pub(crate) fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
     Mandate::parse(&document(patches)?).map_err(|e| format!("{patches:?}: {e}"))
 }
 
