@@ -1738,7 +1738,7 @@ mod protection_tests {
     }
 
     #[test]
-    fn a_leg_named_for_its_entry_takes_that_entrys_agent_whoever_else_holds()
+    fn a_leg_named_for_its_entry_takes_the_agent_of_that_entry_whoever_else_holds()
     -> Result<(), ExecutorError> {
         let mut stream = Stream::opened()?;
         stream.bought("agent-a", "md-buy-1", "4")?;
