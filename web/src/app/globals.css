@@ -1,0 +1,309 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Colour values live in src/lib/tokens.ts as well; tokens.test.ts fails when the two drift.
+ * The spring easings are Motion's spring() output as CSS linear():
+ *   spring({ keyframes: [0, 1], stiffness: 380, damping: 36 })  -> --spring-sheet
+ *   spring({ keyframes: [0, 1], stiffness: 520, damping: 38 })  -> --spring-dialog
+ */
+:root {
+  --background: oklch(0.985 0.006 255);
+  --card: oklch(0.998 0.003 255);
+  --muted: oklch(0.955 0.012 262);
+  --border: oklch(0.905 0.016 262);
+  --foreground: oklch(0.235 0.035 268);
+  --muted-foreground: oklch(0.47 0.035 266);
+  --primary: oklch(0.52 0.22 268);
+  --primary-foreground: oklch(0.985 0.006 255);
+  --ultramarine: oklch(0.52 0.22 268);
+  --persimmon: oklch(0.72 0.17 48);
+  --persimmon-text: oklch(0.52 0.15 42);
+  --lagoon: oklch(0.74 0.12 195);
+  --lagoon-text: oklch(0.48 0.085 205);
+  --orchid: oklch(0.7 0.15 330);
+  --orchid-text: oklch(0.5 0.17 330);
+  --rose: oklch(0.63 0.2 15);
+  --rose-text: oklch(0.51 0.19 15);
+  --crimson: oklch(0.47 0.19 27);
+  --crimson-foreground: oklch(0.985 0.006 255);
+  --ink: oklch(0.205 0 0);
+  --ink-foreground: oklch(0.97 0.011 88);
+  --notice: oklch(0.965 0.03 70);
+  --notice-border: oklch(0.82 0.1 60);
+
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --accent: var(--muted);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--crimson);
+  --input: var(--border);
+  --ring: var(--primary);
+  --radius: 0.875rem;
+
+  --hatch-ink: oklch(0.72 0.17 48 / 0.34);
+  --grain-opacity: 0.16;
+  --shadow-color: 268 40% 20%;
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-in-out-soft: cubic-bezier(0.65, 0, 0.35, 1);
+  --spring-sheet: linear(0, 0.1423, 0.3889, 0.6083, 0.7675, 0.8706, 0.9324, 0.9671, 0.9854, 0.9943, 0.9984, 1, 1);
+  --spring-sheet-duration: 400ms;
+  --spring-dialog: linear(0, 0.1784, 0.4749, 0.7182, 0.8736, 0.9569, 0.9943, 1.007, 1.0087, 1.0066, 1.004, 1.0021, 1.0009, 1.0003, 1);
+  --spring-dialog-duration: 450ms;
+  --duration-press: 150ms;
+  --duration-hover: 180ms;
+  --duration-reveal: 240ms;
+  --duration-drift: 32s;
+}
+
+.dark {
+  --background: oklch(0.17 0.035 268);
+  --card: oklch(0.205 0.04 268);
+  --muted: oklch(0.25 0.045 268);
+  --border: oklch(0.32 0.045 268);
+  --foreground: oklch(0.955 0.008 260);
+  --muted-foreground: oklch(0.76 0.03 262);
+  --primary: oklch(0.74 0.14 268);
+  --primary-foreground: oklch(0.17 0.035 268);
+  --ultramarine: oklch(0.62 0.2 268);
+  --persimmon: oklch(0.74 0.16 50);
+  --persimmon-text: oklch(0.8 0.13 52);
+  --lagoon: oklch(0.74 0.12 195);
+  --lagoon-text: oklch(0.82 0.1 195);
+  --orchid: oklch(0.7 0.15 330);
+  --orchid-text: oklch(0.82 0.11 330);
+  --rose: oklch(0.66 0.18 15);
+  --rose-text: oklch(0.8 0.12 15);
+  --crimson: oklch(0.55 0.2 27);
+  --crimson-foreground: oklch(0.985 0.006 255);
+  --ink: oklch(0.97 0.011 88);
+  --ink-foreground: oklch(0.205 0 0);
+  --notice: oklch(0.26 0.05 55);
+  --notice-border: oklch(0.5 0.1 55);
+
+  --hatch-ink: oklch(0.74 0.16 50 / 0.3);
+  --grain-opacity: 0.22;
+  --shadow-color: 268 60% 3%;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ultramarine: var(--ultramarine);
+  --color-persimmon: var(--persimmon);
+  --color-persimmon-text: var(--persimmon-text);
+  --color-lagoon: var(--lagoon);
+  --color-lagoon-text: var(--lagoon-text);
+  --color-orchid: var(--orchid);
+  --color-orchid-text: var(--orchid-text);
+  --color-rose: var(--rose);
+  --color-rose-text: var(--rose-text);
+  --color-crimson: var(--crimson);
+  --color-crimson-foreground: var(--crimson-foreground);
+  --color-ink: var(--ink);
+  --color-ink-foreground: var(--ink-foreground);
+  --color-notice: var(--notice);
+  --color-notice-border: var(--notice-border);
+
+  --font-display: "Bricolage Grotesque Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Hanken Grotesk Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-display);
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", monospace;
+
+  --text-display: 2.5rem;
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 650;
+  --text-title: 1.75rem;
+  --text-title--line-height: 1.1;
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+  --text-heading: 1.25rem;
+  --text-heading--line-height: 1.2;
+  --text-heading--letter-spacing: -0.01em;
+  --text-heading--font-weight: 600;
+  --text-caption: 0.8125rem;
+  --text-caption--line-height: 1.4;
+
+  --radius-xs: 0.375rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: var(--radius);
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.75rem;
+
+  --ease-out-quart: var(--ease-out-quart);
+  --ease-in-out-soft: var(--ease-in-out-soft);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01" 0;
+  }
+  h1, h2, h3 {
+    font-family: var(--font-display);
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .font-mono {
+    font-variant-numeric: tabular-nums slashed-zero;
+  }
+}
+
+/* shadcn Sheet and Dialog keep their markup; only their timing is ours. */
+[data-slot="sheet-content"] {
+  --tw-duration: var(--spring-sheet-duration);
+  --tw-ease: var(--spring-sheet);
+}
+[data-slot="sheet-content"][data-state="closed"] {
+  --tw-duration: 220ms;
+  --tw-ease: var(--ease-out-quart);
+}
+[data-slot="dialog-content"] {
+  --tw-duration: var(--spring-dialog-duration);
+  --tw-ease: var(--spring-dialog);
+}
+[data-slot="dialog-content"][data-state="closed"] {
+  --tw-duration: 180ms;
+  --tw-ease: var(--ease-out-quart);
+}
+
+@utility press {
+  transition-property: transform, background-color, border-color, color, box-shadow;
+  transition-duration: var(--duration-press);
+  transition-timing-function: var(--ease-out-quart);
+  &:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+}
+
+/* The paper hatch: diagonal persimmon lines, the visual signature of simulated funds. */
+@utility hatch {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--hatch-ink) 0 2px,
+    transparent 2px 7px
+  );
+}
+
+@utility tabular {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* The envelope: ultramarine to orchid to persimmon, with fine grain. Never behind dense data. */
+@utility mesh {
+  background-color: var(--ultramarine);
+  background-image:
+    radial-gradient(120% 140% at 0% 0%, oklch(0.52 0.22 268) 0%, transparent 55%),
+    radial-gradient(90% 120% at 55% 100%, oklch(0.7 0.15 330) 0%, transparent 60%),
+    radial-gradient(100% 120% at 100% 20%, oklch(0.72 0.17 48) 0%, transparent 58%),
+    linear-gradient(110deg, oklch(0.52 0.22 268), oklch(0.7 0.15 330) 55%, oklch(0.72 0.17 48));
+  background-size: 180% 180%;
+  background-position: 0% 50%;
+}
+
+@utility grain {
+  position: relative;
+  isolation: isolate;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: var(--grain-opacity);
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+@utility drift {
+  animation: envelope-drift var(--duration-drift) var(--ease-in-out-soft) infinite alternate;
+}
+
+@keyframes envelope-drift {
+  0% { background-position: 0% 40%; }
+  50% { background-position: 60% 70%; }
+  100% { background-position: 100% 30%; }
+}
+
+@utility shadow-whisper {
+  box-shadow:
+    0 1px 1px hsl(var(--shadow-color) / 0.05),
+    0 2px 6px -2px hsl(var(--shadow-color) / 0.07),
+    0 12px 28px -18px hsl(var(--shadow-color) / 0.18);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 200ms;
+  animation-timing-function: var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    --tw-enter-translate-x: 0 !important;
+    --tw-enter-translate-y: 0 !important;
+    --tw-exit-translate-x: 0 !important;
+    --tw-exit-translate-y: 0 !important;
+    --tw-enter-scale: 1 !important;
+    --tw-exit-scale: 1 !important;
+    scroll-behavior: auto !important;
+  }
+  .drift,
+  [data-slot="skeleton"] {
+    animation: none !important;
+  }
+  .press:active:not(:disabled) {
+    transform: none;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
