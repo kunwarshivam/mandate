@@ -4281,7 +4281,14 @@ fn an_unknown_order_holds_an_exit_in_that_instrument_alone() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    for event in protected_position_events(2).iter().take(3) {
+        shell
+            .fold_one(event)
+            .expect("the held position folds unprotected, so the opening is one the gate allows");
+    }
+    let mut shell = shell.restart_ready(&ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
     shell.run(Input::Market(quote(CPHC, "20", "20.1", 20)), &ports);
     let opening_id = format!("md-{OTHER_INTENT}");
