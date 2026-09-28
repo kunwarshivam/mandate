@@ -984,22 +984,22 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
-    use mandate_accounting::Side;
+    use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
-    use mandate_num::{Price, Qty, Usd};
+    use mandate_num::{Fraction, Price, Qty, ShareIncrement, Usd};
     use mandate_time::Date;
 
     use crate::error::ExecutorError;
     use crate::ids::{ClientOrderId, IntentId};
     use crate::payload::{clock, object, text};
-    use crate::ports::Ports;
+    use crate::ports::{InstrumentSnapshot, Ports};
     use crate::reconcile::tests::{
         Everything, Executor, Ids, aapl, drafted, executor_config, fees, submitted,
     };
     use crate::types::{
         AgentId, BrokerFill, BrokerOutcome, BrokerRequest, BrokerUpdate, Effect, EventDraft,
-        EventId, FillId, Input, IntentBody, IntentHandoff, MarketObservation, OcoLegs, OrderState,
-        Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
+        EventId, ExitTier, FillId, Input, IntentBody, IntentHandoff, MarketObservation, OcoLegs,
+        OrderState, Purpose, ReconcileReason, RiskClock, SubmitOrder, TimeInForce,
     };
 
     const OCO: &str = "md-held-1-p1";
@@ -1019,6 +1019,45 @@ mod sequence_tests {
     /// Ten AAPL that `agent-a` bought, protected by one GTC OCO at 170 over 140 named for the
     /// buy (§2.3).
     fn protected(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("tif", text("gtc")),
+                ("purpose", text("protective")),
+                ("order_class", text("oco")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(OCO)), ("state", text("accepted"))],
+        )?;
+        committed(
+            &mut executor,
+            concat!("Protection", "Changed"),
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
+    /// The same ten AAPL with nothing protecting them.
+    fn held(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
         let mut executor = Executor::opened(ports)?;
         committed(
             &mut executor,
@@ -1051,39 +1090,6 @@ mod sequence_tests {
             vec![
                 ("client_order_id", text("md-held-1")),
                 ("state", text("filled")),
-            ],
-        )?;
-        committed(
-            &mut executor,
-            "OrderSubmitted",
-            vec![
-                ("client_order_id", text(OCO)),
-                ("agent", text("agent-a")),
-                ("instrument", text("AAPL")),
-                ("side", text("sell")),
-                ("qty", text("10")),
-                ("tif", text("gtc")),
-                ("purpose", text("protective")),
-                ("order_class", text("oco")),
-                ("take_profit", text("170")),
-                ("stop", text("140")),
-            ],
-        )?;
-        committed(
-            &mut executor,
-            "OrderStateChanged",
-            vec![("client_order_id", text(OCO)), ("state", text("accepted"))],
-        )?;
-        committed(
-            &mut executor,
-            "ProtectionChanged",
-            vec![
-                ("instrument", text("AAPL")),
-                ("action", text("placed")),
-                ("orders", text(OCO)),
-                ("qty", text("10")),
-                ("take_profit", text("170")),
-                ("stop", text("140")),
             ],
         )?;
         Ok(executor)
@@ -1480,6 +1486,70 @@ mod sequence_tests {
             ],
         );
         assert!(refused.is_err(), "{refused:?}");
+        Ok(())
+    }
+
+    /// Whole-share equities with a liquid exit tier, so the ladder has what it prices from.
+    struct Tiered;
+
+    impl InstrumentSnapshot for Tiered {
+        fn asset_class(&self, _instrument: &InstrumentId) -> Option<AssetClass> {
+            Some(AssetClass::UsEquity)
+        }
+
+        fn increment(&self, _instrument: &InstrumentId) -> Option<ShareIncrement> {
+            Some(ShareIncrement::Whole)
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            Some(ExitTier {
+                exit_offset: Fraction::parse("0.005").ok()?,
+                exit_offset_step: Fraction::parse("0.005").ok()?,
+                max_exit_offset: Fraction::parse("0.03").ok()?,
+            })
+        }
+    }
+
+    /// #174 ruling 5862579929, (A)'s rule-13 condition: the ladder's stub is reached only by an
+    /// exit a sequence runs for, where protection rested. An exit of an **unprotected** position,
+    /// with an exit tier and a fresh quote on hand, is submitted at once at its own limit; the same
+    /// exit of the protected position reaches the stub once its cancel is confirmed.
+    #[test]
+    fn an_unprotected_exit_never_reaches_the_ladder_stub() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        for purpose in [
+            Purpose::RiskExit,
+            Purpose::OwnerExit,
+            Purpose::DiscretionaryExit,
+            Purpose::Flatten,
+        ] {
+            let mut executor = held(&ports)?;
+            executor.run(quote("150")?, &ports)?;
+            let sent = executor.run(sell(EXIT, "5", "150", purpose)?, &ports)?;
+            assert_eq!(
+                submissions(&sent)
+                    .iter()
+                    .map(|order| order.limit_price)
+                    .collect::<Vec<_>>(),
+                vec![Some(Price::parse("150")?)],
+                "{purpose:?}"
+            );
+
+            let mut executor = protected(&ports)?;
+            executor.run(quote("150")?, &ports)?;
+            executor.run(sell(EXIT, "5", "150", purpose)?, &ports)?;
+            assert!(
+                stub(&executor.run(cancel_accepted(OCO), &ports)),
+                "{purpose:?}: the sequence's exit is the ladder's"
+            );
+        }
         Ok(())
     }
 }
