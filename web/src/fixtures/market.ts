@@ -124,11 +124,6 @@ function gaussian(rand: () => number): () => number {
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
-interface Anchor {
-  time: number;
-  price: number;
-}
-
 interface Band {
   from: number;
   to: number;
