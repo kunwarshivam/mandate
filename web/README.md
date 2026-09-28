@@ -37,7 +37,8 @@ renders `normal`.
 
 The same panel switches the workspace role (owner, operator, approver, viewer, auditor; PX-11). The
 role lives in React state only and resets on reload: approvers may pause but not stop, viewers and
-auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group.
+auditors get no Stop control, viewers see requests read-only, and auditors see only the Audit group;
+any other route renders "Not available to your role" for them instead of the page.
 
 ## The mock-data rule
 

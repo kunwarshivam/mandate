@@ -181,7 +181,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 
 **Safety resolutions.**
 
-1. Record screens are pages, never modals. Dialogs are for the Stop sheet, the passkey step-up and short admin actions.
+1. Record screens are pages, never modals: the approval request (D6), and the kill switch and release (D10, D11), which the Stop sheet links to. Dialogs are for the Stop sheet, the passkey step-up and short admin actions.
 2. Pause, Stop and Kill are never `disabled` or `loading` (lint-banned); progress is status text in a live region. Sidebar loading never holds back the header.
 3. No typed confirmation. Stop, kill and release ask for a passkey; Pause does not.
 4. Crimson is the kill switch alone, through `KillSwitchButton`.
@@ -190,7 +190,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 7. The paper badge is in the header, the Stop sheet title and every record-screen title.
 8. Approve and Skip are both secondary, the same size, in a fixed order, with no autofocus; the deadline is static text.
 9. A toast appears only after the mock journals the action, and names the action only. A request the deployment took without a journal entry shows the banner "The result is unknown; we are checking." and never a success.
-10. Roles (PX-11) are a fixture switch: approvers pause only, viewers and auditors have no Stop, viewers see requests read-only, auditors see only Audit.
+10. Roles (PX-11) are a fixture switch: approvers pause only, viewers and auditors have no Stop, viewers see requests read-only, auditors see only Audit. Hiding a link is never the guard: `routeNeeds` in `src/lib/access.ts` names the capability each path needs, and the shell renders "Not available to your role" in place of any page the role may not open, so an auditor who types `/` or an agent URL sees that and a link to Audit. The Owlhead link goes to the role's home, and breadcrumbs drop crumbs the role cannot open. The kill-switch and release record screens need `stop.full`. `src/app/routes.test.tsx` renders every route as every role and checks every link on screen.
 
 ## Do's and Don'ts
 
