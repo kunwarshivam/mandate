@@ -3960,13 +3960,33 @@ fn an_automated_flatten_sells_crypto_at_once() {
     let ports = ports(&ids, &mandates, &instruments, &config);
     let mut shell = started();
     shell.fold_one(&stream_opened()).expect("folds");
-    let held = event(
+    let bought = event(
         ACCOUNT_STREAM,
         2,
+        "OrderSubmitted",
+        with_clock(
+            &[
+                ("client_order_id", text("md-held-btc")),
+                ("agent", text(common::AGENT)),
+                ("instrument", text(BTC)),
+                ("side", text("buy")),
+                ("qty", text("0.5")),
+                ("limit", text("60000")),
+            ],
+            10,
+        ),
+    );
+    shell
+        .fold_one(&bought)
+        .expect("the agent's own buy folds, so the sub-ledger is its (§5.5)");
+    let held = event(
+        ACCOUNT_STREAM,
+        3,
         "FillApplied",
         with_clock(
             &[
                 ("fill_id", text("f-0")),
+                ("client_order_id", text("md-held-btc")),
                 ("instrument", text(BTC)),
                 ("side", text("buy")),
                 ("qty_gross", text("0.5")),
@@ -3976,7 +3996,20 @@ fn an_automated_flatten_sells_crypto_at_once() {
         ),
     );
     shell.fold_one(&held).expect("the crypto position folds");
-    let mut shell = shell.restart_ready(&ports);
+    let done = event(
+        ACCOUNT_STREAM,
+        4,
+        "OrderStateChanged",
+        with_clock(
+            &[
+                ("client_order_id", text("md-held-btc")),
+                ("state", text("filled")),
+            ],
+            10,
+        ),
+    );
+    shell.fold_one(&done).expect("the buy's fill completes it");
+    let (mut shell, _) = shell.restart(&ports);
     shell.run(Input::Market(quote(BTC, "60000", "60010", 20)), &ports);
 
     let ran = shell.run(
