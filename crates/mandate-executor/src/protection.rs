@@ -1,7 +1,7 @@
 //! The protective sequences and the exit price ladder (E7-4, trading-domain spec §5.4 to §5.6).
 
-use mandate_accounting::InstrumentId;
-use mandate_num::Price;
+use mandate_accounting::{AssetClass, InstrumentId};
+use mandate_num::{Fraction, Price, ShareIncrement, SignedQty};
 
 use crate::error::ExecutorError;
 use crate::ports::Ports;
@@ -92,21 +92,43 @@ pub(crate) fn ladder_price(
     Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
-/// Whether one instrument's position is fully covered by resting protective orders right now.
+/// Whether one instrument's position is fully covered by resting protective orders right now: the
+/// public probe the tracer's step 17 reads (#171).
 ///
-/// Only the whole-share part of a fractional position can be protected, and the fraction is
-/// disclosed rather than hidden (§5.4).
-#[allow(
-    dead_code,
-    reason = "the tests PR ships the call site and its contract; `handle` and `reconcile` call it in the implementation PR (DEC-77, DEC-83)"
-)]
-pub(crate) fn is_protected(
+/// Only the whole-share part of a fractional equity position can be protected, and the fraction is
+/// disclosed rather than hidden (§5.4, slice 5); a crypto stop-limit covers the whole position. A
+/// flat instrument needs nothing. An instrument whose asset class or increment the snapshot does
+/// not know is reported unprotected, never guessed covered (`AGENTS.md` rule 3).
+pub fn is_protected(
     state: &ExecutorState,
     instrument: &InstrumentId,
     ports: &Ports<'_>,
 ) -> Result<bool, ExecutorError> {
-    let _ = (state, instrument, ports);
-    Err(ExecutorError::Unimplemented { story: "E7-4" })
+    let held = state
+        .positions
+        .get(instrument)
+        .copied()
+        .unwrap_or(SignedQty::ZERO);
+    if held == SignedQty::ZERO {
+        return Ok(true);
+    }
+    if held.is_negative() {
+        return Ok(false);
+    }
+    let whole = match (
+        ports.instruments.asset_class(instrument),
+        ports.instruments.increment(instrument),
+    ) {
+        (Some(AssetClass::Crypto), _) => held.abs(),
+        (Some(_), Some(increment)) => match increment {
+            ShareIncrement::Whole => held.abs(),
+            ShareIncrement::Fractional => {
+                held.abs().portion(Fraction::ONE, ShareIncrement::Whole)?
+            }
+        },
+        _ => return Ok(false),
+    };
+    Ok(state.protective_sell_qty(instrument)? >= whole)
 }
 
 /// Whether an exit of this purpose may be held at all. `AGENTS.md` rule 13 names exactly four
@@ -176,6 +198,28 @@ mod stub_tests {
     /// so no exit in a protected instrument can reach it (`AGENTS.md` rule 13). Slice 2, the first
     /// writer, lands no earlier than slice 3, which replaces the stub, and deletes this pin with it
     /// (DEC-160).
+    /// #174 ruling (b), 5861764910: slice 1 reads no leg id from a `BrokerOrder`. The broker's
+    /// legs carry only their broker ids until the slice that reconciles legs keeps each leg's
+    /// `client_order_id` (with its own `ready()` tests correction), so until then a broker-reported
+    /// leg falls to the single holder or fails closed (DEC-160 3a). Every source file of this
+    /// crate is scanned, test modules included, for a read of the field.
+    #[test]
+    fn no_leg_id_is_read_from_a_broker_order() -> io::Result<()> {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let read = concat!(".", "legs");
+        for entry in fs::read_dir(&src)? {
+            let path = entry?.path();
+            let source = fs::read_to_string(&path)?;
+            assert!(
+                !source.contains(read),
+                "{} reads a broker order's legs; leg ids from the broker wait for the leg \
+                 reconciliation slice (#174 ruling (b))",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn no_step_journals_protection_while_its_exits_answer_a_stub() -> io::Result<()> {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -272,6 +316,171 @@ mod stub_tests {
             Err(ExecutorError::Unimplemented { story: "E7-4" })
         );
         assert_eq!(watched(&state, &quote(InstrumentId::new("MSFT")?)), Ok(()));
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod probe_tests {
+    use mandate_accounting::{
+        AssetClass, Config, CryptoFees, EquityFees, InstrumentId, TafCapBasis,
+    };
+    use mandate_num::{
+        Bps, FeeCap, FeePerShare, FeeRate, Fraction, Qty, ShareIncrement, SignedQty,
+    };
+    use mandate_time::{Date, TradingCalendar};
+
+    use super::is_protected;
+    use crate::error::ExecutorError;
+    use crate::ports::{IdGen, InstrumentSnapshot, MandateView, Ports};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, EventId, ExecutorConfig, ExitTier, MandateVersion,
+        Protection, Seq, WorkspaceId, WriterEpoch,
+    };
+
+    struct Nothing;
+
+    impl IdGen for Nothing {
+        fn event_id(&self, _epoch: WriterEpoch, _head: Seq, _ordinal: u32) -> EventId {
+            EventId("e".to_owned())
+        }
+    }
+
+    impl MandateView for Nothing {
+        fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
+            None
+        }
+
+        fn crypto_stop_limit_offset(&self, _agent: &AgentId) -> Option<Fraction> {
+            None
+        }
+
+        fn covers(&self, _agent: &AgentId, _instrument: &InstrumentId) -> bool {
+            false
+        }
+    }
+
+    /// `AAPL` whole shares, `FRAC` fractional, `BTC/USD` crypto; anything else unknown.
+    struct Snapshot;
+
+    impl InstrumentSnapshot for Snapshot {
+        fn asset_class(&self, instrument: &InstrumentId) -> Option<AssetClass> {
+            match instrument.as_str() {
+                "AAPL" | "FRAC" | "NOINC" => Some(AssetClass::UsEquity),
+                "BTC/USD" => Some(AssetClass::Crypto),
+                _ => None,
+            }
+        }
+
+        fn increment(&self, instrument: &InstrumentId) -> Option<ShareIncrement> {
+            match instrument.as_str() {
+                "AAPL" => Some(ShareIncrement::Whole),
+                "FRAC" | "BTC/USD" => Some(ShareIncrement::Fractional),
+                _ => None,
+            }
+        }
+
+        fn exit_tier(&self, _instrument: &InstrumentId) -> Option<ExitTier> {
+            None
+        }
+    }
+
+    fn fees() -> Result<Config, ExecutorError> {
+        let date = |raw: &str| Date::parse(raw).map_err(ExecutorError::from);
+        Ok(Config {
+            equities: EquityFees {
+                sec_rate: FeeRate::parse("0")?,
+                taf_per_share: FeePerShare::parse("0")?,
+                taf_cap: FeeCap::parse("0")?,
+                taf_cap_basis: TafCapBasis::PerExecution,
+                cat_per_share: FeePerShare::parse("0")?,
+            },
+            crypto: CryptoFees {
+                maker: Bps::parse("0")?,
+                taker: Bps::parse("0")?,
+            },
+            calendar: TradingCalendar::new(date("2026-09-01")?, date("2026-12-31")?, [], [])?,
+        })
+    }
+
+    /// `held` of `name`, covered by `covered` of resting protection (none when `None`).
+    fn probe(name: &str, held: &str, covered: Option<&str>) -> Result<bool, ExecutorError> {
+        let fees = fees()?;
+        let config = ExecutorConfig::PROPOSED;
+        let ports = Ports {
+            ids: &Nothing,
+            mandates: &Nothing,
+            instruments: &Snapshot,
+            config: &config,
+            fees: &fees,
+        };
+        let mut state = ExecutorState::new(AccountScope {
+            account: AccountRef("acct-1".to_owned()),
+            workspace: WorkspaceId("ws1".to_owned()),
+        });
+        let instrument = InstrumentId::new(name)?;
+        state
+            .positions
+            .insert(instrument.clone(), SignedQty::parse(held)?);
+        if let Some(covered) = covered {
+            state.protection.insert(
+                instrument.clone(),
+                Protection {
+                    instrument: instrument.clone(),
+                    resting: Vec::new(),
+                    covered_qty: Qty::parse(covered)?,
+                },
+            );
+        }
+        is_protected(&state, &instrument, &ports)
+    }
+
+    #[test]
+    fn a_flat_instrument_needs_nothing_and_a_short_is_never_protected() -> Result<(), ExecutorError>
+    {
+        assert!(probe("AAPL", "0", None)?);
+        assert!(!probe("AAPL", "-1", Some("1"))?);
+        Ok(())
+    }
+
+    #[test]
+    fn whole_shares_are_protected_only_when_all_of_them_are_covered() -> Result<(), ExecutorError> {
+        assert!(probe("AAPL", "10", Some("10"))?);
+        assert!(!probe("AAPL", "10", Some("9"))?);
+        assert!(!probe("AAPL", "10", None)?);
+        Ok(())
+    }
+
+    #[test]
+    fn only_the_whole_share_part_of_a_fractional_position_needs_cover() -> Result<(), ExecutorError>
+    {
+        assert!(
+            probe("FRAC", "10.5", Some("10"))?,
+            "the half share is disclosed, not protected"
+        );
+        assert!(!probe("FRAC", "10.5", Some("9"))?);
+        Ok(())
+    }
+
+    #[test]
+    fn a_crypto_position_is_covered_whole() -> Result<(), ExecutorError> {
+        assert!(probe("BTC/USD", "0.5", Some("0.5"))?);
+        assert!(
+            !probe("BTC/USD", "0.5", Some("0.4"))?,
+            "no whole-share floor for crypto"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_instrument_the_snapshot_does_not_know_is_reported_unprotected()
+    -> Result<(), ExecutorError> {
+        assert!(!probe("ZZZZ", "1", Some("1"))?, "unknown asset class");
+        assert!(
+            !probe("NOINC", "1", Some("1"))?,
+            "an equity with no known increment"
+        );
         Ok(())
     }
 }

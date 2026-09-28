@@ -895,9 +895,68 @@ pub struct ExecutorConfig {
     pub gtc_expiry_days: u32,
 }
 
+impl ExecutorConfig {
+    /// The values a deployment starts from until the effective-dated configuration says otherwise.
+    ///
+    /// Five are the spec's own defaults: `bracket_partial_fill_timeout` 60 s, `max_unprotected_s`
+    /// 60 s and `stop_watchdog_s` 60 s (§5.4), `exit_step_s` 5 s (§5.6), and the 90-day GTC expiry
+    /// (§5.2). The other five have no spec value and are **Proposed (founder)**, not accepted
+    /// (DEC-133 item 22; task brief Decisions needed 2), each at the value the brief argues is the
+    /// conservative one: `max_intent_age` 120 s (a stale intent is abandoned, never acted on),
+    /// three absent lookups over 15 s before an `Unknown` order is resubmitted (never early),
+    /// re-placement 5 trading days before expiry (never late), and `closing_only` after three
+    /// unexplained 403s (sooner reduces risk). The founder's ruling replaces them here.
+    pub const PROPOSED: Self = Self {
+        max_intent_age_s: 120,
+        unknown_absent_lookups: 3,
+        unknown_absent_window_s: 15,
+        protective_replace_buffer_trading_days: 5,
+        restriction_403_threshold: 3,
+        bracket_partial_fill_timeout_s: 60,
+        max_unprotected_s: 60,
+        stop_watchdog_s: 60,
+        exit_step_s: 5,
+        gtc_expiry_days: 90,
+    };
+}
+
 /// §11's on-mismatch column, held by the constructors: every [`Unexplained`] kind is one
 /// [`DifferenceKind::adoptable`] refuses, every [`Adopted`] kind one it accepts, and each
 /// constructor records what its kind says.
+#[cfg(test)]
+mod config_tests {
+    use super::ExecutorConfig;
+
+    /// The five spec defaults, and the five values still Proposed (founder) at the brief's
+    /// conservative choice (DEC-133 item 22): a change to either set is a decision, not a refactor.
+    #[test]
+    fn the_proposed_configuration_is_the_spec_defaults_and_the_briefs_conservative_values() {
+        let proposed = ExecutorConfig::PROPOSED;
+        assert_eq!(
+            (
+                proposed.bracket_partial_fill_timeout_s,
+                proposed.max_unprotected_s,
+                proposed.stop_watchdog_s,
+                proposed.exit_step_s,
+                proposed.gtc_expiry_days,
+            ),
+            (60, 60, 60, 5, 90),
+            "the spec's own defaults (§5.2, §5.4, §5.6)"
+        );
+        assert_eq!(
+            (
+                proposed.max_intent_age_s,
+                proposed.unknown_absent_lookups,
+                proposed.unknown_absent_window_s,
+                proposed.protective_replace_buffer_trading_days,
+                proposed.restriction_403_threshold,
+            ),
+            (120, 3, 15, 5, 3),
+            "Proposed (founder), DEC-133 item 22"
+        );
+    }
+}
+
 #[cfg(test)]
 mod difference_tests {
     use super::{Adopted, Difference, DifferenceKind, Unexplained};
