@@ -206,8 +206,18 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   scans owner-written text apart from the platform's own in
   `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
   written and never read as platform advice.
+  *Follow-up (#250 review, minor 1):* `RequestContent.risk_impact` is a `Vec<RiskFigure>`, so a
+  caller could list fewer than §6.3's six figures, or one twice. Make it one figure per
+  `RiskField` by type (`[RiskFigure; 6]` in `RiskField` order, or a map keyed by field), with a
+  tests correction for `every_bound_field_moves_the_content_hash`, which truncates the list.
+  *Done (#250 review, major; DEC-165 item 13):* `ApprovalRef::of_requested_event` accepts only a
+  ULID-shaped event id, so free text cannot reach a notification through it. The runtime or CLI
+  PR that first calls it must prove the id is that `ApprovalRequested` event's own.
 - **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
   adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
+  *Follow-up (#250 review, minor 4):* EI-13's first bound, one pending risk-adding approval per
+  agent, is not in `mandate_approval::ask_permit`; it stays in the runtime's
+  `awaiting_risk_approval`, and the runtime's tests PR must assert it.
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
   approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
   [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.

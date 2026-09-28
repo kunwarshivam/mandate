@@ -13,8 +13,8 @@ use std::num::NonZeroU8;
 
 use common::{DEADLINE, REQUEST_ID, RISK_IMPACT, T0, answer, content, hash, price, request};
 use mandate_approval::{
-    ApprovalRef, AskablePurpose, AssetClass, Channel, Delivery, QuietHours, RiskClock,
-    confirmation_code, content_hash, content_object, deliver_now, notification_for,
+    ApprovalError, ApprovalRef, AskablePurpose, AssetClass, Channel, Delivery, QuietHours,
+    RiskClock, confirmation_code, content_hash, content_object, deliver_now, notification_for,
     notification_payload,
 };
 use mandate_canon::{Digest, Value, to_canonical};
@@ -359,7 +359,50 @@ fn a_push_is_suppressed_from_23_00_and_sent_from_07_00_in_both_dst_states() {
 /// Live: an approval reference is built from the request's event id and displays only that id.
 #[test]
 fn an_approval_ref_displays_only_its_event_id() {
-    let r = ApprovalRef::of_requested_event(REQUEST_ID);
+    let r = ApprovalRef::of_requested_event(REQUEST_ID).unwrap();
     assert_eq!(r.to_string(), REQUEST_ID);
-    assert_ne!(ApprovalRef::of_requested_event("other"), r);
+    assert_eq!(format!("{r:?}"), format!("ApprovalRef({REQUEST_ID:?})"));
+    let other = ApprovalRef::of_requested_event("01J9ZQ4Y8N6K3V5T2R1M0P7XWZ").unwrap();
+    assert_ne!(other, r);
+}
+
+/// Live, rule 6 at rung 1 (#250 review, DEC-165 item 13): only the journal's ULID shape becomes an
+/// approval reference, so free text such as a symbol, a price, or an account id never reaches a
+/// payload through it. Each refusal differs from a valid id in one property only.
+#[test]
+fn only_a_ulid_shaped_event_id_becomes_an_approval_ref() {
+    for accepted in [
+        REQUEST_ID,
+        "00000000000000000000000000",
+        "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "0123456789ABCDEFGHJKMNPQRS",
+        "0TVWXYZ0000000000000000000",
+    ] {
+        assert_eq!(
+            ApprovalRef::of_requested_event(accepted).map(|r| r.to_string()),
+            Ok(accepted.to_owned()),
+            "{accepted}"
+        );
+    }
+    for refused in [
+        "",
+        "other",
+        "AAPL buy 100 @187.25 acct-U1234567",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWAA",
+        "81J9ZQ4Y8N6K3V5T2R1M0P7XWA",
+        "01j9zq4y8n6k3v5t2r1m0p7xwa",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWI",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWL",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWO",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWU",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW-",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW\u{e9}",
+    ] {
+        assert_eq!(
+            ApprovalRef::of_requested_event(refused),
+            Err(ApprovalError::NotAnEventId),
+            "{refused:?}"
+        );
+    }
 }
