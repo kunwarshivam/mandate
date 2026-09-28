@@ -118,7 +118,7 @@ fn document(patches: &[(&str, &str)]) -> Result<Value, String> {
     Ok(document)
 }
 
-fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
+pub(crate) fn mandate(patches: &[(&str, &str)]) -> Result<Mandate, String> {
     Mandate::parse(&document(patches)?).map_err(|e| format!("{patches:?}: {e}"))
 }
 
@@ -135,7 +135,7 @@ fn usd(text: &str) -> Result<Usd, String> {
 }
 
 /// The context the base breaks nothing in: the base's one model registered as it is written.
-fn context() -> Result<ValidationContext, String> {
+pub(crate) fn context() -> Result<ValidationContext, String> {
     let model = RegisteredModel {
         version: "1.0.0".to_owned(),
         content_hash: digest(HASH)?,

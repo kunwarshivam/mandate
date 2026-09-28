@@ -20,7 +20,7 @@ use crate::document::{
     ConnectionId, Goal, LadderAction, Mandate, ModelId, Pointer, ProvenanceMap, ScaleAction,
     SignalModel, Source, pointer,
 };
-use crate::policy::{PolicyLevel, PolicyViolation};
+use crate::policy::{PolicyLevel, PolicyViolation, check};
 use crate::{DecGrammar, SchemaDec, SpecError};
 
 /// A semantic rule of §4.1, by the code the spec gives it.
@@ -806,8 +806,16 @@ impl ValidatedMandate {
         context: &ValidationContext,
         policies: &[PolicyLevel],
     ) -> Result<Self, Rejected> {
-        let _ = (&mandate, context, policies);
-        Err(Rejected::NotEvaluated(SpecError::Unimplemented))
+        let report = validate(&mandate, context)?;
+        let policy = check(&mandate, policies)?.violations;
+        if report.is_valid() && policy.is_empty() {
+            Ok(Self { mandate })
+        } else {
+            Err(Rejected::Rules {
+                report: Box::new(report),
+                policy,
+            })
+        }
     }
 
     pub fn mandate(&self) -> &Mandate {
@@ -914,4 +922,4 @@ pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -21,6 +21,7 @@ use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession,
 use mandate_num::{Price, Qty, Usd};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
+use mandate_spec::policy::{self, LevelName, PolicyKey, PolicyLevel, PolicyValue};
 use mandate_spec::risk::LiftReason;
 use mandate_spec::risk::{
     self, ApplyResult, Input, KillScope, Latch, Opening, RemovalReason, RestrictionReason,
@@ -665,9 +666,173 @@ fn digest(text: &str) -> Result<Digest, String> {
 }
 
 /// `kind: policy` — the nearest broken ancestor, per key kind (§4.3).
+///
+/// Every level of `policies` is read whole: its `level` and every member of `values`, an unknown key
+/// failing the case by name. The violations are compared as a multiset of whole records (key, level,
+/// value, the nearest broken ancestor, and its limit), each value read through the same parse as the
+/// levels, so a decimal compares by value; `valid` must agree with whether any was reported.
 fn policy_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = patched(fixture, case)?;
-    Err(not_implemented("`mandate_spec::policy::check`"))
+    let mandate = must_parse(&patched(fixture, case)?)?;
+    let levels = list_at(case, "policies")?
+        .iter()
+        .map(policy_level)
+        .collect::<Result<Vec<_>, String>>()?;
+    let result = spec(policy::check(&mandate, &levels), "policy::check")?;
+    let expect = at_of(case, "expect")?;
+    let valid = at(expect, "valid")?
+        .as_bool()
+        .ok_or("`expect.valid` is not a boolean")?;
+    expect_eq("valid", result.violations.is_empty(), valid)?;
+    let wanted = list_at(expect, "violations")?
+        .iter()
+        .map(|violation| {
+            unknown_members(violation, VIOLATION_KEYS)
+                .map_err(|unknown| format!("violation members not interpreted: {unknown}"))?;
+            Ok((
+                policy_key(str_at(violation, "key")?)?,
+                level_name(str_at(violation, "level")?)?,
+                policy_value(at(violation, "value")?)?,
+                level_name(str_at(violation, "limit_level")?)?,
+                policy_value(at(violation, "limit")?)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    let mut unmatched: Vec<_> = result
+        .violations
+        .iter()
+        .map(|v| {
+            (
+                v.key,
+                v.level,
+                v.value.clone(),
+                v.limit_level,
+                v.limit.clone(),
+            )
+        })
+        .collect();
+    for record in &wanted {
+        let position = unmatched
+            .iter()
+            .position(|got| got == record)
+            .ok_or_else(|| {
+                format!(
+                    "violations: expected {wanted:?}, got {:?}",
+                    result.violations
+                )
+            })?;
+        unmatched.swap_remove(position);
+    }
+    ensure(unmatched.is_empty(), || {
+        format!("violations: expected {wanted:?}, also got {unmatched:?}")
+    })
+}
+
+/// The members a `policy` case's violation states.
+const VIOLATION_KEYS: &[&str] = &["key", "level", "value", "limit_level", "limit"];
+
+/// Every key §4.3 names, looked up by its spelling so an unknown one fails by name.
+const POLICY_KEYS: &[PolicyKey] = &[
+    PolicyKey::AllocationUsd,
+    PolicyKey::MaxLossFromAllocation,
+    PolicyKey::MaxPositionUsd,
+    PolicyKey::MaxPositionFraction,
+    PolicyKey::MaxGrossExposureUsd,
+    PolicyKey::MaxOrderUsd,
+    PolicyKey::MaxOrdersPerDay,
+    PolicyKey::MaxDailyLoss,
+    PolicyKey::MaxDrawdown,
+    PolicyKey::BreachConfirmS,
+    PolicyKey::MaxOutputAgeS,
+    PolicyKey::ExitThreshold,
+    PolicyKey::StopDistanceMax,
+    PolicyKey::ExitsOnlyAtMax,
+    PolicyKey::TwoApproverAboveUsd,
+    PolicyKey::MaxInstruments,
+    PolicyKey::ResearchWeight,
+    PolicyKey::ResearchCostCapUsdPerDay,
+    PolicyKey::MaxRevisionsPerLineage,
+    PolicyKey::EntryThreshold,
+    PolicyKey::RebalanceBand,
+    PolicyKey::Hysteresis,
+    PolicyKey::CadenceIntervalS,
+    PolicyKey::ApprovalTimeoutS,
+    PolicyKey::ReentryCooldownS,
+    PolicyKey::DailyBreachMinS,
+    PolicyKey::ScaleLiftAfterS,
+    PolicyKey::ResearchIntervalS,
+    PolicyKey::StaggerWindowS,
+    PolicyKey::LeveragedEtpsAllowed,
+    PolicyKey::AutoAllowed,
+    PolicyKey::ResearchAgentAllowed,
+    PolicyKey::AdmissionAutoAllowed,
+    PolicyKey::ProtectionRequired,
+    PolicyKey::IndependentApprovalRequired,
+    PolicyKey::AssetClasses,
+    PolicyKey::SignalModelTypes,
+    PolicyKey::GoalTypes,
+    PolicyKey::Channels,
+    PolicyKey::Environments,
+];
+
+fn policy_key(text: &str) -> Result<PolicyKey, String> {
+    POLICY_KEYS
+        .iter()
+        .copied()
+        .find(|key| key.as_str() == text)
+        .ok_or_else(|| format!("`{text}` is not a policy key"))
+}
+
+fn level_name(text: &str) -> Result<LevelName, String> {
+    [
+        LevelName::Platform,
+        LevelName::Organization,
+        LevelName::Workspace,
+        LevelName::Mandate,
+    ]
+    .into_iter()
+    .find(|name| name.as_str() == text)
+    .ok_or_else(|| format!("`{text}` is not a policy level"))
+}
+
+/// A policy value as the fixture writes it: a decimal string, an integer, a flag, a list of names, or
+/// `null` for a mandate that states nothing.
+fn policy_value(value: &Json) -> Result<PolicyValue, String> {
+    Ok(match value {
+        Json::Null => PolicyValue::Absent,
+        Json::Bool(flag) => PolicyValue::Flag(*flag),
+        Json::Number(_) => PolicyValue::Integer(
+            value
+                .as_u64()
+                .ok_or("a policy integer is not a non-negative integer")?,
+        ),
+        Json::String(text) => PolicyValue::Decimal(
+            SchemaDec::parse(text, DecGrammar::Decimal)
+                .map_err(|_| format!("`{text}` is not a policy decimal"))?,
+        ),
+        Json::Array(items) => PolicyValue::Set(
+            items
+                .iter()
+                .map(|item| text_of(item, "a policy set member"))
+                .collect::<Result<_, _>>()?,
+        ),
+        Json::Object(_) => return Err("a policy value is an object".to_owned()),
+    })
+}
+
+/// One level of a case's chain: its name and every value it states.
+fn policy_level(level: &Json) -> Result<PolicyLevel, String> {
+    unknown_members(level, &["level", "values"])
+        .map_err(|unknown| format!("policy level members not interpreted: {unknown}"))?;
+    let values = at(level, "values")?
+        .as_object()
+        .ok_or("`values` is not an object")?
+        .iter()
+        .map(|(key, value)| Ok((policy_key(key)?, policy_value(value)?)))
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    Ok(PolicyLevel {
+        name: level_name(str_at(level, "level")?)?,
+        values,
+    })
 }
 
 /// `kind: change` — the classification, the changed paths, both version hashes, and step-up (§9.2).
