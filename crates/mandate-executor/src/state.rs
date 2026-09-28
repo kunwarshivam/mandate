@@ -88,6 +88,13 @@ pub(crate) struct OrderDetail {
     pub(crate) submitted_seq: Option<Seq>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
+    /// When a cancel of the order was last asked: the start of rule 5's bounded wait (§5.3).
+    pub(crate) cancel_asked_at: Option<RiskClock>,
+    /// The cancel went unconfirmed past its bound, or the broker refused it, and the order was
+    /// queried; `answered` once any later record of it is folded, and only then. An exit then
+    /// never waits on it again (#174 ruling 5863046153).
+    pub(crate) cancel_overdue: bool,
+    pub(crate) answered: bool,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
@@ -448,6 +455,8 @@ pub(crate) struct ExitSequence {
     pub(crate) entry: ClientOrderId,
     pub(crate) agent: AgentId,
     pub(crate) prices: Option<ProtectionPrices>,
+    /// A passive exit's (`passive_start`): it keeps the stop, so no interval opens.
+    pub(crate) passive: bool,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity

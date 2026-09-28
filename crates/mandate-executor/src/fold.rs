@@ -291,7 +291,7 @@ fn intent_received(
         qty: qty(payload, "qty")?,
         limit: optional_price(payload, "limit")?.ok_or_else(|| refused("limit"))?,
         purpose: purpose_of(required_text(payload, "purpose")?)?,
-        protection: None,
+        protection: prices_of(payload)?,
     };
     state.intents.insert(
         id.clone(),
@@ -452,6 +452,11 @@ fn order_state_changed(
             client_order_id: id.as_str().to_owned(),
         })?;
     let detail = state.details.entry(id.clone()).or_default();
+    if flag(payload, "cancel_overdue") {
+        detail.cancel_overdue = true;
+    } else if detail.cancel_overdue {
+        detail.answered = true;
+    }
     if flag(payload, "ignored") {
         return Ok(());
     }
@@ -468,6 +473,7 @@ fn order_state_changed(
     order.state = next;
     if flag(payload, "cancel_requested") {
         order.cancel_unconfirmed = true;
+        detail.cancel_asked_at = Some(at);
     }
     if next.is_terminal() || flag(payload, "cancel_confirmed") {
         order.cancel_unconfirmed = false;
@@ -722,6 +728,13 @@ fn protection_changed(
             let covered = qty(payload, "qty")?;
             let prices = prices_of(payload)?;
             legs(state, &instrument, &orders, covered, created_on(payload)?);
+            if state
+                .exiting
+                .get(&instrument)
+                .is_some_and(|sequence| sequence.passive)
+            {
+                state.exiting.remove(&instrument);
+            }
             let protection = state
                 .protection
                 .entry(instrument.clone())
@@ -751,7 +764,8 @@ fn protection_changed(
                 }
             }
         }
-        "unprotected_start" => {
+        "unprotected_start" | "passive_start" => {
+            let passive = action == "passive_start";
             if let (Some(intent), Some(entry), Some(agent)) = (
                 optional_text(payload, "intent_id"),
                 optional_text(payload, "entry"),
@@ -765,15 +779,18 @@ fn protection_changed(
                         entry: ClientOrderId::parse(entry)?,
                         agent: AgentId(agent.to_owned()),
                         prices,
+                        passive,
                     },
                 );
             }
-            state.unprotected.push(UnprotectedInterval {
-                instrument,
-                started_at: at,
-                ended_at: None,
-                alerted: false,
-            });
+            if !passive {
+                state.unprotected.push(UnprotectedInterval {
+                    instrument,
+                    started_at: at,
+                    ended_at: None,
+                    alerted: false,
+                });
+            }
         }
         "interval_limit" | "unprotected_end" => {
             let ends = action == "unprotected_end";
@@ -1998,6 +2015,41 @@ mod protection_tests {
         Ok(())
     }
 
+    /// #258 round 2, minor 1: a holder change in one instrument re-attributes that instrument's
+    /// ownerless legs only; another instrument's ownerless leg keeps no owner.
+    #[test]
+    fn a_holder_change_re_attributes_only_its_own_instruments_legs() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("MSFT")),
+                ("action", text("placed")),
+                ("orders", text("md-oco-9")),
+                ("qty", text("3")),
+            ],
+            None,
+        )?;
+        stream.bought("agent-a", "md-buy-1", "5")?;
+        stream.bought("agent-b", "md-buy-2", "5")?;
+        stream.protection("placed", "md-oco-1", "10")?;
+        stream.sold("agent-b", "md-sell-1", "5")?;
+        let owner = |raw: &str| -> Result<Option<AgentId>, ExecutorError> {
+            Ok(stream
+                .state
+                .orders
+                .get(&id(raw)?)
+                .and_then(|order| order.agent.clone()))
+        };
+        assert_eq!(owner("md-oco-1")?, Some(AgentId("agent-a".to_owned())));
+        assert_eq!(
+            owner("md-oco-9")?,
+            None,
+            "MSFT's leg is not AAPL's to re-attribute"
+        );
+        Ok(())
+    }
+
     #[test]
     fn a_leg_is_attributed_once_one_agents_lots_make_up_the_open_quantity()
     -> Result<(), ExecutorError> {
@@ -2163,7 +2215,7 @@ mod protection_tests {
             ("AAPL", "interval_limit"),
         ] {
             stream.fold(
-                concat!("Protection", "Changed"),
+                "ProtectionChanged",
                 vec![
                     ("instrument", text(instrument)),
                     ("action", text(action)),

@@ -7,13 +7,15 @@ use mandate_canon::Value;
 use crate::batch::Batch;
 use crate::codec::{order_type_name, purpose_name, side_name, tif_name};
 use crate::error::ExecutorError;
-use crate::gate::{Proposal, account_stream_checks};
+use crate::gate::{PartialGateDecision, Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
-use crate::protection::{awaits_cancel, begin_exit, exit_limit, sequenced};
+use crate::protection::{
+    awaits_cancel, begin_exit, bracketed_add, crypto_add, exit_limit, passive_exit,
+};
 use crate::state::IntentOutcome;
 use crate::types::{
-    AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
+    AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, Purpose, SubmitOrder, TimeInForce,
 };
 
 /// `Input::Intent`: deduplicated by the fold lookup, journaled as `IntentReceived`, then gated.
@@ -31,25 +33,28 @@ pub(crate) fn received(
         qty,
         limit,
         purpose,
-        ..
+        protection,
     } = &handoff.body
     else {
         return flatten_plan();
     };
-    batch.journal(
-        "IntentReceived",
-        None,
-        vec![
-            ("intent_id", text(handoff.intent_id.0.0.clone())),
-            ("agent", text(handoff.agent.0.clone())),
-            ("kind", text("order")),
-            ("instrument", text(instrument.as_str())),
-            ("side", text(side_name(*side))),
-            ("qty", text(qty.to_string())),
-            ("limit", text(limit.to_string())),
-            ("purpose", text(purpose_name(*purpose))),
-        ],
-    )?;
+    let mut pairs = vec![
+        ("intent_id", text(handoff.intent_id.0.0.clone())),
+        ("agent", text(handoff.agent.0.clone())),
+        ("kind", text("order")),
+        ("instrument", text(instrument.as_str())),
+        ("side", text(side_name(*side))),
+        ("qty", text(qty.to_string())),
+        ("limit", text(limit.to_string())),
+        ("purpose", text(purpose_name(*purpose))),
+    ];
+    if let Some(prices) = protection {
+        pairs.push(("stop", text(prices.stop.to_string())));
+        if let Some(take_profit) = prices.take_profit {
+            pairs.push(("take_profit", text(take_profit.to_string())));
+        }
+    }
+    batch.journal("IntentReceived", None, pairs)?;
     gate_and_submit(batch, &handoff.intent_id)
 }
 
@@ -77,7 +82,10 @@ pub(crate) fn gate_and_submit(
     if too_old(batch, intent) {
         return abandon(batch, intent, "intent_too_old");
     }
-    begin_exit(batch, intent)?;
+    crypto_add(batch, intent)?;
+    if decide(batch, intent)?.0.verdict_name() == ALLOW {
+        begin_exit(batch, intent)?;
+    }
     if gate(batch, intent, true)? == ALLOW {
         submit(batch, intent)?;
     }
@@ -90,17 +98,19 @@ const HOLD: &str = "hold";
 /// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
 /// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
 /// journaled again: a held intent re-checked at a tick records only the moment it is released.
-fn gate(
-    batch: &mut Batch<'_, '_>,
+/// The gate's verdict on `intent` against the current state, journaling nothing: only an exit
+/// the gate allows starts §5.4's sequence, so a held or denied one leaves protection resting.
+fn decide(
+    batch: &Batch<'_, '_>,
     intent: &IntentId,
-    always: bool,
-) -> Result<&'static str, ExecutorError> {
+) -> Result<(PartialGateDecision, Purpose), ExecutorError> {
     let (agent, body) = intent_of(batch, intent)?;
     let IntentBody::Order {
         instrument,
         side,
         qty,
         purpose,
+        protection,
         ..
     } = &body
     else {
@@ -117,9 +127,19 @@ fn gate(
             side: *side,
             qty: *qty,
             purpose: *purpose,
+            bracketed: protection.is_some(),
         },
         batch.ports,
     )?;
+    Ok((decision, *purpose))
+}
+
+fn gate(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    always: bool,
+) -> Result<&'static str, ExecutorError> {
+    let (decision, purpose) = decide(batch, intent)?;
     let verdict = decision.verdict_name();
     if verdict == ALLOW || always {
         batch.journal(
@@ -127,9 +147,9 @@ fn gate(
             None,
             vec![
                 ("intent_id", text(intent.0.0.clone())),
-                ("verdict", text(decision.verdict_name())),
+                ("verdict", text(verdict)),
                 ("reason_code", text(decision.reason_code())),
-                ("purpose", text(purpose_name(*purpose))),
+                ("purpose", text(purpose_name(purpose))),
                 ("checks", decision.checks_value()?),
                 ("evaluation", text("account_stream_only")),
             ],
@@ -161,15 +181,17 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         qty,
         limit,
         purpose,
-        ..
+        protection,
     } = body
     else {
         return Ok(());
     };
-    if awaits_cancel(&batch.view, &instrument, purpose) {
+    if awaits_cancel(&batch.view, &agent, &instrument, purpose)
+        || passive_exit(batch, intent, &instrument, qty, limit)?
+    {
         return Ok(());
     }
-    sequenced(&batch.view, &instrument, purpose)?;
+    bracketed_add(&batch.view, &instrument, purpose, protection.is_some())?;
     let limit = exit_limit(batch, &instrument, purpose, limit)?;
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
@@ -356,6 +378,7 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
             if batch.view.orders.contains_key(&id) {
                 send_again(batch, &id)?;
             } else {
+                begin_exit(batch, &intent)?;
                 submit(batch, &intent)?;
             }
         }
@@ -364,45 +387,42 @@ pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorErro
 }
 
 #[cfg(test)]
-mod sequence_call_tests {
+mod bracket_call_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_canon::Value;
     use mandate_num::{Price, Qty};
 
     use crate::error::ExecutorError;
     use crate::ids::IntentId;
-    use crate::payload::object;
     use crate::ports::Ports;
     use crate::reconcile::tests::{
         Everything, Ids, executor_config, fees, protected_by_an_oco, submitted,
     };
     use crate::types::{
-        AgentId, EventId, Input, IntentBody, IntentHandoff, MarketObservation, Purpose, RiskClock,
+        AgentId, Effect, EventId, Input, IntentBody, IntentHandoff, ProtectionPrices, Purpose,
     };
 
-    fn exit(intent: &str) -> Result<Input, ExecutorError> {
+    fn add(intent: &str, protection: Option<ProtectionPrices>) -> Result<Input, ExecutorError> {
         Ok(Input::Intent(IntentHandoff {
             intent_id: IntentId(EventId(intent.to_owned())),
             agent: AgentId("agent-a".to_owned()),
             body: IntentBody::Order {
                 instrument: InstrumentId::new("AAPL")?,
-                side: Side::Sell,
+                side: Side::Buy,
                 qty: Qty::parse("5")?,
                 limit: Price::parse("150")?,
-                purpose: Purpose::RiskExit,
-                protection: None,
+                purpose: Purpose::Increase,
+                protection,
             },
         }))
     }
 
-    /// #258 round 1, major 1; DEC-160 4. `submit` asks `sequenced` before an exit in a protected
-    /// instrument goes out, so one no sequence runs for — after slice 3a, a passive exit, a sell
-    /// limit above the latest bid — is never sent beside the resting legs: it answers the loud stub
-    /// slice 3b replaces. That stub is a denied exit once reachable, which is why nothing creates
-    /// protection before exits through it work (`AGENTS.md` rule 13, DEC-160 4). Once no
-    /// protective order rests, the same exit is submitted.
+    /// #174 ruling (b), §5.4: where protection rests, the gate denies a plain add
+    /// (`add_blocked_by_protective_order`), and `submit` asks `bracketed_add` before a bracketed
+    /// one goes out, so it answers slice 2's stub rather than being sent beside the resting legs.
     #[test]
-    fn an_exit_where_protection_rests_answers_the_sequence_stub() -> Result<(), ExecutorError> {
+    fn an_add_where_protection_rests_is_denied_or_answers_slice_2s_stub()
+    -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
         let ports = Ports {
             ids: &Ids,
@@ -412,39 +432,26 @@ mod sequence_call_tests {
             fees: &fees,
         };
         let mut executor = protected_by_an_oco(&ports)?;
-        let bid = Price::parse("149")?;
-        executor.run(
-            Input::Market(MarketObservation {
-                instrument: InstrumentId::new("AAPL")?,
-                bid: Some(bid),
-                bid_size: Some(Qty::parse("100")?),
-                ask: Some(bid),
-                last_trade: Some(bid),
-                mark: Some(bid),
-                sane: true,
-                observed_at: RiskClock::from_secs(0),
-            }),
-            &ports,
-        )?;
+        let plain = executor.run(add("01JABCDEFGHJKMNPQRSTVWXYZ1", None)?, &ports)?;
+        assert!(
+            plain.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft) if draft.event_type == "GateDecided"
+                    && draft.payload.get("verdict") == Some(&Value::Str("deny".to_owned()))
+                    && draft.payload.get("reason_code")
+                        == Some(&Value::Str("add_blocked_by_protective_order".to_owned()))
+            )),
+            "{plain:?}"
+        );
+        assert_eq!(submitted(&plain), 0);
+        let prices = ProtectionPrices {
+            stop: Price::parse("140")?,
+            take_profit: Some(Price::parse("170")?),
+        };
         assert_eq!(
-            executor.run(exit("01JABCDEFGHJKMNPQRSTVWXYZ1")?, &ports),
+            executor.run(add("01JABCDEFGHJKMNPQRSTVWXYZ2", Some(prices))?, &ports),
             Err(ExecutorError::Unimplemented { story: "E7-4" })
         );
-        executor.commit_one(
-            concat!("Protection", "Changed"),
-            object(vec![
-                ("instrument", Value::Str("AAPL".to_owned())),
-                ("action", Value::Str("cancelled".to_owned())),
-                ("orders", Value::Str("md-oco-1".to_owned())),
-                ("qty", Value::Str("10".to_owned())),
-                (
-                    "risk_clock",
-                    crate::payload::clock(RiskClock::from_secs(0))?,
-                ),
-            ])?,
-        )?;
-        let sent = executor.run(exit("01JABCDEFGHJKMNPQRSTVWXYZ2")?, &ports)?;
-        assert_eq!(submitted(&sent), 1, "with nothing resting the exit goes");
         Ok(())
     }
 }

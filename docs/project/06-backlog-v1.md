@@ -766,11 +766,11 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   among the executor's drafts, but it is a control-stream event the executor never writes; the
   executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
   Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
-- **E7-4 slice 3b (stream K), from #258's round 2 (comment 5862870455):** (1) pin with tests the
-  three fail-open paths whose code is right but unclaimed: `reconcile::agents` counting an ownerless
-  order as `""`, `orders::unmapped`'s ownerless (`Some(None)`) arm, and `reattribute` without its
-  instrument filter; (2) make the pins' `sources()` skip `#[cfg(test)]` regions and drop the
-  `concat!` idiom that dodges them.
+- **E7-4 slice 2 (stream K), #242's plants that go live with it:** plant 7 (held quantity 10 → 5)
+  and plant 8 (held limit 150 → 100), and plant 9 (`fault::protected` on a plain `restart`), which
+  the coordinator moved from 3a to slice 2 (#267, comment 5862923162): under rule 13 no exit waits
+  for the startup reconciliation, so the plant gets weight only with the first opening through
+  `fault::protected` (slice 2's add). Slice 2's PR shows each of the three red.
 - **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
   finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
   green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`

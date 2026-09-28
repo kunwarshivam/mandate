@@ -14,7 +14,7 @@ use crate::error::ExecutorError;
 use crate::ids::ClientOrderId;
 use crate::intent::resubmit;
 use crate::payload::{int, text};
-use crate::protection::protection_cancelled;
+use crate::protection::{overdue, protection_cancelled, release_waiting};
 use crate::state::{EVERY_AGENT, ExecutorState, restriction_for};
 use crate::types::{
     AccountState, BrokerAccount, BrokerFill, BrokerOrder, BrokerReject, BrokerRequest, EventId,
@@ -173,6 +173,14 @@ pub(crate) fn described(
     if order.filled_qty > applied {
         batch.request_reconciliation();
     }
+    let answered = batch
+        .view
+        .details
+        .get(&id)
+        .is_some_and(|detail| detail.answered);
+    if answered {
+        release_waiting(batch, &order.instrument)?;
+    }
     Ok(())
 }
 
@@ -275,16 +283,19 @@ pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Exec
         OrderState::Canceled,
         vec![("cancel_confirmed", Value::Bool(true))],
     )?;
-    let protective = batch
+    let Some((instrument, purpose)) = batch
         .view
         .orders
         .get(&id)
-        .filter(|order| order.purpose == Purpose::Protective)
-        .map(|order| order.instrument.clone());
-    if let Some(instrument) = protective {
-        protection_cancelled(batch, &instrument, &id)?;
+        .map(|order| (order.instrument.clone(), order.purpose))
+    else {
+        return Ok(());
+    };
+    if purpose == Purpose::Protective {
+        protection_cancelled(batch, &instrument, &id)
+    } else {
+        release_waiting(batch, &instrument)
     }
-    Ok(())
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
@@ -687,7 +698,16 @@ pub(crate) fn reject(
         pairs.push(("code", text(code.clone())));
     }
     batch.journal("RejectObserved", None, pairs)?;
-    if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
+    let cancelling = known(batch, reject.client_order_id.as_deref()).filter(|id| {
+        batch
+            .view
+            .orders
+            .get(id)
+            .is_some_and(|order| order.state == OrderState::PendingCancel)
+    });
+    if let Some(id) = cancelling {
+        overdue(batch, &id)?;
+    } else if let Some(id) = known(batch, reject.client_order_id.as_deref()) {
         let extra = reject
             .code
             .iter()
