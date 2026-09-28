@@ -920,6 +920,22 @@ impl Shell {
         next
     }
 
+    /// The last `ProtectionChanged placed` payload naming `id`, from which `ready()` describes a
+    /// resting protective order as the broker holds it: a GTC OCO at its take-profit with its stop
+    /// as the child leg, or a stop for crypto until the payload carries its limit.
+    fn placed_protection(&self, id: &str) -> Option<&Value> {
+        self.account_journal
+            .iter()
+            .rev()
+            .filter(|event| event.event_type == "ProtectionChanged")
+            .map(|event| &event.payload)
+            .find(|payload| {
+                matches!(payload.get("action"), Some(Value::Str(action)) if action == "placed")
+                    && matches!(payload.get("orders"), Some(Value::Str(orders))
+                        if orders.split([',', ' ']).any(|named| named == id))
+            })
+    }
+
     /// The startup reconciliation and then the account report, on a process already started,
     /// against a broker that agrees with the journal: it holds the positions the fold holds and
     /// lists every live order the fold has, so the run pauses nothing and differs on nothing. The
