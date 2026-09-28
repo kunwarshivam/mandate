@@ -132,8 +132,10 @@ every workspace crate and reference-case suite has an entry and that every path 
 Planned by [the E6-2 task brief](../../../docs/project/tasks/E6-2-autonomy-and-order-builder.md) and
 DEC-130. The implementation lands in two slices. Slice 1 (autonomy, DEC-152) implements §6.2 in
 `autonomy.rs` and §6.3's `Condition::matches` in `mandate-spec`, and its 40 tests are live: family A
-(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. The builder's tests stay pending until
-slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
+(`MC-A01` to `MC-A16`), 16 hand tests and 8 properties. Slice 2 (the builder) implements §8.1 to
+§8.3 in `builder.rs` and the sizing arithmetic in `mandate-num`, and the rest go live: family B
+(the 28 builder cases), 46 hand tests, 18 properties, and the two `mandate-num` tests. No test in
+the crate is pending.
 
 - **Spec:** `docs/specs/mandate.md` §6.1 to §6.4 (purposes, the evaluation order, the condition
   language, the approver count and the skip-on-timeout), §8.1 to §8.3 (the signal-model contract,
@@ -168,8 +170,7 @@ slice 2 and fail on its stubs (`cargo xtask ci pending`, DEC-110).
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. They move in a
   harness-and-status PR after stream F's tests PR adds the `mandate` harness module and, for the `B`
   family, stream G's gate supplies the `gate_dry_run` verdict each of those cases states.
-- **Run:** `cargo nextest run -p mandate-builder`; the pending tests with
-  `cargo nextest run -p mandate-builder --run-ignored all`.
+- **Run:** `cargo nextest run -p mandate-builder -p mandate-num`.
 
 ## Agent runtime and kill switches
 
@@ -323,6 +324,15 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   trading endpoint distinguishes a rejection from a duplicate id from an absence by status: eleven
   scenarios are recorded against the paper host and twelve are hand-built from the spec. Planted bugs
   per test (21): the task brief.
+- **Startup hold:** the gate holds, never denies, an opening until an account has been journaled
+  and a reconciliation has run since `Input::Started` (`gate::unreconciled_opening`,
+  `ExecutorState::reconciled_since_start`; the coordinator's rulings on #174). Its three live cases
+  are in-module in `crates/mandate-executor/src/reconcile.rs`:
+  `an_opening_is_held_until_a_reconciliation_has_run_since_the_start` (a reported account, the
+  release at the next tick, and every non-adding purpose allowed on a stream with neither),
+  `a_run_from_before_the_restart_does_not_release_an_opening`, and
+  `the_hold_lifts_on_an_account_and_a_run_in_either_order`. Run: `cargo nextest run -p
+  mandate-executor --lib reconcile::tests`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they
@@ -557,6 +567,26 @@ proves each pending test fails on them (DEC-110).
   case and require it to fail.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
+
+## Approval core: content, admission, re-validation, and step-up (E8-1 to E8-3)
+
+- **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
+  DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
+- **Code:** `mandate-approval` (new, layer 1, stubs until the implementation PR):
+  `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
+  `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
+  `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
+  `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
+  `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
+  `crates/mandate-approval/src/quiet.rs`, and `crates/mandate-approval/src/stepup.rs`
+  (`owner_command`, and `kill_switch`, whose answer has no refusing variant).
+- **Tests:** `crates/mandate-approval/tests/content.rs` (E8-1: the content object, its hash and
+  code, the notification payload, quiet hours), `crates/mandate-approval/tests/budget.rs` (E8-2:
+  the ask budget and suppressions), and `crates/mandate-approval/tests/properties.rs` (the sentinel
+  scanner, the budget counter with its own DST table, and content separation), all pending, with
+  fixtures in `crates/mandate-approval/tests/common/mod.rs`. E8-3's admission, step-up,
+  re-validation and drift tests follow in their own tests PR (DEC-165 item 1).
+- **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness
 
