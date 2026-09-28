@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * Kumo's ResourceListPage layout (`kumo add ResourceListPage`), in Placard: the list takes the main
+ * Kumo's ResourceListPage layout (`kumo add ResourceListPage`), in the calm system: the list takes the main
  * column and an optional aside holds context. The shell already draws the page background and the
  * width, so this block draws neither.
  */

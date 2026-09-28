@@ -222,7 +222,9 @@ describe("chart states", () => {
   it("stale marks say how old they are on the position and its chart's agent", async () => {
     await open(XYZ_HREF, "stale");
     const figures = within(screen.getByRole("region", { name: "Figures" }));
-    expect(figures.getByText(/ago|as of/i).closest("[data-stale]")).toHaveAttribute("data-stale", "true");
+    const age = figures.getAllByText(/ago|as of/i);
+    expect(age.length).toBeGreaterThan(0);
+    for (const el of age) expect(el.closest("[data-stale]")).toHaveAttribute("data-stale", "true");
     expect(main().querySelector("[data-slot=chart-canvas]")).not.toBeNull();
   });
 

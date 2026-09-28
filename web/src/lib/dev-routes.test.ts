@@ -49,7 +49,7 @@ describe("the colour-blind friendly preference is dev only, and there is one pal
     expect(workspace).toMatch(/getColourBlind[^]*if \(!colourBlindEnabled\) return false;/);
     const layout = readFileSync(web("src/app/layout.tsx"), "utf8");
     expect(layout).toContain('data-cvd={colourBlind ? "on" : undefined}');
-    expect(layout).toMatch(/\{scenariosEnabled \? <ScenarioSwitcher /);
+    expect(layout).toMatch(/\{scenarioSwitcherShown \? <ScenarioSwitcher /);
   });
 
   it("takes ?cvd only in development, and no ?palette at all", () => {

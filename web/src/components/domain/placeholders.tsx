@@ -14,7 +14,7 @@ export function Placeholder({ name, className }: { name: keyof typeof NAMES; cla
   return (
     <span
       data-placeholder={name}
-      className={cn("inline-block border border-dashed border-muted-foreground px-1.5 py-0.5 font-mono text-label font-normal text-muted-foreground", className)}
+      className={cn("inline-block rounded-sm border border-dashed border-muted-foreground px-1.5 py-0.5 font-mono text-label font-normal text-muted-foreground", className)}
     >
       {NAMES[name]}
     </span>
@@ -24,7 +24,7 @@ export function Placeholder({ name, className }: { name: keyof typeof NAMES; cla
 /** Marks fixture values so no one reads them as a record. */
 export function FixtureTag({ className }: { className?: string }) {
   return (
-    <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center border border-dashed border-muted-foreground px-1.5 label-caps text-muted-foreground", className)}>
+    <span data-slot="fixture-tag" className={cn("inline-flex h-5 shrink-0 items-center rounded-sm border border-dashed border-muted-foreground px-1.5 text-label text-muted-foreground", className)}>
       Fixture data
     </span>
   );

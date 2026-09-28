@@ -81,10 +81,15 @@ export function zoneLabel(iso: string): string {
   return iso.endsWith("-04:00") || iso.endsWith("-05:00") ? "ET" : "UTC";
 }
 
-/** "3 min ago", "42 s ago", "2 h ago". Whole units only; never a live-ticking seconds display. */
+/**
+ * "3 min ago", "40 s ago", "2 h ago". Under a minute the age moves in 5-second steps, so the text
+ * changes at most every five seconds. Steps round down, so the age shown is within 5 s of the real
+ * one; the absolute time written beside it stays exact.
+ */
 export function ago(fromIso: string, nowIso: string): string {
-  const seconds = Math.max(0, Math.round((Date.parse(nowIso) - Date.parse(fromIso)) / 1000));
-  if (seconds < 60) return `${seconds} s ago`;
+  const seconds = Math.max(0, Math.floor((Date.parse(nowIso) - Date.parse(fromIso)) / 1000));
+  if (seconds < 5) return "under 5 s ago";
+  if (seconds < 60) return `${seconds - (seconds % 5)} s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} min ago`;
   return `${Math.floor(minutes / 60)} h ago`;

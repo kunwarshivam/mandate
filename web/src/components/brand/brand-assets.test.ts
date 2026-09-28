@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { inflateSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MARK_SOURCE, NAVY, OFF_WHITE, OUTPUTS, PUBLIC_DIR, generateBrandAssets } from "../../../scripts/brand-assets.mjs";
+import { INK, MARK_SOURCE, OFF_WHITE, OUTPUTS, PUBLIC_DIR, generateBrandAssets } from "../../../scripts/brand-assets.mjs";
 import { MARK_PATH } from "./Logo";
-import { brandHex, NAVY as PALETTE_NAVY, OFF_WHITE as PALETTE_OFF_WHITE } from "@/lib/brand-palette";
+import { brandHex, INK as PALETTE_INK, OFF_WHITE as PALETTE_OFF_WHITE } from "@/lib/brand-palette";
 
 type Rgba = [number, number, number, number];
 
@@ -89,22 +89,22 @@ describe("brand assets (npm run brand)", () => {
     expect((await generated(name)).equals(await committed(name))).toBe(true);
   });
 
-  it("uses the palette's navy and off-white, and the mark from the SVG source", async () => {
-    expect(NAVY).toBe(PALETTE_NAVY);
+  it("uses the palette's ink and off-white, and the mark from the SVG source", async () => {
+    expect(INK).toBe(PALETTE_INK);
     expect(OFF_WHITE).toBe(PALETTE_OFF_WHITE);
     expect(await readFile(MARK_SOURCE, "utf8")).toContain(`d="${MARK_PATH}"`);
   });
 
-  it("draws the favicon SVG as the navy mark on an off-white square, in every colour scheme", async () => {
+  it("draws the favicon SVG as the ink mark on an off-white square, in every colour scheme", async () => {
     const svg = (await committed("favicon.svg")).toString("utf8");
     expect(svg).toContain('viewBox="0 0 1000 1000"');
     expect(svg).toContain(`<rect width="1000" height="1000" fill="${OFF_WHITE}"/>`);
-    expect(svg).toContain(`<path fill="${NAVY}"`);
+    expect(svg).toContain(`<path fill="${INK}"`);
     expect(svg).toContain(`d="${MARK_PATH}"`);
     expect(svg).not.toMatch(/<style|prefers-color-scheme/);
   });
 
-  it.each([16, 32, 48])("renders favicon-%i.png as the navy mark, as large as fits, on an opaque off-white square", async (size) => {
+  it.each([16, 32, 48])("renders favicon-%i.png as the ink mark, as large as fits, on an opaque off-white square", async (size) => {
     const image = await png(`favicon-${size}.png`);
     expect([image.width, image.height]).toEqual([size, size]);
     for (const [x, y] of [
@@ -115,13 +115,13 @@ describe("brand assets (npm run brand)", () => {
     ])
       expect(image.at(x, y)).toEqual(opaque(OFF_WHITE));
     const all = pixels(image);
-    const [bg, fg] = [rgb(OFF_WHITE), rgb(NAVY)];
+    const [bg, fg] = [rgb(OFF_WHITE), rgb(INK)];
     for (const [, , p] of all) {
       expect(p[3]).toBe(255);
       for (const c of [0, 1, 2]) expect(p[c]).toBeGreaterThanOrEqual(fg[c]);
       for (const c of [0, 1, 2]) expect(p[c]).toBeLessThanOrEqual(bg[c]);
     }
-    expect(all.some(([, , p]) => p.join() === opaque(NAVY).join())).toBe(true);
+    expect(all.some(([, , p]) => p.join() === opaque(INK).join())).toBe(true);
     const ink = all.filter(([, , p]) => p.join() !== opaque(OFF_WHITE).join());
     const ys = ink.map(([, y]) => y);
     const xs = ink.map(([x]) => x);
@@ -152,7 +152,7 @@ describe("brand assets (npm run brand)", () => {
     ["pwa-192.png", 192],
     ["pwa-512.png", 512],
     ["pwa-maskable-512.png", 512],
-  ])("renders %s as the navy mark centred on an off-white %ipx square", async (name, size) => {
+  ])("renders %s as the ink mark centred on an off-white %ipx square", async (name, size) => {
     const image = await png(name);
     expect([image.width, image.height]).toEqual([size, size]);
     for (const [x, y] of [
@@ -162,7 +162,7 @@ describe("brand assets (npm run brand)", () => {
       [size - 1, size - 1],
     ])
       expect(image.at(x, y)).toEqual(opaque(OFF_WHITE));
-    const mark = pixels(image).filter(([, , p]) => p.join() === opaque(NAVY).join());
+    const mark = pixels(image).filter(([, , p]) => p.join() === opaque(INK).join());
     expect(mark.length).toBeGreaterThan(0);
     const ys = mark.map(([, y]) => y);
     const xs = mark.map(([x]) => x);
@@ -181,29 +181,29 @@ describe("brand assets (npm run brand)", () => {
     }
   });
 
-  it("renders og-image.png at 1200 by 630: off-white, the navy mark and wordmark, and nothing else", async () => {
+  it("renders og-image.png at 1200 by 630: off-white, the ink mark and wordmark, and nothing else", async () => {
     const image = await png("og-image.png");
     expect([image.width, image.height]).toEqual([1200, 630]);
     const all = pixels(image);
-    const navy = all.filter(([, , p]) => p.join() === opaque(NAVY).join());
-    const xs = navy.map(([x]) => x);
-    const ys = navy.map(([, y]) => y);
+    const inkPixels = all.filter(([, , p]) => p.join() === opaque(INK).join());
+    const xs = inkPixels.map(([x]) => x);
+    const ys = inkPixels.map(([, y]) => y);
     const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
     expect(Math.abs(left - (1199 - right))).toBeLessThanOrEqual(2);
     expect(Math.abs(top - (629 - bottom))).toBeLessThanOrEqual(2);
-    expect(navy.some(([x, y]) => x < 345 && y > 190 && y < 450)).toBe(true);
-    expect(navy.some(([x, y]) => x > 445 && y > 190 && y < 312)).toBe(true);
+    expect(inkPixels.some(([x, y]) => x < 345 && y > 190 && y < 450)).toBe(true);
+    expect(inkPixels.some(([x, y]) => x > 445 && y > 190 && y < 312)).toBe(true);
     const ink = all.filter(([, , p]) => p.join() !== opaque(OFF_WHITE).join());
     expect(ink.some(([x, y]) => x > 445 && y > 330)).toBe(false);
     for (const [, , p] of ink) expect(p[3]).toBe(255);
-    const [bg, fg] = [rgb(OFF_WHITE), rgb(NAVY)];
+    const [bg, fg] = [rgb(OFF_WHITE), rgb(INK)];
     for (const [, , p] of ink) for (const c of [0, 1, 2]) expect(p[c]).toBeGreaterThanOrEqual(Math.min(bg[c], fg[c]));
-    expect(all.some(([, , p]) => p.join() === opaque(brandHex("Brass")).join())).toBe(false);
+    expect(all.some(([, , p]) => p.join() === opaque(brandHex("Gold")).join())).toBe(false);
   });
 
   it("describes the installed app in site.webmanifest", async () => {
     const manifest = JSON.parse((await committed("site.webmanifest")).toString("utf8"));
-    expect(manifest).toMatchObject({ name: "Owlhead", short_name: "Owlhead", theme_color: "#F7FAFE", background_color: "#F7FAFE", display: "standalone" });
+    expect(manifest).toMatchObject({ name: "Owlhead", short_name: "Owlhead", theme_color: OFF_WHITE, background_color: OFF_WHITE, display: "standalone" });
     expect(manifest.icons.map((i: { src: string }) => i.src)).toEqual(["/pwa-192.png", "/pwa-512.png", "/pwa-maskable-512.png"]);
   });
 

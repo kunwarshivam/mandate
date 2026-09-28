@@ -3,11 +3,12 @@ import { cn } from "./utils";
 
 describe("cn", () => {
   it("lets a type-scale size replace a primitive's default size", () => {
-    expect(cn("text-base font-medium", "text-title")).toBe("font-medium text-title");
+    expect(cn("text-base font-medium", "text-h1")).toBe("font-medium text-h1");
     expect(cn("text-sm", "text-caption")).toBe("text-caption");
+    expect(cn("text-lg", "text-hero")).toBe("text-hero");
   });
 
   it("keeps a colour and a type-scale size together", () => {
-    expect(cn("text-foreground", "text-heading")).toBe("text-foreground text-heading");
+    expect(cn("text-foreground", "text-h2")).toBe("text-foreground text-h2");
   });
 });

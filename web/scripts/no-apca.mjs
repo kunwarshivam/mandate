@@ -5,6 +5,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { distDir } from "./e2e-build.mjs";
 
 export const MARKERS = {
   apca: /\b(blkThrs|blkClmp|loBoWoffset|loWoBoffset|scaleBoW|scaleWoB|mOffsetIn|mOffsetOut)\b|1\.9468554433171/,
@@ -29,11 +30,12 @@ export function findShipped(nextDir) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const nextDir = join(process.cwd(), ".next");
+  const dir = distDir();
+  const nextDir = join(process.cwd(), dir);
   const { scanned, hits } = findShipped(nextDir);
   if (hits.length) {
     console.error(`APCA or colorparsley code is in the production build (they are dev only):\n  ${hits.join("\n  ")}`);
     process.exit(1);
   }
-  console.log(`no-apca: ${scanned} files in .next/static and .next/server, no APCA or colorparsley code`);
+  console.log(`no-apca: ${scanned} files in ${dir}/static and ${dir}/server, no APCA or colorparsley code`);
 }

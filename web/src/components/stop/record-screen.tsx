@@ -15,13 +15,13 @@ import { KillSwitchButton } from "./kill-switch-button";
 import { type AgentModeLine, MODES_HEADING, RECORD_TITLE, type RecordList, type StopRecord, buildRecord, commandRecord } from "./record";
 import { StepUpDialog } from "./step-up-dialog";
 
-const BACK = "inline-flex h-11 w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground lg:h-8";
+const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-full px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function List({ list }: { list: RecordList }) {
   const id = `record-${list.key}`;
   return (
-    <section aria-labelledby={id} data-list={list.key} className="grid gap-2 bg-card px-3 py-3 sm:px-4">
-      <h2 id={id} className="text-heading">
+    <section aria-labelledby={id} data-list={list.key} className="grid gap-2 border-t border-border/70 pt-4">
+      <h2 id={id} className="text-h3">
         {list.heading}
       </h2>
       {list.items.length > 0 ? (
@@ -64,9 +64,9 @@ function Activate({ record, onClick }: { record: StopRecord; onClick: () => void
           type="button"
           data-tone="outline"
           onClick={onClick}
-          className="press grid min-h-11 w-full gap-1 border-2 border-foreground bg-card px-4 py-3 text-left text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+          className="press grid min-h-11 w-full gap-1 rounded-xl border border-foreground/25 bg-card px-4 py-3 text-left text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <span className="text-base font-bold">Stop and release to me</span>
+          <span className="text-base font-semibold">Stop and release to me</span>
           <span className="text-sm text-muted-foreground">Needs your passkey.</span>
         </button>
       );
@@ -80,9 +80,9 @@ function Activate({ record, onClick }: { record: StopRecord; onClick: () => void
 function Missing({ kind }: { kind: RecordKind }) {
   const agent = kind === "kill" || kind === "release";
   return (
-    <section data-slot="record-missing" className="grid gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <p className="max-w-prose">{agent ? "This workspace has no agent with that ID." : "This workspace has no broker connection with that ID."}</p>
-      <Link href="/" className="press inline-flex h-11 w-fit items-center border-2 border-foreground bg-card px-4 font-bold hover:bg-muted">
+    <section data-slot="record-missing" className="grid gap-4 pt-4">
+      <p className="max-w-measure text-muted-foreground">{agent ? "This workspace has no agent with that ID." : "This workspace has no broker connection with that ID."}</p>
+      <Link href="/" className="press inline-flex h-11 w-fit items-center rounded-full border border-foreground/25 bg-card px-5 font-semibold hover:bg-background">
         Go to the dashboard
       </Link>
     </section>
@@ -126,7 +126,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
   };
 
   return (
-    <article className="grid w-full max-w-3xl grid-cols-1 gap-(--seam)" aria-labelledby="record-title" data-slot="record-screen" data-kind={kind}>
+    <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="record-title" data-slot="record-screen" data-kind={kind}>
       {shown ? (
         <Link href={shown.back.href} className={BACK}>
           <ArrowLeft className="size-4" aria-hidden />
@@ -134,32 +134,32 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
         </Link>
       ) : null}
 
-      <div data-slot="record" className="grid grid-cols-1 gap-(--seam)">
-        <header className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
-          <h1 id="record-title" className="flex flex-wrap items-center gap-3 text-title sm:text-display">
+      <div data-slot="record" className="grid grid-cols-1 gap-5">
+        <header className="reveal grid gap-2">
+          <h1 id="record-title" className="flex flex-wrap items-center gap-3 text-h1">
             {RECORD_TITLE[kind]}
             <EnvironmentBadge environment={shown?.environment ?? ws.environment} />
           </h1>
-          {shown ? <p className="text-base font-bold">{shown.subject}</p> : null}
+          {shown ? <p className="text-lg font-medium">{shown.subject}</p> : null}
         </header>
 
         {shown ? (
           <>
-            <p className="bg-card px-3 py-3 text-base sm:px-4" data-slot="record-scope">
+            <p className="text-base text-pretty" data-slot="record-scope">
               {shown.scope}
             </p>
             {shown.warning ? (
-              <p role="note" data-slot="release-warning" className="border-t-4 border-mandate-edge bg-mandate px-3 py-3 font-bold text-mandate-foreground sm:px-4">
+              <p role="note" data-slot="release-warning" className="rounded-2xl bg-mandate px-5 py-4 font-medium text-mandate-foreground">
                 {shown.warning}
               </p>
             ) : null}
             {shown.lists.map((list) => (
               <List key={list.key} list={list} />
             ))}
-            <p className="bg-card px-3 py-3 text-sm sm:px-4">{shown.afterwards}</p>
+            <p className="border-t border-border/70 pt-4 text-sm">{shown.afterwards}</p>
 
-            <section aria-labelledby="record-modes" className="grid gap-2 bg-card px-3 py-3 sm:px-4">
-              <h2 id="record-modes" className="label-caps text-muted-foreground">
+            <section aria-labelledby="record-modes" className="grid gap-2 border-t border-border/70 pt-4">
+              <h2 id="record-modes" className="text-sm font-medium text-muted-foreground">
                 {MODES_HEADING}
               </h2>
               <Modes modes={shown.modes} />
@@ -174,18 +174,18 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
 
       {shown ? (
         <>
-          <section aria-label="Confirm" className="grid gap-2 border-t-4 border-foreground bg-muted px-3 py-3 sm:px-4">
+          <section aria-label="Confirm" className="grid gap-3 rounded-2xl bg-background px-5 py-5">
             {confirmed ? (
               <p className="text-sm" data-slot="confirmed">
                 You confirmed the record above. It stays as you saw it; progress is under “After you confirmed”.
               </p>
             ) : stale ? (
               <div data-slot="record-changed" className="grid gap-2">
-                <p className="text-sm font-bold">This changed since the page opened, so the record above is out of date. Nothing was sent.</p>
+                <p className="text-sm font-medium">This changed since the page opened, so the record above is out of date. Nothing was sent.</p>
                 <button
                   type="button"
                   onClick={refresh}
-                  className="press inline-flex h-11 w-fit items-center border-2 border-foreground bg-card px-4 font-bold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
+                  className="press inline-flex h-11 w-fit items-center rounded-full border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring"
                 >
                   Show the current version
                 </button>
@@ -199,7 +199,7 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
             ) : (
               <>
                 <Activate record={shown} onClick={() => setAsking(true)} />
-                <Link href={shown.back.href} className="press inline-flex h-11 w-fit items-center px-1 text-sm font-bold underline underline-offset-4 hover:bg-card">
+                <Link href={shown.back.href} className="press -ml-2 inline-flex h-11 w-fit items-center rounded-full px-3 text-sm font-medium text-muted-foreground outline-none hover:bg-card hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring">
                   Back without changing anything
                 </Link>
               </>
@@ -207,10 +207,10 @@ export function StopRecordScreen({ kind, targetId }: { kind: RecordKind; targetI
           </section>
 
           <div role="status" aria-live="polite" className="grid gap-2">
-            {notice ? <p className="bg-card px-4 py-3 text-sm">{notice}</p> : null}
+            {notice ? <p className="rounded-xl bg-background px-4 py-3 text-sm">{notice}</p> : null}
             {confirmed ? (
-              <section aria-labelledby="after-confirm" data-slot="after-confirm" className="grid gap-2 border-2 border-dashed border-foreground bg-background px-3 py-3 sm:px-4">
-                <h2 id="after-confirm" className="text-heading">
+              <section aria-labelledby="after-confirm" data-slot="after-confirm" className="grid gap-2 rounded-2xl border border-dashed border-muted-foreground px-5 py-4">
+                <h2 id="after-confirm" className="text-h3">
                   After you confirmed
                 </h2>
                 <p className="text-sm text-muted-foreground">Live progress. It is not part of the record above.</p>

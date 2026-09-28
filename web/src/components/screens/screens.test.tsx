@@ -10,7 +10,7 @@ import { PURPOSE_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
-import { AgentDetailScreen } from "./agent-detail";
+import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { AgentsListScreen } from "./agents-list";
 import { ApprovalRequestScreen } from "./approval-request";
 import { ApprovalsInboxScreen } from "./approvals-inbox";
@@ -95,17 +95,48 @@ describe("D1 dashboard", () => {
 });
 
 describe("D2 agent detail", () => {
-  it("draws limits as rails in dollars and the profit stop as a level, never a rail", () => {
+  const rails = (el: Element) => [...el.querySelectorAll("[data-slot=limit-rail]")];
+
+  it("keeps only a compact mandate beside the story: mode, rails in dollars, the next level, and a way to the rest", () => {
     renderScreen(`/agents/${AGENT_IDS.swing}`, <AgentDetailScreen agentId={AGENT_IDS.swing} />);
+    const rail = main().querySelector("[data-layout=rail]") as HTMLElement;
+    const card = within(rail).getByRole("region", { name: "Your mandate" });
+    expect(card).toHaveAttribute("data-slot", "mandate-card");
+    expect([...rail.children]).toEqual([card]);
+    expect(card.querySelector("[data-slot=mode-badge]")).not.toBeNull();
+    expect(rails(card).length).toBeGreaterThan(0);
+    for (const r of rails(card)) expect(r).toHaveTextContent(/\$[\d,]+\.\d{2} of \$[\d,]+\.\d{2}/);
+    expect(rails(card).some((r) => /profit/i.test(r.textContent ?? ""))).toBe(false);
+    expect(card.querySelector("[data-slot=next-level]")).toHaveTextContent(/Next level.*\$[\d,]+\.\d{2}.*below equity now/);
+    expect(card.querySelector("[role=progressbar]")).toBeNull();
+    expect(within(card).getByRole("link", { name: "View full mandate" })).toHaveAttribute("href", `/agents/${AGENT_IDS.swing}/mandate`);
+    expect(main().querySelector("[data-slot=mandate-fields]")).toBeNull();
+  });
+
+  it("tells the story in the main column, with a recent slice of activity and a link to all of it", () => {
+    renderScreen(`/agents/${AGENT_IDS.btc}`, <AgentDetailScreen agentId={AGENT_IDS.btc} />);
+    const story = [...main().querySelectorAll("[data-layout=main]")];
+    const headings = story.flatMap((col) => [...col.querySelectorAll("h2")].map((h) => h.textContent));
+    expect(headings).toEqual(expect.arrayContaining(["Equity against your mandate", "Key figures", "Positions", "Working orders", "Recent decisions", "Activity"]));
+    const activity = within(main()).getByRole("region", { name: "Activity" });
+    expect(story.some((col) => col.contains(activity))).toBe(true);
+    expect(activity.querySelectorAll("li").length).toBeLessThanOrEqual(5);
+    expect(within(activity).getByRole("link", { name: "View all activity" })).toHaveAttribute("href", `/agents/${AGENT_IDS.btc}/activity`);
+  });
+
+  it("puts the levels, every rail and every field on the Mandate tab, in two columns on a wide screen", () => {
+    renderScreen(`/agents/${AGENT_IDS.swing}/mandate`, <AgentSectionScreen agentId={AGENT_IDS.swing} section="mandate" />);
     const envelope = within(main()).getByRole("region", { name: "Your mandate" });
     expect(envelope).toHaveAttribute("data-slot", "envelope");
     expect(envelope).toHaveTextContent("Limits in dollars");
-    const rails = [...envelope.querySelectorAll("[data-slot=limit-rail]")];
-    expect(rails.length).toBeGreaterThan(0);
-    for (const rail of rails) expect(rail).toHaveTextContent(/\$[\d,]+\.\d{2} of \$[\d,]+\.\d{2}/);
-    expect(rails.some((r) => /profit/i.test(r.textContent ?? ""))).toBe(false);
+    expect(rails(envelope).length).toBeGreaterThan(0);
+    expect(rails(envelope).some((r) => /profit/i.test(r.textContent ?? ""))).toBe(false);
     expect(envelope.querySelector("[data-level=profit_stop]")).toHaveTextContent("Profit stop");
     expect(envelope.querySelector("[role=progressbar]")).toBeNull();
+    const fields = main().querySelector("[data-slot=mandate-fields]") as HTMLElement;
+    expect(fields.className).toMatch(/\bgrid-cols-1\b.*\blg:grid-cols-2\b/);
+    expect(fields.querySelectorAll("[data-slot=mandate-field]").length).toBeGreaterThan(10);
+    expect(fields.querySelector("[data-slot=provenance-badge], [data-provenance]")).not.toBeNull();
   });
 
   it("never implies a limit caps a realized loss", () => {

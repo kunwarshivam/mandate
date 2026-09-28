@@ -14,10 +14,10 @@ export function ComingSoon({ purpose, back }: { purpose: string; back?: { href: 
         icon={<Hourglass className="size-8 text-muted-foreground" aria-hidden />}
         title="Coming in the next slice"
         description={purpose}
-        className="items-start border-2 border-dashed border-border bg-card text-left [&>div]:items-start [&_p]:text-left"
+        className="items-start rounded-2xl border border-dashed border-border bg-card text-left [&>div]:items-start [&_p]:text-left"
       />
       {back ? (
-        <Link href={back.href} className="w-fit font-bold text-lapis underline underline-offset-4 hover:decoration-2">
+        <Link href={back.href} className="w-fit font-medium text-lapis underline decoration-lapis/30 underline-offset-4 hover:decoration-current">
           {back.label}
         </Link>
       ) : null}

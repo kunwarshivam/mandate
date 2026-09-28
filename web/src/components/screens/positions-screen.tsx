@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { FixtureTag } from "@/components/domain/placeholders";
 import { PositionsTable } from "@/components/domain/positions";
 import { quantity } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
 import { positionHref } from "@/lib/screens";
-import { EmptyBoard, Panel, Section, WorkspaceGate } from "./common";
+import { EmptyBoard, Panel, Section, SectionLink, WorkspaceGate } from "./common";
 
 function Positions() {
   const { ws, now } = useRuntime();
@@ -27,15 +26,9 @@ function Positions() {
             key={agent.agent_id}
             id={`positions-${agent.agent_id}`}
             title={agent.label}
-            action={
-              <Link href={`/agents/${agent.agent_id}`} className="text-sm font-bold text-lapis underline underline-offset-4 hover:decoration-2">
-                Open agent
-              </Link>
-            }
+            action={<SectionLink href={`/agents/${agent.agent_id}`}>Open agent</SectionLink>}
           >
-            <Panel>
-              <PositionsTable positions={agent.positions} now={now} staleSymbols={staleSymbols} hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)} />
-            </Panel>
+            <PositionsTable positions={agent.positions} now={now} staleSymbols={staleSymbols} hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)} />
           </Section>
         );
       })}
@@ -46,11 +39,11 @@ function Positions() {
       ) : null}
       {ws.external_positions.length > 0 ? (
         <Section title="Your own holdings">
-          <Panel className="grid gap-2">
+          <Panel well className="grid gap-2">
             <p className="text-sm text-muted-foreground">No agent manages these. Stop choices leave them alone, except Close everything on this account.</p>
             <ul className="grid gap-1">
               {ws.external_positions.map((p) => (
-                <li key={p.instrument.asset_id} className="flex items-baseline gap-2 font-bold">
+                <li key={p.instrument.asset_id} className="flex items-baseline gap-2 font-medium">
                   <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
                 </li>
               ))}

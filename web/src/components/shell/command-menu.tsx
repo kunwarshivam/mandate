@@ -83,11 +83,11 @@ export function CommandMenu() {
         type="button"
         onClick={() => setOpen(true)}
         aria-keyshortcuts="Meta+K Control+K"
-        className="press inline-flex h-11 shrink-0 items-center gap-2 border border-border bg-card px-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+        className="press inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring max-lg:w-11 lg:bg-background lg:pr-2 lg:pl-3.5 lg:hover:bg-muted"
       >
-        <MagnifyingGlass className="size-4" aria-hidden />
+        <MagnifyingGlass className="size-4.5 lg:size-4" aria-hidden />
         <span className="max-lg:sr-only">Go to…</span>
-        <kbd className="hidden border border-border px-1 font-mono text-label lg:inline">⌘K</kbd>
+        <kbd className="ml-4 hidden h-6 items-center rounded-md bg-card px-1.5 font-sans text-label text-muted-foreground lg:inline-flex">⌘K</kbd>
       </button>
       <CommandPalette.Root<CommandGroup, Command>
         open={open}

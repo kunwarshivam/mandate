@@ -20,8 +20,8 @@ import { useCan } from "@/lib/roles";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "h-12 w-full justify-center text-base";
-const BACK = "inline-flex h-11 w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground lg:h-8";
+const CHOICE = "h-12 w-full justify-center rounded-full text-base font-semibold";
+const BACK = "-ml-2 inline-flex h-11 w-fit items-center gap-1.5 rounded-full px-2 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring lg:h-9";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
   if (response.phase === "sent") {
@@ -55,8 +55,8 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
 function Outcome({ approval }: { approval: Approval }) {
   if (approval.status === "delivered" || !approval.resolution) return null;
   return (
-    <section aria-label="Outcome" data-status={approval.status} className="reveal grid gap-1 border-t-4 border-foreground bg-muted px-3 py-3 sm:px-4">
-      <p className="font-display text-heading uppercase">{APPROVAL_STATUS_LABEL[approval.status]}</p>
+    <section aria-label="Outcome" data-status={approval.status} className="reveal grid gap-1.5 rounded-2xl bg-background px-5 py-4">
+      <p className="text-h3">{APPROVAL_STATUS_LABEL[approval.status]}</p>
       <p className="text-sm">
         {clock(approval.resolution.at)}: {approval.resolution.text}
       </p>
@@ -69,8 +69,8 @@ function RiskFigureRow({ figure }: { figure: RiskFigure }) {
   if (!figure.cap) {
     return (
       <div className="flex items-baseline justify-between gap-4 text-sm">
-        <dt className="font-bold">{label}</dt>
-        <dd className="text-right font-mono font-bold tabular">{usd(figure.value)}</dd>
+        <dt className="font-medium">{label}</dt>
+        <dd className="text-right font-mono font-medium tabular">{usd(figure.value)}</dd>
       </div>
     );
   }
@@ -79,12 +79,12 @@ function RiskFigureRow({ figure }: { figure: RiskFigure }) {
 
 function NotFound() {
   return (
-    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t-4 border-foreground bg-muted p-4 sm:p-6">
-      <h1 id="missing-title" className="text-title sm:text-display">
+    <section aria-labelledby="missing-title" className="reveal grid max-w-2xl gap-4 pt-6 sm:pt-12">
+      <h1 id="missing-title" className="text-h1">
         No request with this ID
       </h1>
-      <p className="max-w-prose">This workspace has no approval request with that ID.</p>
-      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit">
+      <p className="max-w-measure text-muted-foreground">This workspace has no approval request with that ID.</p>
+      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         See all approvals
       </LinkButton>
     </section>
@@ -167,65 +167,80 @@ function Request({ approvalId }: { approvalId: string }) {
     respond(approval.approval_id, choice, { screen: "D6", environment: snap.environment, shown: requestLines(snap, modelOutputExpanded), modelOutputExpanded });
 
   return (
-    <article className="grid w-full max-w-3xl grid-cols-1 gap-(--seam)" aria-labelledby="request-title">
+    <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="request-title">
       <Link href="/approvals" className={BACK}>
         <ArrowLeft className="size-4" aria-hidden />
         Approvals
       </Link>
 
-      <div data-slot="record" className="grid grid-cols-1 gap-(--seam)">
-        <header className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
+      <div data-slot="record" className="grid grid-cols-1 gap-(--section-gap)">
+        <header className="reveal grid gap-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h1 id="request-title" className="label-caps text-muted-foreground">
+            <h1 id="request-title" className="text-sm font-medium text-muted-foreground">
               Approval request
             </h1>
             <EnvironmentBadge environment={snap.environment} />
           </div>
-          <p className="text-sm text-muted-foreground">{snap.proposer}</p>
-          <p className="font-display text-title leading-[0.95] font-bold uppercase sm:text-display">
-            Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol} at a limit of <span className="tabular">{price(b.limit)}</span>
-          </p>
-          <dl className="mt-1 grid grid-cols-2 gap-x-4 gap-y-2 border-t pt-3 text-sm sm:grid-cols-3">
-            <div>
-              <dt className="label-caps text-muted-foreground">Order value</dt>
-              <dd className="font-mono tabular">{orderValueOf(a)}</dd>
+          <div className="grid gap-2">
+            <p className="text-muted-foreground">{snap.proposer}</p>
+            <p className="grid gap-1">
+              <span className="text-hero">
+                Buy <span className="tabular">{quantity(b.qty)}</span> {b.symbol}
+              </span>{" "}
+              <span className="text-h1 font-medium">
+                at a limit of <span className="tabular">{price(b.limit)}</span>
+              </span>
+            </p>
+          </div>
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 pt-2 sm:grid-cols-3">
+            <div className="grid gap-1">
+              <dt className="text-sm text-muted-foreground">Order value</dt>
+              <dd className="font-mono text-figure tabular">{orderValueOf(a)}</dd>
             </div>
-            <div>
-              <dt className="label-caps text-muted-foreground">Purpose</dt>
-              <dd>{PURPOSE_LABEL[b.purpose]}</dd>
+            <div className="grid gap-1">
+              <dt className="text-sm text-muted-foreground">Purpose</dt>
+              <dd className="text-figure">{PURPOSE_LABEL[b.purpose]}</dd>
             </div>
-            <div>
-              <dt className="label-caps text-muted-foreground">Mandate version</dt>
-              <dd className="font-mono text-caption">{b.mandate_version.slice(7, 19)}</dd>
+            <div className="col-span-2 grid gap-1 sm:col-span-1">
+              <dt className="text-sm text-muted-foreground">Mandate version</dt>
+              <dd className="font-mono text-sm leading-7">{b.mandate_version.slice(7, 19)}</dd>
             </div>
           </dl>
-          <ApprovalChart approval={a} className="border-t pt-3" />
-          <div className="grid gap-0.5 border-t pt-3">
-            <p className="label-caps text-muted-foreground">Why you are asked</p>
-            <p>{a.trigger}</p>
-          </div>
-          <div className="grid gap-0.5 border-t pt-3">
-            <p className="text-caption text-muted-foreground">Combined model score, not a probability of profit</p>
-            <p className="font-mono tabular">{b.combined_score}</p>
-          </div>
         </header>
 
-        <section aria-labelledby="risk-title" className="reveal grid gap-4 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4 sm:pt-3 sm:pb-4" style={{ "--i": 1 } as CSSProperties}>
+        <section aria-labelledby="why-title" className="reveal grid gap-4" style={{ "--i": 1 } as CSSProperties}>
+          <div className="grid gap-1.5">
+            <h2 id="why-title" className="text-h2">
+              Why you are asked
+            </h2>
+            <p className="text-lg text-pretty">{a.trigger}</p>
+          </div>
+          <p className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-border/70 pt-3">
+            <span className="text-sm text-muted-foreground">Combined model score, not a probability of profit</span>
+            <span className="font-mono text-figure tabular">{b.combined_score}</span>
+          </p>
+        </section>
+
+        <section
+          aria-labelledby="risk-title"
+          className="reveal grid gap-5 rounded-2xl bg-mandate px-5 py-5 text-mandate-foreground"
+          style={{ "--i": 2 } as CSSProperties}
+        >
           <div className="grid gap-1">
-            <h2 id="risk-title" className="text-heading text-mandate-strong">
+            <h2 id="risk-title" className="text-h2 text-mandate-strong">
               Risk impact in dollars
             </h2>
             <p className="text-sm text-mandate-muted">Measured against your mandate, as if this order fills.</p>
           </div>
           {capped.length > 0 ? (
-            <div className="grid gap-4">
+            <div className="grid gap-5">
               {capped.map((f) => (
                 <RiskFigureRow key={f.field} figure={f} />
               ))}
             </div>
           ) : null}
           {uncapped.length > 0 ? (
-            <dl className="grid gap-2 border-t border-mandate-strong/25 pt-3">
+            <dl className="grid gap-2.5 border-t border-mandate-strong/15 pt-4">
               {uncapped.map((f) => (
                 <RiskFigureRow key={f.field} figure={f} />
               ))}
@@ -233,25 +248,27 @@ function Request({ approvalId }: { approvalId: string }) {
           ) : null}
         </section>
 
+        <ApprovalChart approval={a} className="reveal" />
+
         {a.approvers_required > 1 ? (
-          <p className="bg-card px-3 py-3 text-sm sm:px-4" data-slot="approvers">
+          <p className="rounded-2xl bg-background px-5 py-4 text-sm" data-slot="approvers">
             {approversText(a)}
           </p>
         ) : null}
 
-        <Collapsible.Root className="bg-card" onOpenChange={(opened) => (opened ? setModelOutputExpanded(true) : undefined)}>
-          <Collapsible.Trigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
+        <Collapsible.Root className="border-y border-border/70" onOpenChange={(opened) => (opened ? setModelOutputExpanded(true) : undefined)}>
+          <Collapsible.Trigger className="group -mx-2 flex min-h-12 w-[calc(100%+1rem)] scroll-mb-72 items-center justify-between gap-3 rounded-lg px-2 py-3 text-left font-medium outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset lg:scroll-mb-40">
             View model output
-            <CaretDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
+            <CaretDown className="size-4 text-muted-foreground transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
           </Collapsible.Trigger>
-          <Collapsible.Panel className="grid gap-(--seam) px-3 pb-3 sm:px-4 sm:pb-4">
+          <Collapsible.Panel className="grid gap-2 pb-4">
             {a.evidence.map((e) => (
-              <figure key={e.model_id} className="grid gap-1.5 bg-muted p-3">
+              <figure key={e.model_id} className="grid gap-2 rounded-xl bg-background px-4 py-3">
                 <figcaption className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
                   {e.author === "owner_selected" ? (
                     authorText(e.author)
                   ) : (
-                    <span className="inline-flex h-6 items-center border-2 border-dashed border-foreground px-1.5 label-caps text-foreground">{authorText(e.author)}</span>
+                    <span className="inline-flex h-6 items-center rounded-full border border-dashed border-foreground px-2.5 text-label text-foreground">{authorText(e.author)}</span>
                   )}
                   <span>
                     {e.model_id} {e.version}, at {clock(e.produced_at)}
@@ -271,23 +288,25 @@ function Request({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(3.5rem+2px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-2 border-t-2 border-foreground bg-muted px-(--page-x) py-3 lg:static lg:mx-0 lg:border-t-4 lg:px-4 lg:py-4"
+          className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-6"
         >
-          <p className="font-display text-xl leading-none font-extrabold uppercase lg:text-heading">If you do nothing, this action is skipped.</p>
-          <Deadline deadline={a.deadline} now={now} />
+          <div className="grid gap-1">
+            <p className="text-h3">If you do nothing, this action is skipped.</p>
+            <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
+          </div>
           {response ? null : !canRespond ? (
             <p className="text-sm" data-slot="read-only">
               Your role can read requests. An owner, operator, or approver responds.
             </p>
           ) : stale ? (
             <div data-slot="record-changed" className="grid gap-2">
-              <p className="text-sm font-bold">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
-              <Button variant="outline" size="lg" className="h-11 w-fit" onClick={refresh}>
+              <p className="text-sm font-medium">This request changed since the page opened, so the record above is out of date. Nothing was sent.</p>
+              <Button variant="outline" size="lg" className="h-11 w-fit rounded-full px-5" onClick={refresh}>
                 Show the current version
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-(--seam) pt-1" data-slot="approval-choices">
+            <div className="grid grid-cols-2 gap-3" data-slot="approval-choices">
               <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => answer("approve")}>
                 Approve
               </Button>
@@ -300,8 +319,8 @@ function Request({ approvalId }: { approvalId: string }) {
       ) : null}
 
       {response ? (
-        <section aria-labelledby="after-response" data-slot="after-confirm" className="grid gap-2 border-2 border-dashed border-foreground bg-background px-3 py-3 sm:px-4">
-          <h2 id="after-response" className="text-heading">
+        <section aria-labelledby="after-response" data-slot="after-confirm" className="grid gap-2 rounded-2xl border border-dashed border-muted-foreground px-5 py-4">
+          <h2 id="after-response" className="text-h3">
             After you responded
           </h2>
           <p className="text-sm text-muted-foreground">Live progress. It is not part of the request above.</p>

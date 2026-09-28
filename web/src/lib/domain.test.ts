@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { GateDecision, ReasonCode, RestrictionCode } from "@/fixtures/types";
 import { AGENT_IDS, SCENARIOS, buildWorkspace, findAgent } from "@/fixtures/workspace";
-import { toDecimalString } from "./decimal";
+import { dec, sub, toDecimalString } from "./decimal";
 import { actionSentence, gateRule, verdictLabel } from "./gate-reasons";
 import { AGENT_ID, APPROVAL_ID } from "./ids";
-import { agentLimits } from "./limits";
+import { agentLimits, nextLevel } from "./limits";
 import { effectiveMode } from "./mock-runtime";
 import { RESTRICTIONS, describeRestriction } from "./restrictions";
 
@@ -42,6 +42,19 @@ describe("limits in dollars (mandate spec §5.2–§5.7)", () => {
   it("sorts levels from lowest to highest", () => {
     const at = limits.levels.map((l) => l.at);
     expect([...at].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))).toEqual(at);
+  });
+
+  it("names the closest level below equity as the next one, with its distance in dollars", () => {
+    const next = nextLevel(limits)!;
+    expect(next).toMatchObject({ side: "below", level: { key: "daily" } });
+    expect(toDecimalString(next.distance)).toBe(toDecimalString(sub(limits.equity, dec("9751"))));
+  });
+
+  it("falls back to the profit stop above once every level below is reached, and skips the high-water mark", () => {
+    const reached = { ...limits, levels: limits.levels.map((l) => (l.kind === "profit_stop" ? l : { ...l, reached: true })) };
+    const next = nextLevel(reached)!;
+    expect(next).toMatchObject({ side: "above", level: { key: "profit-stop" } });
+    expect(toDecimalString(next.distance)).toBe(toDecimalString(sub(dec("11000"), limits.equity)));
   });
 });
 

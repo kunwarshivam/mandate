@@ -45,6 +45,7 @@ import { can, useRole } from "@/lib/roles";
 import { AGENT_SECTIONS, type AgentSection, type AgentSectionKey, GROUP_LABEL, GROUP_NEEDS, SCREENS, type ScreenGroup, agentHref } from "@/lib/screens";
 import { SidebarBrand } from "./brand";
 import { agentIdFrom } from "./stop-control";
+import { ThemeMenu } from "./theme-menu";
 
 type IconType = ComponentType<{ className?: string }>;
 
@@ -91,7 +92,7 @@ const SECTION_ICON: Record<AgentSectionKey, IconType> = {
 const GROUPS: ScreenGroup[] = ["main", "agents", "accounts", "audit", "workspace"];
 
 function Icon({ icon: I }: { icon: IconType }) {
-  return <I className="size-4 shrink-0" />;
+  return <I className="size-4 shrink-0" aria-hidden />;
 }
 
 function isActive(pathname: string, href: string): boolean {
@@ -106,7 +107,7 @@ export function ApprovalsCount({ n, className }: { n: number; className?: string
   return (
     <span
       data-slot="approvals-count"
-      className={`inline-flex h-5 min-w-5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular ${className ?? ""}`}
+      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-lapis px-1.5 font-mono text-xs font-semibold text-lapis-foreground tabular ${className ?? ""}`}
     >
       {n}
       <span className="sr-only"> open</span>
@@ -220,9 +221,19 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
 }
 
 /**
- * Kumo's Sidebar in Placard. The header is a light surface carrying the navy Owlhead brand and the
- * account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
+ * Kumo's Sidebar, quiet: the page's paper tone with no rule, so the content column carries the
+ * weight. The header carries the Owlhead brand in ink (off-white in dark) and the account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
  * holds back the header or the Stop control.
+ *
+ * On desktop it stays pinned while the page scrolls (`e2e/sticky-nav.spec.ts`). Kumo sizes its rail
+ * `h-full` against a wrapper with no set height, so the rail is given the viewport's height and sticks;
+ * the app header sits beside it in the content column, so it sticks at the top. Its items scroll on
+ * their own. The same class also reaches Kumo's mobile sheet, hence `lg:`, the mobile breakpoint.
+ *
+ * Kumo picks the rail or the sheet in JS, and its server snapshot is "desktop": the server, and a phone
+ * until hydration, get the rail. Below `lg` CSS keeps that rail (Kumo's non-mobile `aside`) out of the
+ * layout, so a phone never lays out the desktop shell, and Stop stays on screen with or without JS
+ * (`e2e/ssr-shell.spec.ts`). The sheet mounts after hydration, off-canvas until opened.
  */
 export function AppSidebar() {
   const pathname = usePathname();
@@ -235,9 +246,12 @@ export function AppSidebar() {
   const home = homeFor(role);
 
   return (
-    <Sidebar aria-label="Main">
+    <Sidebar
+      aria-label="Main"
+      className="border-r-0 bg-background max-lg:not-data-mobile:hidden lg:sticky lg:top-0 lg:h-dvh lg:self-start"
+    >
       <Sidebar.Header data-slot="brand" className="h-auto flex-col items-stretch gap-0 bg-background px-0">
-        <div className="flex h-14 shrink-0 items-center px-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+        <div className="flex h-16 shrink-0 items-center px-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
           <Link
             href={home.href}
             className="inline-flex min-h-11 items-center outline-none focus-visible:ring-3 focus-visible:ring-ring"
@@ -246,15 +260,15 @@ export function AppSidebar() {
             <SidebarBrand />
           </Link>
         </div>
-        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-3 pb-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
-          <Buildings className="size-5 shrink-0" aria-hidden />
+        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-4 pb-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+          <Buildings className="size-5 shrink-0 text-muted-foreground" aria-hidden />
           <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">
-            <span className="label-caps text-muted-foreground">Account</span>
-            <span className="truncate text-sm font-bold">{ws.connection.broker}</span>
+            <span className="field-label text-muted-foreground">Account</span>
+            <span className="truncate text-sm font-medium">{ws.connection.broker}</span>
           </div>
         </div>
       </Sidebar.Header>
-      <Sidebar.Content>
+      <Sidebar.Content className="*:data-[sidebar=viewport]:overflow-y-auto! *:data-[sidebar=viewport]:overscroll-contain">
         <Sidebar.SlidingViews activeKey={agentScoped ? "agent" : "account"}>
           <Sidebar.SlidingView value="account">
             <AccountView pathname={pathname} openApprovals={openApprovals} />
@@ -271,7 +285,10 @@ export function AppSidebar() {
         </Sidebar.SlidingViews>
       </Sidebar.Content>
       <Sidebar.Footer>
-        <Sidebar.Trigger />
+        <div className="flex items-center justify-between">
+          <Sidebar.Trigger />
+          <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring sm:hidden" />
+        </div>
       </Sidebar.Footer>
     </Sidebar>
   );

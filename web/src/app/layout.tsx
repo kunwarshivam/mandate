@@ -1,16 +1,17 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { ViewTransition } from "react";
-import "@fontsource-variable/big-shoulders-display";
-import "@fontsource-variable/atkinson-hyperlegible-next";
+import "@fontsource-variable/mona-sans";
 import "./globals.css";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
+import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
 import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
-import { getColourBlind, getScenario } from "@/lib/get-workspace";
-import { scenariosEnabled } from "@/lib/scenario";
+import { getColourBlind, getScenario, getThemePref } from "@/lib/get-workspace";
+import { scenarioSwitcherShown } from "@/lib/scenario";
+import { THEME_SCRIPT } from "@/lib/theme";
 
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
 
@@ -41,16 +42,34 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#F7FAFE",
-  colorScheme: "light",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: OFF_WHITE },
+    { media: "(prefers-color-scheme: dark)", color: NIGHT },
+  ],
+  colorScheme: "light dark",
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const scenario = await getScenario();
   const workspace = buildWorkspace(scenario);
   const colourBlind = await getColourBlind();
+  const themePref = await getThemePref();
+  // "system" is resolved in the head script before paint, so the server's guess can differ.
+  const mode = themePref === "dark" ? "dark" : "light";
   return (
-    <html lang="en" data-mode="light" data-theme="placard" data-cvd={colourBlind ? "on" : undefined}>
+    <html
+      lang="en"
+      data-mode={mode}
+      data-theme-pref={themePref}
+      className={mode === "dark" ? "dark" : undefined}
+      style={{ colorScheme: mode }}
+      data-theme="owlhead"
+      data-cvd={colourBlind ? "on" : undefined}
+      suppressHydrationWarning
+    >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body>
         <div className="isolate">
           <RoleProvider>
@@ -58,7 +77,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <AppShell>
                 <ViewTransition>{children}</ViewTransition>
               </AppShell>
-              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
+              {scenarioSwitcherShown ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
             </Providers>
           </RoleProvider>
         </div>
