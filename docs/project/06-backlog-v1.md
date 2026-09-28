@@ -213,6 +213,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Done (#250 review, major; DEC-165 item 13):* `ApprovalRef::of_requested_event` accepts only a
   ULID-shaped event id, so free text cannot reach a notification through it. The runtime or CLI
   PR that first calls it must prove the id is that `ApprovalRequested` event's own.
+  *Follow-up (#254 review, minor 1):* `mandate-approval`'s `is_ulid` is a copy of
+  `mandate_journal::schema::is_ulid`. Layering stops the approval crate from depending on the
+  journal: it is at layer 1 and the journal at layer 2. So nothing keeps the two copies in step.
+  Pin them at rung 2, with an `xtask` check that compares the two function bodies, or at rung 1,
+  by moving the shape into a layer-0 helper that both crates call.
 - **E8-2 (Must, M7)** As an owner, I want timeouts to apply the safe default so that silence never
   adds risk ([task brief](tasks/M7-escalation-v0.md), [DEC-156](04-decision-log.md#decisions)).
   *Follow-up (#250 review, minor 4):* EI-13's first bound, one pending risk-adding approval per
@@ -221,6 +226,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E8-3 (Must, M7)** As an owner, I want approved actions re-validated for drift so that stale
   approvals are not executed blindly ([task brief](tasks/M7-escalation-v0.md),
   [DEC-156](04-decision-log.md#decisions)). The same brief covers M7's CLI owner control.
+  *Follow-up (#240 review, round 2, minor 2):* the step-up generators in
+  `tests/grant_properties.rs` reach an age of exactly 300 s only by chance. Those generators are
+  `-350..20` and `-400..60`. A planted exclusive window is caught under `ci pending`'s pinned seed,
+  but not under about half of other seeds. Add -300 to both generators explicitly (a tests
+  correction). The hand tests already pin that edge.
+  *Follow-up (E8-3 implementation, the do-nothing sweep):* two drift tests check the drift result
+  of `revalidate` in one direction only: `drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not`
+  and `no_mark_is_outside_the_band`. With `within_band` real and `revalidate` returning a constant
+  `Skip(Drift)`, both pass. `a_grant_acts_with_the_bound_order_only_while_every_check_passes` and
+  the re-validation property still catch that constant. Give each of the two tests the paired
+  positive, "the unchanged fixture acts", in a tests correction.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
