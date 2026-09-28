@@ -544,6 +544,11 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
+- **Stream H, before E6-4's goal implementation: pair the goal tests against constants** (#260 review,
+  the coordinator's ruling there). Once slice P makes `tests/goal.rs` reachable past validation, a
+  constant `goal::status` answering `Ok(Done{..})` passes 2 of its 9 tests and `Ok(Running)` passes 1.
+  Each needs its opposite pair so that no constant passes (#240's standard), in a tests correction
+  ahead of the goal implementation.
 - **`ValidationContext::from_journal` (stream F, DEC-169):** implemented; its 17 tests are live.
   Stream L's E7-10 (DEC-168) maps the records to `JournaledFact`: `AccountSnapshotRecorded`,
   `ConnectionEstablished`, `ConnectionRevoked`, `DisclosureAccepted`, `AgentDeployed` and
