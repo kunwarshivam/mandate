@@ -3748,8 +3748,7 @@ fn an_agent_kill_switch_cancels_only_that_agents_orders() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    let mine = accepted_order(&mut shell, &ports, INTENT);
+    let (mut shell, mine) = protected_position_with_a_resting_buy(&ports);
     let theirs = event(
         ACCOUNT_STREAM,
         shell.head().0.saturating_add(1),
@@ -4276,7 +4275,6 @@ fn a_protective_order_submits_with_no_buying_power() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unknown_order_holds_an_exit_in_that_instrument_alone() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL, CPHC]);
@@ -4286,10 +4284,64 @@ fn an_unknown_order_holds_an_exit_in_that_instrument_alone() {
     let mut shell = protected_position(&ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 20)), &ports);
     shell.run(Input::Market(quote(CPHC, "20", "20.1", 20)), &ports);
-    shell.run(
-        handoff(OTHER_INTENT, common::AGENT, opening(AAPL, "1", "150")),
-        &ports,
-    );
+    let opening_id = format!("md-{OTHER_INTENT}");
+    let cphc_id = "md-cphc-1";
+    let facts = [
+        (
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(&opening_id)),
+                ("intent_id", text(OTHER_INTENT)),
+                ("agent", text(common::AGENT)),
+                ("instrument", text(AAPL)),
+                ("side", text("buy")),
+                ("qty", text("1")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        ),
+        (
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(cphc_id)),
+                ("agent", text(common::AGENT)),
+                ("instrument", text(CPHC)),
+                ("side", text("buy")),
+                ("qty", text("1")),
+                ("limit", text("20")),
+                ("purpose", text("open")),
+            ],
+        ),
+        (
+            "FillApplied",
+            vec![
+                ("fill_id", text("f-cphc")),
+                ("client_order_id", text(cphc_id)),
+                ("instrument", text(CPHC)),
+                ("side", text("buy")),
+                ("qty_gross", text("1")),
+                ("price", text("20")),
+            ],
+        ),
+        (
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(cphc_id)),
+                ("state", text("filled")),
+            ],
+        ),
+    ];
+    for (event_type, pairs) in facts {
+        let fact = event(
+            ACCOUNT_STREAM,
+            shell.head().0.saturating_add(1),
+            event_type,
+            with_clock(&pairs, 20),
+        );
+        shell
+            .fold_one(&fact)
+            .expect("the opening in flight and the CPHC share fold");
+    }
     shell.run(Input::Broker(Err(BrokerUnknown::Timeout)), &ports);
 
     let held = shell.run(
