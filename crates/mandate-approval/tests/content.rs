@@ -96,6 +96,27 @@ fn the_content_object_has_exactly_the_listed_fields() {
     .map(str::to_owned)
     .collect();
     assert_eq!(paths, expected);
+    let element_keys = |path: &[&str], keys: &[&str]| {
+        let items = path
+            .iter()
+            .try_fold(&object_value, |v, key| v.get(key))
+            .and_then(Value::as_array)
+            .map(<[Value]>::to_vec)
+            .unwrap_or_default();
+        assert!(!items.is_empty(), "{path:?} has elements");
+        for (i, item) in items.iter().enumerate() {
+            let got: Vec<&str> = item
+                .as_object()
+                .map(|o| o.keys().map(|k| k.as_str()).collect())
+                .unwrap_or_default();
+            assert_eq!(
+                got, keys,
+                "{path:?}[{i}] has every key, not only the union's"
+            );
+        }
+    };
+    element_keys(&["evidence", "outputs"], &["artifact", "event_id", "label"]);
+    element_keys(&["risk_impact"], &["cap", "field", "value"]);
 }
 
 /// E8-1: the proposed action is the bound order, its side is `buy`, and its value is limit × qty.
