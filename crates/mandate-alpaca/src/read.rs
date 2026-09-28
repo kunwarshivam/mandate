@@ -320,3 +320,66 @@ fn nanos(at: UtcNanos) -> Option<i128> {
         .checked_mul(1_000_000_000)?
         .checked_add(i128::from(at.nanos()))
 }
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_num::{Price, Qty};
+
+    use super::asset;
+
+    fn instrument(symbol: &str) -> Result<InstrumentId, String> {
+        InstrumentId::new(symbol).map_err(|e| format!("{e:?}"))
+    }
+
+    const EQUITY: &str = r#"{"attributes":[],"class":"us_equity","exchange":"NYSE","fractionable":false,"id":"11111111-2222-4333-8444-555555555555","status":"active","symbol":"KO","tradable":true"#;
+    const PAIR: &str = r#"{"class":"crypto","exchange":"CRYPTO","fractionable":true,"id":"276e2673-764b-4ab6-a611-caf665ca6340","min_order_size":"0.000018","min_trade_increment":"0.000000001","price_increment":"1","status":"active","symbol":"BTC/USD","tradable":true"#;
+
+    /// An equity record that does carry order constraints has them read, and a `null` one is
+    /// none (the E7-8 implementation's mutation gate: `optional` answering `None` regardless).
+    #[test]
+    fn an_equity_record_with_order_constraints_reads_them() -> Result<(), String> {
+        let ko = instrument("KO")?;
+        let with = format!(
+            r#"{EQUITY},"min_order_size":"1","min_trade_increment":"1","price_increment":"0.01"}}"#
+        );
+        let read = asset(&ko, with.as_bytes()).map_err(|e| e.to_string())?;
+        let one = Qty::parse("1").map_err(|e| e.to_string())?;
+        assert_eq!(read.min_order_size, Some(one));
+        assert_eq!(read.min_trade_increment, Some(one));
+        assert_eq!(
+            read.price_increment,
+            Some(Price::parse("0.01").map_err(|e| e.to_string())?)
+        );
+        let null = format!(r#"{EQUITY},"min_order_size":null}}"#);
+        let read = asset(&ko, null.as_bytes()).map_err(|e| e.to_string())?;
+        assert_eq!(read.min_order_size, None);
+        let bad = format!(r#"{EQUITY},"price_increment":"1e-2"}}"#);
+        assert_eq!(
+            asset(&ko, bad.as_bytes()).map_err(|e| e.code()),
+            Err("exponent_form"),
+            "a constraint an equity sends is read under the same rules as a pair's"
+        );
+        Ok(())
+    }
+
+    /// A pair may omit `attributes`, or send it `null`: no pair is an IPO or a partnership
+    /// (DEC-168 item 6). An equity may not.
+    #[test]
+    fn a_pair_without_attributes_reads_and_an_equity_without_them_does_not() -> Result<(), String> {
+        let pair = instrument("BTC/USD")?;
+        for body in [
+            format!("{PAIR}}}"),
+            format!(r#"{PAIR},"attributes":null}}"#),
+        ] {
+            let read = asset(&pair, body.as_bytes()).map_err(|e| e.to_string())?;
+            assert_eq!((read.ipo, read.ptp_no_exception), (false, false), "{body}");
+        }
+        let without = EQUITY.replacen(r#""attributes":[],"#, "", 1);
+        assert_eq!(
+            asset(&instrument("KO")?, format!("{without}}}").as_bytes()).map_err(|e| e.code()),
+            Err("missing_field")
+        );
+        Ok(())
+    }
+}
