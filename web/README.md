@@ -7,7 +7,7 @@ no deployment, no broker, and no network service, and it cannot place an order.
 
 The screens follow the [product-experience brief](../docs/product/09-product-experience.md). The
 stack is DEC-200: Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Cloudflare's
-Kumo components (`@cloudflare/kumo`, themed to Placard), Base UI primitives through Kumo, Motion,
+Kumo components (`@cloudflare/kumo`, themed in `src/app/kumo-theme.css`), Base UI primitives through Kumo, Motion,
 Phosphor icons, and Vitest with Testing Library.
 
 ## Run it
@@ -29,7 +29,7 @@ npm run build && npm run test:e2e
 
 The e2e suite (`e2e/`, Playwright, Chromium only) starts the production build with `npm start` and
 reads computed styles: no route, overlay, or Kumo surface may paint a gradient or a mask, and each
-Kumo override in `src/app/placard-kumo.css` must hold in the browser (DEC-200). Locally it reuses a
+Kumo override in `src/app/kumo-theme.css` must hold in the browser (DEC-200). Locally it reuses a
 server already on port 4317. The browser download comes from `cdn.playwright.dev`.
 
 Next.js telemetry is off when `NEXT_TELEMETRY_DISABLED=1` is set; CI sets it. The app ships no
@@ -76,12 +76,13 @@ development.
 
 ## Design system
 
-The visual system is **Placard** (the founder's pick, 2026-09-28): transit signage, flat colour
-fields, square corners, big display type. `web/DESIGN.md` holds the rules, the tokens, the state
+The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
+scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
+and dense), in the navy and brass palette and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
 treatments, and the do and don't list; `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
-their OKLCH values and computed contrast, the type scale, the spacing before and after the gutter
-change, every state treatment, the components, and motion samples.
+their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
+ every state treatment, the components, and motion samples.
 
 - **Colour means one thing each** (navy and brass, `web/COLOR.md`). Brass is your mandate, navy is
   the account, ink is a stopped agent and the Stop control, crimson is the kill switch and nothing
@@ -95,19 +96,19 @@ change, every state treatment, the components, and motion samples.
 - **Light only.** Dark mode is follow-up work; there is no theme toggle.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
-- **Type.** Big Shoulders Display for headings and big figures, in capitals; Atkinson Hyperlegible
-  Next for everything read, in sentence case. Self-hosted through `@fontsource-variable/*`.
+- **Type.** Mona Sans for everything, in sentence case, with tabular figures and a plain zero;
+  weight 600 at most. Self-hosted through `@fontsource-variable/mona-sans`.
 - **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
   (DEC-203), always navy on a light surface, with no tagline; the "navy and brass" palette is
   DEC-202. `npm run brand` regenerates the favicons, app icons, share image and manifest in
   `public/` from `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`; commit its output,
   because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
   the rules.
-- **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, nothing past 300 ms,
-  press to 0.97 with a faster release, fields wipe in once with a 30 ms stagger, changed numbers roll
-  whole. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.
+- **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, interactions under
+  300 ms, press to 0.97 with a faster release, lists rise in once with a 40 ms stagger, changed numbers
+  roll whole, and the equity line draws in once on load. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.
 - **Components.** Kumo components are imported one at a time (`@cloudflare/kumo/components/*`; the
-  root barrel is lint-banned) and themed by `src/app/placard-kumo.css`. Blocks added with
+  root barrel is lint-banned) and themed by `src/app/kumo-theme.css`. Blocks added with
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.

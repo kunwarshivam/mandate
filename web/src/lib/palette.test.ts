@@ -267,7 +267,9 @@ describe("Kumo in navy and brass", () => {
   });
 
   it("writes no raw colour into the Kumo theme", () => {
-    const roles = kumoCss.slice(0, kumoCss.indexOf("/* Square corners."));
+    const end = kumoCss.indexOf(" * Kumo's arbitrary radii");
+    expect(end).toBeGreaterThan(0);
+    const roles = kumoCss.slice(0, end);
     expect(roles).not.toMatch(/(oklch|rgb|hsl)a?\(|#[0-9a-f]{3,8}\b|color-mix\(/i);
   });
 });

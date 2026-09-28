@@ -18,15 +18,15 @@ export interface ColorToken {
 }
 
 export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> = {
-  background: { meaning: "surface", role: "Page: slate, barely tinted toward navy" },
-  card: { meaning: "surface", role: "Fields that hold reading text: sheets, dialogs, agent identity, charts" },
-  muted: { meaning: "surface", role: "Quiet fields: a running agent's mode, system notices, skeletons, chart grid" },
+  background: { meaning: "surface", role: "Wells, the sidebar, hover and pressed rows: slate, barely tinted toward navy" },
+  card: { meaning: "surface", role: "The page and every reading surface: sheets, dialogs, charts" },
+  muted: { meaning: "surface", role: "Quiet fills: skeletons, the range pill track, chart grid" },
   border: { meaning: "surface", role: "Hairlines between rows" },
-  foreground: { meaning: "text", role: "Text and 2 px rules" },
+  foreground: { meaning: "text", role: "Text, and the ring on an exits-only mode" },
   "muted-foreground": { meaning: "text", role: "Secondary text, labels, ages" },
   primary: { meaning: "account", role: "Navy as the primary action, links, and focus" },
   "primary-foreground": { meaning: "account", role: "Text on a primary action" },
-  lapis: { meaning: "account", role: "The account, in navy: its board, its connection, the paper hatch, its chart line" },
+  lapis: { meaning: "account", role: "The account, in navy: its chart line, its connection, the paper hatch, links" },
   "lapis-foreground": { meaning: "account", role: "Text on navy" },
   "lapis-muted": { meaning: "account", role: "Secondary text on navy and on ink" },
   "lapis-soft": { meaning: "account", role: "An account notice: reconciliation, unknown order, activity at the broker" },
@@ -37,7 +37,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate tint" },
   "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label" },
   "mandate-marker": { meaning: "mandate", role: "Rail fill, level marks, and mandate price lines on charts" },
-  "mandate-edge": { meaning: "mandate", role: "The 4 px brass rule on top of the mandate tint" },
+  "mandate-edge": { meaning: "mandate", role: "Lines inside the mandate field: Kumo's line and hairline roles there" },
   "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
   selection: { meaning: "mandate", role: "Selected text" },
   ink: { meaning: "stopped", role: "A stopped or paused agent, and the Stop control" },
@@ -113,9 +113,9 @@ export const spacingTokens = [
 ];
 
 export const radiusTokens = [
-  { name: "--radius-sm", value: "0.375rem", use: "Chips, badges, the range pill's thumb" },
-  { name: "--radius-md", value: "0.5rem", use: "Buttons, inputs, menu items" },
-  { name: "--radius-lg", value: "0.75rem", use: "Popovers, menus, the few panels that remain" },
-  { name: "--radius-xl", value: "1rem", use: "Sheets and dialogs" },
-  { name: "full", value: "9999px", use: "The Stop control, the paper badge, the tab bar's current mark" },
+  { name: "--radius-xs / sm", value: "0.25rem / 0.375rem", use: "Placeholder and fixture chips, keyboard hints, chart ticks" },
+  { name: "--radius-lg / xl", value: "0.75rem / 1rem", use: "Menus, restriction notes, the Stop sheet's choices, an unknown order" },
+  { name: "--radius-2xl", value: "1.25rem", use: "Panels: the mandate field, an approval card, a well, a hovered agent row" },
+  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs" },
+  { name: "full", value: "9999px", use: "Buttons, chips, the Stop control, the paper badge, the range pill" },
 ];

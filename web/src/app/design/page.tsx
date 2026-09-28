@@ -11,8 +11,8 @@ import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
-import { MODE_FIELD, ModeBadge, ModeBanner, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
-import { SignedMoney } from "@/components/domain/money";
+import { ModeBadge, ModeBanner, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
+import { Money, SignedMoney } from "@/components/domain/money";
 import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
 import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -20,9 +20,9 @@ import { StopControl } from "@/components/shell/stop-control";
 import type { AgentMode, Provenance } from "@/fixtures/types";
 import { contrastRatio, toHex } from "@/lib/color";
 import { dec } from "@/lib/decimal";
-import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
+import { MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL } from "@/lib/restrictions";
-import { type Meaning, colorTokens, markPairs, motionTokens, spacingTokens, textPairs, tokenValue, typeScale } from "@/lib/tokens";
+import { type Meaning, colorTokens, markPairs, motionTokens, radiusTokens, spacingTokens, textPairs, tokenValue, typeScale } from "@/lib/tokens";
 
 export const metadata: Metadata = { title: "Design system" };
 
@@ -40,18 +40,18 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
     name: "Brass",
     meaning: "mandate",
     means: "Your mandate",
-    detail: "Limits, rails, and the envelope on a pale brass tint under a brass rule. Where the agent must stay.",
-    className: "border-t border-mandate-edge bg-mandate text-mandate-strong",
+    detail: "Limits, rails, the envelope and the mandate's price lines, on a pale brass field. Where the agent must stay.",
+    className: "bg-mandate text-mandate-strong",
   },
-  { name: "Navy", meaning: "account", means: "The account", detail: "Its board, the paper hatch, primary actions.", className: "bg-lapis text-lapis-foreground" },
+  { name: "Navy", meaning: "account", means: "The account", detail: "The account's equity line, links, primary actions and the paper hatch.", className: "bg-lapis text-lapis-foreground" },
   { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
   { name: "Crimson", meaning: "kill", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
 ];
 
 const CHART_RULES: Array<[string, string, string]> = [
-  ["bg-lapis", "The account", "Account equity, and your average cost on a position."],
-  ["bg-foreground", "An agent", "One agent's equity, a flat line over a muted fill."],
-  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit, each a labelled brass line with a dark brass label."],
+  ["bg-lapis", "The account", "Account equity: a 2 px navy line over a pale navy fill. The hero of Home."],
+  ["bg-foreground", "An agent", "One agent's equity: a 2 px ink line over the page colour. The hero of an agent."],
+  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: dashed brass price lines, labelled on the axis in pale brass."],
   ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, on a small neutral chart."],
   ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout. Blue when colour-blind friendly is on."],
   ["bg-loss", "Down candle", "A candle that closed below its open. Orange when colour-blind friendly is on."],
@@ -65,12 +65,36 @@ const SAMPLE_LEVELS: ChartLevel[] = [
 
 const SAMPLE_POINTS = Array.from({ length: 48 }, (_, i) => ({ time: i * 600, value: 9800 + 60 * Math.sin(i / 6) + i * 1.5 }));
 
-function Block({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
+const DENSITY_ROWS: Array<[string, string]> = [
+  ["Order placed", "10123.45"],
+  ["Order filled", "10131.02"],
+  ["Limit checked", "10118.77"],
+];
+
+const DO = [
+  "One hero number per screen, set in the hero size, with its change, the word for it and its disclosure on the next line.",
+  "Let space separate things. Reach for a hairline before a box, and for a box only when it carries meaning: brass, navy, a well.",
+  "Sentence case everywhere. Weight 600 at most in the product.",
+  "Tabular figures wherever numbers line up or change.",
+  "Motion that answers the owner: a press, a sheet, the line drawing in once.",
+  "Stop in the header at every width, never disabled, never behind a menu.",
+];
+
+const DONT = [
+  "Gradients, glass, glows, or a shadow on anything that does not float.",
+  "Capitals-only labels, heavy rules, or bands of colour as signage.",
+  "Confetti, streaks, badges for trading, or any cue that rewards activity.",
+  "Crimson anywhere but the kill switch, or brass for anything but the mandate.",
+  "Optimistic state: nothing is shown as done before the deployment says so.",
+  "Motion on a deadline, a figure the owner is deciding on, or a Stop control.",
+];
+
+function Block({ title, lead, children }: { title: string; lead?: ReactNode; children: ReactNode }) {
   const id = `design-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <section className="grid gap-(--block-gap)" aria-labelledby={id}>
-      <div className="grid gap-1 border-b border-foreground pb-2">
-        <h2 id={id} className="text-h1">
+      <div className="grid gap-1.5">
+        <h2 id={id} className="text-h2">
           {title}
         </h2>
         {lead ? <p className="max-w-prose text-muted-foreground">{lead}</p> : null}
@@ -86,9 +110,9 @@ function Rows({ caption, head, children, min = "36rem" }: { caption: string; hea
       <table className="w-full text-sm" style={{ minWidth: min }}>
         <caption className="sr-only">{caption}</caption>
         <thead>
-          <tr className="border-b border-foreground text-left">
+          <tr className="border-b border-border/70 text-left">
             {head.map((h, i) => (
-              <th key={h} scope="col" className={i === head.length - 1 && head.length > 3 ? "py-2 text-right field-label" : "py-2 pr-3 field-label"}>
+              <th key={h} scope="col" className={i === head.length - 1 && head.length > 3 ? "py-2 text-right text-label font-medium text-muted-foreground" : "py-2 pr-3 text-label font-medium text-muted-foreground"}>
                 {h}
               </th>
             ))}
@@ -100,29 +124,48 @@ function Rows({ caption, head, children, min = "36rem" }: { caption: string; hea
   );
 }
 
+const ROW = "border-b border-border/70 last:border-b-0";
+const WELL = "grid content-start gap-3 rounded-2xl bg-background p-5";
+
+function DensitySample({ density }: { density: "calm" | "dense" }) {
+  return (
+    <div data-density={density} className={WELL}>
+      <p className="text-label font-medium text-muted-foreground">{density === "calm" ? "Calm: Home, agents, approvals" : "Dense: audit, settings, connections"}</p>
+      <ul>
+        {DENSITY_ROWS.map(([what, value]) => (
+          <li key={what} className={`flex items-baseline justify-between gap-3 py-(--row-y) ${ROW}`}>
+            <span>{what}</span>
+            <Money value={value} className="tabular" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default function DesignPage() {
   return (
     <div className="grid gap-(--section-gap)">
-      <header className="grid gap-1.5">
-        <h1 className="text-h1 sm:text-h1">Design system</h1>
+      <header className="grid gap-2">
+        <h1 className="text-h1">Design system</h1>
         <p className="max-w-prose text-muted-foreground">
-          Placard, Owlhead&apos;s visual system: transit signage read at a glance by someone in a hurry. Colour values live in <code>src/lib/palette.ts</code> and{" "}
-          <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code> and the palette&apos;s in{" "}
-          <code>web/COLOR.md</code>.
+          Owlhead&apos;s calm system (DEC-204): one hero number per screen, a chart at the centre, generous space and few boxes, in the navy and brass palette. Colour values live in{" "}
+          <code>src/lib/palette.ts</code> and <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code>{" "}
+          and the palette&apos;s in <code>web/COLOR.md</code>.
         </p>
       </header>
 
-      <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), in the navy and brass palette (DEC-202).">
+      <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), navy on a light surface, in the navy and brass palette (DEC-202).">
         <BrandSpecimen />
       </Block>
 
-      <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number.">
-        <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
+      <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number. Most of a screen is none of them.">
+        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {MEANINGS.map((m, i) => (
-            <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 p-4 ${m.className}`} style={{ "--i": i } as CSSProperties}>
-              <span className="field-label">{m.name}</span>
+            <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 rounded-2xl p-5 ${m.className}`} style={{ "--i": i } as CSSProperties}>
+              <span className="text-label font-medium">{m.name}</span>
               <span className="grid gap-1">
-                <span className="text-h1">{m.means}</span>
+                <span className="text-h2">{m.means}</span>
                 <span className="text-sm">{m.detail}</span>
               </span>
             </li>
@@ -136,15 +179,15 @@ export default function DesignPage() {
       <Block title="Paper hatch" lead="Paper is the account's state, so it wears navy, hatched. The badge is in the header of every screen and never scrolls away.">
         <div className="flex flex-wrap items-center gap-3">
           <EnvironmentBadge environment="paper" />
-          <div className="hatch h-16 w-40 border border-lapis bg-card" aria-hidden />
+          <div className="hatch h-16 w-40 rounded-2xl bg-card ring-1 ring-lapis" aria-hidden />
         </div>
       </Block>
 
       <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are slate, tinted toward navy; nothing is pure grey, black, or white. Light only: dark mode is follow-up work.">
-        <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {colorTokens.map((t) => (
-            <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
-              <span className="h-14 border" style={{ background: t.value }} aria-hidden />
+            <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3rem_1fr] gap-3 rounded-xl bg-background p-2.5">
+              <span className="size-12 rounded-lg ring-1 ring-border" style={{ background: t.value }} aria-hidden />
               <span className="grid min-w-0 content-center gap-0.5">
                 <span className="font-mono text-caption font-semibold">--{t.name}</span>
                 <span className="truncate font-mono text-label font-normal text-muted-foreground">
@@ -160,7 +203,7 @@ export default function DesignPage() {
       <Block title="Contrast" lead="WCAG 2.2 ratios, computed from the OKLCH values (sRGB, gamut clipped, WCAG 2.2 relative luminance). Reading pairs reach 4.5:1 and marks 3:1. APCA (Lc 75 for reading pairs, Lc 45 for marks) is checked in the tests only, with apca-w3 as a dev dependency, so it is not computed here. The Kumo role pairs are checked in each surface scope by the tests.">
         <Rows caption="Contrast ratios" head={["Pair", "Use", "Ratio"]}>
           {[...textPairs.map((p) => ({ ...p, min: 4.5 })), ...markPairs.map((p) => ({ ...p, min: 3 }))].map((p) => (
-            <tr key={`${p.fg}-${p.bg}-${p.kind}-${p.use}`} className="border-b">
+            <tr key={`${p.fg}-${p.bg}-${p.kind}-${p.use}`} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
                 {p.fg} / {p.bg}
               </th>
@@ -173,12 +216,15 @@ export default function DesignPage() {
         </Rows>
       </Block>
 
-      <Block title="Type" lead="Big Shoulders Display for headings and big figures, in capitals. Atkinson Hyperlegible Next for everything read, in sentence case; capitals elsewhere only for field labels. Digits in running text, tables and charts come from Public Sans, for a plain zero: 0 10 100.">
+      <Block
+        title="Type"
+        lead="Mona Sans, one variable family for everything: a grotesque with a humanist touch that stays warm at 16 px and crisp at the hero size. Tabular figures and a plain zero (0 10 100), a true minus sign, sentence case throughout, and weight 600 at most."
+      >
         <ul className="grid">
           {typeScale.map((t) => (
-            <li key={t.role} className="grid gap-1 border-b py-3 sm:grid-cols-[7rem_1fr] sm:items-baseline">
-              <span className="field-label text-muted-foreground">{t.role}</span>
-              <span className="grid gap-1">
+            <li key={t.role} className={`grid gap-1 py-3 sm:grid-cols-[7rem_1fr] sm:items-baseline ${ROW}`}>
+              <span className="text-label font-medium text-muted-foreground">{t.role}</span>
+              <span className="grid min-w-0 gap-1">
                 <span className={t.className}>{t.sample}</span>
                 <span className="text-caption text-muted-foreground">{t.spec}</span>
               </span>
@@ -187,10 +233,10 @@ export default function DesignPage() {
         </ul>
       </Block>
 
-      <Block title="Space" lead="Tighter gutters and a wider column (the founder, 2026-09-28), with touch targets of at least 44 px on phones and reading text held to about 65 characters.">
-        <Rows caption="Spacing tokens before and after" head={["Token", "Use", "Before", "After"]} min="40rem">
+      <Block title="Space and density" lead="Space does the work boxes used to. Two densities share every token: calm for the screens an owner lives in, dense for audit and admin, where more rows on screen matter more than air. Touch targets stay at least 44 px on phones either way.">
+        <Rows caption="Spacing tokens in each density" head={["Token", "Use", "Calm", "Dense"]} min="40rem">
           {spacingTokens.map((s) => (
-            <tr key={s.name} className="border-b">
+            <tr key={s.name} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
                 {s.name}
               </th>
@@ -200,27 +246,46 @@ export default function DesignPage() {
             </tr>
           ))}
         </Rows>
-        <p className="text-sm text-muted-foreground">Corners are square everywhere: a sign has no radius. Adjacent colour fields sit on a 6 px seam, never inside one another.</p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <DensitySample density="calm" />
+          <DensitySample density="dense" />
+        </div>
       </Block>
 
-      <Block title="States" lead="Every state has one flat treatment. Agent modes are fields; a restriction wears the colour of whoever imposed it; system states carry no meaning colour.">
+      <Block title="Shape" lead="Soft, consistent corners: rounder the larger the surface. Shadows only on what floats above the page: menus, the Stop sheet, dialogs.">
+        <Rows caption="Radius tokens" head={["Token", "Value", "Use"]} min="32rem">
+          {radiusTokens.map((r) => (
+            <tr key={r.name} className={ROW}>
+              <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
+                {r.name}
+              </th>
+              <td className="py-2 pr-3 font-mono text-caption">{r.value}</td>
+              <td className="py-2 text-muted-foreground">{r.use}</td>
+            </tr>
+          ))}
+        </Rows>
+      </Block>
+
+      <Block title="States" lead="Every state has one flat treatment. An agent's mode is a pill; a restriction wears the colour of whoever imposed it; system states carry no meaning colour.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">Agent modes</h3>
-            <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
+            <h3 className="text-h3">Agent modes</h3>
+            <ul>
               {MODES.map((m) => (
-                <li key={m} className={`grid min-h-28 content-between gap-3 p-4 transition-colors duration-(--duration-hover) ${MODE_FIELD[m]}`}>
-                  <span className="text-h1">{MODE_LABEL[m]}</span>
-                  <span className="text-sm">{MODE_MEANING[m]}</span>
+                <li key={m} className={`grid gap-2 py-(--row-y) sm:grid-cols-[9rem_1fr] sm:items-center ${ROW}`}>
+                  <span>
+                    <ModeBadge mode={m} />
+                  </span>
+                  <span className="text-sm text-muted-foreground">{MODE_MEANING[m]}</span>
                 </li>
               ))}
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">Restrictions, by who imposed them</h3>
-            <ul className="grid gap-(--seam) sm:grid-cols-2">
+            <h3 className="text-h3">Restrictions, by who imposed them</h3>
+            <ul className="grid gap-2 sm:grid-cols-2">
               {SOURCES.map(([s, text]) => (
-                <li key={s} className={`grid gap-2 px-4 py-3 ${SOURCE_FIELD[s]}`}>
+                <li key={s} className={`grid gap-2 rounded-xl px-4 py-3 ${SOURCE_FIELD[s]}`}>
                   <SourceTag source={s} />
                   <span className="text-sm">
                     <span className="font-semibold">{SOURCE_LABEL[s]}.</span> {text}
@@ -230,36 +295,35 @@ export default function DesignPage() {
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">System states</h3>
-            <ul className="grid gap-(--seam) lg:grid-cols-2">
-              <li className="grid gap-2 bg-card p-4">
-                <span className="field-label text-muted-foreground">Stale</span>
+            <h3 className="text-h3">System states</h3>
+            <ul className="grid gap-3 lg:grid-cols-2">
+              <li className={WELL}>
+                <span className="text-label font-medium text-muted-foreground">Stale</span>
                 <AsOf at="2026-09-28T14:02:11-04:00" now="2026-09-28T14:05:20-04:00" stale />
-                <p className="text-sm text-muted-foreground">The figure stays, labelled with its age. The status strip turns muted and counts what is degraded.</p>
+                <p className="text-sm text-muted-foreground">The figure stays, labelled with its age, and the chart says how old its last point is.</p>
               </li>
-              <li className="grid gap-2 border-t border-foreground bg-muted p-4">
-                <span className="field-label text-muted-foreground">Unreachable and error</span>
-                <p className="text-h2">Cannot reach your deployment</p>
-                <p className="text-sm">A muted field under a heavy ink rule. No agent data is shown, and none is kept on this device.</p>
+              <li className={WELL}>
+                <span className="text-label font-medium text-muted-foreground">Unreachable and error</span>
+                <p className="text-h3">Cannot reach your deployment</p>
+                <p className="text-sm text-muted-foreground">A quiet well with the one thing to try. No agent data is shown, and none is kept on this device.</p>
               </li>
-              <li className="grid gap-2 bg-card p-4">
-                <span className="field-label text-muted-foreground">Loading</span>
-                <div className="grid grid-cols-[1fr_1.2fr_1.3fr] gap-(--seam)" aria-hidden>
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16 bg-mandate-soft" />
+              <li className={WELL}>
+                <span className="text-label font-medium text-muted-foreground">Loading</span>
+                <div className="grid gap-2" aria-hidden>
+                  <Skeleton className="h-10 w-40 rounded-lg" />
+                  <Skeleton className="h-24 rounded-xl" />
                 </div>
-                <p className="text-sm text-muted-foreground">Skeleton fields in the shape of the screen, never a value from an earlier visit.</p>
+                <p className="text-sm text-muted-foreground">Skeletons in the shape of the screen, never a value from an earlier visit.</p>
               </li>
-              <li className="grid gap-2 bg-lapis p-4 text-lapis-foreground">
-                <span className="field-label text-lapis-muted">Empty</span>
-                <p className="text-h2">No agents yet</p>
-                <p className="text-sm text-lapis-muted">An empty account is a navy board with the one next step on it.</p>
+              <li className={WELL}>
+                <span className="text-label font-medium text-muted-foreground">Empty</span>
+                <p className="text-h3">No agents yet</p>
+                <p className="text-sm text-muted-foreground">One sentence and the one next step: describe your first agent.</p>
               </li>
             </ul>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">Mode banner</h3>
+            <h3 className="text-h3">Mode banner</h3>
             <ModeBanner
               mode="exits_only"
               restrictions={[
@@ -271,37 +335,37 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Components" lead="Kumo components in Placard tokens: square, flat, no shadows. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
+      <Block title="Components" lead="Kumo components in the calm tokens: pill-shaped actions, flat fills. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">Actions</h3>
+            <h3 className="text-h3">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="lg" variant="primary" className="h-11">
+              <Button size="lg" variant="primary" className="h-11 rounded-full px-5">
                 Primary
               </Button>
-              <Button size="lg" variant="secondary" className="h-11">
+              <Button size="lg" variant="secondary" className="h-11 rounded-full px-5">
                 Secondary
               </Button>
-              <Button size="lg" variant="outline" className="h-11">
+              <Button size="lg" variant="outline" className="h-11 rounded-full px-5">
                 Outline
               </Button>
-              <Button size="lg" variant="ghost" className="h-11">
+              <Button size="lg" variant="ghost" className="h-11 rounded-full px-5">
                 Ghost
               </Button>
-              <Button size="lg" variant="outline" className="h-11" disabled>
+              <Button size="lg" variant="outline" className="h-11 rounded-full px-5" disabled>
                 Disabled
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <StopControl />
-              <span data-meaning="kill" className="inline-flex h-11 items-center bg-crimson px-4 font-semibold text-crimson-foreground">
+              <span data-meaning="kill" className="inline-flex h-11 items-center rounded-xl bg-crimson px-4 font-semibold text-crimson-foreground">
                 Kill switch (crimson, only here)
               </span>
             </div>
-            <p className="text-sm text-muted-foreground">Approve and Skip use the same secondary variant and size, side by side, with nothing preselected.</p>
+            <p className="text-sm text-muted-foreground">Approve and Skip are the same size, weight and variant, side by side, with nothing preselected.</p>
           </div>
           <div className="grid gap-(--block-gap)">
-            <h3 className="text-h2">Labels</h3>
+            <h3 className="text-h3">Labels</h3>
             <div className="flex flex-wrap items-center gap-2">
               {MODES.map((m) => (
                 <ModeBadge key={m} mode={m} />
@@ -319,9 +383,10 @@ export default function DesignPage() {
               <Placeholder name="retailAutoLive" />
             </div>
           </div>
-          <div className="grid gap-(--seam) lg:grid-cols-2">
-            <div className="grid content-start gap-3 bg-card p-4">
-              <h3 className="text-h2">Figures</h3>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div className={WELL}>
+              <h3 className="text-h3">Figures</h3>
+              <Money value="24987.50" className="text-hero tabular" />
               <SignedMoney value="123.45" />
               <SignedMoney value="-67.89" />
               <SignedMoney value="0" />
@@ -329,8 +394,8 @@ export default function DesignPage() {
               <AsOf at="2026-09-28T14:05:18-04:00" now="2026-09-28T14:05:20-04:00" />
               <Deadline deadline="2026-09-28T14:14:58-04:00" now="2026-09-28T14:05:20-04:00" />
             </div>
-            <div className="grid content-start gap-4 border-t border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground">
-              <h3 className="text-h2 text-mandate-strong">Your mandate</h3>
+            <div className="grid content-start gap-4 rounded-2xl bg-mandate p-5 text-mandate-foreground">
+              <h3 className="text-h3 text-mandate-strong">Your mandate</h3>
               <LimitRail rail={{ key: "a", label: "Total holdings", used: dec("1618.09"), cap: dec("2000"), atCap: "No new buys" }} />
               <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
               <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
@@ -339,23 +404,26 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Charts" lead="TradingView Lightweight Charts in Placard: a solid background, one flat colour per fill, no animation, plain-zero figures and times in ET. A level is a labelled line, never a progress bar, and every level is also listed in words.">
+      <Block
+        title="Charts"
+        lead="TradingView Lightweight Charts, one per screen as the centrepiece. Scrub to read any moment: the hero number and its date follow the finger and return to now on release. Ranges run from 1D to All; the change is measured from the start of the range. Plain-zero figures, times in ET, and every level also listed in words."
+      >
         <div className="grid gap-(--block-gap) lg:grid-cols-2">
-          <ul className="grid gap-2 text-sm">
+          <ul className="grid content-start gap-2.5 text-sm">
             {CHART_RULES.map(([swatch, name, use]) => (
-              <li key={name} className="grid grid-cols-[1rem_minmax(0,1fr)] items-baseline gap-2">
-                <span aria-hidden className={`size-4 self-center ${swatch}`} />
+              <li key={name} className="grid grid-cols-[0.75rem_minmax(0,1fr)] items-baseline gap-2.5">
+                <span aria-hidden className={`size-3 self-center rounded-full ${swatch}`} />
                 <span>
                   <span className="font-semibold">{name}</span>: {use}
                 </span>
               </li>
             ))}
           </ul>
-          <div className="grid content-start gap-3 bg-card p-4">
-            <Sparkline points={SAMPLE_POINTS} limit={9760} label="Sample sparkline: equity rising over the day, above the daily loss limit" width={240} height={56} />
+          <div className="@container grid content-start gap-3 rounded-2xl bg-background p-5">
+            <Sparkline points={SAMPLE_POINTS} limit={9760} label="Sample sparkline: equity rising over the day, above the daily loss limit" className="h-14 w-full" />
             <LevelLegend levels={SAMPLE_LEVELS} />
             <p className="text-caption text-muted-foreground">
-              Loading draws the chart&apos;s outline and no line; stale data keeps its age beside the chart; if the canvas cannot be drawn, the chart says so and the figures stay.
+              Loading shows the chart&apos;s outline and no line; stale data shows its age beside the chart; if the canvas cannot be drawn, the chart says so and the figures stay.
             </p>
             <ChartCredit />
           </div>
@@ -364,15 +432,15 @@ export default function DesignPage() {
 
       <Block
         title="Kumo surfaces, flattened"
-        lead="Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, masks on scrolling regions, and a shimmer on skeletons. Placard flattens every one (DEC-200); a browser test reads the computed styles of these specimens."
+        lead="Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, masks on scrolling regions, and a shimmer on skeletons. The theme flattens every one (DEC-200); a browser test reads the computed styles of these specimens."
       >
         <KumoSurfaces />
       </Block>
 
-      <Block title="Motion" lead="Motion answers an action or shows what changed, and never lasts past 300 ms. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">
+      <Block title="Motion" lead="Motion answers an action or shows what changed. Most of it is under 300 ms; the equity line's draw-in, once on load, is the one longer moment. Deadlines and anything that could nudge a decision never move. Reduced motion keeps colour changes and drops movement.">
         <Rows caption="Motion tokens" head={["Token", "Value", "Use"]} min="32rem">
           {motionTokens.map((m) => (
-            <tr key={m.name} className="border-b">
+            <tr key={m.name} className={ROW}>
               <th scope="row" className="py-2 pr-3 text-left font-mono text-caption font-normal">
                 {m.name}
               </th>
@@ -382,6 +450,27 @@ export default function DesignPage() {
           ))}
         </Rows>
         <MotionSamples />
+      </Block>
+
+      <Block title="Do and don't">
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className={WELL}>
+            <h3 className="text-h3">Do</h3>
+            <ul className="grid gap-2 text-sm">
+              {DO.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          </div>
+          <div className={WELL}>
+            <h3 className="text-h3">Don&apos;t</h3>
+            <ul className="grid gap-2 text-sm">
+              {DONT.map((d) => (
+                <li key={d}>{d}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </Block>
     </div>
   );

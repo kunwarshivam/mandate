@@ -40,7 +40,7 @@ export const PAIRS: Pair[] = [
   { fg: "primary", bg: "card", kind: "body", use: "Links on a card field" },
   { fg: "primary-foreground", bg: "primary", kind: "body", use: "Primary action label" },
   { fg: "primary-foreground", bg: "lapis-strong", kind: "body", use: "Primary action label, pressed or hovered" },
-  { fg: "lapis-foreground", bg: "lapis", kind: "body", use: "Text on brand: the account board and the sidebar account block" },
+  { fg: "lapis-foreground", bg: "lapis", kind: "body", use: "Text on navy: a primary action, the approvals count, the equity row on the envelope" },
   { fg: "lapis-muted", bg: "lapis", kind: "body", use: "Secondary text on brand" },
   { fg: "lapis-foreground", bg: "lapis-strong", kind: "body", use: "Text on a quiet field inside a navy surface" },
   { fg: "lapis-muted", bg: "lapis-strong", kind: "body", use: "Secondary text on a quiet field inside a navy surface" },
@@ -49,7 +49,7 @@ export const PAIRS: Pair[] = [
   { fg: "mandate-strong", bg: "mandate", kind: "body", use: "Mandate heading, labels, the \"Your mandate\" tag, and a mandate level's price label on a chart axis" },
   { fg: "card", bg: "mandate-strong", kind: "body", use: "Card type on dark brass" },
   { fg: "foreground", bg: "selection", kind: "body", use: "Selected text" },
-  { fg: "ink-foreground", bg: "ink", kind: "body", use: "Stop control, Stop sheet header, stopped mode, a proposal's axis label" },
+  { fg: "ink-foreground", bg: "ink", kind: "body", use: "Stop control, a paused or stopped mode pill, a proposal's axis label" },
   { fg: "lapis-muted", bg: "ink", kind: "body", use: "Secondary text inside an ink surface" },
   { fg: "crimson-foreground", bg: "crimson", kind: "body", use: "Kill switch label and its description" },
   { fg: "gain", bg: "card", kind: "body", use: "A gain on a card field, and an up candle on a chart" },
@@ -77,7 +77,7 @@ export const PAIRS: Pair[] = [
   { fg: "crimson", bg: "card", kind: "mark", use: "Kill switch against the Stop sheet" },
 ];
 
-/** A Kumo surface scope in `placard-kumo.css`: the root, or a `[data-surface]` region. */
+/** A Kumo surface scope in `kumo-theme.css`: the root, or a `[data-surface]` region. */
 export type KumoScope = "root" | "navy" | "field" | "ink";
 
 export interface KumoPair {
@@ -90,7 +90,7 @@ export interface KumoPair {
 }
 
 /**
- * The same checks in Kumo's own role names, resolved through `placard-kumo.css` in each surface
+ * The same checks in Kumo's own role names, resolved through `kumo-theme.css` in each surface
  * scope, so a Kumo component drawn in any of them keeps the targets.
  */
 export const KUMO_PAIRS: KumoPair[] = [
@@ -158,7 +158,7 @@ export const CVD_CHECKS: CvdCheck[] = [
   { a: "card", b: "ink", what: "Mode: exits-only ring on a card field", required: true, why: "Lightness alone separates them." },
   { a: "ink", b: "crimson", what: "Pause (ink) versus kill switch (crimson)", required: true, why: "Side by side in the Stop sheet; protanopia darkens red toward ink." },
   { a: "lapis", b: "mandate-marker", what: "Account line versus mandate levels", required: true, why: "On every equity chart and on the equity ladder; the account and the mandate must stay apart." },
-  { a: "lapis", b: "mandate", what: "Account board versus mandate field", required: true, why: "The Meaning Rule's two biggest fields." },
+  { a: "lapis", b: "mandate", what: "Account navy versus mandate field", required: true, why: "The Meaning Rule's two biggest fields." },
   { a: "mandate-edge", b: "background", what: "Mandate panel edge versus the page", required: true, why: "The panel must read as its own region." },
   { a: "mandate-marker", b: "gain-cvd", what: "Mandate level versus an up candle, colour-blind friendly", required: true, why: "Both are drawn on the position chart." },
   { a: "mandate-marker", b: "loss-cvd", what: "Mandate level versus a down candle, colour-blind friendly", required: false, why: "Brass and orange are neighbours in hue; the level is a labelled line, the candle a body." },

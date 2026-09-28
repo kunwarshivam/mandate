@@ -120,7 +120,7 @@ Every token names a ramp step. The account's token is still called `lapis`, so c
 
 ## Kumo
 
-Kumo components read their own roles (`--color-kumo-*`, `--text-color-kumo-*`), which Kumo sets in `@layer base`. `placard-kumo.css` points every one of them at a palette token, unlayered, so it wins; a test fails if Kumo adds a role we do not re-point, or if the roles section holds a raw colour.
+Kumo components read their own roles (`--color-kumo-*`, `--text-color-kumo-*`), which Kumo sets in `@layer base`. `kumo-theme.css` points every one of them at a palette token, unlayered, so it wins; a test fails if Kumo adds a role we do not re-point, or if the roles section holds a raw colour.
 
 | Kumo role | Token |
 |---|---|

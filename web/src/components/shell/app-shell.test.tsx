@@ -86,7 +86,7 @@ describe("Owlhead", () => {
     }
   });
 
-  it("offers no theme toggle: Placard is light only", () => {
+  it("offers no theme toggle: the UI is light only", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     expect(screen.queryByRole("button", { name: /theme/i })).toBeNull();
   });

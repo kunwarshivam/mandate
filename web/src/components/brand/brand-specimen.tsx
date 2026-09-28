@@ -19,9 +19,9 @@ const DONT = [
 
 function Tile({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return (
-    <figure className={`grid content-between gap-3 bg-card p-4 ${className ?? ""}`}>
+    <figure className={`grid content-between gap-3 rounded-2xl bg-background p-5 ${className ?? ""}`}>
       <div className="flex min-h-20 items-center">{children}</div>
-      <figcaption className="field-label text-muted-foreground">{label}</figcaption>
+      <figcaption className="text-label font-medium text-muted-foreground">{label}</figcaption>
     </figure>
   );
 }
@@ -30,8 +30,8 @@ function Tile({ label, children, className }: { label: string; children: ReactNo
 export function BrandSpecimen() {
   return (
     <div className="grid gap-(--block-gap)">
-      <div data-slot="brand-surface" className="grid gap-6 border p-5" style={{ background: OFF_WHITE, color: NAVY }}>
-        <span className="field-label">On off-white</span>
+      <div data-slot="brand-surface" className="grid gap-6 rounded-2xl p-6 ring-1 ring-border" style={{ background: OFF_WHITE, color: NAVY }}>
+        <span className="text-label font-medium">On off-white</span>
         <div className="flex flex-wrap items-end gap-8">
           <OwlheadMark className="h-16 w-auto" />
           <OwlheadWordmark className="h-10 w-auto" />
@@ -39,9 +39,9 @@ export function BrandSpecimen() {
         </div>
       </div>
 
-      <div className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Tile label="Clear space: a quarter of the mark's height" className="sm:col-span-2">
-          <div className="border border-dashed border-muted-foreground" style={{ padding: `${48 * LOCKUP_GAP}px`, color: NAVY }}>
+          <div className="rounded-lg border border-dashed border-muted-foreground" style={{ padding: `${48 * LOCKUP_GAP}px`, color: NAVY }}>
             <OwlheadLockup className="block h-12 w-auto" title="" />
           </div>
         </Tile>
@@ -57,17 +57,17 @@ export function BrandSpecimen() {
         </Tile>
       </div>
 
-      <div className="grid gap-(--seam) lg:grid-cols-2">
-        <div className="grid content-start gap-2 bg-card p-4">
-          <h3 className="text-h2">Do</h3>
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div className="grid content-start gap-2 rounded-2xl bg-background p-5">
+          <h3 className="text-h3">Do</h3>
           <ul className="grid gap-1.5 text-sm">
             {DO.map((d) => (
               <li key={d}>{d}</li>
             ))}
           </ul>
         </div>
-        <div className="grid content-start gap-2 bg-card p-4">
-          <h3 className="text-h2">Don&apos;t</h3>
+        <div className="grid content-start gap-2 rounded-2xl bg-background p-5">
+          <h3 className="text-h3">Don&apos;t</h3>
           <ul className="grid gap-1.5 text-sm">
             {DONT.map((d) => (
               <li key={d}>{d}</li>
@@ -76,10 +76,10 @@ export function BrandSpecimen() {
         </div>
       </div>
 
-      <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-3" aria-label="Navy and brass palette">
+      <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3" aria-label="Navy and brass palette">
         {BRAND_PALETTE.map((c) => (
-          <li key={c.name} data-slot="brand-color" className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
-            <span className="h-14 border" style={{ background: c.hex }} aria-hidden />
+          <li key={c.name} data-slot="brand-color" className="grid grid-cols-[3rem_1fr] gap-3 rounded-xl bg-background p-2.5">
+            <span className="size-12 rounded-lg ring-1 ring-border" style={{ background: c.hex }} aria-hidden />
             <span className="grid min-w-0 content-center gap-0.5">
               <span className="text-caption font-semibold">
                 {c.name} <span className="font-mono">{c.hex}</span>

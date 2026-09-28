@@ -93,7 +93,7 @@
   color: var(--lapis-foreground);
 }
 
-/* Your mandate: the pale brass tint under a brass rule, with dark brass for its strong text. */
+/* Your mandate: the pale brass field, with dark brass for its strong text and brass for its lines. */
 [data-surface="field"] {
   --text-color-kumo-default: var(--mandate-foreground);
   --text-color-kumo-strong: var(--mandate-strong);

@@ -73,7 +73,7 @@ function Preview() {
   );
 }
 
-/** Kumo's own role names, drawn in each surface scope so the remap in placard-kumo.css shows. */
+/** Kumo's own role names, drawn in each surface scope so the remap in kumo-theme.css shows. */
 function KumoScopes() {
   const scopes: KumoScope[] = ["root", "navy", "field", "ink"];
   return (
@@ -129,7 +129,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
         <Preview />
       </Block>
 
-      <Block title="Kumo surfaces" lead="Kumo components read their own role names; placard-kumo.css points each one at a palette token, and re-points them inside each data-surface region.">
+      <Block title="Kumo surfaces" lead="Kumo components read their own role names; kumo-theme.css points each one at a palette token, and re-points them inside each data-surface region.">
         <KumoScopes />
       </Block>
 
