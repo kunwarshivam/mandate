@@ -85,6 +85,10 @@ change, every state treatment, the components, and motion samples.
   else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
   once in `src/lib/palette.ts`, mirrored in `src/app/globals.css`; `tokens.test.ts` and
   `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA.
+- **APCA is dev only.** `apca-w3` (its own limited licence) and its AGPL-3.0 dependency
+  `colorparsley` are dev dependencies used only by the contrast tests (`src/test/apca.ts`). Lint
+  bans them in app code, and `npm run build` ends with `scripts/no-apca.mjs`, which fails if either
+  reached `.next`. `/design` and `/palette` show WCAG ratios only.
 - **Light only.** Dark mode is follow-up work; there is no theme toggle.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).

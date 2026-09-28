@@ -3,8 +3,8 @@
 The founder asked: "Are we sure about colors? Read colour theory and make the colours appropriate for a serious company." Three palettes were built on the principles below and compared side by side (see History), and the founder chose P1, navy and brass ([DEC-202](../docs/project/04-decision-log.md#decisions)). It is now the only palette. DEC-202's six values are ramp steps here: navy #183D73 is navy-800, brass #AC7D1B brass-500, dark brass #634606 brass-700, the brass tint #FDF1DC brass-100, slate ink #181C21 slate-950, and off-white #F7FAFE slate-50, the card; the page is slate-100, so body text measures 16.35:1 on a card and 15.32:1 on the page. This document gives the basis, the ramps and tokens, how they map onto Kumo, and how they measure.
 
 - `src/lib/palette.ts` holds the ramps and the semantic tokens; `globals.css` declares the same values, and `tokens.test.ts` fails if the two drift.
-- `src/lib/contrast.ts` and `contrast-pairs.ts` hold the pairs and the measurements; `palette.test.ts` enforces everything this document claims, including every Kumo role in every surface scope.
-- `/palette` (development only) shows the palette in use, the Kumo surfaces, the ramps, the tokens, the contrast table and the colour-vision simulations. It is a `page.dev.tsx` route: it is not compiled into a production build and answers 404 outside development.
+- `src/lib/contrast-pairs.ts` holds the pairs and their targets, and `src/lib/contrast.ts` measures WCAG and colour vision; `palette.test.ts` enforces everything this document claims, including every Kumo role in every surface scope. APCA is measured only in the tests, through `src/test/apca.ts` (see §5).
+- `/palette` (development only) shows the palette in use, the Kumo surfaces, the ramps, the tokens, the WCAG contrast table and the colour-vision simulations. It is a `page.dev.tsx` route: it is not compiled into a production build and answers 404 outside development.
 - Colour-blind friendly is a development preference until settings exist: `?cvd=1` or `?cvd=0` on any URL, Alt+Shift+C, or the checkbox in the scenario switcher. A production build renders the default gain and loss colours.
 
 ## Principles
@@ -46,6 +46,7 @@ Status family: gain and success are green; loss is red, as text and markers only
 
 - WCAG 2.2 (W3C Recommendation, 2023): 4.5:1 for body text (1.4.3), 3:1 for large text and for UI and non-text marks (1.4.11), and colour is never the only cue (1.4.1).
 - APCA (Somers, `apca-w3` 0.1.9, the candidate method for WCAG 3), Bronze targets: Lc 75 for body text, Lc 60 for large text and UI text, Lc 45 for non-text marks. APCA is polarity-aware and tracks perceived contrast on light backgrounds better than the WCAG 2 ratio, which overrates mid-tones.
+- **APCA is dev only and never ships.** `apca-w3` is published under its "Limited W3 License" (unmodified use for WCAG contrast checks of web content, kept current; AGPL-3.0 for anything else), and its dependency `colorparsley` is AGPL-3.0. Both are dev dependencies used only by the contrast tests, through `src/test/apca.ts`. Lint bans importing either, or that helper, from app code; `palette.test.ts` fails if any app file imports them or if `apca-w3` becomes a dependency; and `npm run build` runs `scripts/no-apca.mjs`, which fails if `.next/static` or `.next/server` holds APCA's constants or colorparsley's colour table. `/design` and `/palette` show the WCAG 2.2 ratios only.
 
 ### 6. Colour-vision deficiency
 
@@ -154,7 +155,7 @@ Lightweight Charts draws on a canvas, which cannot read CSS variables, so `src/c
 
 ## Contrast results
 
-49 semantic pairs (40 text pairs at body targets, 9 non-text marks) and 42 Kumo role pairs across the four scopes. All 91 pass WCAG 2.2 AA and APCA Bronze.
+49 semantic pairs (40 text pairs at body targets, 9 non-text marks) and 42 Kumo role pairs across the four scopes. All 91 pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests).
 
 Lowest margins: `muted-foreground` on `muted` (and Kumo subtle text on a tint) 6.92:1, Lc 75.2; the brass marker on its tint 3.30:1, Lc 56.6; the brass rule against the page 3.31:1, Lc 56.8; a brass chart level on a card 3.54:1, Lc 61.0. The brass marker must not get lighter.
 
@@ -173,7 +174,7 @@ Lowest margins: `muted-foreground` on `muted` (and Kumo subtle text on a tint) 6
 | Success / loss / warning / info text on its tint | 7.48 / 8.06 / 7.88 / 7.78:1 | 81.2 / 82.5 / 82.3 / 82.0 |
 | Colour-blind gain / loss on a card | 8.22:1 / 8.53:1 | 85.8 / 86.9 |
 
-The full table, with a sample of every pair, is on `/palette`.
+The WCAG table, with a sample of every pair, is on `/palette`; the APCA values above come from the tests.
 
 ## Colour-vision results
 
