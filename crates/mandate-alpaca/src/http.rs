@@ -469,9 +469,15 @@ impl DataTransport for AlpacaPaperHttp {
     /// The request is a latest-quote read by construction, so this only dials [`DATA_HOST`] with
     /// the same paper credentials, the same way (DEC-168 item 2).
     async fn send(&self, request: &QuoteRequest) -> Result<Response, TransportError> {
-        let url = sent_as_built_on(DATA_HOST, request.path_and_query())?;
-        self.dispatch(reqwest::Method::GET, url, None).await
+        self.dispatch(reqwest::Method::GET, data_url(request)?, None)
+            .await
     }
+}
+
+/// The URL a latest-quote read is dialled at: always on [`DATA_HOST`], and only if a parser sends
+/// it exactly as it was built.
+fn data_url(request: &QuoteRequest) -> Result<Url, TransportError> {
+    sent_as_built_on(DATA_HOST, request.path_and_query())
 }
 
 impl AlpacaPaperHttp {
@@ -523,7 +529,7 @@ mod tests {
 
     use super::{
         AlpacaPaperHttp, Credentials, DATA_HOST, DataTransport, HttpRequest, Method, QuoteRequest,
-        TradingTransport, TransportError, is_dot_segment, position_path, sent_as_built,
+        TradingTransport, TransportError, data_url, is_dot_segment, position_path, sent_as_built,
         sent_as_built_on,
     };
 
@@ -619,6 +625,20 @@ mod tests {
                  anything leaves"
             );
         }
+        Ok(())
+    }
+
+    /// #288 review, minor 2: the data transport dials the data host, never the trading host.
+    #[test]
+    fn a_quote_read_is_dialled_at_the_data_host() -> Result<(), String> {
+        let aapl = InstrumentId::new("AAPL").map_err(|e| format!("{e:?}"))?;
+        let request = QuoteRequest::latest(&aapl).map_err(|e| e.to_string())?;
+        let url = data_url(&request).map_err(|e| e.to_string())?;
+        assert_eq!(url.host_str(), Some("data.alpaca.markets"));
+        assert_eq!(
+            url.as_str(),
+            "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex"
+        );
         Ok(())
     }
 

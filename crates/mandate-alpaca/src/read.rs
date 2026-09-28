@@ -326,7 +326,7 @@ mod tests {
     use mandate_accounting::InstrumentId;
     use mandate_num::{Price, Qty};
 
-    use super::asset;
+    use super::{asset, latest_quote};
 
     fn instrument(symbol: &str) -> Result<InstrumentId, String> {
         InstrumentId::new(symbol).map_err(|e| format!("{e:?}"))
@@ -359,6 +359,27 @@ mod tests {
             asset(&ko, bad.as_bytes()).map_err(|e| e.code()),
             Err("exponent_form"),
             "a constraint an equity sends is read under the same rules as a pair's"
+        );
+        Ok(())
+    }
+
+    /// #288 review, minor 1: a size or price is the token's own digits, which an `f64` round trip
+    /// would not keep. `0.000000001` would come back `1e-09`, and `322390037.75749118` would come
+    /// back as `…4912` (DEC-168 item 3).
+    #[test]
+    fn a_quote_keeps_digits_a_float_would_lose() -> Result<(), String> {
+        let body = br#"{"quote":{"ap":322390037.75749118,"as":322390037.75749118,"bp":0.000000001,"bs":0.000000001,"t":"2026-09-25T19:59:59.826431742Z"},"symbol":"AAPL"}"#;
+        let quote = latest_quote(&instrument("AAPL")?, body).map_err(|e| e.to_string())?;
+        let exact = |text: &str| Qty::parse(text).map_err(|e| e.to_string());
+        assert_eq!(quote.bid_size, exact("0.000000001")?);
+        assert_eq!(quote.ask_size, exact("322390037.75749118")?);
+        assert_eq!(
+            quote.bid,
+            Price::parse("0.000000001").map_err(|e| e.to_string())?
+        );
+        assert_eq!(
+            quote.ask,
+            Price::parse("322390037.75749118").map_err(|e| e.to_string())?
         );
         Ok(())
     }
