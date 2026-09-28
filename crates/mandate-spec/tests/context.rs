@@ -171,7 +171,6 @@ fn flat(who: &str) -> JournaledFact {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn equity_is_the_latest_snapshot_on_the_drafts_connection_and_zero_without_one() {
     let read = fold(&[
         snapshot(OURS, "1000"),
@@ -184,7 +183,6 @@ fn equity_is_the_latest_snapshot_on_the_drafts_connection_and_zero_without_one()
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_environment_is_the_connections_own_and_live_when_unknown_or_revoked() {
     let revoked = JournaledFact::ConnectionRevoked {
         connection_id: conn(OURS),
@@ -222,7 +220,6 @@ fn the_environment_is_the_connections_own_and_live_when_unknown_or_revoked() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn other_allocations_sum_the_other_active_agents_on_the_connection() {
     let mut facts = vec![
         active("a", OURS, "10000", &[]),
@@ -259,7 +256,6 @@ fn other_allocations_sum_the_other_active_agents_on_the_connection() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn claims_are_the_other_agents_pinned_and_admitted_instruments_until_they_are_flat() {
     let mut facts = vec![
         active("a", OURS, "10000", &[W]),
@@ -288,7 +284,6 @@ fn claims_are_the_other_agents_pinned_and_admitted_instruments_until_they_are_fl
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_loss_carry_sums_retirements_on_the_connection_within_the_window() {
     assert_eq!(LOSS_CARRY_DAYS, 90);
     let facts = [
@@ -308,7 +303,6 @@ fn the_loss_carry_sums_retirements_on_the_connection_within_the_window() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_registry_is_what_is_registered_and_not_withdrawn_and_is_never_unchecked() {
     let carry = model_id("quant.carry");
     let momentum_id = model_id("quant.momentum");
@@ -339,7 +333,6 @@ fn the_registry_is_what_is_registered_and_not_withdrawn_and_is_never_unchecked()
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn disclosures_are_every_accepted_version() {
     let other = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
     let facts = [
@@ -357,7 +350,6 @@ fn disclosures_are_every_accepted_version() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_previous_version_is_the_drafts_agents_last_active_version() {
     let later = JournaledFact::AgentVersionActive {
         agent: agent("a"),
@@ -386,7 +378,6 @@ fn the_previous_version_is_the_drafts_agents_last_active_version() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn membership_is_what_the_identity_service_supplied_and_zero_without_it() {
     let facts = [snapshot(THEIRS, "99"), snapshot(OURS, "25000")];
     let mut two = args();
@@ -417,7 +408,6 @@ fn membership_is_what_the_identity_service_supplied_and_zero_without_it() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_owners_arguments_reach_the_context_unchanged() {
     let mut given = args();
     given.validation_date = date("2026-10-01");
@@ -436,7 +426,6 @@ fn the_owners_arguments_reach_the_context_unchanged() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn a_sum_the_arithmetic_cannot_hold_is_an_error() {
     let most = "79228162514264337593543950335";
     let facts = [active("b", OURS, most, &[]), active("c", OURS, most, &[])];
@@ -455,7 +444,6 @@ fn entry(source: Source, confirmed: bool) -> Provenance {
 /// of the document no entry covers is added `user_entered` and unconfirmed. The walk stops at a
 /// covered path, descends only where an entry lies below, and never adds the system fields.
 #[test]
-#[ignore = "pending E10-1"]
 fn an_unmentioned_envelope_path_is_added_unconfirmed() {
     let mandate = draft();
     let facts = [
@@ -536,7 +524,6 @@ fn an_unmentioned_envelope_path_is_added_unconfirmed() {
 /// Only the draft's own version's records count, the latest of each kind wins, and a confirmation
 /// confirms a recorded path only when it names that path or an ancestor of it.
 #[test]
-#[ignore = "pending E10-1"]
 fn provenance_is_the_drafts_own_record_confirmed_only_by_its_own_confirmation() {
     let mandate = draft();
     let other = Mandate::parse(&with("/name", Some(s("another-agent")))).expect("parses");
@@ -574,7 +561,6 @@ fn provenance_is_the_drafts_own_record_confirmed_only_by_its_own_confirmation() 
 /// The coordinator's test on #252: a document with `admission: auto` and no provenance record is
 /// refused with V-022 (and V-020), where `ProvenanceMap::at`'s default alone would pass it.
 #[test]
-#[ignore = "pending E10-1"]
 fn auto_with_no_provenance_is_v022() {
     let mandate =
         Mandate::parse(&with("/autonomy/admission", Some(s("auto")))).expect("the document parses");
@@ -655,7 +641,6 @@ fn required_facts(mandate: &Mandate) -> Vec<(&'static str, Violation, Vec<Journa
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn with_every_fact_the_base_is_valid_and_without_any_one_it_is_refused_by_its_rule() {
     let mandate = leveraged_base();
     assert!(
@@ -883,13 +868,29 @@ fn oracle(steps: &[Step]) -> Expected {
         });
     let mut other_allocation_cents = 0;
     let mut claims = BTreeSet::new();
+    let working = |who: u8| -> Vec<&'static str> {
+        (0u8..4)
+            .filter(|what| {
+                last(
+                    steps,
+                    |s| matches!(s, Step::Admit { who: w, what: t, .. } if *w == who && *t == *what),
+                )
+                .and_then(|i| steps.get(i))
+                .is_some_and(|s| matches!(s, Step::Admit { admitted: true, .. }))
+            })
+            .map(instrument)
+            .collect()
+    };
     for who in 1u8..3 {
         let version = last(
             steps,
             |s| matches!(s, Step::Active { who: w, .. } if *w == who),
         );
         let flat_at = last(steps, |s| matches!(s, Step::Flat { who: w } if *w == who));
-        let Some(v) = version else { continue };
+        let Some(v) = version else {
+            claims.extend(working(who));
+            continue;
+        };
         let Some(Step::Active {
             ours, cents, pin, ..
         }) = steps.get(v)
@@ -910,17 +911,7 @@ fn oracle(steps: &[Step]) -> Expected {
         let released = retired && flat_at.zip(stop).is_some_and(|(f, s)| f > s);
         if !released {
             claims.insert(instrument(*pin));
-            for what in 0u8..4 {
-                let admitted = last(
-                    steps,
-                    |s| matches!(s, Step::Admit { who: w, what: t, .. } if *w == who && *t == what),
-                )
-                .and_then(|i| steps.get(i))
-                .is_some_and(|s| matches!(s, Step::Admit { admitted: true, .. }));
-                if admitted {
-                    claims.insert(instrument(what));
-                }
-            }
+            claims.extend(working(who));
         }
     }
     let carry_cents = steps
@@ -952,7 +943,6 @@ fn oracle(steps: &[Step]) -> Expected {
 /// connections. A plain function over a `TestRunner`, because a pending test must not be one a macro
 /// generates.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_fold_agrees_with_an_oracle_that_reads_the_journal_backwards() {
     let mut runner = TestRunner::default();
     let journal = prop::collection::vec(step(), 1..40).prop_map(coherent);
@@ -988,7 +978,6 @@ fn the_fold_agrees_with_an_oracle_that_reads_the_journal_backwards() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_oracle_itself_reads_a_hand_written_journal() {
     let steps = [
         Step::Snapshot {

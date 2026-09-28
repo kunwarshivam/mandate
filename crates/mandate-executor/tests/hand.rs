@@ -276,7 +276,6 @@ fn an_append_with_another_environment_is_rejected() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_golden_journal_folds_to_the_committed_state() {
     let text = include_str!("golden-journal.json");
     let golden = common::golden::parse_golden(text);
@@ -2605,6 +2604,59 @@ fn protected_position_events(first_seq: u64) -> Vec<mandate_executor::FoldedEven
     ]
 }
 
+/// The same protected position with the agent's own opening buy of ten resting beside it, as
+/// `accepted_order` would leave it: the buy was submitted and accepted **before** the protection
+/// was placed, so it is folded as those journaled facts. It cannot be sent through the step once
+/// protection rests, because §5.4 denies a plain risk-increasing order there
+/// (`add_blocked_by_protective_order`). Answers the shell and the buy's `client_order_id`.
+fn protected_position_with_a_resting_buy(ports: &mandate_executor::Ports<'_>) -> (Shell, String) {
+    let buy = format!("md-{INTENT}");
+    let mut shell = started();
+    shell.fold_one(&stream_opened()).expect("folds");
+    let held = protected_position_events(2);
+    let resting = [
+        event(
+            ACCOUNT_STREAM,
+            5,
+            "OrderSubmitted",
+            with_clock(
+                &[
+                    ("client_order_id", text(&buy)),
+                    ("intent_id", text(INTENT)),
+                    ("agent", text(common::AGENT)),
+                    ("instrument", text(AAPL)),
+                    ("side", text("buy")),
+                    ("qty", text("10")),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+                10,
+            ),
+        ),
+        event(
+            ACCOUNT_STREAM,
+            6,
+            "OrderStateChanged",
+            with_clock(
+                &[("client_order_id", text(&buy)), ("state", text("accepted"))],
+                10,
+            ),
+        ),
+    ];
+    let protection = protected_position_events(4);
+    for event in held
+        .iter()
+        .take(3)
+        .chain(resting.iter())
+        .chain(protection.iter().skip(3))
+    {
+        shell
+            .fold_one(event)
+            .expect("the protected position and its resting buy fold");
+    }
+    (shell.restart_ready(ports), buy)
+}
+
 /// A position of ten `AAPL` protected by one resting GTC OCO, which is `RC-14`'s initial state.
 fn protected_position(ports: &mandate_executor::Ports<'_>) -> Shell {
     let mut shell = started();
@@ -4273,8 +4325,7 @@ fn entering_exits_only_cancels_the_working_opening_orders() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    let opening_id = accepted_order(&mut shell, &ports, INTENT);
+    let (mut shell, opening_id) = protected_position_with_a_resting_buy(&ports);
 
     let tightening = copied(
         ACCOUNT_STREAM,
@@ -4312,8 +4363,7 @@ fn entering_exits_only_leaves_protective_orders_resting() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    accepted_order(&mut shell, &ports, INTENT);
+    let (mut shell, _) = protected_position_with_a_resting_buy(&ports);
 
     let tightening = copied(
         ACCOUNT_STREAM,
@@ -4354,8 +4404,7 @@ fn a_reducing_sell_cancels_the_resting_opening_buys_first() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    let buy = accepted_order(&mut shell, &ports, INTENT);
+    let (mut shell, buy) = protected_position_with_a_resting_buy(&ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 30)), &ports);
 
     let ran = shell.run(
@@ -4389,8 +4438,7 @@ fn the_reducing_sell_waits_for_the_cancel_confirmation() {
     let instruments = FixedInstruments;
     let config = config();
     let ports = ports(&ids, &mandates, &instruments, &config);
-    let mut shell = protected_position(&ports);
-    let buy = accepted_order(&mut shell, &ports, INTENT);
+    let (mut shell, buy) = protected_position_with_a_resting_buy(&ports);
     shell.run(Input::Market(quote(AAPL, "155", "155.1", 30)), &ports);
     shell.run(
         handoff(OTHER_INTENT, common::AGENT, risk_exit(AAPL, "10", "155")),

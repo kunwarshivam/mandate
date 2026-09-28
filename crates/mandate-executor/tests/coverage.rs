@@ -632,7 +632,7 @@ fn a_held_exit_is_released_at_the_first_tick_its_hold_has_cleared() {
             Side::Buy,
             "10",
             "0",
-            "accepted",
+            "canceled",
         )))),
         &ports,
     );
@@ -1346,7 +1346,6 @@ fn an_acknowledgment_lifts_its_own_subject_and_no_other() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_state_answers_what_the_fold_carries() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -1418,7 +1417,6 @@ fn the_state_answers_what_the_fold_carries() {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_unprotected_interval_ends_for_its_own_instrument() {
     let mut state = ExecutorState::new(common::scope());
     fold(&mut state, &stream_opened()).expect("folds");

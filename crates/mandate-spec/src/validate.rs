@@ -293,11 +293,11 @@ pub fn validate(
 /// their places. It is tighter than the 24 the risk state reports the factor at (§5.5, DEC-167).
 const SIZE_FACTOR_PLACES: usize = 12;
 
-const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
+pub(crate) const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
 /// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
 /// field". The empty pointer is the whole document, so it covers everything.
-fn covers(prefix: &str, path: &str) -> bool {
+pub(crate) fn covers(prefix: &str, path: &str) -> bool {
     path.strip_prefix(prefix)
         .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
 }
@@ -935,4 +935,4 @@ pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, 
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
