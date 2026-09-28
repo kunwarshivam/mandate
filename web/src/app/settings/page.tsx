@@ -1,13 +1,9 @@
 import type { Metadata } from "next";
-import { Stub } from "@/components/screens/stub";
+import { SectionIndexScreen } from "@/components/screens/account-screens";
+import { SECTION_INDEX } from "@/lib/screens";
 
-export const metadata: Metadata = { title: "Settings" };
+export const metadata: Metadata = { title: "Workspace" };
 
 export default function SettingsPage() {
-  return (
-    <Stub title="Settings">
-      <p>Not built in this slice. It will hold notification channels and quiet hours, members and roles, policies, and connections.</p>
-      <p>The theme switch is in the header; it is the only preference this app stores on your device.</p>
-    </Stub>
-  );
+  return <SectionIndexScreen title={SECTION_INDEX.workspace.label} purpose={SECTION_INDEX.workspace.purpose} prefix="/settings" />;
 }

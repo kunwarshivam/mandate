@@ -1,10 +1,10 @@
 "use client";
 
-import Link from "next/link";
-import { Button } from "@/components/ui/button";
+import { LinkButton } from "@cloudflare/kumo/components/button";
 import { useRuntime } from "@/lib/mock-runtime";
 import { AgentCard } from "./agent-card";
-import { EmptyBoard, PageHeader, WorkspaceGate } from "./common";
+import { PageHeader } from "@/components/kumo/page-header/page-header";
+import { EmptyBoard, WorkspaceGate } from "./common";
 
 function Agents() {
   const { ws, now } = useRuntime();
@@ -12,11 +12,16 @@ function Agents() {
   const marketStale = ws.health.market_data.state !== "ok";
   return (
     <div className="grid">
-      <PageHeader title="Agents" lead="Each agent trades on paper within its own confirmed mandate.">
-        <Button asChild variant="outline" size="lg">
-          <Link href="/agents/new">Describe an agent</Link>
-        </Button>
-      </PageHeader>
+      <PageHeader
+        title="Agents"
+        environment={ws.environment}
+        description="Each agent trades on paper within its own confirmed mandate."
+        actions={
+          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11">
+            Describe an agent
+          </LinkButton>
+        }
+      />
       <ul className="grid gap-(--block-gap)">
         {ws.agents.map((agent, i) => (
           <li key={agent.agent_id} className="grid">

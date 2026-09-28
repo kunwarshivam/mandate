@@ -1,9 +1,8 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { ArrowRight } from "@phosphor-icons/react";
+import { LinkButton } from "@cloudflare/kumo/components/button";
 import { Deadline } from "@/components/approvals/deadline";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
@@ -80,11 +79,9 @@ function Dashboard() {
                       <span className="font-mono tabular">{price(a.bound.limit)}</span>
                     </p>
                     <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
-                    <Button asChild size="lg" className="w-fit">
-                      <Link href={`/approvals/${a.approval_id}`}>
-                        Open request <ArrowRight aria-hidden />
-                      </Link>
-                    </Button>
+                    <LinkButton href={`/approvals/${a.approval_id}`} variant="primary" size="lg" className="h-11 w-fit">
+                      Open request <ArrowRight aria-hidden className="size-4" />
+                    </LinkButton>
                   </li>
                 );
               })}

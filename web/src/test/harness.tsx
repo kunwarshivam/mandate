@@ -1,16 +1,20 @@
 import type { ReactElement } from "react";
 import { render } from "@testing-library/react";
+import { Providers } from "@/components/providers";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
-import { RuntimeProvider } from "@/lib/mock-runtime";
+import { type Role, RoleProvider } from "@/lib/roles";
 
 export const RECORD_AFTER_MS = 1600;
 
-export function renderWithRuntime(ui: ReactElement, scenario: Scenario = "normal") {
+/** Renders with the same providers as the app (links, toasts, runtime), with the clock held still. */
+export function renderWithRuntime(ui: ReactElement, scenario: Scenario = "normal", role: Role = "owner") {
   return render(
-    <RuntimeProvider initial={buildWorkspace(scenario)} tick={false} recordAfterMs={RECORD_AFTER_MS}>
-      {ui}
-    </RuntimeProvider>,
+    <RoleProvider initial={role}>
+      <Providers workspace={buildWorkspace(scenario)} tick={false} recordAfterMs={RECORD_AFTER_MS}>
+        {ui}
+      </Providers>
+    </RoleProvider>,
   );
 }
 

@@ -1,49 +1,31 @@
 "use client";
 
-import type { ReactNode } from "react";
-import Link from "next/link";
+import type { CSSProperties, ReactNode } from "react";
+import { Sidebar } from "@cloudflare/kumo/components/sidebar";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { Wordmark } from "./brand";
-import { EnvironmentBadge } from "./environment-badge";
-import { SideNav, TabNav } from "./nav";
+import { AccountBanners } from "./account-banners";
+import { AppHeader } from "./app-header";
+import { AppSidebar } from "./app-sidebar";
+import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
-import { StopControl } from "./stop-control";
+
+/** Placard's nav width, handed to Kumo's Sidebar, which otherwise sets its own. */
+const SIDEBAR_STYLE = { "--sidebar-width": "var(--nav-width)" } as CSSProperties;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]">
+    <Sidebar.Provider collapsible="icon" mobileBreakpoint={1024} style={SIDEBAR_STYLE}>
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <aside className="sticky top-0 hidden h-dvh flex-col gap-6 border-r bg-background py-4 lg:flex">
-        <Link href="/" className="px-4 text-foreground" aria-label="Owlhead, dashboard">
-          <Wordmark className="text-[2rem]" />
-        </Link>
-        <SideNav approvals={open} />
-        <div className="mt-auto grid gap-0.5 bg-lapis px-4 py-3 text-lapis-foreground" data-slot="account">
-          <span className="label-caps text-lapis-muted">Account</span>
-          <span className="text-sm font-bold">{ws.connection.broker}</span>
-          <span className="font-mono text-caption break-all text-lapis-muted" translate="no">
-            {ws.connection.connection_id}
-          </span>
-        </div>
-      </aside>
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-30 border-b bg-background">
-          <div className="flex h-14 items-center gap-2 px-(--page-x) sm:gap-3">
-            <Link href="/" className="text-foreground lg:hidden" aria-label="Owlhead, dashboard">
-              <Wordmark className="text-2xl" />
-            </Link>
-            <EnvironmentBadge environment={ws.environment} />
-            <div className="ml-auto flex items-center">
-              <StopControl />
-            </div>
-          </div>
-          <StatusStrip ws={ws} now={now} className="border-t px-(--page-x)" />
-        </header>
+      <AppSidebar />
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
+        <AppHeader />
+        <StatusStrip ws={ws} now={now} className="border-b px-(--page-x)" />
+        <AccountBanners />
         <main
           id="main"
           tabIndex={-1}
@@ -55,6 +37,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
         <TabNav approvals={open} />
       </div>
-    </div>
+    </Sidebar.Provider>
   );
 }

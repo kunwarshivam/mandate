@@ -22,20 +22,23 @@ function items(ws: Workspace, now: string): Item[] {
       : { key: "market", state: h.market_data.state, text: `Market data stale: as of ${clock(h.market_data.as_of)}, ${ago(h.market_data.as_of, now)}` };
   const deployment: Item =
     h.deployment.state === "ok"
-      ? { key: "deployment", state: "ok", text: "Deployment reachable" }
+      ? { key: "deployment", state: "ok", text: `Deployment answered at ${clock(h.deployment.as_of)}` }
       : { key: "deployment", state: "down", text: `Deployment unreachable since ${clock(h.deployment.as_of)}; agent data hidden` };
   const broker: Item =
     h.broker.state === "ok"
-      ? { key: "broker", state: "ok", text: "Broker connected" }
+      ? { key: "broker", state: "ok", text: `Broker as of ${clock(h.broker.as_of)}` }
       : { key: "broker", state: h.broker.state, text: `Broker last seen ${clock(h.broker.as_of)}` };
   const relay: Item =
     h.relay.state === "ok"
-      ? { key: "relay", state: "ok", text: "Push relay working" }
+      ? { key: "relay", state: "ok", text: `Push relay as of ${clock(h.relay.as_of)}` }
       : { key: "relay", state: h.relay.state, text: "Push relay down: no notifications; this screen still updates" };
   return [md, deployment, broker, relay];
 }
 
-/** System health carries no meaning colour: a healthy line is quiet, a degraded one is labelled. */
+/**
+ * System health carries no meaning colour and no "healthy" dot: every line says when it was last
+ * true, and a degraded one is labelled.
+ */
 const STATE_LABEL: Record<Item["state"], string | null> = {
   ok: null,
   loading: null,
@@ -71,9 +74,7 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
               <span className="border-2 border-foreground px-1 label-caps" aria-hidden>
                 {label}
               </span>
-            ) : (
-              <span className={cn("size-1.5 shrink-0", i.state === "ok" ? "bg-muted-foreground" : "bg-border")} aria-hidden />
-            )}
+            ) : null}
             {i.text}
           </span>
         );

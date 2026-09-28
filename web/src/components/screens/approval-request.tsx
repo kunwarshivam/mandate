@@ -2,21 +2,23 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowLeft, ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { ArrowLeft, CaretDown } from "@phosphor-icons/react";
+import { Button, LinkButton } from "@cloudflare/kumo/components/button";
+import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { LimitRail } from "@/components/domain/envelope";
+import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, RiskFigure } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { dec, max, mul, sub, ZERO } from "@/lib/decimal";
 import { clock, price, quantity, usd } from "@/lib/format";
 import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL } from "@/lib/labels";
 import { type ApprovalResponse, approvalAt, useRuntime } from "@/lib/mock-runtime";
+import { useCan } from "@/lib/roles";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
-const CHOICE = "h-12 w-full text-base";
+const CHOICE = "h-12 w-full justify-center text-base";
 const BACK = "inline-flex h-11 w-fit items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground lg:h-8";
 
 function ResponseStatus({ approval, response }: { approval: Approval; response: ApprovalResponse }) {
@@ -25,6 +27,13 @@ function ResponseStatus({ approval, response }: { approval: Approval; response: 
       <p className="text-sm" data-phase="sent">
         {response.response === "approve" ? "Your approval was sent." : "Your skip was sent."} Not recorded yet; if the runtime does not record it before the deadline (
         {clock(approval.deadline)}), the action is skipped.
+      </p>
+    );
+  }
+  if (response.phase === "unknown") {
+    return (
+      <p className="text-sm" data-phase="unknown">
+        The result is unknown; we are checking. Until the journal answers, treat the action as not approved; it is skipped at {clock(approval.deadline)} if no record arrives.
       </p>
     );
   }
@@ -81,15 +90,16 @@ function NotFound() {
         No request with this ID
       </h1>
       <p className="max-w-prose">This workspace has no approval request with that ID.</p>
-      <Button asChild variant="outline" size="lg" className="w-fit">
-        <Link href="/approvals">See all approvals</Link>
-      </Button>
+      <LinkButton href="/approvals" variant="outline" size="lg" className="h-11 w-fit">
+        See all approvals
+      </LinkButton>
     </section>
   );
 }
 
 function Request({ approvalId }: { approvalId: string }) {
   const { ws, now, responses, respond } = useRuntime();
+  const canRespond = useCan("approvals.respond");
   const raw = ws.approvals.find((a) => a.approval_id === approvalId);
   if (!raw) return <NotFound />;
   const approval = approvalAt(raw, now);
@@ -109,9 +119,12 @@ function Request({ approvalId }: { approvalId: string }) {
       </Link>
 
       <header className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
-        <h1 id="request-title" className="label-caps text-muted-foreground">
-          Approval request
-        </h1>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h1 id="request-title" className="label-caps text-muted-foreground">
+            Approval request
+          </h1>
+          <EnvironmentBadge environment={ws.environment} />
+        </div>
         <p className="text-sm text-muted-foreground">
           {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) proposes:
         </p>
@@ -172,12 +185,12 @@ function Request({ approvalId }: { approvalId: string }) {
         </p>
       ) : null}
 
-      <Collapsible className="bg-card">
-        <CollapsibleTrigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
+      <Collapsible.Root className="bg-card">
+        <Collapsible.Trigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
           View model output
-          <ChevronDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[state=open]:rotate-180" aria-hidden />
-        </CollapsibleTrigger>
-        <CollapsibleContent className="grid gap-(--seam) px-3 pb-3 sm:px-4 sm:pb-4">
+          <CaretDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
+        </Collapsible.Trigger>
+        <Collapsible.Panel className="grid gap-(--seam) px-3 pb-3 sm:px-4 sm:pb-4">
           {approval.evidence.map((e) => (
             <figure key={e.model_id} className="grid gap-1.5 bg-muted p-3">
               <figcaption className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
@@ -197,8 +210,8 @@ function Request({ approvalId }: { approvalId: string }) {
               </blockquote>
             </figure>
           ))}
-        </CollapsibleContent>
-      </Collapsible>
+        </Collapsible.Panel>
+      </Collapsible.Root>
 
       {open ? (
         <section
@@ -211,12 +224,16 @@ function Request({ approvalId }: { approvalId: string }) {
             <div role="status" aria-live="polite">
               <ResponseStatus approval={approval} response={response} />
             </div>
+          ) : !canRespond ? (
+            <p className="text-sm" data-slot="read-only">
+              Your role can read requests. An owner, operator, or approver responds.
+            </p>
           ) : (
             <div className="grid grid-cols-2 gap-(--seam) pt-1" data-slot="approval-choices">
-              <Button variant="outline" size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "approve")}>
+              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "approve")}>
                 Approve
               </Button>
-              <Button variant="outline" size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "skip")}>
+              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "skip")}>
                 Skip
               </Button>
             </div>

@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Deadline } from "@/components/approvals/deadline";
 import type { Approval } from "@/fixtures/types";
@@ -10,7 +10,8 @@ import { findAgent } from "@/fixtures/workspace";
 import { clock, dateLabel, price, quantity } from "@/lib/format";
 import { APPROVAL_STATUS_LABEL } from "@/lib/labels";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { PageHeader, Section, WorkspaceGate } from "./common";
+import { PageHeader } from "@/components/kumo/page-header/page-header";
+import { Section, WorkspaceGate } from "./common";
 
 /** Open requests are card fields you can act on; resolved ones recede to muted, with their status as a label. */
 function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
@@ -54,7 +55,7 @@ function Inbox() {
 
   return (
     <div className="grid max-w-4xl grid-cols-1 gap-(--section-gap)">
-      <PageHeader title="Approvals" lead="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
+      <PageHeader title="Approvals" environment={ws.environment} description="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
       <div className="grid grid-cols-1 gap-(--section-gap)">
         <Section title="Open, by deadline">
           {open.length === 0 ? (
