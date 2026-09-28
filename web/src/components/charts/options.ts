@@ -280,7 +280,7 @@ function levelColours(tone: LevelTone): { line: string; label: string; text: str
   }
 }
 
-export function priceLineFor(level: ChartLevel): CreatePriceLineOptions {
+export function priceLineFor(level: ChartLevel, labelled = true): CreatePriceLineOptions {
   const { line, label, text } = levelColours(level.tone);
   return {
     id: level.key,
@@ -289,11 +289,30 @@ export function priceLineFor(level: ChartLevel): CreatePriceLineOptions {
     lineWidth: 1,
     lineStyle: level.tone === "proposal" ? LineStyle.Dashed : LineStyle.Solid,
     lineVisible: true,
-    axisLabelVisible: true,
+    axisLabelVisible: labelled,
     axisLabelColor: label,
     axisLabelTextColor: text,
-    title: level.label,
+    title: labelled ? level.label : "",
   };
+}
+
+/** A label is about 18 px tall on a plot of about 190 px, so labels closer than this share of the span collide. */
+export const LABEL_GAP = 0.09;
+
+/**
+ * The levels whose labels would sit on top of a label above them, from the top of the scale down.
+ * Their lines still draw; the legend under the chart names every level.
+ */
+export function crowdedLevels(levels: ChartLevel[], values: number[]): Set<string> {
+  const prices = [...values, ...levels.map((l) => l.price)];
+  const span = prices.length > 0 ? Math.max(...prices) - Math.min(...prices) : 0;
+  const hidden = new Set<string>();
+  let last: number | null = null;
+  for (const level of [...levels].sort((a, b) => b.price - a.price)) {
+    if (last !== null && span > 0 && last - level.price < span * LABEL_GAP) hidden.add(level.key);
+    else last = level.price;
+  }
+  return hidden;
 }
 
 export interface ChartMarker {

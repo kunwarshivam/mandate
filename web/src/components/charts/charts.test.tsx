@@ -10,7 +10,7 @@ import { PALETTE } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, CHART_TOKEN, type ChartLevel, type Tone, areaOptions, baseOptions, candleOptions, lineOptions, priceLineFor, usdLabel } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -117,17 +117,25 @@ describe("AgentEquityChart", () => {
       const level = levels.find((l) => l.key === line.id);
       expect(level, String(line.id)).toBeDefined();
       expect(line.price).toBe(Number(toFixed(level!.at, 2)));
-      expect(line.title).toBe(level!.label);
       expect(line.color).toBe(CHART_COLOR.mandateMarker);
       expect(line.lineStyle).toBe(LineStyle.Solid);
-      expect(line.axisLabelVisible).toBe(true);
+      expect(line.title === "" ? !line.axisLabelVisible : line.title === level!.label && line.axisLabelVisible, String(line.id)).toBe(true);
     }
+    expect(series.priceLines.some((l) => l.axisLabelVisible)).toBe(series.priceLines.length > 0);
 
     const legend = container.querySelector("[data-slot=level-legend]");
     const listed = [...(legend?.querySelectorAll("[data-level]") ?? [])];
     expect(listed.map((li) => li.getAttribute("data-level")).sort()).toEqual(levels.map((l) => l.key).sort());
     const drawnKeys = listed.filter((li) => li.getAttribute("data-drawn") === "true").map((li) => li.getAttribute("data-level"));
     expect(drawnKeys.sort()).toEqual(series.priceLines.map((l) => String(l.id)).sort());
+  });
+
+  it("hides the label of a level that would sit on the label above it, and keeps its line", () => {
+    const level = (key: string, price: number): ChartLevel => ({ key, label: key, price, tone: "mandate" });
+    const levels = [level("high", 110), level("daily", 90), level("drawdown", 90 - 100 * LABEL_GAP * 0.4), level("floor", 50)];
+    expect([...crowdedLevels(levels, [100, 105])]).toEqual(["drawdown"]);
+    expect(priceLineFor(levels[2], false)).toMatchObject({ title: "", axisLabelVisible: false, lineVisible: true, price: levels[2].price });
+    expect(crowdedLevels([level("only", 10)], [])).toEqual(new Set());
   });
 
   it("draws at least one mandate level near an agent's equity", () => {

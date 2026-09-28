@@ -30,6 +30,7 @@ import {
   baseOptions,
   candleData,
   candleOptions,
+  crowdedLevels,
   formatTime,
   lineOptions,
   markersFor,
@@ -156,7 +157,8 @@ export function TimeChart({
           line.setData(areaData(series.points));
           api = line;
         }
-        for (const level of levels) api.createPriceLine(priceLineFor(level));
+        const crowded = crowdedLevels(levels, series.kind === "candles" ? series.bars.flatMap((b) => [b.high, b.low]) : series.points.map((p) => p.value));
+        for (const level of levels) api.createPriceLine(priceLineFor(level, !crowded.has(level.key)));
         if (levels.length > 0) api.applyOptions({ autoscaleInfoProvider: autoscaleWith(levels) });
         if (markers.length > 0) createSeriesMarkers(api, markersFor(markers));
         chart.timeScale().fitContent();
