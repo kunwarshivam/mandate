@@ -9,7 +9,7 @@ import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
 import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
-import { getScenario } from "@/lib/get-workspace";
+import { getColourBlind, getScenario } from "@/lib/get-workspace";
 import { scenariosEnabled } from "@/lib/scenario";
 
 /** Titles name the screen, never an agent, ticker, or amount (brief §5); the product is Owlhead (DEC-201). */
@@ -23,15 +23,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f4f7fa",
+  themeColor: "#eff3f8",
   colorScheme: "light",
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const scenario = await getScenario();
   const workspace = buildWorkspace(scenario);
+  const colourBlind = await getColourBlind();
   return (
-    <html lang="en" data-mode="light" data-theme="placard">
+    <html lang="en" data-mode="light" data-theme="placard" data-cvd={colourBlind ? "on" : undefined}>
       <body>
         <div className="isolate">
           <RoleProvider>
@@ -39,7 +40,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <AppShell>
                 <ViewTransition>{children}</ViewTransition>
               </AppShell>
-              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} /> : null}
+              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
             </Providers>
           </RoleProvider>
         </div>
