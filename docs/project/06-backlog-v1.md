@@ -706,6 +706,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   on the normal path (§5.4's legs activate at completion), but a re-placement after a
   cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
   allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
+- **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
+  the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
+  (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
+  schedule's `effective_from` and refuses to price a trade date before it, where today
+  `fee_config` validates the date only against the calendar's range and then drops it;
+  (3) the ruling's flat per-order cost for the paper-only overestimate (#174, 5861904579) cannot be
+  represented, because `EquityFees` has no per-order field, so the overestimate is carried by the
+  per-share and rate figures, each at least ten times the transcribed schedule.
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
