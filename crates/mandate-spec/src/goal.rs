@@ -19,7 +19,8 @@ pub struct GoalInputs {
     pub now: UtcNanos,
     pub position_qty: Qty,
     /// The sum of the agent's buy fills in the goal instrument, fees included. Sales never reduce it
-    /// (§3.1).
+    /// (§3.1), so it is never negative; a negative sum is [`SpecError::InvalidInput`], because it
+    /// would hold a goal open past its spend.
     pub goal_spent_usd: Usd,
     pub min_order_usd: Usd,
     /// The instrument's quantity increment, as the reference cases carry it: a decimal (`1` for whole
@@ -27,6 +28,12 @@ pub struct GoalInputs {
     /// describes, which cannot express `0.0001` and would make MC-L02's dust remainder look tradable.
     /// Zero is [`SpecError::InvalidInput`].
     pub qty_increment: Qty,
+    /// The ask a remainder is valued at against the minimum order. It must come from a quote that
+    /// passed §5.6's sane-and-fresh filter: one bad tick far below the market would make any
+    /// remainder look worth less than the minimum order and finish the goal, and a `release` goal then
+    /// cancels its protection and retires the agent. This function cannot tell a bad tick from a real
+    /// one, so the caller that feeds it guarantees the filter: the order path's goal evaluation in
+    /// `mandate-risk` (stream G), which reads the same sane quote the risk state marks with.
     pub ask: Price,
 }
 
@@ -46,19 +53,28 @@ pub enum GoalStatus {
 /// Whether the goal is done, why, and what follows (§3.1).
 ///
 /// An `end_date` ends the goal at 00:00 America/New_York **after** that date, so the last risk day of
-/// the goal is the date itself.
+/// the goal is the date itself. It is judged first, then an accumulate goal's target and then its spend,
+/// as `reference/mandate/ref.py`'s `goal_status` does, so a goal past its date is done for its date
+/// whatever else holds (DEC-167 item 4).
+///
+/// An `end_date` whose closing midnight the calendar cannot state is not an answer, and it is an error
+/// unless an accumulate goal is done for its target or its spend anyway: a goal whose target is met is
+/// done, and no unrepresentable date can hold it open.
 pub fn status(mandate: &ValidatedMandate, inputs: &GoalInputs) -> Result<GoalStatus, SpecError> {
     let goal = &mandate.mandate().goal;
-    let ended = end_date_passed(goal, inputs.now)?;
+    let ended = end_date_passed(goal, inputs.now);
     match goal {
-        Goal::ProfitStop { .. } if ended => Ok(GoalStatus::Done {
-            reason: GoalReason::EndDate,
-            then: ThenAction::DiscretionaryExitAllThenRetire,
-            stop_reason: StopReason::EndDate,
+        Goal::ProfitStop { .. } => Ok(if ended? {
+            GoalStatus::Done {
+                reason: GoalReason::EndDate,
+                then: ThenAction::DiscretionaryExitAllThenRetire,
+                stop_reason: StopReason::EndDate,
+            }
+        } else {
+            GoalStatus::ConfirmedInRiskState
         }),
-        Goal::ProfitStop { .. } => Ok(GoalStatus::ConfirmedInRiskState),
         Goal::Continuous { on_complete, .. } => {
-            Ok(done_if(ended.then_some(GoalReason::EndDate), *on_complete))
+            Ok(done_if(ended?.then_some(GoalReason::EndDate), *on_complete))
         }
         Goal::Accumulate {
             target_qty,
@@ -66,12 +82,21 @@ pub fn status(mandate: &ValidatedMandate, inputs: &GoalInputs) -> Result<GoalSta
             on_complete,
             ..
         } => {
+            if inputs.goal_spent_usd.is_negative() {
+                return Err(SpecError::InvalidInput {
+                    what: "goal_spent_usd, a sum of buy fills, which is never negative",
+                });
+            }
+            if matches!(ended, Ok(true)) {
+                return Ok(done_if(Some(GoalReason::EndDate), *on_complete));
+            }
             let reason = if quantity_exhausted(target_qty, inputs)? {
                 Some(GoalReason::TargetQty)
             } else if spend_exhausted(max_spend_usd, inputs)? {
                 Some(GoalReason::MaxSpend)
             } else {
-                ended.then_some(GoalReason::EndDate)
+                ended?;
+                None
             };
             Ok(done_if(reason, *on_complete))
         }
@@ -134,16 +159,34 @@ fn out_of_range(path: &'static str) -> impl Fn(NumError) -> SpecError {
 }
 
 #[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+#[allow(
+    dead_code,
+    clippy::expect_used,
+    reason = "the integration tests' mandate builder, shared rather than copied: it carries helpers these tests do not use, and it is test code"
+)]
+mod common;
+
+#[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
     use std::error::Error;
 
+    use mandate_canon::Value;
+    use mandate_domain::Environment;
     use mandate_num::{Price, Qty, Usd};
-    use mandate_time::UtcNanos;
+    use mandate_time::{Date, UtcNanos};
 
-    use super::{GoalInputs, quantity_exhausted};
-    use crate::{DecGrammar, SchemaDec};
+    use super::common::{arr, obj, s, with_all};
+    use super::{GoalInputs, GoalStatus, quantity_exhausted, spend_exhausted, status};
+    use crate::document::{OnComplete, Pointer, ProvenanceMap};
+    use crate::risk::{GoalReason, StopReason, ThenAction};
+    use crate::validate::{ValidatedMandate, ValidationContext};
+    use crate::{DecGrammar, Mandate, SchemaDec, SpecError};
 
     type Checked = Result<(), Box<dyn Error>>;
+
+    const GOAL_INSTRUMENT: &str = "7b4a1c2e-1111-4a2b-9c3d-000000000001";
 
     fn inputs(position: &str, ask: &str) -> Result<GoalInputs, Box<dyn Error>> {
         Ok(GoalInputs {
@@ -154,6 +197,172 @@ mod tests {
             qty_increment: Qty::parse("0.0001")?,
             ask: Price::parse(ask)?,
         })
+    }
+
+    fn at(now: &str, position: &str, spent: &str) -> Result<GoalInputs, Box<dyn Error>> {
+        Ok(GoalInputs {
+            now: UtcNanos::parse(now)?,
+            goal_spent_usd: Usd::parse(spent)?,
+            ..inputs(position, "55000")?
+        })
+    }
+
+    fn validated(changes: &[(&str, Option<Value>)]) -> Result<ValidatedMandate, Box<dyn Error>> {
+        let context = ValidationContext {
+            account_equity_usd: Usd::parse("25000")?,
+            other_allocations_usd: Usd::ZERO,
+            validation_date: Date::parse("2026-09-20")?,
+            registry: None,
+            provenance: ProvenanceMap::default(),
+            workspace_users: 1,
+            approver_users: 1,
+            disclosures_accepted: BTreeSet::new(),
+            instrument_groups: BTreeMap::new(),
+            claimed_by_other_agents: BTreeSet::new(),
+            connection_environment: Some(Environment::Paper),
+            connection_loss_carry_usd: Usd::ZERO,
+            eligibility_failures: BTreeSet::new(),
+            previous_version: None,
+        };
+        Ok(ValidatedMandate::new(
+            Mandate::parse(&with_all(changes))?,
+            &context,
+            &[],
+        )?)
+    }
+
+    /// The `btc_accumulator` figures of `tests/goal.rs`: target 0.15, max spend 9000, the given end
+    /// date, `hold_protected`, and a universe pinned to the goal instrument (V-003).
+    fn accumulator(end_date: &str) -> Result<ValidatedMandate, Box<dyn Error>> {
+        validated(&[
+            ("/goal/type", Some(s("accumulate"))),
+            ("/goal/instrument", Some(s(GOAL_INSTRUMENT))),
+            ("/goal/target_qty", Some(s("0.15"))),
+            ("/goal/max_avg_price", Some(s("58000"))),
+            ("/goal/max_spend_usd", Some(s("9000"))),
+            ("/goal/end_date", Some(s(end_date))),
+            ("/goal/on_complete", Some(s("hold_protected"))),
+            (
+                "/universe/pinned_instruments",
+                Some(arr(vec![obj(vec![
+                    ("asset_id", s(GOAL_INSTRUMENT)),
+                    ("symbol", s("AAA")),
+                    ("asset_class", s("us_equity")),
+                ])])),
+            ),
+        ])
+    }
+
+    fn done(reason: GoalReason) -> GoalStatus {
+        GoalStatus::Done {
+            reason,
+            then: ThenAction::Applied(OnComplete::HoldProtected),
+            stop_reason: StopReason::GoalComplete,
+        }
+    }
+
+    /// Past its end date a goal is done for its date, even with its target met or its spend gone, as
+    /// `reference/mandate/ref.py` judges it (DEC-167 item 4). The day before, the target and the spend
+    /// decide.
+    #[test]
+    fn the_end_date_outranks_the_target_and_the_spend() -> Checked {
+        let goal = accumulator("2026-12-31")?;
+        let after = "2027-01-01T05:00:00.000000000Z";
+        let before = "2026-12-31T15:00:00.000000000Z";
+        assert_eq!(
+            status(&goal, &at(after, "0.15", "8300")?)?,
+            done(GoalReason::EndDate)
+        );
+        assert_eq!(
+            status(&goal, &at(after, "0.14", "8999.5")?)?,
+            done(GoalReason::EndDate)
+        );
+        assert_eq!(
+            status(&goal, &at(before, "0.15", "8300")?)?,
+            done(GoalReason::TargetQty)
+        );
+        assert_eq!(
+            status(&goal, &at(before, "0.14", "8999.5")?)?,
+            done(GoalReason::MaxSpend)
+        );
+        Ok(())
+    }
+
+    /// The goal ends at 00:00 New York after its end date, which is 04:00Z after a spring-forward
+    /// date and 05:00Z after a fall-back one: a day is not always 86,400 s (§3.1, §5.4).
+    #[test]
+    fn the_end_date_closes_at_new_york_midnight_across_daylight_saving() -> Checked {
+        for (end_date, closes) in [
+            ("2027-03-14", "2027-03-15T04:00:00.000000000Z"),
+            ("2027-03-15", "2027-03-16T04:00:00.000000000Z"),
+            ("2027-11-07", "2027-11-08T05:00:00.000000000Z"),
+            ("2027-11-08", "2027-11-09T05:00:00.000000000Z"),
+        ] {
+            let goal = accumulator(end_date)?;
+            let closes = UtcNanos::parse(closes)?;
+            let last = UtcNanos::from_parts(closes.secs().saturating_sub(1), 0)?;
+            let running = GoalInputs {
+                now: last,
+                ..inputs("0.1", "55000")?
+            };
+            let ended = GoalInputs {
+                now: closes,
+                ..inputs("0.1", "55000")?
+            };
+            assert_eq!(status(&goal, &running)?, GoalStatus::Running, "{end_date}");
+            assert_eq!(
+                status(&goal, &ended)?,
+                done(GoalReason::EndDate),
+                "{end_date}"
+            );
+        }
+        Ok(())
+    }
+
+    /// An end date whose closing midnight the calendar cannot state holds no goal open whose target
+    /// is met, and decides nothing else: a goal that is not done for another reason is an error.
+    #[test]
+    fn an_unstatable_end_date_blocks_nothing_that_is_done() -> Checked {
+        let goal = accumulator("9999-12-31")?;
+        let now = "2026-09-21T15:00:00.000000000Z";
+        assert_eq!(
+            status(&goal, &at(now, "0.15", "8300")?)?,
+            done(GoalReason::TargetQty)
+        );
+        assert_eq!(
+            status(&goal, &at(now, "0.1", "8999.5")?)?,
+            done(GoalReason::MaxSpend)
+        );
+        assert!(status(&goal, &at(now, "0.1", "5000")?).is_err());
+        Ok(())
+    }
+
+    /// Goal spend is a sum of buy fills, never negative; a negative one would hold the goal open past
+    /// its spend, so it is refused rather than read (rule 3).
+    #[test]
+    fn a_negative_goal_spend_is_refused() -> Checked {
+        let goal = accumulator("2026-12-31")?;
+        assert!(matches!(
+            status(&goal, &at("2026-09-21T15:00:00.000000000Z", "0.15", "-0.01")?),
+            Err(SpecError::InvalidInput { what }) if what.contains("goal_spent_usd")
+        ));
+        assert!(status(&goal, &at("2026-09-21T15:00:00.000000000Z", "0.1", "0")?).is_ok());
+        Ok(())
+    }
+
+    /// A `max_spend_usd` a `Usd` cannot hold is `out_of_range` naming its own pointer (DEC-128 item 4).
+    #[test]
+    fn a_spend_cap_a_usd_cannot_hold_names_its_pointer() -> Checked {
+        let cap = SchemaDec::parse(
+            "1234567890123456789012345678.1234567890123456789012345678",
+            DecGrammar::PositiveDecimal,
+        )?;
+        let answer = spend_exhausted(&cap, &inputs("0.1", "55000")?);
+        assert!(
+            matches!(&answer, Err(SpecError::OutOfRange { path, .. }) if *path == Pointer::new("/goal/max_spend_usd")),
+            "{answer:?}"
+        );
+        Ok(())
     }
 
     /// A remainder worth exactly the minimum order can still be bought; a cent less cannot (§3.1).
