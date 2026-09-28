@@ -64,6 +64,9 @@ pub enum Violation {
     V037,
     V038,
     V039,
+    /// The `scale_sizes` factors' fractional digits sum past 12, so some set of active rungs would
+    /// have a size factor the order builder cannot multiply by exactly (DEC-167).
+    V040,
 }
 
 impl Violation {
@@ -101,6 +104,7 @@ impl Violation {
             Self::V037 => "V-037",
             Self::V038 => "V-038",
             Self::V039 => "V-039",
+            Self::V040 => "V-040",
         }
     }
 }
@@ -284,6 +288,11 @@ pub fn validate(
 }
 
 /// The system fields, which carry no provenance rule (§7).
+/// The places of the size fraction the order builder multiplies its targets by (§8.3 step 2), which
+/// V-040 bounds the scale factors' digits by: the product of any set of them has at most the sum of
+/// their places. It is tighter than the 24 the risk state reports the factor at (§5.5, DEC-167).
+const SIZE_FACTOR_PLACES: usize = 12;
+
 const SYSTEM_FIELDS: [&str; 2] = ["/mandate_schema_version", "/source_text_ref"];
 
 /// True when `path` is `prefix` or lies under it, the JSON Pointer sense of "this entry is about that
@@ -546,6 +555,18 @@ fn document_rules(m: &Mandate, document: &Value, out: &mut BTreeSet<Violation>) 
             .all(|rung| (rung.action == LadderAction::ScaleSizes) == rung.factor.is_some()),
         Violation::V010,
     );
+    let scale_places: usize = ladder
+        .iter()
+        .filter(|rung| rung.action == LadderAction::ScaleSizes)
+        .filter_map(|rung| rung.factor.as_ref())
+        .map(|factor| {
+            factor
+                .as_str()
+                .split_once('.')
+                .map_or(0, |(_, fraction)| fraction.len())
+        })
+        .sum();
+    flag(out, scale_places > SIZE_FACTOR_PLACES, Violation::V040);
     let flattens = ladder
         .iter()
         .filter(|rung| rung.action == LadderAction::FlattenAndPause)

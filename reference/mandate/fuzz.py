@@ -581,7 +581,58 @@ def fuzz_expiry(n):
         check(all(v == "removed_instrument" for v in r["instrument_restrictions"].values()),
               "MI-19 removal restricts only the instrument, never the agent", (inp, r))
 
+PLACES = 12  # the size fraction the order builder multiplies targets by (§8.3 step 2)
+
+def fits(x):
+    return x == x.quantize(D(1).scaleb(-PLACES))
+
+def ladder_with(factors):
+    m = copy.deepcopy(base.swing)
+    lad = [{"at": norm(D(i + 1) / 1000), "action": "scale_sizes", "factor": f} for i, f in enumerate(factors)]
+    m["risk"]["drawdown_ladder"] = lad + [{"at": "0.06", "action": "exits_only", "factor": None},
+                                          {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
+    return m
+
+def cancelling_factor():
+    """A factor whose significand is a power of 2 or of 5, so that products of such factors cancel
+    places: 2^k x 5^k is a power of ten, and a whole ladder can need fewer places than one of its rungs."""
+    v = (2 if rng.random() < 0.5 else 5) ** rng.randint(1, 15)
+    return "0." + "0" * rng.randint(0, 3) + str(v)
+
+def fuzz_ladder_precision(n):
+    """V-040 (DEC-167): a valid ladder's size factor is exact at 12 places for every set of active rungs,
+    and a ladder whose factors' places sum to at most 12 is never refused. The oracle multiplies every
+    subset exactly; the pinned ladders fix both boundaries and a ladder whose whole product fits while a
+    subset does not, which is why the rule is a sum and not a whole-product bound."""
+    from itertools import combinations
+    ctx = dict(base.CTX, disclosures_accepted=["sha256:" + "b" * 64])
+    pinned = [(["0.123456789012"], False), (["0.1234567890123"], True),
+              (["0.123456", "0.123456"], False), (["0.123456", "0.1234567"], True),
+              (["0.0000000008192", "0.1220703125"], True)]
+    for factors, refused in pinned:
+        check(("V-040" in semantic(ladder_with(factors), ctx)[0]) == refused, "V-040: a pinned ladder", factors)
+    check(fits(D("0.0000000008192") * D("0.1220703125")) and not fits(D("0.0000000008192")),
+          "V-040: the pinned 2^13 x 5^13 ladder is the one where the whole product fits and a subset does not", None)
+    for _ in range(n):
+        k = rng.randint(1, 4)
+        factors = [cancelling_factor() if rng.random() < 0.4 else
+                   "0." + "".join(rng.choice("0123456789") for _ in range(rng.randint(0, 6))) + rng.choice("123456789")
+                   for _ in range(k)]
+        errs = semantic(ladder_with(factors), ctx)[0]
+        every = all(fits(reduce_mul(sub)) for r in range(1, k + 1) for sub in combinations([D(f) for f in factors], r))
+        places = sum(len(f) - 2 for f in factors)
+        check("V-040" in errs or every, "V-040: a valid ladder's size factor needs more than 12 places", factors)
+        check(places > PLACES or "V-040" not in errs, "V-040: a ladder whose factors fit is refused", factors)
+        check(places <= PLACES or "V-040" in errs, "V-040: factors past 12 places are accepted", factors)
+
+def reduce_mul(xs):
+    out = D(1)
+    for x in xs:
+        out *= x
+    return out
+
 if __name__ == "__main__":
+    fuzz_ladder_precision(300)
     fuzz_risk(400)
     fuzz_gate(300)
     fuzz_builder(400)
