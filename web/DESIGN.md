@@ -74,13 +74,13 @@ The wordmark is "OWLHEAD" set in Big Shoulders Display 800, capitals, in the cur
 
 Operate first: the dashboard answers "does anything need me?" and "is each agent inside its mandate?" in its first viewport. The approval request is phone first, with the trigger, the risk in dollars and the default readable before the response controls, and the response area pinned above the tab bar. Layouts hold from 360px up.
 
-Desktop has a side navigation and a wide content column; below 64rem the navigation becomes a bottom tab bar and the header keeps the wordmark, the paper badge and Stop.
+Desktop has a side navigation that collapses to icons and a wide content column; below 64rem the navigation becomes a bottom tab bar (the sidebar opens as a sheet from the header) and the header keeps the wordmark, the paper badge and Stop.
 
 The founder asked for less gutter space. Before and after:
 
 | Token | Use | Before | After |
 |---|---|---|---|
-| `--sidebar-width` | Desktop side navigation | 15rem | 12rem |
+| `--nav-width` | Desktop side navigation (Kumo's `--sidebar-width`) | 15rem | 12rem |
 | `--content-max` | Widest content column | 72rem | 90rem |
 | `--page-x` | Page padding at phone / tablet (40rem) / desktop (64rem) | 1rem / 1.5rem / 2rem | 0.75rem / 1rem / 1.5rem |
 | `--page-top` | Space above the page title | 1.5rem | 1rem / 1.25rem (desktop) |
@@ -101,11 +101,13 @@ Radius is 0 everywhere (`--radius: 0rem`, every Tailwind radius token 0). A sign
 
 ## Components
 
-- **Header.** Wordmark (phones), the paper badge, and Stop, on the page colour with a hairline. Below it, the status strip.
+- **Header.** Always rendered, never held back by loading: the sidebar trigger (phones), the wordmark, the workspace switcher (fixtures), breadcrumbs, the ⌘K trigger, the paper badge, the approvals count, Alerts, the user menu, and Stop in ink on the right. Below it, the status strip, then account banners.
 - **Paper badge.** `PAPER · simulated funds`: a 2px lapis border over the lapis hatch. Below 25rem the words "simulated funds" become screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
-- **Side navigation.** Rows 44px tall; the current page is a solid lapis field. The approvals count is a square foreground chip.
+- **Side navigation.** Kumo's Sidebar, collapsible to icons, with a lapis account field at the top. Groups: Home, Approvals and Alerts without a label; Agents; Accounts; Audit; Workspace. On an agent's pages the sidebar slides to that agent's sections (Overview, Positions, Orders, Decisions, Approvals, Mandate, Prove, Activity) with a link back to all agents. The current page is a solid lapis field. The approvals count is a square foreground chip.
+- **Page header.** The page title with the paper badge beside it, an optional description, route tabs as links (the current one underlined in lapis), and actions. Record screens (an agent, a request) always carry the badge in the title row.
+- **Command palette (⌘K).** "Stop…" is the first command for every role that may stop. Titles come from the screen list and owner-given agent labels; nothing typed is kept and there are no recents.
 - **Tab bar.** A 2px foreground top rule; the current tab has a 4px lapis bar on its top edge and bold text.
-- **Account block.** The foot of the side navigation is a lapis field with the broker and connection id.
+- **Account block.** The top of the side navigation is a lapis field with the broker.
 - **Stop control.** An ink button, 44px tall, with the stop icon. Opens the Stop sheet.
 - **Stop sheet.** An ink header with the display title; sections under heading rules; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Account notices wear lapis-soft with an account tag.
 - **Step-up dialog.** Title, the one action in a muted box under a 2px rule, and Cancel / Use passkey in a muted footer. The waiting message sits in the footer's live region.
@@ -152,6 +154,43 @@ Every state has one flat treatment inside the system. Agent modes and restrictio
 | Empty | A lapis board with the one next step on it |
 | Unknown order | Reads "unknown" in words inside the account notice; never a guessed status |
 
+## Kumo
+
+The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Base UI, restyled to Placard. The rules below are binding; the tests in `src/test/safety-static.test.ts`, `src/lib/roles.test.tsx`, `src/app/routes.test.tsx` and `src/components/shell/journal.test.tsx` hold them.
+
+**Theme.** `src/app/globals.css` imports, in order, Kumo's sources, Kumo's Tailwind styles, Tailwind, then `placard-kumo.css`, which redefines every `--color-kumo-*` and `--text-color-kumo-*` token under `:root, [data-theme="placard"]`. The html element carries `data-theme="placard"` and `data-mode="light"`; the app root is `isolate`.
+
+| Kumo role | Placard value |
+|---|---|
+| Brand, link, info, warning | Lapis (warning is a lapis notice, never amber) |
+| Danger | Ink. Crimson is not a Kumo colour; only `KillSwitchButton` draws it |
+| Success | Gain green |
+| Canvas / base, control, overlay / recessed, tint, fill | Page / card / muted |
+| Lines, focus | Border hairline / lapis |
+| Badge orange | Marigold, for mandate fields only |
+| Badge red, green, blue-family, neutral | Ink, gain, lapis, muted foreground |
+
+`[data-surface="lapis" | "field" | "ink"]` rescopes the text tokens for content on a coloured field. Radius is 0, including Kumo's unlayered `rounded`, `rounded-full`, `rounded-[5px]` and `rounded-[10px]`. Shadows are none; the 1px shadow-edge hairline stays in the border colour.
+
+**Flat fills.** Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, scroll masks on the sidebar, layer dialog and tab list, and a shimmer on skeletons. `placard-kumo.css` flattens each one: the button overlay is one solid brand colour (the end colour Kumo computes for primary, the only emphasis variant we use), masks are removed, and skeletons are static muted fields. A test checks that each override is present and that Kumo still ships the class names it targets. Checking computed styles in a real browser is follow-up work (Playwright).
+
+**Imports.** One component per import (`@cloudflare/kumo/components/button`); the root barrel is lint-banned and `optimizePackageImports` covers Kumo and Phosphor. Phosphor icons come from `@phosphor-icons/react/ssr` in server components. `LinkProvider` routes Kumo links through `next/link`; `Toasty` and `KumoLocaleProvider` wrap the app. Inputs are 16px on coarse pointers so iOS does not zoom.
+
+**Not used.** Cloudflare's logo and "Powered by Cloudflare"; Kumo's destructive and secondary-destructive variants (lint-banned); Meter (limits are rails in dollars, and goals and profit stops are never progress bars); clipboard copy of agent names or instruments; recents or stored history; select-all on proposals; "Recommended" or "New" badges on models; green "healthy" dots (status shows "as of" times instead); Collapsible or Tabs that hide required content on a record screen (only "View model output" collapses).
+
+**Safety resolutions.**
+
+1. Record screens are pages, never modals. Dialogs are for the Stop sheet, the passkey step-up and short admin actions.
+2. Pause, Stop and Kill are never `disabled` or `loading` (lint-banned); progress is status text in a live region. Sidebar loading never holds back the header.
+3. No typed confirmation. Stop, kill and release ask for a passkey; Pause does not.
+4. Crimson is the kill switch alone, through `KillSwitchButton`.
+5. Badge orange (marigold) marks mandate fields only.
+6. Titles are generic ("Agent", "Approval request", "Orders"); IDs are opaque; model text never becomes a palette title, page title or button label.
+7. The paper badge is in the header, the Stop sheet title and every record-screen title.
+8. Approve and Skip are both secondary, the same size, in a fixed order, with no autofocus; the deadline is static text.
+9. A toast appears only after the mock journals the action, and names the action only. A request the deployment took without a journal entry shows the banner "The result is unknown; we are checking." and never a success.
+10. Roles (PX-11) are a fixture switch: approvers pause only, viewers and auditors have no Stop, viewers see requests read-only, auditors see only Audit.
+
 ## Do's and Don'ts
 
 - Do give every colour field one meaning and keep it on every screen.
@@ -172,3 +211,4 @@ Every state has one flat treatment inside the system. Agent modes and restrictio
 - **2026-09-28, first look rejected.** PR #253's first screenshots (a generic card dashboard) were rejected by the founder as too plain.
 - **2026-09-28, three directions.** Impeccable's `shape` flow produced three concepts over the same fixtures at a dev-only `/directions` route: Vernier (an engineering instrument panel: drafting-film green, one international-orange signal, tick-scale limits), Placard (transit signage: flat meaning fields, condensed capitals, square corners), and Keel (Braun-era hardware: two accents on a warm neutral, rounded panels and pill controls). Each was a full token set and component language, not a hue swap, and each was reviewed with the vendored skills before the founder saw it.
 - **2026-09-28, Placard chosen.** The founder picked Placard and asked for tighter gutters. Vernier, Keel and the picker were deleted; Placard became the app's only design. The product was named Owlhead the same day (DEC-201).
+- **2026-09-28, Kumo and a dashboard shell.** The founder asked for a product closer to a Cloudflare-style dashboard. shadcn/ui, Radix and lucide gave way to Kumo and Phosphor, themed to Placard, with a collapsible sidebar, breadcrumbs, ⌘K and agent-scoped navigation.
