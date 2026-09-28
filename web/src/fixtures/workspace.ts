@@ -3,6 +3,7 @@
  * internally consistent (equity = allocation + realized + market value − cost basis) and to sit
  * inside every limit they are not meant to break; none is a performance record.
  */
+import { BTC_HISTORY, LMN_HISTORY, SWING_HISTORY } from "./history";
 import { INSTRUMENTS, btcAccumulator, lmnCore, provenance, twoStockSwing } from "./mandates";
 import type { Agent, Approval, CancelReason, GateDecision, Health, Scenario, TimelineEvent, Workspace } from "./types";
 
@@ -85,6 +86,7 @@ const btc: Agent = {
       time_in_force: "gtc",
     },
   ],
+  ...BTC_HISTORY,
   goal_progress: { spent_usd: "6666.67", held_qty: "0.12" },
   deployed_at: t("09:30:00", "2026-09-21"),
 };
@@ -163,6 +165,7 @@ const swing: Agent = {
       time_in_force: "gtc",
     },
   ],
+  ...SWING_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-22"),
 };
@@ -191,6 +194,7 @@ const lmn: Agent = {
   },
   positions: [],
   orders: [],
+  ...LMN_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-23"),
 };
@@ -383,6 +387,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "2", symbol: "XYZ", limit_price: "141.3", purpose: "increase" },
     then: "Asked you for approval (your rule “low_score”).",
+    approval_id: APPROVAL_IDS.swingXyz,
   },
   {
     event_id: "01JBWPQ5E6EYCNDY0YP57RCYBV",
@@ -400,6 +405,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "0.01", symbol: "BTC/USD", limit_price: "55900", purpose: "increase" },
     then: "Submitted without asking (your rule “routine”); resting at the broker.",
+    client_order_id: "cid_01JBH3BV4H15G5E4G7X0NTH82F",
   },
   {
     event_id: "01JBN5SXS5AA819X9YP981068V",
@@ -417,6 +423,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "5", symbol: "QRS", limit_price: "98.76", purpose: "open" },
     then: "Approved by you; submitted and filled.",
+    client_order_id: "cid_01JCGPZ78Y1223KHAFF3AMAPB9",
   },
   {
     event_id: "01JBCD1GDJFMGT83PXT891WB09",
@@ -572,7 +579,11 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       b.pnl_today = "-70";
       b.state = { ...b.state, equity: "9530", equity_day_start: "9600", size_factor: "0.5" };
       b.positions[0] = { ...b.positions[0], mark: "51843.58", market_value: "6221.23", unrealized_pnl: "-445.44" };
+      const canceled = b.orders.filter((o) => o.purpose !== "protective");
       b.orders = b.orders.filter((o) => o.purpose === "protective");
+      b.past_orders.unshift(
+        ...canceled.map((o) => ({ ...o, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering exits-only." })),
+      );
       ws.decisions.unshift({
         event_id: "01JBEZT39S3D19T33BSWM75ANC",
         at: t("14:04:30"),
