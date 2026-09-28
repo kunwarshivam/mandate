@@ -102,13 +102,13 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
   );
 }
 
-/** The envelope: an agent's limits in dollars, inside the brand's gradient ring. */
+/** The envelope: an agent's limits in dollars, inside an ultramarine frame with a persimmon wall. */
 export function Envelope({ agent, compact = false, className }: { agent: Agent; compact?: boolean; className?: string }) {
   const limits = agentLimits(agent);
   const scaled = limits.sizeFactor < ONE;
   return (
-    <section aria-label="Limits in dollars" className={cn("mesh drift rounded-xl p-[1.5px]", className)}>
-      <div className="grid gap-5 rounded-[calc(var(--radius-xl)-1.5px)] bg-card p-4 sm:p-5">
+    <section aria-label="Limits in dollars" className={cn("envelope rounded-xl p-[2px] pr-(--envelope-wall)", className)}>
+      <div className="grid gap-5 rounded-[calc(var(--radius-xl)-2px)] bg-card p-4 sm:p-5">
         {compact ? null : <EquityLevels equity={limits.equity} levels={limits.levels} />}
         <div className="grid gap-4">
           {limits.rails.map((rail) => (

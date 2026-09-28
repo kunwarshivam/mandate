@@ -77,9 +77,12 @@ export default function DesignPage() {
         </p>
       </header>
 
-      <Block title="The envelope" lead="Ultramarine to orchid to persimmon, with fine grain and a 32 s drift. It frames content and never sits behind dense figures.">
-        <div className="mesh drift grain grid h-56 place-items-end rounded-2xl p-3">
-          <p className="rounded-lg bg-card/95 px-3 py-2 text-sm">Only light text blocks sit on the gradient, on a card surface.</p>
+      <Block
+        title="The envelope"
+        lead="Flat colour only (DEC-200): an ultramarine field bounded by a persimmon wall, the same pair a limit rail uses for its fill and its cap. It frames content and never sits behind dense figures."
+      >
+        <div className="envelope grid h-56 place-items-end rounded-2xl p-3 pr-[calc(var(--envelope-wall)+0.75rem)]">
+          <p className="rounded-lg bg-card px-3 py-2 text-sm">Text sits on a card surface inside the field, never on the field itself.</p>
         </div>
       </Block>
 

@@ -84,5 +84,4 @@ export const motionTokens = [
   { name: "--duration-press", value: "150ms", use: "Press feedback (scale 0.98)" },
   { name: "--duration-hover", value: "180ms", use: "Hover colour and border" },
   { name: "--duration-reveal", value: "240ms", use: "List reveals, 40 ms stagger" },
-  { name: "--duration-drift", value: "32s", use: "Ambient drift of the envelope gradient" },
 ];

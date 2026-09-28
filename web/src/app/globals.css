@@ -48,7 +48,7 @@
   --radius: 0.875rem;
 
   --hatch-ink: oklch(0.72 0.17 48 / 0.34);
-  --grain-opacity: 0.16;
+  --envelope-wall: 0.625rem;
   --shadow-color: 268 40% 20%;
 
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
@@ -60,7 +60,6 @@
   --duration-press: 150ms;
   --duration-hover: 180ms;
   --duration-reveal: 240ms;
-  --duration-drift: 32s;
 }
 
 .dark {
@@ -89,7 +88,6 @@
   --notice-border: oklch(0.5 0.1 55);
 
   --hatch-ink: oklch(0.74 0.16 50 / 0.3);
-  --grain-opacity: 0.22;
   --shadow-color: 268 60% 3%;
   color-scheme: dark;
 }
@@ -221,54 +219,38 @@
   }
 }
 
-/* The paper hatch: diagonal persimmon lines, the visual signature of simulated funds. */
+/*
+ * The paper hatch: diagonal persimmon lines, the visual signature of simulated funds. The lines are
+ * an SVG tile used as a mask over a flat token colour, so the hatch follows the theme (DEC-200: flat
+ * colour only).
+ */
 @utility hatch {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    var(--hatch-ink) 0 2px,
-    transparent 2px 7px
-  );
+  position: relative;
+  isolation: isolate;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background-color: var(--hatch-ink);
+    mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1l2-2M0 7l7-7M6 8l2-2' stroke='black' stroke-width='1.6'/%3E%3C/svg%3E");
+    mask-size: 7px 7px;
+  }
 }
 
 @utility tabular {
   font-variant-numeric: tabular-nums slashed-zero;
 }
 
-/* The envelope: ultramarine to orchid to persimmon, with fine grain. Never behind dense data. */
-@utility mesh {
+/*
+ * The envelope: a flat ultramarine field bounded by a persimmon wall, the same pair a limit rail
+ * uses for its fill and its cap. It frames content and never sits behind dense figures.
+ */
+@utility envelope {
   background-color: var(--ultramarine);
-  background-image:
-    radial-gradient(120% 140% at 0% 0%, oklch(0.52 0.22 268) 0%, transparent 55%),
-    radial-gradient(90% 120% at 55% 100%, oklch(0.7 0.15 330) 0%, transparent 60%),
-    radial-gradient(100% 120% at 100% 20%, oklch(0.72 0.17 48) 0%, transparent 58%),
-    linear-gradient(110deg, oklch(0.52 0.22 268), oklch(0.7 0.15 330) 55%, oklch(0.72 0.17 48));
-  background-size: 180% 180%;
-  background-position: 0% 50%;
-}
-
-@utility grain {
-  position: relative;
-  isolation: isolate;
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    opacity: var(--grain-opacity);
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 1 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  }
-}
-
-@utility drift {
-  animation: envelope-drift var(--duration-drift) var(--ease-in-out-soft) infinite alternate;
-}
-
-@keyframes envelope-drift {
-  0% { background-position: 0% 40%; }
-  50% { background-position: 60% 70%; }
-  100% { background-position: 100% 30%; }
+  box-shadow: inset calc(-1 * var(--envelope-wall)) 0 0 var(--persimmon);
 }
 
 @utility shadow-whisper {
@@ -294,7 +276,6 @@
     --tw-exit-scale: 1 !important;
     scroll-behavior: auto !important;
   }
-  .drift,
   [data-slot="skeleton"] {
     animation: none !important;
   }

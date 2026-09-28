@@ -26,7 +26,7 @@ analytics, no session replay, and no service worker.
 
 ### Scenarios (development only)
 
-`npm run dev` shows a scenario switcher at the bottom left. It sets the `mandate-scenario` cookie,
+`npm run dev` shows a scenario switcher at the bottom right. It sets the `mandate-scenario` cookie,
 and `?scenario=<id>` on any URL does the same. The scenarios are `normal`, `empty`, `loading`,
 `stale`, `paused`, `drawdown`, `reconciliation`, `unknown-order`, `unreachable`, and `approvals`.
 A production build always renders `normal`.
@@ -57,9 +57,10 @@ contrast, the type scale, radii and spacing, components in their states, and mot
   platform-authored labels. Crimson is used only for kill-switch actions. The Stop control is
   high-contrast ink in both themes. Values are defined once in `src/lib/tokens.ts` and mirrored in
   `src/app/globals.css`; `tokens.test.ts` fails if they drift or a reading pair falls below 4.5:1.
-- **The envelope.** A mesh gradient (ultramarine, orchid, persimmon) with grain and a slow drift.
-  It frames content (a hero band, the ring around an agent's limits) and never sits behind dense
-  figures.
+- **The envelope.** Flat colour only, no gradients (DEC-200): an ultramarine field bounded by a
+  persimmon wall, the pair a limit rail uses for its fill and its cap. It frames content (a hero
+  band, the frame around an agent's limits) and never sits behind dense figures. CI fails on any
+  gradient in `src/` and runs the Impeccable detector (`.github/workflows/web.yml`).
 - **Type.** Bricolage Grotesque for display, Hanken Grotesk for reading, JetBrains Mono with
   tabular figures for numbers. Fonts are self-hosted through `@fontsource-variable/*`.
 - **Motion.** Sheets and dialogs enter on spring curves (Motion's `spring()` rendered as CSS
