@@ -154,10 +154,12 @@ pub(crate) fn account_stream_checks(
 /// a reconciliation establishes its presence, not its owner (trading-domain spec §5.4, §9.1 check
 /// 4, before `add_blocked_by_protective_order`). Exits pass (`AGENTS.md` rule 13).
 fn unattributed_opening(state: &ExecutorState, instrument: &InstrumentId, adds: bool) -> bool {
-    adds && state
-        .unattributed
-        .values()
-        .any(|leg| &leg.instrument == instrument)
+    adds && state.orders.values().any(|order| {
+        order.agent.is_none()
+            && &order.instrument == instrument
+            && !order.state.is_terminal()
+            && order.filled_qty < order.qty
+    })
 }
 
 /// The startup reconciliation, last so a check that denies is reported first: an opening is
@@ -234,47 +236,152 @@ fn available(state: &ExecutorState, instrument: &InstrumentId) -> Result<Qty, Ex
 
 #[cfg(test)]
 mod attribution_tests {
-    use mandate_accounting::InstrumentId;
+    use mandate_accounting::{InstrumentId, Side};
+    use mandate_num::{Qty, SignedQty};
 
-    use mandate_num::Qty;
-
-    use super::unattributed_opening;
+    use super::{Proposal, account_stream_checks, unattributed_opening};
     use crate::error::ExecutorError;
     use crate::ids::ClientOrderId;
-    use crate::state::{ExecutorState, UnattributedLeg};
-    use crate::types::{AccountRef, AccountScope, WorkspaceId};
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees};
+    use crate::state::ExecutorState;
+    use crate::types::{
+        AccountRef, AccountScope, AgentId, GateVerdict, Order, OrderState, Purpose, WorkspaceId,
+    };
 
-    #[test]
-    fn only_an_opening_in_an_unattributed_instrument_is_held() -> Result<(), ExecutorError> {
-        let mut state = ExecutorState::new(AccountScope {
+    fn state() -> ExecutorState {
+        ExecutorState::new(AccountScope {
             account: AccountRef("acct-1".to_owned()),
             workspace: WorkspaceId("ws1".to_owned()),
-        });
+        })
+    }
+
+    /// A broker-created leg of 10 AAPL resting for `agent`, or for no one.
+    fn leg(agent: Option<&str>, state: OrderState, filled: &str) -> Result<Order, ExecutorError> {
+        Ok(Order {
+            client_order_id: ClientOrderId::parse("md-oco-1")?,
+            intent_id: None,
+            agent: agent.map(|agent| AgentId(agent.to_owned())),
+            instrument: InstrumentId::new("AAPL")?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::parse(filled)?,
+            state,
+            attempt: 1,
+            purpose: Purpose::Protective,
+            absent_lookups: 0,
+            first_absence_at: None,
+            cancel_unconfirmed: false,
+            replaced_by: None,
+            created_on: None,
+        })
+    }
+
+    /// DEC-160 3(c): an opening is held while an ownerless leg still works in its instrument, and
+    /// only then — never an exit (`AGENTS.md` rule 13), never another instrument, and not once the
+    /// leg is attributed, done, or wholly filled.
+    #[test]
+    fn only_an_opening_where_an_ownerless_leg_works_is_held() -> Result<(), ExecutorError> {
         let aapl = InstrumentId::new("AAPL")?;
         let msft = InstrumentId::new("MSFT")?;
         assert!(
-            !unattributed_opening(&state, &aapl, true),
-            "nothing unattributed holds nothing"
+            !unattributed_opening(&state(), &aapl, true),
+            "nothing ownerless holds nothing"
         );
-        state.unattributed.insert(
-            ClientOrderId::parse("md-oco-1")?,
-            UnattributedLeg {
-                instrument: aapl.clone(),
-                covered: Qty::parse("10")?,
-                created_on: None,
-            },
+        for (agent, at, filled, held) in [
+            (None, OrderState::Accepted, "0", true),
+            (None, OrderState::PartiallyFilled, "5", true),
+            (None, OrderState::PendingCancel, "0", true),
+            (None, OrderState::PartiallyFilled, "10", false),
+            (None, OrderState::Canceled, "0", false),
+            (None, OrderState::Expired, "0", false),
+            (None, OrderState::Filled, "10", false),
+            (Some("agent-a"), OrderState::Accepted, "0", false),
+        ] {
+            let mut state = state();
+            let order = leg(agent, at, filled)?;
+            state.orders.insert(order.client_order_id.clone(), order);
+            let case = format!("{agent:?} {at:?} filled {filled}");
+            assert_eq!(unattributed_opening(&state, &aapl, true), held, "{case}");
+            assert!(
+                !unattributed_opening(&state, &aapl, false),
+                "{case}: an exit is never held for attribution (rule 13)"
+            );
+            assert!(
+                !unattributed_opening(&state, &msft, true),
+                "{case}: another instrument is untouched"
+            );
+        }
+        Ok(())
+    }
+
+    /// #258 round 1, major 1 and minor 3: the gate runs the attribution check, in its §9.1 place
+    /// (check 4, after the quantity a sell may take and before the startup reconciliation), and an
+    /// ownerless leg **holds** an opening with `protection_unattributed` — never denies it — while
+    /// an exit in the same instrument passes it.
+    #[test]
+    fn the_gate_holds_an_opening_on_an_ownerless_leg_in_its_place() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let aapl = InstrumentId::new("AAPL")?;
+        let agent = AgentId("agent-a".to_owned());
+        let mut state = state();
+        state
+            .positions
+            .insert(aapl.clone(), SignedQty::parse("10")?);
+        let order = leg(None, OrderState::Accepted, "0")?;
+        state.orders.insert(order.client_order_id.clone(), order);
+        let ask = |side: Side, purpose: Purpose| {
+            account_stream_checks(
+                &state,
+                &Proposal {
+                    agent: &agent,
+                    instrument: &aapl,
+                    side,
+                    qty: Qty::parse("5")?,
+                    purpose,
+                },
+                &ports,
+            )
+        };
+        let opening = ask(Side::Buy, Purpose::Increase)?;
+        assert_eq!(
+            opening
+                .checks
+                .iter()
+                .map(|check| (check.id, check.passed))
+                .collect::<Vec<_>>(),
+            vec![
+                ("account_state", true),
+                ("agent_mode", true),
+                ("unknown_order_in_flight", true),
+                ("universe", true),
+                ("sell_exceeds_available", true),
+                ("protection_attributed", false),
+                ("startup_reconciliation", false),
+            ]
         );
-        assert!(
-            unattributed_opening(&state, &aapl, true),
-            "an opening in the unattributed instrument is held"
+        assert_eq!(
+            (opening.verdict.clone(), opening.verdict_name()),
+            (
+                GateVerdict::Deny {
+                    reason_code: "protection_unattributed".to_owned()
+                },
+                "hold"
+            ),
+            "the attribution hold is the first failure, and a hold"
         );
-        assert!(
-            !unattributed_opening(&state, &aapl, false),
-            "an exit is never held for attribution (rule 13)"
-        );
-        assert!(
-            !unattributed_opening(&state, &msft, true),
-            "another instrument is untouched"
+        let exit = ask(Side::Sell, Purpose::RiskExit)?;
+        assert_eq!(
+            (exit.verdict.clone(), exit.verdict_name()),
+            (GateVerdict::Allow, "allow"),
+            "the exit passes every check"
         );
         Ok(())
     }

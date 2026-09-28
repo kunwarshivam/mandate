@@ -195,3 +195,51 @@ fn copied_facts() -> Result<(), ExecutorError> {
 fn later_slice() -> Result<(), ExecutorError> {
     Err(ExecutorError::Unimplemented { story: "E7-3" })
 }
+
+#[cfg(test)]
+mod watch_call_tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_num::{Price, Qty};
+
+    use crate::error::ExecutorError;
+    use crate::ports::Ports;
+    use crate::reconcile::tests::{Everything, Ids, executor_config, fees, protected_by_an_oco};
+    use crate::types::{Input, MarketObservation, RiskClock};
+
+    fn quote(name: &str, at: &str) -> Result<Input, ExecutorError> {
+        let at = Price::parse(at)?;
+        Ok(Input::Market(MarketObservation {
+            instrument: InstrumentId::new(name)?,
+            bid: Some(at),
+            bid_size: Some(Qty::parse("100")?),
+            ask: Some(at),
+            last_trade: Some(at),
+            mark: Some(at),
+            sane: true,
+            observed_at: RiskClock::from_secs(0),
+        }))
+    }
+
+    /// #258 round 1, major 1: `handle` passes every quote to `watched`, so the watchdog's input — a
+    /// sane mark at or below the resting stop — answers its stub (slice 4), and any other quote,
+    /// there or elsewhere, passes.
+    #[test]
+    fn a_quote_where_protection_rests_reaches_the_watchdog_stub() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected_by_an_oco(&ports)?;
+        assert_eq!(
+            executor.run(quote("AAPL", "140")?, &ports),
+            Err(ExecutorError::Unimplemented { story: "E7-4" })
+        );
+        assert_eq!(executor.run(quote("AAPL", "150")?, &ports), Ok(Vec::new()));
+        assert_eq!(executor.run(quote("MSFT", "100")?, &ports), Ok(Vec::new()));
+        Ok(())
+    }
+}

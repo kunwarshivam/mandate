@@ -16,7 +16,7 @@ use crate::payload::{
 };
 use crate::state::{
     Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, ObservedAccount,
-    OrderDetail, UnattributedLeg,
+    OrderDetail,
 };
 use crate::types::{
     AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, OcoLegs,
@@ -376,7 +376,7 @@ fn order_submitted(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(),
             .map_or(Ok(Usd::ZERO), |limit| request.qty.notional(limit))?,
         Side::Sell => Usd::ZERO,
     };
-    let agent = AgentId(required_text(payload, "agent")?.to_owned());
+    let agent = Some(AgentId(required_text(payload, "agent")?.to_owned()));
     let created_on = None;
     let order = state.orders.entry(id.clone()).or_insert_with(|| Order {
         client_order_id: id.clone(),
@@ -511,7 +511,7 @@ fn order_abandoned(state: &mut ExecutorState, payload: &Value) -> Result<(), Exe
         let order = Order {
             client_order_id: id.clone(),
             intent_id: Some(intent.clone()),
-            agent: record.agent.clone(),
+            agent: Some(record.agent.clone()),
             instrument: instrument.clone(),
             side: *side,
             qty: *qty,
@@ -718,7 +718,6 @@ fn protection_changed(
         "cancelled" => {
             let orders = protective_orders(payload)?;
             let uncovered = optional_qty(payload, "qty")?;
-            state.unattributed.retain(|id, _| !orders.contains(id));
             if let Some(protection) = state.protection.get_mut(&instrument) {
                 protection.resting.retain(|id| !orders.contains(id));
                 if let Some(uncovered) = uncovered {
@@ -790,8 +789,9 @@ fn protection_changed(
 /// DEC-160's leg-agent rule (trading-domain spec §2.3, §5.4): a protective order the broker
 /// created, which no `OrderSubmitted` recorded, joins the order set as a live sell of the covered
 /// quantity with a zero reservation, owned by the entry's agent when its id names the entry, else by
-/// the position's single holder. With neither it is kept, by its own id, as unattributed: its
-/// instrument holds openings until it is attributed or gone, and nothing guesses an owner.
+/// the position's single holder. With neither it joins with no agent, by its own id: its
+/// instrument holds openings until it is attributed or done, and nothing guesses an owner. Its
+/// lifecycle — fills, expiry, the confirmed cancel — folds through the order set like any leg's.
 fn legs(
     state: &mut ExecutorState,
     instrument: &InstrumentId,
@@ -803,59 +803,46 @@ fn legs(
         if state.orders.contains_key(id) {
             continue;
         }
-        let leg = UnattributedLeg {
-            instrument: instrument.clone(),
-            covered,
-            created_on,
-        };
-        match leg_agent(state, instrument, id) {
-            Some(agent) => attribute(state, id, &leg, agent),
-            None => {
-                state.unattributed.insert(id.clone(), leg);
-            }
-        }
+        let agent = leg_agent(state, instrument, id);
+        state.orders.insert(
+            id.clone(),
+            Order {
+                client_order_id: id.clone(),
+                intent_id: None,
+                agent,
+                instrument: instrument.clone(),
+                side: Side::Sell,
+                qty: covered,
+                filled_qty: Qty::ZERO,
+                state: OrderState::Accepted,
+                attempt: 1,
+                purpose: Purpose::Protective,
+                absent_lookups: 0,
+                first_absence_at: None,
+                cancel_unconfirmed: false,
+                replaced_by: None,
+                created_on,
+            },
+        );
+        state.reservations.insert(id.clone(), Usd::ZERO);
     }
 }
 
-/// Retries DEC-160's rule for the unattributed legs in one instrument, after the fold changed who
-/// holds it: a leg that can now be named joins the order set and stops holding openings.
+/// Retries DEC-160's rule for the ownerless legs in one instrument, after the fold changed who
+/// holds it: a leg that can now be named takes that agent and stops holding openings.
 fn reattribute(state: &mut ExecutorState, instrument: &InstrumentId) {
-    let waiting: Vec<(ClientOrderId, UnattributedLeg)> = state
-        .unattributed
-        .iter()
-        .filter(|(_, leg)| &leg.instrument == instrument)
-        .map(|(id, leg)| (id.clone(), leg.clone()))
+    let waiting: Vec<ClientOrderId> = state
+        .orders
+        .values()
+        .filter(|order| order.agent.is_none() && &order.instrument == instrument)
+        .map(|order| order.client_order_id.clone())
         .collect();
-    for (id, leg) in waiting {
-        if let Some(agent) = leg_agent(state, instrument, &id) {
-            state.unattributed.remove(&id);
-            attribute(state, &id, &leg, agent);
+    for id in waiting {
+        let agent = leg_agent(state, instrument, &id);
+        if let Some(order) = state.orders.get_mut(&id) {
+            order.agent = agent;
         }
     }
-}
-
-fn attribute(state: &mut ExecutorState, id: &ClientOrderId, leg: &UnattributedLeg, agent: AgentId) {
-    state.orders.insert(
-        id.clone(),
-        Order {
-            client_order_id: id.clone(),
-            intent_id: None,
-            agent,
-            instrument: leg.instrument.clone(),
-            side: Side::Sell,
-            qty: leg.covered,
-            filled_qty: Qty::ZERO,
-            state: OrderState::Accepted,
-            attempt: 1,
-            purpose: Purpose::Protective,
-            absent_lookups: 0,
-            first_absence_at: None,
-            cancel_unconfirmed: false,
-            replaced_by: None,
-            created_on: leg.created_on,
-        },
-    );
-    state.reservations.insert(id.clone(), Usd::ZERO);
 }
 
 /// The agent a broker-created leg belongs to, or `None` when DEC-160's rule cannot name one: the
@@ -870,9 +857,10 @@ fn leg_agent(
 ) -> Option<AgentId> {
     let entry = leg
         .protected_entry()
-        .and_then(|entry| state.orders.get(&entry));
-    if let Some(entry) = entry {
-        return Some(entry.agent.clone());
+        .and_then(|entry| state.orders.get(&entry))
+        .and_then(|entry| entry.agent.clone());
+    if entry.is_some() {
+        return entry;
     }
     let mut lots: BTreeMap<&AgentId, SignedQty> = BTreeMap::new();
     for order in state
@@ -885,7 +873,10 @@ fn leg_agent(
             Side::Buy => filled,
             Side::Sell => filled.negated(),
         };
-        let held = lots.entry(&order.agent).or_insert(SignedQty::ZERO);
+        let Some(agent) = &order.agent else {
+            continue;
+        };
+        let held = lots.entry(agent).or_insert(SignedQty::ZERO);
         *held = held.checked_add(signed).ok()?;
     }
     let open = state.positions.get(instrument).copied()?;
@@ -1105,7 +1096,7 @@ mod tests {
             Order {
                 client_order_id: original.clone(),
                 intent_id: Some(IntentId(EventId("01JABCDEFGHJKMNPQRSTVWXYZ0".to_owned()))),
-                agent: AgentId("agent-a".to_owned()),
+                agent: Some(AgentId("agent-a".to_owned())),
                 instrument: InstrumentId::new("AAPL")?,
                 side: Side::Buy,
                 qty: Qty::parse("10")?,
@@ -1753,8 +1744,23 @@ mod protection_tests {
         Ok(Qty::parse(raw)?)
     }
 
-    fn missing(what: &'static str) -> ExecutorError {
-        ExecutorError::Unimplemented { story: what }
+    /// What a test expected and did not find. Never `Unimplemented`, whose story `ci pending`
+    /// reads as a stub (DEC-137).
+    fn missing(what: &str) -> ExecutorError {
+        ExecutorError::NonCanonicalPayload {
+            field: format!("expected {what}"),
+        }
+    }
+
+    /// The legs in the order set that no agent owns.
+    fn ownerless(stream: &Stream) -> Vec<ClientOrderId> {
+        stream
+            .state
+            .orders
+            .values()
+            .filter(|order| order.agent.is_none())
+            .map(|order| order.client_order_id.clone())
+            .collect()
     }
 
     #[test]
@@ -1780,7 +1786,7 @@ mod protection_tests {
                 .ok_or_else(|| missing("the leg in the order set"))?;
             assert_eq!(
                 order.agent,
-                AgentId("agent-a".to_owned()),
+                Some(AgentId("agent-a".to_owned())),
                 "{leg} has the single holder"
             );
             assert_eq!(order.side, Side::Sell);
@@ -1790,7 +1796,7 @@ mod protection_tests {
             assert_eq!(order.created_on, Some(Date::parse("2026-09-22")?));
             assert_eq!(stream.state.reservations.get(&id(leg)?), Some(&Usd::ZERO));
         }
-        assert!(stream.state.unattributed.is_empty());
+        assert!(ownerless(&stream).is_empty());
         Ok(())
     }
 
@@ -1864,13 +1870,13 @@ mod protection_tests {
             .orders
             .get(&id("md-buy-2-p1")?)
             .ok_or_else(|| missing("the named leg"))?;
-        assert_eq!(order.agent, AgentId("agent-b".to_owned()));
-        assert!(stream.state.unattributed.is_empty());
+        assert_eq!(order.agent, Some(AgentId("agent-b".to_owned())));
+        assert!(ownerless(&stream).is_empty());
         Ok(())
     }
 
     #[test]
-    fn a_leg_with_no_holder_or_several_is_kept_by_id_and_a_reconciliation_does_not_own_it()
+    fn a_leg_with_no_holder_or_several_joins_the_order_set_with_no_agent()
     -> Result<(), ExecutorError> {
         for holders in [&[][..], &["agent-a", "agent-b"][..]] {
             let mut stream = Stream::opened()?;
@@ -1878,33 +1884,94 @@ mod protection_tests {
                 stream.bought(agent, &format!("md-buy-{n}"), "5")?;
             }
             stream.protection("placed", "md-oco-1", "10")?;
-            assert!(
-                !stream.state.orders.contains_key(&id("md-oco-1")?),
-                "{holders:?}: the leg is never guessed onto an agent"
+            let leg = stream
+                .state
+                .orders
+                .get(&id("md-oco-1")?)
+                .ok_or_else(|| missing("the ownerless leg in the order set"))?;
+            assert_eq!(
+                (
+                    leg.agent.clone(),
+                    leg.instrument.clone(),
+                    leg.side,
+                    leg.qty,
+                    leg.purpose,
+                    leg.state
+                ),
+                (
+                    None,
+                    aapl()?,
+                    Side::Sell,
+                    qty("10")?,
+                    Purpose::Protective,
+                    OrderState::Accepted
+                ),
+                "{holders:?}: in the order set by its own id, never guessed onto an agent"
             );
             assert_eq!(
-                stream
-                    .state
-                    .unattributed
-                    .get(&id("md-oco-1")?)
-                    .map(|leg| (leg.instrument.clone(), leg.covered)),
-                Some((aapl()?, qty("10")?)),
-                "{holders:?}: kept by its own id, so an exit or a kill switch can cancel it"
+                stream.state.reservations.get(&id("md-oco-1")?),
+                Some(&Usd::ZERO),
+                "{holders:?}"
             );
             assert_eq!(
                 stream.state.protective_sell_qty(&aapl()?)?,
                 qty("10")?,
                 "{holders:?}: the protection itself still counts"
             );
-            stream.fold("ReconciliationRun", vec![], None)?;
-            assert!(
-                stream.state.unattributed.contains_key(&id("md-oco-1")?),
-                "{holders:?}: a reconciliation establishes presence, not ownership"
-            );
-            stream.protection("cancelled", "md-oco-1", "10")?;
-            assert!(
-                stream.state.unattributed.is_empty(),
-                "{holders:?}: a leg that is gone holds nothing"
+        }
+        Ok(())
+    }
+
+    /// #258 round 1 (b), (c), (d): an ownerless leg's lifecycle folds through the order set like
+    /// any leg's — the broker's expiry, a fill and the confirmed cancel — so a journal carrying
+    /// them replays; and its fill counts toward no agent's lots.
+    #[test]
+    fn an_ownerless_legs_expiry_fill_and_confirmed_cancel_fold() -> Result<(), ExecutorError> {
+        for (event, pairs, state, filled) in [
+            (
+                "OrderStateChanged",
+                vec![("state", text("expired"))],
+                OrderState::Expired,
+                "0",
+            ),
+            (
+                "OrderStateChanged",
+                vec![
+                    ("state", text("canceled")),
+                    ("cancel_confirmed", Value::Bool(true)),
+                ],
+                OrderState::Canceled,
+                "0",
+            ),
+            (
+                "FillApplied",
+                vec![
+                    ("fill_id", text("f-leg")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("sell")),
+                    ("qty_gross", text("5")),
+                    ("price", text("140")),
+                ],
+                OrderState::Accepted,
+                "5",
+            ),
+        ] {
+            let mut stream = Stream::opened()?;
+            stream.bought("agent-a", "md-buy-1", "5")?;
+            stream.bought("agent-b", "md-buy-2", "5")?;
+            stream.protection("placed", "md-oco-1", "10")?;
+            let mut pairs = pairs;
+            pairs.push(("client_order_id", text("md-oco-1")));
+            stream.fold(event, pairs, None)?;
+            let leg = stream
+                .state
+                .orders
+                .get(&id("md-oco-1")?)
+                .ok_or_else(|| missing("the ownerless leg"))?;
+            assert_eq!(
+                (leg.state, leg.filled_qty, leg.agent.clone()),
+                (state, qty(filled)?, None),
+                "{event} {state:?}: folded on the leg, which stays no one's"
             );
         }
         Ok(())
@@ -1917,10 +1984,10 @@ mod protection_tests {
         stream.bought("agent-a", "md-buy-1", "5")?;
         stream.bought("agent-b", "md-buy-2", "5")?;
         stream.protection("placed", "md-oco-1", "10")?;
-        assert!(stream.state.unattributed.contains_key(&id("md-oco-1")?));
+        assert_eq!(ownerless(&stream), vec![id("md-oco-1")?]);
         stream.sold("agent-b", "md-sell-1", "5")?;
         assert!(
-            stream.state.unattributed.is_empty(),
+            ownerless(&stream).is_empty(),
             "agent-b went flat, so agent-a's five are the whole position"
         );
         let order = stream
@@ -1928,7 +1995,7 @@ mod protection_tests {
             .orders
             .get(&id("md-oco-1")?)
             .ok_or_else(|| missing("the attributed leg"))?;
-        assert_eq!(order.agent, AgentId("agent-a".to_owned()));
+        assert_eq!(order.agent, Some(AgentId("agent-a".to_owned())));
         assert_eq!(
             stream.state.reservations.get(&id("md-oco-1")?),
             Some(&Usd::ZERO)
@@ -1952,8 +2019,9 @@ mod protection_tests {
             None,
         )?;
         stream.protection("placed", "md-oco-1", "8")?;
-        assert!(
-            stream.state.unattributed.contains_key(&id("md-oco-1")?),
+        assert_eq!(
+            ownerless(&stream),
+            vec![id("md-oco-1")?],
             "agent-a's five are not the whole eight"
         );
         Ok(())
@@ -2045,6 +2113,22 @@ mod protection_tests {
             None,
             "the last leg clears it"
         );
+        Ok(())
+    }
+
+    /// #258 round 1, minor 3: an action the fold does not interpret is refused, never skipped.
+    #[test]
+    fn an_unknown_protection_action_is_refused() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        let before = stream.state.clone();
+        assert_eq!(
+            stream.protection("moved", "md-oco-1", "10"),
+            Err(ExecutorError::NonCanonicalPayload {
+                field: "action".to_owned()
+            })
+        );
+        assert_eq!(stream.state, before, "and nothing is folded");
         Ok(())
     }
 
@@ -2169,7 +2253,7 @@ mod protection_tests {
             .ok_or_else(|| missing("the leg of the single holder"))?;
         assert_eq!(
             order.agent,
-            AgentId("agent-a".to_owned()),
+            Some(AgentId("agent-a".to_owned())),
             "an unfilled buy and another instrument's buyer hold nothing here, and the holder's own \
              sell counts against its lots"
         );
