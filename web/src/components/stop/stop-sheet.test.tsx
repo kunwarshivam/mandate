@@ -472,10 +472,10 @@ describe("unmounting mid-passkey abandons the request, and a late answer never b
 
     view.rerender(<Tree stop={false} />);
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(release).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
 
     expect(recordedCount()).toBe(0);
+    expect(release).toHaveBeenCalledTimes(1);
     expect(console_.calls()).toEqual([]);
   });
 
@@ -495,9 +495,9 @@ describe("unmounting mid-passkey abandons the request, and a late answer never b
 
     view.rerender(ui(false));
     expect(screen.queryByRole("dialog")).toBeNull();
-    expect(release).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
     expect(recordedCount()).toBe(0);
+    expect(release).toHaveBeenCalledTimes(1);
 
     view.rerender(ui(true));
     expect(stepUpDialog()).toBeNull();

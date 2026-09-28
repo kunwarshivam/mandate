@@ -40,12 +40,12 @@ describe.each<PasskeyResult>(["verified", "failed"])("StepUpDialog, with a %s an
     expect(passkey).toHaveBeenCalledTimes(1);
 
     unmount();
-    expect(release).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS * 3));
 
     expect(handlers.onVerified).not.toHaveBeenCalled();
     expect(handlers.onFailed).not.toHaveBeenCalled();
     expect(handlers.onCancel).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
     expect(console_.calls()).toEqual([]);
   });
 
@@ -55,11 +55,11 @@ describe.each<PasskeyResult>(["verified", "failed"])("StepUpDialog, with a %s an
     fireEvent.click(within(dialog()).getByRole("button", { name: "Use passkey" }));
 
     reopen(false);
-    expect(release).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS * 3));
 
     expect(handlers.onVerified).not.toHaveBeenCalled();
     expect(handlers.onFailed).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
     expect(console_.calls()).toEqual([]);
   });
 
