@@ -1,6 +1,6 @@
 ---
 name: Owlhead
-description: Autonomous trading agents under a mandate you set. Paper trading only.
+description: The design system of the Owlhead web app. Paper trading only.
 direction: Placard
 ---
 
@@ -68,13 +68,30 @@ The root size is 106.25%, so body reads at 17px when the browser default is 16px
 
 Every figure uses tabular digits. Identifiers (connection ids, order ids) use the same sans with tabular figures and `translate="no"`; there is no monospace face. Reading text is held to about 65 characters (`max-w-prose` or narrower).
 
-The wordmark is "OWLHEAD" set in Big Shoulders Display 800, capitals, in the current text colour: the condensed face is drawn for capitals, and the lowercase version read as a word rather than a name. There is no symbol and no favicon until a founder-approved mark exists.
+The brand is not set in these faces: the wordmark is drawn as outlines (see Brand).
+
+## Brand
+
+The Owlhead mark is the founder's artwork, traced into one flat path; the wordmark is lowercase "owlhead" in P052 Roman, as outlines ([DEC-203](../docs/project/04-decision-log.md#decisions)). The sources are `src/components/brand/owlhead-mark.svg` and `owlhead-wordmark.svg`, and `src/components/brand/Logo.tsx` inlines the same paths in `currentColor` as `OwlheadMark`, `OwlheadWordmark` and `OwlheadLockup`. No font file is committed and the UI loads no font for the wordmark.
+
+- **Navy on light, always.** The brand is navy #183D73 on a light surface (off-white #F7FAFE or the page), never off-white on a navy block, and it does not change with the system's colour scheme. There is no tagline.
+- **Lockup.** The mark, then the wordmark at half the mark's height after a gap of a quarter of it, centred vertically. The clear space around it is that same quarter. Minimum sizes: 16px for the mark, 96px wide for the lockup.
+- **In the shell.** From 64rem up the sidebar header carries the lockup, and the mark alone when the sidebar collapses to icons. Below 64rem the top header carries the mark. Both are the link to the role's home.
+- **Palette** ([DEC-202](../docs/project/04-decision-log.md#decisions)). Navy #183D73; brass #AC7D1B, the one accent, for rules, borders and large type only (3.5:1 on off-white); dark brass #634606 for brass as text; brass tint #FDF1DC; slate ink #181C21 for text; off-white #F7FAFE for the page. About 60% neutrals, 30% navy, at most 10% brass. `src/components/brand/palette.ts` holds the six values for the brand assets and `/design`; the UI tokens in Colors move onto them in the palette port, which replaces lapis and marigold.
+- **Generated assets.** `npm run brand` (`scripts/brand-assets.mjs`, rendering with `@resvg/resvg-js`) writes `public/` from the mark and `brand/og-image.svg`:
+  - `favicon.svg`, `favicon-16.png`, `favicon-32.png`, `favicon-48.png` and `favicon.ico` (the three PNGs in one ICO): the navy mark on an off-white square tile, as large as fits (87.5% of the tile's height, 1px above and below at 16px), the same in light and dark tabs.
+  - `apple-touch-icon.png` (180), `pwa-192.png` and `pwa-512.png`: the navy mark at 76% of an off-white tile's height. `pwa-maskable-512.png` is scaled to sit inside the 80% safe circle.
+  - `og-image.png`: the 1200×630 share image, the navy lockup centred on off-white.
+  - `site.webmanifest`: Owlhead, theme and background #F7FAFE.
+
+  The generated files are committed with the script. `src/components/brand/brand-assets.test.ts` regenerates them into a temporary directory and fails if a byte differs, and checks their pixels (the tile, the colours, the centring, the safe zone).
+- **`/design`** renders the Brand block: the mark, wordmark and lockup on off-white, clear space, minimum sizes, do and don't, and the palette with its contrast.
 
 ## Layout and space
 
 Operate first: the dashboard answers "does anything need me?" and "is each agent inside its mandate?" in its first viewport. The approval request is phone first, with the trigger, the risk in dollars and the default readable before the response controls, and the response area pinned above the tab bar. Layouts hold from 360px up.
 
-Desktop has a side navigation that collapses to icons and a wide content column; below 64rem the navigation becomes a bottom tab bar (the sidebar opens as a sheet from the header) and the header keeps the wordmark, the paper badge and Stop.
+Desktop has a side navigation that collapses to icons and a wide content column; below 64rem the navigation becomes a bottom tab bar (the sidebar opens as a sheet from the header) and the header keeps the mark, the paper badge and Stop.
 
 The founder asked for less gutter space. Before and after:
 
@@ -101,13 +118,13 @@ Radius is 0 everywhere (`--radius: 0rem`, every Tailwind radius token 0). A sign
 
 ## Components
 
-- **Header.** Always rendered, never held back by loading: the sidebar trigger (phones), the wordmark, the workspace switcher (fixtures), breadcrumbs, the ⌘K trigger, the paper badge, the approvals count, Alerts, the user menu, and Stop in ink on the right. Below it, the status strip, then account banners.
-- **Paper badge.** `PAPER · simulated funds`: a 2px lapis border over the lapis hatch. Below 25rem the words "simulated funds" become screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
-- **Side navigation.** Kumo's Sidebar, collapsible to icons, with a lapis account field at the top. Groups: Home, Approvals and Alerts without a label; Agents; Accounts; Audit; Workspace. On an agent's pages the sidebar slides to that agent's sections (Overview, Positions, Orders, Decisions, Approvals, Mandate, Prove, Activity) with a link back to all agents. The current page is a solid lapis field. The approvals count is a square foreground chip.
+- **Header.** Always rendered, never held back by loading: the sidebar trigger and the mark (below 64rem), the workspace switcher (fixtures), breadcrumbs, the ⌘K trigger, the paper badge, the approvals count, Alerts, the user menu, and Stop in ink on the right. Below it, the status strip, then account banners. Stop is last, never shrinks, and is fully on screen at every width from 320px (`e2e/stop-visible.spec.ts`). As the header narrows, the other items give way first: below 80rem the breadcrumbs keep the last two crumbs, the workspace switcher becomes an icon, and Alerts and the user menu fold into a "More" menu; below 64rem search becomes an icon and the workspace switcher goes; below 48rem the breadcrumbs go; below 40rem the approvals count and "More" go. The sidebar sheet carries everything the header drops.
+- **Paper badge.** `PAPER · simulated funds`: a 2px lapis border over the lapis hatch. Below 30rem the words "simulated funds" become screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
+- **Side navigation.** Kumo's Sidebar, collapsible to icons. Its header is a light field with the brand (see Brand) and the account below it. Groups: Home, Approvals and Alerts without a label; Agents; Accounts; Audit; Workspace. On an agent's pages the sidebar slides to that agent's sections (Overview, Positions, Orders, Decisions, Approvals, Mandate, Prove, Activity) with a link back to all agents. The current page is a solid lapis field. The approvals count is a square foreground chip.
 - **Page header.** The page title with the paper badge beside it, an optional description, route tabs as links (the current one underlined in lapis), and actions. Record screens (an agent, a request) always carry the badge in the title row.
 - **Command palette (⌘K).** "Stop…" is the first command for every role that may stop. Titles come from the screen list and owner-given agent labels; nothing typed is kept and there are no recents.
 - **Tab bar.** A 2px foreground top rule; the current tab has a 4px lapis bar on its top edge and bold text.
-- **Account block.** The top of the side navigation is a lapis field with the broker.
+- **Account block.** Under the brand in the sidebar header, on the same light field: "Account" and the broker.
 - **Stop control.** An ink button, 44px tall, with the stop icon. Opens the Stop sheet.
 - **Stop sheet.** G2, the chooser. An ink header with the display title; sections under heading rules; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Pause, Resume and Stop of a flat agent act in the sheet. The kill switch, release, Stop all and Close everything are links to their record screens, and the sheet closes on the way. Account notices wear lapis-soft with an account tag.
 - **Kill-switch and release record screens (D10, D11).** Pages at `/agents/{agent_id}/kill-switch`, `/agents/{agent_id}/release`, `/connections/{connection_id}/stop-all` and `/connections/{connection_id}/close-all`, with opaque IDs. The title carries the paper badge; the document title names the environment. Every list shows expanded: orders it cancels, positions it sells or releases, agents it stops, and what it leaves alone. Release carries its "yours and unprotected" warning in a marigold field. Each agent's mode badge is part of the record. The passkey check (G3) opens from the page, and the command carries every line shown and every badge as it read, so the journal keeps what the owner confirmed.
