@@ -97,6 +97,12 @@ change, every state treatment, the components, and motion samples.
   (`.github/workflows/web.yml`).
 - **Type.** Big Shoulders Display for headings and big figures, in capitals; Atkinson Hyperlegible
   Next for everything read, in sentence case. Self-hosted through `@fontsource-variable/*`.
+- **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
+  (DEC-203), always navy on a light surface, with no tagline; the "navy and brass" palette is
+  DEC-202. `npm run brand` regenerates the favicons, app icons, share image and manifest in
+  `public/` from `src/components/brand/owlhead-mark.svg` and `brand/og-image.svg`; commit its output,
+  because `brand-assets.test.ts` fails when a committed file differs. `web/DESIGN.md` ("Brand") has
+  the rules.
 - **Motion.** Emil Kowalski's rules: ease-out `cubic-bezier(0.23, 1, 0.32, 1)`, nothing past 300 ms,
   press to 0.97 with a faster release, fields wipe in once with a 30 ms stagger, changed numbers roll
   whole. Deadlines never move. `prefers-reduced-motion` drops movement and keeps colour changes.

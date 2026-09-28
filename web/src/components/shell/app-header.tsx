@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
 import { Sidebar } from "@cloudflare/kumo/components/sidebar";
-import { Bell, CaretUpDown, Tray, UserCircle } from "@phosphor-icons/react";
+import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, Tray, UserCircle } from "@phosphor-icons/react";
 import { canOpen, homeFor } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { can, useRole } from "@/lib/roles";
+import { type Role, can, useRole } from "@/lib/roles";
 import { crumbsFor } from "@/lib/screens";
 import { ApprovalsCount } from "./app-sidebar";
 import { Wordmark } from "./brand";
@@ -25,27 +25,51 @@ const WORKSPACES = [
 const ICON_LINK =
   "press relative inline-flex size-11 shrink-0 items-center justify-center text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring";
 
+/** Below `xl` the trail keeps its last two crumbs: Kumo renders the full trail as the nav's last child. */
+const TWO_CRUMBS = "max-xl:[&>div:last-child>*:nth-child(-n+2)]:hidden";
+
 function WorkspaceSwitcher() {
   const current = WORKSPACES.find((w) => w.current) ?? WORKSPACES[0];
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger
         render={<button type="button" />}
+        aria-label={`Workspace: ${current.label}`}
         className="press inline-flex h-11 max-w-48 shrink-0 items-center gap-1.5 px-2 text-sm font-bold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
       >
-        <span className="truncate">{current.label}</span>
+        <Briefcase className="size-5 shrink-0 xl:hidden" aria-hidden />
+        <span className="truncate max-xl:sr-only">{current.label}</span>
         <CaretUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="start">
-        <DropdownMenu.Label>Workspaces (fixture)</DropdownMenu.Label>
-        {WORKSPACES.map((w) => (
-          <DropdownMenu.Item key={w.id} selected={w.current} disabled={!w.current}>
-            {w.label}
-            {w.current ? null : <span className="ml-2 text-caption text-muted-foreground">not connected in this preview</span>}
-          </DropdownMenu.Item>
-        ))}
+        <DropdownMenu.Group>
+          <DropdownMenu.Label>Workspaces (fixture)</DropdownMenu.Label>
+          {WORKSPACES.map((w) => (
+            <DropdownMenu.Item key={w.id} selected={w.current} disabled={!w.current}>
+              {w.label}
+              {w.current ? null : <span className="ml-2 text-caption text-muted-foreground">not connected in this preview</span>}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
       </DropdownMenu.Content>
     </DropdownMenu>
+  );
+}
+
+/** Base UI's menu labels must sit inside a group. */
+function AccountLinks({ role }: { role: Role }) {
+  return (
+    <DropdownMenu.Group>
+      <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
+      {can(role, "workspace.view") ? (
+        <>
+          <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
+          <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
+        </>
+      ) : (
+        <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
+      )}
+    </DropdownMenu.Group>
   );
 }
 
@@ -57,15 +81,23 @@ function UserMenu() {
         <UserCircle className="size-5" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
-        <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
-        {can(role, "workspace.view") ? (
-          <>
-            <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
-            <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
-          </>
-        ) : (
-          <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
-        )}
+        <AccountLinks role={role} />
+      </DropdownMenu.Content>
+    </DropdownMenu>
+  );
+}
+
+/** Alerts and the account menu folded into one control, where the header has no room for both. */
+function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
+  const { role } = useRole();
+  return (
+    <DropdownMenu>
+      <DropdownMenu.Trigger render={<button type="button" />} aria-label="More" className={ICON_LINK}>
+        <DotsThreeVertical className="size-5" weight="bold" aria-hidden />
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Content align="end">
+        {seesAgents ? <DropdownMenu.LinkItem render={<Link href="/alerts" />}>Alerts</DropdownMenu.LinkItem> : null}
+        <AccountLinks role={role} />
       </DropdownMenu.Content>
     </DropdownMenu>
   );
@@ -73,7 +105,11 @@ function UserMenu() {
 
 /**
  * The header always renders, whatever is loading: the Stop control, the paper badge, and the way
- * home never wait for workspace data (brief §5, rule 13).
+ * home never wait for workspace data (brief §5, rule 13). Stop never shrinks and never leaves the
+ * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
+ * the search becomes an icon (below `lg`), the trail keeps two crumbs and the workspace switcher
+ * becomes an icon (below `xl`), alerts and the account menu fold into "More" (below `xl`), the paper
+ * badge drops its gloss (below 30rem), and on phones the tab bar and the sidebar sheet carry the rest.
  */
 export function AppHeader() {
   const pathname = usePathname();
@@ -91,14 +127,14 @@ export function AppHeader() {
     <header className="sticky top-0 z-30 border-b bg-background">
       <div className="flex h-14 items-center gap-1 px-(--page-x) sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
-        <Link href={home.href} className="shrink-0 px-1 text-foreground" aria-label={`Owlhead, ${home.label}`}>
+        <Link href={home.href} className="shrink-0 px-1 text-foreground lg:hidden" aria-label={`Owlhead, ${home.label}`}>
           <Wordmark className="text-xl sm:text-2xl" />
         </Link>
         <div className="hidden lg:block">
           <WorkspaceSwitcher />
         </div>
         <div className="hidden min-w-0 flex-1 md:flex">
-          <Breadcrumbs size="sm" className="mr-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate">
+          <Breadcrumbs size="sm" className={`mr-0 min-w-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${crumbs.length > 2 ? TWO_CRUMBS : ""}`}>
             {crumbs.flatMap((c, i) => [
               ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),
               i === crumbs.length - 1 ? (
@@ -111,7 +147,7 @@ export function AppHeader() {
             ])}
           </Breadcrumbs>
         </div>
-        <div className="ml-auto flex items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
           <CommandMenu />
           <EnvironmentBadge environment={ws.environment} />
           {seesAgents ? (
@@ -120,13 +156,16 @@ export function AppHeader() {
                 <Tray className="size-5" aria-hidden />
                 <ApprovalsCount n={open} className="absolute top-1 right-0.5" />
               </Link>
-              <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-sm:hidden`}>
+              <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
                 <Bell className="size-5" aria-hidden />
               </Link>
             </>
           ) : null}
-          <div className="max-sm:hidden">
+          <div className="max-xl:hidden">
             <UserMenu />
+          </div>
+          <div className="max-sm:hidden xl:hidden">
+            <MoreMenu seesAgents={seesAgents} />
           </div>
           <StopControl />
         </div>

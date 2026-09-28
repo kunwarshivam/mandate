@@ -19,8 +19,8 @@ export function EnvironmentBadge({ environment, className }: { environment: Envi
       className={cn("hatch inline-flex h-8 items-center gap-1.5 border-2 border-lapis bg-card px-2 text-caption whitespace-nowrap text-foreground", className)}
     >
       <span className="label-caps">PAPER</span>
-      <span aria-hidden className="max-[25rem]:hidden">·</span>
-      <span className="font-medium max-[25rem]:sr-only">simulated funds</span>
+      <span aria-hidden className="max-[30rem]:hidden">·</span>
+      <span className="font-medium max-[30rem]:sr-only">simulated funds</span>
     </span>
   );
 }
