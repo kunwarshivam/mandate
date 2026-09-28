@@ -928,6 +928,22 @@ impl Shell {
     /// `CompensatingEvent`. The run is asserted to draft only its record, the positions it
     /// observed, the account snapshot when an account was already reported, and that adoption
     /// when such an order exists, so a case's own subject is never changed behind its back.
+    /// The payload of the last `ProtectionChanged placed` on the account stream that names `id`,
+    /// which is how `ready()` describes a resting protective order as the broker holds it: a GTC
+    /// OCO at its take-profit with its stop as the child leg, or a stop-limit for crypto.
+    fn placed_protection(&self, id: &str) -> Option<&Value> {
+        self.account_journal
+            .iter()
+            .rev()
+            .filter(|event| event.event_type == "ProtectionChanged")
+            .map(|event| &event.payload)
+            .find(|payload| {
+                matches!(payload.get("action"), Some(Value::Str(action)) if action == "placed")
+                    && matches!(payload.get("orders"), Some(Value::Str(orders))
+                        if orders.split([',', ' ']).any(|named| named == id))
+            })
+    }
+
     pub fn ready(&mut self, ports: &Ports<'_>) {
         let reported = self.state.observed_account().is_some();
         let in_doubt = self
@@ -961,20 +977,39 @@ impl Shell {
                     OrderState::PendingReplace => "pending_replace",
                     _ => return None,
                 };
+                let id = order.client_order_id.as_str();
+                let placed = self.placed_protection(id);
+                let text_of = |key: &str| {
+                    placed.and_then(|payload| match payload.get(key) {
+                        Some(Value::Str(raw)) => Some(raw.clone()),
+                        _ => None,
+                    })
+                };
+                let take_profit = text_of("take_profit");
+                let stop = text_of("stop");
                 Some(BrokerOrder {
-                    broker_order_id: format!("b-{}", order.client_order_id.as_str()),
-                    client_order_id: Some(order.client_order_id.as_str().to_owned()),
+                    broker_order_id: format!("b-{id}"),
+                    client_order_id: Some(id.to_owned()),
                     instrument: order.instrument.clone(),
                     side: order.side,
                     qty: order.qty,
                     filled_qty: order.filled_qty,
-                    limit_price: Some(price("150")),
-                    stop_price: None,
+                    limit_price: match (&placed, &take_profit) {
+                        (Some(_), Some(target)) => Some(price(target)),
+                        (Some(_), None) => None,
+                        (None, _) => Some(price("150")),
+                    },
+                    stop_price: stop.as_deref().map(price),
                     status: status.to_owned(),
                     reject_code: None,
                     replaced_by_broker_order_id: None,
-                    legs: Vec::new(),
-                    created_on: Some(date("2026-09-22")),
+                    legs: match (&take_profit, &stop) {
+                        (Some(_), Some(_)) => vec![format!("b-{id}-sl")],
+                        _ => Vec::new(),
+                    },
+                    created_on: Some(
+                        text_of("created_on").map_or_else(|| date("2026-09-22"), |day| date(&day)),
+                    ),
                 })
             })
             .collect();
