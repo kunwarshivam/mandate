@@ -2342,18 +2342,73 @@ fn tokens(src: &str) -> Vec<(Token, usize)> {
     found
 }
 
-/// The commit a change is compared against. An all-zero `MANDATE_BASE_REF` is what a forge sends
-/// for a branch's first push, meaning there is no base.
+/// The commit a change is compared against, from this process's environment: `MANDATE_BASE_REF`
+/// (the explicit override) and `GITHUB_EVENT_NAME` (set by GitHub Actions).
 fn base_ref() -> Option<String> {
-    if let Ok(base) = env::var("MANDATE_BASE_REF")
-        && !base.is_empty()
-    {
-        return (!base.chars().all(|c| c == '0')).then_some(base);
+    base_ref_in(
+        Path::new("."),
+        env::var("MANDATE_BASE_REF").ok().as_deref(),
+        env::var("GITHUB_EVENT_NAME").ok().as_deref(),
+    )
+}
+
+/// Reads what `choose_base` needs from the repository at `root`.
+fn base_ref_in(root: &Path, explicit: Option<&str>, event: Option<&str>) -> Option<String> {
+    let git = |args: &[&str]| {
+        output_in(root, "git", args)
+            .ok()
+            .map(|out| out.trim().to_owned())
+    };
+    let head = git(&["rev-parse", "HEAD"]).unwrap_or_default();
+    let parents = git(&["rev-list", "--parents", "-n", "1", "HEAD"])
+        .map(|line| line.split_whitespace().skip(1).map(str::to_owned).collect())
+        .unwrap_or_default();
+    choose_base(&BaseInputs {
+        explicit: explicit.map(str::to_owned),
+        event: event.map(str::to_owned),
+        head,
+        parents,
+        main_merge_base: git(&["merge-base", "HEAD", "origin/main"]),
+    })
+}
+
+/// What decides the commit a change is compared against.
+struct BaseInputs {
+    /// `MANDATE_BASE_REF`, the explicit override for a local run.
+    explicit: Option<String>,
+    /// `GITHUB_EVENT_NAME`, the event a GitHub Actions run answers.
+    event: Option<String>,
+    head: String,
+    /// HEAD's parents, first parent first.
+    parents: Vec<String>,
+    /// `git merge-base HEAD origin/main`, when there is an `origin/main`.
+    main_merge_base: Option<String>,
+}
+
+/// The commit a change is compared against; the diff-based jobs (`spec-guard`, the trailer check,
+/// `mutants`, gitleaks' range) read `<base>...HEAD` or `<base>..HEAD`.
+///
+/// 1. A non-empty `MANDATE_BASE_REF` wins. An all-zero one is what a forge sends for a branch's
+///    first push, meaning there is no base.
+/// 2. On a `pull_request` event CI checks out the merge of the PR into main's tip as of the event,
+///    so the base is that merge commit's first parent. The PR's `base.sha` is not: it is main as
+///    of the PR's opening or last retarget, and against it every later change on main counts as
+///    the PR's own (#243, #258).
+/// 3. Otherwise the merge base with `origin/main`, and none when that is HEAD itself (a run on
+///    main).
+fn choose_base(inputs: &BaseInputs) -> Option<String> {
+    if let Some(base) = inputs.explicit.as_deref().filter(|base| !base.is_empty()) {
+        return (!base.chars().all(|c| c == '0')).then(|| base.to_owned());
     }
-    let merge_base = output("git", &["merge-base", "HEAD", "origin/main"]).ok()?;
-    let head = output("git", &["rev-parse", "HEAD"]).ok()?;
-    let merge_base = merge_base.trim().to_string();
-    (merge_base != head.trim()).then_some(merge_base)
+    if inputs.event.as_deref() == Some("pull_request")
+        && let [main_tip, _pr_head] = inputs.parents.as_slice()
+    {
+        return Some(main_tip.clone());
+    }
+    inputs
+        .main_merge_base
+        .clone()
+        .filter(|merge_base| *merge_base != inputs.head)
 }
 
 /// Commits a change adds carry no `Co-authored-by` trailer: Cursor's agent hook fills it with the
@@ -2386,17 +2441,34 @@ fn spec_guard() -> Result<()> {
         eprintln!("    spec-guard: HEAD is the base; nothing to check");
         return Ok(());
     };
-    let changed = output("git", &["diff", "--name-only", &format!("{base}...HEAD")])?;
+    let pr_body = env::var("MANDATE_PR_BODY").unwrap_or_default();
+    report(
+        spec_guard_problems(Path::new("."), &base, &pr_body)?,
+        "spec-guard",
+    )
+}
+
+/// Protected paths (ES-22) changed since `base` need a DEC cited in the PR description or a commit
+/// message, and may not ship with code.
+fn spec_guard_problems(root: &Path, base: &str, pr_body: &str) -> Result<Vec<String>> {
+    let changed = output_in(
+        root,
+        "git",
+        &["diff", "--name-only", &format!("{base}...HEAD")],
+    )?;
     let (protected, code) = classify(changed.lines());
     if protected.is_empty() {
         eprintln!("    spec-guard: no protected paths changed");
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut problems = Vec::new();
     let messages = format!(
-        "{}\n{}",
-        env::var("MANDATE_PR_BODY").unwrap_or_default(),
-        output("git", &["log", "--format=%B", &format!("{base}..HEAD")])?
+        "{pr_body}\n{}",
+        output_in(
+            root,
+            "git",
+            &["log", "--format=%B", &format!("{base}..HEAD")]
+        )?
     );
     if !contains_dec_id(&messages) {
         problems.push(format!(
@@ -2407,7 +2479,7 @@ fn spec_guard() -> Result<()> {
     if !code.is_empty() {
         problems.push(format!("specs, schemas, or reference cases changed together with code ({} code files); split the change", code.len()));
     }
-    report(problems, "spec-guard")
+    Ok(problems)
 }
 
 /// Splits changed paths into protected paths and code paths. A protected file under a code
@@ -2448,17 +2520,19 @@ mod tests {
     use std::env;
     use std::fs;
     use std::path::PathBuf;
+    use std::process::Command;
     use std::time::Duration;
 
     use anyhow::{Context, Result};
 
     use super::{
         BEHAVIOUR_ONLY_TESTS, MUTANTS_OUT, MutatedCrate, PendingTest, PendingTestRun, TestOutcome,
-        backticked_paths, ci, classify, contains_dec_id, contains_word, failure_cause,
+        backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause,
         first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
         is_stub_function, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
         mutants_outcome, names_a_stub, output_in, pending_problems, pending_tests,
-        plain_comment_lines, repo_root, test_binary, test_outcomes, unjudged_mutants, verdicts,
+        plain_comment_lines, repo_root, spec_guard_problems, test_binary, test_outcomes,
+        unjudged_mutants, verdicts,
     };
 
     #[test]
@@ -3065,27 +3139,71 @@ mod tests {
         }
 
         fn commit(&self) -> Result<()> {
+            self.commit_with("fixture")
+        }
+
+        fn commit_with(&self, message: &str) -> Result<()> {
             output_in(&self.0, "git", &["add", "-A"])?;
-            output_in(
-                &self.0,
-                "git",
-                &[
-                    "-c",
-                    "user.name=xtask",
-                    "-c",
-                    "user.email=xtask@example.invalid",
-                    "-c",
-                    "commit.gpgsign=false",
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "commit",
-                    "-q",
-                    "-m",
-                    "fixture",
-                ],
-            )?;
+            self.git(&["commit", "-q", "-m", message])?;
             Ok(())
         }
+
+        /// `git` in the fixture as a committer with no hooks or signing, trimmed.
+        fn git(&self, args: &[&str]) -> Result<String> {
+            let mut all = vec![
+                "-c",
+                "user.name=xtask",
+                "-c",
+                "user.email=xtask@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+            ];
+            all.extend_from_slice(args);
+            Ok(output_in(&self.0, "git", &all)?.trim().to_owned())
+        }
+
+        /// A pull request merged onto a main that moved after the PR branched, as a `pull_request`
+        /// run checks it out. `old_base` (the PR's `base.sha`) holds a spec and a code file; the PR
+        /// branch `pr` changes `pr_files`; main then gains a spec change citing DEC-1 at
+        /// `main_tip`; HEAD is the merge of `pr` into `main_tip`. `origin/main` still names
+        /// `old_base`, as in a checkout whose remote refs predate main's change, so only the merge
+        /// commit's first parent gives `main_tip`.
+        fn moved_base(name: &str, pr_files: &[&str]) -> Result<MovedBase> {
+            let dir = env::temp_dir().join(format!("mandate-xtask-{name}-{}", std::process::id()));
+            if dir.exists() {
+                fs::remove_dir_all(&dir)?;
+            }
+            let fx = Fixture(dir);
+            fx.write("docs/specs/s.md", "v1\n")?;
+            fx.write("crates/c/src/lib.rs", "")?;
+            output_in(&fx.0, "git", &["init", "-q", "-b", "main"])?;
+            fx.commit_with("base")?;
+            let old_base = fx.git(&["rev-parse", "HEAD"])?;
+            fx.git(&["switch", "-q", "-c", "pr"])?;
+            for file in pr_files {
+                fx.write(file, "changed by the PR\n")?;
+            }
+            fx.commit_with("the PR's change")?;
+            fx.git(&["switch", "-q", "main"])?;
+            fx.write("docs/specs/s.md", "v2\n")?;
+            fx.commit_with("Spec: DEC-1 changes s")?;
+            let main_tip = fx.git(&["rev-parse", "HEAD"])?;
+            fx.git(&["update-ref", "refs/remotes/origin/main", &old_base])?;
+            fx.git(&["merge", "--no-ff", "-q", "-m", "Merge pr into main", "pr"])?;
+            Ok(MovedBase {
+                fx,
+                old_base,
+                main_tip,
+            })
+        }
+    }
+
+    struct MovedBase {
+        fx: Fixture,
+        old_base: String,
+        main_tip: String,
     }
 
     impl Drop for Fixture {
@@ -3734,6 +3852,186 @@ mod tests {
                 "crates/fx/tests/untracked.rs:3: `untracked_and_passing` (pending E1-2) passes on this change's code",
             ]
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_pull_request_is_diffed_against_the_main_it_was_merged_onto() -> Result<()> {
+        let MovedBase {
+            fx,
+            old_base,
+            main_tip,
+        } = Fixture::moved_base("base-moved", &["crates/c/src/lib.rs"])?;
+        let base = base_ref_in(&fx.0, None, Some("pull_request"));
+        assert_eq!(
+            base.as_deref(),
+            Some(main_tip.as_str()),
+            "the merge commit's first parent, not the PR's base.sha"
+        );
+        assert_eq!(
+            spec_guard_problems(&fx.0, &main_tip, "")?,
+            Vec::<String>::new(),
+            "main's own spec change is not the PR's"
+        );
+        let stale = spec_guard_problems(&fx.0, &old_base, "")?;
+        assert!(
+            stale.iter().any(|p| p.contains("together with code")),
+            "the stale base.sha is what flagged #243 and #258: {stale:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_pull_request_changing_a_spec_and_code_is_still_flagged() -> Result<()> {
+        let MovedBase { fx, main_tip, .. } = Fixture::moved_base(
+            "base-mixed",
+            &["docs/specs/pr.md", "schemas/pr.json", "crates/c/src/lib.rs"],
+        )?;
+        let base = base_ref_in(&fx.0, None, Some("pull_request"));
+        assert_eq!(base.as_deref(), Some(main_tip.as_str()));
+        let problems = spec_guard_problems(&fx.0, &main_tip, "")?;
+        assert!(
+            problems.iter().any(|p| p.contains("together with code")),
+            "{problems:?}"
+        );
+        assert!(
+            problems.iter().any(|p| p.contains("no DEC-<n> is cited")),
+            "main's DEC-1 commit is not the PR's citation: {problems:?}"
+        );
+        let cited = spec_guard_problems(&fx.0, &main_tip, "Cites DEC-5.")?;
+        assert_eq!(
+            cited.len(),
+            1,
+            "a citation clears only the DEC problem: {cited:?}"
+        );
+        assert!(cited[0].contains("together with code"), "{cited:?}");
+        let spec_only = Fixture::moved_base("base-spec-only", &["docs/specs/pr.md"])?;
+        let problems = spec_guard_problems(&spec_only.fx.0, &spec_only.main_tip, "DEC-5")?;
+        assert_eq!(
+            problems,
+            Vec::<String>::new(),
+            "a cited spec-only PR passes"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn runs_outside_a_pull_request_keep_their_base() -> Result<()> {
+        let MovedBase {
+            fx,
+            old_base,
+            main_tip,
+        } = Fixture::moved_base("base-push", &["crates/c/src/lib.rs"])?;
+        let pr_tip = fx.git(&["rev-parse", "pr"])?;
+        assert_eq!(
+            base_ref_in(&fx.0, None, Some("push")).as_deref(),
+            Some(old_base.as_str()),
+            "outside a pull_request event the merge base with origin/main is the base"
+        );
+        fx.git(&["update-ref", "refs/remotes/origin/main", &main_tip])?;
+        fx.git(&["switch", "-q", "--detach", &main_tip])?;
+        for event in [
+            Some("push"),
+            Some("schedule"),
+            Some("workflow_dispatch"),
+            None,
+        ] {
+            assert_eq!(
+                base_ref_in(&fx.0, None, event),
+                None,
+                "a run on main's tip has no base ({event:?})"
+            );
+        }
+        fx.git(&["switch", "-q", "--detach", &pr_tip])?;
+        for event in [Some("workflow_dispatch"), Some("pull_request"), None] {
+            assert_eq!(
+                base_ref_in(&fx.0, None, event).as_deref(),
+                Some(old_base.as_str()),
+                "a branch tip that is no merge commit is compared from its merge base with origin/main ({event:?})"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn ci_leaves_the_base_to_the_event() -> Result<()> {
+        let workflow = fs::read_to_string(repo_root()?.join(".github/workflows/ci.yml"))?;
+        let setters: Vec<&str> = workflow
+            .lines()
+            .filter(|line| !line.trim_start().starts_with('#') && line.contains("MANDATE_BASE_REF"))
+            .collect();
+        assert!(
+            setters.is_empty(),
+            "CI must not pin MANDATE_BASE_REF (a PR's base.sha misses main's later changes; #243, #258): {setters:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn an_explicit_base_overrides_the_event() -> Result<()> {
+        let MovedBase {
+            fx,
+            old_base,
+            main_tip,
+        } = Fixture::moved_base("base-explicit", &["crates/c/src/lib.rs"])?;
+        assert_eq!(
+            base_ref_in(&fx.0, Some(&old_base), Some("pull_request")).as_deref(),
+            Some(old_base.as_str())
+        );
+        assert_eq!(
+            base_ref_in(&fx.0, Some(&"0".repeat(40)), Some("pull_request")),
+            None,
+            "an all-zero base is a branch's first push: no base"
+        );
+        assert_eq!(
+            base_ref_in(&fx.0, Some(""), Some("pull_request")).as_deref(),
+            Some(main_tip.as_str()),
+            "an empty override is no override"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_short_path_picks_the_base_xtask_picks() -> Result<()> {
+        let MovedBase {
+            fx,
+            old_base,
+            main_tip,
+        } = Fixture::moved_base("base-script", &["crates/c/src/lib.rs"])?;
+        let script = repo_root()?.join(".github/scripts/base-ref.sh");
+        let merge = fx.git(&["rev-parse", "HEAD"])?;
+        let pr_tip = fx.git(&["rev-parse", "pr"])?;
+        let zeros = "0".repeat(40);
+        let mut compared = 0;
+        for checkout in [&merge, &main_tip, &pr_tip] {
+            fx.git(&["switch", "-q", "--detach", checkout])?;
+            for explicit in [None, Some(old_base.as_str()), Some(zeros.as_str())] {
+                for event in [None, Some("pull_request"), Some("push")] {
+                    let mut command = Command::new("bash");
+                    command
+                        .arg(&script)
+                        .current_dir(&fx.0)
+                        .env_remove("MANDATE_BASE_REF")
+                        .env_remove("GITHUB_EVENT_NAME");
+                    if let Some(explicit) = explicit {
+                        command.env("MANDATE_BASE_REF", explicit);
+                    }
+                    if let Some(event) = event {
+                        command.env("GITHUB_EVENT_NAME", event);
+                    }
+                    let out = command.output()?;
+                    assert!(out.status.success(), "base-ref.sh failed: {out:?}");
+                    let printed = String::from_utf8(out.stdout)?.trim().to_owned();
+                    let chosen = base_ref_in(&fx.0, explicit, event).unwrap_or_default();
+                    assert_eq!(
+                        printed, chosen,
+                        "at {checkout} with {explicit:?} and {event:?}"
+                    );
+                    compared += 1;
+                }
+            }
+        }
+        assert_eq!(compared, 27);
         Ok(())
     }
 }
