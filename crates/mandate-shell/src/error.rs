@@ -199,7 +199,13 @@ pub(crate) fn refused(stage: Stage) -> impl FnOnce(Cause) -> ShellError {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use mandate_executor::{BrokerUnknown, ConnectorError};
+    use mandate_marketdata::dataset::DatasetError;
+    use mandate_marketdata::inspect::InspectError;
+    use mandate_marketdata::model::ModelError;
+    use mandate_num::NumError;
     use mandate_runtime::SinkError;
 
     use super::{Cause, ShellError};
@@ -233,6 +239,22 @@ mod tests {
             (Cause::Append { outcome: "Fenced" }, "append_refused"),
             (Cause::Absent { what: "gap" }, "absent"),
             (Cause::Untrusted { what: "gap" }, "untrusted"),
+            (
+                Cause::Inspect(InspectError::Overflow { column: "close" }),
+                "overflow",
+            ),
+            (
+                Cause::Dataset(DatasetError::Manifest {
+                    path: PathBuf::from("manifest.json"),
+                    reason: "absent".to_owned(),
+                }),
+                "manifest",
+            ),
+            (
+                Cause::Model(ModelError::Timeframe("2Day".to_owned())),
+                "timeframe",
+            ),
+            (Cause::Num(NumError::NotCanonical), "not_canonical"),
         ];
         for (cause, code) in cases {
             assert_eq!(cause.code(), code, "{cause:?}");

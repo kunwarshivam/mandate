@@ -83,8 +83,10 @@ impl MandateSource for SpecMandate {
 }
 
 /// The stored daily bars in the dataset directory `dir`, read through `mandate-marketdata`'s own
-/// `inspect` and `dataset::read`. The closes are returned exactly as stored: the shell adjusts,
-/// filters and repairs nothing, so coverage it cannot trust is a refusal, never a guess (PB-15).
+/// `inspect` and `dataset::read`, one close per listed day in the manifest's date order. A day
+/// holding anything but exactly one bar is refused, so the windows always span the days the
+/// envelope names. The closes are returned exactly as stored: the shell adjusts, filters and
+/// repairs nothing, so coverage it cannot trust is a refusal, never a guess (PB-15).
 pub struct StoredBars {
     pub dir: PathBuf,
 }
@@ -98,11 +100,12 @@ impl Bars for StoredBars {
         for listed in days.iter().filter(|listed| listed.file.is_some()) {
             let path = self.dir.join(dataset::partition_name(listed.day));
             match dataset::read(&path, inspection.dataset.kind())? {
-                Records::Bars(bars) => {
-                    for bar in bars {
-                        closes.push(Price::parse(bar.close.as_str())?);
+                Records::Bars(bars) => match bars.as_slice() {
+                    [bar] => closes.push(Price::parse(bar.close.as_str())?),
+                    [] | [_, _, ..] => {
+                        return Err(untrusted("a listed day does not hold exactly one bar"));
                     }
-                }
+                },
                 Records::Trades(_) | Records::Quotes(_) => {
                     return Err(untrusted("the dataset holds no bars"));
                 }
@@ -413,9 +416,11 @@ mod tests {
     use mandate_num::Price;
     use mandate_time::{Date, UtcNanos};
 
-    use super::{MovingAverage, StoredBars, split_inside, trusted};
+    use mandate_executor::{BrokerRequest, ConnectorError};
+
+    use super::{Disconnected, MovingAverage, StoredBars, split_inside, trusted};
     use crate::error::Cause;
-    use crate::stages::{Bars, ModelRef, SignalModel};
+    use crate::stages::{Bars, Connector, ModelRef, SignalModel};
 
     /// A scratch directory, removed when dropped.
     struct Scratch(PathBuf);
@@ -515,28 +520,82 @@ mod tests {
         }
     }
 
+    /// Storage order and time order differ: the partitions are written newest day first, so only
+    /// a read in the manifest's date order answers oldest first.
     #[test]
     fn stored_closes_are_read_oldest_first_exactly_as_stored() -> Result<(), String> {
         let scratch = Scratch::new("read")?;
-        let dir = aapl(&scratch.0, &[], &[])?;
-        let saturday = day("2026-08-29")?;
-        Store::new(&scratch.0)
-            .put_day(
-                &dataset("AAPL", "1Day")?,
-                saturday,
-                &Records::Bars(Vec::new()),
-            )
+        let id = dataset("AAPL", "1Day")?;
+        let store = Store::new(&scratch.0);
+        let closes = rising();
+        let mut days = Vec::new();
+        let mut on = day("2026-08-24")?;
+        while days.len() < closes.len() {
+            if !on.is_weekend() {
+                days.push(on);
+            }
+            on = on.next().map_err(|e| e.to_string())?;
+        }
+        for (on, close) in days.iter().zip(&closes).rev() {
+            store
+                .put_day(&id, *on, &Records::Bars(vec![bar(*on, close)?]))
+                .map_err(|e| e.to_string())?;
+        }
+        store
+            .put_day(&id, day("2026-08-29")?, &Records::Bars(Vec::new()))
             .map_err(|e| e.to_string())?;
-        let closes = StoredBars { dir }
-            .closes("AAPL")
-            .map_err(|e| e.to_string())?;
-        let expected: Vec<String> = rising()
+        let read = StoredBars {
+            dir: store.dataset_dir(&id),
+        }
+        .closes("AAPL")
+        .map_err(|e| e.to_string())?;
+        let expected: Vec<String> = closes
             .iter()
             .map(|c| c.trim_end_matches('0').to_owned())
             .collect();
-        let read: Vec<String> = closes.iter().map(ToString::to_string).collect();
+        let read: Vec<String> = read.iter().map(ToString::to_string).collect();
         assert_eq!(read, expected);
         Ok(())
+    }
+
+    /// Review round 1, major 2: two bars on one listed day, newest first, would put the closes out
+    /// of time order and make the windows span fewer days than the envelope names.
+    #[test]
+    fn a_listed_day_holding_more_than_one_bar_is_refused() -> Result<(), String> {
+        let scratch = Scratch::new("two-bars")?;
+        let dir = aapl(&scratch.0, &["2026-08-26"], &[])?;
+        let on = day("2026-08-26")?;
+        let at = |hour: &str, close: &str| -> Result<Bar, String> {
+            Ok(Bar {
+                start: UtcNanos::parse_rfc3339(&format!("{on}T{hour}:00:00Z"))
+                    .map_err(|e| e.to_string())?,
+                ..bar(on, close)?
+            })
+        };
+        Store::new(&scratch.0)
+            .put_day(
+                &dataset("AAPL", "1Day")?,
+                on,
+                &Records::Bars(vec![at("09", "999.99")?, at("04", "111.11")?]),
+            )
+            .map_err(|e| e.to_string())?;
+        let what = untrusted(StoredBars { dir }.closes("AAPL"))?;
+        assert_eq!(what, "a listed day does not hold exactly one bar");
+        Ok(())
+    }
+
+    /// Review round 1, major 3: the only connector the shipped binary holds refuses every request
+    /// before it leaves the process.
+    #[test]
+    fn the_disconnected_connector_sends_nothing() {
+        for request in [BrokerRequest::GetAccount, BrokerRequest::ListPositions] {
+            assert_eq!(
+                Disconnected.call(&request),
+                Err(ConnectorError::NotSent {
+                    code: "no_transport"
+                })
+            );
+        }
     }
 
     #[test]
