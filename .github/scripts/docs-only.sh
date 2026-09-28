@@ -9,9 +9,14 @@
 # code: `cargo xtask feature-map` checks it against the workspace. The web app is everything under
 # `web/`, which `.github/workflows/web.yml` checks (DEC-200).
 #
-# Usage: docs-only.sh <base-ref>   (the merge base with HEAD is computed here, as xtask does)
+# Usage: docs-only.sh   (the base is `base-ref.sh`'s, as xtask chooses it; with no base, the change
+# takes the full path)
 set -euo pipefail
-base="$1"
+base=$("$(dirname "$0")/base-ref.sh")
+if [ -z "$base" ]; then
+  echo "docs_only=false"
+  exit 0
+fi
 merge_base=$(git merge-base "$base" HEAD)
 docs_only=true
 while IFS= read -r file; do
