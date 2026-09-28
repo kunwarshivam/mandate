@@ -544,6 +544,13 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
+- **`ValidationContext::from_journal` (stream F, DEC-169):** the tests PR lands the `context` module's
+  stub and 14 `pending E10-1` tests; the implementation follows. Stream L's E7-10 (DEC-168) maps the
+  control-stream records (`AccountSnapshotRecorded`, `AgentDeployed`/`AgentStopped`,
+  `ConnectionEstablished`, `DisclosureAccepted`, `MandateVersionCreated`/`MandateConfirmed`,
+  `ConfigSnapshotRegistered`, `PlatformOperatorAction`) to `JournaledFact`; `AgentFlat` needs a source
+  there too (the account ledger's flat-in-every-instrument signal).
+
 - **E17-1 slice (stream F, next):** V-003, V-034 to V-037, V-039, W-006, and `worst_case_stop_distance`
   (DEC-161 item 1). MC-V05, MC-V53 to MC-V61, MC-V64, and MC-V65 pass once it lands.
 - **Stream H:** `ConditionField::is_unit_bounded` and `mandate-builder`'s `well_typed` omit

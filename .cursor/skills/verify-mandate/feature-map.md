@@ -499,7 +499,8 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `crates/mandate-spec/src/risk.rs` (the risk-state fold, breach confirmation, risk days),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
-  else); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
+  else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
+  journaled facts with refusing defaults, DEC-169); `mandate-domain`: `crates/mandate-domain/src/lib.rs` (the vocabulary `mandate-risk`,
   `mandate-builder`, and the research agent share). The exact arithmetic stays in `mandate-num`
   (ES-04).
 - **Tests:** `crates/mandate-spec/tests/dec.rs` (live: every grammar's own values, the four things
@@ -515,6 +516,9 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   lift and its renewal, acknowledgment and the stepwise lift, the floor and its loosening, the loss
   carry, allocation scaling, session marks and staleness, and eleven properties whose oracles are an
   `i128` accumulator, an interval scan for breach time, and a second reader of the journal),
+  `crates/mandate-spec/tests/context.rs` (the context from journaled facts: each field's source and
+  refusing default, the base refused without any one required fact, and a property against an oracle
+  that reads the journal backwards),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
   `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
   PR. Planted bugs per test: the task brief.
