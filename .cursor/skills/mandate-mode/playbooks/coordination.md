@@ -20,8 +20,8 @@ The current allocation. Change it by editing this table in a PR, never by starti
 
 | Coordinator | Stories | Crates and paths |
 |---|---|---|
-| `claude-code` | Everything from 2026-09-26 evening: E4-1, E4-2, E5-4, E2-3, E17-0 (spike), the DEC-97 and DEC-98 spec rewrite (Track C), the M1 exit run, and every follow-up; the `cursor` row below is paused at the founder's request and holds nothing new | `mandate-accounting`, `mandate-sim`, `python/research_spike/`, `docs/specs/mandate.md`, `schemas/mandate.schema.json`, `schemas/policy.schema.json`, `reference/mandate/` |
-| `cursor` | E2-4, E2-2, E5-2, E5-3, E5-4 (`mandate-cli journal verify` and an artifact-store command), the M1 exit run (download and inspect the stock/ETF basket and BTC/USD history), E2-3 (Should), market-data write safety, `UtcNanos` fractional seconds in `mandate-time` (shared crate: own claim) | `mandate-marketdata`, `mandate-cli`, `mandate-journal`, `mandate-journal-pg`, `mandate-artifacts-fs`, `.cursor/install.sh` and CI environment work |
+| `claude-code` | Everything from 2026-09-26 evening except `web/` (DEC-200): E4-1, E4-2, E5-4, E2-3, E17-0 (spike), the DEC-97 and DEC-98 spec rewrite (Track C), the M1 exit run, and every follow-up; the `cursor` row below is paused at the founder's request and holds nothing new | `mandate-accounting`, `mandate-sim`, `python/research_spike/`, `docs/specs/mandate.md`, `schemas/mandate.schema.json`, `schemas/policy.schema.json`, `reference/mandate/` |
+| `cursor` | W3, the web UI (DEC-200; claims [#246](https://github.com/kunwarshivam/mandate/issues/246) and [#247](https://github.com/kunwarshivam/mandate/issues/247)), from 2026-09-28. Its earlier backend stories passed to `claude-code` with the pause of 2026-09-26 | `web/` (the web UI, DEC-200), its workflow `.github/workflows/web.yml`, and vendored design skills under `.cursor/skills/`; merges UI PRs itself (founder, 2026-09-28) |
 
 Shared, owned by no one: `mandate-num`, `mandate-time`, `mandate-canon`, `xtask`, and
 `mandate-refcases` with `status.toml` and `docs/specs/reference-cases/`. In the harness and the
@@ -37,7 +37,9 @@ registry is the **Reserved identifiers** table at the end of
 `docs/project/04-decision-log.md`. Before the first commit that uses a new identifier:
 
 1. Take the next integer for that prefix after the highest one in the table or in the log's
-   rows on `main`, whichever is larger. The table is on `main`, so fetch first.
+   rows on `main`, whichever is larger. The table is on `main`, so fetch first. A block reserved
+   ahead of the sequence (DEC-200 to DEC-249, `cursor`, the web UI) does not count as the highest;
+   numbers below it run on, then jump past it.
 2. Add a row (identifier, coordinator, claim issue, purpose) in a one-line docs PR, or in your
    claim's first PR if it is docs-only and can merge within the hour. Until that row is on
    `main`, also comment `DEC-<n> reserved` on your claim issue so the other side sees it.
@@ -60,6 +62,10 @@ findings back to the author through the PR, and on PASS squash-merges (the revie
 its behalf, as ship.md step 5 allows). Merges go in claim order, one at a time, so shared files
 never race. Nobody rebases, force-pushes, or closes a branch they did not create; to ask for a
 review, a decision, or a rebase, comment on the PR or the claim issue.
+
+The exception is UI PRs (DEC-200): the Cursor coordinating session launches their independent
+review on a different model and merges them itself, and the Claude Code session neither reviews nor
+merges them.
 
 ## 6. Secrets and environments
 

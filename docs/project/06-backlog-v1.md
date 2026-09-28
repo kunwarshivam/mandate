@@ -656,6 +656,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
   starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
   it starts ready (#231 review, follow-up c).
+- **E7-4 slice 1 (stream K):** align `mandate-executor`'s `ClientOrderId::for_protection` to the
+  trading-domain spec's §2.3 protective grammar (`{entry}-p{protection}`, legs `-tp` and `-sl`,
+  replacing `md-p-<origin>`), and make `mandate-alpaca`'s `wire.rs` keep each leg's
+  `client_order_id` instead of reading `legs[].id` only. Until both land, DEC-160's ID branch receives
+  no input, and every leg is attributed by the single holder or is unattributed
+  ([DEC-160](04-decision-log.md#decisions), #243 round 1).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
