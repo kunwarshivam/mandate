@@ -78,6 +78,7 @@
 mod batch;
 mod codec;
 mod error;
+mod fees;
 mod fold;
 mod gate;
 mod ids;
@@ -92,6 +93,7 @@ mod step;
 mod types;
 
 pub use error::{ExecutorError, JsonError};
+pub use fees::{FeeSchedule, fee_config};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use ports::{BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports};
