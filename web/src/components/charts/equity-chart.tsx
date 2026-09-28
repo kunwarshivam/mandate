@@ -130,8 +130,11 @@ function EquityHero({
             <span className="text-muted-foreground" data-slot="hero-when">
               {scrubbing ? formatTime(shown.time as UTCTimestamp) : words}
             </span>
+            <Placeholder name="performance" className="ml-1" />
           </p>
-        ) : null}
+        ) : (
+          <Placeholder name="performance" className="w-fit" />
+        )}
       </div>
       {empty ?? (
         <TimeChart
@@ -147,7 +150,7 @@ function EquityHero({
       )}
       <RangePicker label={rangeLabel} value={range} options={EQUITY_RANGES} onChange={onRange} />
       {legend}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-caption text-muted-foreground">{footer}</div>
+      <div className="text-caption leading-6 text-muted-foreground *:mr-1.5 *:align-middle">{footer}</div>
     </section>
   );
 }
@@ -184,14 +187,13 @@ export function AccountEquityChart() {
       rangeLabel="Account equity range"
       footer={
         <>
-          <Placeholder name="performance" />
           <span>Simulated funds on paper.</span>
           <span data-slot="unmanaged">
             Includes <span className="font-mono tabular">{usd(unmanaged)}</span> no agent manages.
           </span>
           <AsOf at={asOf} now={now} stale={stale} />
           <FixtureTag />
-          <ChartCredit className="sm:ml-auto" />
+          <ChartCredit className="mt-1" />
         </>
       }
     />
@@ -227,7 +229,6 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
       legend={<LevelLegend levels={drawn} offChart={offChart} />}
       footer={
         <>
-          <Placeholder name="performance" />
           <span>Paper P&amp;L, simulated.</span>
           <AsOf at={asOf} now={now} stale={stale} />
         </>

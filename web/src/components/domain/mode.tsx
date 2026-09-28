@@ -11,12 +11,12 @@ import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib
 const MODE_ICON = { normal: CheckCircle, exits_only: SignOut, paused: PauseCircle, stopped: Prohibit } as const;
 
 /**
- * A mode is a sign read from across the room: running is quiet, exits only is outlined in ink
- * (half stopped), paused and stopped are solid ink.
+ * Running is quiet; exits only is outlined in ink (half stopped); paused and stopped are solid ink.
+ * The label and icon carry the mode, so no colour has to.
  */
 export const MODE_FIELD: Record<AgentMode, string> = {
-  normal: "bg-muted text-foreground",
-  exits_only: "bg-card text-foreground ring-2 ring-ink ring-inset",
+  normal: "bg-background text-muted-foreground",
+  exits_only: "bg-card text-foreground ring-1 ring-ink ring-inset",
   paused: "bg-ink text-ink-foreground",
   stopped: "bg-ink text-ink-foreground",
 };
@@ -32,35 +32,35 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
       data-slot="mode-badge"
       data-mode={mode}
       className={cn(
-        "inline-flex h-7 w-fit shrink-0 items-center gap-1.5 px-2 whitespace-nowrap field-label transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
+        "inline-flex h-6 w-fit shrink-0 items-center gap-1 rounded-full pr-2.5 pl-2 text-label whitespace-nowrap transition-colors duration-(--duration-hover) [&>svg]:size-3.5",
         MODE_FIELD[mode],
         className,
       )}
     >
-      <Icon aria-hidden />
+      <Icon aria-hidden weight={mode === "normal" ? "regular" : "fill"} />
       {MODE_LABEL[mode]}
     </motion.span>
   );
 }
 
-/** A restriction wears the colour of whoever imposed it. */
+/** A restriction wears the colour of whoever imposed it, and names them. */
 export const SOURCE_FIELD: Record<RestrictionSource, string> = {
   mandate: "bg-mandate-soft",
   account: "bg-lapis-soft",
-  owner: "bg-muted",
-  market: "bg-muted",
+  owner: "bg-background",
+  market: "bg-background",
 };
 
 export const SOURCE_TAG: Record<RestrictionSource, string> = {
   mandate: "bg-mandate text-mandate-strong ring-1 ring-mandate-edge ring-inset",
-  account: "bg-lapis text-lapis-foreground",
+  account: "bg-lapis-soft text-lapis",
   owner: "bg-ink text-ink-foreground",
-  market: "bg-card text-foreground ring-1 ring-foreground ring-inset",
+  market: "bg-card text-foreground ring-1 ring-border ring-inset",
 };
 
 export function SourceTag({ source, className }: { source: RestrictionSource; className?: string }) {
   return (
-    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center px-1.5 field-label", SOURCE_TAG[source], className)}>
+    <span data-source={source} className={cn("inline-flex h-6 w-fit shrink-0 items-center rounded-full px-2.5 text-label", SOURCE_TAG[source], className)}>
       {SOURCE_LABEL[source]}
     </span>
   );
@@ -68,7 +68,8 @@ export function SourceTag({ source, className }: { source: RestrictionSource; cl
 
 /**
  * The §4.3 mode banner: every active restriction with what it blocks, how it ends, and who acts.
- * Opening actions are explained here rather than hidden. Fields sit on seams, never nested.
+ * Opening actions are explained here rather than hidden. One calm panel; restrictions sit on
+ * hairlines inside it rather than as boxes within a box.
  */
 export function ModeBanner({
   mode,
@@ -78,32 +79,32 @@ export function ModeBanner({
 }: {
   mode: AgentMode;
   restrictions: ActiveRestriction[];
-  /** Off where the mode already stands as its own field right above, so it is not said twice. */
+  /** Off where the mode is already stated right above, so it is not said twice. */
   showMode?: boolean;
   className?: string;
 }) {
   if (mode === "normal" && restrictions.length === 0) return null;
   if (!showMode && restrictions.length === 0) return null;
   return (
-    <section aria-label="Restrictions" data-slot="mode-banner" className={cn("reveal grid gap-(--seam) text-foreground", className)}>
+    <section aria-label="Restrictions" data-slot="mode-banner" data-mode={mode} className={cn("reveal grid gap-4 rounded-2xl bg-background px-5 py-4 text-foreground sm:px-6", className)}>
       {showMode ? (
-        <div data-mode={mode} className={cn("flex flex-wrap items-baseline gap-x-4 gap-y-1 px-4 py-3 transition-colors duration-(--duration-hover)", MODE_FIELD[mode])}>
-          <p className="text-h2">{MODE_LABEL[mode]}</p>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          <ModeBadge mode={mode} />
           <p className="font-medium">{MODE_MEANING[mode]}</p>
         </div>
       ) : null}
       {restrictions.length > 0 ? (
-        <ul className="grid gap-(--seam)">
+        <ul className="grid divide-y divide-border">
           {restrictions.map((r) => {
             const text = describeRestriction(r);
             return (
-              <li key={`${r.code}-${r.symbol ?? ""}`} data-source={text.source} className={cn("grid gap-2 px-4 py-3", SOURCE_FIELD[text.source])}>
+              <li key={`${r.code}-${r.symbol ?? ""}`} data-source={text.source} className="grid gap-2 py-3 first:pt-0 last:pb-0">
                 <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <SourceTag source={text.source} />
                   <span className="font-semibold">{text.title}</span>
-                  <span className="text-muted-foreground">since {clock(r.since)}</span>
+                  <span className="text-sm text-muted-foreground">since {clock(r.since)}</span>
                 </p>
-                <dl className="grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-[auto_1fr]">
+                <dl className="grid gap-x-5 gap-y-1 text-sm sm:grid-cols-[6rem_1fr]">
                   <dt className="text-muted-foreground">Blocks</dt>
                   <dd>{text.blocks}</dd>
                   <dt className="text-muted-foreground">Ends when</dt>
