@@ -624,7 +624,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   nothing, silently, so `properties::every_copied_draft_cites_its_origin` sees no copied draft under any
   script and passes vacuously. The slice that adds the producer also adds a generator step (a clock
   advance crossing midnight New York, an owner acknowledgment) and asserts `seen > 0` on scripts
-  containing it, shown failing under the do-nothing plant (#244 round 1, finding 3).
+  containing it, shown failing under the do-nothing plant (#244 round 1, finding 3). Until then
+  `Input::Journal` answers a loud `Unimplemented { story: "E7-4" }` naming slice 5, landing first in
+  E7-4 slice 1 rather than dropping the fact (the coordinator's ruling on #244, 5861479849).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected

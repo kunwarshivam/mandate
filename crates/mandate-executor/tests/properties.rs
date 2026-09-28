@@ -929,7 +929,9 @@ fn play(script: &[Step]) -> Run {
             }
             Step::KillSwitch => {
                 kill_working.push(broker.order_of_arrival.iter().any(|id| {
-                    broker.working(id) && broker.orders.get(id).is_some_and(|o| o.acknowledged)
+                    broker.working(id)
+                        && broker.orders.get(id).is_some_and(|o| o.acknowledged)
+                        && !broker.cancels_asked.contains(id)
                 }));
                 let ran = record(
                     shell.run(
@@ -1001,6 +1003,29 @@ fn play(script: &[Step]) -> Run {
         kill_batches,
         kill_working,
     }
+}
+
+/// Whether anything rule 13 lets hold a protective order was in force before draft `at`, in the
+/// protected lead's instrument: a kill switch anywhere in the script (its sells and cancels come
+/// first), the agent `paused` or `stopped`, or an `Unknown` order in `CPHC` (DEC-129 item 22). A
+/// correct executor may then decline to place the lead's legs, so a property must not demand them.
+fn may_hold_protection(script: &[Step], drafts: &[EventDraft], at: usize) -> bool {
+    let mut in_cphc: BTreeSet<&str> = BTreeSet::new();
+    script.contains(&Step::KillSwitch)
+        || drafts.iter().take(at).any(|d| {
+            if d.event_type == "OrderSubmitted"
+                && field(d, "instrument") == Some(CPHC)
+                && let Some(id) = field(d, "client_order_id")
+            {
+                in_cphc.insert(id);
+            }
+            d.event_type == "KillSwitchActivated"
+                || (d.event_type == "AgentModeApplied"
+                    && matches!(field(d, "to"), Some("paused" | "stopped")))
+                || (d.event_type == "OrderStateChanged"
+                    && field(d, "state") == Some("unknown")
+                    && field(d, "client_order_id").is_some_and(|id| in_cphc.contains(id)))
+        })
 }
 
 /// Whether a script runs the protected lead: its entry is then a partly filled GTC bracket.
@@ -1551,17 +1576,10 @@ proptest! {
                 && field(d, "client_order_id") == Some(entry.as_str())
                 && field(d, "state") == Some("filled")
         });
-        let held = |at: usize| {
-            script.contains(&Step::KillSwitch)
-                || run.drafts.iter().take(at).any(|d| {
-                    d.event_type == "KillSwitchActivated"
-                        || (d.event_type == "AgentModeApplied"
-                            && matches!(field(d, "to"), Some("paused" | "stopped")))
-                })
-        };
         prop_assert!(
             !leads(&script)
-                || completed.is_none_or(|at| held(at) || run.drafts.iter().skip(at).any(|d| {
+                || completed.is_none_or(|at| may_hold_protection(&script, &run.drafts, at)
+                    || run.drafts.iter().skip(at).any(|d| {
                     d.event_type == "ProtectionChanged"
                         && field(d, "action") == Some("placed")
                         && field(d, "instrument") == Some(CPHC)
@@ -2626,4 +2644,58 @@ proptest! {
         }
         prop_assert_eq!(submissions, ShadowBook::of(&run.drafts).submissions.len());
     }
+}
+
+/// #244 round 2, blocker 1: the reviewer's shrunk script. `External` leaves the second `CPHC` order
+/// `Unknown` before the protected lead's entry completes, which rule 13 lets hold the entry's legs,
+/// so `protective_sell_quantity_never_exceeds_the_position_in_any_script` must skip it rather than
+/// demand a placement.
+#[test]
+fn an_unknown_order_in_the_leads_instrument_before_the_completion_is_skipped() {
+    let script = [
+        Step::Intent {
+            which: 0,
+            exiting: false,
+            other: false,
+            protected: false,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Intent {
+            which: 1,
+            exiting: false,
+            other: true,
+            protected: true,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Intent {
+            which: 2,
+            exiting: false,
+            other: true,
+            protected: false,
+        },
+        Step::External,
+        Step::Fill,
+        Step::Fill,
+    ];
+    let run = play(&script);
+    let entry = ClientOrderId::for_intent(&IntentId(EventId(intent_named(1))))
+        .map(|id| id.as_str().to_owned())
+        .unwrap_or_default();
+    let completed = run.drafts.iter().position(|d| {
+        d.event_type == "OrderStateChanged"
+            && field(d, "client_order_id") == Some(entry.as_str())
+            && field(d, "state") == Some("filled")
+    });
+    assert!(leads(&script), "the script runs the protected lead");
+    let at = completed.unwrap_or(run.drafts.len());
+    assert!(
+        may_hold_protection(&script, &run.drafts, at),
+        "an Unknown CPHC order before the completion may hold the legs, so the case is skipped"
+    );
+    assert!(
+        !may_hold_protection(&script, &run.drafts, 0),
+        "and nothing holds protection before the first draft, so the scope is not a blanket skip"
+    );
 }
