@@ -61,6 +61,32 @@ pub(crate) fn watched(
     Ok(())
 }
 
+/// The limit a sequence's exit is submitted at (§5.4, §5.6). The ladder prices an exit in a
+/// running sequence from the latest quote, in an instrument whose exit tier the snapshot knows;
+/// until slice 4 that exit answers the ladder's own stub, and every other order goes at its
+/// intent's limit. Reachable only where protection rested, which the pin
+/// `no_protection_is_created_on_an_unprotected_position` keeps from happening before slice 2.
+pub(crate) fn exit_limit(
+    batch: &Batch<'_, '_>,
+    instrument: &InstrumentId,
+    purpose: Purpose,
+    limit: Price,
+) -> Result<Price, ExecutorError> {
+    if purpose.adds_risk()
+        || purpose == Purpose::Protective
+        || !batch.view.exiting.contains_key(instrument)
+    {
+        return Ok(limit);
+    }
+    let (Some(tier), Some(quote)) = (
+        batch.ports.instruments.exit_tier(instrument),
+        batch.view.quotes.get(instrument),
+    ) else {
+        return Ok(limit);
+    };
+    ladder_price(tier, std::slice::from_ref(quote), 0, batch.at(), None).map(|rung| rung.limit)
+}
+
 /// Whether protective orders rest in `instrument`.
 fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
     state
@@ -102,6 +128,12 @@ pub(crate) fn begin_exit(
     else {
         return Ok(());
     };
+    if purpose.adds_risk()
+        && batch.ports.instruments.asset_class(&instrument) == Some(AssetClass::Crypto)
+        && rests(&batch.view, &instrument)
+    {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
     let passive = batch
         .view
         .quotes
@@ -406,10 +438,6 @@ pub struct LadderPrice {
 ///
 /// An owner exit outside the regular session prices from the bid the owner confirmed and never
 /// below the floor that `OwnerExitRequested` carries (§5.5, mandate spec §6.1).
-#[allow(
-    dead_code,
-    reason = "the tests PR ships the call site and its contract; `handle` and `reconcile` call it in the implementation PR (DEC-77, DEC-83)"
-)]
 pub(crate) fn ladder_price(
     tier: ExitTier,
     observations: &[MarketObservation],

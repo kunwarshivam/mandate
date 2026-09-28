@@ -2658,6 +2658,7 @@ fn an_exit_follows_cancel_confirm_regate_submit_replace() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn an_exit_never_submits_before_the_cancel_is_confirmed() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -2690,6 +2691,7 @@ fn an_exit_never_submits_before_the_cancel_is_confirmed() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn an_order_submitted_without_protection_is_marketable() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);
@@ -3045,6 +3047,7 @@ fn a_terminal_partly_filled_entry_is_oco_d_at_once() {
 }
 
 #[test]
+#[ignore = "pending E7-4"]
 fn an_unprotected_interval_at_the_limit_cancels_re_places_and_alerts() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

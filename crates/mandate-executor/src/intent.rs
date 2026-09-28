@@ -10,7 +10,7 @@ use crate::error::ExecutorError;
 use crate::gate::{Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
-use crate::protection::{awaits_cancel, begin_exit, sequenced};
+use crate::protection::{awaits_cancel, begin_exit, exit_limit, sequenced};
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
@@ -170,6 +170,7 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
         return Ok(());
     }
     sequenced(&batch.view, &instrument, purpose)?;
+    let limit = exit_limit(batch, &instrument, purpose, limit)?;
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
         _ => TimeInForce::Day,
