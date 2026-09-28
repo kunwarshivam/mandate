@@ -2,6 +2,18 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+vi.mock("next/navigation", async () => {
+  const { navigation } = await import("./src/test/navigation");
+  return {
+    usePathname: () => navigation.pathname,
+    useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn(), back: vi.fn(), forward: vi.fn(), prefetch: vi.fn() }),
+    useSearchParams: () => new URLSearchParams(),
+    notFound: () => {
+      throw new Error("NEXT_NOT_FOUND");
+    },
+  };
+});
+
 afterEach(() => {
   cleanup();
 });
