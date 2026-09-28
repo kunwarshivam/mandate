@@ -112,7 +112,6 @@ fn done(reason: GoalReason, on_complete: OnComplete, stop_reason: StopReason) ->
 /// 0.01 of quantity remains, so the reason is the spend and not the target. MC-L04 and MC-L05 straddle
 /// 00:00 New York on 2027-01-01, the instant after the 2026-12-31 end date.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_five_reference_goals_finish_for_the_reason_section_three_one_gives() {
     let goal = accumulator(&[]);
     let expected_done = done(
@@ -184,7 +183,6 @@ fn the_five_reference_goals_finish_for_the_reason_section_three_one_gives() {
 /// while finishing every goal one order early. The far side of each boundary is asserted too, so no
 /// constant answer passes this test (the #260 review's ruling, #240's standard).
 #[test]
-#[ignore = "pending E6-4"]
 fn a_remainder_of_exactly_one_increment_or_one_minimum_order_is_still_running() {
     let goal = accumulator(&[]);
     assert_eq!(
@@ -241,7 +239,6 @@ fn a_remainder_of_exactly_one_increment_or_one_minimum_order_is_still_running() 
 /// happens to test first. The spend alone and neither are asserted beside it, so no constant answer
 /// passes this test.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
     let goal = accumulator(&[]);
     assert_eq!(
@@ -289,7 +286,6 @@ fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
 /// be done by the second, and only by reading the ask. A remainder worth just over the minimum is
 /// asserted beside it, so no constant answer passes this test.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
     let goal = accumulator(&[]);
     let mut dust = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
@@ -317,7 +313,6 @@ fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
 /// MC-L01 to MC-L05 all use `hold_protected`, so the other two values are unpinned by the case set,
 /// and MC-R16 and MC-R17 show what the risk state does with them.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_owners_on_complete_is_the_then() {
     for (value, on_complete) in [
         ("hold_protected", OnComplete::HoldProtected),
@@ -339,7 +334,6 @@ fn the_owners_on_complete_is_the_then() {
 
 /// A `continuous` goal finishes only on its `end_date`, and a null `end_date` never finishes.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_continuous_goal_ends_on_its_end_date_and_a_null_end_date_never_ends() {
     let dated = Mandate::parse(&with("/goal/end_date", Some(s("2026-12-31"))))
         .expect("a continuous goal with an end date");
@@ -377,7 +371,6 @@ fn a_continuous_goal_ends_on_its_end_date_and_a_null_end_date_never_ends() {
 /// answering `Running` and inviting a second, disagreeing answer. Its `end_date` is still this
 /// function's, because a date needs no confirmation.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_profit_stop_is_the_risk_states_to_confirm_but_its_end_date_is_not() {
     let profit_stop = with(
         "/goal",
@@ -422,7 +415,6 @@ fn a_profit_stop_is_the_risk_states_to_confirm_but_its_end_date_is_not() {
 /// A nine-place `target_qty` is asserted beside it and must be answered, so a constant error passes this
 /// test no more than a constant status does.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_target_quantity_a_qty_cannot_hold_is_out_of_range_and_never_a_running_goal() {
     let goal = accumulator(&[("/goal/target_qty", Some(s("0.1234567891")))]);
     let answer = status(
@@ -458,7 +450,6 @@ fn a_target_quantity_a_qty_cannot_hold_is_out_of_range_and_never_a_running_goal(
 /// zero increment, so "not done" would keep buying forever, while "done" would stop a goal that is not
 /// done. Review round 1 found item 27 introducing this rule with nothing exercising it.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_zero_quantity_increment_is_rejected_rather_than_guessed() {
     let goal = accumulator(&[]);
     let mut zero = inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000");
