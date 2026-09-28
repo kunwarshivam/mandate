@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 4317",
     "build": "next build",
+    "postbuild": "node scripts/no-apca.mjs",
     "start": "next start --hostname 127.0.0.1 --port 4317",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

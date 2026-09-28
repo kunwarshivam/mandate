@@ -152,7 +152,7 @@ export default function DesignPage() {
         </ul>
       </Block>
 
-      <Block title="Contrast" lead="Computed from the OKLCH values (sRGB, gamut clipped, WCAG 2.2 relative luminance), with APCA Lc from apca-w3. Reading pairs reach 4.5:1 and Lc 75; marks reach 3:1 and Lc 45. The Kumo role pairs are checked in each surface scope by the tests.">
+      <Block title="Contrast" lead="WCAG 2.2 ratios, computed from the OKLCH values (sRGB, gamut clipped, WCAG 2.2 relative luminance). Reading pairs reach 4.5:1 and marks 3:1. APCA (Lc 75 for reading pairs, Lc 45 for marks) is checked in the tests only, with apca-w3 as a dev dependency, so it is not computed here. The Kumo role pairs are checked in each surface scope by the tests.">
         <Rows caption="Contrast ratios" head={["Pair", "Use", "Ratio"]}>
           {[...textPairs.map((p) => ({ ...p, min: 4.5 })), ...markPairs.map((p) => ({ ...p, min: 3 }))].map((p) => (
             <tr key={`${p.fg}-${p.bg}-${p.kind}-${p.use}`} className="border-b">

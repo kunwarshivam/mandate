@@ -107,7 +107,7 @@ function Swatch({ color, className }: { color: string; className?: string }) {
 export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
   const contrast = checkPalette();
   const cvd = checkCvd();
-  const passing = contrast.filter((r) => r.passWcag && r.passApca).length;
+  const passing = contrast.filter((r) => r.passWcag).length;
   const hatchOnCard = hexOf(composite(PALETTE.tokens[PALETTE.hatch.ref].value, PALETTE.hatch.alpha, PALETTE.tokens.card.value));
 
   return (
@@ -228,14 +228,14 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
 
       <Block
         title="Contrast"
-        lead={`WCAG 2.2 ratio and APCA Lc (apca-w3) for every semantic pair: ${passing} of ${contrast.length} pass both. Body text needs ${REQUIREMENT.body.wcag}:1 and Lc ${REQUIREMENT.body.apca}; marks need ${REQUIREMENT.mark.wcag}:1 and Lc ${REQUIREMENT.mark.apca}. Negative Lc is light text on a dark field.`}
+        lead={`WCAG 2.2 ratio for every semantic pair: ${passing} of ${contrast.length} pass. Body text needs ${REQUIREMENT.body.wcag}:1 and marks ${REQUIREMENT.mark.wcag}:1. APCA (Lc ${REQUIREMENT.body.apca} for body text, Lc ${REQUIREMENT.mark.apca} for marks) is checked in the tests, not here: apca-w3 is a dev dependency and never ships.`}
       >
         <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
-          <table className="w-full min-w-[52rem] text-sm">
+          <table className="w-full min-w-[46rem] text-sm">
             <caption className="sr-only">Contrast by pair</caption>
             <thead>
               <tr className="border-b-2 border-foreground text-left">
-                {["Sample", "Pair", "Use", "Kind", "WCAG", "APCA Lc", "Result"].map((h) => (
+                {["Sample", "Pair", "Use", "Kind", "WCAG", "Result"].map((h) => (
                   <th key={h} scope="col" className="py-2 pr-3 label-caps">
                     {h}
                   </th>
@@ -256,11 +256,8 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
                   <td className="py-1.5 pr-3 text-caption text-muted-foreground">{r.use}</td>
                   <td className="py-1.5 pr-3 text-caption">{r.kind}</td>
                   <td className="py-1.5 pr-3 font-mono tabular">{r.ratio.toFixed(2)}:1</td>
-                  <td className="py-1.5 pr-3 font-mono tabular">{r.lc.toFixed(1)}</td>
                   <td className="py-1.5 text-caption">
-                    <Verdict pass={r.passWcag && r.passApca} />
-                    {!r.passWcag ? " WCAG" : null}
-                    {!r.passApca ? " APCA" : null}
+                    <Verdict pass={r.passWcag} />
                   </td>
                 </tr>
               ))}

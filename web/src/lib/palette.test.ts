@@ -2,7 +2,9 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { composite, contrastRatio, inGamut, parseOklch, rgbContrast, toRgb255 } from "./color";
-import { apcaLc, checkCvd, checkPalette, measure } from "./contrast";
+import { apcaLc, passesApca } from "@/test/apca";
+import { MARKERS } from "../../scripts/no-apca.mjs";
+import { checkCvd, checkPalette, measure } from "./contrast";
 import { CVD_DISTINCT, HATCH_MAX, HATCH_MIN, KUMO_PAIRS, type KumoScope } from "./contrast-pairs";
 import { LIGHTNESS, PALETTE, RAMPS, STEPS, TOKEN_NAMES, TOKEN_REFS } from "./palette";
 
@@ -193,14 +195,40 @@ describe("contrast, WCAG 2.2 and APCA", () => {
 
   it.each(checkPalette().map((r) => [`${r.fg} on ${r.bg} (${r.kind})`, r] as const))("%s meets WCAG and APCA", (_, r) => {
     expect(r.passWcag, `WCAG ${r.ratio.toFixed(2)}`).toBe(true);
-    expect(r.passApca, `APCA Lc ${r.lc.toFixed(1)}`).toBe(true);
+    const lc = apcaLc(t[r.fg].value, t[r.bg].value);
+    expect(passesApca(lc, r.kind), `APCA Lc ${lc.toFixed(1)}`).toBe(true);
   });
 
   it.each(KUMO_PAIRS.map((p) => [`${p.scope}: ${p.fg} on ${p.bg} (${p.kind})`, p] as const))("Kumo %s meets WCAG and APCA", (_, p) => {
     const scope = SCOPES[p.scope];
     const m = measure(scope[p.fg], scope[p.bg], p.kind);
     expect(m.passWcag, `WCAG ${m.ratio.toFixed(2)}`).toBe(true);
-    expect(m.passApca, `APCA Lc ${m.lc.toFixed(1)}`).toBe(true);
+    const lc = apcaLc(scope[p.fg], scope[p.bg]);
+    expect(passesApca(lc, p.kind), `APCA Lc ${lc.toFixed(1)}`).toBe(true);
+  });
+});
+
+describe("apca-w3 stays in the tests", () => {
+  const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8"));
+  const APCA_IMPORT = /["'](apca-w3|colorparsley)["']|["'][^"'\n]*test\/apca["']/;
+
+  it("is a dev dependency, never a dependency", () => {
+    expect(pkg.devDependencies["apca-w3"]).toBeDefined();
+    expect(pkg.dependencies["apca-w3"]).toBeUndefined();
+    expect(pkg.dependencies.colorparsley).toBeUndefined();
+  });
+
+  it("is imported by no app file, only by src/test/apca.ts and the tests", () => {
+    const app = sources(SRC).filter((f) => !relative(SRC, f).startsWith("test/"));
+    expect(app.length).toBeGreaterThan(50);
+    expect(app.filter((f) => APCA_IMPORT.test(readFileSync(f, "utf8"))).map((f) => relative(SRC, f))).toEqual([]);
+  });
+
+  it("is named by the build check's markers, which match APCA's and colorparsley's own source", () => {
+    const apca = readFileSync(resolve(process.cwd(), "node_modules/apca-w3/src/apca-w3.js"), "utf8");
+    const parsley = readFileSync(resolve(process.cwd(), "node_modules/colorparsley/src/colorparsley.js"), "utf8");
+    expect(MARKERS.apca.test(apca)).toBe(true);
+    expect(MARKERS.colorparsley.test(parsley)).toBe(true);
   });
 });
 
