@@ -6,7 +6,9 @@
 //! journal record to a fact are stream L's (E7-10, DEC-168), so `mandate-spec` keeps no dependency
 //! on `mandate-journal` (DEC-128 item 1). What no event carries comes in as an explicit argument
 //! from its owner: the instrument groups (the instrument snapshot, trading spec §7.1), the
-//! eligibility failures (E6-7's floor), and the workspace membership.
+//! eligibility failures (E6-7's floor), and the workspace membership. The draft's provenance is folded
+//! too, from its `MandateVersionCreated` and `MandateConfirmed` records (the coordinator's ruling on
+//! #255).
 //!
 //! **A fact the fold never saw takes the value that refuses.** No equity snapshot is equity 0 (V-002),
 //! no registration is an empty registry (V-007, and never `None`, which means "not checked"), no
@@ -14,9 +16,10 @@
 //! `live` (V-001 on a paper mandate). Each of those makes a V-rule fire; none skips a check.
 //!
 //! **An envelope path the draft's provenance does not mention is unconfirmed** (DEC-169 item 5, the
-//! coordinator's ruling on #252): the fold adds a `user_entered`, unconfirmed entry for every part of
-//! the document no entry covers, so V-020 fires on it and an `auto` under it is V-022. A record that
-//! lost its provenance can therefore never read as the owner having confirmed everything.
+//! coordinator's rulings on #252 and #255): the fold adds a `user_entered`, unconfirmed entry for
+//! every part of the document no entry covers, so V-020 fires on it and an `auto` under it is V-022.
+//! With no `MandateVersionCreated` for the draft, every envelope path is unconfirmed; and a path is
+//! confirmed only by a `MandateConfirmed` for the draft's own version naming it or an ancestor.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,6 +29,7 @@ use mandate_num::Usd;
 use mandate_time::Date;
 
 use crate::Mandate;
+use crate::MandateVersion;
 use crate::SpecError;
 use crate::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use crate::validate::{
@@ -82,7 +86,9 @@ pub enum JournaledFact {
         admitted: bool,
     },
     /// `AgentStopped`: the agent retired on `retired_on`, adding `loss_added_usd` to its connection's
-    /// loss carry (mandate spec §5.7). Its claims stay until [`JournaledFact::AgentFlat`].
+    /// loss carry (mandate spec §5.7). It retires the agent only when `connection_id` is the one the
+    /// agent's latest version named; otherwise its allocation and claims still count (rule 3). Its
+    /// claims stay until [`JournaledFact::AgentFlat`].
     AgentStopped {
         agent: AgentId,
         connection_id: ConnectionId,
@@ -95,6 +101,18 @@ pub enum JournaledFact {
     ModelRegistered { id: ModelId, model: RegisteredModel },
     /// `PlatformOperatorAction` `model_withdrawn`.
     ModelWithdrawn { id: ModelId },
+    /// `MandateVersionCreated`: the source of each path of a version, as the compiler recorded it
+    /// (§2.1, §10). Only the draft's own version counts, and the latest record for it wins.
+    MandateVersionCreated {
+        version: MandateVersion,
+        sources: BTreeMap<Pointer, Source>,
+    },
+    /// `MandateConfirmed`: the paths the owner confirmed on a version. Only the draft's own version
+    /// counts, and the latest record for it wins; a path confirms itself and everything under it.
+    MandateConfirmed {
+        version: MandateVersion,
+        confirmed_paths: BTreeSet<Pointer>,
+    },
 }
 
 /// The workspace's members, as the identity service counts them (V-024).
@@ -113,9 +131,6 @@ pub struct ContextArgs {
     /// the environment, and the loss carry.
     pub connection_id: ConnectionId,
     pub validation_date: Date,
-    /// The draft's own provenance, from its `MandateVersionCreated` and `MandateConfirmed` records.
-    /// Every part of the document no entry covers is added to the context as unconfirmed.
-    pub provenance: ProvenanceMap,
     /// `None` when the identity service supplied nothing, which counts zero users.
     pub membership: Option<Membership>,
     pub instrument_groups: BTreeMap<AssetId, GroupId>,
@@ -129,7 +144,7 @@ impl ValidationContext {
     /// The context `validate` reads for `draft`, folded from `facts` in journal order.
     ///
     /// `Err` when a sum cannot be held exactly (the allocations or the loss carry overflow `Usd`), or
-    /// when `draft` has no canonical form; a missing fact is never an error, it is the refusing value
+    /// when `draft` has no canonical form or version; a missing fact is never an error, it is the refusing value
     /// the module doc names.
     pub fn from_journal<'a>(
         draft: &Mandate,
@@ -140,8 +155,9 @@ impl ValidationContext {
         for fact in facts {
             fold.apply(fact);
         }
+        let provenance = fold.provenance(draft.version()?);
         let mut context = fold.context(args)?;
-        context.provenance = completed(&draft.canonical()?, &context.provenance);
+        context.provenance = completed(&draft.canonical()?, &provenance);
         Ok(context)
     }
 }
@@ -164,6 +180,8 @@ struct Fold {
     agents: BTreeMap<AgentId, AgentState>,
     retirements: Vec<(ConnectionId, Date, Usd)>,
     registry: BTreeMap<ModelId, RegisteredModel>,
+    sources: BTreeMap<MandateVersion, BTreeMap<Pointer, Source>>,
+    confirmations: BTreeMap<MandateVersion, BTreeSet<Pointer>>,
 }
 
 impl Fold {
@@ -223,8 +241,14 @@ impl Fold {
                 loss_added_usd,
             } => {
                 let state = self.agents.entry(agent.clone()).or_default();
-                state.retired = true;
-                state.flat_since_retired = false;
+                let named = state
+                    .version
+                    .as_ref()
+                    .is_some_and(|(version_connection, ..)| version_connection == connection_id);
+                if named {
+                    state.retired = true;
+                    state.flat_since_retired = false;
+                }
                 self.retirements
                     .push((connection_id.clone(), *retired_on, *loss_added_usd));
             }
@@ -238,7 +262,43 @@ impl Fold {
             JournaledFact::ModelWithdrawn { id } => {
                 self.registry.remove(id);
             }
+            JournaledFact::MandateVersionCreated { version, sources } => {
+                self.sources.insert(*version, sources.clone());
+            }
+            JournaledFact::MandateConfirmed {
+                version,
+                confirmed_paths,
+            } => {
+                self.confirmations.insert(*version, confirmed_paths.clone());
+            }
         }
+    }
+
+    /// The draft's recorded sources, each confirmed only when its version's latest confirmation names
+    /// the path or an ancestor of it.
+    fn provenance(&self, draft: MandateVersion) -> ProvenanceMap {
+        let confirmed = self.confirmations.get(&draft);
+        ProvenanceMap::new(
+            self.sources
+                .get(&draft)
+                .into_iter()
+                .flatten()
+                .map(|(path, source)| {
+                    let confirmed = confirmed.is_some_and(|paths| {
+                        paths
+                            .iter()
+                            .any(|named| covers(named.as_str(), path.as_str()))
+                    });
+                    (
+                        path.clone(),
+                        Provenance {
+                            source: *source,
+                            confirmed,
+                        },
+                    )
+                })
+                .collect(),
+        )
     }
 
     fn context(self, args: ContextArgs) -> Result<ValidationContext, SpecError> {
@@ -286,7 +346,7 @@ impl Fold {
             other_allocations_usd,
             validation_date: args.validation_date,
             registry: Some(self.registry),
-            provenance: args.provenance,
+            provenance: ProvenanceMap::default(),
             workspace_users: membership.workspace_users,
             approver_users: membership.approver_users,
             disclosures_accepted: self.disclosures,
@@ -308,6 +368,9 @@ impl Fold {
 /// Whether `retired_on` is at most `days` days before `today`, or after it. A date `Date` cannot step
 /// past counts as inside, so the carry never drops a loss it cannot place.
 fn within(retired_on: Date, today: Date, days: u32) -> bool {
+    if retired_on > today {
+        return false;
+    }
     let mut reached = retired_on;
     for _ in 0..days {
         if reached >= today {
