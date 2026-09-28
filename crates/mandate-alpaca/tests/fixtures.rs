@@ -160,7 +160,10 @@ fn every_data_fixture_is_one_latest_quote_read_and_holds_no_credential() {
             let latest = (path.starts_with("/v2/stocks/")
                 && path.ends_with("/quotes/latest?feed=iex"))
                 || path.starts_with("/v1beta3/crypto/us/latest/quotes?symbols=");
-            assert!(latest, "{name} names `{path}`, which is not a latest-quote read");
+            assert!(
+                latest,
+                "{name} names `{path}`, which is not a latest-quote read"
+            );
             assert_eq!(exchange.method, mandate_alpaca::Method::Get, "{name}");
             assert_eq!(exchange.body, None, "{name} sends no body");
             assert!(!is_paper_trading_path(path), "{name} is not a trading path");
@@ -198,7 +201,10 @@ fn every_data_fixture_is_one_latest_quote_read_and_holds_no_credential() {
             files = files.saturating_add(1);
         }
     }
-    assert!(files >= 12, "the scan must see every data file, saw {files}");
+    assert!(
+        files >= 12,
+        "the scan must see every data file, saw {files}"
+    );
 }
 
 #[test]

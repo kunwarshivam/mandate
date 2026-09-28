@@ -79,8 +79,10 @@ impl QuoteRequest {
 /// Sends one latest-quote read to [`DATA_HOST`]. Every [`QuoteRequest`] is already one of the two
 /// latest-quote endpoints, so an implementation has nothing left to decide about what may be sent.
 pub trait DataTransport {
-    fn send(&self, request: &QuoteRequest)
-    -> impl Future<Output = Result<Response, TransportError>>;
+    fn send(
+        &self,
+        request: &QuoteRequest,
+    ) -> impl Future<Output = Result<Response, TransportError>>;
 }
 
 /// The latest-quote client, over an injected transport and clock, so no test touches a network

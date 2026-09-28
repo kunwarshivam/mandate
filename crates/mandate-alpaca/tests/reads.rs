@@ -86,7 +86,11 @@ fn data_text_of(name: &str) -> String {
 /// `text` with `from` replaced by `to` exactly once, so a mutation that misses its target is a
 /// failure of the case rather than a case that checks the unmutated body.
 fn mutated(text: &str, from: &str, to: &str) -> Vec<u8> {
-    assert_eq!(text.matches(from).count(), 1, "`{from}` occurs once in {text}");
+    assert_eq!(
+        text.matches(from).count(),
+        1,
+        "`{from}` occurs once in {text}"
+    );
     text.replacen(from, to, 1).into_bytes()
 }
 
@@ -167,7 +171,11 @@ fn trading(
     now: UtcNanos,
 ) -> (TradingClient<FakeTransport, FakeClock>, FakeTransport) {
     let transport = FakeTransport::serving(replies);
-    let client = TradingClient::new(transport.clone(), FakeClock::at(now), RetryPolicy::default());
+    let client = TradingClient::new(
+        transport.clone(),
+        FakeClock::at(now),
+        RetryPolicy::default(),
+    );
     (client, transport)
 }
 
@@ -176,7 +184,10 @@ fn data(
     now: UtcNanos,
 ) -> (DataClient<FakeDataTransport, FakeClock>, FakeDataTransport) {
     let transport = FakeDataTransport::serving(replies);
-    (DataClient::new(transport.clone(), FakeClock::at(now)), transport)
+    (
+        DataClient::new(transport.clone(), FakeClock::at(now)),
+        transport,
+    )
 }
 
 /// One latest-quote scenario's recorded reply.
@@ -353,8 +364,16 @@ fn an_uninterpretable_equity_asset_record_is_refused_field_by_field() {
         ("\"fractionable\":true,", "", "missing_field"),
         ("\"fractionable\":true", "\"fractionable\":1", "wrong_type"),
         ("\"status\":\"active\",", "", "missing_field"),
-        ("\"status\":\"active\"", "\"status\":\"halted\"", "wrong_type"),
-        ("\"class\":\"us_equity\"", "\"class\":\"us_option\"", "wrong_type"),
+        (
+            "\"status\":\"active\"",
+            "\"status\":\"halted\"",
+            "wrong_type",
+        ),
+        (
+            "\"class\":\"us_equity\"",
+            "\"class\":\"us_option\"",
+            "wrong_type",
+        ),
         ("\"class\":\"us_equity\",", "", "missing_field"),
         ("\"exchange\":\"NASDAQ\",", "", "missing_field"),
         ("\"exchange\":\"NASDAQ\"", "\"exchange\":7", "wrong_type"),
@@ -379,7 +398,11 @@ fn an_uninterpretable_equity_asset_record_is_refused_field_by_field() {
             "wrong_type",
         ),
         (",\"symbol\":\"AAPL\"", "", "missing_field"),
-        ("\"symbol\":\"AAPL\"", "\"symbol\":\"AAPL/..\"", "wrong_type"),
+        (
+            "\"symbol\":\"AAPL\"",
+            "\"symbol\":\"AAPL/..\"",
+            "wrong_type",
+        ),
     ] {
         assert_eq!(
             code(read::asset(&aapl_id, &mutated(&base, from, to))),
@@ -595,7 +618,10 @@ async fn a_crypto_latest_quote_is_read_exactly_on_the_crypto_feed() {
 async fn a_missing_quote_is_absent() {
     let now = shifted(instant(EQUITY_QUOTE_AT), 1);
     let (client, _) = data(
-        [data_reply("quote_equity"), data_reply("quote_equity_absent")],
+        [
+            data_reply("quote_equity"),
+            data_reply("quote_equity_absent"),
+        ],
         now,
     );
     assert_eq!(
@@ -610,7 +636,10 @@ async fn a_missing_quote_is_absent() {
 
     let now = shifted(instant(CRYPTO_QUOTE_AT), 1);
     let (client, _) = data(
-        [data_reply("quote_crypto"), data_reply("quote_crypto_absent")],
+        [
+            data_reply("quote_crypto"),
+            data_reply("quote_crypto_absent"),
+        ],
         now,
     );
     assert_eq!(
@@ -789,7 +818,10 @@ fn a_quote_about_another_instrument_is_refused() {
     );
     let crypto = data_text_of("quote_crypto");
     assert_eq!(
-        code(read::latest_quote(&instrument("ETH/USD"), crypto.as_bytes())),
+        code(read::latest_quote(
+            &instrument("ETH/USD"),
+            crypto.as_bytes()
+        )),
         Err("absent"),
         "a pair's quote is found by its key, and BTC/USD's key is not ETH/USD's"
     );
@@ -815,7 +847,11 @@ async fn a_quote_older_than_the_bound_is_refused() {
     }
     let (client, _) = data([data_reply("quote_equity")], shifted(stamped, 1));
     assert_eq!(
-        code(client.latest_quote(&instrument("AAPL"), Duration::ZERO).await),
+        code(
+            client
+                .latest_quote(&instrument("AAPL"), Duration::ZERO)
+                .await
+        ),
         Err("stale"),
         "the bound is the caller's, and a zero one refuses any quote not stamped this instant"
     );
@@ -877,7 +913,11 @@ async fn an_overloaded_or_failing_data_host_leaves_the_quote_unread() {
         Ok(aapl_quote()),
         "and the next good answer is read"
     );
-    assert_eq!(transport.sent().len(), 7, "one request per read, never a retry");
+    assert_eq!(
+        transport.sent().len(),
+        7,
+        "one request per read, never a retry"
+    );
 }
 
 /// The canonical text `mandate-num` parses: trailing fractional zeros and a bare point dropped,
@@ -993,8 +1033,24 @@ fn the_asset_read_is_built_on_the_slash_free_symbol_path() {
 #[test]
 fn a_hostile_symbol_never_becomes_an_asset_or_a_quote_request() {
     for symbol in [
-        "../AAPL", "AAPL/..", "A/B/C", "BTC/", "/USD", "/", "BTC/US.D", "BTC//USD", ".", "..",
-        "%2e%2e", ".A", "A%2FB", "AAPL?x=1", "AAPL#x", "B TC", "BTC/USD?x=1", "AAPL&feed=sip",
+        "../AAPL",
+        "AAPL/..",
+        "A/B/C",
+        "BTC/",
+        "/USD",
+        "/",
+        "BTC/US.D",
+        "BTC//USD",
+        ".",
+        "..",
+        "%2e%2e",
+        ".A",
+        "A%2FB",
+        "AAPL?x=1",
+        "AAPL#x",
+        "B TC",
+        "BTC/USD?x=1",
+        "AAPL&feed=sip",
     ] {
         let id = instrument(symbol);
         assert_eq!(
@@ -1055,7 +1111,10 @@ fn every_read_error_code_is_stable_and_unique() {
         (ReadError::Stale, "stale"),
         (ReadError::AheadOfClock, "ahead_of_clock"),
         (ReadError::Overloaded, "overloaded"),
-        (ReadError::UnexpectedStatus { status: 403 }, "unexpected_status"),
+        (
+            ReadError::UnexpectedStatus { status: 403 },
+            "unexpected_status",
+        ),
         (ReadError::Wire(WireError::NotJson), "not_json"),
         (
             ReadError::Wire(WireError::MissingField { field: "t" }),
