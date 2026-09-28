@@ -8,8 +8,9 @@
 //! and every reading case asserts exact values, so one that answers a constant passes none either
 //! (`AGENTS.md` rule 3: a missing, unreadable, or stale answer is refused, and a good one is read).
 //!
-//! The cases whose subject is a read are `pending E7-8`. The request-building cases at the end are
-//! live: the allowlist and the data host's request type are this PR's, not a stub's.
+//! The cases whose subject is a read were written before the reads, against stubs (DEC-77). The
+//! request-building cases at the end test the allowlist and the data host's request type, which
+//! never had a stub.
 
 mod common;
 
