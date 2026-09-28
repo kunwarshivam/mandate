@@ -18,6 +18,7 @@ import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { cn } from "@/lib/utils";
 import { useColourBlind } from "./chart-parts";
 import {
+  CHART_FONT,
   type ChartLevel,
   type ChartMarker,
   type Tone,
@@ -127,6 +128,8 @@ export function TimeChart({
         if (markers.length > 0) createSeriesMarkers(api, markersFor(markers));
         chart.timeScale().fitContent();
         chart.subscribeCrosshairMove((param) => setReadout(readoutFor(param, api, valueFormat)));
+        // The canvas draws with whatever face is ready; redraw once the plain-zero figures load.
+        void document.fonts?.load(`12px ${CHART_FONT}`, "0123456789").then(() => chart?.applyOptions({ layout: { fontFamily: CHART_FONT } }));
       } catch {
         chart?.remove();
         chart = null;

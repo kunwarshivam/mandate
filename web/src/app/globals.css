@@ -100,6 +100,37 @@ html:root[data-cvd="on"] {
   --loss-soft: var(--loss-cvd-soft);
 }
 
+/*
+ * Figures with a plain zero (web/DESIGN.md, Type). Atkinson Hyperlegible Next has only a slashed
+ * zero, so the ten digits come from Public Sans, scaled to Atkinson's figure height, with Atkinson's
+ * vertical metrics so a line box does not grow. Every other character stays Atkinson.
+ */
+@font-face {
+  font-family: "Owlhead Figures";
+  src: url("../../node_modules/@fontsource-variable/public-sans/files/public-sans-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0030-0039;
+  size-adjust: 92.4%;
+  ascent-override: 106.5%;
+  descent-override: 34.2%;
+  line-gap-override: 0%;
+}
+
+@font-face {
+  font-family: "Owlhead Figures";
+  src: url("../../node_modules/@fontsource-variable/public-sans/files/public-sans-latin-wght-italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+  unicode-range: U+0030-0039;
+  size-adjust: 92.4%;
+  ascent-override: 106.5%;
+  descent-override: 34.2%;
+  line-gap-override: 0%;
+}
+
 @media (min-width: 40rem) {
   :root {
     --page-x: 1rem;
@@ -160,9 +191,9 @@ html:root[data-cvd="on"] {
   --color-info-soft: var(--info-soft);
 
   --font-display: "Big Shoulders Display Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Owlhead Figures", "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-display);
-  --font-mono: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Owlhead Figures", "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
 
   --text-display: 3rem;
   --text-display--line-height: 0.9;

@@ -166,7 +166,7 @@ export default function DesignPage() {
         </Rows>
       </Block>
 
-      <Block title="Type" lead="Big Shoulders Display for headings and big figures, in capitals. Atkinson Hyperlegible Next for everything read, in sentence case; capitals elsewhere only for field labels.">
+      <Block title="Type" lead="Big Shoulders Display for headings and big figures, in capitals. Atkinson Hyperlegible Next for everything read, in sentence case; capitals elsewhere only for field labels. Digits in running text, tables and charts come from Public Sans, for a plain zero: 0 10 100.">
         <ul className="grid">
           {typeScale.map((t) => (
             <li key={t.role} className="grid gap-1 border-b py-3 sm:grid-cols-[7rem_1fr] sm:items-baseline">
@@ -318,6 +318,7 @@ export default function DesignPage() {
               <SignedMoney value="123.45" />
               <SignedMoney value="-67.89" />
               <SignedMoney value="0" />
+              <span className="font-mono tabular">0 1 2 3 4 5 6 7 8 9 · 10.00 · 100.00</span>
               <AsOf at="2026-09-28T14:05:18-04:00" now="2026-09-28T14:05:20-04:00" />
               <Deadline deadline="2026-09-28T14:14:58-04:00" now="2026-09-28T14:05:20-04:00" />
             </div>
@@ -331,7 +332,7 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Charts" lead="TradingView Lightweight Charts in Placard: a solid background, one flat colour per fill, no animation, figures in Atkinson and times in ET. A level is a labelled line, never a progress bar, and every level is also listed in words.">
+      <Block title="Charts" lead="TradingView Lightweight Charts in Placard: a solid background, one flat colour per fill, no animation, plain-zero figures and times in ET. A level is a labelled line, never a progress bar, and every level is also listed in words.">
         <div className="grid gap-(--block-gap) lg:grid-cols-2">
           <ul className="grid gap-2 text-sm">
             {CHART_RULES.map(([swatch, name, use]) => (

@@ -82,7 +82,7 @@ export const typeScale = [
   { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Atkinson Hyperlegible Next 400, 0.875rem / 1.45" },
   { role: "caption", className: "text-caption", sample: "as of 14:02:11, 3 min ago", spec: "Atkinson Hyperlegible Next 400, 0.8125rem / 1.35" },
   { role: "label", className: "label-caps", sample: "Your mandate", spec: "Atkinson Hyperlegible Next 700, 0.75rem, capitals (field labels only)" },
-  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Atkinson Hyperlegible Next, tabular figures" },
+  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Atkinson Hyperlegible Next, with its digits from Public Sans for a plain zero; tabular figures" },
 ];
 
 export const motionTokens = [

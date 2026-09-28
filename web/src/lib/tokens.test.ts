@@ -1,6 +1,7 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { CHART_FONT } from "@/components/charts/options";
 import { contrastRatio, parseOklch, toHex } from "./color";
 import { hatchInk } from "./palette";
 import { colorTokens, markPairs, textPairs, tokenValue } from "./tokens";
@@ -85,5 +86,34 @@ describe("colour tokens", () => {
 
   it("uses no rounded corners", () => {
     for (const m of css.matchAll(/--radius[a-z0-9-]*:\s*([^;]+);/g)) expect(m[1].trim()).toBe("0rem");
+  });
+});
+
+describe("figures with a plain zero", () => {
+  const theme = block("@theme inline");
+  const faces = Array.from(css.matchAll(/@font-face\s*\{([^}]*)\}/g), (m) => m[1]).filter((f) => f.includes('font-family: "Owlhead Figures"'));
+
+  it("sets the figures class and the body in the plain-zero face first, then Atkinson", () => {
+    for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Owlhead Figures", "Atkinson Hyperlegible Next Variable",/);
+    expect(CHART_FONT).toMatch(/^'Owlhead Figures', 'Atkinson Hyperlegible Next Variable',/);
+  });
+
+  it("takes only the ten digits from Public Sans, scaled to Atkinson's figure height", () => {
+    expect(faces).toHaveLength(2);
+    for (const face of faces) {
+      expect(face).toMatch(/unicode-range:\s*U\+0030-0039;/);
+      expect(face).toMatch(/size-adjust:\s*92\.4%;/);
+      const src = /url\("([^"]+)"\)/.exec(face)?.[1] ?? "";
+      expect(src).toMatch(/@fontsource-variable\/public-sans\/files\/public-sans-latin-wght-(normal|italic)\.woff2$/);
+      expect(existsSync(resolve(dirname(resolve(process.cwd(), "src/app/globals.css")), src)), src).toBe(true);
+    }
+  });
+
+  it("sets tabular figures on the figures class, and never asks for a slashed zero", () => {
+    const mono = css.slice(css.indexOf(".font-mono {"), css.indexOf("}", css.indexOf(".font-mono {")));
+    expect(mono).toContain("font-variant-numeric: tabular-nums;");
+    const tabular = css.slice(css.indexOf("@utility tabular {"), css.indexOf("}", css.indexOf("@utility tabular {")));
+    expect(tabular).toContain("font-variant-numeric: tabular-nums;");
+    expect(css).not.toMatch(/slashed-zero|["']zero["']/);
   });
 });
