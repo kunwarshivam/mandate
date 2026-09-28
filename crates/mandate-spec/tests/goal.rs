@@ -53,8 +53,10 @@ fn context() -> ValidationContext {
     }
 }
 
-/// `btc_accumulator`'s goal on the builder's base: target 0.15, max spend 9000, end date 2026-12-31,
-/// `on_complete: hold_protected`.
+/// `btc_accumulator`'s goal figures on the builder's base: target 0.15, max spend 9000, end date
+/// 2026-12-31, `on_complete: hold_protected`. The universe is pinned to exactly the goal instrument
+/// (V-003), declared `us_equity` because the base allows only that class; the figures, not the class,
+/// are what these tests read.
 fn accumulator(changes: &[(&str, Option<Value>)]) -> ValidatedMandate {
     let mut all: Vec<(&str, Option<Value>)> = vec![
         ("/goal/type", Some(s("accumulate"))),
@@ -224,7 +226,7 @@ fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
 /// The remaining quantity is also done when what is left is worth less than the minimum order.
 ///
 /// §3.1 gives two quantity conditions, "below one increment" **or** "below the minimum order", and the
-/// second needs the ask to evaluate. Here 0.0000001 BTC at 55000 is 0.0055, under the 1.00 minimum,
+/// second needs the ask to evaluate. Here 0.0000001 units at 55000 is 0.0055, under the 1.00 minimum,
 /// while the increment is set small enough that the first condition does not fire — so the goal can only
 /// be done by the second, and only by reading the ask.
 #[test]
@@ -241,7 +243,7 @@ fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
             OnComplete::HoldProtected,
             StopReason::GoalComplete
         ),
-        "0.0000001 BTC at 55000 is 0.0055, below the 1.00 minimum order, though above one increment"
+        "0.0000001 units at 55000 is 0.0055, below the 1.00 minimum order, though above one increment"
     );
 }
 
