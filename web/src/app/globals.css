@@ -379,8 +379,19 @@ html:root[data-cvd="on"] {
   text-transform: uppercase;
 }
 
-::view-transition-old(root),
-::view-transition-new(root) {
+/* Only the page content cross-fades. The root is not captured and the overlay lets clicks through,
+   because a captured element and the overlay above it ignore hits, and Stop must answer one mid-fade. */
+:root {
+  view-transition-name: none;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
   animation-duration: 180ms;
   animation-timing-function: var(--ease-out);
 }

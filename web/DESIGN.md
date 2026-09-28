@@ -82,7 +82,7 @@ The Owlhead mark is the founder's artwork, traced into one flat path; the wordma
 - **In the shell.** From 64rem up the sidebar header carries the lockup, and the mark alone when the sidebar collapses to icons. Below 64rem the top header carries the mark. Both are the link to the role's home.
 - **Palette** ([DEC-202](../docs/project/04-decision-log.md#decisions)). Navy #183D73; brass #AC7D1B, the one accent, for rules, borders and large type only (3.5:1 on off-white); dark brass #634606 for brass as text; brass tint #FDF1DC; slate ink #181C21 for text; off-white #F7FAFE for the page. About 60% neutrals, 30% navy, at most 10% brass. `src/lib/brand-palette.ts` holds the six values for the brand assets and the `/design` Brand block; the UI tokens in Colors are ramp steps of the same palette ([COLOR.md](COLOR.md)).
 - **Generated assets.** `npm run brand` (`scripts/brand-assets.mjs`, rendering with `@resvg/resvg-js`) writes `public/` from the mark and `brand/og-image.svg`:
-  - `favicon.svg`, `favicon-16.png`, `favicon-32.png`, `favicon-48.png` and `favicon.ico` (the three PNGs in one ICO): the navy mark on an off-white square tile, as large as fits (87.5% of the tile's height, 1px above and below at 16px), the same in light and dark tabs.
+  - `favicon.svg`, `favicon-16.png`, `favicon-32.png`, `favicon-48.png` and `favicon.ico` (the three PNG files in one ICO): the navy mark on an off-white square tile, as large as fits (87.5% of the tile's height, 1px above and below at 16px), the same in light and dark tabs.
   - `apple-touch-icon.png` (180), `pwa-192.png` and `pwa-512.png`: the navy mark at 76% of an off-white tile's height. `pwa-maskable-512.png` is scaled to sit inside the 80% safe circle.
   - `og-image.png`: the 1200×630 share image, the navy lockup centred on off-white.
   - `site.webmanifest`: Owlhead, theme and background #F7FAFE.
@@ -167,6 +167,7 @@ Emil Kowalski's rules: motion explains a change, stays under 300ms, is interrupt
 | `--duration-sheet` | 280ms in, 200ms out | Stop sheet |
 | `--duration-dialog` | 220ms in, 150ms out | Step-up dialog |
 | Number roll | 200ms | A changed value rolls up and out; a stable screen-reader copy never animates |
+| Page change | 180ms | The page content cross-fades (React's `ViewTransition`). The root is not captured and the overlay lets presses through, so the header and Stop stay live throughout; `e2e/stop-visible.spec.ts` checks Stop takes a press in every frame but the snapshot's own |
 
 Reduced motion drops every movement (translate, scale, clip-path, press) and keeps colour and opacity changes that help comprehension.
 
