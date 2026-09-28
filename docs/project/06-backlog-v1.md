@@ -546,6 +546,14 @@ From E10-1's slice-V implementation (DEC-161):
 - **`reference/mandate/ref.py`:** `PLATFORM_DEFAULTABLE` gives `leveraged_etp_disclosure_version` the value
   `None`, which the reference reads as "any value"; §7 allows only `null` (DEC-161 item 8). Give the
   reference a sentinel for "any value" so `None` can mean `null`.
+- **W-005 misses a wrapped catch-all** (#238 review, round 1, minor 1). `Condition::is_catch_all` reads only
+  a top-level `purpose in [increase, open]`, so `{"all": [{"field": "purpose", "op": "in", "value": ["open",
+  "increase"]}]}` and `{"all": []}`, which also match every action a later rule could, warn of nothing.
+  Warning-only, never blocking; widen it to any condition that holds for both purposes.
+- **`validate::tests::oracle_default_allowed` returns `true` for `/environment` whatever its value**
+  (#238 review, round 1, minor 1), so the V-020 property never exercises §7's `paper`-only bound there
+  (`v020_reads_the_source_the_confirmation_and_the_listed_value` does). Make the oracle check `paper` in a
+  later tests correction.
 - The worst-case figures multiply by `Fraction`, which holds nine places, so a schema-valid fraction with
   ten or more is `out_of_range` (DEC-161 item 3). Move to an exact `Usd × Ratio` when `mandate-num` has
   one (stream H's `UsdExact` is the candidate).
