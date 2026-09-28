@@ -223,6 +223,17 @@ fn each_document_rule_fires_on_each_of_its_branches_and_nothing_else() -> Checke
     let rule = |id: &str, when: &str, then: &str| {
         format!(r#"{{"id": "{id}", "when": {when}, "then": "{then}"}}"#)
     };
+    let two_scale_rungs = |lower: &str, upper: &str| {
+        format!(
+            r#"[{{"at": "0.02", "action": "scale_sizes", "factor": "{lower}"}},
+                {{"at": "0.03", "action": "scale_sizes", "factor": "{upper}"}},
+                {{"at": "0.05", "action": "exits_only", "factor": null}},
+                {{"at": "0.08", "action": "flatten_and_pause", "factor": null}}]"#
+        )
+    };
+    let v040_past = two_scale_rungs("0.123456", "0.1234567");
+    let v040_fits = two_scale_rungs("0.123456", "0.123456");
+    let v040_cancelling = two_scale_rungs("0.0000000008192", "0.1220703125");
     let second_rule = rule(
         "large_orders",
         r#"{"field": "order_usd", "op": "gt", "value": "5"}"#,
@@ -375,6 +386,39 @@ fn each_document_rule_fires_on_each_of_its_branches_and_nothing_else() -> Checke
         (
             "V-010 factor on exits_only",
             vec![("/risk/drawdown_ladder/1/factor", r#""0.5""#)],
+            v(Violation::V010),
+        ),
+        (
+            "V-040 one factor of 13 places",
+            vec![("/risk/drawdown_ladder/0/factor", r#""0.1234567890123""#)],
+            v(Violation::V040),
+        ),
+        (
+            "V-040 one factor of 12 places",
+            vec![("/risk/drawdown_ladder/0/factor", r#""0.123456789012""#)],
+            vec![],
+        ),
+        (
+            "V-040 two factors of 13 places together",
+            vec![("/risk/drawdown_ladder", &v040_past)],
+            v(Violation::V040),
+        ),
+        (
+            "V-040 two factors of 12 places together",
+            vec![("/risk/drawdown_ladder", &v040_fits)],
+            vec![],
+        ),
+        (
+            "V-040 is a sum, not the whole product's places",
+            vec![("/risk/drawdown_ladder", &v040_cancelling)],
+            v(Violation::V040),
+        ),
+        (
+            "V-040 reads only scale rungs",
+            vec![(
+                "/risk/drawdown_ladder/1/factor",
+                r#""0.1234567890123456789012345""#,
+            )],
             v(Violation::V010),
         ),
         (
