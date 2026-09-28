@@ -85,6 +85,11 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Chromium's libraries come from Ubuntu's archive. The runner also lists packages.microsoft.com,
+      # which has answered 403 for noble; one failing source fails `apt-get update` and the install.
+      - name: Drop the runner's Microsoft package source
+        if: steps.playwright.outputs.version != ''
+        run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f
       - name: Install Chromium
         if: steps.playwright.outputs.version != '' && steps.browsers.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps --only-shell chromium
