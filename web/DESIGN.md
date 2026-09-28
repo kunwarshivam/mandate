@@ -117,6 +117,20 @@ Radius is 0 everywhere (`--radius: 0rem`, every Tailwind radius token 0). A sign
 - **Limit rail.** On marigold: the label, the dollar value against its cap, a track with an ink fill and a 4px post at the limit, and the headroom and consequence in words.
 - **Provenance.** "You said", "You entered" and "From template" are bordered captions; anything the platform authored ("Proposed by the platform", "Platform default") has a dashed 2px border, so it reads as not yet yours by shape, not colour.
 
+## Charts
+
+TradingView Lightweight Charts (`lightweight-charts`, Apache-2.0, pinned exactly), styled in `src/components/charts/options.ts`. Canvas cannot read CSS variables, so the tokens are converted to hex once.
+
+- **Flat.** The background is `ColorType.Solid`; an area's top and bottom colours are the same token; no series animates (`LastPriceAnimationMode.Disabled`). `charts.test.tsx` checks every builder for this.
+- **Colour follows ownership.** Account equity and your average cost in lapis; one agent's equity as a foreground line over muted; every mandate level (loss limits, floor, stop, take-profit) in marigold; a proposal an agent asks about in ink, dashed. Candles are gain and loss; pre-market and after-hours candles are the border colour.
+- **Levels are labelled lines, never progress bars.** Each carries its name on the price axis, the price scale widens to include it, and the legend below lists every level in words, saying which are outside the range shown.
+- **Readout.** Above the plot, in Atkinson with tabular figures: the time in ET and the value under the crosshair, otherwise the latest value. The grid is the muted tint; the crosshair is foreground with an ink label.
+- **Motion.** No kinetic scrolling on touch under reduced motion; no mouse inertia ever.
+- **Accessible.** The canvas is `role="img"` with a label, and a written summary (first, last, low, high) is its description.
+- **States.** Loading draws the chart's outline and no line. Stale data keeps its age beside the chart. Empty, unreachable and error draw no chart and invent no values. A paused or restricted agent still shows its chart and levels. If the canvas cannot be drawn, the chart says so and the figures around it stay.
+- **Attribution.** `attributionLogo: false` inside the chart; a text link to TradingView under the dashboard's account chart and on `/design`, and the notice in `web/NOTICE`.
+- **Fixtures.** Bars, fills and equity curves come from a seeded generator (`src/fixtures/market.ts`) that reproduces the fixture's positions, P&L and equity; the account curve ends on the broker's equity.
+
 ## Motion
 
 Emil Kowalski's rules: motion explains a change, stays under 300ms, is interruptible, and never animates keyboard-driven or high-frequency actions.

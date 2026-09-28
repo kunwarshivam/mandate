@@ -3,6 +3,9 @@ import type { CSSProperties, ReactNode } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Skeleton } from "@/components/domain/skeleton";
 import { Deadline } from "@/components/approvals/deadline";
+import { ChartCredit, LevelLegend } from "@/components/charts/chart-parts";
+import type { ChartLevel } from "@/components/charts/options";
+import { Sparkline } from "@/components/charts/sparkline";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
@@ -36,6 +39,23 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
   { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
   { name: "Crimson", meaning: "kill", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
 ];
+
+const CHART_RULES: Array<[string, string, string]> = [
+  ["bg-lapis", "The account", "Account equity, and your average cost on a position."],
+  ["bg-foreground", "An agent", "One agent's equity, a flat line over a muted fill."],
+  ["bg-marigold", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit, each a labelled line."],
+  ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, on a small neutral chart."],
+  ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout."],
+  ["bg-loss", "Down candle", "A candle that closed below its open."],
+];
+
+const SAMPLE_LEVELS: ChartLevel[] = [
+  { key: "daily", label: "Daily loss limit", price: 9701.5, tone: "mandate", meaning: "Exits only until a new risk day" },
+  { key: "avg-cost", label: "Average cost", price: 9850, tone: "account", meaning: "What you paid per unit" },
+  { key: "proposed", label: "Proposed limit", price: 9912.25, tone: "proposal" },
+];
+
+const SAMPLE_POINTS = Array.from({ length: 48 }, (_, i) => ({ time: i * 600, value: 9800 + 60 * Math.sin(i / 6) + i * 1.5 }));
 
 function Block({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
   const id = `design-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
@@ -301,6 +321,29 @@ export default function DesignPage() {
               <LimitRail rail={{ key: "b", label: "Loss today", used: dec("0"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
               <LimitRail rail={{ key: "c", label: "Loss today", used: dec("214.5"), cap: dec("201"), atCap: "Exits only until a new risk day" }} />
             </div>
+          </div>
+        </div>
+      </Block>
+
+      <Block title="Charts" lead="TradingView Lightweight Charts in Placard: a solid background, one flat colour per fill, no animation, figures in Atkinson and times in ET. A level is a labelled line, never a progress bar, and every level is also listed in words.">
+        <div className="grid gap-(--block-gap) lg:grid-cols-2">
+          <ul className="grid gap-2 text-sm">
+            {CHART_RULES.map(([swatch, name, use]) => (
+              <li key={name} className="grid grid-cols-[1rem_minmax(0,1fr)] items-baseline gap-2">
+                <span aria-hidden className={`size-4 self-center ${swatch}`} />
+                <span>
+                  <span className="font-bold">{name}</span>: {use}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="grid content-start gap-3 bg-card p-4">
+            <Sparkline points={SAMPLE_POINTS} limit={9760} label="Sample sparkline: equity rising over the day, above the daily loss limit" width={240} height={56} />
+            <LevelLegend levels={SAMPLE_LEVELS} />
+            <p className="text-caption text-muted-foreground">
+              Loading draws the chart&apos;s outline and no line; stale data keeps its age beside the chart; if the canvas cannot be drawn, the chart says so and the figures stay.
+            </p>
+            <ChartCredit />
           </div>
         </div>
       </Block>

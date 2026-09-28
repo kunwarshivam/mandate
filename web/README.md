@@ -52,6 +52,9 @@ auditors get no Stop control, viewers see requests read-only, and auditors see o
   optimistic result.
 - Nothing about approvals, positions, or mandates is written to `localStorage`,
   `sessionStorage`, or a cache. The app stores nothing in the browser.
+- Charts draw seeded, deterministic fixture bars and equity (`src/fixtures/market.ts`), consistent
+  with the fixture's fills, positions and equity. They are TradingView Lightweight Charts
+  (Apache-2.0); the credit is in `web/NOTICE`, under the dashboard's account chart and on `/design`.
 - Compliance text appears only as the placeholders `[[DISCLOSURE-PERFORMANCE]]`,
   `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`.
 
