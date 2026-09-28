@@ -810,3 +810,14 @@ From E6-2's builder slice (stream H; found while implementing §8.3, not by a re
   Both stay because `tests/vocabulary.rs` and `num::error_codes_are_stable` pin their codes, and an
   implementation PR may not edit a test. Drop each variant with its row in the next tests correction
   that touches those files (E6-2; the `NumError` half is the E4-2 row above).
+
+From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round 1):
+
+- **Add V-040's boundary pair to `mandate.yaml`, with the harness counts, in one approved change
+  (founder).** The rule's boundaries are two ladders: factors of 12 places in total (valid) and 13
+  (V-040). The 2¹³ × 5¹³ ladder, where the whole product fits and a subset does not, belongs there
+  too. For now all three are pinned in `reference/mandate/fuzz.py::fuzz_ladder_precision`, which runs
+  on every seed, and as in-module rows in `crates/mandate-spec/src/validate/tests.rs`. They are not
+  reference cases because a case changes counts that live `mandate_harness.rs` tests assert (298
+  cases, 67 semantic, 202 owned, and the member sweeps), and the spec guard keeps the fixture and
+  those tests in separate PRs. The founder-owned YAML (ES-22) and the counts must change together.
