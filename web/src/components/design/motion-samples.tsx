@@ -61,7 +61,7 @@ export function MotionSamples() {
       </Sample>
       <Sample note="Reveal: each field wipes in from its leading edge, 200 ms, 30 ms apart; once, on first render" className="sm:col-span-2">
         <ul key={reveal} className="grid grid-cols-3 gap-(--seam)">
-          {["bg-muted", "bg-card ring-2 ring-foreground ring-inset", "bg-marigold"].map((c, i) => (
+          {["bg-muted", "bg-card ring-2 ring-foreground ring-inset", "bg-mandate"].map((c, i) => (
             <li key={c} className={`reveal h-14 ${c}`} style={{ "--i": i } as CSSProperties} />
           ))}
         </ul>

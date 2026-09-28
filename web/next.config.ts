@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
+import { pageExtensions } from "./src/lib/dev-routes";
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  pageExtensions: pageExtensions(process.env.NODE_ENV),
   reactStrictMode: true,
   devIndicators: false,
   agentRules: false,

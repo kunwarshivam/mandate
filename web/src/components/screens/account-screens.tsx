@@ -10,7 +10,8 @@ import type { HealthState, TimelineEvent } from "@/fixtures/types";
 import { ago, clock } from "@/lib/format";
 import { useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
-import { type Screen, screensIn } from "@/lib/screens";
+import { useCan } from "@/lib/roles";
+import { type Screen, decisionHref, screensIn } from "@/lib/screens";
 import { ComingSoon } from "./coming-soon";
 import { Panel, Section, WorkspaceGate } from "./common";
 
@@ -83,14 +84,22 @@ export function AlertsScreen() {
   );
 }
 
+/** Auditors read decisions here but cannot open agent pages, so only roles that can see agents get links. */
 function Decisions() {
   const { ws } = useRuntime();
+  const linked = useCan("agents.view");
   if (ws.decisions.length === 0) return <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">No gate decisions yet.</p>;
   return (
     <Panel className="py-0.5 sm:py-0.5">
       <ul>
         {ws.decisions.map((d) => (
-          <GateDecisionRow key={d.event_id} decision={d} agent={ws.agents.find((a) => a.agent_id === d.agent_id)} showAgent />
+          <GateDecisionRow
+            key={d.event_id}
+            decision={d}
+            agent={ws.agents.find((a) => a.agent_id === d.agent_id)}
+            showAgent
+            href={linked ? decisionHref(d.agent_id, d.event_id) : undefined}
+          />
         ))}
       </ul>
     </Panel>
