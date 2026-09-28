@@ -170,7 +170,8 @@ test.describe("With JavaScript on, phones show no desktop flash before hydration
           await page.goto(route.path, { waitUntil: "domcontentloaded" });
           await stylesLoaded(page);
           await page.evaluate(() => new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame))));
-          await expect.poll(() => held.length, "the client bundle is held back").toBeGreaterThan(0);          const before = await measureShell(page);
+          await expect.poll(() => held.length, "the client bundle is held back").toBeGreaterThan(0);
+          const before = await measureShell(page);
           expect(before.sheet, "before hydration Kumo's sheet has not mounted").toBeNull();
           expectPhoneShell(before, width, "before hydration");
 
