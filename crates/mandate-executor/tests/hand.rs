@@ -2622,6 +2622,7 @@ fn protected_position_with_a_resting_buy(ports: &mandate_executor::Ports<'_>) ->
             with_clock(
                 &[
                     ("client_order_id", text(&buy)),
+                    ("intent_id", text(INTENT)),
                     ("agent", text(common::AGENT)),
                     ("instrument", text(AAPL)),
                     ("side", text("buy")),
