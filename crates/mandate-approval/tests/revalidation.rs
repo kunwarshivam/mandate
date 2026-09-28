@@ -16,6 +16,15 @@ fn acted(now: &mandate_approval::Current) -> Revalidation {
     answer("revalidate", revalidate(&request(), now))
 }
 
+/// The paired positive of every one-sided skip below: the current state each test varies is one
+/// in which the grant acts, so a stub that skips for one constant reason passes none of them.
+fn the_unchanged_fixture_acts() {
+    assert!(
+        matches!(acted(&current()), Revalidation::Act(_)),
+        "the unchanged fixture acts"
+    );
+}
+
 /// MC-E01, EI-4, EI-5, PB-8: a grant acts with exactly the bound order, never re-priced to the
 /// moved mark, and only while every check passes.
 #[test]
@@ -39,6 +48,7 @@ fn a_grant_acts_with_the_bound_order_only_while_every_check_passes() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_changed_version_skips() {
+    the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
         mandate_version: "v4".to_owned(),
         ..current()
@@ -50,6 +60,7 @@ fn a_changed_version_skips() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_mode_other_than_normal_skips() {
+    the_unchanged_fixture_acts();
     for mode in [ModeNow::ExitsOnly, ModeNow::Paused, ModeNow::Stopped] {
         let now = mandate_approval::Current { mode, ..current() };
         assert_eq!(
@@ -64,6 +75,7 @@ fn a_mode_other_than_normal_skips() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_restricted_or_removed_instrument_skips() {
+    the_unchanged_fixture_acts();
     let restricted = mandate_approval::Current {
         instrument_restricted: true,
         ..current()
@@ -84,6 +96,7 @@ fn a_restricted_or_removed_instrument_skips() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_reclassified_deny_skips() {
+    the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
         classification: Classification::Deny,
         ..current()
@@ -121,6 +134,7 @@ fn an_ask_by_another_trigger_skips_and_auto_or_the_same_trigger_acts() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_gate_denial_skips_with_the_gates_reason() {
+    the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
         dry_run: DryRun::Deny {
             reason: "close_window".to_owned(),

@@ -16,9 +16,9 @@ use common::{
     step_up, user,
 };
 use mandate_approval::{
-    ActorKind, Admission, AssertionId, CommandAuthority, Environment, KillSwitchAuthority,
-    OwnerCommandKind, Refusal, RiskClock, StepUpRefusal, Verdict, admit, kill_switch,
-    owner_command,
+    ActorKind, Admission, ApprovalRef, AssertionId, CommandAuthority, Environment, KillScope,
+    KillSwitchAuthority, OwnerCommandKind, Refusal, RiskClock, StepUpRefusal, Verdict, admit,
+    kill_switch, kill_switch_code, owner_command,
 };
 use mandate_num::Price;
 
@@ -27,6 +27,16 @@ fn admitted(
     response: &mandate_approval::Response,
 ) -> Admission {
     answer("admit", admit(pending, response, &ctx()))
+}
+
+/// The paired positive of every one-sided refusal below: the fixture each test varies is itself
+/// admitted, so a stub that refuses one constant reason passes none of them.
+fn the_unchanged_fixture_is_admitted() {
+    assert_eq!(
+        admitted(Some(&request()), &grant()),
+        Admission::Admitted,
+        "the unchanged fixture is admitted"
+    );
 }
 
 /// MC-E01, MC-E03: a timely grant from a listed user with fresh evidence is admitted; the same
@@ -58,7 +68,8 @@ fn a_skip_needs_no_step_up_and_ignores_the_quorum() {
     );
 }
 
-/// MC-E08, check 1: a response to an approval no longer pending is refused.
+/// MC-E08, check 1: a response to an approval no longer pending is refused, and so is one that
+/// names another approval (a response copied onto a different request).
 #[test]
 #[ignore = "pending E8-3"]
 fn a_response_to_an_approval_not_pending_is_refused() {
@@ -75,6 +86,16 @@ fn a_response_to_an_approval_not_pending_is_refused() {
         Admission::Admitted,
         "the same skip, pending"
     );
+    for response in [grant(), skip()] {
+        let elsewhere = mandate_approval::Response {
+            approval: ApprovalRef::of_requested_event("01J9ZQ4Y8N6K3V5T2R1M0P7XWZ"),
+            ..response
+        };
+        assert_eq!(
+            admitted(Some(&request()), &elsewhere),
+            Admission::Refused(Refusal::NotPending)
+        );
+    }
 }
 
 /// MC-E04, PB-3, check 2: a response at exactly the deadline is late; a second before is not.
@@ -101,6 +122,7 @@ fn a_response_at_exactly_the_deadline_is_late() {
 #[test]
 #[ignore = "pending E8-3"]
 fn lateness_uses_the_later_of_submitted_and_the_folded_clock() {
+    the_unchanged_fixture_is_admitted();
     let mut c = ctx();
     c.folded_clock = RiskClock(DEADLINE + 60);
     let early = grant();
@@ -120,6 +142,7 @@ fn lateness_uses_the_later_of_submitted_and_the_folded_clock() {
 #[test]
 #[ignore = "pending E8-3"]
 fn every_actor_but_a_listed_user_is_refused() {
+    the_unchanged_fixture_is_admitted();
     for kind in [
         ActorKind::System,
         ActorKind::Agent,
@@ -148,22 +171,26 @@ fn every_actor_but_a_listed_user_is_refused() {
     );
 }
 
-/// PB-20, EI-16, check 4: a request no channel delivered cannot be granted.
+/// PB-20, EI-16, check 4: a request no channel delivered cannot be granted or skipped.
 #[test]
 #[ignore = "pending E8-3"]
 fn an_undelivered_request_is_refused() {
+    the_unchanged_fixture_is_admitted();
     let mut r = request();
     r.delivered = false;
-    assert_eq!(
-        admitted(Some(&r), &grant()),
-        Admission::Refused(Refusal::NotDelivered)
-    );
+    for response in [grant(), skip()] {
+        assert_eq!(
+            admitted(Some(&r), &response),
+            Admission::Refused(Refusal::NotDelivered)
+        );
+    }
 }
 
 /// MC-E07, PB-15, EI-14, check 5: a response must repeat the request's content hash.
 #[test]
 #[ignore = "pending E8-3"]
 fn a_wrong_content_hash_is_refused() {
+    the_unchanged_fixture_is_admitted();
     for response in [grant(), skip()] {
         let r = mandate_approval::Response {
             content_hash: hash("other"),
@@ -180,6 +207,7 @@ fn a_wrong_content_hash_is_refused() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_grant_without_step_up_is_refused() {
+    the_unchanged_fixture_is_admitted();
     let r = mandate_approval::Response {
         verdict: Verdict::Approve(None),
         ..grant()
@@ -215,6 +243,7 @@ fn step_up_is_judged_at_the_effective_time_and_300_s_is_fresh() {
 #[test]
 #[ignore = "pending E8-3"]
 fn a_reused_assertion_is_refused() {
+    the_unchanged_fixture_is_admitted();
     let mut c = ctx();
     c.used_assertions
         .insert(AssertionId("assertion-1".to_owned()));
@@ -228,6 +257,7 @@ fn a_reused_assertion_is_refused() {
 #[test]
 #[ignore = "pending E8-3"]
 fn cli_confirm_is_refused_for_a_live_stream() {
+    the_unchanged_fixture_is_admitted();
     let mut c = ctx();
     c.environment = Environment::Live;
     assert_eq!(
@@ -256,6 +286,7 @@ fn a_first_grant_of_two_is_counted_and_a_second_approver_admits() {
 #[test]
 #[ignore = "pending E8-3"]
 fn same_approver_counts_once() {
+    the_unchanged_fixture_is_admitted();
     let mut r = request();
     r.content.bound.approvers_required = NonZeroU8::new(2).unwrap();
     r.grants.insert(user(OWNER));
@@ -443,6 +474,32 @@ fn a_kill_switch_without_step_up_still_stops_and_flattens() {
         judge(Some(step_up("assertion-1", T0)), Environment::Paper),
         KillSwitchAuthority::OwnerExitPrivileges
     );
+}
+
+/// DEC-155 item 4, rule 13: the kill switch's code is computed locally from the scope typed and
+/// the control stream's head, so it is the same on every host for the same command and confirms
+/// neither another scope nor a command made after another one landed.
+#[test]
+#[ignore = "pending E8-3"]
+fn the_kill_switch_code_is_bound_to_its_scope_and_the_control_head() {
+    let code = |scope: &KillScope, head| answer("kill_switch_code", kill_switch_code(scope, head));
+    let agent = KillScope::Agent("agent-1".to_owned());
+    let base = code(&agent, 41);
+    assert_eq!(
+        base,
+        code(&agent, 41),
+        "the same command gives the same code"
+    );
+    assert!(!base.0.is_empty());
+    let others = [
+        code(&agent, 42),
+        code(&KillScope::Agent("agent-2".to_owned()), 41),
+        code(&KillScope::Connection("agent-1".to_owned()), 41),
+        code(&KillScope::Workspace, 41),
+    ];
+    for (i, other) in others.iter().enumerate() {
+        assert_ne!(*other, base, "variant {i} confirms the same code");
+    }
 }
 
 /// Live: the fixture's grant is the one every check above varies, and it binds the fixture's

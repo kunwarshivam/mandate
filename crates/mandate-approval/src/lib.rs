@@ -56,8 +56,9 @@ pub use revalidate::{
     Classification, Current, DryRun, GrantedOrder, ModeNow, Revalidation, SkipReason, revalidate,
 };
 pub use stepup::{
-    AssertionId, CommandAuthority, Environment, KillSwitchAuthority, OwnerCommandKind,
-    STEP_UP_WINDOW_S, StepUp, StepUpMethod, StepUpRefusal, kill_switch, owner_command,
+    AssertionId, CommandAuthority, Environment, KillScope, KillSwitchAuthority, OwnerCommandKind,
+    STEP_UP_WINDOW_S, StepUp, StepUpMethod, StepUpRefusal, kill_switch, kill_switch_code,
+    owner_command,
 };
 
 /// The runtime's whole-second risk clock (mandate spec §5.2), as seconds since the Unix epoch. The
