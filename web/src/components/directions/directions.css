@@ -134,8 +134,11 @@
   font-variant-numeric: tabular-nums;
 }
 :root:has([data-direction="vernier"]) {
-  font-size: 15px;
   font-variation-settings: "wdth" 92;
+}
+/* The shell's 11px labels sit under the 12px body floor once a direction scales type. */
+:root:has([data-direction]) .text-\[0\.6875rem\] {
+  font-size: 0.75rem;
 }
 :root:has([data-direction="placard"]) {
   font-size: 17px;
@@ -155,7 +158,25 @@
 }
 :root:has([data-direction="keel"]) [data-slot="stop-control"] {
   border-radius: 0.75rem;
-  box-shadow: 0 1px 0 oklch(0 0 0 / 0.25), 0 6px 14px -6px oklch(0.25 0.02 55 / 0.45);
+  box-shadow: 0 1px 0 oklch(0 0 0 / 0.25), 0 6px 14px -6px oklch(0.25 0.03 240 / 0.45);
+}
+
+/* Browser surfaces carry the direction too. */
+:root:has([data-direction]) {
+  caret-color: var(--foreground);
+  accent-color: var(--primary);
+  scrollbar-color: var(--border) transparent;
+}
+:root:has([data-direction="vernier"]) ::selection {
+  background-color: color-mix(in oklch, var(--signal) 30%, transparent);
+}
+:root:has([data-direction="placard"]) ::selection {
+  background-color: var(--field);
+  color: var(--field-foreground);
+}
+:root:has([data-direction="keel"]) ::selection {
+  background-color: var(--apricot-soft);
+  color: var(--foreground);
 }
 
 /* The framed phone view shows the app, not the harness. */

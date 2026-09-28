@@ -70,8 +70,8 @@ function AgentBand({ agent, index }: { agent: Agent; index: number }) {
   const rails = limits.rails.filter((r) => r.key === "gross" || r.key === "daily");
   return (
     <li className="d-reveal grid gap-1.5 md:grid-cols-[9.5rem_minmax(0,1fr)_minmax(0,1.15fr)]" style={stagger(index)}>
-      <div data-mode={agent.mode} className={cn("flex items-end px-4 py-3 md:py-4", MODE_FIELD[agent.mode])}>
-        <span className="font-display text-[1.75rem] leading-[0.9] font-extrabold uppercase">{MODE_LABEL[agent.mode]}</span>
+      <div data-mode={agent.mode} className={cn("flex items-end px-4 py-1.5 md:py-4", MODE_FIELD[agent.mode])}>
+        <span className="font-display text-lg leading-[0.9] font-extrabold uppercase md:text-[1.75rem]">{MODE_LABEL[agent.mode]}</span>
       </div>
       <div className="grid content-start gap-2 bg-card px-4 py-4">
         <div className="flex items-baseline justify-between gap-3">
@@ -299,14 +299,14 @@ function Approval({ approvalId }: { approvalId: string }) {
         <ArrowLeft className="size-4" aria-hidden /> Approvals
       </Link>
       <header className="d-reveal grid gap-2 bg-(--lapis) px-5 pt-6 pb-5 text-(--lapis-foreground)" style={stagger(0)}>
-        <h1 id="p-request" className="font-sans text-base font-normal text-(--lapis-muted)">
-          {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) asks for your approval
-        </h1>
-        <p className="font-display text-[3.75rem] leading-[0.85] font-extrabold uppercase">
+        <h1 id="p-request" className="text-[3.75rem] leading-[0.85] font-extrabold uppercase">
           Buy {quantity(b.qty)} {b.symbol}
-        </p>
+        </h1>
         <p className="text-lg">
           at a limit of <span className="font-mono font-bold tabular">{price(b.limit)}</span>, <span className="font-mono tabular">{orderValue}</span> in all
+        </p>
+        <p className="text-(--lapis-muted)">
+          {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) asks for your approval
         </p>
       </header>
 
@@ -381,9 +381,9 @@ function Approval({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 mt-4 grid gap-3 border-t-[3px] border-foreground bg-background px-4 py-4 sm:static sm:mx-0 sm:px-0"
+          className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 mt-4 grid gap-3 bg-muted px-4 py-4 sm:static sm:mx-0 sm:px-5"
         >
-          <p className="font-display text-xl leading-tight font-extrabold uppercase sm:text-2xl">If you do nothing, this action is skipped.</p>
+          <p className="font-display text-2xl leading-tight font-extrabold">If you do nothing, this action is skipped.</p>
           <Deadline deadline={approval.deadline} now={now} />
           {response ? (
             <div role="status" aria-live="polite" className="grid gap-2">
@@ -392,7 +392,7 @@ function Approval({ approvalId }: { approvalId: string }) {
                   <li
                     key={s}
                     aria-current={i === stage ? "step" : undefined}
-                    className={cn("px-2 py-1.5 font-bold", i === stage ? "bg-(--lapis) text-(--lapis-foreground)" : i < stage ? "bg-ink text-ink-foreground" : "bg-muted text-muted-foreground")}
+                    className={cn("px-2 py-1.5 font-bold", i === stage ? "bg-(--lapis) text-(--lapis-foreground)" : i < stage ? "bg-ink text-ink-foreground" : "bg-card text-muted-foreground")}
                   >
                     {s}
                   </li>
@@ -414,7 +414,7 @@ function Approval({ approvalId }: { approvalId: string }) {
           )}
         </section>
       ) : outcome ? (
-        <section aria-label="Outcome" data-status={approval.status} className="mt-4 grid gap-1 border-t-[3px] border-foreground pt-3">
+        <section aria-label="Outcome" data-status={approval.status} className="mt-4 grid gap-1 bg-muted px-5 py-4">
           <p className="font-display text-2xl font-extrabold uppercase">{outcome.title}</p>
           <p>{outcome.text}</p>
         </section>

@@ -94,14 +94,14 @@ function Picker({ labels, current, onPick, onReplay, position, label }: { labels
 
 function PhoneFrame({ index, run }: { index: number; run: number }) {
   return (
-    <div className="grid justify-items-center py-6">
+    <div className="grid justify-items-center py-6 [@media(max-height:1040px)]:h-[calc(844px*0.8+3rem)]">
       <iframe
         key={`${index}-${run}`}
         title="Approval request at phone width"
         src={`/directions?v=${index + 1}&s=approval&embed=1`}
         width={390}
         height={844}
-        className="max-w-full rounded-[2.25rem] border-[10px] border-foreground bg-background"
+        className="max-w-full origin-top rounded-[2.25rem] border-[10px] border-foreground bg-background [@media(max-height:1040px)]:scale-[0.8]"
       />
     </div>
   );

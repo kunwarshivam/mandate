@@ -63,7 +63,7 @@ export function Signed({ value, className, word = true }: { value: string | Dec;
   return (
     <span data-direction-of-change={d} className={cn("inline-flex items-baseline gap-1.5", d === "gain" && "text-lagoon-text", d === "loss" && "text-rose-text", className)}>
       <Figure value={signedUsd(value)} className="font-mono tabular" />
-      {word ? <span className="font-sans text-[0.8em] font-medium">{directionWord(value)}</span> : <span className="sr-only">{directionWord(value)}</span>}
+      {word ? <span className="font-sans text-[max(0.8em,0.75rem)] font-medium">{directionWord(value)}</span> : <span className="sr-only">{directionWord(value)}</span>}
     </span>
   );
 }

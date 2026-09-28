@@ -19,7 +19,7 @@ import { describeRestriction } from "@/lib/restrictions";
 import { Figure, ResponseText, STAGES, Signed, outcomeOf, stageOf, stagger, useApproval, useDashboard } from "./shared";
 
 /** One elevation, used for every panel; nothing sits in a box inside a panel. */
-const PANEL = "rounded-(--radius) bg-card shadow-[0_1px_0_oklch(0.25_0.02_55/0.06),0_8px_24px_-12px_oklch(0.25_0.02_55/0.18)]";
+const PANEL = "rounded-(--radius) bg-card shadow-[0_1px_0_oklch(0.25_0.03_240/0.06),0_8px_24px_-12px_oklch(0.25_0.03_240/0.18)]";
 
 const MODE_PILL: Record<AgentMode, string> = {
   normal: "bg-(--petrol-soft) text-foreground",
@@ -52,7 +52,7 @@ function Meter({ label, used, cap }: { label: string; used: Dec; cap: Dec }) {
         <div className="absolute inset-y-0 left-0 rounded-full bg-(--petrol)" style={{ width: `${share * 100}%` }} />
         <div className="absolute -inset-y-1.5 right-0 w-1 translate-x-1/2 rounded-full bg-(--apricot)" />
         <div
-          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-(--petrol) bg-card shadow-[0_1px_2px_oklch(0.25_0.02_55/0.3)]"
+          className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-(--petrol) bg-card shadow-[0_1px_2px_oklch(0.25_0.03_240/0.3)]"
           style={{ left: `${share * 100}%` }}
         />
       </div>
@@ -302,7 +302,7 @@ function Dashboard() {
 }
 
 const CHOICE =
-  "d-press h-13 w-full rounded-full border border-foreground/25 bg-card text-base font-semibold text-foreground shadow-[0_1px_0_oklch(0.25_0.02_55/0.08)] hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2";
+  "d-press h-13 w-full rounded-full border border-foreground/25 bg-card text-base font-semibold text-foreground shadow-[0_1px_0_oklch(0.25_0.03_240/0.08)] hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2";
 
 function Approval({ approvalId }: { approvalId: string }) {
   const view = useApproval(approvalId);
@@ -317,12 +317,12 @@ function Approval({ approvalId }: { approvalId: string }) {
         <ArrowLeft className="size-4" aria-hidden /> Approvals
       </Link>
       <header className="d-reveal grid gap-1.5 px-1" style={stagger(0)}>
-        <h1 id="k-request" className="font-sans text-base font-normal text-muted-foreground">
-          {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) asks for your approval
-        </h1>
-        <p className="font-display text-[2.5rem] leading-[1.05] font-semibold tracking-tight">
+        <h1 id="k-request" className="text-[2.5rem] leading-[1.05] font-semibold tracking-tight">
           Buy {quantity(b.qty)} {b.symbol}
           <span className="block text-muted-foreground">at {price(b.limit)}</span>
+        </h1>
+        <p className="text-muted-foreground">
+          {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) asks for your approval
         </p>
       </header>
 
@@ -394,7 +394,7 @@ function Approval({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 grid gap-3 rounded-t-(--radius) bg-card px-5 pt-5 pb-4 shadow-[0_-10px_30px_-18px_oklch(0.25_0.02_55/0.35)] sm:static sm:mx-0 sm:rounded-(--radius)"
+          className="sticky bottom-[calc(3.5rem+1px+env(safe-area-inset-bottom))] z-10 -mx-4 grid gap-3 rounded-t-(--radius) bg-card px-5 pt-5 pb-4 shadow-[0_-10px_30px_-18px_oklch(0.25_0.03_240/0.35)] sm:static sm:mx-0 sm:rounded-(--radius)"
         >
           <p className="text-lg font-semibold">If you do nothing, this action is skipped.</p>
           <Deadline deadline={approval.deadline} now={now} className="text-muted-foreground" />

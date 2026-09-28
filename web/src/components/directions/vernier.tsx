@@ -102,7 +102,7 @@ function AgentsTable() {
             <th scope="col" className={cn(TH, "text-right")}>
               <span className="grid justify-items-end gap-1">
                 Paper P&amp;L, simulated
-                <Placeholder name="performance" className="rounded-none" />
+                <Placeholder name="performance" className="rounded-none whitespace-nowrap" />
               </span>
             </th>
             <th scope="col" className={TH}>Gross exposure</th>
@@ -214,7 +214,7 @@ function AgentsTable() {
 function SectionTitle({ id, children, aside }: { id: string; children: string; aside?: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3 pb-2">
-      <h2 id={id} className="text-base font-semibold [font-variation-settings:'wdth'_110]">
+      <h2 id={id} className="text-xl font-semibold [font-variation-settings:'wdth'_110]">
         {children}
       </h2>
       {aside}
@@ -245,7 +245,7 @@ function Dashboard() {
           {(
             [
               ["Account equity", <Figure key="e" value={usd(ws.connection.account_equity)} />, false],
-              ["Agents", `${ws.agents.length} on ${ws.connection.broker}`, false],
+              [`Agents on ${ws.connection.broker}`, String(ws.agents.length), false],
               ["Running", `${running} of ${ws.agents.length}`, false],
               ["Waiting for you", open.length === 0 ? "Nothing" : `${open.length} request${open.length === 1 ? "" : "s"}`, open.length > 0],
             ] as Array<[string, ReactNode, boolean]>
@@ -392,14 +392,14 @@ function Approval({ approvalId }: { approvalId: string }) {
         <ArrowLeft className="size-4" aria-hidden /> Approvals
       </Link>
       <header className="grid gap-1 border-t border-foreground/70 pt-3">
-        <h1 id="v-request" className="text-sm font-medium text-muted-foreground">
-          Approval request · {agent?.label ?? "An agent"} ({agent?.mandate.name ?? "unknown mandate"}) proposes
-        </h1>
-        <p className="text-[2rem] leading-tight font-semibold tracking-tight [font-variation-settings:'wdth'_110]">
+        <h1 id="v-request" className="text-[2rem] leading-tight font-semibold tracking-tight [font-variation-settings:'wdth'_110]">
           Buy <span className="font-mono tabular">{quantity(b.qty)}</span> {b.symbol}
-        </p>
+        </h1>
         <p className="text-lg">
           at a limit of <span className="font-mono font-semibold tabular">{price(b.limit)}</span>
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Approval request from {agent?.label ?? "an agent"} ({agent?.mandate.name ?? "unknown mandate"})
         </p>
       </header>
 
@@ -421,7 +421,7 @@ function Approval({ approvalId }: { approvalId: string }) {
       </dl>
 
       <section aria-labelledby="v-risk" className="grid gap-2">
-        <h2 id="v-risk" className="text-base font-semibold [font-variation-settings:'wdth'_110]">
+        <h2 id="v-risk" className="text-xl font-semibold [font-variation-settings:'wdth'_110]">
           Risk impact in dollars
         </h2>
         <dl className="border-t border-foreground/70">
