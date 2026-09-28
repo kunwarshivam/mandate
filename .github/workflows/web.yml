@@ -7,6 +7,9 @@
 # but not a plain gradient, so the founder's no-gradients rule (DEC-200) has its own check.
 # That check reads source; the Playwright suite (`web/e2e/`) reads computed styles in Chromium
 # against `next start`, which catches a gradient or mask Kumo paints from its own stylesheet.
+# `npm run build` is the production build, and its postbuild checks fail if it contains the scenario
+# switcher or takes a scenario. The suite then builds its own copy into `.next-e2e`, with the scenario
+# switch on (`web/scripts/e2e-build.mjs`), and runs in light and dark: about 9 minutes on two workers.
 # Only the Chromium headless shell is installed, cached per Playwright version; on a cache hit
 # only its system libraries are installed.
 name: web
@@ -27,7 +30,7 @@ concurrency:
 jobs:
   web:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
