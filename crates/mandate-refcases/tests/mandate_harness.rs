@@ -364,7 +364,10 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
 ///
 /// A non-empty name set (`restrictions`, `instrument_restrictions`, `pending`) is edited name by name,
 /// for the same reason as the journal below: `edited` replaces a list's first element only, so a second
-/// name was never swept (#276 review, and the coordinator's ruling there).
+/// name was never swept (#276 review, and the coordinator's ruling there). Each such set is also edited
+/// once with its first name dropped and once with a stranger added, because substitution alone keeps
+/// the set's size and so cannot tell an equality from a subset or a superset comparison, and a fold
+/// that drops a restriction is the loosening direction (#283 review, and the coordinator's ruling there).
 ///
 /// A non-empty journal is edited member by member in every event, not by replacing its first event:
 /// replacing the first event left every later event's members unswept, so a fold that journalled the
@@ -450,6 +453,31 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
                     );
                     edits += 1;
                 }
+                if !names.is_empty() {
+                    let shorter: Vec<Json> = names.iter().skip(1).cloned().collect();
+                    let mut longer = names.to_vec();
+                    longer.push(json!("not_a_name"));
+                    for (edit, list) in
+                        [("one name dropped", shorter), ("a stranger added", longer)]
+                    {
+                        let mut doctored = fixture.clone();
+                        doctored["cases"]
+                            .as_array_mut()
+                            .expect("a case list")
+                            .iter_mut()
+                            .find(|c| c["id"] == id.as_str())
+                            .expect("the case")["steps"][index]["expect"][member] =
+                            Json::Array(list);
+                        let failure = run(doctored, id).expect_err(
+                            "a name set with a name dropped or added must fail the case",
+                        );
+                        assert!(
+                            failure.contains(&step) && failure.contains(member.as_str()),
+                            "{id}: `{member}` with {edit} at {step} must fail there, naming it, got: {failure}"
+                        );
+                        edits += 1;
+                    }
+                }
                 if !listed.is_empty() {
                     continue;
                 }
@@ -472,10 +500,11 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
         }
     }
     assert_eq!(
-        edits, 1_939,
+        edits, 2_097,
         "every member of every step of the 24 cases was edited once, every member of every one of the \
-         138 journal events, and every one of the 106 names the three name sets list, each in place of \
-         its list's first element alone"
+         138 journal events, every one of the 106 names the three name sets list, each in place of its \
+         list's first element alone, and each of the 79 non-empty name sets once with a name dropped \
+         and once with a stranger added"
     );
 }
 
