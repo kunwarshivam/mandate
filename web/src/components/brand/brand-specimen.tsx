@@ -10,7 +10,7 @@ const DO = [
 ];
 
 const DONT = [
-  "Set it on a colour: no mark on gold, crimson, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
+  "Set it on a colour: no mark on gold, the kill switch's red, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
   "Recolour it: no gold mark, no second colour, no colour fade, shadow, or outline.",
   "Stretch, rotate, crop, or redraw it, or rebuild the wordmark in live type or another face.",
   "Use the founder's shaded original in product UI: the UI is flat colour (DEC-200).",

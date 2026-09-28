@@ -229,7 +229,7 @@ export function lineOptions(tone: Tone): LineSeriesPartialOptions {
   };
 }
 
-/** Gain and loss candles, in blue and orange when colour-blind friendly is on. */
+/** Gain and loss candles; with colour-blind friendly on, blue for gains and raspberry (light) or orange (dark) for losses. */
 export function candleOptions(colourBlind = false): CandlestickSeriesPartialOptions {
   const up = colourBlind ? CHART_COLOR.gainCvd : CHART_COLOR.gain;
   const down = colourBlind ? CHART_COLOR.lossCvd : CHART_COLOR.loss;

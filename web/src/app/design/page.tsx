@@ -35,26 +35,33 @@ const SOURCES: Array<[RestrictionSource, string]> = [
   ["market", "Market data is stale for one instrument."],
 ];
 
-const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: string; className: string }> = [
+const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: string; className: string; line?: boolean }> = [
   {
-    name: "Brass",
+    name: "Gold",
     meaning: "mandate",
     means: "Your mandate",
-    detail: "Limits, rails, the envelope and the mandate's price lines, on a pale brass field. Where the agent must stay.",
+    detail: "Limits, rails, the envelope and the labels of the mandate's price lines, in dark gold on a pale gold field. Where the agent must stay.",
     className: "bg-mandate text-mandate-strong",
   },
-  { name: "Navy", meaning: "account", means: "The account", detail: "The account's equity line, links, primary actions and the paper hatch.", className: "bg-lapis text-lapis-foreground" },
+  {
+    name: "Ink, with a gold line",
+    meaning: "account",
+    means: "The account",
+    detail: "Primary actions and the paper hatch in ink; the account's equity line and the current tab in gold.",
+    className: "bg-lapis text-lapis-foreground",
+    line: true,
+  },
   { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
   { name: "Crimson", meaning: "kill", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
 ];
 
 const CHART_RULES: Array<[string, string, string]> = [
-  ["bg-lapis", "The account", "Account equity: a 2 px navy line over a pale navy fill. The hero of Home."],
-  ["bg-foreground", "An agent", "One agent's equity: a 2 px ink line over the page colour. The hero of an agent."],
-  ["bg-mandate-marker", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1px brass price lines, labelled on the axis in pale brass; a crowded label gives way and the legend names it."],
-  ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, on a small neutral chart."],
+  ["bg-lapis-line", "The account", "Account equity: a 2 px gold line over a pale gold fill. The hero of Home."],
+  ["bg-foreground", "An agent", "One agent's equity: a 2 px ink line over the card. The hero of an agent."],
+  ["bg-muted-foreground", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1 px dashed grey price lines with a pale gold axis label in dark gold; a crowded label gives way and the legend names it."],
+  ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, in ink, on a small neutral chart."],
   ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout. Blue when colour-blind friendly is on."],
-  ["bg-loss", "Down candle", "A candle that closed below its open. Orange when colour-blind friendly is on."],
+  ["bg-loss", "Down candle", "A candle that closed below its open. Raspberry in light and orange in dark when colour-blind friendly is on."],
 ];
 
 const SAMPLE_LEVELS: ChartLevel[] = [
@@ -73,7 +80,8 @@ const DENSITY_ROWS: Array<[string, string]> = [
 
 const DO = [
   "One hero number per screen, set in the hero size, with its change, the word for it and its disclosure on the next line.",
-  "Let space separate things. Reach for a hairline before a box, and for a box only when it carries meaning: brass, navy, a well.",
+  "Let space separate things. Reach for a hairline before a box, and for a box only when it carries meaning: the mandate's pale gold, an ink action, a well.",
+  "Check a screen in light and dark: every token has a value in each, and nothing else changes.",
   "Sentence case everywhere. Weight 600 at most in the product.",
   "Tabular figures wherever numbers line up or change.",
   "Motion that answers the owner: a press, a sheet, the line drawing in once.",
@@ -84,7 +92,7 @@ const DONT = [
   "Colour blends, glass, glows, or a shadow on anything that does not float.",
   "Capitals-only labels, heavy rules, or bands of colour as signage.",
   "Confetti, streaks, badges for trading, or any cue that rewards activity.",
-  "Crimson anywhere but the kill switch, or brass for anything but the mandate.",
+  "Crimson anywhere but the kill switch. Gold outside the gold tokens, as a large block, or, in light mode, as text lighter than dark gold.",
   "Optimistic state: nothing is shown as done before the deployment says so.",
   "Motion on a deadline, a figure the owner is deciding on, or a Stop control.",
 ];
@@ -149,13 +157,13 @@ export default function DesignPage() {
       <header className="grid gap-2">
         <h1 className="text-h1">Design system</h1>
         <p className="max-w-measure text-muted-foreground">
-          Owlhead&apos;s calm system (DEC-204): one hero number per screen, a chart at the centre, generous space and few boxes, in the navy and brass palette. Colour values live in{" "}
+          Owlhead&apos;s calm system (DEC-204): one hero number per screen, a chart at the centre, generous space and few boxes, in Ink and Gold, light or dark. Colour values live in{" "}
           <code>src/lib/palette.ts</code> and <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code>{" "}
           and the palette&apos;s in <code>web/COLOR.md</code>.
         </p>
       </header>
 
-      <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), navy on a light surface, in the navy and brass palette (DEC-202).">
+      <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), ink on light and off-white on dark (DEC-204).">
         <BrandSpecimen />
       </Block>
 
@@ -163,7 +171,10 @@ export default function DesignPage() {
         <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {MEANINGS.map((m, i) => (
             <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 rounded-2xl p-5 ${m.className}`} style={{ "--i": i } as CSSProperties}>
-              <span className="text-label font-medium">{m.name}</span>
+              <span className="grid gap-2">
+                <span className="text-label font-medium">{m.name}</span>
+                {m.line ? <span aria-hidden className="h-0.5 w-12 rounded-full bg-lapis-line" /> : null}
+              </span>
               <span className="grid gap-1">
                 <span className="text-h2">{m.means}</span>
                 <span className="text-sm">{m.detail}</span>
@@ -176,14 +187,14 @@ export default function DesignPage() {
         </p>
       </Block>
 
-      <Block title="Paper hatch" lead="Paper is the account's state, so it wears navy, hatched. The badge is in the header of every screen and never scrolls away.">
+      <Block title="Paper hatch" lead="Paper is the account's state, so it wears the account's ink, hatched. The badge is in the header of every screen and never scrolls away.">
         <div className="flex flex-wrap items-center gap-3">
           <EnvironmentBadge environment="paper" />
           <div className="hatch h-16 w-40 rounded-2xl bg-card ring-1 ring-lapis" aria-hidden />
         </div>
       </Block>
 
-      <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are slate, tinted toward navy; nothing is pure grey, black, or white. Light, dark or system, from the theme menu in the header.">
+      <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are warm paper and cool ink, barely tinted; nothing is pure grey, black, or white. Light, dark or system, from the theme menu in the header; each swatch here shows the current theme.">
         <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {colorTokens.map((t) => (
             <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3rem_1fr] gap-3 rounded-xl bg-background p-2.5">
@@ -412,7 +423,7 @@ export default function DesignPage() {
           <ul className="grid content-start gap-2.5 text-sm">
             {CHART_RULES.map(([swatch, name, use]) => (
               <li key={name} className="grid grid-cols-[0.75rem_minmax(0,1fr)] items-baseline gap-2.5">
-                <span aria-hidden className={`size-3 self-center rounded-full ${swatch}`} />
+                <span aria-hidden className={`h-0.5 w-3 self-center rounded-full ${swatch}`} />
                 <span>
                   <span className="font-semibold">{name}</span>: {use}
                 </span>
