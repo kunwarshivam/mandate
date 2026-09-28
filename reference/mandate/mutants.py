@@ -50,12 +50,13 @@ MUTANTS = {
     "retirement removes what another lineage holds": (
         '            for lid in [k for k, v in holders.items() if v == th["instrument_id"] and k != th["lineage_id"]]:\n'
         '                del holders[lid]\n', ""),
+    "V-040 is never raised": ('        errs.add("V-040")', '        pass'),
     "admission ignores the leveraged-ETP disclosure": (
         '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
         '        u["leveraged_etps_enabled"])'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
-         "fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
+         "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
          "print(len(FAIL))")
 

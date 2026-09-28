@@ -581,7 +581,37 @@ def fuzz_expiry(n):
         check(all(v == "removed_instrument" for v in r["instrument_restrictions"].values()),
               "MI-19 removal restricts only the instrument, never the agent", (inp, r))
 
+def fuzz_ladder_precision(n):
+    """V-040 (DEC-167): a valid ladder's size factor is exact at 24 places for every set of active rungs,
+    and a ladder whose factors fit is never refused. The oracle multiplies each subset exactly."""
+    from itertools import combinations
+    ctx = dict(base.CTX, disclosures_accepted=["sha256:" + "b" * 64])
+    for _ in range(n):
+        m = copy.deepcopy(base.swing)
+        k = rng.randint(1, 4)
+        ats = sorted(rng.sample(range(1, 60), k))
+        factors = ["0." + "".join(rng.choice("0123456789") for _ in range(rng.randint(0, 13))) + rng.choice("123456789")
+                   for _ in range(k)]
+        lad = [{"at": norm(D(a) / 1000), "action": "scale_sizes", "factor": f} for a, f in zip(ats, factors)]
+        lad += [{"at": "0.06", "action": "exits_only", "factor": None},
+                {"at": "0.08", "action": "flatten_and_pause", "factor": None}]
+        m["risk"]["drawdown_ladder"] = lad
+        errs = semantic(m, ctx)[0]
+        fits = all(-reduce_mul(sub).as_tuple().exponent <= 24 or reduce_mul(sub) == reduce_mul(sub).quantize(D("1e-24"))
+                   for r in range(1, k + 1) for sub in combinations([D(f) for f in factors], r))
+        places = sum(len(f) - 2 for f in factors)
+        check("V-040" in errs or fits, "V-040: a valid ladder's size factor needs more than 24 places", factors)
+        check(places > 24 or "V-040" not in errs, "V-040: a ladder whose factors fit is refused", factors)
+        check(places <= 24 or "V-040" in errs, "V-040: factors past 24 places are accepted", factors)
+
+def reduce_mul(xs):
+    out = D(1)
+    for x in xs:
+        out *= x
+    return out
+
 if __name__ == "__main__":
+    fuzz_ladder_precision(300)
     fuzz_risk(400)
     fuzz_gate(300)
     fuzz_builder(400)

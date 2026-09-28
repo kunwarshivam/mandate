@@ -34,6 +34,9 @@ builder, versioning, change classification, and the records kept.
   and W-006 added (§4.1, §4.2); the retail profile is replaced and an internal research profile
   added (§4.3); `ThesisProposed`, `ThesisRevised`, and `UniverseChanged` join the records (§5.10,
   §10, journal spec §9); 291 reference cases (§11).
+- **v0.6, amended ([DEC-167](../project/04-decision-log.md#decisions)):** V-040 bounds the
+  precision of the ladder's scale factors, so no schema-valid mandate can hold a size factor the
+  risk state cannot compute (§4.1, §5.5).
 - **v0.5:** founder sign-off ([DEC-71](../project/04-decision-log.md#decisions)).
 
 ## 1. Principles
@@ -289,6 +292,7 @@ and is recorded in `MandateConfirmed`.
 | V-037 | `universe.pinned` true requires that no signal model admits instruments: pinning the universe turns the research agent off (§2.3) |
 | V-038 | `universe.pinned_instruments`, `environment`, and `connection_id` are never `platform_proposed`: bring-your-own-strategy means the owner's own universe, and the research agent is the path for platform ideas (§7) |
 | V-039 | Every pinned instrument's `asset_class` is in `universe.asset_classes` |
+| V-040 | The `factor`s of the `scale_sizes` rungs have at most 24 fractional digits in total, so the size factor of every set of active rungs is exact at the 24 places the risk state reports it at (§5.5; [DEC-167](../project/04-decision-log.md#decisions)) |
 
 ### 4.2 Warnings and the confirmation screen
 
