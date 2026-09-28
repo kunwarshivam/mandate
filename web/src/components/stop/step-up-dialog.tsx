@@ -1,45 +1,76 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Fingerprint } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
+export type PasskeyResult = "verified" | "failed";
+
 /**
- * G3: a mocked passkey check. The real one is a WebAuthn assertion bound to this one action; here
- * the "passkey" answers after a short wait. Cancelling means the action did not happen.
+ * One passkey request bound to one action. It calls `answer` at most once and returns a function
+ * that abandons the request; after that, `answer` is never called.
+ */
+export type Passkey = (action: string, answer: (result: PasskeyResult) => void) => () => void;
+
+export const PASSKEY_ANSWER_MS = 900;
+
+/** The real check is a WebAuthn assertion; this one verifies after a short wait. */
+export const mockPasskey: Passkey = (_action, answer) => {
+  const id = window.setTimeout(() => answer("verified"), PASSKEY_ANSWER_MS);
+  return () => window.clearTimeout(id);
+};
+
+export const PasskeyContext = createContext<Passkey>(mockPasskey);
+
+/**
+ * G3. Cancelled or failed means the action did not happen: only a verified answer to the request
+ * still in flight reaches `onVerified`.
  */
 export function StepUpDialog({
   action,
   open,
   onVerified,
   onCancel,
-  verifyAfterMs = 900,
+  onFailed,
 }: {
   action: string;
   open: boolean;
   onVerified: () => void;
   onCancel: () => void;
-  verifyAfterMs?: number;
+  onFailed: () => void;
 }) {
+  const passkey = useContext(PasskeyContext);
   const [waiting, setWaiting] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | undefined>(undefined);
+  const abandon = useRef<(() => void) | null>(null);
 
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  useEffect(() => () => abandon.current?.(), []);
 
   const cancel = () => {
-    window.clearTimeout(timer.current);
+    abandon.current?.();
+    abandon.current = null;
     setWaiting(false);
     onCancel();
   };
 
   const verify = () => {
-    setWaiting(true);
-    timer.current = window.setTimeout(() => {
+    if (abandon.current) return;
+    let live = true;
+    const release = passkey(action, (result) => {
+      if (!live) return;
+      live = false;
+      abandon.current = null;
       setWaiting(false);
-      onVerified();
-    }, verifyAfterMs);
+      if (result === "verified") onVerified();
+      else onFailed();
+    });
+    if (!live) return;
+    setWaiting(true);
+    abandon.current = () => {
+      live = false;
+      release();
+    };
   };
 
   return (

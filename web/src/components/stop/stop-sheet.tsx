@@ -254,6 +254,10 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
             setPending(null);
             setNotice("Passkey check canceled. Nothing was sent.");
           }}
+          onFailed={() => {
+            setPending(null);
+            setNotice("Passkey check failed. Nothing was sent.");
+          }}
         />
       </SheetContent>
     </Sheet>
