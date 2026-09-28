@@ -32,6 +32,7 @@ mod dec;
 
 pub mod change;
 pub mod condition;
+pub mod context;
 pub mod document;
 pub mod goal;
 pub mod policy;
