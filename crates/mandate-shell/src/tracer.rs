@@ -74,11 +74,11 @@ pub fn run(stages: &mut Stages, setup: &Setup) -> Result<Report, ShellError> {
     let instrument = pinned(&admitted.view)?;
     let closes = stages
         .bars
-        .closes(&instrument)
+        .closes(&admitted.symbol)
         .map_err(refused(Stage::MarketData))?;
     let signal = stages
         .signal
-        .signal(&closes)
+        .signal(&admitted.model, &closes)
         .map_err(refused(Stage::Signal))?;
     let clock = RiskClock::from_secs(setup.now.secs());
     let output = map::model_output(signal, &admitted.model, &instrument, clock)

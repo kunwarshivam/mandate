@@ -218,7 +218,9 @@ implementation reviews' rulings added, one per finding (DEC-131 item 25(k)).
 
 Planned by [the E7-7 task brief](../../../docs/project/tasks/E7-7-tracer-bullet.md) and DEC-138; the
 tests PR (DEC-157) has landed the crate with every production adapter a stub and the fail-closed
-suite live. The implementation PR fills the adapters in and deletes the pending markers only.
+suite live. The implementation lands in slices (DEC-166). Slice 1 makes the stored bars, the
+moving-average signal and the Alpaca connector live. Every other adapter still refuses until its
+upstream and its inputs exist.
 
 - **Spec:** `docs/HLD.md` section 5 (the runtime's components in order, "Durability": the write-ahead
   intent and event-sourced state), 6.B (the decision cycle), 6.D (crash recovery);
@@ -233,8 +235,8 @@ suite live. The implementation PR fills the adapters in and deletes the pending 
   after its `OrderSubmitted` committed in the same run; `src/map.rs` the total mappings with no
   permitting arm for any non-answer; `src/envelope.rs` the journal envelope (always `paper`) and the
   deterministic ids; `src/host.rs` the refusal of a configured host; `src/cli.rs` and
-  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters, every one a stub
-  in the tests PR. It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
+  `src/bin/mandate-tracer.rs` the binary; `src/adapters.rs` the production adapters: `StoredBars`,
+  `MovingAverage` and `AlpacaConnector` live, and the rest refusing (DEC-166). It holds no trading logic — no sizing, no gating, no pricing, no state machine, and
   no arithmetic on money or quantity — and binds `mandate-runtime` (`handle`, `fold`) for real today.
 - **Tests:** `src/stages/fail_closed.rs` over the permissive doubles of `src/stages/doubles.rs`: one
   case per `Stage`, each asserting at the furthest boundary its stage could reach (zero submissions;
@@ -246,12 +248,14 @@ suite live. The implementation PR fills the adapters in and deletes the pending 
   `gate_allow_with_not_reached_refused`, `proposal_sanity`, and more), the environment scanner and the
   shadow order book over the committed bytes, and the host, transport, and defaulting-combinator
   source scans; `src/map.rs`'s properties that no source error or gate answer maps to a permitting
-  verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11). Then
+  verdict (TI-3) and that an opening `Allow` with a `NotReached` check is refused (TI-11);
+  `src/adapters.rs`'s cases for the stored-data trust rule and the crossover's envelope windows. Then
   `tests/tracer.rs`, pending on E7-7: the production path over recorded Alpaca paper responses and a
   bar dataset written by `mandate-marketdata`'s own writer (`happy`, `happy_is_deterministic`,
   `autonomy_ask`, `signal_flat`, `signal_undecided`, `oversized_proposal`, `outlier_close`,
   `duplicate_after_restart`, `fresh_journal_with_broker_position`, `broker_unknown_then_absent`,
-  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing). The mandate
+  `reconcile_mismatch_pauses`, and the fixture's validation and one-share sizing), except the live
+  `the_connector_is_the_alpaca_client_over_the_given_transport`. The mandate
   fixtures are generated and checked against `reference/mandate/ref.py` by
   `tests/fixtures/tracer/generate.py`. `AlpacaPaperHttp` is never constructed in a test, so no test
   can reach a network (ES-19).
@@ -579,13 +583,16 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-approval/src/drift.rs`, `crates/mandate-approval/src/budget.rs`,
   `crates/mandate-approval/src/notify.rs` (the closed `Notification`),
   `crates/mandate-approval/src/quiet.rs`, and `crates/mandate-approval/src/stepup.rs`
-  (`owner_command`, and `kill_switch`, whose answer has no refusing variant).
+  (`owner_command`, `kill_switch`, whose answer has no refusing variant, and `kill_switch_code`).
 - **Tests:** `crates/mandate-approval/tests/content.rs` (E8-1: the content object, its hash and
   code, the notification payload, quiet hours), `crates/mandate-approval/tests/budget.rs` (E8-2:
   the ask budget and suppressions), and `crates/mandate-approval/tests/properties.rs` (the sentinel
   scanner, the budget counter with its own DST table, and content separation), all pending, with
-  fixtures in `crates/mandate-approval/tests/common/mod.rs`. E8-3's admission, step-up,
-  re-validation and drift tests follow in their own tests PR (DEC-165 item 1).
+  fixtures in `crates/mandate-approval/tests/common/mod.rs`; for E8-3,
+  `crates/mandate-approval/tests/admission.rs` (checks 1 to 7, lateness, step-up, owner commands,
+  the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
+  and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
+  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles).
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness
