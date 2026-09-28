@@ -229,6 +229,11 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
  * `h-full` against a wrapper with no set height, so the rail is given the viewport's height and sticks;
  * the app header sits beside it in the content column, so it sticks at the top. Its items scroll on
  * their own. The same class also reaches Kumo's mobile sheet, hence `lg:`, the mobile breakpoint.
+ *
+ * Kumo picks the rail or the sheet in JS, and its server snapshot is "desktop": the server, and a phone
+ * until hydration, get the rail. Below `lg` CSS keeps that rail (Kumo's non-mobile `aside`) out of the
+ * layout, so a phone never lays out the desktop shell, and Stop stays on screen with or without JS
+ * (`e2e/ssr-shell.spec.ts`). The sheet mounts after hydration, off-canvas until opened.
  */
 export function AppSidebar() {
   const pathname = usePathname();
@@ -241,7 +246,10 @@ export function AppSidebar() {
   const home = homeFor(role);
 
   return (
-    <Sidebar aria-label="Main" className="border-r-0 bg-background lg:sticky lg:top-0 lg:h-dvh lg:self-start">
+    <Sidebar
+      aria-label="Main"
+      className="border-r-0 bg-background max-lg:not-data-mobile:hidden lg:sticky lg:top-0 lg:h-dvh lg:self-start"
+    >
       <Sidebar.Header data-slot="brand" className="h-auto flex-col items-stretch gap-0 bg-background px-0">
         <div className="flex h-16 shrink-0 items-center px-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
           <Link
