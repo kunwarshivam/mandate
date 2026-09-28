@@ -700,6 +700,16 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   on the normal path (§5.4's legs activate at completion), but a re-placement after a
   cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
   allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
+- **E7-4 slice 2's tests correction (stream K):** a `properties` oracle expects `OwnerAlertSent`
+  among the executor's drafts, but it is a control-stream event the executor never writes; the
+  executor's alert is its own record (`ProtectionChanged interval_limit`) plus `Effect::Notify`.
+  Correct the oracle before slice 2 un-ignores it (found building slice 3a, #267).
+- **E7-4 slice 4 (stream K), from #264's review (comment 5862761692):** (a) name the do-nothing
+  finding in slice 4's PR: a permissive `ladder_price` turns `fault::crash_at_confirmation_before_exit_submit`
+  green, and only `protection::sequence_tests::an_unprotected_exit_never_reaches_the_ladder_stub`
+  catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
+  (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
+  slice reads buying power from it.
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
