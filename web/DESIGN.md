@@ -27,7 +27,7 @@ Strategy: Committed. Four meaning colours on tinted neutrals, all OKLCH, all fla
 | Marigold | Your mandate | `--marigold` | `oklch(0.85 0.155 84)` #fdc43f | The envelope field, limit rails, restriction tags a limit imposed, `::selection` |
 | Lapis | The account | `--lapis` (= `--primary`, `--ring`) | `oklch(0.36 0.1 258)` #173c70 | The account block, the paper hatch, the current page in navigation, primary actions, links, focus rings, the equity knob, empty boards |
 | Ink | Stopped or paused agent | `--ink` | `oklch(0.21 0.035 258)` #0e1928 | Paused and stopped mode fields, the exits-only ring, the Stop control and the Stop sheet header |
-| Crimson | Kill switch | `--crimson` | `oklch(0.47 0.19 27)` #ac0311 | The kill-switch actions in the Stop sheet. Nothing else |
+| Crimson | Kill switch | `--crimson` | `oklch(0.47 0.19 27)` #ac0311 | The kill-switch choices in the Stop sheet and the switch on the kill-switch record screens. Nothing else |
 
 Supporting tokens:
 
@@ -45,7 +45,7 @@ Supporting tokens:
 | `--gain` / `--loss` | `oklch(0.44 0.11 155)` / `oklch(0.49 0.18 10)` | Text only, always with a sign and the word ("+$123.45 gain") |
 | `--hatch-ink` | lapis at 30% | The paper hatch lines |
 
-Rules the tests enforce: every neutral is tinted toward lapis (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; body pairs reach 4.5:1 and marks 3:1; there is no `.dark` block and no `dark:` class anywhere in `src/`. `src/lib/crimson.test.tsx` renders every route in every scenario, the Stop sheet in every context, the passkey check, and the result of every Stop choice, and fails if crimson paints anything but a kill-switch choice (Kill switch, Stop all agents, Close everything) or the kill-switch specimen on `/design`; in the source, only `globals.css`, the Stop sheet's two kill-switch tones, and `/design` may name it.
+Rules the tests enforce: every neutral is tinted toward lapis (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; body pairs reach 4.5:1 and marks 3:1; there is no `.dark` block and no `dark:` class anywhere in `src/`. `src/lib/crimson.test.tsx` renders every route in every scenario, the Stop sheet in every context, the passkey check, the result of every Stop choice, and each record screen through its passkey check and recorded result, and fails if crimson paints anything but a kill-switch choice (Kill switch, Activate the kill switch, Stop all agents, Close everything) or the kill-switch specimen on `/design`; in the source, only `globals.css`, `KillSwitchButton`'s two tones, and `/design` may name it.
 
 No gradients of any kind (fills, text, masks, fades or glows). The paper hatch is an SVG mask over a flat token colour.
 
@@ -109,7 +109,8 @@ Radius is 0 everywhere (`--radius: 0rem`, every Tailwind radius token 0). A sign
 - **Tab bar.** A 2px foreground top rule; the current tab has a 4px lapis bar on its top edge and bold text.
 - **Account block.** The top of the side navigation is a lapis field with the broker.
 - **Stop control.** An ink button, 44px tall, with the stop icon. Opens the Stop sheet.
-- **Stop sheet.** An ink header with the display title; sections under heading rules; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Account notices wear lapis-soft with an account tag.
+- **Stop sheet.** G2, the chooser. An ink header with the display title; sections under heading rules; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Pause, Resume and Stop of a flat agent act in the sheet. The kill switch, release, Stop all and Close everything are links to their record screens, and the sheet closes on the way. Account notices wear lapis-soft with an account tag.
+- **Kill-switch and release record screens (D10, D11).** Pages at `/agents/{agent_id}/kill-switch`, `/agents/{agent_id}/release`, `/connections/{connection_id}/stop-all` and `/connections/{connection_id}/close-all`, with opaque IDs. The title carries the paper badge; the document title names the environment. Every list shows expanded: orders it cancels, positions it sells or releases, agents it stops, and what it leaves alone. Release carries its "yours and unprotected" warning in a marigold field. The screen is fixed at first render, the passkey check (G3) opens from the page, and the command carries every line shown, so the journal keeps what the owner confirmed.
 - **Step-up dialog.** Title, the one action in a muted box under a 2px rule, and Cancel / Use passkey in a muted footer. The waiting message sits in the footer's live region.
 - **Buttons.** Primary lapis, outline (2px foreground border on card), ghost, link. Every button presses to 0.97.
 - **Mode badge.** A square chip in the mode's field colour with an icon and the label in capitals.

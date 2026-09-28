@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, Iso, Workspace } from "@/fixtures/types";
+import type { ActiveRestriction, Agent, AgentMode, Approval, CancelReason, Environment, Iso, Workspace } from "@/fixtures/types";
 import { clock } from "./format";
 import { RESTRICTIONS } from "./restrictions";
 
@@ -13,6 +13,17 @@ import { RESTRICTIONS } from "./restrictions";
 
 export type CommandKind = "pause" | "resume" | "stop" | "kill" | "release" | "pause_all" | "stop_all" | "close_all";
 
+/**
+ * What a record screen showed when the owner confirmed, sent with the command so the journal keeps
+ * it (brief §4.1). `shown` is every line on the screen, in order; nothing on a record screen collapses.
+ */
+export interface CommandRecord {
+  screen: "D10" | "D11";
+  environment: Environment;
+  title: string;
+  shown: string[];
+}
+
 export interface Command {
   id: string;
   kind: CommandKind;
@@ -21,6 +32,7 @@ export interface Command {
   phase: "sent" | "recorded" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
+  record?: CommandRecord;
 }
 
 export interface ApprovalResponse {
@@ -37,7 +49,7 @@ interface Runtime {
   reachable: boolean;
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
-  send: (kind: CommandKind, agentId: string | null) => Command;
+  send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
   respond: (approvalId: string, response: "approve" | "skip") => void;
 }
 
@@ -209,9 +221,9 @@ export function RuntimeProvider({
   }, [initial.now, tick]);
 
   const send = useCallback(
-    (kind: CommandKind, agentId: string | null): Command => {
+    (kind: CommandKind, agentId: string | null, record?: CommandRecord): Command => {
       counter.current += 1;
-      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current };
+      const command: Command = { id: `cmd-${counter.current}`, kind, agentId, phase: "sent", sentAt: nowRef.current, ...(record ? { record } : {}) };
       setCommands((list) => [...list, command]);
       window.setTimeout(() => {
         const at = nowRef.current;

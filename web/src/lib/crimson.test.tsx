@@ -11,8 +11,8 @@ import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { colorTokens, tokenValue } from "./tokens";
 
-/** Crimson is the kill switch and nothing else (web/DESIGN.md): these are the kill-switch choices. */
-const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Stop all agents on this account|Close everything on this account)/;
+/** Crimson is the kill switch and nothing else (web/DESIGN.md): the sheet's kill-switch links and the record screens' switches. */
+const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Activate the kill switch|Stop all agents on this account|Close everything on this account)/;
 
 const CRIMSON_VALUE = /oklch\(\s*0\.47[\s_]+0\.19[\s_]+27\b/;
 const CRIMSON_NAME = /-crimson\b/;
@@ -36,7 +36,7 @@ function paintsCrimson(el: Element): boolean {
 function strays({ design = false } = {}): string[] {
   return Array.from(document.body.querySelectorAll("*"))
     .filter(paintsCrimson)
-    .filter((el) => !KILL_SWITCH.test(el.closest("button")?.textContent ?? ""))
+    .filter((el) => !KILL_SWITCH.test(el.closest("button, a")?.textContent ?? ""))
     .filter((el) => !(design && el.closest('[data-meaning="kill"]')))
     .map((el) => `<${el.tagName.toLowerCase()} class="${el.getAttribute("class")}"> ${(el.textContent ?? "").slice(0, 60)}`);
 }
@@ -90,17 +90,20 @@ describe("crimson in the source", () => {
     for (const t of colorTokens.filter((c) => c.meaning !== "kill")) expect(t.value, t.name).not.toBe(tokenValue("crimson"));
   });
 
-  it("is used only by the kill-switch button's two appearances, and the Stop sheet paints through that button", () => {
-    const button = readFileSync(join(root, "components/stop/kill-switch-button.tsx"), "utf8");
-    const lines = button.split("\n").filter((line) => CRIMSON_NAME.test(line));
-    expect(lines).toHaveLength(1);
-    expect(lines[0].trim()).toMatch(/^appearance === "filled" \? "bg-crimson text-crimson-foreground[^"]*" : "border-2 border-crimson [^"]*",$/);
-    const sheet = readFileSync(join(root, "components/stop/stop-sheet.tsx"), "utf8");
-    expect(sheet).not.toMatch(CRIMSON_NAME);
-    const titles = Array.from(sheet.matchAll(/<KillSwitchButton\b[^>]*\btitle="([^"]+)"/g), (m) => m[1]);
-    expect(titles.length).toBeGreaterThan(0);
-    for (const title of titles) expect(title).toMatch(KILL_SWITCH);
-  });
+  it.each(["components/stop/stop-sheet.tsx", "components/stop/record-screen.tsx"])(
+    "is used only by the kill-switch button's two appearances, and %s paints through that button",
+    (file) => {
+      const button = readFileSync(join(root, "components/stop/kill-switch-button.tsx"), "utf8");
+      const lines = button.split("\n").filter((line) => CRIMSON_NAME.test(line));
+      expect(lines).toHaveLength(1);
+      expect(lines[0].trim()).toMatch(/^appearance === "filled" \? "bg-crimson text-crimson-foreground[^"]*" : "border-2 border-crimson [^"]*",$/);
+      const source = readFileSync(join(root, file), "utf8");
+      expect(source).not.toMatch(CRIMSON_NAME);
+      const titles = Array.from(source.matchAll(/<KillSwitchButton\b[^>]*\btitle="([^"]+)"/g), (m) => m[1]);
+      expect(titles.length).toBeGreaterThan(0);
+      for (const title of titles) expect(title).toMatch(KILL_SWITCH);
+    },
+  );
 });
 
 describe("crimson on screen", () => {
@@ -150,5 +153,20 @@ describe("crimson on screen", () => {
       expect(strays(), title).toEqual([]);
       view.unmount();
     }
+  });
+
+  it.each(ROUTES.filter(([path]) => /\/(kill-switch|release|stop-all|close-all)$/.test(path)))("on the record screen %s, the passkey check and the recorded result carry no crimson", (path, Page) => {
+    vi.useFakeTimers();
+    setPathname(path);
+    renderWithRuntime(<Page />);
+    const record = document.querySelector<HTMLElement>("[data-slot=record-screen]")!;
+    const action = record.querySelector<HTMLElement>("[data-slot=kill-switch], button[data-tone]")!;
+    fireEvent.click(action);
+    const stepUp = screen.getByRole("dialog", { name: "Confirm it is you" });
+    expect(Array.from(stepUp.querySelectorAll("*")).filter(paintsCrimson)).toEqual([]);
+    fireEvent.click(within(stepUp).getByRole("button", { name: "Use passkey" }));
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
+    expect(within(record).getByRole("status").querySelector("[data-phase=recorded]")).not.toBeNull();
+    expect(strays()).toEqual([]);
   });
 });
