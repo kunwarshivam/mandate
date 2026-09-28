@@ -1,17 +1,19 @@
 "use client";
 
 import { type ReactNode, useRef, useState } from "react";
+import Link from "next/link";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { CaretDown, Plugs, WarningCircle, X } from "@phosphor-icons/react";
+import { CaretDown, WarningCircle, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Agent } from "@/fixtures/types";
-import { clock, quantity } from "@/lib/format";
-import { type Command, type CommandKind, useRuntime } from "@/lib/mock-runtime";
+import { quantity } from "@/lib/format";
+import { useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
-import { commandTitle, needsStepUp, recordedLine, stepUpLine } from "./commands";
+import { CommandEntry, UnreachableAlert } from "./command-log";
+import { type SheetKind, needsStepUp, recordHref, stepUpLine } from "./commands";
 import { KillSwitchButton } from "./kill-switch-button";
 import { StepUpDialog } from "./step-up-dialog";
 
@@ -23,27 +25,35 @@ const TONE: Record<Tone, string> = {
   outline: "border-2 border-foreground bg-card text-foreground hover:bg-muted",
 };
 
-/** Every choice stays enabled in every state: loading, stale, unreachable, or mid-command. */
-function Choice({ tone, title, children, onClick }: { tone: Tone; title: string; children?: ReactNode; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      data-tone={tone}
-      onClick={onClick}
-      className={cn("press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone])}
-    >
+/**
+ * Every choice stays enabled in every state: loading, stale, unreachable, or mid-command. A choice
+ * with `href` opens its record screen, a page, and closes the sheet on the way (brief §4.1).
+ */
+function Choice({ tone, title, children, onClick, href }: { tone: Tone; title: string; children?: ReactNode; onClick: () => void; href?: string }) {
+  const className = cn("press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone]);
+  const body = (
+    <>
       <span className="text-base font-bold">{title}</span>
       {children ? <span className={cn("text-sm", tone === "ink" ? "" : "text-muted-foreground")}>{children}</span> : null}
+    </>
+  );
+  return href ? (
+    <Link href={href} data-tone={tone} onClick={onClick} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <button type="button" data-tone={tone} onClick={onClick} className={className}>
+      {body}
     </button>
   );
 }
 
 interface Pending {
-  kind: CommandKind;
+  kind: SheetKind;
   agent: Agent | null;
 }
 
-function AgentChoices({ agent, choose, full }: { agent: Agent; choose: (kind: CommandKind, agent: Agent) => void; full: boolean }) {
+function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (kind: SheetKind, agent: Agent) => void; leave: () => void; full: boolean }) {
   if (agent.mode === "stopped") {
     return <p className="bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
   }
@@ -91,12 +101,13 @@ function AgentChoices({ agent, choose, full }: { agent: Agent; choose: (kind: Co
       ) : null}
       {holding ? (
         <>
-          <KillSwitchButton title="Kill switch: close and stop" onClick={() => choose("kill", agent)}>
-            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Needs your passkey.
+          <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
+            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm with
+            your passkey.
           </KillSwitchButton>
-          <Choice tone="outline" title="Stop and release positions to me" onClick={() => choose("release", agent)}>
+          <Choice tone="outline" title="Stop and release positions to me" href={recordHref("release", agent.agent_id)} onClick={leave}>
             Ends the agent and makes its positions yours, <strong className="font-semibold text-foreground">without protection</strong>: its protective orders are canceled and
-            nothing watches {agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(" and ")}. Needs your passkey.
+            nothing watches {agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(" and ")}. Opens the full list to confirm with your passkey.
           </Choice>
         </>
       ) : (
@@ -104,8 +115,8 @@ function AgentChoices({ agent, choose, full }: { agent: Agent; choose: (kind: Co
           <Choice tone="outline" title={`Stop ${agent.label}`} onClick={() => choose("stop", agent)}>
             Ends the agent for good. It holds nothing, so nothing is sold. Needs your passkey.
           </Choice>
-          <KillSwitchButton title="Kill switch: cancel and stop" onClick={() => choose("kill", agent)}>
-            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Needs your passkey.
+          <KillSwitchButton title="Kill switch: cancel and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
+            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Opens the full list to confirm with your passkey.
           </KillSwitchButton>
         </>
       )}
@@ -114,7 +125,7 @@ function AgentChoices({ agent, choose, full }: { agent: Agent; choose: (kind: Co
 }
 
 export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOpenChange: (open: boolean) => void; agentId: string | null }) {
-  const { ws, reachable, commands, send, now } = useRuntime();
+  const { ws, reachable, commands, send } = useRuntime();
   const full = useCan("stop.full");
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -132,15 +143,17 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
     node?.focus();
   };
 
-  const dispatch = (kind: CommandKind, agent: Agent | null) => {
+  const dispatch = (kind: SheetKind, agent: Agent | null) => {
     setNotice(null);
     send(kind, agent?.agent_id ?? null);
   };
 
-  const choose = (kind: CommandKind, agent: Agent | null) => {
+  const choose = (kind: SheetKind, agent: Agent | null) => {
     if (needsStepUp(kind)) setPending({ kind, agent });
     else dispatch(kind, agent);
   };
+
+  const leave = () => onOpenChange(false);
 
   const labelFor = (id: string | null) => (id ? ws.agents.find((a) => a.agent_id === id)?.label ?? "The agent" : "Account");
 
@@ -169,23 +182,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           </div>
 
           <div className="grid gap-(--section-gap) p-4">
-            {reachable ? null : (
-              <div role="alert" className="grid gap-1.5 border-t-4 border-foreground bg-muted px-4 py-3 text-foreground" data-slot="unreachable">
-                <p className="flex items-center gap-2 text-base font-bold">
-                  <Plugs className="size-4 shrink-0" aria-hidden />
-                  Cannot reach your deployment
-                </p>
-                <div className="grid gap-2 text-sm">
-                  <p>
-                    It has not answered since {clock(ws.health.deployment.as_of)}. A request from here cannot be delivered, and the screen will say so rather than show it as done.
-                  </p>
-                  <p>
-                    To stop trading now, go to the broker directly: sign in to your Alpaca paper dashboard, cancel open orders, and close positions there. Protective orders
-                    already resting at the broker stay in place until you cancel them.
-                  </p>
-                </div>
-              </div>
-            )}
+            {reachable ? null : <UnreachableAlert />}
 
             {ws.status === "loading" ? (
               <p className="bg-muted px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
@@ -197,7 +194,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                   This agent: {contextAgent.label}
                   <ModeBadge mode={contextAgent.mode} />
                 </h3>
-                <AgentChoices agent={contextAgent} choose={choose} full={full} />
+                <AgentChoices agent={contextAgent} choose={choose} leave={leave} full={full} />
               </section>
             ) : ws.agents.length > 0 ? (
               <section className="grid" aria-labelledby="stop-one-agent">
@@ -219,7 +216,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                       </span>
                     </Collapsible.Trigger>
                     <Collapsible.Panel className="pb-3">
-                      <AgentChoices agent={agent} choose={choose} full={full} />
+                      <AgentChoices agent={agent} choose={choose} leave={leave} full={full} />
                     </Collapsible.Panel>
                   </Collapsible.Root>
                 ))}
@@ -239,10 +236,11 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </Choice>
               {full ? (
                 <>
-                  <KillSwitchButton title="Stop all agents on this account" onClick={() => choose("stop_all", null)}>
-                    Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Needs your passkey.
+                  <KillSwitchButton title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
+                    Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
+                    your passkey.
                   </KillSwitchButton>
-                  <KillSwitchButton appearance="outline" title="Close everything on this account" onClick={() => choose("close_all", null)}>
+                  <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
                     <span className="grid gap-1">
                       <span>The broker&apos;s cancel-all and close-all. It:</span>
                       <span className="grid list-disc gap-0.5 pl-4 [&>span]:list-item">
@@ -253,7 +251,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
                         </span>
                         <span>ends every agent.</span>
                       </span>
-                      <span>Needs your passkey.</span>
+                      <span>Opens the full list to confirm with your passkey.</span>
                     </span>
                   </KillSwitchButton>
                 </>
@@ -266,9 +264,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               <div role="status" aria-live="polite" className="grid gap-2">
                 {notice ? <p className="bg-muted px-4 py-3 text-sm">{notice}</p> : null}
                 {commands.map((c) => (
-                  <p key={c.id} data-phase={c.phase} className="reveal border-t-2 border-foreground bg-muted px-4 py-3 text-sm">
-                    <span className="font-bold">{commandTitle(c.kind, labelFor(c.agentId))}.</span> <PhaseLine phase={c.phase} at={clock(c.recordedAt ?? now)} recorded={recordedLine(c.kind, labelFor(c.agentId))} />
-                  </p>
+                  <CommandEntry key={c.id} command={c} label={labelFor(c.agentId)} />
                 ))}
               </div>
             </section>
@@ -294,21 +290,4 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
       </Dialog.Portal>
     </Dialog.Root>
   );
-}
-
-function PhaseLine({ phase, at, recorded }: { phase: Command["phase"]; at: string; recorded: string }) {
-  switch (phase) {
-    case "sent":
-      return "Sent; waiting for the runtime to record it.";
-    case "recorded":
-      return `Recorded at ${at}. ${recorded}`;
-    case "undelivered":
-      return "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above.";
-    case "unknown":
-      return "The result is unknown; we are checking. Nothing on screen changes until the journal answers.";
-    default: {
-      const unhandled: never = phase;
-      throw new Error(`unhandled phase ${String(unhandled)}`);
-    }
-  }
 }

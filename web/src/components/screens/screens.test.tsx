@@ -5,7 +5,9 @@ import * as agentRoute from "@/app/agents/[agentId]/page";
 import * as approvalRoute from "@/app/approvals/[approvalId]/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
-import { approvalAt } from "@/lib/mock-runtime";
+import { clock, price } from "@/lib/format";
+import { PURPOSE_LABEL } from "@/lib/labels";
+import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { AgentDetailScreen } from "./agent-detail";
@@ -191,6 +193,58 @@ describe("D5 inbox and D6 request", () => {
     expect(screen.queryByText(/Output of software you selected/)).toBeNull();
     fireEvent.click(within(main()).getByRole("button", { name: "View model output" }));
     expect(within(main()).getByText(/Output of software you selected/)).toBeInTheDocument();
+  });
+
+  it("collapses only model output (D6): every other required value is on screen with it closed (§4.1)", () => {
+    request(APPROVAL_IDS.lmn);
+    const expanders = Array.from(main().querySelectorAll("[aria-expanded]"));
+    expect(expanders.map((e) => e.textContent?.trim())).toEqual(["View model output"]);
+    expect(expanders[0]).toHaveAttribute("aria-expanded", "false");
+    expect(main().querySelector("details, [hidden]")).toBeNull();
+    const approval = findApproval(buildWorkspace("approvals"), APPROVAL_IDS.lmn)!;
+    const required = [
+      `Buy ${approval.bound.qty}`,
+      approval.bound.symbol,
+      `at a limit of ${price(approval.bound.limit)}`,
+      "Order value",
+      PURPOSE_LABEL[approval.bound.purpose],
+      approval.bound.mandate_version.slice(7, 19),
+      approval.trigger,
+      "Risk impact in dollars",
+      "Combined model score, not a probability of profit",
+      approval.bound.combined_score,
+      "If you do nothing, this action is skipped.",
+      `Skipped at ${clock(approval.deadline)}`,
+      "Needs 2 approvers. Approved so far:",
+    ];
+    for (const text of required) expect(main().textContent, text).toContain(text);
+    expect(main().querySelector("[data-slot=deadline]")).toHaveTextContent(/if you do nothing \(\d+ min left\)/);
+  });
+
+  it("records with the response whether model output was opened first", () => {
+    function Responses() {
+      const { responses } = useRuntime();
+      return <output data-slot="responses" data-json={JSON.stringify(responses)} />;
+    }
+    const recordFor = (id: string) => JSON.parse(document.querySelector("[data-slot=responses]")!.getAttribute("data-json")!)[id].record;
+    const both = (id: string) => (
+      <>
+        <ApprovalRequestScreen approvalId={id} />
+        <Responses />
+      </>
+    );
+
+    const closed = renderScreen(`/approvals/${APPROVAL_IDS.btc}`, both(APPROVAL_IDS.btc), "approvals");
+    fireEvent.click(within(main()).getByRole("button", { name: "Approve" }));
+    expect(recordFor(APPROVAL_IDS.btc)).toEqual({ screen: "D6", modelOutputExpanded: false });
+    closed.unmount();
+
+    renderScreen(`/approvals/${APPROVAL_IDS.btc}`, both(APPROVAL_IDS.btc), "approvals");
+    const view = within(main()).getByRole("button", { name: "View model output" });
+    fireEvent.click(view);
+    fireEvent.click(view);
+    fireEvent.click(within(main()).getByRole("button", { name: "Skip" }));
+    expect(recordFor(APPROVAL_IDS.btc)).toEqual({ screen: "D6", modelOutputExpanded: true });
   });
 
   it("shows nothing as approved or submitted until the runtime records it", () => {
