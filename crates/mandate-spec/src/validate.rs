@@ -248,6 +248,7 @@ pub fn validate(
     document_rules(mandate, &document, &mut violations);
     condition_rules(mandate, &mut violations);
     provenance_rules(mandate, &document, context, &mut violations);
+    universe_rules(mandate, &mut violations);
     let rules = &mandate.autonomy.rules;
     let warnings = [
         (!context.eligibility_failures.is_empty(), Warning::W001),
@@ -265,6 +266,11 @@ pub fn validate(
                 .skip(1)
                 .any(|rule| rule.when.is_catch_all()),
             Warning::W005,
+        ),
+        (
+            mandate.autonomy.admission == AutonomyDecision::Auto
+                && admitting(mandate).next().is_some(),
+            Warning::W006,
         ),
     ]
     .into_iter()
@@ -593,6 +599,59 @@ fn document_rules(m: &Mandate, document: &Value, out: &mut BTreeSet<Violation>) 
     );
 }
 
+/// The signal models that admit instruments: the research agent, of which V-036 allows one (§8.4).
+fn admitting(m: &Mandate) -> impl Iterator<Item = &SignalModel> {
+    m.behavior
+        .signal_models
+        .iter()
+        .filter(|model| model.admits_instruments)
+}
+
+/// E17-1's field split (§2.3): V-003, V-034 to V-037, and V-039. Pinning the universe and running a
+/// research agent are exclusive, and an `accumulate` goal is always pinned to its one instrument.
+fn universe_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
+    let universe = &m.universe;
+    let pinned = &universe.pinned_instruments;
+    let research = &m.behavior.research;
+    if let Goal::Accumulate { instrument, .. } = &m.goal {
+        flag(
+            out,
+            !(universe.pinned
+                && pinned.iter().map(|entry| &entry.asset_id).eq([instrument])
+                && research.is_none()),
+            Violation::V003,
+        );
+    }
+    flag(out, universe.pinned == pinned.is_empty(), Violation::V034);
+    flag(
+        out,
+        u32::try_from(pinned.len()).map_or(true, |count| universe.max_instruments < count),
+        Violation::V035,
+    );
+    let admitting: Vec<&SignalModel> = admitting(m).collect();
+    flag(
+        out,
+        match admitting.as_slice() {
+            [] => research.is_some(),
+            [model] => model.id.model_type() != Some("llm") || research.is_none(),
+            _ => true,
+        },
+        Violation::V036,
+    );
+    flag(
+        out,
+        universe.pinned && !admitting.is_empty(),
+        Violation::V037,
+    );
+    flag(
+        out,
+        pinned
+            .iter()
+            .any(|entry| !class_allowed(entry.asset_class, &universe.asset_classes)),
+        Violation::V039,
+    );
+}
+
 /// V-017, V-018, and V-023, over every comparison of every rule.
 fn condition_rules(m: &Mandate, out: &mut BTreeSet<Violation>) {
     for rule in &m.autonomy.rules {
@@ -822,9 +881,33 @@ pub fn class_allowed(class: AssetClass, allowed: &BTreeSet<AssetClass>) -> bool 
 
 /// The stop distance a worst-case figure uses: the stop, plus the crypto stop-limit offset when the
 /// universe admits crypto (§4.2 W-002).
+///
+/// `None` exactly when there is no stop: protection is disabled, or its stop is null. The sum is exact
+/// (a [`Ratio`](mandate_num::Ratio) holds both operands' places), and a value it cannot hold is
+/// [`SpecError::OutOfRange`] naming the field, never a rounded distance (DEC-128 item 4).
 pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, SpecError> {
-    let _ = mandate;
-    Err(SpecError::Unimplemented)
+    let protection = &mandate.protection;
+    let stop = match (protection.enabled, &protection.stop_distance) {
+        (true, Some(stop)) => stop,
+        _ => return Ok(None),
+    };
+    let Some(offset) = crypto_offset(mandate) else {
+        return Ok(Some(stop.clone()));
+    };
+    let stop_path = "/protection/stop_distance";
+    let offset_path = "/protection/crypto_stop_limit_offset";
+    let sum = stop
+        .to_ratio()
+        .map_err(|cause| out_of_range(stop_path, cause))?
+        .checked_add(
+            offset
+                .to_ratio()
+                .map_err(|cause| out_of_range(offset_path, cause))?,
+        )
+        .map_err(|cause| out_of_range(offset_path, cause))?;
+    SchemaDec::parse(&sum.to_string(), DecGrammar::PositiveDecimal)
+        .map(Some)
+        .map_err(|_| out_of_range(offset_path, NumError::NotCanonical))
 }
 
 #[cfg(test)]

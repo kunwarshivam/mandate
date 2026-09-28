@@ -1454,6 +1454,279 @@ fn a_connection_id_is_the_schemas_id() -> Checked {
     Ok(())
 }
 
+/// A research agent's model: `llm.`, admitting, and the research envelope beside it. The registry is
+/// left out of the context these rows run in, so renaming the base's model reads as V-036 alone and
+/// never as V-007.
+const RESEARCH: &str =
+    r#"{"interval_s": 3600, "cost_cap_usd_per_day": "5", "max_revisions_per_lineage": 3}"#;
+
+fn unregistered() -> Result<ValidationContext, String> {
+    let mut ctx = context()?;
+    ctx.registry = None;
+    Ok(ctx)
+}
+
+/// The rows of the field split run with no registry, so a model's id is free to change.
+fn expect_unregistered_rows(rows: &[(&str, Owned<'_>, &[Violation])]) -> Checked {
+    let ctx = unregistered()?;
+    for (name, patches, expected) in rows {
+        let got = codes(patches, &ctx)?;
+        let wanted: BTreeSet<Violation> = expected.iter().copied().collect();
+        if got != wanted {
+            return Err(format!("{name}: expected {wanted:?}, got {got:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// E17-1's field split (§2.3): V-034, V-035, V-036, V-037, and V-039, each on both sides.
+#[test]
+fn each_universe_rule_fires_on_each_of_its_branches_and_nothing_else() -> Checked {
+    let unpinned = [
+        ("/universe/pinned", "false"),
+        ("/universe/pinned_instruments", "[]"),
+    ];
+    let llm = [
+        ("/behavior/signal_models/0/id", r#""llm.research""#),
+        ("/behavior/signal_models/0/admits_instruments", "true"),
+    ];
+    let second_llm = r#"{"id": "llm.second", "version": "1.0.0",
+      "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "params": [], "weight": "1", "max_output_age_s": 1800, "admits_instruments": true}"#;
+    let research = [("/behavior/research", RESEARCH)];
+    let join = |parts: &[&[(&'static str, &'static str)]]| -> Owned<'static> {
+        parts.iter().flat_map(|part| part.iter().copied()).collect()
+    };
+    let rows: Vec<(&str, Owned<'_>, &[Violation])> = vec![
+        ("the base, pinned to two", vec![], &[]),
+        ("unpinned and empty", join(&[&unpinned]), &[]),
+        (
+            "V-034 unpinned with instruments",
+            vec![("/universe/pinned", "false")],
+            &[Violation::V034],
+        ),
+        (
+            "V-034 pinned with none",
+            vec![("/universe/pinned_instruments", "[]")],
+            &[Violation::V034],
+        ),
+        (
+            "V-035 a ceiling below the pinned count",
+            vec![("/universe/max_instruments", "1")],
+            &[Violation::V035],
+        ),
+        (
+            "V-036 a research agent with its envelope",
+            join(&[&unpinned, &llm, &research]),
+            &[],
+        ),
+        (
+            "V-036 a research agent without its envelope",
+            join(&[&unpinned, &llm]),
+            &[Violation::V036],
+        ),
+        (
+            "V-036 an envelope without a research agent",
+            join(&[&unpinned, &research]),
+            &[Violation::V036],
+        ),
+        (
+            "V-036 an admitting model that is not llm",
+            join(&[
+                &unpinned,
+                &[("/behavior/signal_models/0/admits_instruments", "true")],
+                &research,
+            ]),
+            &[Violation::V036],
+        ),
+        (
+            "V-036 two admitting models",
+            join(&[&unpinned, &llm, &research])
+                .into_iter()
+                .chain([("/behavior/signal_models/-", second_llm)])
+                .collect(),
+            &[Violation::V036],
+        ),
+        (
+            "V-037 a pinned universe with a research agent",
+            join(&[&llm, &research]),
+            &[Violation::V037],
+        ),
+        (
+            "V-039 the last pinned class not allowed",
+            vec![("/universe/pinned_instruments/1/asset_class", r#""crypto""#)],
+            &[Violation::V039],
+        ),
+        (
+            "V-039 the first pinned class not allowed",
+            vec![("/universe/pinned_instruments/0/asset_class", r#""crypto""#)],
+            &[Violation::V039],
+        ),
+        (
+            "V-039 the same class once allowed",
+            vec![
+                ("/universe/pinned_instruments/1/asset_class", r#""crypto""#),
+                ("/universe/asset_classes", r#"["crypto", "us_equity"]"#),
+                ("/protection/crypto_stop_limit_offset", r#""0.005""#),
+            ],
+            &[],
+        ),
+    ];
+    expect_unregistered_rows(&rows)
+}
+
+/// V-003: an `accumulate` goal is pinned to exactly its instrument and has no research envelope.
+#[test]
+fn v003_pins_an_accumulator_to_its_one_instrument() -> Checked {
+    let goal = |instrument: &str| {
+        format!(
+            r#"{{"type": "accumulate", "instrument": "{instrument}", "target_qty": "10",
+              "max_avg_price": null, "max_spend_usd": "1000", "end_date": "2026-12-31",
+              "on_complete": "hold_protected"}}"#
+        )
+    };
+    let on_a = goal(ASSET_A);
+    let on_b = goal(ASSET_B);
+    let only_a = r#"[{"asset_id": "7b4a1c2e-2222-4a2b-9c3d-000000000002", "symbol": "XYZ", "asset_class": "us_equity"}]"#;
+    let only_b = r#"[{"asset_id": "7b4a1c2e-3333-4a2b-9c3d-000000000003", "symbol": "QRS", "asset_class": "us_equity"}]"#;
+    let rows: Vec<(&str, Owned<'_>, &[Violation])> = vec![
+        (
+            "pinned to its instrument",
+            vec![("/goal", &on_a), ("/universe/pinned_instruments", only_a)],
+            &[],
+        ),
+        (
+            "pinned to its instrument and another",
+            vec![("/goal", &on_a)],
+            &[Violation::V003],
+        ),
+        (
+            "pinned to its instrument, listed last of two",
+            vec![("/goal", &on_b)],
+            &[Violation::V003],
+        ),
+        (
+            "pinned to another instrument",
+            vec![("/goal", &on_a), ("/universe/pinned_instruments", only_b)],
+            &[Violation::V003],
+        ),
+        (
+            "not pinned",
+            vec![
+                ("/goal", &on_a),
+                ("/universe/pinned", "false"),
+                ("/universe/pinned_instruments", "[]"),
+            ],
+            &[Violation::V003],
+        ),
+        (
+            "pinned to its instrument with a research envelope",
+            vec![
+                ("/goal", &on_a),
+                ("/universe/pinned_instruments", only_a),
+                ("/behavior/research", RESEARCH),
+            ],
+            &[Violation::V003, Violation::V036],
+        ),
+    ];
+    expect_unregistered_rows(&rows)
+}
+
+/// W-006: `admission: auto` warns only with a research agent configured.
+#[test]
+fn w006_warns_of_auto_admission_only_with_a_research_agent() -> Checked {
+    let ctx = unregistered()?;
+    let agent = [
+        ("/universe/pinned", "false"),
+        ("/universe/pinned_instruments", "[]"),
+        ("/behavior/signal_models/0/id", r#""llm.research""#),
+        ("/behavior/signal_models/0/admits_instruments", "true"),
+        ("/behavior/research", RESEARCH),
+    ];
+    let auto = ("/autonomy/admission", r#""auto""#);
+    let with_auto: Owned<'_> = agent.iter().copied().chain([auto]).collect();
+    let rows: Vec<(&str, Owned<'_>, Vec<Warning>)> = vec![
+        ("auto with a research agent", with_auto, vec![Warning::W006]),
+        ("ask with a research agent", agent.to_vec(), vec![]),
+        ("auto with none", vec![auto], vec![]),
+    ];
+    for (name, patches, expected) in rows {
+        let report = report(&patches, &ctx)?;
+        let wanted: BTreeSet<Warning> = expected.into_iter().collect();
+        if report.warnings != wanted || !report.violations.is_empty() {
+            return Err(format!("{name}: expected {wanted:?} alone, got {report:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// The stop a worst case uses: the stop, the offset added only with crypto, none without protection,
+/// and a distance a `Ratio` cannot hold named by its field.
+#[test]
+fn the_worst_case_stop_distance_adds_the_offset_only_with_crypto() -> Checked {
+    let crypto = ("/universe/asset_classes", r#"["crypto", "us_equity"]"#);
+    let offset = ("/protection/crypto_stop_limit_offset", r#""0.005""#);
+    let disabled = [
+        ("/protection/enabled", "false"),
+        ("/protection/stop_distance", "null"),
+        ("/protection/take_profit_distance", "null"),
+    ];
+    let rows: Vec<(&str, Owned<'_>, Option<&str>)> = vec![
+        ("the base's stop", vec![], Some("0.05")),
+        ("an offset without crypto", vec![offset], Some("0.05")),
+        (
+            "the offset with crypto",
+            vec![crypto, offset],
+            Some("0.055"),
+        ),
+        (
+            "a sum past one",
+            vec![
+                crypto,
+                ("/protection/stop_distance", r#""0.9""#),
+                ("/protection/crypto_stop_limit_offset", r#""0.25""#),
+            ],
+            Some("1.15"),
+        ),
+        ("protection disabled", disabled.to_vec(), None),
+    ];
+    for (name, patches, expected) in rows {
+        let got = super::worst_case_stop_distance(&mandate(&patches)?)
+            .map_err(|e| format!("{name}: {e}"))?;
+        if got.as_ref().map(crate::SchemaDec::as_str) != expected {
+            return Err(format!("{name}: expected {expected:?}, got {got:?}"));
+        }
+    }
+    let too_precise = format!(r#""0.{}1""#, "0".repeat(24));
+    for (path, patches) in [
+        (
+            "/protection/stop_distance",
+            vec![
+                crypto,
+                offset,
+                ("/protection/stop_distance", too_precise.as_str()),
+            ],
+        ),
+        (
+            "/protection/crypto_stop_limit_offset",
+            vec![
+                crypto,
+                ("/protection/crypto_stop_limit_offset", too_precise.as_str()),
+            ],
+        ),
+    ] {
+        match super::worst_case_stop_distance(&mandate(&patches)?) {
+            Err(SpecError::OutOfRange { path: at, .. }) if at.as_str() == path => {}
+            other => {
+                return Err(format!(
+                    "{path}: expected out_of_range there, got {other:?}"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Adds one provenance entry, keeping the others, so two breakers that each state one compose.
 fn state(ctx: &mut ValidationContext, path: &str, source: Source) {
     let mut entries = ctx.provenance.entries().clone();
@@ -1478,7 +1751,7 @@ type Breaker = (
 ///
 /// V-015 and V-030 both need `end_date`, so V-030 moves the validation date instead; an invalid date has
 /// no calendar position, so with V-015 chosen V-030 cannot fire and the property drops it.
-const BREAKERS: [Breaker; 23] = [
+const BREAKERS: [Breaker; 26] = [
     (Violation::V001, &[], |c| {
         c.connection_environment = Some(Environment::Live)
     }),
@@ -1574,6 +1847,17 @@ const BREAKERS: [Breaker; 23] = [
         |_| {},
     ),
     (Violation::V024, &[], |c| c.approver_users = 0),
+    (Violation::V034, &[("/universe/pinned", "false")], |_| {}),
+    (
+        Violation::V035,
+        &[("/universe/max_instruments", "1")],
+        |_| {},
+    ),
+    (
+        Violation::V039,
+        &[("/universe/pinned_instruments/1/asset_class", r#""crypto""#)],
+        |_| {},
+    ),
     (Violation::V038, &[], |c| {
         state(c, "/connection_id", Source::PlatformProposed);
     }),

@@ -544,8 +544,9 @@ round 1), as the coordinator ruled there:
 
 From E10-1's slice-V implementation (DEC-161):
 
-- **E17-1 slice (stream F, next):** V-003, V-034 to V-037, V-039, W-006, and `worst_case_stop_distance`
-  (DEC-161 item 1). MC-V05, MC-V53 to MC-V61, MC-V64, and MC-V65 pass once it lands.
+- **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
+  `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
+  locally; a status-only PR moves them to `passing` (DEC-77 item 3).
 - **Stream H:** `ConditionField::is_unit_bounded` and `mandate-builder`'s `well_typed` omit
   `thesis_confidence`, which §6.3 types "decimal in [0, 1]"; `validate` bounds it (DEC-161 item 5), so the
   order path's re-check is looser than the load check. Fix both with the builder's
