@@ -868,13 +868,29 @@ fn oracle(steps: &[Step]) -> Expected {
         });
     let mut other_allocation_cents = 0;
     let mut claims = BTreeSet::new();
+    let working = |who: u8| -> Vec<&'static str> {
+        (0u8..4)
+            .filter(|what| {
+                last(
+                    steps,
+                    |s| matches!(s, Step::Admit { who: w, what: t, .. } if *w == who && *t == *what),
+                )
+                .and_then(|i| steps.get(i))
+                .is_some_and(|s| matches!(s, Step::Admit { admitted: true, .. }))
+            })
+            .map(instrument)
+            .collect()
+    };
     for who in 1u8..3 {
         let version = last(
             steps,
             |s| matches!(s, Step::Active { who: w, .. } if *w == who),
         );
         let flat_at = last(steps, |s| matches!(s, Step::Flat { who: w } if *w == who));
-        let Some(v) = version else { continue };
+        let Some(v) = version else {
+            claims.extend(working(who));
+            continue;
+        };
         let Some(Step::Active {
             ours, cents, pin, ..
         }) = steps.get(v)
@@ -895,17 +911,7 @@ fn oracle(steps: &[Step]) -> Expected {
         let released = retired && flat_at.zip(stop).is_some_and(|(f, s)| f > s);
         if !released {
             claims.insert(instrument(*pin));
-            for what in 0u8..4 {
-                let admitted = last(
-                    steps,
-                    |s| matches!(s, Step::Admit { who: w, what: t, .. } if *w == who && *t == what),
-                )
-                .and_then(|i| steps.get(i))
-                .is_some_and(|s| matches!(s, Step::Admit { admitted: true, .. }));
-                if admitted {
-                    claims.insert(instrument(what));
-                }
-            }
+            claims.extend(working(who));
         }
     }
     let carry_cents = steps
