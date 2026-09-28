@@ -18,11 +18,12 @@ export const PUBLIC_DIR = path.join(WEB, "public");
 export const NAVY = "#183D73";
 export const OFF_WHITE = "#F7FAFE";
 
-const FAVICON_VIEWBOX = "-40 -8 530 530";
 const FAVICON_PNG_SIZES = [16, 32, 48];
 const TILE = 1000;
-/** The mark's height on a filled tile, as a share of the tile. */
+/** The mark's height on an app icon tile, as a share of the tile. */
 const TILE_MARK_HEIGHT = 0.76;
+/** The mark's height on a favicon tile: as large as fits, leaving 1 px above and below at 16 px. */
+const FAVICON_MARK_HEIGHT = 0.875;
 /** A maskable icon's safe zone is the centred circle whose diameter is 80% of the tile. */
 const MASKABLE_SAFE_RADIUS = 0.4;
 /** Room between the mark's farthest point and the safe zone's edge. */
@@ -61,14 +62,6 @@ function bounds(points) {
 
 const round = (n) => Number(n.toFixed(4));
 
-function faviconSvg(d) {
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${FAVICON_VIEWBOX}">` +
-    `<style>path{fill:${NAVY}}@media (prefers-color-scheme:dark){path{fill:${OFF_WHITE}}}</style>` +
-    `<path fill-rule="evenodd" d="${d}"/></svg>\n`
-  );
-}
-
 /** The navy mark on an off-white square, its bounding box centred and scaled to `scale` tile units. */
 function tileSvg(d, scale) {
   const b = bounds(markPoints(d));
@@ -81,9 +74,10 @@ function tileSvg(d, scale) {
   );
 }
 
-function tileScale(d) {
+/** The scale at which the mark's height is `share` of the tile; the mark is taller than it is wide. */
+function tileScale(d, share) {
   const b = bounds(markPoints(d));
-  return (TILE * TILE_MARK_HEIGHT) / (b.maxY - b.minY);
+  return (TILE * share) / (b.maxY - b.minY);
 }
 
 /** The largest scale at which every point of the mark stays inside the maskable safe circle. */
@@ -145,8 +139,8 @@ function manifest() {
 export async function generateBrandAssets(outDir = PUBLIC_DIR) {
   const d = markPath(await readFile(MARK_SOURCE, "utf8"));
   const og = await readFile(OG_SOURCE, "utf8");
-  const favicon = faviconSvg(d);
-  const tile = tileSvg(d, tileScale(d));
+  const favicon = `${tileSvg(d, tileScale(d, FAVICON_MARK_HEIGHT))}\n`;
+  const tile = tileSvg(d, tileScale(d, TILE_MARK_HEIGHT));
   const maskable = tileSvg(d, maskableScale(d));
   const favicons = FAVICON_PNG_SIZES.map((size) => ({ size, data: png(favicon, size) }));
 

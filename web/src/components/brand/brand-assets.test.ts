@@ -95,22 +95,44 @@ describe("brand assets (npm run brand)", () => {
     expect(await readFile(MARK_SOURCE, "utf8")).toContain(`d="${MARK_PATH}"`);
   });
 
-  it("draws the favicon SVG in navy, off-white when the system is dark", async () => {
+  it("draws the favicon SVG as the navy mark on an off-white square, in every colour scheme", async () => {
     const svg = (await committed("favicon.svg")).toString("utf8");
-    expect(svg).toContain('viewBox="-40 -8 530 530"');
-    expect(svg).toContain(`path{fill:${NAVY}}`);
-    expect(svg).toContain(`@media (prefers-color-scheme:dark){path{fill:${OFF_WHITE}}}`);
+    expect(svg).toContain('viewBox="0 0 1000 1000"');
+    expect(svg).toContain(`<rect width="1000" height="1000" fill="${OFF_WHITE}"/>`);
+    expect(svg).toContain(`<path fill="${NAVY}"`);
     expect(svg).toContain(`d="${MARK_PATH}"`);
+    expect(svg).not.toMatch(/<style|prefers-color-scheme/);
   });
 
-  it.each([16, 32, 48])("renders favicon-%i.png as the navy mark on transparent", async (size) => {
+  it.each([16, 32, 48])("renders favicon-%i.png as the navy mark, as large as fits, on an opaque off-white square", async (size) => {
     const image = await png(`favicon-${size}.png`);
     expect([image.width, image.height]).toEqual([size, size]);
-    expect(image.at(0, 0)[3]).toBe(0);
-    expect(image.at(size - 1, size - 1)[3]).toBe(0);
-    const solid = pixels(image).filter(([, , p]) => p[3] === 255);
-    expect(solid.length).toBeGreaterThan(0);
-    for (const [, , p] of solid) expect(p).toEqual(opaque(NAVY));
+    for (const [x, y] of [
+      [0, 0],
+      [size - 1, 0],
+      [0, size - 1],
+      [size - 1, size - 1],
+    ])
+      expect(image.at(x, y)).toEqual(opaque(OFF_WHITE));
+    const all = pixels(image);
+    const [bg, fg] = [rgb(OFF_WHITE), rgb(NAVY)];
+    for (const [, , p] of all) {
+      expect(p[3]).toBe(255);
+      for (const c of [0, 1, 2]) expect(p[c]).toBeGreaterThanOrEqual(fg[c]);
+      for (const c of [0, 1, 2]) expect(p[c]).toBeLessThanOrEqual(bg[c]);
+    }
+    expect(all.some(([, , p]) => p.join() === opaque(NAVY).join())).toBe(true);
+    const ink = all.filter(([, , p]) => p.join() !== opaque(OFF_WHITE).join());
+    const ys = ink.map(([, y]) => y);
+    const xs = ink.map(([x]) => x);
+    const [top, bottom, left, right] = [Math.min(...ys), Math.max(...ys), Math.min(...xs), Math.max(...xs)];
+    const [below, beside] = [size - 1 - bottom, size - 1 - right];
+    for (const margin of [top, below]) {
+      expect(margin).toBeGreaterThanOrEqual(1);
+      expect(margin).toBeLessThanOrEqual(size / 16);
+    }
+    expect(Math.abs(top - below)).toBeLessThanOrEqual(1);
+    expect(Math.abs(left - beside)).toBeLessThanOrEqual(1);
   });
 
   it("packs the three favicon PNG files, smallest first, into favicon.ico", async () => {
