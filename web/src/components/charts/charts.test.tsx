@@ -92,7 +92,7 @@ describe("chart builders draw flat, solid colour", () => {
 
   it("a mandate level is a brass line with a dark brass label, the account navy, a proposal ink", () => {
     const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
-    expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mandateMarker, axisLabelColor: CHART_COLOR.mandateStrong, axisLabelTextColor: CHART_COLOR.card });
+    expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mandateMarker, axisLabelColor: CHART_COLOR.mandate, axisLabelTextColor: CHART_COLOR.mandateStrong });
     expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.lapis, axisLabelTextColor: CHART_COLOR.lapisForeground });
     expect(priceLineFor(level("proposal"))).toMatchObject({ color: CHART_COLOR.ink, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Dashed });
   });

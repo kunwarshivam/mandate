@@ -115,7 +115,7 @@ function EquityHero({
   const pct = shown ? signedPercent(change, base) : null;
 
   return (
-    <section aria-labelledby={titleId} data-slot={slot} data-scrubbing={scrubbing ? "" : undefined} className="grid content-start gap-5">
+    <section aria-labelledby={titleId} data-slot={slot} data-scrubbing={scrubbing ? "" : undefined} className="@container grid content-start gap-5">
       <div className="grid gap-1.5">
         <h2 id={titleId} className="text-sm font-medium text-muted-foreground">
           {title}

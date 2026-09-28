@@ -18,7 +18,7 @@ function useMove() {
 
 /**
  * A limit as a rail on the mandate field: usage fills in the marker colour toward the limit, a
- * strong post where the agent stops. It always sits on the mandate field, the colour of your mandate.
+ * fine post where the agent stops. It always sits on the mandate field, the colour of your mandate.
  */
 export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: ReactNode; className?: string }) {
   const share = Math.min(ratio(rail.used, rail.cap), 1);
@@ -27,19 +27,19 @@ export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: 
   return (
     <div className={cn("grid gap-1.5", className)} data-slot="limit-rail" data-over={over ? "" : undefined}>
       <div className="flex items-baseline justify-between gap-3 text-sm">
-        <span className="font-semibold">{rail.label}</span>
+        <span className="font-medium">{rail.label}</span>
         <span className="text-right font-mono tabular">
-          <span className="font-semibold">{usd(rail.used)}</span> <span className="text-mandate-muted">of {usd(rail.cap)}</span>
+          <span className="font-medium">{usd(rail.used)}</span> <span className="text-mandate-muted">of {usd(rail.cap)}</span>
         </span>
       </div>
-      <div role="img" aria-label={`${rail.label}: ${usd(rail.used)} of a ${usd(rail.cap)} limit`} className="relative h-3 bg-mandate-marker/15">
+      <div role="img" aria-label={`${rail.label}: ${usd(rail.used)} of a ${usd(rail.cap)} limit`} className="relative h-2 rounded-full bg-mandate-marker/15">
         <motion.div
-          className="absolute inset-y-0 left-0 w-full origin-left bg-mandate-marker"
+          className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-mandate-marker"
           initial={false}
           animate={{ transform: `scaleX(${share})` }}
           transition={move}
         />
-        <div className="absolute -inset-y-[3px] right-0 w-1 bg-mandate-strong" aria-hidden />
+        <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-strong" aria-hidden />
       </div>
       <p className="text-caption text-mandate-muted">
         {over ? <span className="font-semibold text-mandate-strong">Over the limit. </span> : null}
@@ -50,11 +50,11 @@ export function LimitRail({ rail, caption, className }: { rail: Rail; caption?: 
 }
 
 const TICK: Record<Level["kind"], string> = {
-  floor: "h-5 w-1",
-  rung: "h-4 w-[3px]",
-  daily: "h-4 w-[3px]",
-  high_water_mark: "h-3 w-[2px]",
-  profit_stop: "h-3 w-[2px]",
+  floor: "h-5 w-[3px]",
+  rung: "h-4 w-[2px]",
+  daily: "h-4 w-[2px]",
+  high_water_mark: "h-3 w-px",
+  profit_stop: "h-3 w-px",
 };
 
 /**
@@ -75,9 +75,9 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
   return (
     <div className="grid gap-4">
       <div className="relative h-8 overflow-hidden" aria-hidden>
-        <div className="absolute inset-x-0 top-1/2 h-0.5 bg-mandate-marker/30" />
+        <div className="absolute inset-x-0 top-1/2 h-px bg-mandate-marker/40" />
         {levels.map((l) => (
-          <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 bg-mandate-marker", TICK[l.kind])} style={{ left: pos(l.at) }} />
+          <span key={l.key} className={cn("absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-mandate-marker", TICK[l.kind])} style={{ left: pos(l.at) }} />
         ))}
         <motion.span
           className="absolute inset-0"
@@ -85,26 +85,25 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
           animate={{ transform: `translateX(${pos(equity)})` }}
           transition={move}
         >
-          <span className="absolute top-1/2 left-0 size-3.5 -translate-x-1/2 -translate-y-1/2 bg-lapis ring-2 ring-mandate" />
+          <span className="absolute top-1/2 left-0 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-lapis ring-3 ring-mandate" />
         </motion.span>
       </div>
       <ol className="grid text-sm" aria-label="Equity levels, highest first">
         {withEquity.map((row) =>
           row === "equity" ? (
-            <li key="equity" className="my-1 grid grid-cols-[7.5rem_1fr] items-baseline gap-3 bg-lapis px-2 py-2 text-lapis-foreground sm:grid-cols-[8.5rem_1fr_auto]">
-              <span className="text-right font-mono font-semibold tabular">{usd(equity)}</span>
-              <span className="font-semibold">Equity now</span>
-              <span className="hidden text-caption text-lapis-muted sm:block">Fixture value</span>
+            <li key="equity" className="my-1 grid grid-cols-[6.5rem_1fr] items-baseline gap-3 rounded-lg bg-lapis px-2.5 py-2 text-lapis-foreground">
+              <span className="text-right font-mono font-medium tabular">{usd(equity)}</span>
+              <span className="font-medium">Equity now</span>
             </li>
           ) : (
-            <li key={row.key} data-level={row.kind} className="grid grid-cols-[7.5rem_1fr] items-baseline gap-3 border-b border-mandate-strong/25 px-2 py-2 last:border-b-0 sm:grid-cols-[8.5rem_1fr_auto]">
+            <li key={row.key} data-level={row.kind} className="grid grid-cols-[6.5rem_1fr] items-baseline gap-x-3 gap-y-0.5 border-b border-mandate-strong/15 px-2.5 py-2 last:border-b-0">
               <span className="text-right font-mono tabular">{usd(row.at)}</span>
               <span className="flex items-center gap-2">
                 <span className={cn("shrink-0 bg-mandate-marker", TICK[row.kind])} aria-hidden />
                 {row.label}
-                {row.reached ? <span className="bg-ink px-1.5 field-label text-ink-foreground">Reached</span> : null}
+                {row.reached ? <span className="rounded-full bg-ink px-2 text-label text-ink-foreground">Reached</span> : null}
               </span>
-              <span className="col-start-2 text-caption text-mandate-muted sm:col-start-auto sm:text-right">{row.action}</span>
+              <span className="col-start-2 text-caption text-mandate-muted">{row.action}</span>
             </li>
           ),
         )}
@@ -114,14 +113,14 @@ export function EquityLevels({ equity, levels }: { equity: Dec; levels: Level[] 
 }
 
 /**
- * The envelope: an agent's limits in dollars on one mandate field, under the mandate's edge rule.
+ * The envelope: an agent's limits in dollars on one soft brass field, the colour of your mandate.
  * Everything inside sits directly on the field; nothing is boxed inside it.
  */
 export function Envelope({ agent, compact = false, className }: { agent: Agent; compact?: boolean; className?: string }) {
   const limits = agentLimits(agent);
   const scaled = limits.sizeFactor < ONE;
   return (
-    <section aria-labelledby={`envelope-${agent.agent_id}`} data-slot="envelope" className={cn("grid gap-5 border-t border-mandate-edge bg-mandate px-4 pt-3 pb-4 text-mandate-foreground", className)}>
+    <section aria-labelledby={`envelope-${agent.agent_id}`} data-slot="envelope" className={cn("grid gap-5 rounded-2xl bg-mandate px-5 py-5 text-mandate-foreground", className)}>
       <div className="grid gap-1">
         <h2 id={`envelope-${agent.agent_id}`} className="text-h2 text-mandate-strong">
           Your mandate
@@ -138,20 +137,20 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-mandate-muted">Largest order</dt>
-          <dd className="font-mono font-semibold tabular">
+          <dd className="font-mono font-medium tabular">
             {usd(limits.orderCap)}
-            {scaled ? <span className="ml-1.5 bg-ink px-1.5 font-sans field-label text-ink-foreground">Sizes scaled</span> : null}
+            {scaled ? <span className="ml-1.5 rounded-full bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
           </dd>
         </div>
         <div>
           <dt className="text-mandate-muted">Orders today</dt>
-          <dd className="font-mono font-semibold tabular">
+          <dd className="font-mono font-medium tabular">
             {limits.ordersToday} of {limits.ordersCap}
           </dd>
         </div>
       </dl>
       {agent.state.pending.map((p) => (
-        <p key={p.limit} className="text-sm font-semibold">
+        <p key={p.limit} className="text-sm font-medium">
           Confirming a breach of {p.limit}: {p.seconds_in_breach} s of {p.confirm_after_s} s.
         </p>
       ))}

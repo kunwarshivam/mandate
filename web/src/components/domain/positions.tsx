@@ -28,7 +28,7 @@ export function protectionText(p: Position): string {
   }
 }
 
-const TH = "py-2 pr-3 field-label";
+const TH = "pt-1 pb-2 pr-3 text-label font-normal text-muted-foreground";
 
 /** A link over its whole row or card: the row is the target, the text is the accessible name. */
 export const STRETCHED_LINK = "outline-none after:absolute after:inset-0 after:content-[''] focus-visible:after:ring-3 focus-visible:after:ring-ring focus-visible:after:ring-inset";
@@ -46,11 +46,11 @@ export function PositionsTable({
 }) {
   if (positions.length === 0) return <p className="text-sm text-muted-foreground">No positions. The agent is flat.</p>;
   return (
-    <div className="relative -mx-3 overflow-x-auto px-3 sm:-mx-4 sm:px-4">
+    <div className="relative -mx-(--page-x) overflow-x-auto px-(--page-x) lg:mx-0 lg:px-0">
       <table className="w-full min-w-[34rem] text-sm">
         <caption className="sr-only">Positions</caption>
         <thead>
-          <tr className="border-b border-foreground text-left">
+          <tr className="border-b border-border text-left">
             <th scope="col" className={TH}>Instrument</th>
             <th scope="col" className={cn(TH, "text-right")}>Quantity</th>
             <th scope="col" className={cn(TH, "text-right")}>Mark</th>
@@ -62,10 +62,10 @@ export function PositionsTable({
           {positions.map((p) => {
             const stale = staleSymbols.has(p.instrument.symbol);
             return (
-              <tr key={p.instrument.asset_id} className={cn("border-b align-top last:border-b-0", hrefFor && "relative hover:bg-muted")}>
-                <th scope="row" className="py-2.5 pr-3 text-left font-semibold">
+              <tr key={p.instrument.asset_id} className={cn("border-b border-border/70 align-top last:border-b-0", hrefFor && "group relative transition-colors duration-(--duration-hover) hover:bg-background")}>
+                <th scope="row" className="py-3 pr-3 text-left font-medium">
                   {hrefFor ? (
-                    <Link href={hrefFor(p)} className={cn("underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
+                    <Link href={hrefFor(p)} className={cn("underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
                       {p.instrument.symbol}
                     </Link>
                   ) : (
@@ -76,15 +76,15 @@ export function PositionsTable({
                     {protectionText(p)}
                   </span>
                 </th>
-                <td className="py-2.5 pr-3 text-right font-mono tabular">{quantity(p.qty)}</td>
-                <td className="py-2.5 pr-3 text-right">
+                <td className="py-3 pr-3 text-right font-mono tabular">{quantity(p.qty)}</td>
+                <td className="py-3 pr-3 text-right">
                   <span className="font-mono tabular">{price(p.mark)}</span>
                   <span className="block">
                     <AsOf at={p.mark_as_of} now={now} stale={stale} />
                   </span>
                 </td>
-                <td className="py-2.5 pr-3 text-right font-mono tabular">{usd(p.market_value)}</td>
-                <td className="py-2.5 text-right">
+                <td className="py-3 pr-3 text-right font-mono tabular">{usd(p.market_value)}</td>
+                <td className="py-3 text-right">
                   <SignedMoney value={p.unrealized_pnl} showWord={false} />
                 </td>
               </tr>
@@ -92,7 +92,9 @@ export function PositionsTable({
           })}
         </tbody>
       </table>
-      <Placeholder name="performance" className="mt-2" />
+      <p className="mt-3 flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
+        Unrealized paper P&amp;L, simulated. <Placeholder name="performance" />
+      </p>
     </div>
   );
 }
@@ -107,7 +109,7 @@ export function orderPriceText(o: AnyOrder): string {
 /** Nothing more is sent in the instrument while an order's state is unknown: the stopped treatment. */
 export function SendingStopped({ symbol }: { symbol: string }) {
   return (
-    <span data-slot="sending-stopped" className="inline-flex h-6 items-center bg-ink px-1.5 field-label text-ink-foreground">
+    <span data-slot="sending-stopped" className="inline-flex h-6 items-center rounded-full bg-ink px-2.5 text-label text-ink-foreground">
       Sending stopped in {symbol}
     </span>
   );
@@ -120,7 +122,7 @@ export function SendingStopped({ symbol }: { symbol: string }) {
 export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: { orders: AnyOrder[]; hrefFor?: (o: AnyOrder) => string; empty?: string }) {
   if (orders.length === 0) return <p className="text-sm text-muted-foreground">{empty}</p>;
   return (
-    <ul className="grid gap-(--seam)">
+    <ul className="grid">
       {orders.map((o) => {
         const unknown = o.state === "Unknown";
         const past = isPast(o);
@@ -133,12 +135,17 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
           <li
             key={o.client_order_id}
             data-state={o.state}
-            className={cn("grid gap-1 px-3 py-2.5 sm:px-4", unknown ? "bg-lapis-soft" : "bg-card", hrefFor && "relative", hrefFor && !unknown && "hover:bg-muted")}
+            className={cn(
+              "-mx-3 grid gap-1 px-3 py-3",
+              unknown ? "my-1 rounded-xl bg-lapis-soft px-4 py-4 max-sm:mx-0" : "border-b border-border/70 last:border-b-0",
+              hrefFor && "group relative",
+              hrefFor && !unknown && "transition-colors duration-(--duration-hover) hover:bg-background",
+            )}
           >
             <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-              <span className="font-semibold">
+              <span className="font-medium">
                 {hrefFor ? (
-                  <Link href={hrefFor(o)} className={cn("underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
+                  <Link href={hrefFor(o)} className={cn("underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
                     {title}
                   </Link>
                 ) : (
@@ -149,7 +156,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
               <span className="flex flex-wrap items-center gap-1.5">
                 {unknown ? <SourceTag source="account" /> : null}
                 {unknown ? <SendingStopped symbol={o.instrument.symbol} /> : null}
-                <span className={cn("inline-flex h-6 items-center px-1.5 field-label", unknown ? "bg-card ring-2 ring-foreground ring-inset" : past ? "bg-muted" : "text-muted-foreground")}>
+                <span className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : past ? "bg-background text-muted-foreground" : "bg-background text-foreground")}>
                   {ORDER_STATE_LABEL[o.state]}
                 </span>
               </span>

@@ -86,14 +86,14 @@ export function LevelLegend({ levels, offChart = [], format = usdLabel, classNam
   const all = [...levels.map((l) => ({ l, drawn: true })), ...offChart.map((l) => ({ l, drawn: false }))].sort((a, b) => b.l.price - a.l.price);
   if (all.length === 0) return null;
   return (
-    <ul data-slot="level-legend" className={cn("grid gap-2 text-sm", className)}>
+    <ul data-slot="level-legend" className={cn("grid gap-x-8 gap-y-1.5 text-caption @lg:grid-cols-2", className)}>
       {all.map(({ l, drawn }) => (
-        <li key={l.key} data-level={l.key} data-drawn={drawn} className="grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-baseline gap-2">
+        <li key={l.key} data-level={l.key} data-drawn={drawn} className={cn("grid grid-cols-[0.75rem_minmax(0,1fr)_auto] items-baseline gap-2", !drawn && "text-muted-foreground")}>
           <span aria-hidden className={cn("h-0.5 w-3 self-center rounded-full", SWATCH[l.tone])} />
           <span>
             <span className="font-medium">{l.label}</span>
             {l.meaning ? <span className="text-muted-foreground">: {l.meaning}</span> : null}
-            {drawn ? null : <span className="text-muted-foreground"> (outside the range shown)</span>}
+            {drawn ? null : <span> (outside the range shown)</span>}
           </span>
           <span className="font-mono tabular">{format(l.price)}</span>
         </li>

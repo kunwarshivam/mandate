@@ -13,12 +13,12 @@ import { AGENT_SECTIONS, agentHref } from "@/lib/screens";
 
 export function AgentNotFound() {
   return (
-    <section aria-labelledby="missing-title" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 sm:p-6">
-      <h1 id="missing-title" className="text-h1 sm:text-h1">
+    <section aria-labelledby="missing-title" className="reveal grid max-w-2xl gap-4 pt-6 sm:pt-12">
+      <h1 id="missing-title" className="text-h1">
         No agent with this ID
       </h1>
-      <p className="max-w-prose">This workspace has no agent with that ID. It may belong to another workspace.</p>
-      <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit">
+      <p className="max-w-prose text-muted-foreground">This workspace has no agent with that ID. It may belong to another workspace.</p>
+      <LinkButton href="/agents" variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         See all agents
       </LinkButton>
     </section>
@@ -28,12 +28,12 @@ export function AgentNotFound() {
 /** A record the agent does not have, with the way back to the list it would be in. */
 export function RecordNotFound({ title, text, back }: { title: string; text: string; back: { href: string; label: string } }) {
   return (
-    <section aria-labelledby="record-missing-title" data-slot="record-missing" className="reveal grid max-w-3xl gap-3 border-t border-foreground bg-muted p-4 sm:p-6">
+    <section aria-labelledby="record-missing-title" data-slot="record-missing" className="reveal grid max-w-2xl gap-4 pt-4 sm:pt-8">
       <h2 id="record-missing-title" className="text-h1">
         {title}
       </h2>
-      <p className="max-w-prose">{text}</p>
-      <LinkButton href={back.href} variant="outline" size="lg" className="h-11 w-fit">
+      <p className="max-w-prose text-muted-foreground">{text}</p>
+      <LinkButton href={back.href} variant="outline" size="lg" className="h-11 w-fit rounded-full px-5">
         {back.label}
       </LinkButton>
     </section>
@@ -68,9 +68,9 @@ export function AgentFrame({ agent, title, description, children }: { agent: Age
               type="button"
               onClick={() => window.dispatchEvent(new Event(OPEN_STOP_EVENT))}
               aria-haspopup="dialog"
-              className="press inline-flex h-11 items-center gap-2 border border-ink bg-card px-3 font-semibold text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press inline-flex h-11 items-center gap-2 rounded-full border border-ink bg-card pr-5 pl-4 text-sm font-semibold text-foreground outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <Octagon className="size-4" weight="bold" aria-hidden />
+              <Octagon className="size-4.5" weight="fill" aria-hidden />
               Stop this agent…
             </button>
           ) : null

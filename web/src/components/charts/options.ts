@@ -36,6 +36,7 @@ export const CHART_TOKEN = {
   lapis: "lapis",
   lapisSoft: "lapis-soft",
   lapisForeground: "lapis-foreground",
+  mandate: "mandate",
   mandateMarker: "mandate-marker",
   mandateStrong: "mandate-strong",
   gain: "gain",
@@ -193,7 +194,7 @@ export type Tone = "account" | "agent" | "neutral";
 /** A flat area: the fill is one colour from the line down to the axis. */
 export function areaOptions(tone: Tone): AreaSeriesPartialOptions {
   const line = tone === "account" ? CHART_COLOR.lapis : tone === "agent" ? CHART_COLOR.foreground : CHART_COLOR.mutedForeground;
-  const fill = tone === "account" ? CHART_COLOR.lapisSoft : tone === "agent" ? CHART_COLOR.background : CHART_COLOR.muted;
+  const fill = tone === "account" ? CHART_COLOR.lapisSoft : tone === "agent" ? CHART_COLOR.card : CHART_COLOR.muted;
   return {
     lineColor: line,
     lineWidth: 2,
@@ -263,11 +264,11 @@ export interface ChartLevel {
   meaning?: string;
 }
 
-/** The line and its axis label. A brass line is a mark; its label is dark brass so card text reads on it. */
+/** The line and its axis label. A brass line is a mark; its label is a pale brass tag in dark brass type. */
 function levelColours(tone: LevelTone): { line: string; label: string; text: string } {
   switch (tone) {
     case "mandate":
-      return { line: CHART_COLOR.mandateMarker, label: CHART_COLOR.mandateStrong, text: CHART_COLOR.card };
+      return { line: CHART_COLOR.mandateMarker, label: CHART_COLOR.mandate, text: CHART_COLOR.mandateStrong };
     case "account":
       return { line: CHART_COLOR.lapis, label: CHART_COLOR.lapis, text: CHART_COLOR.lapisForeground };
     case "proposal":

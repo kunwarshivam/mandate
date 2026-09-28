@@ -2,27 +2,30 @@
 
 import Link from "next/link";
 import { ArrowRight, ArrowsClockwise } from "@phosphor-icons/react";
-import { cn } from "@/lib/utils";
 import { Deadline } from "@/components/approvals/deadline";
 import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { Envelope } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
-import { MODE_FIELD } from "@/components/domain/mode";
+import { ModeBadge } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
 import { Timeline } from "@/components/domain/timeline";
 import { price, quantity, usd } from "@/lib/format";
-import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
+import { MODE_MEANING } from "@/lib/labels";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allOrders } from "@/lib/orders";
 import { AGENT_SECTIONS, type AgentSectionKey, agentHref, decisionHref, orderHref, positionHref } from "@/lib/screens";
 import { AgentFrame, AgentNotFound, useAgent } from "./agent-frame";
 import { ComingSoon } from "./coming-soon";
-import { Panel, Section, WorkspaceGate } from "./common";
+import { Section, SectionLink, WorkspaceGate } from "./common";
 import { MandateSummary } from "./mandate-summary";
+
+/** A list row that opens a record: the whole row is the target, on hairlines rather than boxes. */
+const ROW_LINK =
+  "press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring";
 
 function AgentDetail({ agentId }: { agentId: string }) {
   const { ws, now } = useRuntime();
@@ -36,45 +39,51 @@ function AgentDetail({ agentId }: { agentId: string }) {
 
   return (
     <AgentFrame agent={agent}>
-      <div className="grid grid-cols-1 gap-(--seam)">
-        <section aria-label="Mode and figures" data-mode={agent.mode} className="reveal grid grid-cols-1 gap-(--seam) md:grid-cols-[11rem_minmax(0,1fr)]">
-          <div
-            data-slot="mode-field"
-            className={cn(
-              "flex flex-wrap items-baseline gap-x-3 gap-y-1 px-3 py-2.5 transition-colors duration-(--duration-hover) sm:px-4 md:flex-col md:flex-nowrap md:items-start md:justify-end md:py-4",
-              MODE_FIELD[agent.mode],
-            )}
-          >
-            <p className="text-[1.625rem] font-semibold md:text-[2rem]">{MODE_LABEL[agent.mode]}</p>
-            <p className="text-sm font-medium">{MODE_MEANING[agent.mode]}</p>
-          </div>
-          <div className="grid gap-3 bg-card px-3 py-3 sm:px-4 sm:py-4">
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+        <div className="reveal grid min-w-0 content-start gap-6">
+          <section aria-label="Mode" data-mode={agent.mode} data-slot="mode-field" className="grid gap-2">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <ModeBadge mode={agent.mode} />
+              <span className="text-sm text-muted-foreground">{MODE_MEANING[agent.mode]}</span>
+            </p>
             {agent.startup === "reconciling" ? (
-              <p role="status" data-slot="reconciling" className="flex items-center gap-2 font-semibold">
-                <ArrowsClockwise className="size-4 shrink-0" aria-hidden />
+              <p role="status" data-slot="reconciling" className="flex items-center gap-2 text-sm font-medium">
+                <ArrowsClockwise className="size-4 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
                 Checking with the broker. Nothing is needed from you.
               </p>
             ) : null}
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-[auto_auto_auto] sm:justify-start sm:gap-x-8">
-              <div className="col-span-2 sm:col-span-1">
-                <dt className="field-label text-muted-foreground">Equity</dt>
-                <dd className="text-[2.25rem] leading-none font-semibold">
-                  <Money value={agent.state.equity} className="" />
-                </dd>
-                <dd className="text-caption text-muted-foreground">
-                  of <span className="font-mono tabular">{usd(agent.mandate.capital.allocation_usd, 0)}</span> capital
+          </section>
+          <AgentEquityChart agent={agent} />
+        </div>
+
+        <div className="grid content-start gap-(--section-gap) lg:pt-1">
+          <section aria-labelledby="figures-title" data-slot="key-figures" className="grid gap-4">
+            <h2 id="figures-title" className="text-h2">
+              Key figures
+            </h2>
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-5">
+              <div className="grid gap-1">
+                <dt className="text-sm text-muted-foreground">Capital</dt>
+                <dd className="text-figure">
+                  <Money value={agent.mandate.capital.allocation_usd} places={0} />
                 </dd>
               </div>
-              <div>
-                <dt className="field-label text-muted-foreground">Paper P&amp;L, simulated</dt>
-                <dd>
-                  <SignedMoney value={agent.pnl_total} className="font-semibold" />
+              <div className="grid gap-1">
+                <dt className="text-sm text-muted-foreground">Equity</dt>
+                <dd className="text-figure">
+                  <Money value={agent.state.equity} />
                 </dd>
               </div>
-              <div>
-                <dt className="field-label text-muted-foreground">Today</dt>
+              <div className="grid gap-1">
+                <dt className="text-sm text-muted-foreground">Paper P&amp;L, simulated</dt>
                 <dd>
-                  <SignedMoney value={agent.pnl_today} className="font-semibold" />
+                  <SignedMoney value={agent.pnl_total} className="text-figure" />
+                </dd>
+              </div>
+              <div className="grid gap-1">
+                <dt className="text-sm text-muted-foreground">Today</dt>
+                <dd>
+                  <SignedMoney value={agent.pnl_today} className="text-figure" />
                 </dd>
               </div>
             </dl>
@@ -82,50 +91,22 @@ function AgentDetail({ agentId }: { agentId: string }) {
               <Placeholder name="performance" />
               {marketStale && markAt ? <AsOf at={markAt} now={now} stale /> : null}
             </p>
-          </div>
-        </section>
-        <AgentEquityChart agent={agent} />
-      </div>
+          </section>
 
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-        <div className="grid grid-cols-1 content-start gap-(--section-gap)">
-          <Envelope agent={agent} />
-
-          <Section title="Positions">
-            <Panel>
-              <PositionsTable
-                positions={agent.positions}
-                now={now}
-                staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols}
-                hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)}
-              />
-            </Panel>
-          </Section>
-
-          <Section
-            title="Working orders"
-            action={
-              <Link href={agentHref(agent.agent_id, "orders")} className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
-                All orders
-              </Link>
-            }
-          >
-            <OrdersTable orders={agent.orders} hrefFor={(o) => orderHref(agent.agent_id, o.client_order_id)} />
-          </Section>
-        </div>
-
-        <div className="grid grid-cols-1 content-start gap-(--section-gap)">
           {open.length > 0 ? (
             <Section title="Waiting for you">
-              <ul className="grid gap-(--seam)">
+              <ul className="grid gap-2">
                 {open.map((a) => (
                   <li key={a.approval_id}>
-                    <Link href={`/approvals/${a.approval_id}`} className="press group grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-                      <span className="flex items-baseline justify-between gap-3 font-semibold">
+                    <Link
+                      href={`/approvals/${a.approval_id}`}
+                      className="press group grid gap-1.5 rounded-2xl bg-lapis-soft px-4 py-3.5 outline-none hover:bg-lapis-soft/70 focus-visible:ring-3 focus-visible:ring-ring"
+                    >
+                      <span className="flex items-baseline justify-between gap-3 font-medium">
                         <span>
                           Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
                         </span>
-                        <ArrowRight className="size-4 shrink-0 self-center" aria-hidden />
+                        <ArrowRight className="size-4 shrink-0 self-center text-lapis transition-transform duration-(--duration-hover) group-hover:translate-x-0.5" aria-hidden />
                       </span>
                       <Deadline deadline={a.deadline} now={now} className="text-muted-foreground" />
                     </Link>
@@ -134,31 +115,46 @@ function AgentDetail({ agentId }: { agentId: string }) {
               </ul>
             </Section>
           ) : null}
+        </div>
+      </div>
 
-          <Section title="Mandate">
-            <Panel>
-              <MandateSummary agent={agent} />
-            </Panel>
+      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+        <div className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap)">
+          <Section title="Positions" action={<SectionLink href={agentHref(agent.agent_id, "positions")}>All positions</SectionLink>}>
+            <PositionsTable
+              positions={agent.positions}
+              now={now}
+              staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols}
+              hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)}
+            />
           </Section>
 
-          <Section title="Gate decisions">
-            <Panel className="py-0.5 sm:py-0.5">
-              {decisions.length === 0 ? (
-                <p className="py-2.5 text-sm text-muted-foreground">No decisions yet.</p>
-              ) : (
-                <ul>
-                  {decisions.map((d) => (
-                    <GateDecisionRow key={d.event_id} decision={d} agent={agent} href={decisionHref(agent.agent_id, d.event_id)} />
-                  ))}
-                </ul>
-              )}
-            </Panel>
+          <Section title="Working orders" action={<SectionLink href={agentHref(agent.agent_id, "orders")}>All orders</SectionLink>}>
+            <OrdersTable orders={agent.orders} hrefFor={(o) => orderHref(agent.agent_id, o.client_order_id)} />
+          </Section>
+
+          <Section title="Recent decisions" action={<SectionLink href={agentHref(agent.agent_id, "decisions")}>All decisions</SectionLink>}>
+            {decisions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No decisions yet.</p>
+            ) : (
+              <ul className="grid">
+                {decisions.map((d) => (
+                  <GateDecisionRow key={d.event_id} decision={d} agent={agent} href={decisionHref(agent.agent_id, d.event_id)} />
+                ))}
+              </ul>
+            )}
+          </Section>
+        </div>
+
+        <div className="grid grid-cols-1 content-start gap-(--section-gap)">
+          <Envelope agent={agent} />
+
+          <Section title="Mandate" action={<SectionLink href={agentHref(agent.agent_id, "mandate")}>Details</SectionLink>}>
+            <MandateSummary agent={agent} />
           </Section>
 
           <Section title="Activity">
-            <Panel>
-              <Timeline events={ws.timeline[agent.agent_id] ?? []} today={ws.now.slice(0, 10)} />
-            </Panel>
+            <Timeline events={ws.timeline[agent.agent_id] ?? []} today={ws.now.slice(0, 10)} />
           </Section>
         </div>
       </div>
@@ -177,13 +173,13 @@ export function AgentDetailScreen({ agentId }: { agentId: string }) {
 function AgentApprovals({ agent }: { agent: Agent }) {
   const { ws, now } = useRuntime();
   const all = ws.approvals.filter((a) => a.agent_id === agent.agent_id).map((a) => approvalAt(a, now));
-  if (all.length === 0) return <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">No requests from this agent.</p>;
+  if (all.length === 0) return <p className="text-muted-foreground">No requests from this agent.</p>;
   return (
-    <ul className="grid gap-(--seam)">
+    <ul className="grid divide-y divide-border/70">
       {all.map((a) => (
         <li key={a.approval_id}>
-          <Link href={`/approvals/${a.approval_id}`} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-            <span className="flex items-baseline justify-between gap-3 font-semibold">
+          <Link href={`/approvals/${a.approval_id}`} className={ROW_LINK}>
+            <span className="flex items-baseline justify-between gap-3 font-medium">
               <span>
                 Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
               </span>
@@ -224,14 +220,12 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
     case "positions":
       return (
         <Section title="Positions">
-          <Panel>
             <PositionsTable
                 positions={agent.positions}
                 now={now}
                 staleSymbols={marketStale ? new Set(agent.positions.map((p) => p.instrument.symbol)) : staleSymbols}
                 hrefFor={(p) => positionHref(agent.agent_id, p.instrument.asset_id)}
               />
-          </Panel>
         </Section>
       );
     case "orders":
@@ -244,17 +238,15 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       const decisions = ws.decisions.filter((d) => d.agent_id === agent.agent_id);
       return (
         <Section title="Gate decisions">
-          <Panel className="py-0.5 sm:py-0.5">
             {decisions.length === 0 ? (
-              <p className="py-2.5 text-sm text-muted-foreground">No decisions yet.</p>
+              <p className="text-sm text-muted-foreground">No decisions yet.</p>
             ) : (
-              <ul>
+              <ul className="grid">
                 {decisions.map((d) => (
                   <GateDecisionRow key={d.event_id} decision={d} agent={agent} href={decisionHref(agent.agent_id, d.event_id)} />
                 ))}
               </ul>
             )}
-          </Panel>
         </Section>
       );
     }
@@ -270,26 +262,20 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
           <Envelope agent={agent} />
           <Section
             title="Mandate"
-            action={
-              <Link href={agentHref(agent.agent_id, "mandate/versions")} className="text-sm font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
-                Versions
-              </Link>
-            }
+            action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}
           >
-            <Panel>
               <MandateSummary agent={agent} />
-            </Panel>
           </Section>
         </div>
       );
     case "prove":
       return (
         <Section title="Prove">
-          <ul className="grid gap-(--seam)">
+          <ul className="grid divide-y divide-border/70">
             {AGENT_SECTIONS.filter((s) => s.parent === "prove").map((s) => (
               <li key={s.key}>
-                <Link href={agentHref(agent.agent_id, s.key)} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
-                  <span className="flex items-center justify-between gap-3 font-semibold">
+                <Link href={agentHref(agent.agent_id, s.key)} className={ROW_LINK}>
+                  <span className="flex items-center justify-between gap-3 font-medium">
                     {s.label}
                     <ArrowRight className="size-4 shrink-0" aria-hidden />
                   </span>
@@ -303,9 +289,7 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
     case "activity":
       return (
         <Section title="Activity">
-          <Panel>
             <Timeline events={ws.timeline[agent.agent_id] ?? []} today={ws.now.slice(0, 10)} />
-          </Panel>
         </Section>
       );
     case "mandate/versions":
