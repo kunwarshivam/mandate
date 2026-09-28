@@ -43,7 +43,7 @@
   --color-kumo-brand-hover: var(--lapis-strong);
   --color-kumo-line: var(--border);
   --color-kumo-hairline: var(--border);
-  --color-kumo-focus: var(--lapis);
+  --color-kumo-focus: var(--lapis-line);
   --color-kumo-shadow-edge: var(--border);
   --color-kumo-shadow-drop: transparent;
   --color-kumo-arrow-edge: var(--border);

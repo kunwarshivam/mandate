@@ -49,7 +49,7 @@ export function TabNav({ approvals }: { approvals: number }) {
               {active ? (
                 <motion.span
                   layoutId="tab-pill"
-                  className="absolute inset-0 rounded-full bg-lapis-soft"
+                  className="absolute inset-0 rounded-full bg-lapis-soft ring-1 ring-inset ring-lapis-line"
                   transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
                   aria-hidden
                 />

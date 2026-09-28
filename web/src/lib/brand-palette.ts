@@ -1,11 +1,11 @@
-/** The founder's "navy and brass" palette (DEC-202). `scripts/brand-assets.mjs` uses the same values. */
+/** The founder's "ink and gold" palette (DEC-202). `scripts/brand-assets.mjs` uses the same values. */
 export const BRAND_PALETTE = [
-  { name: "Navy", hex: "#183D73", role: "The brand; the mark, always on a light surface" },
-  { name: "Brass", hex: "#AC7D1B", role: "The one accent: rules, borders, large type. Never body text" },
-  { name: "Dark brass", hex: "#634606", role: "Brass as text, and text on the brass tint" },
-  { name: "Brass tint", hex: "#FDF1DC", role: "A brass notice field" },
-  { name: "Slate ink", hex: "#181C21", role: "Text" },
-  { name: "Off-white", hex: "#F7FAFE", role: "The page; the tile behind the app icons and the share image" },
+  { name: "Navy", hex: "#111417", role: "Ink: the brand, text, and the mark, always on a light surface" },
+  { name: "Brass", hex: "#D8A93B", role: "Gold: the one accent, for rules, fills and markers. Never body text" },
+  { name: "Dark brass", hex: "#8A600A", role: "Dark gold: gold as text, and text on the gold tint" },
+  { name: "Brass tint", hex: "#FDF3D9", role: "Gold tint: a notice field" },
+  { name: "Slate ink", hex: "#111417", role: "Text" },
+  { name: "Off-white", hex: "#FDFCFA", role: "The page; the tile behind the app icons and the share image" },
 ] as const;
 
 export type BrandColorName = (typeof BRAND_PALETTE)[number]["name"];

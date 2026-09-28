@@ -63,7 +63,7 @@ export function RangePicker<T extends string>({
               <motion.span
                 layoutId={pill}
                 aria-hidden
-                className="absolute inset-0 rounded-full bg-lapis-soft"
+                className="absolute inset-0 rounded-full bg-lapis-soft ring-1 ring-inset ring-lapis-line"
                 transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
               />
             ) : null}
@@ -76,8 +76,8 @@ export function RangePicker<T extends string>({
 }
 
 const SWATCH = {
-  mandate: "bg-mandate-marker",
-  account: "bg-lapis",
+  mandate: "bg-muted-foreground",
+  account: "bg-lapis-line",
   proposal: "bg-ink",
 } as const;
 

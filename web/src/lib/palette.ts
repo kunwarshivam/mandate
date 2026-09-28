@@ -192,11 +192,54 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   "loss-cvd-soft": "cvd-orange-100",
 };
 
+/** Ink and gold: the values `globals.css` writes, which take precedence over the ramp steps above. */
+export const INK_AND_GOLD: Record<TokenName, string> = {
+  background: "oklch(0.975 0.004 85)",
+  card: "oklch(0.992 0.003 85)",
+  muted: "oklch(0.91 0.006 85)",
+  border: "oklch(0.91 0.006 85)",
+  foreground: "oklch(0.19 0.008 255)",
+  "muted-foreground": "oklch(0.43 0.01 255)",
+  primary: "oklch(0.19 0.008 255)",
+  "primary-foreground": "oklch(0.992 0.003 85)",
+  lapis: "oklch(0.19 0.008 255)",
+  "lapis-foreground": "oklch(0.992 0.003 85)",
+  "lapis-muted": "oklch(0.91 0.006 85)",
+  "lapis-soft": "oklch(0.965 0.035 90)",
+  "lapis-strong": "oklch(0.43 0.01 255)",
+  "lapis-line": "oklch(0.66 0.13 80)",
+  mandate: "oklch(0.965 0.035 90)",
+  "mandate-foreground": "oklch(0.19 0.008 255)",
+  "mandate-muted": "oklch(0.43 0.01 255)",
+  "mandate-strong": "oklch(0.52 0.105 78)",
+  "mandate-marker": "oklch(0.76 0.135 85)",
+  "mandate-edge": "oklch(0.76 0.135 85)",
+  "mandate-soft": "oklch(0.965 0.035 90)",
+  selection: "oklch(0.965 0.035 90)",
+  ink: "oklch(0.19 0.008 255)",
+  "ink-foreground": "oklch(0.992 0.003 85)",
+  "ink-line": "oklch(0.43 0.01 255)",
+  crimson: "oklch(0.44 0.17 27)",
+  "crimson-foreground": "oklch(0.992 0.003 85)",
+  gain: "oklch(0.53 0.13 155)",
+  loss: "oklch(0.56 0.18 25)",
+  warning: "oklch(0.415 0.087 70)",
+  info: "oklch(0.43 0.01 255)",
+  "gain-soft": "oklch(0.962 0.017 155)",
+  "loss-soft": "oklch(0.962 0.017 25)",
+  "warning-soft": "oklch(0.962 0.017 70)",
+  "info-soft": "oklch(0.975 0.004 85)",
+  "gain-cvd": "oklch(0.415 0.087 245)",
+  "loss-cvd": "oklch(0.415 0.087 55)",
+  "gain-cvd-soft": "oklch(0.962 0.017 245)",
+  "loss-cvd-soft": "oklch(0.962 0.017 55)",
+};
+
 export const PALETTE: Palette = {
-  name: "Navy and brass",
-  summary: "Navy for the account, muted brass for your mandate: a pale brass panel under a brass rule, dark brass labels.",
+  name: "Ink and gold",
+  summary: "Ink for text and actions, gold for your mandate and the account's line: a pale gold panel, gold markers, dark gold labels.",
   hatch: { ref: "lapis", alpha: 0.3 },
-  tokens: Object.fromEntries(TOKEN_NAMES.map((n) => [n, refValue(TOKEN_REFS[n])])) as Record<TokenName, TokenValue>,
+  tokens: Object.fromEntries(TOKEN_NAMES.map((n) => [n, { ...refValue(TOKEN_REFS[n]), value: INK_AND_GOLD[n] }])) as Record<TokenName, TokenValue>,
 };
 
 export function hatchInk(palette: Palette = PALETTE): string {

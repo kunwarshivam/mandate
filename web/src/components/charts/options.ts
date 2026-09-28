@@ -33,7 +33,7 @@ export const CHART_TOKEN = {
   muted: "muted",
   mutedForeground: "muted-foreground",
   border: "border",
-  lapis: "lapis",
+  lapis: "lapis-line",
   lapisSoft: "lapis-soft",
   lapisForeground: "lapis-foreground",
   mandate: "mandate",
@@ -268,9 +268,9 @@ export interface ChartLevel {
 function levelColours(tone: LevelTone): { line: string; label: string; text: string } {
   switch (tone) {
     case "mandate":
-      return { line: CHART_COLOR.mandateMarker, label: CHART_COLOR.mandate, text: CHART_COLOR.mandateStrong };
+      return { line: CHART_COLOR.mutedForeground, label: CHART_COLOR.mandate, text: CHART_COLOR.mandateStrong };
     case "account":
-      return { line: CHART_COLOR.lapis, label: CHART_COLOR.lapis, text: CHART_COLOR.lapisForeground };
+      return { line: CHART_COLOR.lapis, label: CHART_COLOR.ink, text: CHART_COLOR.inkForeground };
     case "proposal":
       return { line: CHART_COLOR.ink, label: CHART_COLOR.ink, text: CHART_COLOR.inkForeground };
     default: {
@@ -287,7 +287,7 @@ export function priceLineFor(level: ChartLevel, labelled = true): CreatePriceLin
     price: level.price,
     color: line,
     lineWidth: 1,
-    lineStyle: level.tone === "proposal" ? LineStyle.Dashed : LineStyle.Solid,
+    lineStyle: level.tone === "account" ? LineStyle.Solid : LineStyle.Dashed,
     lineVisible: true,
     axisLabelVisible: labelled,
     axisLabelColor: label,
