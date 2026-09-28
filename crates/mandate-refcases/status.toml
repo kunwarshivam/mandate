@@ -200,3 +200,27 @@
 'MC-T03' = { status = "passing", story = "E6-4" }
 'MC-T04' = { status = "passing", story = "E6-4" }
 'MC-T05' = { status = "passing", story = "E6-4" }
+
+# Family P (stream F, E10-1 slice P; DEC-77 item 3, DEC-128 item 30).
+'MC-P01' = { status = "passing", story = "E10-1" }
+'MC-P02' = { status = "passing", story = "E10-1" }
+'MC-P03' = { status = "passing", story = "E10-1" }
+'MC-P04' = { status = "passing", story = "E10-1" }
+'MC-P05' = { status = "passing", story = "E10-1" }
+'MC-P06' = { status = "passing", story = "E10-1" }
+'MC-P07' = { status = "passing", story = "E10-1" }
+'MC-P08' = { status = "passing", story = "E10-1" }
+'MC-P09' = { status = "passing", story = "E10-1" }
+'MC-P10' = { status = "passing", story = "E10-1" }
+'MC-P11' = { status = "passing", story = "E10-1" }
+'MC-P12' = { status = "passing", story = "E10-1" }
+'MC-P13' = { status = "passing", story = "E10-1" }
+'MC-P14' = { status = "passing", story = "E10-1" }
+'MC-P15' = { status = "passing", story = "E10-1" }
+'MC-P16' = { status = "passing", story = "E10-1" }
+'MC-P17' = { status = "passing", story = "E10-1" }
+'MC-P18' = { status = "passing", story = "E10-1" }
+'MC-P19' = { status = "passing", story = "E10-1" }
+'MC-P20' = { status = "passing", story = "E10-1" }
+'MC-P21' = { status = "passing", story = "E10-1" }
+'MC-P22' = { status = "passing", story = "E10-1" }
