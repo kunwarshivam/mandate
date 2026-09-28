@@ -205,7 +205,7 @@ fn unrepresentable(what: &'static str) -> ApprovalError {
     ApprovalError::Unrepresentable { what }
 }
 
-fn text(s: &str) -> Value {
+pub(crate) fn text(s: &str) -> Value {
     Value::Str(s.to_owned())
 }
 
@@ -215,7 +215,7 @@ fn int(n: u64) -> Result<Value, ApprovalError> {
         .ok_or_else(|| unrepresentable("integer"))
 }
 
-fn object<const N: usize>(members: [(&str, Value); N]) -> Result<Value, ApprovalError> {
+pub(crate) fn object<const N: usize>(members: [(&str, Value); N]) -> Result<Value, ApprovalError> {
     members
         .into_iter()
         .map(|(k, v)| Key::new(k).map(|k| (k, v)))

@@ -6,6 +6,7 @@ use mandate_num::Price;
 use crate::ApprovalError;
 use crate::admit::Request;
 use crate::content::BoundAction;
+use crate::drift::within_band;
 
 /// The effective mode this step applies. Anything stricter than `normal` skips.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,9 +77,47 @@ pub enum Revalidation {
 
 /// Checks 8 to 12 in order, for a grant [`crate::admit`] admitted in the same step.
 ///
+/// The act carries the bound order unchanged; nothing here re-prices or re-sizes it (EI-4).
+///
 /// # Errors
-/// [`ApprovalError::Unimplemented`] until E8-3.
+/// None: every input has an answer, and drift that cannot be computed is outside the band. The
+/// `Result` is the stub API's shape.
 pub fn revalidate(request: &Request, now: &Current) -> Result<Revalidation, ApprovalError> {
-    let _ = (request, now);
-    Err(ApprovalError::Unimplemented { story: "E8-3" })
+    let bound = &request.content.bound;
+    let skip = if now.mandate_version != bound.mandate_version {
+        Some(SkipReason::VersionChanged)
+    } else if now.mode != ModeNow::Normal {
+        Some(SkipReason::Mode)
+    } else if now.instrument_restricted || !now.in_working_universe {
+        Some(SkipReason::InstrumentRestricted)
+    } else if let Some(reason) = reclassified(&now.classification, &bound.decided_by) {
+        Some(reason)
+    } else if let DryRun::Deny { reason } = &now.dry_run {
+        Some(SkipReason::Gate {
+            reason: reason.clone(),
+        })
+    } else if !within_band(
+        bound.reference_mark.as_ref().map(|m| m.price),
+        now.mark_now,
+        bound.asset_class,
+    )? {
+        Some(SkipReason::Drift)
+    } else {
+        None
+    };
+    Ok(skip.map_or_else(
+        || Revalidation::Act(GrantedOrder(bound.clone())),
+        Revalidation::Skip,
+    ))
+}
+
+/// Check 10: `deny` is never overridden, and an `ask` by another trigger is a question the owner
+/// has not seen (DEC-156 item 4).
+fn reclassified(now: &Classification, bound_trigger: &str) -> Option<SkipReason> {
+    match now {
+        Classification::Auto => None,
+        Classification::Ask { decided_by } if decided_by == bound_trigger => None,
+        Classification::Ask { .. } => Some(SkipReason::ReclassifiedOtherTrigger),
+        Classification::Deny => Some(SkipReason::ReclassifiedDeny),
+    }
 }
