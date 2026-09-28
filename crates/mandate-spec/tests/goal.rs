@@ -177,11 +177,12 @@ fn the_five_reference_goals_finish_for_the_reason_section_three_one_gives() {
 }
 
 /// A remainder of exactly one increment is not below one increment, and neither is remaining spend of
-/// exactly the minimum order.
+/// exactly the minimum order; one unit less of each is.
 ///
 /// Both boundaries are `<`, not `<=`: §3.1 says "below one increment" and "below the minimum order".
 /// The reference cases sit either side of each boundary but on neither, so a `<=` would pass all five
-/// while finishing every goal one order early.
+/// while finishing every goal one order early. The far side of each boundary is asserted too, so no
+/// constant answer passes this test (the #260 review's ruling, #240's standard).
 #[test]
 #[ignore = "pending E6-4"]
 fn a_remainder_of_exactly_one_increment_or_one_minimum_order_is_still_running() {
@@ -204,6 +205,32 @@ fn a_remainder_of_exactly_one_increment_or_one_minimum_order_is_still_running() 
         GoalStatus::Running,
         "1.00 of spend remains, exactly the minimum order"
     );
+    assert_eq!(
+        status(
+            &goal,
+            &inputs("2026-09-21T15:00:00.000000000Z", "0.14991", "8300")
+        )
+        .expect("a status"),
+        done(
+            GoalReason::TargetQty,
+            OnComplete::HoldProtected,
+            StopReason::GoalComplete
+        ),
+        "0.00009 remains, below one 0.0001 increment"
+    );
+    assert_eq!(
+        status(
+            &goal,
+            &inputs("2026-09-21T15:00:00.000000000Z", "0.14", "8999.01")
+        )
+        .expect("a status"),
+        done(
+            GoalReason::MaxSpend,
+            OnComplete::HoldProtected,
+            StopReason::GoalComplete
+        ),
+        "0.99 of spend remains, below the 1.00 minimum order"
+    );
 }
 
 /// When both the target and the spend are exhausted at once, the reason is `target_qty`.
@@ -211,7 +238,8 @@ fn a_remainder_of_exactly_one_increment_or_one_minimum_order_is_still_running() 
 /// §3.1 lists the quantity conditions before the spend one, and the journal carries exactly one reason,
 /// so the order has to be settled somewhere; DEC-128 item 26 records it. No reference case has both
 /// true, which is why this is stated here rather than left to whichever branch an implementation
-/// happens to test first.
+/// happens to test first. The spend alone and neither are asserted beside it, so no constant answer
+/// passes this test.
 #[test]
 #[ignore = "pending E6-4"]
 fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
@@ -229,6 +257,28 @@ fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
         ),
         "the target is reached and the spend is exhausted; §3.1 lists the target first"
     );
+    assert_eq!(
+        status(
+            &goal,
+            &inputs("2026-09-21T15:00:00.000000000Z", "0.14", "8999.5")
+        )
+        .expect("a status"),
+        done(
+            GoalReason::MaxSpend,
+            OnComplete::HoldProtected,
+            StopReason::GoalComplete
+        ),
+        "only the spend is exhausted, so it is the reason"
+    );
+    assert_eq!(
+        status(
+            &goal,
+            &inputs("2026-09-21T15:00:00.000000000Z", "0.14", "8300")
+        )
+        .expect("a status"),
+        GoalStatus::Running,
+        "neither is exhausted"
+    );
 }
 
 /// The remaining quantity is also done when what is left is worth less than the minimum order.
@@ -236,7 +286,8 @@ fn the_target_is_the_reason_when_the_target_and_the_spend_run_out_together() {
 /// §3.1 gives two quantity conditions, "below one increment" **or** "below the minimum order", and the
 /// second needs the ask to evaluate. Here 0.0000001 units at 55000 is 0.0055, under the 1.00 minimum,
 /// while the increment is set small enough that the first condition does not fire — so the goal can only
-/// be done by the second, and only by reading the ask.
+/// be done by the second, and only by reading the ask. A remainder worth just over the minimum is
+/// asserted beside it, so no constant answer passes this test.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
@@ -252,6 +303,12 @@ fn a_remainder_worth_less_than_the_minimum_order_finishes_the_goal() {
             StopReason::GoalComplete
         ),
         "0.0000001 units at 55000 is 0.0055, below the 1.00 minimum order, though above one increment"
+    );
+    dust.position_qty = Qty::parse("0.1499818").expect("a quantity");
+    assert_eq!(
+        status(&goal, &dust).expect("a status"),
+        GoalStatus::Running,
+        "0.0000182 units at 55000 is 1.001, just over the 1.00 minimum order"
     );
 }
 
@@ -361,6 +418,9 @@ fn a_profit_stop_is_the_risk_states_to_confirm_but_its_end_date_is_not() {
 /// The name says `Qty` and not "no type", which round 2 was right to flag: `Usd` holds 28 places, so ten
 /// places is only unholdable by the type §3.1's quantity comparison needs. A test name that overstates
 /// what it proves is the very thing round 1 found here.
+///
+/// A nine-place `target_qty` is asserted beside it and must be answered, so a constant error passes this
+/// test no more than a constant status does.
 #[test]
 #[ignore = "pending E6-4"]
 fn a_target_quantity_a_qty_cannot_hold_is_out_of_range_and_never_a_running_goal() {
@@ -378,6 +438,17 @@ fn a_target_quantity_a_qty_cannot_hold_is_out_of_range_and_never_a_running_goal(
         path.as_str(),
         "/goal/target_qty",
         "the error names the field that could not be held"
+    );
+
+    let nine_places = accumulator(&[("/goal/target_qty", Some(s("0.123456789")))]);
+    assert_eq!(
+        status(
+            &nine_places,
+            &inputs("2026-09-21T15:00:00.000000000Z", "0.1", "5000")
+        )
+        .expect("a nine-place target_qty is one a Qty holds"),
+        GoalStatus::Running,
+        "0.023456789 remains of a target a Qty holds exactly"
     );
 }
 
