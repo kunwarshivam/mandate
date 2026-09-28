@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use mandate_accounting::InstrumentId;
 use mandate_num::{Qty, Rounding, SignedQty, Usd};
-use mandate_time::Date;
 
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
@@ -51,7 +50,6 @@ pub struct ExecutorState {
     pub(crate) protection: BTreeMap<InstrumentId, Protection>,
     pub(crate) unprotected: Vec<UnprotectedInterval>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
-    pub(crate) unattributed: BTreeMap<ClientOrderId, UnattributedLeg>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -164,7 +162,6 @@ impl ExecutorState {
             protection: BTreeMap::new(),
             unprotected: Vec::new(),
             copied: BTreeMap::new(),
-            unattributed: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
@@ -436,17 +433,6 @@ impl ExecutorState {
     }
 }
 
-/// A protective leg the broker created that DEC-160's rule could not attribute: kept by its own
-/// `client_order_id` until it is attributed or gone, so the exit sequences and an agent-scoped kill
-/// switch can cancel it by id (trading-domain spec §5.4, §5.5), and its instrument holds openings
-/// meanwhile. A reconciliation establishes its presence, never its owner.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct UnattributedLeg {
-    pub(crate) instrument: InstrumentId,
-    pub(crate) covered: Qty,
-    pub(crate) created_on: Option<Date>,
-}
-
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
 /// on the account — and the only one an owner acknowledgment of that subject lifts (§11).
 pub(crate) fn restriction_for(subject: &str) -> String {
@@ -525,7 +511,7 @@ mod tests {
             Order {
                 client_order_id: id("md-a"),
                 intent_id: None,
-                agent: AgentId("agent-a".to_owned()),
+                agent: Some(AgentId("agent-a".to_owned())),
                 instrument: instrument.clone(),
                 side: Side::Buy,
                 qty: Qty::parse("1").ok()?,

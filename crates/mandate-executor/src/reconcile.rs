@@ -435,7 +435,7 @@ fn agents(state: &ExecutorState, instrument: Option<&InstrumentId>) -> Vec<Strin
         .orders
         .values()
         .filter(|order| instrument.is_none_or(|wanted| &order.instrument == wanted))
-        .map(|order| order.agent.0.clone())
+        .filter_map(|order| order.agent.as_ref().map(|agent| agent.0.clone()))
         .chain(
             instrument
                 .is_none()
@@ -478,7 +478,7 @@ fn restrict(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use mandate_accounting::{
         AssetClass, Config, CryptoFees, EquityFees, InstrumentId, Side, TafCapBasis,
     };
@@ -497,23 +497,24 @@ mod tests {
     use crate::step::handle;
     use crate::types::{
         AccountRef, AccountScope, AccountState, ActivityCursor, AgentId, BrokerAccount,
-        BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate, DifferenceKind,
-        Effect, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody, IntentHandoff,
-        MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq, WorkspaceId,
-        WriterEpoch,
+        BrokerOrder, BrokerOutcome, BrokerPosition, BrokerRequest, BrokerSnapshot, BrokerUpdate,
+        DifferenceKind, Effect, EventId, ExecutorConfig, ExitTier, FoldedEvent, Input, IntentBody,
+        IntentHandoff, MandateVersion, Mode, Order, OrderState, Purpose, ReconcileReason, Seq,
+        WorkspaceId, WriterEpoch,
     };
 
-    /// Ids derived from the epoch, the head and the ordinal, as a production id generator does.
-    struct Ids;
+    /// Ids derived from the epoch, the head and the ordinal, as a production id generator does,
+    /// and alphanumeric like its, so a protective order can be named for one (§2.3).
+    pub(crate) struct Ids;
 
     impl IdGen for Ids {
         fn event_id(&self, epoch: WriterEpoch, head: Seq, ordinal: u32) -> EventId {
-            EventId(format!("e-{}-{}-{ordinal}", epoch.0, head.0))
+            EventId(format!("e{}h{}o{ordinal}", epoch.0, head.0))
         }
     }
 
     /// A mandate covering everything, and whole-share equities.
-    struct Everything;
+    pub(crate) struct Everything;
 
     impl MandateView for Everything {
         fn version(&self, _agent: &AgentId) -> Option<MandateVersion> {
@@ -543,7 +544,7 @@ mod tests {
         }
     }
 
-    fn executor_config() -> ExecutorConfig {
+    pub(crate) fn executor_config() -> ExecutorConfig {
         ExecutorConfig {
             max_intent_age_s: 120,
             unknown_absent_lookups: 3,
@@ -558,7 +559,7 @@ mod tests {
         }
     }
 
-    fn fees() -> Result<Config, ExecutorError> {
+    pub(crate) fn fees() -> Result<Config, ExecutorError> {
         let date = |raw: &str| Date::parse(raw).map_err(ExecutorError::from);
         Ok(Config {
             equities: EquityFees {
@@ -576,7 +577,7 @@ mod tests {
         })
     }
 
-    fn aapl() -> Result<InstrumentId, ExecutorError> {
+    pub(crate) fn aapl() -> Result<InstrumentId, ExecutorError> {
         Ok(InstrumentId::new("AAPL")?)
     }
 
@@ -596,7 +597,7 @@ mod tests {
         })
     }
 
-    fn snapshot(reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+    pub(crate) fn snapshot(reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
         Ok(BrokerSnapshot {
             open_orders: Vec::new(),
             positions: Vec::new(),
@@ -625,14 +626,14 @@ mod tests {
 
     /// One executor over the journal it writes: every draft `handle` answers is committed and
     /// folded back, in order, as the shell does (journal spec §5.2).
-    struct Executor {
-        state: ExecutorState,
+    pub(crate) struct Executor {
+        pub(crate) state: ExecutorState,
         journal: Vec<FoldedEvent>,
         epoch: u64,
     }
 
     impl Executor {
-        fn opened(ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+        pub(crate) fn opened(ports: &Ports<'_>) -> Result<Self, ExecutorError> {
             let mut executor = Self {
                 state: ExecutorState::new(AccountScope {
                     account: AccountRef("acct-1".to_owned()),
@@ -649,7 +650,11 @@ mod tests {
             Ok(executor)
         }
 
-        fn commit_one(&mut self, event_type: &str, payload: Value) -> Result<(), ExecutorError> {
+        pub(crate) fn commit_one(
+            &mut self,
+            event_type: &str,
+            payload: Value,
+        ) -> Result<(), ExecutorError> {
             let seq = self.state.account_head().0.saturating_add(1);
             let event = FoldedEvent {
                 stream: self.state.account_stream(),
@@ -695,12 +700,16 @@ mod tests {
             Ok(effects)
         }
 
-        fn run(&mut self, input: Input, ports: &Ports<'_>) -> Result<Vec<Effect>, ExecutorError> {
+        pub(crate) fn run(
+            &mut self,
+            input: Input,
+            ports: &Ports<'_>,
+        ) -> Result<Vec<Effect>, ExecutorError> {
             self.run_keeping(input, ports, usize::MAX)
         }
 
         /// A crash and a restart: a new process folds the same journal and takes a new epoch.
-        fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
+        pub(crate) fn restarted(&self, ports: &Ports<'_>) -> Result<Self, ExecutorError> {
             let mut next = Self {
                 state: ExecutorState::new(AccountScope {
                     account: AccountRef("acct-1".to_owned()),
@@ -717,7 +726,10 @@ mod tests {
             Ok(next)
         }
 
-        fn snapshot(&self, reason: ReconcileReason) -> Result<BrokerSnapshot, ExecutorError> {
+        pub(crate) fn snapshot(
+            &self,
+            reason: ReconcileReason,
+        ) -> Result<BrokerSnapshot, ExecutorError> {
             Ok(BrokerSnapshot {
                 taken_at_head: self.state.account_head(),
                 ..snapshot(reason)?
@@ -725,7 +737,15 @@ mod tests {
         }
     }
 
-    fn drafted(effects: &[Effect]) -> Vec<&str> {
+    /// What a test expected and did not find. Never `Unimplemented`, whose story `ci pending`
+    /// reads as a stub (DEC-137).
+    pub(crate) fn missing(what: &str) -> ExecutorError {
+        ExecutorError::NonCanonicalPayload {
+            field: format!("expected {what}"),
+        }
+    }
+
+    pub(crate) fn drafted(effects: &[Effect]) -> Vec<&str> {
         effects
             .iter()
             .filter_map(|effect| match effect {
@@ -735,7 +755,7 @@ mod tests {
             .collect()
     }
 
-    fn submitted(effects: &[Effect]) -> usize {
+    pub(crate) fn submitted(effects: &[Effect]) -> usize {
         effects
             .iter()
             .filter(|effect| matches!(effect, Effect::Broker(BrokerRequest::Submit(_))))
@@ -753,7 +773,7 @@ mod tests {
         Ok(Order {
             client_order_id: id.clone(),
             intent_id: None,
-            agent: AgentId("agent-a".to_owned()),
+            agent: Some(AgentId("agent-a".to_owned())),
             instrument: aapl()?,
             side: Side::Buy,
             qty: Qty::parse("10")?,
@@ -1754,16 +1774,13 @@ mod tests {
             )?,
             &ports,
         )?;
-        let id =
-            executor
-                .state
-                .orders
-                .keys()
-                .next()
-                .cloned()
-                .ok_or(ExecutorError::Unimplemented {
-                    story: "the submitted order",
-                })?;
+        let id = executor
+            .state
+            .orders
+            .keys()
+            .next()
+            .cloned()
+            .ok_or_else(|| missing("the submitted order"))?;
         executor.commit_one(
             "OrderStateChanged",
             object(vec![
@@ -1786,9 +1803,7 @@ mod tests {
         let order = executor
             .state
             .order(&id)
-            .ok_or(ExecutorError::Unimplemented {
-                story: "the cancelled order",
-            })?;
+            .ok_or(missing("the cancelled order"))?;
         assert_eq!(
             (order.state, order.cancel_unconfirmed),
             (OrderState::Canceled, false)
@@ -1841,6 +1856,203 @@ mod tests {
             Err(ExecutorError::Unimplemented { story: "E7-4" })
         );
         assert_eq!(executor.state, before, "a refused step changes nothing");
+        Ok(())
+    }
+
+    /// `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) that its lots own.
+    pub(crate) fn protected_by_an_oco(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = Executor::opened(ports)?;
+        let clock = || crate::payload::clock(crate::types::RiskClock::from_secs(0));
+        let text = |raw: &str| Value::Str(raw.to_owned());
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-buy-a")),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", text("f-a")),
+                ("client_order_id", text("md-buy-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            concat!("Protection", "Changed"),
+            object(vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-oco-1")),
+                ("qty", text("10")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        Ok(executor)
+    }
+
+    /// Two agents' buys of 5 AAPL each, and a broker-created OCO leg for the 10 that DEC-160's
+    /// rule cannot give to either.
+    fn two_holders_and_an_ownerless_leg(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = Executor::opened(ports)?;
+        let clock = || crate::payload::clock(crate::types::RiskClock::from_secs(0));
+        for (agent, id) in [("agent-a", "md-buy-a"), ("agent-b", "md-buy-b")] {
+            executor.commit_one(
+                "OrderSubmitted",
+                object(vec![
+                    ("client_order_id", Value::Str(id.to_owned())),
+                    ("agent", Value::Str(agent.to_owned())),
+                    ("instrument", Value::Str("AAPL".to_owned())),
+                    ("side", Value::Str("buy".to_owned())),
+                    ("qty", Value::Str("5".to_owned())),
+                    ("limit", Value::Str("150".to_owned())),
+                    ("risk_clock", clock()?),
+                ])?,
+            )?;
+            executor.commit_one(
+                "FillApplied",
+                object(vec![
+                    ("fill_id", Value::Str(format!("f-{id}"))),
+                    ("client_order_id", Value::Str(id.to_owned())),
+                    ("instrument", Value::Str("AAPL".to_owned())),
+                    ("side", Value::Str("buy".to_owned())),
+                    ("qty_gross", Value::Str("5".to_owned())),
+                    ("price", Value::Str("150".to_owned())),
+                    ("risk_clock", clock()?),
+                ])?,
+            )?;
+            executor.commit_one(
+                "OrderStateChanged",
+                object(vec![
+                    ("client_order_id", Value::Str(id.to_owned())),
+                    ("state", Value::Str("filled".to_owned())),
+                    ("risk_clock", clock()?),
+                ])?,
+            )?;
+        }
+        executor.commit_one(
+            concat!("Protection", "Changed"),
+            object(vec![
+                ("instrument", Value::Str("AAPL".to_owned())),
+                ("action", Value::Str("placed".to_owned())),
+                ("orders", Value::Str("md-oco-1".to_owned())),
+                ("qty", Value::Str("10".to_owned())),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        let leg = ClientOrderId::parse("md-oco-1")?;
+        assert_eq!(
+            executor.state.order(&leg).map(|leg| leg.agent.clone()),
+            Some(None),
+            "the leg is in the order set, and no one's"
+        );
+        Ok(executor)
+    }
+
+    /// #258 round 1, the reviewer's probe (DEC-160 3(c)): a snapshot that lists an ownerless leg
+    /// finds it **present**. It is not external activity, and nobody's mode changes; the leg stays
+    /// no one's, since a reconciliation establishes presence and not ownership.
+    #[test]
+    fn a_snapshot_listing_an_ownerless_leg_finds_it_present_not_external()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = two_holders_and_an_ownerless_leg(&ports)?;
+        let mut taken = executor.snapshot(ReconcileReason::Scheduled)?;
+        taken.positions = vec![BrokerPosition {
+            instrument: aapl()?,
+            qty: SignedQty::parse("10")?,
+            avg_entry_price: Price::parse("150")?,
+        }];
+        taken.open_orders = vec![BrokerOrder {
+            broker_order_id: "b-oco".to_owned(),
+            client_order_id: Some("md-oco-1".to_owned()),
+            instrument: aapl()?,
+            side: Side::Sell,
+            qty: Qty::parse("10")?,
+            filled_qty: Qty::ZERO,
+            limit_price: Some(Price::parse("170")?),
+            stop_price: None,
+            status: "new".to_owned(),
+            reject_code: None,
+            replaced_by_broker_order_id: None,
+            legs: Vec::new(),
+            created_on: None,
+        }];
+        let run = executor.run(Input::BrokerSnapshot(taken), &ports)?;
+        let drafts = drafted(&run);
+        assert!(
+            !drafts.contains(&"ExternalActivityIngested") && !drafts.contains(&"AgentModeApplied"),
+            "{drafts:?}"
+        );
+        assert!(drafts.contains(&"ReconciliationRun"), "{drafts:?}");
+        assert_eq!(
+            executor
+                .state
+                .order(&ClientOrderId::parse("md-oco-1")?)
+                .map(|leg| leg.agent.clone()),
+            Some(None),
+            "presence, not ownership"
+        );
+        Ok(())
+    }
+
+    /// #258 round 1 (d), DEC-160 3(d): the broker's confirmation of a cancel sent by the ownerless
+    /// leg's own id completes it — the leg is `Canceled`, confirmed — rather than asking for a
+    /// reconciliation.
+    #[test]
+    fn a_confirmed_cancel_of_an_ownerless_leg_completes_it() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = two_holders_and_an_ownerless_leg(&ports)?;
+        let confirmed = executor.run(
+            Input::Broker(Ok(BrokerOutcome::CancelAccepted {
+                client_order_id: "md-oco-1".to_owned(),
+            })),
+            &ports,
+        )?;
+        assert_eq!(drafted(&confirmed), vec!["OrderStateChanged"]);
+        assert!(
+            confirmed.iter().any(|effect| matches!(
+                effect,
+                Effect::Journal(draft)
+                    if draft.payload.get("cancel_confirmed") == Some(&Value::Bool(true))
+            )),
+            "the confirmation is journaled as one (#258 round 1, minor 3)"
+        );
+        assert!(
+            !confirmed
+                .iter()
+                .any(|effect| matches!(effect, Effect::Broker(BrokerRequest::ListOpenOrders))),
+            "no reconciliation is asked for"
+        );
+        let leg = executor
+            .state
+            .order(&ClientOrderId::parse("md-oco-1")?)
+            .ok_or_else(|| missing("the leg"))?;
+        assert_eq!((leg.state, leg.agent.clone()), (OrderState::Canceled, None));
         Ok(())
     }
 }

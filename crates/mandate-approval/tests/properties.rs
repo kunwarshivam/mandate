@@ -46,12 +46,15 @@ fn fail<E: std::fmt::Debug>(what: &str) -> impl FnOnce(E) -> TestCaseError + '_ 
     move |e| TestCaseError::fail(format!("{what} answers, not {e:?}"))
 }
 
+/// The journal's event-id shape, which `ApprovalRef` accepts and nothing else (DEC-165 item 13).
+const ULID: &str = "[0-7][0-9A-HJKMNP-TV-Z]{25}";
+
 /// EI-9, PB-9: no notification payload carries any sentinel from the request it points at.
 #[test]
 fn no_notification_carries_a_sentinel() {
-    check((0u32..1_000_000, "[0-9A-HJKMNP-TV-Z]{26}"), |(n, id)| {
+    check((0u32..1_000_000, ULID), |(n, id)| {
         let mut r = request();
-        r.id = ApprovalRef::of_requested_event(&id);
+        r.id = ApprovalRef::of_requested_event(&id).unwrap();
         r.content.bound.instrument = format!("sentinelinstrument{n}");
         r.content.bound.qty = Qty::parse(&format!("777{n}")).unwrap();
         r.content.bound.limit = Price::parse(&format!("31337.{n}1")).unwrap();
