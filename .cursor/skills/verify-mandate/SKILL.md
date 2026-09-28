@@ -21,7 +21,7 @@ if it lacks something you need twice, add a subcommand (the `correction` playboo
 | `cargo xtask ci test` | nextest, doctests, pytest; reference cases marked `passing` in `status.toml` |
 | `cargo xtask ci pending` | Every test in the workspace marked `#[ignore = "pending <story>"]` fails on the change's code |
 | `cargo xtask ci mutants` | cargo-mutants on the changed source of safety-critical crates: every mutant caught |
-| `cargo xtask ci spec-guard` | Protected paths cite a DEC and ship without code (set `MANDATE_BASE_REF` to check one commit range) |
+| `cargo xtask ci spec-guard` | Protected paths cite a DEC and ship without code, diffed from the merge base with `origin/main` (on a CI `pull_request` run, the merge commit's first parent); set `MANDATE_BASE_REF` to check one commit range |
 | `cargo xtask refcases` | `fixtures/refcases/` matches the reference-case YAML |
 | `cargo xtask layers`, `cargo xtask deps` | Dependency directions and the dependency registry |
 | `cargo test -p mandate-refcases -- --include-ignored` | Pending reference cases, before a status change marks them passing |
