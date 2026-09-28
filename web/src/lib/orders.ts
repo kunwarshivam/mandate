@@ -1,4 +1,5 @@
 import type { Agent, Fill, OrderState, PastOrder, WorkingOrder } from "@/fixtures/types";
+import { type Dec, ZERO, add, dec, div, mul, sub } from "./decimal";
 import { price, quantity } from "./format";
 
 export type AnyOrder = WorkingOrder | PastOrder;
@@ -19,6 +20,28 @@ export function findOrder(agent: Agent, clientOrderId: string): AnyOrder | undef
 
 export function fillsOf(agent: Agent, clientOrderId: string): Fill[] {
   return agent.fills.filter((f) => f.client_order_id === clientOrderId);
+}
+
+/** Realized P&L in one instrument from the agent's fills, at average cost, oldest fill first. */
+export function realizedIn(agent: Agent, symbol: string): Dec {
+  let qty = ZERO;
+  let cost = ZERO;
+  let realized = ZERO;
+  const fills = agent.fills.filter((f) => f.instrument.symbol === symbol).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  for (const f of fills) {
+    const q = dec(f.qty);
+    const p = dec(f.price);
+    if (f.side === "buy") {
+      qty = add(qty, q);
+      cost = add(cost, mul(q, p));
+      continue;
+    }
+    const avg = qty === ZERO ? ZERO : div(cost, qty);
+    realized = add(realized, mul(sub(p, avg), q));
+    cost = sub(cost, mul(avg, q));
+    qty = sub(qty, q);
+  }
+  return realized;
 }
 
 export function orderSentence(o: AnyOrder): string {

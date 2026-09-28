@@ -7,6 +7,7 @@ import { Button, LinkButton } from "@cloudflare/kumo/components/button";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Deadline } from "@/components/approvals/deadline";
 import { LimitRail } from "@/components/domain/envelope";
+import { ApprovalChart } from "@/components/charts/price-chart";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Approval, RiskFigure } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
@@ -145,6 +146,7 @@ function Request({ approvalId }: { approvalId: string }) {
             <dd className="font-mono text-caption">{b.mandate_version.slice(7, 19)}</dd>
           </div>
         </dl>
+        <ApprovalChart approval={approval} className="border-t pt-3" />
         <div className="grid gap-0.5 border-t pt-3">
           <p className="label-caps text-muted-foreground">Why you are asked</p>
           <p>{approval.trigger}</p>

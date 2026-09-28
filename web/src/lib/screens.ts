@@ -40,6 +40,7 @@ export const SCREENS: readonly Screen[] = [
   { key: "approvals", href: "/approvals", label: "Approvals", purpose: "Requests waiting for you, by deadline, and what happened to earlier ones.", group: "main", built: true, needs: "agents.view" },
   { key: "alerts", href: "/alerts", label: "Alerts", purpose: "Data, deployment, and agent conditions that change what agents may do.", group: "main", built: true, needs: "agents.view" },
   { key: "agents", href: "/agents", label: "All agents", purpose: "Each agent trading on paper within its own confirmed mandate.", group: "agents", built: true, needs: "agents.view" },
+  { key: "positions", href: "/positions", label: "Positions", purpose: "Everything your agents hold, across agents, each marked with the time of its mark.", group: "agents", built: true, needs: "agents.view" },
   {
     key: "agents-new",
     href: "/agents/new",
@@ -128,6 +129,43 @@ export function findAgentSection(segments: readonly string[]): AgentSection | un
   return AGENT_SECTIONS.find((s) => s.key === key && s.key !== "overview");
 }
 
+export type AgentRecord =
+  | { kind: "position"; id: string }
+  | { kind: "close-position"; id: string }
+  | { kind: "order"; id: string }
+  | { kind: "decision"; id: string };
+
+/** A record under an agent: a position, its close page, an order, or a gate decision. */
+export function findAgentRecord(segments: readonly string[]): AgentRecord | undefined {
+  const [section, id, action] = segments;
+  if (!id) return undefined;
+  if (section === "positions" && action === "close" && segments.length === 3) return { kind: "close-position", id };
+  if (segments.length !== 2) return undefined;
+  if (section === "positions") return { kind: "position", id };
+  if (section === "orders") return { kind: "order", id };
+  if (section === "decisions") return { kind: "decision", id };
+  return undefined;
+}
+
+export function positionHref(agentId: string, assetId: string): string {
+  return `/agents/${agentId}/positions/${assetId}`;
+}
+
+export function orderHref(agentId: string, clientOrderId: string): string {
+  return `/agents/${agentId}/orders/${clientOrderId}`;
+}
+
+export function decisionHref(agentId: string, eventId: string): string {
+  return `/agents/${agentId}/decisions/${eventId}`;
+}
+
+export const RECORD_TITLE: Record<AgentRecord["kind"], string> = {
+  position: "Position",
+  "close-position": "Close position",
+  order: "Order",
+  decision: "Gate decision",
+};
+
 export function findScreen(href: string): Screen | undefined {
   return SCREENS.find((s) => s.href === href);
 }
@@ -162,7 +200,8 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
       if (top) trail.push({ href: agentHref(second, top.key), label: top.label });
       const child = sub ? AGENT_SECTIONS.find((s) => s.key === `${first}/${sub}`) : undefined;
       if (child) trail.push({ href: agentHref(second, child.key), label: child.label });
-      else if (sub) trail.push({ href: pathname, label: RECORD_LABEL[first] ?? "Record" });
+      else if (sub) trail.push({ href: `/agents/${second}/${first}/${sub}`, label: RECORD_LABEL[first] ?? "Record" });
+      if (!child && sub && rest[2] === "close") trail.push({ href: pathname, label: "Close position" });
       return trail;
     }
     case "approvals":
@@ -190,6 +229,6 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
 const RECORD_LABEL: Record<string, string> = {
   positions: "Position",
   orders: "Order",
-  decisions: "Decision",
+  decisions: "Gate decision",
   approvals: "Request",
 };

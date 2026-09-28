@@ -13,11 +13,12 @@ import * as audit from "@/app/audit/page";
 import * as connections from "@/app/connections/page";
 import * as design from "@/app/design/page";
 import * as dashboard from "@/app/page";
+import * as positions from "@/app/positions/page";
 import * as settingsScreen from "@/app/settings/[screen]/page";
 import * as settings from "@/app/settings/page";
 import { AppShell } from "@/components/shell/app-shell";
-import { AGENT_IDS, APPROVAL_IDS } from "@/fixtures/workspace";
-import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, screensIn } from "@/lib/screens";
+import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
+import { AGENT_SECTIONS, RECORD_TITLE, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref, screensIn } from "@/lib/screens";
 import { isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 
@@ -39,6 +40,9 @@ async function pageFor(path: string): Promise<ReactNode> {
       return approval.default(params({ approvalId: second }));
     case "alerts":
       return <alerts.default />;
+    case "positions":
+      if (second) throw new Error(`no page for ${path}`);
+      return <positions.default />;
     case "connections":
       return <connections.default />;
     case "audit":
@@ -56,12 +60,28 @@ async function pageFor(path: string): Promise<ReactNode> {
 
 const AGENT = AGENT_IDS.swing;
 
+const WS = buildWorkspace("normal");
+const SWING = WS.agents.find((a) => a.agent_id === AGENT)!;
+const BTC = WS.agents.find((a) => a.agent_id === AGENT_IDS.btc)!;
+const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
+
+/** One of each record: a stock and a crypto position, the close page, a working and a finished order, and a decision. */
+const RECORDS = [
+  positionHref(AGENT, XYZ.instrument.asset_id),
+  `${positionHref(AGENT, XYZ.instrument.asset_id)}/close`,
+  positionHref(AGENT_IDS.btc, BTC.positions[0].instrument.asset_id),
+  orderHref(AGENT, SWING.orders[0].client_order_id),
+  orderHref(AGENT, SWING.past_orders[0].client_order_id),
+  decisionHref(AGENT, WS.decisions.find((d) => d.agent_id === AGENT)!.event_id),
+];
+
 const PATHS = [
   ...SCREENS.map((s) => s.href),
   SECTION_INDEX.audit.href,
   SECTION_INDEX.workspace.href,
   ...AGENT_SECTIONS.map((s) => agentHref(AGENT, s.key)),
   `/approvals/${APPROVAL_IDS.swingXyz}`,
+  ...RECORDS,
 ];
 
 async function renderPath(path: string) {
@@ -115,13 +135,21 @@ describe("route coverage", () => {
     await expect(pageFor(`/agents/${AGENT}/nope`)).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(pageFor(`/agents/${AGENT}/overview`)).rejects.toThrow("NEXT_NOT_FOUND");
   });
+
+  it("sends a record whose ID has the wrong shape to not found", async () => {
+    await expect(pageFor(`/agents/${AGENT}/positions/XYZ`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/positions/${XYZ.instrument.asset_id}/sell`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/orders/${SWING.orders[0].client_order_id.slice(4)}`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/decisions/cid_01JB5GQ`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/approvals/${APPROVAL_IDS.swingXyz}`)).rejects.toThrow("NEXT_NOT_FOUND");
+  });
 });
 
 describe("titles", () => {
   const generic = /^[A-Z][a-z]+( [a-z]+)*$/;
 
   it("keeps static titles generic", () => {
-    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design]) {
+    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design, positions]) {
       const title = mod.metadata.title;
       const text = typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
       expect(text).toMatch(generic);
@@ -132,6 +160,16 @@ describe("titles", () => {
     for (const s of AGENT_SECTIONS.filter((x) => x.key !== "overview")) {
       const meta = await agentSection.generateMetadata({ params: Promise.resolve({ agentId: AGENT, section: s.key.split("/") }) });
       expect(meta.title).toBe(s.label);
+    }
+  });
+
+  it("names records by kind, never by agent, instrument or ID", async () => {
+    const expected = [RECORD_TITLE.position, RECORD_TITLE["close-position"], RECORD_TITLE.position, RECORD_TITLE.order, RECORD_TITLE.order, RECORD_TITLE.decision];
+    for (const [i, path] of RECORDS.entries()) {
+      const [, , agentId, ...section] = path.split("/");
+      const meta = await agentSection.generateMetadata({ params: Promise.resolve({ agentId, section }) });
+      expect(meta.title, path).toBe(expected[i]);
+      expect(String(meta.title)).toMatch(generic);
     }
   });
 });

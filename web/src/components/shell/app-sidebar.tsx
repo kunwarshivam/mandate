@@ -50,6 +50,7 @@ const SCREEN_ICON: Record<string, IconType> = {
   approvals: Tray,
   alerts: Bell,
   agents: Robot,
+  positions: Stack,
   "agents-new": Plus,
   connections: Plugs,
   "audit-trace": Path,

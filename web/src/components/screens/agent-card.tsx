@@ -1,14 +1,18 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { type CSSProperties, useMemo } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { useMarket } from "@/components/charts/chart-parts";
+import { Sparkline } from "@/components/charts/sparkline";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
 import { MODE_FIELD, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
+import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent } from "@/fixtures/types";
+import { equityWindow, mandateLevels } from "@/lib/chart-data";
 import { quantity, usd } from "@/lib/format";
 import { MODE_LABEL } from "@/lib/labels";
 import { agentLimits } from "@/lib/limits";
@@ -17,7 +21,8 @@ import { describeRestriction } from "@/lib/restrictions";
 /**
  * An agent as a sign band: its mode field (read from across the room), its identity and money on
  * a card field, and your mandate on marigold. Restrictions follow on their own fields, each in the
- * colour of whoever imposed it. Fields sit on seams, never inside one another.
+ * colour of whoever imposed it. Fields sit on seams, never inside one another. The whole band opens
+ * the agent; its name is the link.
  */
 export function AgentCard({
   agent,
@@ -35,11 +40,15 @@ export function AgentCard({
   const limits = agentLimits(agent);
   const rails = limits.rails.filter((r) => r.key === "gross" || r.key === "daily");
   const markAt = agent.positions[0]?.mark_as_of;
+  const market = useMarket();
+  const today = useMemo(() => equityWindow(market.equity[agent.agent_id] ?? [], "1D", market.end), [market, agent.agent_id]);
+  const daily = mandateLevels(agent).find((l) => l.key === "daily");
   return (
     <article
       aria-labelledby={`agent-${agent.agent_id}`}
       data-mode={agent.mode}
-      className="reveal grid grid-cols-1 gap-(--seam) md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1.1fr)]"
+      data-slot="agent-band"
+      className="group reveal relative grid grid-cols-1 gap-(--seam) md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1.1fr)]"
       style={{ "--i": Math.min(index, 6) } as CSSProperties}
     >
       <div data-slot="mode-field" className={cn("flex items-center px-3 py-1.5 transition-colors duration-(--duration-hover) sm:px-4 md:items-end md:py-3", MODE_FIELD[agent.mode])}>
@@ -49,7 +58,7 @@ export function AgentCard({
       <div className="grid content-start gap-2 bg-card px-3 py-3 sm:px-4">
         <header className="flex flex-wrap items-baseline justify-between gap-x-3">
           <Heading id={`agent-${agent.agent_id}`} className="text-heading">
-            <Link href={`/agents/${agent.agent_id}`} className="underline-offset-4 hover:underline">
+            <Link href={`/agents/${agent.agent_id}`} className={cn("decoration-2 underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
               {agent.label}
             </Link>
           </Heading>
@@ -61,6 +70,24 @@ export function AgentCard({
         <p className="text-sm text-muted-foreground">
           Equity, of <span className="font-mono tabular">{usd(agent.mandate.capital.allocation_usd, 0)}</span> capital
         </p>
+        {today.length > 1 ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <Sparkline
+              points={today}
+              limit={daily?.price ?? null}
+              label={`${agent.label} equity today${daily ? `, against the daily loss limit at ${usd(daily.price.toFixed(2))}` : ""}`}
+            />
+            <span aria-hidden className="flex items-center gap-1.5 text-caption text-muted-foreground">
+              Today
+              {daily ? (
+                <>
+                  <span className="ml-1.5 inline-block h-0.5 w-3 bg-marigold" />
+                  Daily loss limit
+                </>
+              ) : null}
+            </span>
+          </div>
+        ) : null}
         <div className="grid gap-1 border-t pt-2">
           <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
             <span>Paper P&amp;L, simulated</span>
