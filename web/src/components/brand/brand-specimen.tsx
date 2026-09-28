@@ -1,0 +1,105 @@
+import type { ReactNode } from "react";
+import { LOCKUP_GAP, OwlheadLockup, OwlheadMark, OwlheadWordmark } from "./Logo";
+import { BRAND_PALETTE, NAVY, OFF_WHITE, hexContrast } from "./palette";
+
+const SURFACES = [
+  { name: "On navy", background: NAVY, color: OFF_WHITE },
+  { name: "On off-white", background: OFF_WHITE, color: NAVY },
+] as const;
+
+const DO = [
+  "Navy on light surfaces, off-white on navy: one colour at a time.",
+  "The mark alone where the lockup does not fit: a phone header, a collapsed sidebar, a favicon.",
+  "Clear space of a quarter of the mark's height on every side, the same as the gap inside the lockup.",
+  "The committed SVGs or the Logo components, scaled as a whole.",
+];
+
+const DONT = [
+  "Recolour it: no brass mark, no second colour, no colour fade, shadow, or outline.",
+  "Stretch, rotate, crop, or redraw it, or rebuild the wordmark in live type or another face.",
+  "Use the founder's shaded original in product UI: the UI is flat colour (DEC-200).",
+  "Go below 16 px for the mark or 96 px wide for the lockup, or set it on a busy field.",
+];
+
+function Tile({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return (
+    <figure className={`grid content-between gap-3 bg-card p-4 ${className ?? ""}`}>
+      <div className="flex min-h-20 items-center">{children}</div>
+      <figcaption className="label-caps text-muted-foreground">{label}</figcaption>
+    </figure>
+  );
+}
+
+/** The Brand block of `/design`: the mark, the wordmark, and the lockup, and how to use them (DEC-202, DEC-203). */
+export function BrandSpecimen() {
+  return (
+    <div className="grid gap-(--block-gap)">
+      <div className="grid gap-(--seam) lg:grid-cols-2">
+        {SURFACES.map((s) => (
+          <div key={s.name} data-slot="brand-surface" className="grid gap-6 border p-5" style={{ background: s.background, color: s.color }}>
+            <span className="label-caps">{s.name}</span>
+            <div className="flex flex-wrap items-end gap-8">
+              <OwlheadMark className="h-16 w-auto" />
+              <OwlheadWordmark className="h-10 w-auto" />
+            </div>
+            <OwlheadLockup className="h-12 w-auto max-w-full self-start" />
+          </div>
+        ))}
+      </div>
+
+      <div className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
+        <Tile label="Clear space: a quarter of the mark's height" className="sm:col-span-2">
+          <div className="border border-dashed border-muted-foreground" style={{ padding: `${48 * LOCKUP_GAP}px` }}>
+            <OwlheadLockup className="block h-12 w-auto" title="" />
+          </div>
+        </Tile>
+        <Tile label="Minimum: mark 16 px">
+          <span style={{ color: NAVY }}>
+            <OwlheadMark className="h-4 w-auto" />
+          </span>
+        </Tile>
+        <Tile label="Minimum: lockup 96 px wide">
+          <span style={{ color: NAVY }}>
+            <OwlheadLockup className="block h-auto w-24" />
+          </span>
+        </Tile>
+      </div>
+
+      <div className="grid gap-(--seam) lg:grid-cols-2">
+        <div className="grid content-start gap-2 bg-card p-4">
+          <h3 className="text-heading">Do</h3>
+          <ul className="grid gap-1.5 text-sm">
+            {DO.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+        <div className="grid content-start gap-2 bg-card p-4">
+          <h3 className="text-heading">Don&apos;t</h3>
+          <ul className="grid gap-1.5 text-sm">
+            {DONT.map((d) => (
+              <li key={d}>{d}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-3" aria-label="Navy and brass palette">
+        {BRAND_PALETTE.map((c) => (
+          <li key={c.name} data-slot="brand-color" className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
+            <span className="h-14 border" style={{ background: c.hex }} aria-hidden />
+            <span className="grid min-w-0 content-center gap-0.5">
+              <span className="text-caption font-bold">
+                {c.name} <span className="font-mono">{c.hex}</span>
+              </span>
+              <span className="text-label font-normal text-muted-foreground">{c.role}</span>
+              <span className="font-mono text-label font-normal text-muted-foreground tabular">
+                {hexContrast(c.hex, OFF_WHITE).toFixed(2)}:1 on off-white · {hexContrast(c.hex, NAVY).toFixed(2)}:1 on navy
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

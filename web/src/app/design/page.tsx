@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { Button } from "@cloudflare/kumo/components/button";
 import { Skeleton } from "@/components/domain/skeleton";
 import { Deadline } from "@/components/approvals/deadline";
+import { BrandSpecimen } from "@/components/brand/brand-specimen";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
@@ -82,6 +83,10 @@ export default function DesignPage() {
           <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA. The written rules are in <code>web/DESIGN.md</code>.
         </p>
       </header>
+
+      <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), in the navy and brass palette (DEC-202).">
+        <BrandSpecimen />
+      </Block>
 
       <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number.">
         <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
