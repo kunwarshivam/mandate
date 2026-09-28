@@ -273,25 +273,30 @@ mod tests {
             .collect()
     }
 
-    fn figure<'a>(pairs: &[(&str, &'a str)], key: &str) -> &'a str {
+    /// One transcribed figure, or a refusal naming the key: a figure the file lacks must fail the
+    /// test that reads it, never compare as an empty `0` (#259 round 1, major).
+    fn figure<'a>(pairs: &[(&str, &'a str)], key: &str) -> Result<&'a str, ExecutorError> {
         pairs
             .iter()
-            .find(|(named, _)| *named == key)
-            .map_or("", |(_, value)| value)
+            .find(|(named, value)| *named == key && !value.is_empty())
+            .map(|(_, value)| *value)
+            .ok_or_else(|| ExecutorError::NonCanonicalPayload {
+                field: key.to_owned(),
+            })
     }
 
     #[test]
     fn the_transcribed_schedule_builds() -> Result<(), ExecutorError> {
         let pairs = transcribed();
         let schedule = FeeSchedule {
-            effective_from: figure(&pairs, "effective_from"),
-            sec_rate: figure(&pairs, "sec_rate"),
-            taf_per_share: figure(&pairs, "taf_per_share"),
-            taf_cap: figure(&pairs, "taf_cap"),
-            taf_cap_basis: figure(&pairs, "taf_cap_basis"),
-            cat_per_share: figure(&pairs, "cat_per_share"),
-            crypto_maker_bps: figure(&pairs, "maker_bps"),
-            crypto_taker_bps: figure(&pairs, "taker_bps"),
+            effective_from: figure(&pairs, "effective_from")?,
+            sec_rate: figure(&pairs, "sec_rate")?,
+            taf_per_share: figure(&pairs, "taf_per_share")?,
+            taf_cap: figure(&pairs, "taf_cap")?,
+            taf_cap_basis: figure(&pairs, "taf_cap_basis")?,
+            cat_per_share: figure(&pairs, "cat_per_share")?,
+            crypto_maker_bps: figure(&pairs, "maker_bps")?,
+            crypto_taker_bps: figure(&pairs, "taker_bps")?,
         };
         let config = fee_config(&schedule, calendar()?)?;
         assert_eq!(config.equities.sec_rate, FeeRate::parse("0.0000206")?);
@@ -305,18 +310,18 @@ mod tests {
         let pairs = transcribed();
         let paper = paper_only_fee_config("paper", calendar()?, "2026-09-01")?;
         let ten = |raw: &str| -> Result<String, ExecutorError> { Ok(times_ten(raw)) };
-        assert!(paper.equities.sec_rate >= FeeRate::parse(&ten(figure(&pairs, "sec_rate"))?)?);
+        assert!(paper.equities.sec_rate >= FeeRate::parse(&ten(figure(&pairs, "sec_rate")?)?)?);
         assert!(
             paper.equities.taf_per_share
-                >= FeePerShare::parse(&ten(figure(&pairs, "taf_per_share"))?)?
+                >= FeePerShare::parse(&ten(figure(&pairs, "taf_per_share")?)?)?
         );
-        assert!(paper.equities.taf_cap >= FeeCap::parse(&ten(figure(&pairs, "taf_cap"))?)?);
+        assert!(paper.equities.taf_cap >= FeeCap::parse(&ten(figure(&pairs, "taf_cap")?)?)?);
         assert!(
             paper.equities.cat_per_share
-                >= FeePerShare::parse(&ten(figure(&pairs, "cat_per_share"))?)?
+                >= FeePerShare::parse(&ten(figure(&pairs, "cat_per_share")?)?)?
         );
-        assert!(paper.crypto.maker >= Bps::parse(&ten(figure(&pairs, "maker_bps"))?)?);
-        assert!(paper.crypto.taker >= Bps::parse(&ten(figure(&pairs, "taker_bps"))?)?);
+        assert!(paper.crypto.maker >= Bps::parse(&ten(figure(&pairs, "maker_bps")?)?)?);
+        assert!(paper.crypto.taker >= Bps::parse(&ten(figure(&pairs, "taker_bps")?)?)?);
         Ok(())
     }
 

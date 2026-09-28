@@ -12,8 +12,12 @@ retrieved_on = "2026-09-28"
 sec_rate = "0.0000206"                 # "SEC Transaction Fee, When sells only: $0.0000206 * Trade Value"
 taf_per_share = "0.000195"             # "FINRA Trading Activity Fees (TAF), When sells only: $0.000195 per share"
 taf_cap = "9.79"                       # "*Max of $9.79 per trade (capped at 50,205 shares or more)"
-taf_cap_basis = "per_execution"        # "per trade"; §6.2's default basis, which a reviewer confirms
+taf_cap_basis = "per_execution"        # "per trade": FINRA's trade is a reported sale transaction, an execution; §6.2's default, and the conservative basis (confirmed in #259 round 1)
 cat_per_share = "0.000003"             # "FINRA Consolidated Audit Trail Fee (CAT), When buys and sells: $0.000003 per executed equivalent share" (NMS equities)
+# FINRA's own currently effective Schedule A charges TAF at $0.000166 per share, max $8.30 per
+# trade, below Alpaca's pass-through above, and FINRA filed on 2026-09-23 (FR 2026-19392) to
+# temporarily pause assessing TAF. Transcribing Alpaca's higher figure overestimates cost and stays
+# conservative; the next revision of this file must re-check both (#259 round 1).
 
 [crypto]
 # https://docs.alpaca.markets/docs/crypto-fees, the volume-tiered table, tier 1 (0 - 100,000 USD
