@@ -183,7 +183,7 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are slate, tinted toward navy; nothing is pure grey, black, or white. Light only: dark mode is follow-up work.">
+      <Block title="Colour" lead="OKLCH ramps on one lightness curve; every token is a ramp step (web/COLOR.md). Neutrals are slate, tinted toward navy; nothing is pure grey, black, or white. Light, dark or system, from the theme menu in the header.">
         <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
           {colorTokens.map((t) => (
             <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3rem_1fr] gap-3 rounded-xl bg-background p-2.5">

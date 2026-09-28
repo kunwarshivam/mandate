@@ -54,7 +54,7 @@ Rules the tests enforce: every token is a ramp step and every neutral is tinted 
 
 No gradients of any kind (fills, text, masks, fades or glows). CI greps `src/` for them, and `e2e/flat-fills.spec.ts` reads computed styles on every route. The paper hatch is an SVG mask over a flat token colour.
 
-**Dark mode** is follow-up work. A dark variant needs its own pass for the meaning colours; shipping half of one would break the Meaning Rule. The app sets `color-scheme: light` and stores nothing in the browser.
+**Dark mode**: Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in the header, or the sidebar footer on phones. The choice is the only thing the browser stores, in the `owlhead-theme` cookie, so the server renders an explicit choice and a head script resolves System before first paint. `<html>` carries `data-mode="dark"` (for Kumo) and `.dark` (for the `dark:` variant). Dark keeps every meaning: ink surfaces with off-white type, off-white primary actions and Stop control with ink type, gold for the account's line, selection and the mandate's labels, crimson still the only filled crimson, and still flat. Values are in `INK_AND_GOLD_DARK` (`palette.ts`) and the dark block of `globals.css`; charts redraw from them when the mode changes.
 
 ## Typography
 

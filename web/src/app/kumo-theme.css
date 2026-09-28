@@ -43,7 +43,7 @@
   --color-kumo-brand-hover: var(--lapis-strong);
   --color-kumo-line: var(--border);
   --color-kumo-hairline: var(--border);
-  --color-kumo-focus: var(--lapis-line);
+  --color-kumo-focus: var(--ring);
   --color-kumo-shadow-edge: var(--border);
   --color-kumo-shadow-drop: transparent;
   --color-kumo-arrow-edge: var(--border);
@@ -67,6 +67,17 @@
   --color-kumo-badge-blue: var(--lapis);
   --color-kumo-badge-neutral: var(--muted-foreground);
   --color-kumo-badge-inverted: var(--ink);
+}
+
+/*
+ * Dark: every role above follows its token, which globals.css re-points. These three change
+ * meaning, because the brand and contrast fills turn off-white: inactive text dims to the mid grey,
+ * and type on an inverted fill is ink rather than the (now dark) card.
+ */
+html:root[data-mode="dark"] {
+  --text-color-kumo-inactive: var(--ink-line);
+  --text-color-kumo-inverse: var(--ink-foreground);
+  --text-color-kumo-badge-inverted: var(--ink-foreground);
 }
 
 /* Surfaces: a region painted in one of the meanings re-points every role inside it. */

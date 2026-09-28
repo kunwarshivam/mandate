@@ -45,6 +45,7 @@ import { can, useRole } from "@/lib/roles";
 import { AGENT_SECTIONS, type AgentSection, type AgentSectionKey, GROUP_LABEL, GROUP_NEEDS, SCREENS, type ScreenGroup, agentHref } from "@/lib/screens";
 import { SidebarBrand } from "./brand";
 import { agentIdFrom } from "./stop-control";
+import { ThemeMenu } from "./theme-menu";
 
 type IconType = ComponentType<{ className?: string }>;
 
@@ -271,7 +272,10 @@ export function AppSidebar() {
         </Sidebar.SlidingViews>
       </Sidebar.Content>
       <Sidebar.Footer>
-        <Sidebar.Trigger />
+        <div className="flex items-center justify-between">
+          <Sidebar.Trigger />
+          <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring sm:hidden" />
+        </div>
       </Sidebar.Footer>
     </Sidebar>
   );

@@ -235,12 +235,73 @@ export const INK_AND_GOLD: Record<TokenName, string> = {
   "loss-cvd-soft": "oklch(0.962 0.017 55)",
 };
 
+/**
+ * Ink and gold in the dark: the `html:root[data-mode="dark"]` block in `globals.css`. Ink surfaces
+ * and off-white type; primary actions, the Stop control and stopped states become an off-white fill
+ * with ink type; gold carries the account's line, selection and the mandate's labels.
+ */
+export const INK_AND_GOLD_DARK: Record<TokenName, string> = {
+  background: "oklch(0.16 0.008 255)",
+  card: "oklch(0.2 0.009 255)",
+  muted: "oklch(0.24 0.01 255)",
+  border: "oklch(0.31 0.01 255)",
+  foreground: "oklch(0.96 0.004 85)",
+  "muted-foreground": "oklch(0.78 0.006 85)",
+  primary: "oklch(0.96 0.004 85)",
+  "primary-foreground": "oklch(0.19 0.008 255)",
+  lapis: "oklch(0.96 0.004 85)",
+  "lapis-foreground": "oklch(0.19 0.008 255)",
+  "lapis-muted": "oklch(0.43 0.01 255)",
+  "lapis-soft": "oklch(0.28 0.04 85)",
+  "lapis-strong": "oklch(0.86 0.006 85)",
+  "lapis-line": "oklch(0.8 0.125 85)",
+  mandate: "oklch(0.28 0.04 85)",
+  "mandate-foreground": "oklch(0.96 0.004 85)",
+  "mandate-muted": "oklch(0.78 0.006 85)",
+  "mandate-strong": "oklch(0.8 0.125 85)",
+  "mandate-marker": "oklch(0.8 0.125 85)",
+  "mandate-edge": "oklch(0.8 0.125 85)",
+  "mandate-soft": "oklch(0.23 0.02 85)",
+  selection: "oklch(0.34 0.06 85)",
+  ink: "oklch(0.96 0.004 85)",
+  "ink-foreground": "oklch(0.19 0.008 255)",
+  "ink-line": "oklch(0.64 0.008 85)",
+  crimson: "oklch(0.55 0.19 27)",
+  "crimson-foreground": "oklch(0.96 0.004 85)",
+  gain: "oklch(0.74 0.15 155)",
+  loss: "oklch(0.7 0.17 25)",
+  warning: "oklch(0.78 0.12 70)",
+  info: "oklch(0.78 0.006 85)",
+  "gain-soft": "oklch(0.26 0.04 155)",
+  "loss-soft": "oklch(0.26 0.04 25)",
+  "warning-soft": "oklch(0.26 0.04 70)",
+  "info-soft": "oklch(0.24 0.01 255)",
+  "gain-cvd": "oklch(0.74 0.12 245)",
+  "loss-cvd": "oklch(0.74 0.13 55)",
+  "gain-cvd-soft": "oklch(0.26 0.04 245)",
+  "loss-cvd-soft": "oklch(0.26 0.04 55)",
+};
+
+function tokensOf(values: Record<TokenName, string>): Record<TokenName, TokenValue> {
+  return Object.fromEntries(TOKEN_NAMES.map((n) => [n, { ...refValue(TOKEN_REFS[n]), value: values[n] }])) as Record<TokenName, TokenValue>;
+}
+
 export const PALETTE: Palette = {
   name: "Ink and gold",
   summary: "Ink for text and actions, gold for your mandate and the account's line: a pale gold panel, gold markers, dark gold labels.",
   hatch: { ref: "lapis", alpha: 0.3 },
-  tokens: Object.fromEntries(TOKEN_NAMES.map((n) => [n, { ...refValue(TOKEN_REFS[n]), value: INK_AND_GOLD[n] }])) as Record<TokenName, TokenValue>,
+  tokens: tokensOf(INK_AND_GOLD),
 };
+
+/** The paper hatch in the dark is the mid grey over the gold tint, so it still reads as paper. */
+export const PALETTE_DARK: Palette = {
+  name: "Ink and gold, dark",
+  summary: "Ink surfaces and off-white type; off-white primary actions; gold for your mandate, the account's line and selection.",
+  hatch: { ref: "ink-line", alpha: 0.4 },
+  tokens: tokensOf(INK_AND_GOLD_DARK),
+};
+
+export const PALETTES = { light: PALETTE, dark: PALETTE_DARK } as const;
 
 export function hatchInk(palette: Palette = PALETTE): string {
   return palette.tokens[palette.hatch.ref].value.replace(")", ` / ${palette.hatch.alpha})`);

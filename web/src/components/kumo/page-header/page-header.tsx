@@ -65,7 +65,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
                     aria-current={current ? "page" : undefined}
                     className={cn(
                       "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) first:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-medium text-foreground after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis",
+                      current && "font-medium text-foreground after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis dark:after:bg-lapis-line",
                     )}
                   >
                     {tab.label}

@@ -18,7 +18,8 @@ import {
 } from "lightweight-charts";
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { toHex } from "@/lib/color";
-import { PALETTE, type TokenName } from "@/lib/palette";
+import { PALETTE, PALETTES, type Palette, type TokenName } from "@/lib/palette";
+import type { ThemeMode } from "@/lib/theme";
 
 /**
  * TradingView Lightweight Charts in the calm system. Canvas cannot read CSS variables, so the tokens
@@ -47,10 +48,20 @@ export const CHART_TOKEN = {
   inkForeground: "ink-foreground",
 } as const satisfies Record<string, TokenName>;
 
-export const CHART_COLOR = Object.fromEntries(Object.entries(CHART_TOKEN).map(([key, name]) => [key, toHex(PALETTE.tokens[name].value)])) as Record<
-  keyof typeof CHART_TOKEN,
-  string
->;
+type ChartColors = Record<keyof typeof CHART_TOKEN, string>;
+
+function chartColors(palette: Palette): ChartColors {
+  return Object.fromEntries(Object.entries(CHART_TOKEN).map(([key, name]) => [key, toHex(palette.tokens[name].value)])) as ChartColors;
+}
+
+export const CHART_COLORS: Record<ThemeMode, ChartColors> = { light: chartColors(PALETTE), dark: chartColors(PALETTES.dark) };
+
+/** The colours every option builder reads; a chart calls `setChartMode` before it draws. */
+export const CHART_COLOR: ChartColors = { ...CHART_COLORS.light };
+
+export function setChartMode(mode: ThemeMode): void {
+  Object.assign(CHART_COLOR, CHART_COLORS[mode]);
+}
 
 export const CHART_FONT = "'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif";
 

@@ -15,6 +15,7 @@ import { Wordmark } from "./brand";
 import { CommandMenu } from "./command-menu";
 import { EnvironmentBadge } from "./environment-badge";
 import { StopControl } from "./stop-control";
+import { ThemeMenu } from "./theme-menu";
 
 /** Fixture workspaces: the switcher shows the shape of the control, and only one is connected. */
 const WORKSPACES = [
@@ -149,6 +150,7 @@ export function AppHeader() {
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
           <CommandMenu />
+          <ThemeMenu className={`${ICON_LINK} max-sm:hidden`} />
           <EnvironmentBadge environment={ws.environment} />
           {seesAgents ? (
             <>

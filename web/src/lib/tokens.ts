@@ -1,8 +1,8 @@
 /**
  * The colour tokens in navy and brass (DEC-202), one entry per CSS custom property in `globals.css`
  * (the test `tokens.test.ts` keeps the two in step). Values come from `palette.ts`; this file adds
- * what each token means. The design page and the contrast checks read it. The UI is light only;
- * dark mode is follow-up work (web/DESIGN.md).
+ * what each token means. The design page and the contrast checks read it. Dark values live in
+ * `INK_AND_GOLD_DARK` and the `data-mode="dark"` block of `globals.css`.
  */
 import { PAIRS } from "./contrast-pairs";
 import { PALETTE, type RampRef, TOKEN_NAMES, type TokenName } from "./palette";

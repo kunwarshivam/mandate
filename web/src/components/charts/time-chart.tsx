@@ -18,7 +18,7 @@ import {
 import type { Bar, DailyBar, Point } from "@/fixtures/market";
 import { nearestPoint } from "@/lib/chart-data";
 import { cn } from "@/lib/utils";
-import { useColourBlind } from "./chart-parts";
+import { useChartMode, useColourBlind } from "./chart-parts";
 import {
   CHART_FONT,
   type ChartLevel,
@@ -35,6 +35,7 @@ import {
   lineOptions,
   markersFor,
   priceLineFor,
+  setChartMode,
   usdLabel,
 } from "./options";
 
@@ -126,6 +127,7 @@ export function TimeChart({
 }) {
   const reducedMotion = useReducedMotion() ?? false;
   const colourBlind = useColourBlind();
+  const mode = useChartMode();
   const [readout, setReadout] = useState<Readout | null>(null);
   const [failedFor, setFailedFor] = useState<ChartSeries | null>(null);
   const summaryId = useId();
@@ -142,6 +144,7 @@ export function TimeChart({
       if (!el) return;
       let chart: IChartApi | null = null;
       try {
+        setChartMode(mode);
         chart = createChart(el, baseOptions({ reducedMotion, compact, valueFormat, hero: hero ? { axis } : undefined }));
         let api: ISeriesApi<SeriesType>;
         if (series.kind === "candles") {
@@ -180,7 +183,7 @@ export function TimeChart({
         live.current = null;
       };
     },
-    [series, levels, markers, reducedMotion, compact, valueFormat, colourBlind, hero, axis],
+    [series, levels, markers, reducedMotion, compact, valueFormat, colourBlind, mode, hero, axis],
   );
 
   /** Touch and pen: follow the finger along the line. A mouse already moves the crosshair. */

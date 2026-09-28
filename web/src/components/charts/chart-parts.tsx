@@ -4,6 +4,7 @@ import { useId, useMemo, useSyncExternalStore } from "react";
 import { motion } from "motion/react";
 import { type Market, buildMarket } from "@/fixtures/market";
 import { useRuntime } from "@/lib/mock-runtime";
+import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { type ChartLevel, usdLabel } from "./options";
 
@@ -12,11 +13,16 @@ export function useMarket(): Market {
   return useMemo(() => buildMarket(ws), [ws]);
 }
 
-function watchCvd(onChange: () => void): () => void {
-  const observer = new MutationObserver(onChange);
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-cvd"] });
-  return () => observer.disconnect();
+function watchRoot(attribute: string): (onChange: () => void) => () => void {
+  return (onChange) => {
+    const observer = new MutationObserver(onChange);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: [attribute] });
+    return () => observer.disconnect();
+  };
 }
+
+const watchCvd = watchRoot("data-cvd");
+const watchMode = watchRoot("data-mode");
 
 /** Canvas cannot follow the CSS remap, so charts read the colour-blind friendly flag from `<html data-cvd>`. */
 export function useColourBlind(): boolean {
@@ -24,6 +30,15 @@ export function useColourBlind(): boolean {
     watchCvd,
     () => document.documentElement.dataset.cvd === "on",
     () => false,
+  );
+}
+
+/** Charts redraw from the palette when `<html data-mode>` changes, for the same reason. */
+export function useChartMode(): ThemeMode {
+  return useSyncExternalStore(
+    watchMode,
+    () => (document.documentElement.dataset.mode === "dark" ? "dark" : "light"),
+    () => "light",
   );
 }
 
