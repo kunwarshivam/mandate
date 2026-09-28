@@ -228,7 +228,15 @@ fn sent_urls(transport: &FakeDataTransport) -> Vec<String> {
 #[ignore = "pending E7-8"]
 async fn an_equity_asset_is_read_into_its_eligibility_fields_and_stamped_with_the_clock() {
     let now = instant("2026-09-28T13:00:00Z");
-    let (client, transport) = trading([reply(200, "asset_equity", 0)], now);
+    let relisted = text_of("asset_equity")
+        .replacen("\"exchange\":\"NASDAQ\"", "\"exchange\":\"NYSE\"", 1)
+        .replacen("\"fractionable\":true", "\"fractionable\":false", 1)
+        .replacen(
+            "\"attributes\":[\"fractional_eh_enabled\",\"has_options\"]",
+            "\"attributes\":[\"ipo\"]",
+            1,
+        );
+    let (client, transport) = trading([reply(200, "asset_equity", 0), inline(200, &relisted)], now);
     let snapshot = read(client.asset(&instrument("AAPL")).await);
     assert_eq!(
         snapshot,
@@ -239,9 +247,22 @@ async fn an_equity_asset_is_read_into_its_eligibility_fields_and_stamped_with_th
         "every §3.1 field the gate reads, exactly, and the instant it was read"
     );
     assert_eq!(
+        read(client.asset(&instrument("AAPL")).await).map(|s| s.asset),
+        Ok(Asset {
+            exchange: Exchange::Nyse,
+            fractionable: false,
+            ipo: true,
+            ..aapl()
+        }),
+        "a second answer is read from its own body, so no constant passes (#277 review, minor 1)"
+    );
+    assert_eq!(
         sent_lines(&transport),
-        vec![(Method::Get, "/v2/assets/AAPL".to_owned(), None)],
-        "one read, on the asset endpoint, with no body"
+        vec![
+            (Method::Get, "/v2/assets/AAPL".to_owned(), None),
+            (Method::Get, "/v2/assets/AAPL".to_owned(), None)
+        ],
+        "one read per call, on the asset endpoint, with no body"
     );
 }
 
@@ -583,16 +604,35 @@ fn an_asset_snapshot_older_than_its_bound_is_refused() {
 #[ignore = "pending E7-8"]
 async fn an_equity_latest_quote_is_read_exactly_on_the_iex_feed() {
     let now = shifted(instant(EQUITY_QUOTE_AT), 5_000_000_000);
-    let (client, transport) = data([data_reply("quote_equity")], now);
+    let moved = data_text_of("quote_equity")
+        .replacen("\"ap\":227.46", "\"ap\":228.1", 1)
+        .replacen("\"as\":1", "\"as\":300", 1)
+        .replacen("\"bp\":227.44", "\"bp\":228.05", 1)
+        .replacen("\"bs\":2", "\"bs\":7", 1)
+        .replacen(EQUITY_QUOTE_AT, "2026-09-25T20:00:01.5Z", 1);
+    let (client, transport) = data([data_reply("quote_equity"), inline(200, &moved)], now);
     assert_eq!(
         read(client.latest_quote(&instrument("AAPL"), MAX_AGE).await),
         Ok(aapl_quote()),
         "both sides, exactly as the data host sent them, and the instant it stamped"
     );
     assert_eq!(
+        read(client.latest_quote(&instrument("AAPL"), MAX_AGE).await),
+        Ok(LatestQuote {
+            at: instant("2026-09-25T20:00:01.5Z"),
+            bid: price("228.05"),
+            bid_size: qty("7"),
+            ask: price("228.1"),
+            ask_size: qty("300"),
+            ..aapl_quote()
+        }),
+        "a second quote is read from its own body, so no constant passes (#277 review, minor 1)"
+    );
+    let url = "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex".to_owned();
+    assert_eq!(
         sent_urls(&transport),
-        vec!["https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex".to_owned()],
-        "one read, on the data host, on the paper profile's feed (spec §4.2)"
+        vec![url.clone(), url],
+        "one read per call, on the data host, on the paper profile's feed (spec §4.2)"
     );
 }
 
