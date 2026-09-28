@@ -2,6 +2,9 @@
 # change that touches only documentation and `web/` (DEC-112), and this workflow runs the web
 # checks. Until `web/package.json` exists every step after the checkout is skipped; `hashFiles`
 # cannot gate the job itself, because a job-level `if` is evaluated before the checkout.
+# The Impeccable detector (Apache-2.0, `docs/dependencies.md`) fails on any primary finding and
+# reads `web/.impeccable/config.json` when it exists. It flags gradient text and AI-typical palettes
+# but not a plain gradient, so the founder's no-gradients rule (DEC-200) has its own check.
 name: web
 
 on:
@@ -25,6 +28,8 @@ jobs:
       contents: read
     env:
       NEXT_TELEMETRY_DISABLED: "1"
+      IMPECCABLE_NO_TELEMETRY: "1"
+      DO_NOT_TRACK: "1"
     defaults:
       run:
         working-directory: web
@@ -45,6 +50,16 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         if: steps.app.outputs.present == 'true'
+      - name: Impeccable detector (DEC-200)
+        if: steps.app.outputs.present == 'true'
+        run: npx --yes impeccable@4.1.0 detect src/
+      - name: No gradients (DEC-200)
+        if: steps.app.outputs.present == 'true'
+        run: |
+          if grep -rnEi 'gradient|bg-(linear|radial|conic)-' src/; then
+            echo "gradients are not allowed in web/ (DEC-200, founder 2026-09-28)" >&2
+            exit 1
+          fi
       - run: npm run lint
         if: steps.app.outputs.present == 'true'
       - run: npm run typecheck
