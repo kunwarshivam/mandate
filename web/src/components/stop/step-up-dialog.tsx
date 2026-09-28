@@ -45,7 +45,19 @@ export function StepUpDialog({
   const contentRef = useRef<HTMLDivElement>(null);
   const abandon = useRef<(() => void) | null>(null);
 
+  const [shownOpen, setShownOpen] = useState(open);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (!open) setWaiting(false);
+  }
+
   useEffect(() => () => abandon.current?.(), []);
+
+  useEffect(() => {
+    if (open) return;
+    abandon.current?.();
+    abandon.current = null;
+  }, [open]);
 
   const cancel = () => {
     abandon.current?.();

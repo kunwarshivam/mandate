@@ -106,6 +106,11 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
   const { ws, reachable, commands, send, now } = useRuntime();
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [shownOpen, setShownOpen] = useState(open);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (!open) setPending(null);
+  }
   const contentRef = useRef<HTMLDivElement>(null);
   const contextAgent = agentId ? ws.agents.find((a) => a.agent_id === agentId) ?? null : null;
   const own = ws.external_positions;

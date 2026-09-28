@@ -1,12 +1,14 @@
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StopControl } from "@/components/shell/stop-control";
+import { StopSheet } from "@/components/stop/stop-sheet";
 import type { Scenario } from "@/fixtures/types";
 import { AGENT_IDS, SCENARIOS } from "@/fixtures/workspace";
-import type { CommandKind } from "@/lib/mock-runtime";
-import { PASSKEY_ANSWER_MS, type Passkey, mockPasskey } from "./step-up-dialog";
+import { type CommandKind, useRuntime } from "@/lib/mock-runtime";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
+import { heldPasskey, watchConsole } from "@/test/passkey";
+import { PASSKEY_ANSWER_MS, type Passkey, type PasskeyResult, mockPasskey } from "./step-up-dialog";
 
 function openSheet() {
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -217,16 +219,16 @@ function modes(sheet: HTMLElement) {
   return Array.from(sheet.querySelectorAll("[data-slot=mode-badge]"), (b) => b.getAttribute("data-mode"));
 }
 
-function start(c: Case, options?: { passkey?: Passkey }) {
+function start(c: Case, options?: { passkey?: Passkey }, ui = <StopControl />) {
   setPathname(c.path);
-  renderWithRuntime(<StopControl />, c.scenario, options);
+  const view = renderWithRuntime(ui, c.scenario, options);
   const sheet = openSheet();
   const before = modes(sheet);
   fireEvent.click(within(sheet).getByRole("button", { name: c.choice }));
-  return { sheet, before };
+  return { sheet, before, view };
 }
 
-function press(name: "Use passkey" | "Cancel") {
+function press(name: "Use passkey" | "Cancel" | "Close") {
   fireEvent.click(within(stepUpDialog()!).getByRole("button", { name }));
 }
 
@@ -347,6 +349,34 @@ const ENDINGS: Ending[] = [
     },
   },
   {
+    ending: "the dialog's Close button",
+    notice: "Passkey check canceled. Nothing was sent.",
+    run: () => press("Close"),
+  },
+  {
+    ending: "the Close button before a late verified answer",
+    notice: "Passkey check canceled. Nothing was sent.",
+    passkey: latePasskey,
+    run: () => {
+      press("Use passkey");
+      press("Close");
+    },
+  },
+  {
+    ending: "a click outside the dialog",
+    notice: "Passkey check canceled. Nothing was sent.",
+    run: () => clickOutside(),
+  },
+  {
+    ending: "a click outside before a late verified answer",
+    notice: "Passkey check canceled. Nothing was sent.",
+    passkey: latePasskey,
+    run: () => {
+      press("Use passkey");
+      clickOutside();
+    },
+  },
+  {
     ending: "a failed passkey check",
     notice: "Passkey check failed. Nothing was sent.",
     passkey: failingPasskey,
@@ -356,6 +386,14 @@ const ENDINGS: Ending[] = [
     },
   },
 ];
+
+/** Radix listens for a press outside only after the dialog's first tick, and dismisses on the click that ends it. */
+function clickOutside() {
+  act(() => vi.advanceTimersByTime(0));
+  const overlay = document.querySelector("[data-slot=dialog-overlay]")!;
+  fireEvent.pointerDown(overlay);
+  fireEvent.click(overlay);
+}
 
 describe("a cancelled or failed passkey check never becomes an action (G3, P4)", () => {
   it.each(STEP_UP.flatMap((c) => ENDINGS.map((e) => [c.name, e.ending, c, e] as const)))("%s, ended by %s, sends nothing and says so", (_, __, c, e) => {
@@ -386,6 +424,97 @@ describe("after a verified passkey, the command is sent and never shown as done 
     press("Use passkey");
     act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
     expect(entries(sheet)).toHaveLength(1);
+  });
+});
+
+/** What the runtime recorded, rendered beside the Stop control so it outlives it. */
+function RuntimeCommands() {
+  const { commands } = useRuntime();
+  return <output data-slot="runtime-commands">{commands.length}</output>;
+}
+
+function Tree({ stop }: { stop: boolean }) {
+  return (
+    <>
+      {stop ? <StopControl /> : null}
+      <RuntimeCommands />
+    </>
+  );
+}
+
+function recordedCount() {
+  return Number(document.querySelector("[data-slot=runtime-commands]")?.textContent);
+}
+
+describe("unmounting mid-passkey abandons the request, and a late answer never becomes an action (P4)", () => {
+  let console_: ReturnType<typeof watchConsole>;
+  beforeEach(() => {
+    console_ = watchConsole();
+  });
+  afterEach(() => console_.restore());
+
+  const RESULTS: PasskeyResult[] = ["verified", "failed"];
+  const CASES_BY_RESULT = STEP_UP.flatMap((c) => RESULTS.map((r) => [c.name, r, c] as const));
+
+  it("counts a command the runtime receives, so the unmount tests below can see one", () => {
+    const [c] = STEP_UP;
+    start(c, undefined, <Tree stop />);
+    press("Use passkey");
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS));
+    expect(recordedCount()).toBe(1);
+  });
+
+  it.each(CASES_BY_RESULT)("%s: removing the Stop control while the passkey is asked sends nothing, even when it later answers %s", (_, result, c) => {
+    const { passkey, release } = heldPasskey(result);
+    const { view } = start(c, { passkey }, <Tree stop />);
+    press("Use passkey");
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS - 1));
+
+    view.rerender(<Tree stop={false} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(release).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+
+    expect(recordedCount()).toBe(0);
+    expect(console_.calls()).toEqual([]);
+  });
+
+  it.each(CASES_BY_RESULT)("%s: closing the Stop sheet while the passkey is asked sends nothing, even when it later answers %s, and it reopens without the old check", (_, result, c) => {
+    const { passkey, release } = heldPasskey(result);
+    const agentId = c.path.startsWith("/agents/") ? c.path.slice("/agents/".length) : null;
+    const ui = (open: boolean) => (
+      <>
+        <StopSheet open={open} onOpenChange={() => {}} agentId={agentId} />
+        <RuntimeCommands />
+      </>
+    );
+    setPathname(c.path);
+    const view = renderWithRuntime(ui(true), c.scenario, { passkey });
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: c.choice }));
+    press("Use passkey");
+
+    view.rerender(ui(false));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(release).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+    expect(recordedCount()).toBe(0);
+
+    view.rerender(ui(true));
+    expect(stepUpDialog()).toBeNull();
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("Nothing was sent");
+    expect(console_.calls()).toEqual([]);
+  });
+
+  it.each(CASES_BY_RESULT)("%s: unmounting the whole screen while the passkey is asked abandons it, with no warning when it later answers %s", (_, result, c) => {
+    const { passkey, release } = heldPasskey(result);
+    const { view } = start(c, { passkey });
+    press("Use passkey");
+
+    view.unmount();
+    expect(release).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime((PASSKEY_ANSWER_MS + RECORD_AFTER_MS) * 3));
+
+    expect(console_.calls()).toEqual([]);
   });
 });
 
