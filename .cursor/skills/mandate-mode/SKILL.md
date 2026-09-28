@@ -13,8 +13,9 @@ into structure. The founder is not a gate (DEC-79).
 
 `AGENTS.md` and accepted decisions (`docs/project/04-decision-log.md`) come first, then this
 skill, then the vendored skills (`how`, `why`, `tdd`, `blast-radius`, `interrogate`, `unslop`,
-`technical-writing`, `deslop`, and for `web/` the design skills `frontend-design` and
-`design-engineering`; see `.cursor/third_party/README.md`).
+`technical-writing`, `deslop`, and for `web/` the design skills `impeccable`, `emil-design-eng`,
+`review-animations`, `prototype`, `apple-design`, `baseline-ui`, `fixing-accessibility`,
+`fixing-motion-performance`, and `web-design-guidelines`; see `.cursor/third_party/README.md`).
 
 ## Decide, record, continue
 
@@ -62,10 +63,12 @@ code (the spec guard enforces it).
 - **Adversarial review of a safety-critical diff:** the `interrogate` skill, before opening the PR.
 - **Prose (docs, PR descriptions, commits):** the `unslop` and `technical-writing` skills.
 - **Before commit:** the `deslop` skill.
-- **Web UI (`web/`, DEC-200):** the `frontend-design` skill for visual direction and
-  `design-engineering` for component, motion, and accessibility craft, both under the
-  [product-experience brief](../../../docs/product/09-product-experience.md), which wins where they
-  differ.
+- **Web UI (`web/`, DEC-200):** no gradients, flat colour (founder, 2026-09-28). `impeccable` for
+  direction, critique, audit, and polish; `emil-design-eng` and `review-animations` for motion;
+  `prototype` to compare directions; `baseline-ui`, `fixing-accessibility`,
+  `fixing-motion-performance`, and `web-design-guidelines` as review passes
+  (`.cursor/third_party/README.md` says when to use which). The
+  [product-experience brief](../../../docs/product/09-product-experience.md) wins where they differ.
 
 ## Subagents
 

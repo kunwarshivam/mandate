@@ -1,0 +1,7 @@
+vercel-labs/agent-skills (https://github.com/vercel-labs/agent-skills) has no LICENSE file at
+commit 063bee94c3f4df8453406c830b0a7df0f2860278, nor in its history. Its README.md declares the
+license in full as follows, and `web-design-guidelines` is vendored under that declaration:
+
+## License
+
+MIT
