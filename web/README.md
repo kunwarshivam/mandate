@@ -11,7 +11,8 @@ Motion, lucide icons, and Vitest with Testing Library.
 
 ## Run it
 
-Node 22 or later (`.nvmrc`), with npm.
+Node 22.18 or later, with npm; CI uses the exact release in `.nvmrc`. The Impeccable detector
+(4.1.0) that CI runs needs 22.18 or later.
 
 ```sh
 npm ci
