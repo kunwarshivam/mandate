@@ -86,6 +86,45 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
+/** Saturated gold: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
+const SATURATED_GOLD = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
+const MARK_GOLD = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
+/** A rail is 8 px tall and a post, tick or bar a few px wide: anything thicker on both sides is a block. */
+const GOLD_MAX_THICKNESS = 8;
+
+/** Elements painted in saturated gold thicker than a line, and text set in gold's mark colours. */
+async function goldMisuse(page: Page): Promise<string[]> {
+  return page.evaluate(
+    ({ fills, marks, max }) => {
+      const resolve = (token: string) => {
+        const probe = document.createElement("div");
+        probe.style.color = `var(${token})`;
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      };
+      const fill = new Set(fills.map(resolve));
+      const mark = new Set(marks.map(resolve));
+      const label = (el: Element) => `<${el.tagName.toLowerCase()} class="${(el.getAttribute("class") ?? "").slice(0, 80)}">`;
+      const hits: string[] = [];
+      for (const el of document.body.querySelectorAll("*")) {
+        for (const pseudo of [null, "::before", "::after"]) {
+          const style = getComputedStyle(el, pseudo);
+          if (pseudo && (style.content === "none" || style.content === "normal")) continue;
+          if (!fill.has(style.backgroundColor)) continue;
+          const box = pseudo ? { width: parseFloat(style.width), height: parseFloat(style.height) } : el.getBoundingClientRect();
+          if (Math.min(box.width, box.height) > max) hits.push(`${label(el)}${pseudo ?? ""} is a ${Math.round(box.width)}x${Math.round(box.height)} gold block`);
+        }
+        const text = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
+        if (text && mark.has(getComputedStyle(el).color)) hits.push(`${label(el)} sets text in a gold mark colour: ${el.textContent?.slice(0, 40)}`);
+      }
+      return hits;
+    },
+    { fills: SATURATED_GOLD, marks: MARK_GOLD, max: GOLD_MAX_THICKNESS },
+  );
+}
+
 /** Next hydrates after load; a press before then does nothing, so retry until it opens. */
 async function openBy(page: Page, trigger: Locator, opened: Locator) {
   await expect(async () => {
@@ -113,6 +152,35 @@ test.describe("no gradient paints on any route (DEC-200)", () => {
       });
     }
   });
+});
+
+test.describe("gold is a line, never a block, and never text lighter than dark gold (DEC-204)", () => {
+  for (const path of ROUTES) {
+    test(`desktop ${path}`, async ({ page }) => {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      expect(await goldMisuse(page)).toEqual([]);
+    });
+  }
+
+  test.describe("phone", () => {
+    test.use({ viewport: { width: 390, height: 844 } });
+    for (const path of ROUTES) {
+      test(`phone ${path}`, async ({ page }) => {
+        await page.goto(path);
+        await page.waitForLoadState("networkidle");
+        expect(await goldMisuse(page)).toEqual([]);
+      });
+    }
+  });
+});
+
+test("renders in the project's theme, with the body on the theme's card colour", async ({ page }, testInfo) => {
+  const mode = testInfo.project.use.colorScheme === "dark" ? "dark" : "light";
+  await page.goto("/");
+  await expect(page.locator("html")).toHaveAttribute("data-mode", mode);
+  expect(await page.locator("html").evaluate((el) => el.classList.contains("dark"))).toBe(mode === "dark");
+  expect((await computed(page.locator("body"), ["background-color"]))["background-color"]).toBe(await tokenColor(page, "--card"));
 });
 
 test.describe("no gradient paints in any overlay (DEC-200)", () => {
