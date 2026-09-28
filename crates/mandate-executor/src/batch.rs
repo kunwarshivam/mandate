@@ -51,8 +51,7 @@ impl<'p, 'a> Batch<'p, 'a> {
         self.id_after(0)
     }
 
-    /// The id the draft `later` places after the next one will carry, for a record that must name
-    /// an event written just after it in the same list.
+    /// The id of the draft `later` places after the next, for a record naming a later event.
     pub(crate) fn id_after(&self, later: u32) -> EventId {
         self.ports
             .ids

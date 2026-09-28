@@ -207,8 +207,7 @@ pub(crate) fn send(
     Ok(())
 }
 
-/// `OrderSubmitted` naming every field of `request`, without describing the request yet, for a
-/// sequence that records more before it acts (a re-placement's `ProtectionChanged`).
+/// `OrderSubmitted` for `request`, before a sequence records more and then sends it.
 pub(crate) fn journal_submission(
     batch: &mut Batch<'_, '_>,
     request: &SubmitOrder,

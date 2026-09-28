@@ -51,11 +51,9 @@ pub struct ExecutorState {
     pub(crate) protection: BTreeMap<InstrumentId, Protection>,
     pub(crate) unprotected: Vec<UnprotectedInterval>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
-    /// The marketable exit sequence each instrument is in, from its `unprotected_start` to its
-    /// `unprotected_end` (§5.4).
+    /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
     pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
-    /// The latest quote per instrument. Process-local, like the latest tick: a quote is an input,
-    /// never journaled, and only what it decides is.
+    /// The latest quote per instrument: process-local, an input never journaled (like the tick).
     pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
@@ -442,9 +440,8 @@ impl ExecutorState {
     }
 }
 
-/// One marketable exit sequence (§5.4): the exit intent it runs for, the entry and agent a
-/// re-placement is named for, and the prices it re-places at, all as its `unprotected_start`
-/// journaled them.
+/// One exit sequence as its `unprotected_start` journaled it (§5.4): the exit's intent, and the
+/// entry, agent and prices a re-placement takes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExitSequence {
     pub(crate) intent: IntentId,

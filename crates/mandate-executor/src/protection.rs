@@ -19,11 +19,10 @@ use crate::types::{
     OrderType, Purpose, RiskClock, SubmitOrder, TimeInForce,
 };
 
-/// §5.4's stub after slice 3a: an **add** (slice 2) or a **passive** exit (slice 3b) where
-/// protection rests; a marketable exit runs [`begin_exit`] instead. Rule 13: the passive exit here
-/// would be a denied exit once reachable, so the pin
-/// `no_protection_is_created_on_an_unprotected_position` keeps every instrument unprotected until
-/// slice 2, which lands after 3a, 3b and 4 (DEC-160).
+/// §5.4's stub after 3a: an **add** (slice 2) or **passive** exit (3b) where protection rests.
+/// Rule 13: that exit would be denied once reachable, so the pin
+/// `no_protection_is_created_on_an_unprotected_position` keeps protection away until slice 2,
+/// which lands after 3a, 3b and 4 (DEC-160).
 pub(crate) fn sequenced(
     state: &ExecutorState,
     instrument: &InstrumentId,
@@ -35,9 +34,8 @@ pub(crate) fn sequenced(
     Ok(())
 }
 
-/// The triggered-stop watchdog's input (§5.4, slice 4) — a sane mark at or below a resting stop —
-/// answers its stub; every other quote passes, kept as the latest by [`crate::handle`]. The refusal
-/// is this step's alone: no exit, cancel or reconciliation waits on it.
+/// Only the triggered-stop watchdog's input (§5.4, slice 4), a sane mark at or below a resting
+/// stop, answers its stub, and refuses this step alone: nothing else waits on it.
 pub(crate) fn watched(
     state: &ExecutorState,
     observation: &MarketObservation,
@@ -56,9 +54,8 @@ pub(crate) fn watched(
     Ok(())
 }
 
-/// The limit a sequence's exit is submitted at (§5.4, §5.6): the ladder's, from the latest quote,
-/// where the snapshot knows the exit tier — its stub until slice 4 (#174 ruling (A)); every other
-/// order goes at its intent's limit. Reached only where protection rested (the pin above).
+/// A sequence's exit is priced by §5.6's ladder (its stub until slice 4, #174 ruling (A)) where
+/// the exit tier and a quote are known; every other order keeps its intent's limit.
 pub(crate) fn exit_limit(
     batch: &Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -77,7 +74,6 @@ pub(crate) fn exit_limit(
     }
 }
 
-/// Whether the purpose reduces risk other than as a protective order itself.
 fn exits(purpose: Purpose) -> bool {
     purpose != Purpose::Protective && !purpose.adds_risk()
 }
@@ -89,8 +85,7 @@ fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
         .is_some_and(|protection| !protection.resting.is_empty())
 }
 
-/// Whether an exit waits for its sequence's cancels: nothing is submitted beside a protective
-/// order not yet confirmed gone (§5.4).
+/// Nothing is submitted beside a protective order not yet confirmed gone (§5.4).
 pub(crate) fn awaits_cancel(
     state: &ExecutorState,
     instrument: &InstrumentId,
@@ -99,11 +94,10 @@ pub(crate) fn awaits_cancel(
     exits(purpose) && state.exiting.contains_key(instrument) && rests(state, instrument)
 }
 
-/// §5.4's marketable exit sequence, before the gate: every resting protective order in the
-/// instrument, attributed or not (DEC-160 3d), is cancelled by id, and the interval's start
-/// records the sequence (intent, entry, agent, prices) so a restart resumes it; asked again, the
-/// cancels are sent again. A passive exit (limit above the latest bid) and an add are not this
-/// sequence, and a crypto add answers slice 5's stub. Nothing is denied here (rule 13).
+/// §5.4's marketable exit sequence, before the gate: every resting protective order, attributed or
+/// not (DEC-160 3d), is cancelled by id (again on each ask), and the interval's start records the
+/// sequence so a restart resumes it. A passive exit or an add is not this sequence; a crypto add
+/// answers slice 5's stub. Nothing is denied here (rule 13).
 pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -147,7 +141,17 @@ pub(crate) fn begin_exit(
             None => ClientOrderId::for_intent(intent)?,
         };
         let mut pairs = vec![
-            ("orders", text(named(&protection.resting))),
+            (
+                "orders",
+                text(
+                    protection
+                        .resting
+                        .iter()
+                        .map(ClientOrderId::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+            ),
             ("intent_id", text(intent.0.0.clone())),
             ("entry", text(entry.as_str())),
             ("agent", text(agent.0.clone())),
@@ -169,7 +173,7 @@ pub(crate) fn begin_exit(
     Ok(())
 }
 
-/// Moves a live order with no cancel outstanding to `PendingCancel`; whether it did.
+/// Whether a live order with no cancel outstanding was moved to `PendingCancel`.
 fn ask_cancel(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<bool, ExecutorError> {
     let live = batch
         .view
@@ -195,8 +199,8 @@ fn changed(
     batch.journal("ProtectionChanged", None, pairs)
 }
 
-/// A protective order's confirmed cancel (§5.4): it leaves the protection, and once none rests
-/// the instrument's waiting exits are gated again on that fresh state and submitted.
+/// A protective order's confirmed cancel (§5.4); once none rests, the instrument's waiting exits
+/// are re-gated on fresh state and submitted.
 pub(crate) fn protection_cancelled(
     batch: &mut Batch<'_, '_>,
     instrument: &InstrumentId,
@@ -229,10 +233,9 @@ pub(crate) fn protection_cancelled(
     Ok(())
 }
 
-/// The sequence's end (§5.4): once nothing rests and the exit is finished (terminal, denied or
-/// abandoned), protection is re-placed for what the position holds at the recorded prices and the
-/// interval ends; a flat position places nothing. A sequence with no take-profit to re-use
-/// (crypto, slice 5) stays open, bounded and alerted by [`bound`].
+/// The sequence's end (§5.4): once nothing rests and the exit is terminal, denied or abandoned,
+/// the position left is re-protected at the recorded prices and the interval ends. Without a
+/// take-profit (crypto, slice 5) it stays open, bounded by [`bound`].
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
         .view
@@ -319,8 +322,8 @@ fn replace(
     Ok(())
 }
 
-/// §5.4's bound: an interval open for `max_unprotected_s` has its working exit cancelled (whose
-/// confirmation re-places protection through [`settle`]) and the owner alerted once.
+/// §5.4's bound: at `max_unprotected_s` the exit is cancelled (its confirmation re-places
+/// protection through [`settle`]) and the owner alerted once.
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
@@ -353,13 +356,6 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         batch.notify(alerted, "unprotected_interval_limit");
     }
     Ok(())
-}
-
-fn named(ids: &[ClientOrderId]) -> String {
-    ids.iter()
-        .map(ClientOrderId::as_str)
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Where a ladder price came from, so a journaled exit says which of §5.6's three fallbacks was
