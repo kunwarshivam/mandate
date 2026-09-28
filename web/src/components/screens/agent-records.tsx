@@ -9,7 +9,7 @@ import { PositionChart } from "@/components/charts/price-chart";
 import { AsOf } from "@/components/domain/as-of";
 import { SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
-import { FixtureTag } from "@/components/domain/placeholders";
+import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, SendingStopped, protectionText } from "@/components/domain/positions";
 import { Skeleton } from "@/components/domain/skeleton";
 import type { Agent, Fill } from "@/fixtures/types";
@@ -162,7 +162,10 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
           </Fact>
         </Facts>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <FixtureTag />
+          <span className="flex flex-wrap items-center gap-2">
+            <FixtureTag />
+            <Placeholder name="performance" />
+          </span>
           {canClose ? (
             <LinkButton href={`${positionHref(agent.agent_id, assetId)}/close`} variant="outline" size="lg" className="h-11">
               Close position…

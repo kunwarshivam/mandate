@@ -9,6 +9,7 @@ import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
 import { SignedMoney } from "@/components/domain/money";
+import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
@@ -213,6 +214,7 @@ function Dashboard() {
                 </tbody>
               </table>
             )}
+            {positions.length > 0 ? <Placeholder name="performance" className="mt-2" /> : null}
             {ws.external_positions.length > 0 ? (
               <p className="mt-3 border-t pt-2.5 text-caption text-muted-foreground">
                 Also on the account, not managed by any agent: {ws.external_positions.map((e) => `${quantity(e.qty)} ${e.instrument.symbol}`).join(", ")}.

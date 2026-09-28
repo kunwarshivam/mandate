@@ -6,6 +6,7 @@ import { clockShort, dateLabel, price, quantity, usd } from "@/lib/format";
 import { ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
 import { type AnyOrder, isPast } from "@/lib/orders";
 import { AsOf } from "./as-of";
+import { Placeholder } from "./placeholders";
 import { SourceTag } from "./mode";
 import { SignedMoney } from "./money";
 
@@ -91,6 +92,7 @@ export function PositionsTable({
           })}
         </tbody>
       </table>
+      <Placeholder name="performance" className="mt-2" />
     </div>
   );
 }

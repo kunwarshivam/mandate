@@ -69,7 +69,10 @@ development.
   with the fixture's fills, positions and equity. They are TradingView Lightweight Charts
   (Apache-2.0); the credit is in `web/NOTICE`, under the dashboard's account chart and on `/design`.
 - Compliance text appears only as the placeholders `[[DISCLOSURE-PERFORMANCE]]`,
-  `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`.
+  `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`. Every P&L figure (a signed gain or loss,
+  or a dollar figure labelled realized, unrealized, P&L, gain or loss) has
+  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item; `src/app/disclosure.test.tsx`
+  renders every route in every scenario and fails otherwise.
 
 ## Design system
 

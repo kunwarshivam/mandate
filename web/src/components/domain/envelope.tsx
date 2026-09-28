@@ -7,6 +7,7 @@ import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { type Level, type Rail, agentLimits } from "@/lib/limits";
+import { Placeholder } from "./placeholders";
 
 const EASE = [0.23, 1, 0.32, 1] as const;
 
@@ -132,6 +133,7 @@ export function Envelope({ agent, compact = false, className }: { agent: Agent; 
         {limits.rails.map((rail) => (
           <LimitRail key={rail.key} rail={rail} />
         ))}
+        <Placeholder name="performance" className="w-fit" />
       </div>
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>

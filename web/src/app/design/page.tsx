@@ -124,7 +124,7 @@ export default function DesignPage() {
           ))}
         </ul>
         <p className="max-w-prose text-sm text-muted-foreground">
-          Gains and losses are the only other hues, and only as text beside a sign and the word: <SignedMoney value="123.45" /> <SignedMoney value="-67.89" />
+          Gains and losses are the only other hues, and only as text beside a sign and the word: <SignedMoney value="123.45" /> <SignedMoney value="-67.89" /> <Placeholder name="performance" />
         </p>
       </Block>
 
