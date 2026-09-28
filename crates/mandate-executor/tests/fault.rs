@@ -24,9 +24,9 @@ mod common;
 use std::collections::{BTreeMap, BTreeSet};
 
 use common::{
-    ACCOUNT_STREAM, CrashPoint, FixedInstruments, FixedMandate, Shell, TestIds, broker_fill,
-    broker_order, broker_position, clock, config, event, handoff, instrument, opening, ports,
-    price, protected_opening, qty, quote, risk_exit, snapshot, stream_opened, text, usd,
+    ACCOUNT_STREAM, CrashPoint, FixedInstruments, FixedMandate, Shell, TestIds, broker_account,
+    broker_fill, broker_order, broker_position, clock, config, event, handoff, instrument, opening,
+    ports, price, protected_opening, qty, quote, risk_exit, snapshot, stream_opened, text, usd,
     with_clock,
 };
 use mandate_accounting::Side;
@@ -58,6 +58,7 @@ struct Truth {
     /// The broker's cash once a fill since the last account snapshot has moved it; `None` keeps
     /// the default account's. A reconciliation compares cash within a band of the fills since its
     /// base (§11 step 4), so a truth that reports a fill must report the cash that fill moved.
+    /// With no position left, the account's equity and buying power are that cash too.
     cash: Option<Usd>,
 }
 
@@ -68,7 +69,15 @@ impl Truth {
         taken.fills = self.fills.clone();
         taken.positions = self.positions.clone();
         if let Some(cash) = self.cash {
+            assert!(
+                self.positions.is_empty(),
+                "a truth that sets the cash holds no position, so its equity and buying power are \
+                 that cash"
+            );
             taken.account.cash = cash;
+            taken.account.equity = cash;
+            taken.account.buying_power = cash;
+            taken.account.non_marginable_buying_power = cash;
         }
         taken
     }
@@ -517,6 +526,25 @@ fn cash_after_the_exit_sell() -> Usd {
     usd("21540")
 }
 
+/// The proceeds of every sell fill the journal applied, at its own quantity and price: the cash
+/// the exit moved, computed from the executor's record rather than the fixture's figure.
+fn journaled_sell_proceeds(shell: &Shell) -> Option<Usd> {
+    shell
+        .account_journal
+        .iter()
+        .filter(|e| {
+            e.event_type == "FillApplied"
+                && e.payload.get("side").and_then(Value::as_str) == Some("sell")
+        })
+        .try_fold(Usd::ZERO, |total, e| {
+            let field = |name: &str| e.payload.get(name).and_then(Value::as_str);
+            let notional = qty(field("qty_gross")?)
+                .notional(price(field("price")?))
+                .ok()?;
+            total.checked_add(notional).ok()
+        })
+}
+
 /// A risk exit of the protected position, crashed inside its cancel → confirm → submit sequence
 /// (points 9 and 10), restarted, and driven to the exit's fill.
 fn crash_one_protective_sequence(point: CrashPoint) {
@@ -615,6 +643,13 @@ fn crash_one_protective_sequence(point: CrashPoint) {
         ..broker_fill("f-exit", Some(&exit_id), "10", "154")
     }];
     truth.cash = Some(cash_after_the_exit_sell());
+    assert_eq!(
+        Some(cash_after_the_exit_sell()),
+        journaled_sell_proceeds(&shell)
+            .and_then(|proceeds| broker_account().cash.checked_add(proceeds).ok()),
+        "crash at {point:?}: the broker's cash is exactly the default account's plus the journaled \
+         exit proceeds, not merely within §11's band"
+    );
     let started = shell
         .account_journal
         .iter()
