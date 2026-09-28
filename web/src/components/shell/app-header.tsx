@@ -23,7 +23,7 @@ const WORKSPACES = [
 ] as const;
 
 const ICON_LINK =
-  "press relative inline-flex size-11 shrink-0 items-center justify-center text-foreground outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring";
+  "press relative inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
 /** Below `xl` the trail keeps its last two crumbs: Kumo renders the full trail as the nav's last child. */
 const TWO_CRUMBS = "max-xl:[&>div:last-child>*:nth-child(-n+2)]:hidden";
@@ -35,7 +35,7 @@ function WorkspaceSwitcher() {
       <DropdownMenu.Trigger
         render={<button type="button" />}
         aria-label={`Workspace: ${current.label}`}
-        className="press inline-flex h-11 max-w-48 shrink-0 items-center gap-1.5 px-2 text-sm font-semibold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
+        className="press inline-flex h-10 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
       >
         <Briefcase className="size-5 shrink-0 xl:hidden" aria-hidden />
         <span className="truncate max-xl:sr-only">{current.label}</span>
@@ -124,11 +124,11 @@ export function AppHeader() {
   const home = homeFor(role);
 
   return (
-    <header className="sticky top-0 z-30 border-b bg-background">
-      <div className="flex h-14 items-center gap-1 px-(--page-x) sm:gap-2">
+    <header className="sticky top-0 z-30 border-b border-border/70 bg-card">
+      <div className="flex h-16 items-center gap-1 px-(--page-x) sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
         <Link href={home.href} className="shrink-0 px-1 text-foreground lg:hidden" aria-label={`Owlhead, ${home.label}`}>
-          <Wordmark className="text-xl sm:text-2xl" />
+          <Wordmark />
         </Link>
         <div className="hidden lg:block">
           <WorkspaceSwitcher />
@@ -147,14 +147,14 @@ export function AppHeader() {
             ])}
           </Breadcrumbs>
         </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
           <CommandMenu />
           <EnvironmentBadge environment={ws.environment} />
           {seesAgents ? (
             <>
               <Link href="/approvals" aria-label="Approvals" className={`${ICON_LINK} max-sm:hidden`}>
                 <Tray className="size-5" aria-hidden />
-                <ApprovalsCount n={open} className="absolute top-1 right-0.5" />
+                <ApprovalsCount n={open} className="absolute top-0.5 right-0" />
               </Link>
               <Link href="/alerts" aria-label="Alerts" className={`${ICON_LINK} max-xl:hidden`}>
                 <Bell className="size-5" aria-hidden />
@@ -167,7 +167,7 @@ export function AppHeader() {
           <div className="max-sm:hidden xl:hidden">
             <MoreMenu seesAgents={seesAgents} />
           </div>
-          <StopControl />
+          <StopControl className="ml-1 sm:ml-2" />
         </div>
       </div>
     </header>

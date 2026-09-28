@@ -367,6 +367,14 @@ html:root[data-cvd="on"] {
   }
 }
 
+/* The hero line draws in from the left on first load; a new range redraws in place, with no wipe. */
+@utility draw-in {
+  transition: clip-path var(--duration-draw) var(--ease-out);
+  @starting-style {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -410,6 +418,12 @@ html:root[data-cvd="on"] {
   }
   .press:active:not(:disabled) {
     transform: none;
+  }
+  .draw-in {
+    transition: none;
+    @starting-style {
+      clip-path: none;
+    }
   }
   .reveal {
     transition: none;

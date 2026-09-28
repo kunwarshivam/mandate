@@ -8,7 +8,7 @@ import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Environment } from "@/fixtures/types";
 
 /**
- * Kumo's PageHeader block (`kumo add PageHeader`), in Placard. Route tabs are links in a `nav`, not a
+ * Kumo's PageHeader block (`kumo add PageHeader`), calm. Route tabs are links in a `nav`, not a
  * tablist: each is a page with its own address, so nothing required hides behind a tab. The
  * environment slot is filled on every record screen, so the paper badge sits beside the title.
  */
@@ -45,7 +45,7 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="grid min-w-0 gap-1">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="text-h1 sm:text-h1">{title}</h1>
+            <h1 className="text-h1">{title}</h1>
             {environment ? <EnvironmentBadge environment={environment} /> : null}
           </div>
           {description ? <p className="max-w-prose text-muted-foreground">{description}</p> : null}
@@ -54,8 +54,8 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
       </div>
       {children}
       {tabs && tabs.length > 0 ? (
-        <nav aria-label={tabsLabel} className="-mx-(--page-x) overflow-x-auto border-b border-foreground px-(--page-x) lg:mx-0 lg:px-0">
-          <ul className="flex min-w-max gap-1">
+        <nav aria-label={tabsLabel} className="-mx-(--page-x) overflow-x-auto px-(--page-x) [scrollbar-width:none] lg:mx-0 lg:px-0">
+          <ul className="flex min-w-max gap-1 border-b border-border/70">
             {tabs.map((tab) => {
               const current = isCurrent(pathname, tab.href, tabs);
               return (
@@ -64,8 +64,8 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
                     href={tab.href}
                     aria-current={current ? "page" : undefined}
                     className={cn(
-                      "relative inline-flex h-11 items-center px-3 text-sm font-medium text-muted-foreground outline-none transition-colors duration-(--duration-hover) hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-semibold text-foreground after:absolute after:inset-x-0 after:-bottom-0.5 after:h-1 after:bg-lapis",
+                      "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) first:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+                      current && "font-medium text-foreground after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis",
                     )}
                   >
                     {tab.label}

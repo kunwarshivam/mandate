@@ -56,8 +56,8 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       data-slot="status-strip"
       data-degraded={degraded > 0 ? "" : undefined}
       className={cn(
-        "flex items-center gap-x-4 gap-y-1 overflow-x-auto py-1.5 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none] sm:flex-wrap sm:overflow-x-visible",
-        degraded > 0 && "bg-muted",
+        "flex items-center gap-x-5 gap-y-1 overflow-x-auto py-2 text-caption whitespace-nowrap text-muted-foreground [scrollbar-width:none] sm:flex-wrap sm:overflow-x-visible",
+        degraded > 0 && "bg-background",
         className,
       )}
     >
@@ -71,7 +71,7 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
         return (
           <span key={i.key} data-state={i.state} className={cn("inline-flex items-center gap-1.5", label && "font-medium text-foreground")}>
             {label ? (
-              <span className="border border-foreground px-1 field-label" aria-hidden>
+              <span className="rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
                 {label}
               </span>
             ) : null}

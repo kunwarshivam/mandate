@@ -106,7 +106,7 @@ export function ApprovalsCount({ n, className }: { n: number; className?: string
   return (
     <span
       data-slot="approvals-count"
-      className={`inline-flex h-5 min-w-5 items-center justify-center bg-foreground px-1 font-mono text-label font-semibold text-background tabular ${className ?? ""}`}
+      className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-lapis px-1.5 font-mono text-xs font-semibold text-lapis-foreground tabular ${className ?? ""}`}
     >
       {n}
       <span className="sr-only"> open</span>
@@ -220,8 +220,8 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
 }
 
 /**
- * Kumo's Sidebar in Placard. The header is a light surface carrying the navy Owlhead brand and the
- * account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
+ * Kumo's Sidebar, quiet: the page's slate tone with no rule, so the content column carries the
+ * weight. The header carries the navy Owlhead brand and the account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
  * holds back the header or the Stop control.
  */
 export function AppSidebar() {
@@ -235,9 +235,9 @@ export function AppSidebar() {
   const home = homeFor(role);
 
   return (
-    <Sidebar aria-label="Main">
+    <Sidebar aria-label="Main" className="border-r-0 bg-background">
       <Sidebar.Header data-slot="brand" className="h-auto flex-col items-stretch gap-0 bg-background px-0">
-        <div className="flex h-14 shrink-0 items-center px-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+        <div className="flex h-16 shrink-0 items-center px-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
           <Link
             href={home.href}
             className="inline-flex min-h-11 items-center outline-none focus-visible:ring-3 focus-visible:ring-ring"
@@ -246,11 +246,11 @@ export function AppSidebar() {
             <SidebarBrand />
           </Link>
         </div>
-        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-3 pb-3 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
-          <Buildings className="size-5 shrink-0" aria-hidden />
+        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-4 pb-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+          <Buildings className="size-5 shrink-0 text-muted-foreground" aria-hidden />
           <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">
             <span className="field-label text-muted-foreground">Account</span>
-            <span className="truncate text-sm font-semibold">{ws.connection.broker}</span>
+            <span className="truncate text-sm font-medium">{ws.connection.broker}</span>
           </div>
         </div>
       </Sidebar.Header>
