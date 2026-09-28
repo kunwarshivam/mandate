@@ -37,7 +37,9 @@ export function ScenarioSwitcher({ scenario, colourBlind }: { scenario: Scenario
   }, [colourBlind, router]);
 
   return (
-    <div className="fixed right-3 bottom-20 z-40 flex flex-wrap items-center gap-2 border-2 border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-3">
+    <div
+      data-slot="scenario-switcher"
+      className="fixed right-3 bottom-20 z-40 flex flex-wrap items-center gap-2 border border-dashed border-foreground bg-card py-1 pr-1 pl-2.5 text-caption lg:bottom-3">
       <Flask className="size-3.5 text-muted-foreground" aria-hidden />
       <label className="flex items-center gap-1.5">
         <span className="text-muted-foreground">Scenario</span>

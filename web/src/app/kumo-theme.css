@@ -1,16 +1,17 @@
 /*
- * Kumo, dressed as Placard in navy and brass (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
+ * Kumo in Owlhead's calm system, Ink and Gold (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
  * its roles inside `@layer base`; these rules are unlayered, so they win without `!important`.
  * Every role points at a semantic token from globals.css, never at a raw colour.
  *
- * Kumo's brand is navy. Its danger is ink: crimson belongs to the kill switch alone, and a loss is
- * never a fill. Its warning is amber, which no screen uses (a test holds that line, because amber
- * and dark brass are neighbours at text lightness). Its info is the status blue; its success is the
- * gain green. Its orange badge is the mandate's brass tint, and its purple, teal and blue collapse
- * to navy; its red badge is ink, never red.
+ * Kumo's brand is the account's colour: ink in light mode, paper in dark. Its danger is ink too:
+ * crimson belongs to the kill switch alone, and a loss is never a fill. Its warning is amber, which
+ * no screen uses (a test holds that line, because amber and dark gold are neighbours at text
+ * lightness). Its info is the muted type; its success is the gain green. Its orange badge is the
+ * mandate's gold tint, and its purple, teal and blue collapse to the account; its red badge is ink,
+ * never red.
  */
 :root,
-[data-theme="placard"] {
+[data-theme="owlhead"] {
   --text-color-kumo-default: var(--foreground);
   --text-color-kumo-strong: var(--foreground);
   --text-color-kumo-inverse: var(--card);
@@ -28,9 +29,9 @@
   --text-color-kumo-badge-neutral-subtle: var(--foreground);
   --text-color-kumo-badge-inverted: var(--card);
 
-  --color-kumo-canvas: var(--background);
-  --color-kumo-elevated: var(--background);
-  --color-kumo-recessed: var(--muted);
+  --color-kumo-canvas: var(--card);
+  --color-kumo-elevated: var(--card);
+  --color-kumo-recessed: var(--background);
   --color-kumo-base: var(--card);
   --color-kumo-tint: var(--muted);
   --color-kumo-contrast: var(--ink);
@@ -43,7 +44,7 @@
   --color-kumo-brand-hover: var(--lapis-strong);
   --color-kumo-line: var(--border);
   --color-kumo-hairline: var(--border);
-  --color-kumo-focus: var(--lapis);
+  --color-kumo-focus: var(--ring);
   --color-kumo-shadow-edge: var(--border);
   --color-kumo-shadow-drop: transparent;
   --color-kumo-arrow-edge: var(--border);
@@ -69,8 +70,19 @@
   --color-kumo-badge-inverted: var(--ink);
 }
 
-/* Surfaces: a region painted in one of the meanings re-points every role inside it. */
-[data-surface="navy"] {
+/*
+ * Dark: every role above follows its token, which globals.css re-points. These three change
+ * meaning, because the brand and contrast fills turn off-white: inactive text dims to the mid grey,
+ * and type on an inverted fill is ink rather than the (now dark) card.
+ */
+html:root[data-mode="dark"] {
+  --text-color-kumo-inactive: var(--ink-line);
+  --text-color-kumo-inverse: var(--ink-foreground);
+  --text-color-kumo-badge-inverted: var(--ink-foreground);
+}
+
+/* Surfaces: a region painted in one of the meanings re-points every role inside it. `account` is an ink (dark: paper) fill. */
+[data-surface="account"] {
   --foreground: var(--lapis-foreground);
   --muted-foreground: var(--lapis-muted);
   --card: var(--lapis);
@@ -93,7 +105,7 @@
   color: var(--lapis-foreground);
 }
 
-/* Your mandate: the pale brass tint under a brass rule, with dark brass for its strong text. */
+/* Your mandate: the pale gold field, with dark gold for its strong text and gold for its lines. */
 [data-surface="field"] {
   --text-color-kumo-default: var(--mandate-foreground);
   --text-color-kumo-strong: var(--mandate-strong);
@@ -122,16 +134,28 @@
   color: var(--ink-foreground);
 }
 
-/* Square corners. The arbitrary radii are not theme-driven, so they need naming here. */
-.rounded,
-.rounded-full,
-.rounded-\[5px\],
-.rounded-\[10px\],
-.rounded-tl-\[5px\],
-.rounded-tr-\[5px\],
-.rounded-bl-\[5px\],
+/*
+ * Kumo's arbitrary radii are not theme-driven; they join the radius scale here, so a control and
+ * the sheet around it round by the same steps (web/DESIGN.md, Shape).
+ */
+.rounded-\[5px\] {
+  border-radius: var(--radius-sm);
+}
+.rounded-tl-\[5px\] {
+  border-top-left-radius: var(--radius-sm);
+}
+.rounded-tr-\[5px\] {
+  border-top-right-radius: var(--radius-sm);
+}
+.rounded-bl-\[5px\] {
+  border-bottom-left-radius: var(--radius-sm);
+}
 .rounded-br-\[5px\] {
-  border-radius: 0;
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.rounded-\[10px\] {
+  border-radius: var(--radius-lg);
 }
 
 /*
@@ -146,12 +170,6 @@
   background-image: none;
   background-color: var(--color-kumo-brand);
   box-shadow: none;
-}
-
-/* No drop shadows. The shadow-edge hairline stays: it is drawn in the border colour. */
-.shadow,
-[class*="shadow-[0_20px"] {
-  --tw-shadow: 0 0 #0000;
 }
 
 [class*="linear-to-"] {

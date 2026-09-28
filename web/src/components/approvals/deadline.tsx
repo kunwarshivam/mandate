@@ -9,7 +9,8 @@ function quantize(iso: string, seconds: number): string {
 
 /**
  * The deadline as an absolute time and whole minutes remaining, in neutral type. It never pulses,
- * counts seconds, or changes colour as time runs out (PX-10).
+ * counts seconds, or changes colour as time runs out (PX-10). The count holds the width of
+ * "(59 min left)", so the sentence never rewraps as it ticks down.
  */
 export function Deadline({ deadline, now, className }: { deadline: string; now: string; className?: string }) {
   return (
@@ -18,7 +19,7 @@ export function Deadline({ deadline, now, className }: { deadline: string; now: 
       <time dateTime={deadline} className="font-mono tabular">
         {clock(deadline)} {zoneLabel(deadline)}
       </time>{" "}
-      if you do nothing <span className="text-muted-foreground">({remaining(deadline, quantize(now, 15))})</span>
+      if you do nothing <span className="inline-block min-w-[13ch] whitespace-nowrap text-muted-foreground tabular">({remaining(deadline, quantize(now, 15))})</span>
     </p>
   );
 }

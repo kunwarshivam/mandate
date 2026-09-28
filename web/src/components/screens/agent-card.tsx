@@ -2,27 +2,29 @@
 
 import { type CSSProperties, useMemo } from "react";
 import Link from "next/link";
+import { CaretRight } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { useMarket } from "@/components/charts/chart-parts";
 import { Sparkline } from "@/components/charts/sparkline";
 import { AsOf } from "@/components/domain/as-of";
-import { LimitRail } from "@/components/domain/envelope";
-import { MODE_FIELD, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
+import { ModeBadge, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent } from "@/fixtures/types";
 import { equityWindow, mandateLevels } from "@/lib/chart-data";
 import { quantity, usd } from "@/lib/format";
-import { MODE_LABEL } from "@/lib/labels";
-import { agentLimits } from "@/lib/limits";
 import { describeRestriction } from "@/lib/restrictions";
 
+function holdings(agent: Agent): string {
+  if (agent.positions.length === 0) return "Flat";
+  return agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ");
+}
+
 /**
- * An agent as a sign band: its mode field (read from across the room), its identity and money on
- * a card field, and your mandate on its own field. Restrictions follow on their own fields, each in the
- * colour of whoever imposed it. Fields sit on seams, never inside one another. The whole band opens
- * the agent; its name is the link.
+ * An agent as one calm row: name and mode, what it holds, today's line against the daily loss
+ * limit, and its equity with today's change. The P&L line and its disclosure sit right under it;
+ * restrictions follow, each saying what it blocks and how it ends. The whole row opens the agent.
  */
 export function AgentCard({
   agent,
@@ -37,8 +39,6 @@ export function AgentCard({
   index?: number;
   heading?: "h2" | "h3";
 }) {
-  const limits = agentLimits(agent);
-  const rails = limits.rails.filter((r) => r.key === "gross" || r.key === "daily");
   const markAt = agent.positions[0]?.mark_as_of;
   const market = useMarket();
   const today = useMemo(() => equityWindow(market.equity[agent.agent_id] ?? [], "1D", market.end), [market, agent.agent_id]);
@@ -48,93 +48,65 @@ export function AgentCard({
       aria-labelledby={`agent-${agent.agent_id}`}
       data-mode={agent.mode}
       data-slot="agent-band"
-      className="group reveal relative grid grid-cols-1 gap-(--seam) md:grid-cols-[8.5rem_minmax(0,1fr)_minmax(0,1.1fr)]"
-      style={{ "--i": Math.min(index, 6) } as CSSProperties}
+      className="group reveal relative -mx-3 grid gap-2.5 rounded-2xl px-3 py-4 transition-[background-color,scale] duration-(--duration-hover) ease-(--ease-out) hover:bg-background has-[a:active]:scale-[0.99]"
+      style={{ "--i": index } as CSSProperties}
     >
-      <div data-slot="mode-field" className={cn("flex items-center px-3 py-1.5 transition-colors duration-(--duration-hover) sm:px-4 md:items-end md:py-3", MODE_FIELD[agent.mode])}>
-        <p className="font-display text-lg leading-[0.9] font-extrabold uppercase md:text-[1.625rem]">{MODE_LABEL[agent.mode]}</p>
-      </div>
-
-      <div className="grid content-start gap-2 bg-card px-3 py-3 sm:px-4">
-        <header className="flex flex-wrap items-baseline justify-between gap-x-3">
-          <Heading id={`agent-${agent.agent_id}`} className="text-heading">
-            <Link href={`/agents/${agent.agent_id}`} className={cn("decoration-2 underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
-              {agent.label}
-            </Link>
-          </Heading>
-          <span className="text-sm text-muted-foreground">{agent.mandate.name}</span>
-        </header>
-        <p className="font-display text-[2.5rem] leading-none font-bold">
-          <Money value={agent.state.equity} className="font-display" />
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Equity, of <span className="font-mono tabular">{usd(agent.mandate.capital.allocation_usd, 0)}</span> capital
-        </p>
-        {today.length > 1 ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-x-4 sm:grid-cols-[minmax(0,1fr)_9rem_10rem_1rem] sm:gap-x-6">
+        <div className="grid min-w-0 gap-1">
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <Heading id={`agent-${agent.agent_id}`} className="text-h3">
+              <Link href={`/agents/${agent.agent_id}`} className={cn("underline-offset-4 group-hover:underline after:rounded-2xl", STRETCHED_LINK)}>
+                {agent.label}
+              </Link>
+            </Heading>
+            <ModeBadge mode={agent.mode} />
+          </div>
+          <p className="grid min-w-0 text-sm text-muted-foreground sm:block sm:truncate">
+            <span className="truncate">
+              {agent.mandate.name}
+              <span className="hidden sm:inline"> · </span>
+            </span>
+            <span className="font-mono break-words tabular">{holdings(agent)}</span>
+          </p>
+        </div>
+        <div className="min-w-0">
+          {today.length > 1 ? (
             <Sparkline
               points={today}
               limit={daily?.price ?? null}
               label={`${agent.label} equity today${daily ? `, against the daily loss limit at ${usd(daily.price.toFixed(2))}` : ""}`}
+              className="h-9 sm:h-10"
             />
-            <span aria-hidden className="flex items-center gap-1.5 text-caption text-muted-foreground">
-              Today
-              {daily ? (
-                <>
-                  <span className="ml-1.5 inline-block h-0.5 w-3 bg-mandate-marker" />
-                  Daily loss limit
-                </>
-              ) : null}
-            </span>
-          </div>
-        ) : null}
-        <div className="grid gap-1 border-t pt-2">
-          <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
-            <span>Paper P&amp;L, simulated</span>
-            <Placeholder name="performance" />
-          </p>
-          <p className="flex flex-wrap items-baseline justify-between gap-x-3">
-            <SignedMoney value={agent.pnl_total} className="font-bold" />
-            <span className="text-caption text-muted-foreground">
-              today <SignedMoney value={agent.pnl_today} showWord={false} className="text-caption" />
-            </span>
-          </p>
-          {marketStale && markAt ? <AsOf at={markAt} now={now} stale /> : null}
+          ) : null}
         </div>
-        <p className="text-sm">
-          {agent.positions.length === 0 ? (
-            "Flat, no positions."
-          ) : (
-            <>
-              Holds{" "}
-              {agent.positions.map((p, i) => (
-                <span key={p.instrument.asset_id}>
-                  {i > 0 ? ", " : null}
-                  <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
-                </span>
-              ))}
-              .
-            </>
-          )}
-        </p>
+        <div className="grid justify-items-end gap-0.5 text-right">
+          <p className="text-base font-medium sm:text-lg">
+            <Money value={agent.state.equity} />
+          </p>
+          <p className="text-sm">
+            <SignedMoney value={agent.pnl_today} showWord={false} /> <span className="text-muted-foreground">today</span>
+          </p>
+        </div>
+        <CaretRight aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5 sm:block" />
       </div>
 
-      <div className="grid content-start gap-3 border-t-4 border-mandate-edge bg-mandate px-3 pt-2 pb-3 text-mandate-foreground sm:px-4">
-        <p className="font-display text-base leading-none font-extrabold text-mandate-strong uppercase">Your mandate</p>
-        {rails.map((rail) => (
-          <LimitRail key={rail.key} rail={rail} />
-        ))}
-      </div>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+        <span>Paper P&amp;L, simulated</span>
+        <SignedMoney value={agent.pnl_total} className="text-caption" />
+        <span>since deployed</span>
+        <Placeholder name="performance" />
+        {marketStale && markAt ? <AsOf at={markAt} now={now} stale /> : null}
+      </p>
 
       {agent.restrictions.length > 0 ? (
-        <ul aria-label="Restrictions" className="grid gap-(--seam) md:col-span-3">
+        <ul aria-label="Restrictions" className="grid gap-1.5">
           {agent.restrictions.map((r) => {
             const d = describeRestriction(r);
             return (
-              <li key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className={cn("flex flex-wrap items-baseline gap-x-2 gap-y-1 px-3 py-2 text-sm sm:px-4", SOURCE_FIELD[d.source])}>
+              <li key={`${r.code}-${r.symbol ?? ""}`} data-source={d.source} className={cn("flex flex-wrap items-baseline gap-x-2.5 gap-y-1 rounded-xl px-3 py-2.5 text-sm", SOURCE_FIELD[d.source])}>
                 <SourceTag source={d.source} className="self-center" />
-                <span>
-                  <span className="font-bold">{d.title}.</span> Blocks {d.blocks.toLowerCase()}. Ends when: {d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.
+                <span className="min-w-0 flex-1">
+                  <span className="font-semibold">{d.title}.</span> Blocks {d.blocks.toLowerCase()}. Ends when: {d.endsWhen.charAt(0).toLowerCase() + d.endsWhen.slice(1)}.
                 </span>
               </li>
             );

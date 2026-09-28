@@ -13,7 +13,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "./common";
 
-/** Open requests are card fields you can act on; resolved ones recede to muted, with their status as a label. */
+/** Open requests sit on a pale gold tint you can act on; resolved ones recede to muted type, with their status as a label. */
 function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
   const open = approval.status === "delivered";
   return (
@@ -21,17 +21,20 @@ function Row({ approval, now, label, index }: { approval: Approval; now: string;
       <Link
         href={`/approvals/${approval.approval_id}`}
         data-status={approval.status}
-        className={cn("press grid gap-1.5 px-3 py-3 sm:px-4", open ? "bg-card hover:bg-muted" : "bg-muted text-muted-foreground hover:text-foreground")}
+        className={cn(
+          "press group grid gap-1.5 rounded-2xl px-4 py-4 outline-none focus-visible:ring-3 focus-visible:ring-ring",
+          open ? "bg-lapis-soft hover:bg-lapis-soft/70" : "-mx-4 text-muted-foreground hover:bg-background hover:text-foreground",
+        )}
       >
         <span className={cn("flex justify-between gap-x-3 gap-y-1", open ? "items-start" : "flex-wrap items-center")}>
-          <span className={cn("min-w-0", open ? "font-bold text-foreground" : "font-medium")}>
+          <span className={cn("min-w-0 font-medium", open && "text-foreground")}>
             {label}: buy <span className="font-mono tabular">{quantity(approval.bound.qty)}</span> {approval.bound.symbol} at a limit of{" "}
             <span className="font-mono tabular">{price(approval.bound.limit)}</span>
           </span>
           {open ? (
-            <ArrowRight className="mt-1 size-4 shrink-0" aria-hidden />
+            <ArrowRight className="mt-1 size-4 shrink-0 text-lapis transition-transform duration-(--duration-hover) motion-safe:group-hover:translate-x-0.5" aria-hidden />
           ) : (
-            <span className="inline-flex h-6 items-center bg-card px-1.5 label-caps text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
+            <span className="inline-flex h-6 items-center rounded-full bg-background px-2.5 text-label text-foreground">{APPROVAL_STATUS_LABEL[approval.status]}</span>
           )}
         </span>
         {open ? (
@@ -54,14 +57,14 @@ function Inbox() {
   const label = (a: Approval) => findAgent(ws, a.agent_id)?.label ?? "An agent";
 
   return (
-    <div className="grid max-w-4xl grid-cols-1 gap-(--section-gap)">
+    <div className="grid max-w-3xl grid-cols-1 gap-(--section-gap)">
       <PageHeader title="Approvals" environment={ws.environment} description="Requests your rules sent to you. If you do nothing, a request is skipped at its deadline." className="mb-0" />
       <div className="grid grid-cols-1 gap-(--section-gap)">
         <Section title="Open, by deadline">
           {open.length === 0 ? (
-            <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">Nothing is waiting for you.</p>
+            <p className="text-muted-foreground">Nothing is waiting for you.</p>
           ) : (
-            <ul className="grid gap-(--seam)">
+            <ul className="grid gap-2">
               {open.map((a, i) => (
                 <Row key={a.approval_id} approval={a} now={now} label={label(a)} index={i} />
               ))}
@@ -72,7 +75,7 @@ function Inbox() {
           {resolved.length === 0 ? (
             <p className="text-muted-foreground">No resolved requests yet.</p>
           ) : (
-            <ul className="grid gap-(--seam)">
+            <ul className="grid divide-y divide-border/70">
               {resolved.map((a, i) => (
                 <Row key={a.approval_id} approval={a} now={now} label={label(a)} index={open.length + i} />
               ))}

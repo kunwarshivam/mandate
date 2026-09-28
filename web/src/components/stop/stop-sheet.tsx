@@ -4,7 +4,7 @@ import { type ReactNode, useRef, useState } from "react";
 import Link from "next/link";
 import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { CaretDown, WarningCircle, X } from "@phosphor-icons/react";
+import { CaretDown, Octagon, WarningCircle, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
@@ -22,7 +22,7 @@ type Tone = "ink" | "outline";
 /** Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. */
 const TONE: Record<Tone, string> = {
   ink: "bg-ink text-ink-foreground hover:bg-ink/85",
-  outline: "border-2 border-foreground bg-card text-foreground hover:bg-muted",
+  outline: "border border-foreground/25 bg-card text-foreground hover:bg-background",
 };
 
 /**
@@ -30,10 +30,10 @@ const TONE: Record<Tone, string> = {
  * with `href` opens its record screen, a page, and closes the sheet on the way (brief §4.1).
  */
 function Choice({ tone, title, children, onClick, href }: { tone: Tone; title: string; children?: ReactNode; onClick: () => void; href?: string }) {
-  const className = cn("press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone]);
+  const className = cn("press grid min-h-11 w-full gap-1 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone]);
   const body = (
     <>
-      <span className="text-base font-bold">{title}</span>
+      <span className="text-base font-semibold">{title}</span>
       {children ? <span className={cn("text-sm", tone === "ink" ? "" : "text-muted-foreground")}>{children}</span> : null}
     </>
   );
@@ -55,13 +55,13 @@ interface Pending {
 
 function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (kind: SheetKind, agent: Agent) => void; leave: () => void; full: boolean }) {
   if (agent.mode === "stopped") {
-    return <p className="bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
+    return <p className="rounded-xl bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
   }
   if (!full) {
     return agent.mode === "paused" ? (
-      <p className="bg-muted px-4 py-3 text-sm">Paused. Your role can pause; an owner or operator can resume or stop it.</p>
+      <p className="rounded-xl bg-background px-4 py-3 text-sm">Paused. Your role can pause; an owner or operator can resume or stop it.</p>
     ) : (
-      <div className="grid gap-(--seam)">
+      <div className="grid gap-2">
         <Choice tone="ink" title={`Pause ${agent.label}`} onClick={() => choose("pause", agent)}>
           No new orders. Resting protection stays. An owner or operator can resume it.
         </Choice>
@@ -73,7 +73,7 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
   const reconciling = agent.startup === "reconciling";
   const unknown = agent.orders.some((o) => o.state === "Unknown");
   return (
-    <div className="grid gap-(--seam)">
+    <div className="grid gap-2">
       {agent.mode === "paused" ? null : (
         <Choice tone="ink" title={`Pause ${agent.label}`} onClick={() => choose("pause", agent)}>
           No new orders. Resting protection stays. You can resume later.
@@ -85,13 +85,13 @@ function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (k
         </Choice>
       ) : null}
       {reconciling ? (
-        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+        <p className="grid gap-1.5 rounded-xl bg-lapis-soft px-4 py-3 text-sm" data-source="account">
           <SourceTag source="account" />
           Checking with the broker. It resumes on its own once the check confirms; nothing is needed from you.
         </p>
       ) : null}
       {unknown ? (
-        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+        <p className="grid gap-1.5 rounded-xl bg-lapis-soft px-4 py-3 text-sm" data-source="account">
           <span className="flex items-center gap-2">
             <SourceTag source="account" />
             <WarningCircle className="size-4 shrink-0" aria-hidden />
@@ -165,32 +165,33 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
           ref={focusOnMount}
           initialFocus={popupRef}
           data-slot="stop-sheet"
-          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-y-auto overscroll-contain border-l-2 border-foreground bg-card text-foreground outline-none sm:max-w-md"
+          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-y-auto overscroll-contain border-l border-border bg-card text-foreground shadow-2xl outline-none sm:max-w-md sm:rounded-l-3xl"
         >
-          <div className="grid gap-1.5 bg-ink px-4 pt-4 pb-4 pr-14 text-ink-foreground">
-            <Dialog.Title className="flex flex-wrap items-center gap-3 text-display text-ink-foreground">
+          <div className="grid gap-2 border-b border-border/70 px-5 pt-6 pr-16 pb-5">
+            <Dialog.Title className="flex flex-wrap items-center gap-3 text-h1">
+              <Octagon aria-hidden weight="fill" className="size-6 text-ink" />
               Stop
               <EnvironmentBadge environment={ws.environment} />
             </Dialog.Title>
-            <Dialog.Description className="text-ink-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</Dialog.Description>
+            <Dialog.Description className="text-muted-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</Dialog.Description>
             <Dialog.Close
               aria-label="Close"
-              className="absolute top-3 right-3 grid size-11 place-items-center text-ink-foreground outline-none hover:bg-ink-foreground/15 focus-visible:ring-3 focus-visible:ring-ring"
+              className="absolute top-4 right-4 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
               <X className="size-5" aria-hidden />
             </Dialog.Close>
           </div>
 
-          <div className="grid gap-(--section-gap) p-4">
+          <div className="grid gap-8 px-5 pt-6 pb-8">
             {reachable ? null : <UnreachableAlert />}
 
             {ws.status === "loading" ? (
-              <p className="bg-muted px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
+              <p className="rounded-xl bg-background px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
             ) : null}
 
             {contextAgent ? (
               <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
-                <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
+                <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 text-h3">
                   This agent: {contextAgent.label}
                   <ModeBadge mode={contextAgent.mode} />
                 </h3>
@@ -198,21 +199,21 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </section>
             ) : ws.agents.length > 0 ? (
               <section className="grid" aria-labelledby="stop-one-agent">
-                <h3 id="stop-one-agent" className="border-b-2 border-foreground pb-1.5 text-heading">
+                <h3 id="stop-one-agent" className="pb-1 text-h3">
                   One agent
                 </h3>
                 {ws.agents.map((agent) => (
-                  <Collapsible.Root key={agent.agent_id} className="border-b">
-                    <Collapsible.Trigger className="group flex min-h-14 w-full items-center justify-between gap-3 px-1 py-2.5 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring">
+                  <Collapsible.Root key={agent.agent_id} className="border-b border-border/70 last:border-b-0">
+                    <Collapsible.Trigger className="group -mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring">
                       <span className="grid">
-                        <span className="font-bold">{agent.label}</span>
+                        <span className="font-medium">{agent.label}</span>
                         <span className="text-caption text-muted-foreground" translate="no">
                           {agent.mandate.name}
                         </span>
                       </span>
                       <span className="flex items-center gap-2">
                         <ModeBadge mode={agent.mode} />
-                        <CaretDown className="size-5 transition-transform duration-200 ease-(--ease-in-out) group-data-[panel-open]:rotate-180" aria-hidden />
+                        <CaretDown className="size-4 text-muted-foreground transition-transform duration-200 ease-(--ease-in-out) group-data-[panel-open]:rotate-180" aria-hidden />
                       </span>
                     </Collapsible.Trigger>
                     <Collapsible.Panel className="pb-3">
@@ -223,12 +224,12 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
               </section>
             ) : null}
 
-            <section className="grid gap-(--seam)" aria-labelledby="stop-account">
-              <h3 id="stop-account" className="flex items-baseline justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
+            <section className="grid gap-2" aria-labelledby="stop-account">
+              <h3 id="stop-account" className="flex items-baseline justify-between gap-2 text-h3">
                 Everything on this account
               </h3>
               <p className="mb-1 flex items-center gap-2 text-caption text-muted-foreground">
-                <span className="bg-lapis px-1.5 label-caps text-lapis-foreground">Account</span>
+                <span className="inline-flex h-6 items-center rounded-full bg-lapis-soft px-2.5 text-label text-lapis">Account</span>
                 {ws.connection.broker}
               </p>
               <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
@@ -262,7 +263,7 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
 
             <section aria-label="What happened" className="grid gap-2">
               <div role="status" aria-live="polite" className="grid gap-2">
-                {notice ? <p className="bg-muted px-4 py-3 text-sm">{notice}</p> : null}
+                {notice ? <p className="rounded-xl bg-background px-4 py-3 text-sm">{notice}</p> : null}
                 {commands.map((c) => (
                   <CommandEntry key={c.id} command={c} label={labelFor(c.agentId)} />
                 ))}

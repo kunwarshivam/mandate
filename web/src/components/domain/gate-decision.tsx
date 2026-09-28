@@ -15,7 +15,10 @@ export function GateDecisionRow({ decision, agent, showAgent = false, href }: { 
   const rule = decision.reason_code && agent ? gateRule(decision.reason_code, agent.mandate) : null;
   const allowed = decision.verdict === "allow";
   return (
-    <li data-verdict={decision.verdict} className={cn("grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 border-b py-2.5 last:border-b-0", href && "relative hover:bg-muted")}>
+    <li
+      data-verdict={decision.verdict}
+      className={cn("grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 border-b border-border/70 py-(--row-y) last:border-b-0", href && "group relative transition-colors duration-(--duration-hover) hover:bg-background")}
+    >
       <time dateTime={decision.at} className="pt-0.5 font-mono text-caption text-muted-foreground tabular">
         {clock(decision.at).slice(0, 5)}
       </time>
@@ -23,16 +26,16 @@ export function GateDecisionRow({ decision, agent, showAgent = false, href }: { 
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-6 items-center px-1.5 label-caps", allowed ? "bg-muted text-foreground" : "bg-card text-foreground ring-2 ring-foreground ring-inset")}
+            className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", allowed ? "bg-background text-muted-foreground" : "bg-card text-foreground ring-1 ring-foreground ring-inset")}
           >
             {label}
           </span>
           {href ? (
-            <Link href={href} className={cn("font-bold underline decoration-2 underline-offset-4", STRETCHED_LINK)}>
+            <Link href={href} className={cn("font-medium underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
               {actionSentence(decision.action)}
             </Link>
           ) : (
-            <span className="font-bold">{actionSentence(decision.action)}</span>
+            <span className="font-medium">{actionSentence(decision.action)}</span>
           )}
           <span className="text-caption text-muted-foreground">
             {PURPOSE_LABEL[decision.action.purpose]}

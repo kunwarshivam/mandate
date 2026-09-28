@@ -6,11 +6,11 @@ import { parseOklch, toHex } from "@/lib/color";
 import { toFixed } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { agentLimits } from "@/lib/limits";
-import { PALETTE } from "@/lib/palette";
-import { type MockChart, chartControl, chartIn, liveCharts } from "@/test/chart-mock";
+import { PALETTE, PALETTE_DARK } from "@/lib/palette";
+import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
-import { CHART_COLOR, CHART_TOKEN, type ChartLevel, type Tone, areaOptions, baseOptions, candleOptions, lineOptions, priceLineFor } from "./options";
+import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
 
 const WS = buildWorkspace("normal");
@@ -78,26 +78,40 @@ describe("chart builders draw flat, solid colour", () => {
     }
   });
 
-  it("draws the account in navy, the mandate in brass, and the grid in tinted slate", () => {
-    expect(PALETTE.tokens.lapis.ref).toBe("navy-800");
-    expect(PALETTE.tokens["mandate-marker"].ref).toBe("brass-500");
-    expect(PALETTE.tokens["mandate-strong"].ref).toBe("brass-700");
+  it("draws the account as a gold line, the mandate's marks in gold, and the grid in a warm paper tint", () => {
+    expect(CHART_TOKEN.lapis).toBe("lapis-line");
+    expect(PALETTE.tokens["lapis-line"].ref).toBe("gold-500");
+    expect(PALETTE.tokens["mandate-marker"].ref).toBe("gold-500");
+    expect(PALETTE.tokens["mandate-strong"].ref).toBe("gold-700");
     const grid = baseOptions({ reducedMotion: false }).grid;
     expect(grid?.horzLines?.color).toBe(CHART_COLOR.muted);
     expect(grid?.vertLines?.color).toBe(CHART_COLOR.muted);
-    const slate = parseOklch(PALETTE.tokens.muted.value);
-    expect(slate.h).toBe(255);
-    expect(slate.c).toBeGreaterThan(0);
+    const paper = parseOklch(PALETTE.tokens.muted.value);
+    expect(paper.h).toBe(85);
+    expect(paper.c).toBeGreaterThan(0);
   });
 
-  it("a mandate level is a brass line with a dark brass label, the account navy, a proposal ink", () => {
+  it("a mandate level is a dashed grey line with a gold label, the account a solid gold line, a proposal dashed ink", () => {
     const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
-    expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mandateMarker, axisLabelColor: CHART_COLOR.mandateStrong, axisLabelTextColor: CHART_COLOR.card });
-    expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.lapis, axisLabelTextColor: CHART_COLOR.lapisForeground });
+    expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mutedForeground, axisLabelColor: CHART_COLOR.mandate, axisLabelTextColor: CHART_COLOR.mandateStrong, lineStyle: LineStyle.Dashed });
+    expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Solid });
     expect(priceLineFor(level("proposal"))).toMatchObject({ color: CHART_COLOR.ink, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Dashed });
   });
 
-  it("candles turn blue and orange when colour-blind friendly is on", () => {
+  it("reads the dark palette after setChartMode, and back", () => {
+    try {
+      setChartMode("dark");
+      for (const [key, name] of Object.entries(CHART_TOKEN)) {
+        expect(CHART_COLOR[key as keyof typeof CHART_TOKEN], `${key} is ${name}`).toBe(toHex(PALETTE_DARK.tokens[name].value));
+      }
+      expect(baseOptions({ reducedMotion: false }).layout?.background).toEqual({ type: ColorType.Solid, color: toHex(PALETTE_DARK.tokens.card.value) });
+    } finally {
+      setChartMode("light");
+    }
+    expect(CHART_COLOR.card).toBe(toHex(PALETTE.tokens.card.value));
+  });
+
+  it("candles turn to the colour-blind alternates when colour-blind friendly is on", () => {
     expect(candleOptions(true)).toMatchObject({ upColor: CHART_COLOR.gainCvd, downColor: CHART_COLOR.lossCvd, wickUpColor: CHART_COLOR.gainCvd, wickDownColor: CHART_COLOR.lossCvd });
     expect(CHART_COLOR.gainCvd).not.toBe(CHART_COLOR.gain);
     expect(CHART_COLOR.lossCvd).not.toBe(CHART_COLOR.loss);
@@ -117,17 +131,25 @@ describe("AgentEquityChart", () => {
       const level = levels.find((l) => l.key === line.id);
       expect(level, String(line.id)).toBeDefined();
       expect(line.price).toBe(Number(toFixed(level!.at, 2)));
-      expect(line.title).toBe(level!.label);
-      expect(line.color).toBe(CHART_COLOR.mandateMarker);
-      expect(line.lineStyle).toBe(LineStyle.Solid);
-      expect(line.axisLabelVisible).toBe(true);
+      expect(line.color).toBe(CHART_COLOR.mutedForeground);
+      expect(line.lineStyle).toBe(LineStyle.Dashed);
+      expect(line.title === "" ? !line.axisLabelVisible : line.title === level!.label && line.axisLabelVisible, String(line.id)).toBe(true);
     }
+    expect(series.priceLines.some((l) => l.axisLabelVisible)).toBe(series.priceLines.length > 0);
 
     const legend = container.querySelector("[data-slot=level-legend]");
     const listed = [...(legend?.querySelectorAll("[data-level]") ?? [])];
     expect(listed.map((li) => li.getAttribute("data-level")).sort()).toEqual(levels.map((l) => l.key).sort());
     const drawnKeys = listed.filter((li) => li.getAttribute("data-drawn") === "true").map((li) => li.getAttribute("data-level"));
     expect(drawnKeys.sort()).toEqual(series.priceLines.map((l) => String(l.id)).sort());
+  });
+
+  it("hides the label of a level that would sit on the label above it, and keeps its line", () => {
+    const level = (key: string, price: number): ChartLevel => ({ key, label: key, price, tone: "mandate" });
+    const levels = [level("high", 110), level("daily", 90), level("drawdown", 90 - 100 * LABEL_GAP * 0.4), level("floor", 50)];
+    expect([...crowdedLevels(levels, [100, 105])]).toEqual(["drawdown"]);
+    expect(priceLineFor(levels[2], false)).toMatchObject({ title: "", axisLabelVisible: false, lineVisible: true, price: levels[2].price });
+    expect(crowdedLevels([level("only", 10)], [])).toEqual(new Set());
   });
 
   it("draws at least one mandate level near an agent's equity", () => {
@@ -163,7 +185,7 @@ describe("AgentEquityChart", () => {
 });
 
 describe("AccountEquityChart", () => {
-  it("ends at the broker's equity, in navy, with the TradingView credit", () => {
+  it("ends at the broker's equity, as the account's gold line, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
     expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
@@ -183,29 +205,122 @@ describe("AccountEquityChart", () => {
     expect(Number(unmanagedEquity(ws))).toBeGreaterThan(0);
   });
 
-  it("reads the crosshair out in Eastern time", () => {
+});
+
+describe("the hero chart scrubs", () => {
+  type Datum = { time: number; value: number };
+  const hover = (chart: MockChart, p: Datum) =>
+    act(() => chart.crosshair[0]({ time: p.time, point: { x: 10, y: 10 }, seriesData: new Map([[chart.series[0].api, p]]) } as never));
+  const leave = (chart: MockChart) => act(() => chart.crosshair[0]({ seriesData: new Map() } as never));
+  const hero = (container: HTMLElement) => ({
+    value: container.querySelector("[data-slot=account-equity-value], [data-slot=agent-equity-value]")!,
+    change: container.querySelector("[data-slot=hero-change]")!,
+    when: container.querySelector("[data-slot=hero-when]")!,
+    section: container.querySelector("section")!,
+  });
+
+  it("moves the hero figure, its change, and the time to the point under the pointer", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const chart = onlyChart(container);
-    const time = Date.parse("2026-09-28T14:03:00-04:00") / 1000;
-    act(() => chart.crosshair[0]({ time, seriesData: new Map([[chart.series[0].api, { time, value: 24987.5 }]]) } as never));
-    const readout = container.querySelector("[data-slot=time-chart] > p[aria-hidden]");
-    expect(readout).toHaveTextContent("Sep 28, 14:03 ET");
-    expect(readout).toHaveTextContent("$24,987.50");
-    act(() => chart.crosshair[0]({ seriesData: new Map() } as never));
-    expect(readout).not.toHaveTextContent("$24,987.50");
+    const data = chart.series[0].data as Datum[];
+    const point = data[Math.floor(data.length / 2)];
+    hover(chart, point);
+    const h = hero(container);
+    expect(h.value.textContent).toBe(usdLabel(point.value));
+    expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
+    expect(h.section).toHaveAttribute("data-scrubbing");
+    const change = Math.round((point.value - data[0].value) * 100) / 100;
+    expect(h.change.querySelector("[data-direction]")).toHaveTextContent(usdLabel(Math.abs(change)).replace("\u2212", ""));
+  });
+
+  it("returns to now when the pointer leaves the line", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    hover(chart, data[3]);
+    leave(chart);
+    const h = hero(container);
+    expect(h.value).toHaveTextContent(usd(WS.connection.account_equity));
+    expect(h.when).toHaveTextContent("today");
+    expect(h.section).not.toHaveAttribute("data-scrubbing");
+  });
+
+  it("keeps the sign, the word, and the performance disclosure on a scrubbed gain and a scrubbed loss", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const low = data.reduce((a, b) => (b.value < a.value ? b : a));
+    const high = data.reduce((a, b) => (b.value > a.value ? b : a));
+    expect(low.value).toBeLessThan(data[0].value);
+    expect(high.value).toBeGreaterThan(data[0].value);
+    for (const [point, sign, word] of [
+      [low, "\u2212", "loss"],
+      [high, "+", "gain"],
+    ] as const) {
+      hover(chart, point);
+      const signed = hero(container).change.querySelector("[data-direction]")!;
+      expect(signed).toHaveAttribute("data-direction", word);
+      expect(signed.textContent).toMatch(new RegExp(`^\\${sign}\\$[\\d,]+\\.\\d{2}${word}$`));
+      expect(hero(container).section.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+    }
+  });
+
+  it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
+    const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const target = data[Math.floor(data.length / 3)];
+    pointerTime.at = () => target.time + 7;
+    const canvas = container.querySelector<HTMLElement>("[data-slot=chart-canvas]")!;
+    fireEvent.pointerDown(canvas, { pointerType: "touch", clientX: 40 });
+    expect(chart.pinned).toEqual({ price: target.value, time: target.time });
+    expect(hero(container).value.textContent).toBe(usdLabel(target.value));
+    fireEvent.pointerUp(canvas, { pointerType: "touch", clientX: 40 });
+    expect(chart.pinned).toBeNull();
+    expect(hero(container).value).toHaveTextContent(usdLabel(data.at(-1)!.value));
+  });
+
+  it("updates a scrubbed figure at once, never through the roll a live change uses", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    expect(hero(container).value.querySelector("[data-instant]")).toBeNull();
+    hover(chart, (chart.series[0].data as Datum[])[5]);
+    expect(hero(container).value.querySelector("[data-instant]")).not.toBeNull();
+    expect(hero(container).change.querySelector("[data-instant]")).not.toBeNull();
+  });
+
+  it("draws the line in on first load, and says a range longer than the history starts with it", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    expect(container.querySelector("[data-slot=chart-canvas]")).toHaveAttribute("data-draw-in");
+    const picker = within(screen.getByRole("group", { name: "Account equity range" }));
+    expect(picker.getAllByRole("button").map((b) => b.textContent)).toEqual(["1D", "1W", "1M", "3M", "1Y", "All"]);
+    fireEvent.click(picker.getByRole("button", { name: "1Y" }));
+    expect(hero(container).when).toHaveTextContent(/^since Sep 2\d$/);
+    fireEvent.click(picker.getByRole("button", { name: "1D" }));
+    expect(hero(container).when).toHaveTextContent("today");
+  });
+
+  it("keeps a hero chart still: no pan, no zoom, and no labels on the crosshair", () => {
+    const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
+    expect(onlyChart(container).options).toMatchObject({
+      handleScroll: false,
+      handleScale: false,
+      kineticScroll: { touch: false, mouse: false },
+      crosshair: { vertLine: { labelVisible: false }, horzLine: { visible: false } },
+    });
   });
 });
 
 describe("PositionChart", () => {
-  it("draws candles with average cost in navy and the bracket in brass, at the position's prices", () => {
+  it("draws candles with the average cost as the account's gold line and the bracket as the mandate's dashed lines, at the position's prices", () => {
     const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
     const [series] = onlyChart(container).series;
     expect(series.type).toBe("Candlestick");
     const byId = new Map(series.priceLines.map((l) => [l.id, l]));
     const expected = {
       "avg-cost": { price: Number(XYZ.avg_cost), color: CHART_COLOR.lapis, title: "Average cost" },
-      stop: { price: Number(XYZ.protection.stop_price), color: CHART_COLOR.mandateMarker, title: "Stop" },
-      "take-profit": { price: Number(XYZ.protection.take_profit_price), color: CHART_COLOR.mandateMarker, title: "Take-profit" },
+      stop: { price: Number(XYZ.protection.stop_price), color: CHART_COLOR.mutedForeground, title: "Stop" },
+      "take-profit": { price: Number(XYZ.protection.take_profit_price), color: CHART_COLOR.mutedForeground, title: "Take-profit" },
     };
     const legend = [...container.querySelectorAll("[data-slot=level-legend] [data-level]")].map((li) => li.getAttribute("data-level"));
     expect(legend.sort()).toEqual(Object.keys(expected).sort());

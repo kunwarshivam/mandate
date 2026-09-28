@@ -10,7 +10,7 @@ const ROWS = ["ABC", "XYZ", "LMN", "BTC", "ETH", "QRS", "TUV", "DEF"];
 const TABS = ["Overview", "Positions", "Orders", "Decisions", "Approvals", "Mandate", "Prove", "Activity"].map((label) => ({ value: label.toLowerCase(), label }));
 
 /**
- * One of each Kumo surface that paints a blend, fade, mask or shimmer before Placard flattens it:
+ * One of each Kumo surface that paints a blend, fade, mask or shimmer before the theme flattens it:
  * the emphasis button's overlay, sticky table cells, overflowing tabs, skeleton lines, and the layer
  * dialog. The browser suite in `e2e/` reads their computed styles here.
  */
@@ -56,8 +56,8 @@ export function KumoSurfaces() {
       </div>
 
       <div className="grid max-w-md gap-2" data-specimen="skeleton" aria-hidden>
-        <SkeletonLine />
-        <SkeletonLine />
+        <SkeletonLine minWidth={90} maxWidth={90} minDuration={1.5} maxDuration={1.5} minDelay={0} maxDelay={0} />
+        <SkeletonLine minWidth={60} maxWidth={60} minDuration={1.5} maxDuration={1.5} minDelay={0} maxDelay={0} />
       </div>
 
       <div data-specimen="layer-dialog">

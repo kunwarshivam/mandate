@@ -13,8 +13,13 @@ import { AppSidebar } from "./app-sidebar";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
 
-/** Placard's nav width, handed to Kumo's Sidebar, which otherwise sets its own. */
+/** The nav width, handed to Kumo's Sidebar, which otherwise sets its own. */
 const SIDEBAR_STYLE = { "--sidebar-width": "var(--nav-width)" } as CSSProperties;
+
+/** Audit and admin read like a console; everything an owner lives in stays calm (DEC-204). */
+export function densityFor(pathname: string): "calm" | "dense" {
+  return /^\/(audit|settings|connections)(\/|$)/.test(pathname) ? "dense" : "calm";
+}
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
@@ -28,14 +33,15 @@ export function AppShell({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <AppSidebar />
-      <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
         <AppHeader />
-        <StatusStrip ws={ws} now={now} className="border-b px-(--page-x)" />
+        <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
         <AccountBanners />
         <main
           id="main"
           tabIndex={-1}
-          className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-28 outline-none lg:pb-(--page-bottom)"
+          data-density={densityFor(pathname)}
+          className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)] outline-none lg:pb-(--page-bottom)"
         >
           {canOpen(role, pathname) ? children : <AccessDenied role={role} />}
         </main>

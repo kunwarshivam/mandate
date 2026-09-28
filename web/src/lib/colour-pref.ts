@@ -1,5 +1,5 @@
 /**
- * The colour-blind friendly preference (web/COLOR.md): gain and loss move to blue and orange.
+ * The colour-blind friendly preference (web/COLOR.md): a gain turns blue, and a loss raspberry in light or orange in dark.
  * Outside `next dev` the app always renders the default gain and loss colours; the preference moves
  * to settings once there is a settings store.
  */

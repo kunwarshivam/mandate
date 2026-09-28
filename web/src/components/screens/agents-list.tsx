@@ -17,12 +17,12 @@ function Agents() {
         environment={ws.environment}
         description="Each agent trades on paper within its own confirmed mandate."
         actions={
-          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11">
+          <LinkButton href="/agents/new" variant="outline" size="lg" className="h-11 rounded-full px-5">
             Describe an agent
           </LinkButton>
         }
       />
-      <ul className="grid gap-(--block-gap)">
+      <ul className="grid">
         {ws.agents.map((agent, i) => (
           <li key={agent.agent_id} className="grid">
             <AgentCard agent={agent} now={now} marketStale={marketStale} index={i} heading="h2" />

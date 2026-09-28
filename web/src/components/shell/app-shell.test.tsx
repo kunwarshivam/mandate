@@ -12,6 +12,7 @@ import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
 import { AppShell } from "./app-shell";
+import { hiddenToTheRight } from "./status-strip";
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
 
@@ -59,6 +60,17 @@ describe("status strip", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "unreachable");
     expect(screen.getByRole("region", { name: "System status" })).toHaveTextContent("Deployment unreachable since 13:58:02; agent data hidden");
   });
+
+  it("counts the items that end past its visible right edge, for the phone cue", () => {
+    expect(hiddenToTheRight([80, 200, 300.4], 300)).toBe(0);
+    expect(hiddenToTheRight([80, 301, 420], 300)).toBe(2);
+    expect(hiddenToTheRight([], 300)).toBe(0);
+  });
+
+  it("shows no cue while every item is in view", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
+    expect(document.querySelector("[data-slot=status-more]")).toBeNull();
+  });
 });
 
 describe("Owlhead", () => {
@@ -74,21 +86,39 @@ describe("Owlhead", () => {
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
-  it("sets the sidebar header on a light surface, with the brand in navy and no lapis block", () => {
+  it("sets the sidebar header on the page's own surface, with the brand in the logo colour and no account block", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
     expect(header).toHaveClass("bg-background");
     expect(header?.closest("[data-surface]")).toBeNull();
     expect(header?.querySelector("[data-surface]")).toBeNull();
     for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
-      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("rgb(24, 61, 115)");
+      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
       expect(brand.closest("[data-surface]")).toBeNull();
     }
   });
 
-  it("offers no theme toggle: Placard is light only", () => {
-    renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(screen.queryByRole("button", { name: /theme/i })).toBeNull();
+  it("offers light, dark and system from the theme menu, and a choice sets the mode and the cookie", async () => {
+    const root = document.documentElement;
+    try {
+      renderWithRuntime(<AppShell>{null}</AppShell>);
+      const triggers = screen.getAllByRole("button", { name: "Theme" });
+      expect(triggers.length).toBe(2);
+      fireEvent.click(triggers[0]);
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Light", "Dark", "System"]);
+      fireEvent.click(within(menu).getByRole("menuitem", { name: "Dark" }));
+      expect(root.dataset.mode).toBe("dark");
+      expect(root.classList.contains("dark")).toBe(true);
+      expect(root.dataset.themePref).toBe("dark");
+      expect(document.cookie).toContain("owlhead-theme=dark");
+    } finally {
+      document.cookie = "owlhead-theme=; path=/; max-age=0";
+      delete root.dataset.mode;
+      delete root.dataset.themePref;
+      root.classList.remove("dark");
+      root.style.colorScheme = "";
+    }
   });
 });
 
