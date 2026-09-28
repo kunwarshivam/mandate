@@ -1,8 +1,12 @@
 "use client";
 
 import type { CSSProperties, ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "@cloudflare/kumo/components/sidebar";
+import { canOpen } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
+import { useRole } from "@/lib/roles";
+import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
 import { AppSidebar } from "./app-sidebar";
@@ -14,6 +18,8 @@ const SIDEBAR_STYLE = { "--sidebar-width": "var(--nav-width)" } as CSSProperties
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
+  const { role } = useRole();
+  const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
 
   return (
@@ -31,7 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           tabIndex={-1}
           className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-28 outline-none lg:pb-(--page-bottom)"
         >
-          {children}
+          {canOpen(role, pathname) ? children : <AccessDenied role={role} />}
         </main>
       </div>
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">

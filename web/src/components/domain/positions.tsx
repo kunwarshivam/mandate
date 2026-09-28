@@ -95,7 +95,7 @@ export function PositionsTable({
   );
 }
 
-function priceText(o: AnyOrder): string {
+export function orderPriceText(o: AnyOrder): string {
   if (o.stop_price && o.limit_price) return `stop ${price(o.stop_price)}, limit ${price(o.limit_price)}`;
   if (o.stop_price) return `stop ${price(o.stop_price)}`;
   if (o.limit_price) return `limit ${price(o.limit_price)}`;
@@ -142,7 +142,7 @@ export function OrdersTable({ orders, hrefFor, empty = "No working orders." }: {
                 ) : (
                   title
                 )}
-                <span className="font-normal text-muted-foreground"> {priceText(o)}</span>
+                <span className="font-normal text-muted-foreground"> {orderPriceText(o)}</span>
               </span>
               <span className="flex flex-wrap items-center gap-1.5">
                 {unknown ? <SourceTag source="account" /> : null}

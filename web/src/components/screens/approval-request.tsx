@@ -1,6 +1,6 @@
 "use client";
 
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, CaretDown } from "@phosphor-icons/react";
 import { Button, LinkButton } from "@cloudflare/kumo/components/button";
@@ -101,6 +101,7 @@ function NotFound() {
 function Request({ approvalId }: { approvalId: string }) {
   const { ws, now, responses, respond } = useRuntime();
   const canRespond = useCan("approvals.respond");
+  const [modelOutputExpanded, setModelOutputExpanded] = useState(false);
   const raw = ws.approvals.find((a) => a.approval_id === approvalId);
   if (!raw) return <NotFound />;
   const approval = approvalAt(raw, now);
@@ -187,7 +188,7 @@ function Request({ approvalId }: { approvalId: string }) {
         </p>
       ) : null}
 
-      <Collapsible.Root className="bg-card">
+      <Collapsible.Root className="bg-card" onOpenChange={(open) => (open ? setModelOutputExpanded(true) : undefined)}>
         <Collapsible.Trigger className="group flex min-h-11 w-full scroll-mb-60 items-center justify-between gap-3 px-3 py-3 text-left font-bold outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4 lg:scroll-mb-0">
           View model output
           <CaretDown className="size-4 transition-transform duration-200 ease-(--ease-out) group-data-[panel-open]:rotate-180" aria-hidden />
@@ -232,10 +233,10 @@ function Request({ approvalId }: { approvalId: string }) {
             </p>
           ) : (
             <div className="grid grid-cols-2 gap-(--seam) pt-1" data-slot="approval-choices">
-              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "approve")}>
+              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "approve", { screen: "D6", modelOutputExpanded })}>
                 Approve
               </Button>
-              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "skip")}>
+              <Button variant="secondary" size="lg" data-variant="secondary" data-size="lg" className={CHOICE} onClick={() => respond(approval.approval_id, "skip", { screen: "D6", modelOutputExpanded })}>
                 Skip
               </Button>
             </div>

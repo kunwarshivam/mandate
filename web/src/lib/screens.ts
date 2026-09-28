@@ -201,6 +201,7 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
       const child = sub ? AGENT_SECTIONS.find((s) => s.key === `${first}/${sub}`) : undefined;
       if (child) trail.push({ href: agentHref(second, child.key), label: child.label });
       else if (sub) trail.push({ href: `/agents/${second}/${first}/${sub}`, label: RECORD_LABEL[first] ?? "Record" });
+      else if (!top && STOP_LABEL[first]) trail.push({ href: pathname, label: STOP_LABEL[first] });
       if (!child && sub && rest[2] === "close") trail.push({ href: pathname, label: "Close position" });
       return trail;
     }
@@ -220,11 +221,19 @@ export function crumbsFor(pathname: string, agentLabel: (id: string) => string |
     default: {
       const screen = findScreen(`/${head}`);
       if (screen) trail.push({ href: screen.href, label: screen.label });
-      if (screen && second) trail.push({ href: pathname, label: RECORD_LABEL[head] ?? "Record" });
+      if (screen && second) trail.push({ href: pathname, label: STOP_LABEL[rest[0]] ?? RECORD_LABEL[head] ?? "Record" });
       return trail;
     }
   }
 }
+
+/** The kill-switch and release record screens (D10, D11), named by kind like every record. */
+const STOP_LABEL: Record<string, string> = {
+  "kill-switch": "Kill switch",
+  release: "Release",
+  "stop-all": "Stop all",
+  "close-all": "Close everything",
+};
 
 const RECORD_LABEL: Record<string, string> = {
   positions: "Position",
