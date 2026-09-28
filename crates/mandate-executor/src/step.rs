@@ -7,7 +7,7 @@ use crate::orders::{
     absent, account, cancelled, described, duplicate, fill, lookups_due, reject, silence,
 };
 use crate::ports::Ports;
-use crate::protection::watched;
+use crate::protection::{bound, settle, watched};
 use crate::reconcile::run;
 use crate::state::{ExecutorState, UnresolvedAppend};
 use crate::types::{
@@ -56,9 +56,15 @@ pub fn handle(
     if let Input::Tick(at) = &input {
         state.now = state.now.max(Some(*at));
     }
+    if let Input::Market(observation) = &input {
+        state
+            .quotes
+            .insert(observation.instrument.clone(), observation.clone());
+    }
     let head = state.account_head();
     let mut batch = Batch::new(state, ports)?;
     step(&mut batch, input.clone())?;
+    settle(&mut batch)?;
     let effects = batch.effects;
     let drafts: Vec<_> = effects
         .iter()
@@ -133,7 +139,8 @@ fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
         Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
-            release_held(batch)
+            release_held(batch)?;
+            bound(batch)
         }
         Input::Intent(handoff) => received(batch, handoff),
         Input::Broker(Err(_)) => silence(batch),
@@ -199,8 +206,8 @@ mod watch_call_tests {
     use crate::reconcile::tests::{Everything, Ids, executor_config, fees, protected_by_an_oco};
     use crate::types::{Input, MarketObservation, RiskClock};
 
-    fn quote(name: &str) -> Result<Input, ExecutorError> {
-        let at = Price::parse("150")?;
+    fn quote(name: &str, at: &str) -> Result<Input, ExecutorError> {
+        let at = Price::parse(at)?;
         Ok(Input::Market(MarketObservation {
             instrument: InstrumentId::new(name)?,
             bid: Some(at),
@@ -213,9 +220,9 @@ mod watch_call_tests {
         }))
     }
 
-    /// #258 round 1, major 1: `handle` passes every quote to `watched`, so a quote in an
-    /// instrument whose protection rests answers the watchdog's stub (slice 4), and one elsewhere
-    /// passes.
+    /// #258 round 1, major 1: `handle` passes every quote to `watched`, so the watchdog's input — a
+    /// sane mark at or below the resting stop — answers its stub (slice 4), and any other quote,
+    /// there or elsewhere, passes.
     #[test]
     fn a_quote_where_protection_rests_reaches_the_watchdog_stub() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -228,10 +235,11 @@ mod watch_call_tests {
         };
         let mut executor = protected_by_an_oco(&ports)?;
         assert_eq!(
-            executor.run(quote("AAPL")?, &ports),
+            executor.run(quote("AAPL", "140")?, &ports),
             Err(ExecutorError::Unimplemented { story: "E7-4" })
         );
-        assert_eq!(executor.run(quote("MSFT")?, &ports), Ok(Vec::new()));
+        assert_eq!(executor.run(quote("AAPL", "150")?, &ports), Ok(Vec::new()));
+        assert_eq!(executor.run(quote("MSFT", "100")?, &ports), Ok(Vec::new()));
         Ok(())
     }
 }
