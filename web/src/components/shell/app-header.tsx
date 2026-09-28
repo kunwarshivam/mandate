@@ -42,26 +42,34 @@ function WorkspaceSwitcher() {
         <CaretUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="start">
-        <DropdownMenu.Label>Workspaces (fixture)</DropdownMenu.Label>
-        {WORKSPACES.map((w) => (
-          <DropdownMenu.Item key={w.id} selected={w.current} disabled={!w.current}>
-            {w.label}
-            {w.current ? null : <span className="ml-2 text-caption text-muted-foreground">not connected in this preview</span>}
-          </DropdownMenu.Item>
-        ))}
+        <DropdownMenu.Group>
+          <DropdownMenu.Label>Workspaces (fixture)</DropdownMenu.Label>
+          {WORKSPACES.map((w) => (
+            <DropdownMenu.Item key={w.id} selected={w.current} disabled={!w.current}>
+              {w.label}
+              {w.current ? null : <span className="ml-2 text-caption text-muted-foreground">not connected in this preview</span>}
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Group>
       </DropdownMenu.Content>
     </DropdownMenu>
   );
 }
 
+/** Base UI's menu labels must sit inside a group. */
 function AccountLinks({ role }: { role: Role }) {
-  return can(role, "workspace.view") ? (
-    <>
-      <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
-      <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
-    </>
-  ) : (
-    <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
+  return (
+    <DropdownMenu.Group>
+      <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
+      {can(role, "workspace.view") ? (
+        <>
+          <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
+          <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
+        </>
+      ) : (
+        <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
+      )}
+    </DropdownMenu.Group>
   );
 }
 
@@ -73,7 +81,6 @@ function UserMenu() {
         <UserCircle className="size-5" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
-        <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
         <AccountLinks role={role} />
       </DropdownMenu.Content>
     </DropdownMenu>
@@ -90,7 +97,6 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
         {seesAgents ? <DropdownMenu.LinkItem render={<Link href="/alerts" />}>Alerts</DropdownMenu.LinkItem> : null}
-        <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
         <AccountLinks role={role} />
       </DropdownMenu.Content>
     </DropdownMenu>
