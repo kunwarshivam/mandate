@@ -47,7 +47,7 @@ function Fact({ term, children, wide }: { term: string; children: ReactNode; wid
 function RelatedLink({ href, children }: { href: string; children: ReactNode }) {
   return (
     <li>
-      <Link href={href} className="press flex min-h-11 items-center justify-between gap-3 bg-card px-3 py-2.5 font-semibold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4">
+      <Link href={href} className="press -mx-3 flex min-h-12 items-center justify-between gap-3 rounded-xl px-3 py-3 font-medium outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset sm:px-4">
         {children}
         <ArrowRight className="size-4 shrink-0" aria-hidden />
       </Link>
@@ -55,7 +55,7 @@ function RelatedLink({ href, children }: { href: string; children: ReactNode }) 
   );
 }
 
-const TH = "py-2 pr-3 field-label";
+const TH = "pt-1 pb-2 pr-3 text-label font-normal text-muted-foreground";
 
 /** Executions as journaled, newest first, each linked to the order it filled. */
 function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: Fill[]; showOrder?: boolean }) {
@@ -66,7 +66,7 @@ function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: F
       <table className="w-full min-w-[30rem] text-sm" data-slot="fills">
         <caption className="sr-only">Fills</caption>
         <thead>
-          <tr className="border-b border-foreground text-left">
+          <tr className="border-b border-border text-left">
             <th scope="col" className={TH}>Time</th>
             <th scope="col" className={TH}>Side</th>
             <th scope="col" className={cn(TH, "text-right")}>Quantity</th>
@@ -87,7 +87,7 @@ function FillsTable({ agent, fills, showOrder = true }: { agent: Agent; fills: F
               <td className={cn("py-2.5 text-right font-mono tabular", showOrder && "pr-3")}>{usd(mul(dec(f.qty), dec(f.price)))}</td>
               {showOrder ? (
                 <td className="py-2.5 text-right">
-                  <Link href={orderHref(agent.agent_id, f.client_order_id)} className="font-semibold text-lapis underline underline-offset-4 hover:decoration-2">
+                  <Link href={orderHref(agent.agent_id, f.client_order_id)} className="font-semibold text-lapis underline decoration-lapis/30 underline-offset-4 hover:decoration-current">
                     View order
                   </Link>
                 </td>
@@ -137,7 +137,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
         </>
       }
     >
-      <section aria-label="Figures" className="reveal grid gap-3 bg-card px-3 py-3 sm:px-4 sm:py-4">
+      <section aria-label="Figures" className="reveal grid gap-3">
         <Facts>
           <Fact term="Quantity">
             <span className="font-mono text-lg font-semibold tabular">{quantity(position.qty)}</span>
@@ -182,7 +182,7 @@ function PositionRecord({ agent, assetId }: { agent: Agent; assetId: string }) {
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <Section title="Protection">
-          <p className={cn("flex items-start gap-2 px-3 py-2.5 text-sm sm:px-4", unprotected ? "bg-muted font-semibold" : "bg-mandate-soft")} data-slot="protection">
+          <p className={cn("flex items-start gap-2 rounded-xl px-4 py-3 text-sm", unprotected ? "bg-muted font-medium" : "bg-mandate-soft")} data-slot="protection">
             <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
             {protectionText(position)}
           </p>
@@ -240,7 +240,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
     >
       <section aria-label="Order" data-state={order.state} className={cn("reveal grid gap-3 px-3 py-3 sm:px-4 sm:py-4", unknown ? "bg-lapis-soft" : "bg-card")}>
         <p className="flex flex-wrap items-center gap-2">
-          <span data-slot="order-state" className={cn("inline-flex h-7 items-center px-2 field-label", unknown ? "bg-card ring-2 ring-foreground ring-inset" : "bg-muted")}>
+          <span data-slot="order-state" className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-label", unknown ? "bg-card ring-1 ring-foreground ring-inset" : "bg-muted")}>
             {ORDER_STATE_LABEL[order.state]}
           </span>
           {unknown ? <SourceTag source="account" /> : null}
@@ -291,15 +291,15 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <Section title="Lifecycle">
           <Panel>
-            <ol className="grid gap-3 border-l-2 border-foreground pl-4" data-slot="lifecycle">
+            <ol className="grid gap-4 border-l border-border pl-5" data-slot="lifecycle">
               {steps.map((s, i) => (
                 <li key={`${s.state}-${i}`} data-step={s.state} className="relative grid gap-0.5">
-                  <span className="absolute top-1.5 -left-[1.3125rem] size-2 bg-foreground" aria-hidden />
+                  <span className="absolute top-1.5 -left-[1.5625rem] size-2 rounded-full bg-muted-foreground ring-4 ring-card" aria-hidden />
                   <p className="flex flex-wrap items-baseline gap-x-2 text-caption text-muted-foreground">
                     <time dateTime={s.at} className="font-mono tabular">
                       {stamp(s.at)}
                     </time>
-                    <span className="field-label text-foreground">{ORDER_STATE_LABEL[s.state]}</span>
+                    <span className="text-label text-foreground">{ORDER_STATE_LABEL[s.state]}</span>
                   </p>
                   <p className="text-sm">{s.text}</p>
                 </li>
@@ -316,7 +316,7 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
           </Section>
           {decision || held ? (
             <Section title="Related">
-              <ul className="grid gap-(--seam)">
+              <ul className="grid divide-y divide-border/70">
                 {decision ? <RelatedLink href={decisionHref(agent.agent_id, decision.event_id)}>The gate decision that allowed it</RelatedLink> : null}
                 {held ? <RelatedLink href={positionHref(agent.agent_id, held.instrument.asset_id)}>{`The ${held.instrument.symbol} position`}</RelatedLink> : null}
               </ul>
@@ -330,8 +330,8 @@ function OrderRecord({ agent, id }: { agent: Agent; id: string }) {
 
 const CHECK_CHIP: Record<GateCheck["result"], string> = {
   passed: "bg-muted text-foreground",
-  failed: "bg-card text-foreground ring-2 ring-foreground ring-inset",
-  waiting: "bg-card text-foreground ring-2 ring-foreground ring-inset",
+  failed: "bg-card text-foreground ring-1 ring-foreground ring-inset",
+  waiting: "bg-card text-foreground ring-1 ring-foreground ring-inset",
   not_run: "border border-dashed border-muted-foreground text-muted-foreground",
 };
 
@@ -364,11 +364,11 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
         </>
       }
     >
-      <section aria-label="Verdict" data-verdict={decision.verdict} className="reveal grid gap-2 bg-card px-3 py-3 sm:px-4 sm:py-4">
+      <section aria-label="Verdict" data-verdict={decision.verdict} className="reveal grid gap-2">
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
           <span
             data-slot="verdict"
-            className={cn("inline-flex h-7 items-center px-2 field-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-2 ring-foreground ring-inset")}
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-label", decision.verdict === "allow" ? "bg-muted" : "bg-card ring-1 ring-foreground ring-inset")}
           >
             {verdictLabel(decision)}
           </span>
@@ -385,12 +385,12 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
         <Section title="Checks, in the order the gate ran them">
-          <ol className="grid gap-(--seam)" data-slot="gate-checks">
+          <ol className="grid divide-y divide-border/70" data-slot="gate-checks">
             {checks.map((c) => (
-              <li key={c.key} data-check={c.key} data-result={c.result} className={cn("grid gap-1 px-3 py-2.5 sm:px-4", c.result === "not_run" ? "bg-muted" : "bg-card")}>
+              <li key={c.key} data-check={c.key} data-result={c.result} className="grid gap-1 py-3">
                 <p className="flex flex-wrap items-center justify-between gap-2">
                   <span className={cn("font-semibold", c.result === "not_run" && "text-muted-foreground")}>{c.label}</span>
-                  <span className={cn("inline-flex h-6 items-center px-1.5 field-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
+                  <span className={cn("inline-flex h-6 items-center rounded-full px-2.5 text-label", CHECK_CHIP[c.result])}>{resultLabel(c)}</span>
                 </p>
                 <p className="text-sm text-muted-foreground">{c.rule}</p>
               </li>
@@ -401,7 +401,7 @@ function DecisionRecord({ agent, id }: { agent: Agent; id: string }) {
 
         {order || decision.approval_id ? (
           <Section title="What it led to">
-            <ul className="grid gap-(--seam)">
+            <ul className="grid divide-y divide-border/70">
               {order ? <RelatedLink href={orderHref(agent.agent_id, order.client_order_id)}>{`The order: ${orderSentence(order)}`}</RelatedLink> : null}
               {decision.approval_id ? <RelatedLink href={`/approvals/${decision.approval_id}`}>The request it sent you</RelatedLink> : null}
             </ul>
@@ -416,7 +416,7 @@ function RecordSkeleton() {
   return (
     <div className="grid gap-(--section-gap)" aria-busy="true" aria-label="Loading" data-slot="skeleton">
       <Skeleton className="h-28" />
-      <div className="bg-card p-3 sm:p-4">
+      <div>
         <ChartSkeleton height={320} label="Loading the price chart" />
       </div>
       <Skeleton className="h-40" />

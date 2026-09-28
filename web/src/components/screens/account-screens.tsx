@@ -26,12 +26,12 @@ function Alerts() {
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <Section title="Data and deployment">
-        <ul className="grid gap-(--seam)">
+        <ul className="grid divide-y divide-border/70">
           {health.map((h) => (
-            <li key={h.key} data-state={h.state} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 bg-card px-3 py-3 sm:px-4">
+            <li key={h.key} data-state={h.state} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3">
               <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
               <span className="text-sm">
-                {h.state === "ok" ? null : <span className="mr-2 border border-foreground px-1 field-label">{STATE_WORD[h.state]}</span>}
+                {h.state === "ok" ? null : <span className="mr-2 rounded-sm border border-foreground px-1.5 text-label">{STATE_WORD[h.state]}</span>}
                 <span className="text-muted-foreground">
                   as of <span className="font-mono tabular">{clock(h.as_of)}</span>, {ago(h.as_of, now)}
                 </span>
@@ -42,14 +42,14 @@ function Alerts() {
       </Section>
       <Section title="Agent conditions">
         {conditions.length === 0 ? (
-          <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">No agent is restricted.</p>
+          <p className="text-muted-foreground">No agent is restricted.</p>
         ) : (
-          <ul className="grid gap-(--seam)">
+          <ul className="grid divide-y divide-border/70">
             {conditions.map(({ agent, r }) => {
               const text = RESTRICTIONS[r.code];
               return (
                 <li key={`${agent.agent_id}-${r.code}-${r.symbol ?? ""}`}>
-                  <Link href={`/agents/${agent.agent_id}`} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
+                  <Link href={`/agents/${agent.agent_id}`} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
                     <span className="flex flex-wrap items-center gap-2">
                       <SourceTag source={text.source} />
                       <span className="font-semibold">
@@ -88,7 +88,7 @@ export function AlertsScreen() {
 function Decisions() {
   const { ws } = useRuntime();
   const linked = useCan("agents.view");
-  if (ws.decisions.length === 0) return <p className="bg-muted px-3 py-3 text-muted-foreground sm:px-4">No gate decisions yet.</p>;
+  if (ws.decisions.length === 0) return <p className="text-muted-foreground">No gate decisions yet.</p>;
   return (
     <Panel className="py-0.5 sm:py-0.5">
       <ul>
@@ -153,10 +153,10 @@ export function SectionIndexScreen({ title, purpose, prefix }: { title: string; 
   return (
     <div className="grid">
       <PageHeader title={title} environment={ws.environment} description={purpose} />
-      <ul className="grid max-w-3xl gap-(--seam)">
+      <ul className="grid max-w-3xl divide-y divide-border/70">
         {screensIn(prefix).map((s) => (
           <li key={s.key}>
-            <Link href={s.href} className="press grid gap-1 bg-card px-3 py-3 hover:bg-muted sm:px-4">
+            <Link href={s.href} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
               <span className="flex items-center justify-between gap-3 font-semibold">
                 {s.label}
                 <span className="flex items-center gap-2 text-caption font-normal text-muted-foreground">

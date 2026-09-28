@@ -22,8 +22,8 @@ export function KillSwitchButton({
   appearance?: "filled" | "outline";
 }) {
   const className = cn(
-    "press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2",
-    appearance === "filled" ? "bg-crimson text-crimson-foreground hover:bg-crimson/90" : "border-2 border-crimson bg-card text-foreground hover:bg-muted",
+    "press grid min-h-11 w-full gap-1 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2",
+    appearance === "filled" ? "bg-crimson text-crimson-foreground hover:bg-crimson/90" : "border-2 border-crimson bg-card text-foreground hover:bg-background",
   );
   const body = (
     <>

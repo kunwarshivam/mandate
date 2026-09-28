@@ -98,7 +98,7 @@ export function StepUpDialog({
           ref={focusOnMount}
           initialFocus={popupRef}
           data-slot="step-up-dialog"
-          className="fixed top-1/2 left-1/2 z-[60] grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 border border-foreground bg-card p-4 text-foreground outline-none"
+          className="fixed top-1/2 left-1/2 z-[60] grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-5 rounded-3xl border border-border bg-card p-6 text-foreground shadow-2xl outline-none"
         >
           <div className="grid gap-1.5">
             <Dialog.Title className="flex items-center gap-2 pr-10 text-h1">
@@ -110,12 +110,12 @@ export function StepUpDialog({
             </Dialog.Description>
             <Dialog.Close
               aria-label="Close"
-              className="absolute top-2 right-2 grid size-11 place-items-center outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
+              className="absolute top-3 right-3 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
             >
               <X className="size-5" aria-hidden />
             </Dialog.Close>
           </div>
-          <p className="border-t border-foreground bg-muted px-3 py-2.5 font-semibold text-foreground" data-slot="step-up-action">
+          <p className="rounded-xl bg-background px-4 py-3 font-medium text-foreground" data-slot="step-up-action">
             {action}
           </p>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
@@ -125,14 +125,14 @@ export function StepUpDialog({
             <button
               type="button"
               onClick={cancel}
-              className="press h-11 min-w-28 border border-foreground bg-card px-4 font-semibold outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press h-11 min-w-28 rounded-full border border-foreground/25 bg-card px-5 font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={verify}
-              className="press h-11 min-w-28 bg-lapis px-4 font-semibold text-lapis-foreground outline-none hover:bg-lapis/90 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="press h-11 min-w-28 rounded-full bg-lapis px-5 font-semibold text-lapis-foreground outline-none hover:bg-lapis-strong focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               Use passkey
             </button>

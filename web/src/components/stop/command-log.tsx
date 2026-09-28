@@ -9,7 +9,7 @@ import { commandTitle, recordedLine } from "./commands";
 export function CommandEntry({ command, label }: { command: Command; label: string }) {
   const { now } = useRuntime();
   return (
-    <p data-phase={command.phase} className="reveal border-t border-foreground bg-muted px-4 py-3 text-sm">
+    <p data-phase={command.phase} className="reveal rounded-xl bg-background px-4 py-3 text-sm">
       <span className="font-semibold">{commandTitle(command.kind, label)}.</span>{" "}
       <PhaseLine phase={command.phase} at={clock(command.recordedAt ?? now)} recorded={recordedLine(command.kind, label)} />
     </p>
@@ -37,7 +37,7 @@ function PhaseLine({ phase, at, recorded }: { phase: Command["phase"]; at: strin
 export function UnreachableAlert() {
   const { ws } = useRuntime();
   return (
-    <div role="alert" className="grid gap-1.5 border-t border-foreground bg-muted px-4 py-3 text-foreground" data-slot="unreachable">
+    <div role="alert" className="grid gap-1.5 rounded-xl bg-background px-4 py-3 text-foreground" data-slot="unreachable">
       <p className="flex items-center gap-2 text-base font-semibold">
         <Plugs className="size-4 shrink-0" aria-hidden />
         Cannot reach your deployment
