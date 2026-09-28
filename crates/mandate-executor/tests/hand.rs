@@ -2670,7 +2670,6 @@ fn protected_position(ports: &mandate_executor::Ports<'_>) -> Shell {
 }
 
 #[test]
-#[ignore = "pending E7-4"]
 fn an_exit_follows_cancel_confirm_regate_submit_replace() {
     let ids = TestIds;
     let mandates = FixedMandate::covering(&[AAPL]);

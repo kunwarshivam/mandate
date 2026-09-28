@@ -8,8 +8,9 @@ use mandate_num::{Qty, Rounding, SignedQty, Usd};
 use crate::error::ExecutorError;
 use crate::ids::{ClientOrderId, IntentId};
 use crate::types::{
-    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody, Mode, Order,
-    OrderState, Protection, RiskClock, Seq, SubmitOrder, UnprotectedInterval, WriterEpoch,
+    AccountScope, AccountState, ActivityCursor, AgentId, EventId, FillId, IntentBody,
+    MarketObservation, Mode, Order, OrderState, Protection, ProtectionPrices, RiskClock, Seq,
+    SubmitOrder, UnprotectedInterval, WriterEpoch,
 };
 
 pub use crate::fold::fold;
@@ -50,6 +51,10 @@ pub struct ExecutorState {
     pub(crate) protection: BTreeMap<InstrumentId, Protection>,
     pub(crate) unprotected: Vec<UnprotectedInterval>,
     pub(crate) copied: BTreeMap<EventId, EventId>,
+    /// Each instrument's running exit sequence, `unprotected_start` to `unprotected_end` (§5.4).
+    pub(crate) exiting: BTreeMap<InstrumentId, ExitSequence>,
+    /// The latest quote per instrument: process-local, an input never journaled (like the tick).
+    pub(crate) quotes: BTreeMap<InstrumentId, MarketObservation>,
     pub(crate) positions: BTreeMap<InstrumentId, SignedQty>,
     pub(crate) fills: BTreeSet<FillId>,
     pub(crate) modes: BTreeMap<AgentId, Mode>,
@@ -162,6 +167,8 @@ impl ExecutorState {
             protection: BTreeMap::new(),
             unprotected: Vec::new(),
             copied: BTreeMap::new(),
+            exiting: BTreeMap::new(),
+            quotes: BTreeMap::new(),
             positions: BTreeMap::new(),
             fills: BTreeSet::new(),
             modes: BTreeMap::new(),
@@ -431,6 +438,16 @@ impl ExecutorState {
             .max(self.now)
             .unwrap_or(RiskClock::from_secs(0))
     }
+}
+
+/// One exit sequence as its `unprotected_start` journaled it (§5.4): the exit's intent, and the
+/// entry, agent and prices a re-placement takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ExitSequence {
+    pub(crate) intent: IntentId,
+    pub(crate) entry: ClientOrderId,
+    pub(crate) agent: AgentId,
+    pub(crate) prices: Option<ProtectionPrices>,
 }
 
 /// The restriction a reconciliation places for one subject — an instrument, or external activity
