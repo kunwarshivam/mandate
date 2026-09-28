@@ -60,7 +60,6 @@ fn codes(document: &Value, provenance: ProvenanceMap) -> BTreeSet<Violation> {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn a_platform_default_is_allowed_only_on_the_listed_paths_with_the_listed_value() {
     for (path, allowed_value) in platform_defaultable() {
         let provenance = sourced(path, Source::PlatformDefault, true);
@@ -74,7 +73,6 @@ fn a_platform_default_is_allowed_only_on_the_listed_paths_with_the_listed_value(
 
 /// The point of the closed list: the platform may not quietly choose a limit for an owner.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_platform_default_anywhere_else_is_a_violation() {
     for path in [
         "/capital/allocation_usd",
@@ -95,7 +93,6 @@ fn a_platform_default_anywhere_else_is_a_violation() {
 
 /// `/autonomy/default` may be a platform default only when it is `ask`.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_platform_default_with_the_wrong_value_is_a_violation() {
     let document = with("/autonomy/default", Some(s("deny")));
     let violations = codes(
@@ -106,7 +103,6 @@ fn a_platform_default_with_the_wrong_value_is_a_violation() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn an_unconfirmed_or_proposed_envelope_field_is_a_violation() {
     let unconfirmed = codes(
         &base(),
@@ -136,7 +132,6 @@ fn an_unconfirmed_or_proposed_envelope_field_is_a_violation() {
 
 /// V-022: the compiler and templates never produce or propose `auto`, for the default, a rule's `then`, or the admission ceiling.
 #[test]
-#[ignore = "pending E10-1"]
 fn every_auto_must_be_entered_by_the_owner_and_confirmed() {
     for path in ["/autonomy/default", "/autonomy/admission"] {
         let document = with(path, Some(s("auto")));
@@ -161,7 +156,6 @@ fn every_auto_must_be_entered_by_the_owner_and_confirmed() {
 
 /// V-038: bring-your-own-strategy means the owner's own universe, and the research agent is the path for the platform's ideas.
 #[test]
-#[ignore = "pending E17-1"]
 fn the_owners_own_universe_and_connection_are_never_proposed() {
     for path in NEVER_PROPOSED {
         let violations = codes(&base(), sourced(path, Source::PlatformProposed, true));
@@ -174,7 +168,6 @@ fn the_owners_own_universe_and_connection_are_never_proposed() {
 
 /// §7, DEC-117 and DEC-111. Both shown as proposed, both needing confirmation.
 #[test]
-#[ignore = "pending E17-1"]
 fn the_platform_proposes_five_instruments_and_three_revisions() {
     assert_eq!(PlatformProposals::DEFAULT.max_instruments, 5);
     assert_eq!(PlatformProposals::DEFAULT.max_revisions_per_lineage, 3);
@@ -190,7 +183,6 @@ fn the_platform_proposes_five_instruments_and_three_revisions() {
 
 /// Recomputed by hand from §4.2 on the builder's base: A = 10000, cap = min(1500, 0.5 × 10000) = 1500, stop 0.05 with no crypto offset, so one position at its stop is 75; the daily budget is 0.02 × 10000 = 200; the flatten loss is 0.08 × 10000 = 800; the floor loss is 0.1 × 10000 = 1000.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_worst_case_figures_are_the_products_the_screen_shows() {
     let mandate = Mandate::parse(&base()).expect("the base parses");
     let report = validate(&mandate, &context(ProvenanceMap::default())).expect("evaluable");
@@ -206,7 +198,6 @@ fn the_worst_case_figures_are_the_products_the_screen_shows() {
 
 /// W-002 with the position cap raised to the allocation: 10000 × 0.05 = 500 > 200.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_position_that_can_lose_more_than_a_days_budget_warns() {
     let document = with_all(&[
         ("/risk/max_position_usd", Some(s("10000"))),
@@ -221,7 +212,6 @@ fn a_position_that_can_lose_more_than_a_days_budget_warns() {
 
 /// W-003, and `one_position_at_stop_usd` absent rather than zero: there is no stop, which is a different statement from "the stop loses nothing".
 #[test]
-#[ignore = "pending E10-1"]
 fn disabled_protection_has_no_stop_to_lose_at() {
     let document = with_all(&[
         ("/protection/enabled", Some(Value::Bool(false))),
@@ -234,7 +224,6 @@ fn disabled_protection_has_no_stop_to_lose_at() {
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn warnings_are_never_violations() {
     let mandate = Mandate::parse(&base()).expect("the base parses");
     let report = validate(&mandate, &context(ProvenanceMap::default())).expect("evaluable");
@@ -249,7 +238,6 @@ fn warnings_are_never_violations() {
 
 /// V-013's chain and V-014, which are the two rules that need nothing but ordering.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_ordering_rules_compare_by_decimal_value() {
     let document = with("/risk/max_order_usd", Some(s("2000")));
     assert!(
