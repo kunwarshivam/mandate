@@ -1,18 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { Octagon } from "lucide-react";
+import { Octagon } from "@phosphor-icons/react";
 import { StopSheet } from "@/components/stop/stop-sheet";
+import { useCan } from "@/lib/roles";
+
+export const OPEN_STOP_EVENT = "owlhead:open-stop";
+
+/** The agent a path is scoped to, if any. IDs are opaque and never shown as titles. */
+export function agentIdFrom(pathname: string): string | null {
+  const match = /^\/agents\/(agt_[0-9A-Z]+)/.exec(pathname);
+  return match ? match[1] : null;
+}
 
 /**
- * The Stop control is always rendered and never disabled. It does not wait for the dashboard or any
- * model to load (brief §5, rule 13). Ink, because ink is what a stopped agent looks like.
+ * The Stop control is always rendered for a role that may stop, and never disabled. It does not
+ * wait for the dashboard, the sidebar, or any model to load (brief §5, rule 13). Ink, because ink
+ * is what a stopped agent looks like. The command palette opens it through `OPEN_STOP_EVENT`.
  */
-export function StopControl() {
+export function StopControl({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
-  const match = /^\/agents\/(agt_[0-9A-Z]+)/.exec(pathname);
+  const allowed = useCan("stop.open");
+
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(OPEN_STOP_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_STOP_EVENT, onOpen);
+  }, []);
+
+  if (!allowed) return null;
   return (
     <>
       <button
@@ -20,12 +38,13 @@ export function StopControl() {
         onClick={() => setOpen(true)}
         data-slot="stop-control"
         aria-haspopup="dialog"
-        className="press inline-flex h-11 items-center gap-2 bg-ink px-4 font-bold text-ink-foreground outline-none hover:bg-ink/85 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2"
+        className="press inline-flex h-11 shrink-0 items-center gap-2 bg-ink px-4 font-bold text-ink-foreground outline-none hover:bg-ink/85 focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2 data-[compact=true]:px-3"
+        data-compact={compact}
       >
-        <Octagon className="size-4.5" aria-hidden />
+        <Octagon className="size-4.5" weight="bold" aria-hidden />
         Stop
       </button>
-      <StopSheet open={open} onOpenChange={setOpen} agentId={match ? match[1] : null} />
+      <StopSheet open={open} onOpenChange={setOpen} agentId={agentIdFrom(pathname)} />
     </>
   );
 }

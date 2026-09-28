@@ -365,11 +365,14 @@ export type Scenario =
   | "reconciliation"
   | "unknown-order"
   | "unreachable"
-  | "approvals";
+  | "approvals"
+  | "result-unknown";
 
 export interface Workspace {
   scenario: Scenario;
   status: "ready" | "loading" | "unreachable";
+  /** Whether the deployment answers commands with a journal entry, or goes quiet after taking them. */
+  journal: "answers" | "silent";
   now: Iso;
   environment: Environment;
   connection: Connection;

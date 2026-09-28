@@ -17,7 +17,8 @@ export interface Command {
   id: string;
   kind: CommandKind;
   agentId: string | null;
-  phase: "sent" | "recorded" | "undelivered";
+  /** `unknown`: the deployment took the command but no journal entry came back. */
+  phase: "sent" | "recorded" | "undelivered" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
 }
@@ -25,7 +26,7 @@ export interface Command {
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
-  phase: "sent" | "recorded" | "decided";
+  phase: "sent" | "recorded" | "decided" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
 }
@@ -194,6 +195,7 @@ export function RuntimeProvider({
   const nowRef = useRef(initial.now);
   const counter = useRef(0);
   const reachable = initial.status !== "unreachable";
+  const silent = initial.journal === "silent";
 
   useEffect(() => {
     if (!tick) return;
@@ -217,12 +219,16 @@ export function RuntimeProvider({
           setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "undelivered" } : c)));
           return;
         }
+        if (silent) {
+          setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "unknown" } : c)));
+          return;
+        }
         setWs((current) => applyCommand(current, command, at));
         setCommands((list) => list.map((c) => (c.id === command.id ? { ...c, phase: "recorded", recordedAt: at } : c)));
       }, recordAfterMs);
       return command;
     },
-    [reachable, recordAfterMs],
+    [reachable, silent, recordAfterMs],
   );
 
   const respond = useCallback(
@@ -231,6 +237,10 @@ export function RuntimeProvider({
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       window.setTimeout(() => {
         const at = nowRef.current;
+        if (silent) {
+          setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "unknown" } }));
+          return;
+        }
         setWs((current) => applyResponse(current, entry, at, "recorded"));
         setResponses((map) => ({ ...map, [approvalId]: { ...entry, phase: "recorded", recordedAt: at } }));
         if (response === "skip") return;
@@ -241,7 +251,7 @@ export function RuntimeProvider({
         }, recordAfterMs * 0.75);
       }, recordAfterMs);
     },
-    [recordAfterMs],
+    [silent, recordAfterMs],
   );
 
   const value = useMemo(
