@@ -45,7 +45,7 @@ Supporting tokens:
 | `--gain` / `--loss` | `oklch(0.44 0.11 155)` / `oklch(0.49 0.18 10)` | Text only, always with a sign and the word ("+$123.45 gain") |
 | `--hatch-ink` | lapis at 30% | The paper hatch lines |
 
-Rules the tests enforce: every neutral is tinted toward lapis (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; body pairs reach 4.5:1 and marks 3:1; there is no `.dark` block and no `dark:` class anywhere in `src/`.
+Rules the tests enforce: every neutral is tinted toward lapis (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; body pairs reach 4.5:1 and marks 3:1; there is no `.dark` block and no `dark:` class anywhere in `src/`. `src/lib/crimson.test.tsx` renders every route in every scenario, the Stop sheet in every context, the passkey check, and the result of every Stop choice, and fails if crimson paints anything but a kill-switch choice (Kill switch, Stop all agents, Close everything) or the kill-switch specimen on `/design`; in the source, only `globals.css`, the Stop sheet's two kill-switch tones, and `/design` may name it.
 
 No gradients of any kind (fills, text, masks, fades or glows). The paper hatch is an SVG mask over a flat token colour.
 

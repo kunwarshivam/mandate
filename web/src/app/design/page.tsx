@@ -17,7 +17,7 @@ import { contrastRatio, toHex } from "@/lib/color";
 import { dec } from "@/lib/decimal";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL } from "@/lib/restrictions";
-import { colorTokens, markPairs, motionTokens, spacingTokens, textPairs, tokenValue, typeScale } from "@/lib/tokens";
+import { type Meaning, colorTokens, markPairs, motionTokens, spacingTokens, textPairs, tokenValue, typeScale } from "@/lib/tokens";
 
 export const metadata: Metadata = { title: "Design system" };
 
@@ -30,11 +30,11 @@ const SOURCES: Array<[RestrictionSource, string]> = [
   ["market", "Market data is stale for one instrument."],
 ];
 
-const MEANINGS = [
-  { name: "Marigold", means: "Your mandate", detail: "Limits, rails, and the envelope. Where the agent must stay.", className: "bg-marigold text-marigold-foreground" },
-  { name: "Lapis", means: "The account", detail: "Its board, the paper hatch, the current page, primary actions.", className: "bg-lapis text-lapis-foreground" },
-  { name: "Ink", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
-  { name: "Crimson", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
+const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: string; className: string }> = [
+  { name: "Marigold", meaning: "mandate", means: "Your mandate", detail: "Limits, rails, and the envelope. Where the agent must stay.", className: "bg-marigold text-marigold-foreground" },
+  { name: "Lapis", meaning: "account", means: "The account", detail: "Its board, the paper hatch, the current page, primary actions.", className: "bg-lapis text-lapis-foreground" },
+  { name: "Ink", meaning: "stopped", means: "Stopped", detail: "A paused or stopped agent, and the Stop control.", className: "bg-ink text-ink-foreground" },
+  { name: "Crimson", meaning: "kill", means: "Kill switch", detail: "Nothing else in the product is this colour.", className: "bg-crimson text-crimson-foreground" },
 ];
 
 function Block({ title, lead, children }: { title: string; lead?: string; children: ReactNode }) {
@@ -86,7 +86,7 @@ export default function DesignPage() {
       <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number.">
         <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-4">
           {MEANINGS.map((m, i) => (
-            <li key={m.name} className={`reveal grid min-h-40 content-between gap-6 p-4 ${m.className}`} style={{ "--i": i } as CSSProperties}>
+            <li key={m.name} data-meaning={m.meaning} className={`reveal grid min-h-40 content-between gap-6 p-4 ${m.className}`} style={{ "--i": i } as CSSProperties}>
               <span className="label-caps">{m.name}</span>
               <span className="grid gap-1">
                 <span className="font-display text-title uppercase">{m.means}</span>
@@ -110,7 +110,7 @@ export default function DesignPage() {
       <Block title="Colour" lead="OKLCH. Every neutral is tinted toward lapis; nothing is pure grey, black, or white. Light only: dark mode is follow-up work.">
         <ul className="grid gap-(--seam) sm:grid-cols-2 xl:grid-cols-3">
           {colorTokens.map((t) => (
-            <li key={t.name} className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
+            <li key={t.name} data-meaning={t.meaning} className="grid grid-cols-[3.5rem_1fr] gap-3 bg-card p-2.5">
               <span className="h-14 border" style={{ background: t.value }} aria-hidden />
               <span className="grid min-w-0 content-center gap-0.5">
                 <span className="font-mono text-caption font-bold">--{t.name}</span>
@@ -259,7 +259,9 @@ export default function DesignPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <StopControl />
-              <span className="inline-flex h-11 items-center bg-crimson px-4 font-bold text-crimson-foreground">Kill switch (crimson, only here)</span>
+              <span data-meaning="kill" className="inline-flex h-11 items-center bg-crimson px-4 font-bold text-crimson-foreground">
+                Kill switch (crimson, only here)
+              </span>
             </div>
             <p className="text-sm text-muted-foreground">Approve and Skip use the same outline variant and size, side by side, with nothing preselected.</p>
           </div>
