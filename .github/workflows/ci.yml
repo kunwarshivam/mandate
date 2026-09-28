@@ -2,7 +2,8 @@
 # setup cost is paid twice rather than once per check. Each is one `cargo xtask ci <job>`; run
 # `cargo xtask check` locally for the same set. main itself is covered by the nightly workflow.
 # A documentation-only change takes the short path in both jobs (DEC-112): no toolchain, just
-# typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`).
+# typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`). So does a change
+# that touches only documentation and `web/`, whose checks run in `web.yml` (DEC-200).
 name: ci
 
 on:

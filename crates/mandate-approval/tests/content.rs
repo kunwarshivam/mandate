@@ -13,8 +13,8 @@ use std::num::NonZeroU8;
 
 use common::{DEADLINE, REQUEST_ID, RISK_IMPACT, T0, answer, content, hash, price, request};
 use mandate_approval::{
-    ApprovalRef, AskablePurpose, AssetClass, Channel, Delivery, QuietHours, RiskClock,
-    confirmation_code, content_hash, content_object, deliver_now, notification_for,
+    ApprovalError, ApprovalRef, AskablePurpose, AssetClass, Channel, Delivery, QuietHours,
+    RiskClock, confirmation_code, content_hash, content_object, deliver_now, notification_for,
     notification_payload,
 };
 use mandate_canon::{Digest, Value, to_canonical};
@@ -52,7 +52,6 @@ fn key_paths(value: &Value, prefix: &str, out: &mut Vec<String>) {
 /// E8-1, EI-14: the content is mandate spec §6.4's list as DEC-165 item 3 names it, at every
 /// nesting level, and nothing else, so no field can be dropped or added unseen.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_object_has_exactly_the_listed_fields() {
     let object_value = answer("content_object", content_object(&content()));
     let mut paths = Vec::new();
@@ -121,7 +120,6 @@ fn the_content_object_has_exactly_the_listed_fields() {
 
 /// E8-1: the proposed action is the bound order, its side is `buy`, and its value is limit × qty.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_action_is_the_bound_order_and_its_value() {
     let object_value = answer("content_object", content_object(&content()));
     let field = |key| text(&object_value, &["action", key]);
@@ -145,7 +143,6 @@ fn the_action_is_the_bound_order_and_its_value() {
 /// E8-1 "risk impact": the six §6.3 figures at the request, each beside the mandate's own cap,
 /// in the fixture's order; facts about the order, never an estimate.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_risk_impact_lists_every_figure_with_its_cap() {
     let object_value = answer("content_object", content_object(&content()));
     let rendered: Vec<(Option<&str>, Option<&str>, Option<&str>)> = object_value
@@ -181,7 +178,6 @@ fn the_risk_impact_lists_every_figure_with_its_cap() {
 /// E8-1 and PX-10: the default is skip, stated in §6.4's words, and approve and skip are the only
 /// choices, in that order, with neither preselected.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_default_is_skip_and_approve_and_skip_have_equal_weight() {
     let object_value = answer("content_object", content_object(&content()));
     assert_eq!(
@@ -199,7 +195,6 @@ fn the_default_is_skip_and_approve_and_skip_have_equal_weight() {
 
 /// E8-1 and §6.4: the score and each output carry the spec's labels; theses stay references.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_score_and_the_evidence_carry_the_spec_labels() {
     let object_value = answer("content_object", content_object(&content()));
     assert_eq!(
@@ -238,7 +233,6 @@ fn the_score_and_the_evidence_carry_the_spec_labels() {
 /// FR-6.2, DEC-126: nothing in the content reads as advice. Owner-written rule text is not in the
 /// content yet (DEC-165 item 3); when it is, it is scanned apart from the platform's own text.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_never_carries_advice_wording() {
     let bytes = to_canonical(&answer("content_object", content_object(&content())));
     let text = String::from_utf8(bytes).unwrap().to_lowercase();
@@ -257,7 +251,6 @@ fn the_content_never_carries_advice_wording() {
 
 /// EI-14: the hash is SHA-256 of the canonical object (journal spec §4).
 #[test]
-#[ignore = "pending E8-1"]
 fn the_content_hash_is_the_sha256_of_the_canonical_object() {
     let object_value = answer("content_object", content_object(&content()));
     let hash = answer("content_hash", content_hash(&content()));
@@ -266,7 +259,6 @@ fn the_content_hash_is_the_sha256_of_the_canonical_object() {
 
 /// EI-14, PB-15: what the owner saw is what is bound, so every bound field moves the hash.
 #[test]
-#[ignore = "pending E8-1"]
 fn every_bound_field_moves_the_content_hash() {
     let base = answer("content_hash", content_hash(&content()));
     let mut changed = Vec::new();
@@ -296,7 +288,6 @@ fn every_bound_field_moves_the_content_hash() {
 
 /// DEC-155 item 4: `approvals show`'s code is bound to one content hash.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_confirmation_code_is_bound_to_the_content_hash() {
     let a = answer("confirmation_code", confirmation_code(&hash("a")));
     let again = answer("confirmation_code", confirmation_code(&hash("a")));
@@ -308,7 +299,6 @@ fn the_confirmation_code_is_bound_to_the_content_hash() {
 
 /// EI-9, PB-9, rule 6: a notification is the opaque id and one generic text, nothing else.
 #[test]
-#[ignore = "pending E8-1"]
 fn a_notification_is_the_opaque_id_and_one_generic_text() {
     let n = answer("notification_for", notification_for(&request()));
     let payload = answer("notification_payload", notification_payload(&n));
@@ -331,7 +321,6 @@ fn deliver(channel: Channel, at: i64) -> Delivery {
 
 /// MC-E29, PB-17, DEC-156 item 6: `cli_inbox` is delivered inside quiet hours.
 #[test]
-#[ignore = "pending E8-1"]
 fn the_cli_inbox_is_delivered_inside_quiet_hours() {
     let two_am_edt = T0 - 8 * 3600;
     assert_eq!(deliver(Channel::CliInbox, two_am_edt), Delivery::Send);
@@ -344,7 +333,6 @@ fn the_cli_inbox_is_delivered_inside_quiet_hours() {
 /// MC-E30, PB-17: a push is suppressed from 23:00 and sent from 07:00 New York time, in both DST
 /// states.
 #[test]
-#[ignore = "pending E8-1"]
 fn a_push_is_suppressed_from_23_00_and_sent_from_07_00_in_both_dst_states() {
     for (eleven_pm, seven_am) in [
         (1_768_536_000, 1_768_564_800),
@@ -371,7 +359,50 @@ fn a_push_is_suppressed_from_23_00_and_sent_from_07_00_in_both_dst_states() {
 /// Live: an approval reference is built from the request's event id and displays only that id.
 #[test]
 fn an_approval_ref_displays_only_its_event_id() {
-    let r = ApprovalRef::of_requested_event(REQUEST_ID);
+    let r = ApprovalRef::of_requested_event(REQUEST_ID).unwrap();
     assert_eq!(r.to_string(), REQUEST_ID);
-    assert_ne!(ApprovalRef::of_requested_event("other"), r);
+    assert_eq!(format!("{r:?}"), format!("ApprovalRef({REQUEST_ID:?})"));
+    let other = ApprovalRef::of_requested_event("01J9ZQ4Y8N6K3V5T2R1M0P7XWZ").unwrap();
+    assert_ne!(other, r);
+}
+
+/// Live, rule 6 at rung 1 (#250 review, DEC-165 item 13): only the journal's ULID shape becomes an
+/// approval reference, so free text such as a symbol, a price, or an account id never reaches a
+/// payload through it. Each refusal differs from a valid id in one property only.
+#[test]
+fn only_a_ulid_shaped_event_id_becomes_an_approval_ref() {
+    for accepted in [
+        REQUEST_ID,
+        "00000000000000000000000000",
+        "7ZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "0123456789ABCDEFGHJKMNPQRS",
+        "0TVWXYZ0000000000000000000",
+    ] {
+        assert_eq!(
+            ApprovalRef::of_requested_event(accepted).map(|r| r.to_string()),
+            Ok(accepted.to_owned()),
+            "{accepted}"
+        );
+    }
+    for refused in [
+        "",
+        "other",
+        "AAPL buy 100 @187.25 acct-U1234567",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWAA",
+        "81J9ZQ4Y8N6K3V5T2R1M0P7XWA",
+        "01j9zq4y8n6k3v5t2r1m0p7xwa",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWI",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWL",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWO",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XWU",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW-",
+        "01J9ZQ4Y8N6K3V5T2R1M0P7XW\u{e9}",
+    ] {
+        assert_eq!(
+            ApprovalRef::of_requested_event(refused),
+            Err(ApprovalError::NotAnEventId),
+            "{refused:?}"
+        );
+    }
 }

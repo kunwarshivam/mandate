@@ -27,7 +27,9 @@
 //! automated flatten does (DEC-158 option (c), `AGENTS.md` rule 13).
 //!
 //! Every entry point is pure: no clock, no randomness, no I/O, ordered collections only (ES-21).
-//! In this tests PR every entry point returns [`ApprovalError::Unimplemented`] (DEC-77).
+//! E8-1's and E8-2's entry points are implemented: [`content_object`], [`content_hash`],
+//! [`confirmation_code`], [`notification_for`], [`notification_payload`], [`deliver_now`], and
+//! [`ask_permit`]. E8-3's still return [`ApprovalError::Unimplemented`] (DEC-77).
 
 mod admit;
 mod budget;
@@ -72,4 +74,12 @@ pub enum ApprovalError {
     /// The body of every stub in the tests PR (DEC-77, DEC-83).
     #[error("{story} has not been implemented yet")]
     Unimplemented { story: &'static str },
+    /// A value the request holds has no canonical form: a deadline outside `UtcNanos`'s range,
+    /// an order value that overflows, or an integer beyond the canonical bound (journal spec
+    /// §4.4). A caller reads it as "do not ask", never as a reason to act.
+    #[error("the {what} cannot be represented")]
+    Unrepresentable { what: &'static str },
+    /// An approval reference was asked for from text that is not an event id's ULID.
+    #[error("an approval reference must be an ApprovalRequested event id")]
+    NotAnEventId,
 }

@@ -583,6 +583,10 @@ struct Run {
     /// The effects of each kill-switch command's own batch, in order, so a property can see what
     /// the switch did before it journaled anything.
     kill_batches: Vec<Vec<Effect>>,
+    /// For each kill-switch command, in order, whether the broker was then holding a working order
+    /// it had acknowledged: one the switch must cancel (§5.5), read from the broker model rather
+    /// than the executor.
+    kill_working: Vec<bool>,
 }
 
 /// The broker's side of a run, kept by the script rather than read from the executor: every order
@@ -607,6 +611,8 @@ struct BrokerSide {
     filled_units: i128,
     acknowledged: bool,
     cancelled: bool,
+    /// The purpose the submission carried, so a protective order is told from the agent's own.
+    purpose: Purpose,
 }
 
 impl BrokerModel {
@@ -630,6 +636,7 @@ impl BrokerModel {
                     filled_units: 0,
                     acknowledged: false,
                     cancelled: false,
+                    purpose: order.purpose,
                 },
             );
             self.order_of_arrival.push(id);
@@ -639,6 +646,21 @@ impl BrokerModel {
                 self.cancels_asked.push(client_order_id.as_str().to_owned());
             }
         }
+    }
+
+    /// Whether an agent kill switch must now cancel something at this broker: a working,
+    /// acknowledged order of the agent's own whose cancel has not already been asked for. A
+    /// protective order is not one: an automated switch leaves protection in place until the
+    /// session (§5.5), so it may cancel none (#244 round 3, major 1).
+    fn must_cancel_at_a_switch(&self) -> bool {
+        self.order_of_arrival.iter().any(|id| {
+            self.working(id)
+                && self
+                    .orders
+                    .get(id)
+                    .is_some_and(|o| o.acknowledged && o.purpose != Purpose::Protective)
+                && !self.cancels_asked.contains(id)
+        })
     }
 
     fn working(&self, id: &str) -> bool {
@@ -728,6 +750,7 @@ fn play(script: &[Step]) -> Run {
     let mut fills: u32 = 0;
     let mut prefix_head = Seq(0);
     let mut kill_batches: Vec<Vec<Effect>> = Vec::new();
+    let mut kill_working: Vec<bool> = Vec::new();
 
     let record = |ran: Ran,
                   drafts: &mut Vec<EventDraft>,
@@ -923,6 +946,7 @@ fn play(script: &[Step]) -> Run {
                 );
             }
             Step::KillSwitch => {
+                kill_working.push(broker.must_cancel_at_a_switch());
                 let ran = record(
                     shell.run(
                         Input::Command(Command::KillSwitch {
@@ -991,7 +1015,58 @@ fn play(script: &[Step]) -> Run {
         prefix_head,
         broker,
         kill_batches,
+        kill_working,
     }
+}
+
+/// Whether anything rule 13 lets hold a protective order was in force before draft `at`, in the
+/// protected lead's instrument: a kill switch anywhere in the script (its sells and cancels come
+/// first), the agent `paused` or `stopped`, or an `Unknown` order in `CPHC` (DEC-129 item 22). A
+/// correct executor may then decline to place the lead's legs, so a property must not demand them.
+fn may_hold_protection(script: &[Step], drafts: &[EventDraft], at: usize) -> bool {
+    let mut in_cphc: BTreeSet<&str> = BTreeSet::new();
+    script.contains(&Step::KillSwitch)
+        || drafts.iter().take(at).any(|d| {
+            if d.event_type == "OrderSubmitted"
+                && field(d, "instrument") == Some(CPHC)
+                && let Some(id) = field(d, "client_order_id")
+            {
+                in_cphc.insert(id);
+            }
+            d.event_type == "KillSwitchActivated"
+                || (d.event_type == "AgentModeApplied"
+                    && matches!(field(d, "to"), Some("paused" | "stopped")))
+                || (d.event_type == "OrderStateChanged"
+                    && field(d, "state") == Some("unknown")
+                    && field(d, "client_order_id").is_some_and(|id| in_cphc.contains(id)))
+        })
+}
+
+/// Whether a script runs the protected lead: its entry is then a partly filled GTC bracket.
+fn leads(script: &[Step]) -> bool {
+    script.get(PREFIX.len()..PREFIX.len().saturating_add(PROTECTED_LEAD.len()))
+        == Some(&PROTECTED_LEAD[..])
+}
+
+/// The exit intents a script hands over that no `GateDecided` names: an intent id whose first
+/// handoff is an exit, which the executor must gate (allow, hold, or deny) rather than drop.
+fn ungated_exits(script: &[Step], drafts: &[EventDraft]) -> Vec<String> {
+    let mut first: BTreeMap<u8, bool> = BTreeMap::new();
+    for one in script {
+        if let Step::Intent { which, exiting, .. } = one {
+            first.entry(*which).or_insert(*exiting);
+        }
+    }
+    first
+        .into_iter()
+        .filter(|(_, exiting)| *exiting)
+        .map(|(which, _)| intent_named(which))
+        .filter(|intent| {
+            !drafts.iter().any(|d| {
+                d.event_type == "GateDecided" && field(d, "intent_id") == Some(intent.as_str())
+            })
+        })
+        .collect()
 }
 
 proptest! {
@@ -1467,6 +1542,13 @@ proptest! {
         let run = play(&script);
         prop_assume!(script.contains(&Step::KillSwitch));
         prop_assert!(!run.kill_batches.is_empty());
+        prop_assert!(
+            run.kill_batches.first().is_some_and(|batch| batch
+                .iter()
+                .any(|e| matches!(e, Effect::Journal(d) if d.event_type == "AgentModeApplied"))),
+            "the first kill switch journals the agent's final mode (§5.5): a switch that does \
+             nothing orders nothing before it"
+        );
         for batch in &run.kill_batches {
             let mode_at = batch
                 .iter()
@@ -1500,6 +1582,26 @@ proptest! {
     #[ignore = "pending E7-2"]
     fn protective_sell_quantity_never_exceeds_the_position_in_any_script(script in scripted()) {
         let run = play(&script);
+        let entry = ClientOrderId::for_intent(&IntentId(EventId(intent_named(1))))
+            .map(|id| id.as_str().to_owned())
+            .unwrap_or_default();
+        let completed = run.drafts.iter().position(|d| {
+            d.event_type == "OrderStateChanged"
+                && field(d, "client_order_id") == Some(entry.as_str())
+                && field(d, "state") == Some("filled")
+        });
+        prop_assert!(
+            !leads(&script)
+                || completed.is_none_or(|at| may_hold_protection(&script, &run.drafts, at)
+                    || run.drafts.iter().skip(at).any(|d| {
+                    d.event_type == "ProtectionChanged"
+                        && field(d, "action") == Some("placed")
+                        && field(d, "instrument") == Some(CPHC)
+                })),
+            "the protected lead's entry filled completely with the agent in no mode that may hold \
+             protection (no kill switch, not paused or stopped: AGENTS.md rule 13, §5.5), so its \
+             bracket legs are placed (§5.4), and there is protection for this property to judge"
+        );
         let accountant = ProtectionAccountant::of(&run.drafts);
         let ledger = ShadowLedger::of(&run.drafts);
         for (name, covered) in &accountant.covered {
@@ -1597,6 +1699,16 @@ proptest! {
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
+        if let (Some(batch), Some(true)) = (run.kill_batches.first(), run.kill_working.first()) {
+            prop_assert!(
+                batch
+                    .iter()
+                    .any(|e| matches!(e, Effect::Broker(BrokerRequest::Cancel { .. }))),
+                "the first kill switch, with the agent's order working at the broker and no cancel \
+                 yet asked for it, cancels it (§5.5), so cancels are on the table for this property \
+                 to judge"
+            );
+        }
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
         let mut outstanding: BTreeMap<String, String> = BTreeMap::new();
         for effect in &run.effects {
@@ -1668,6 +1780,13 @@ proptest! {
     #[ignore = "pending E7-4"]
     fn no_resting_order_is_submitted_inside_an_unprotected_interval(script in scripted()) {
         let run = play(&script);
+        prop_assert!(
+            !leads(&script)
+                || run.drafts.iter().any(|d| d.event_type == "ProtectionChanged"
+                    && field(d, "action") == Some("unprotected_start")),
+            "the protected lead's partly filled bracket opens an unprotected interval (§5.4), so \
+             there is an interval for this property to judge"
+        );
         let mut unprotected: BTreeSet<String> = BTreeSet::new();
         let mut submissions = 0usize;
         for effect in &run.effects {
@@ -1743,6 +1862,13 @@ proptest! {
             denials <= run.drafts.len(),
             "the denial count comes from the same draft list"
         );
+        let ungated = ungated_exits(&script, &run.drafts);
+        prop_assert!(
+            ungated.is_empty(),
+            "every exit the script hands over is gated, so there are exit verdicts for this \
+             property to judge: {:?}",
+            ungated
+        );
     }
 
     /// `AGENTS.md` rule 13: the only holds on an exit are the four the rule names.
@@ -1771,6 +1897,13 @@ proptest! {
             }
         }
         prop_assert!(holds <= run.drafts.len());
+        let ungated = ungated_exits(&script, &run.drafts);
+        prop_assert!(
+            ungated.is_empty(),
+            "every exit the script hands over is gated, so there are exit verdicts for this \
+             property to judge: {:?}",
+            ungated
+        );
     }
 
     /// §5.7: the status map is total and never silently ignores.
@@ -2525,4 +2658,138 @@ proptest! {
         }
         prop_assert_eq!(submissions, ShadowBook::of(&run.drafts).submissions.len());
     }
+}
+
+/// #244 round 2, blocker 1: the reviewer's shrunk script. `External` leaves the second `CPHC` order
+/// `Unknown` before the protected lead's entry completes, which rule 13 lets hold the entry's legs,
+/// so `protective_sell_quantity_never_exceeds_the_position_in_any_script` must skip it rather than
+/// demand a placement.
+#[test]
+fn an_unknown_order_in_the_leads_instrument_before_the_completion_is_skipped() {
+    let script = [
+        Step::Intent {
+            which: 0,
+            exiting: false,
+            other: false,
+            protected: false,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Intent {
+            which: 1,
+            exiting: false,
+            other: true,
+            protected: true,
+        },
+        Step::Acknowledge,
+        Step::Fill,
+        Step::Intent {
+            which: 2,
+            exiting: false,
+            other: true,
+            protected: false,
+        },
+        Step::External,
+        Step::Fill,
+        Step::Fill,
+    ];
+    let run = play(&script);
+    let entry = ClientOrderId::for_intent(&IntentId(EventId(intent_named(1))))
+        .map(|id| id.as_str().to_owned())
+        .unwrap_or_default();
+    let completed = run.drafts.iter().position(|d| {
+        d.event_type == "OrderStateChanged"
+            && field(d, "client_order_id") == Some(entry.as_str())
+            && field(d, "state") == Some("filled")
+    });
+    assert!(leads(&script), "the script runs the protected lead");
+    let at = completed.unwrap_or(run.drafts.len());
+    assert!(
+        may_hold_protection(&script, &run.drafts, at),
+        "an Unknown CPHC order before the completion may hold the legs, so the case is skipped"
+    );
+    assert!(
+        !may_hold_protection(&script, &run.drafts, 0),
+        "and nothing holds protection before the first draft, so the scope is not a blanket skip"
+    );
+}
+
+/// #244 round 3, major 1: the reviewer's script `PREFIX + PROTECTED_LEAD + [Wait, Wait, Cancelled,
+/// Acknowledge, KillSwitch]`. At the switch the prefix's buy is filled, the lead's entry remainder is
+/// cancelled at the bracket timeout, and the only working acknowledged order is the OCO §5.4 then
+/// submits for the filled share. `play` cannot reach that state on this code (the OCO's producer is
+/// E7-4's), so the broker the script leaves at the switch is built directly: it asks the switch to
+/// cancel nothing, while the same broker holding the agent's own working buy does.
+#[test]
+fn a_resting_protective_order_is_not_one_the_kill_switch_must_cancel() {
+    let side = |instrument: &str, side, qty_units, filled_units, cancelled, purpose| BrokerSide {
+        instrument: instrument.to_owned(),
+        side,
+        qty_units,
+        filled_units,
+        acknowledged: true,
+        cancelled,
+        purpose,
+    };
+    let mut broker = BrokerModel::default();
+    let unit = 1_000_000_000;
+    for (id, order) in [
+        (
+            "md-prefix",
+            side(
+                AAPL,
+                mandate_accounting::Side::Buy,
+                unit,
+                unit,
+                false,
+                Purpose::Open,
+            ),
+        ),
+        (
+            "md-entry",
+            side(
+                CPHC,
+                mandate_accounting::Side::Buy,
+                2 * unit,
+                unit,
+                true,
+                Purpose::Open,
+            ),
+        ),
+        (
+            "md-entry-p1",
+            side(
+                CPHC,
+                mandate_accounting::Side::Sell,
+                unit,
+                0,
+                false,
+                Purpose::Protective,
+            ),
+        ),
+    ] {
+        broker.orders.insert(id.to_owned(), order);
+        broker.order_of_arrival.push(id.to_owned());
+    }
+    broker.cancels_asked.push("md-entry".to_owned());
+    assert!(
+        !broker.must_cancel_at_a_switch(),
+        "only the OCO works, and an automated switch may leave it in place (§5.5)"
+    );
+    broker.orders.insert(
+        "md-own".to_owned(),
+        side(
+            CPHC,
+            mandate_accounting::Side::Buy,
+            unit,
+            0,
+            false,
+            Purpose::Open,
+        ),
+    );
+    broker.order_of_arrival.push("md-own".to_owned());
+    assert!(
+        broker.must_cancel_at_a_switch(),
+        "the agent's own working buy is still one the switch must cancel"
+    );
 }
