@@ -276,7 +276,6 @@ fn an_append_with_another_environment_is_rejected() {
 }
 
 #[test]
-#[ignore = "pending E7-2"]
 fn the_golden_journal_folds_to_the_committed_state() {
     let text = include_str!("golden-journal.json");
     let golden = common::golden::parse_golden(text);

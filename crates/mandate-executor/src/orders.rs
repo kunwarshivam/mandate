@@ -178,18 +178,17 @@ pub(crate) fn described(
 /// §5.7's last row: a status outside the table pauses the agent and alerts the owner. The order
 /// is left in its state, because a status that cannot be mapped is a state that cannot be derived.
 fn unmapped(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
-    let agent = batch
-        .view
-        .orders
-        .get(id)
-        .map(|order| order.agent.0.clone())
-        .unwrap_or_default();
+    let (agent, to) = match batch.view.orders.get(id).map(|order| order.agent.clone()) {
+        Some(Some(agent)) => (agent.0, "paused"),
+        Some(None) => (EVERY_AGENT.to_owned(), "exits_only"),
+        None => (String::new(), "paused"),
+    };
     let applied = batch.journal(
         "AgentModeApplied",
         None,
         vec![
             ("agent", text(agent)),
-            ("to", text("paused")),
+            ("to", text(to)),
             ("restriction", text("broker_status_unmapped")),
             ("originated", Value::Bool(true)),
         ],
@@ -260,10 +259,22 @@ pub(crate) fn absent(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), Executo
     Ok(())
 }
 
-/// A cancel the broker confirmed, which only the kill switch's and E7-4's cancels ask for: a later
-/// slice of this stack.
-pub(crate) fn cancelled() -> Result<(), ExecutorError> {
-    Err(ExecutorError::Unimplemented { story: "E7-3" })
+/// A cancel the broker confirmed (§5.7): the order it names becomes `Canceled`, which releases its
+/// reservation and clears the unconfirmed cancel that held its instrument (§5.4). An id this
+/// executor did not derive, or does not carry, asks for a reconciliation rather than being
+/// dropped.
+pub(crate) fn cancelled(batch: &mut Batch<'_, '_>, raw: &str) -> Result<(), ExecutorError> {
+    let Some(id) = known(batch, Some(raw)) else {
+        batch.request_reconciliation();
+        return Ok(());
+    };
+    transition(
+        batch,
+        &id,
+        OrderState::Canceled,
+        vec![("cancel_confirmed", Value::Bool(true))],
+    )?;
+    Ok(())
 }
 
 /// An `Unknown` order is queried again once `unknown_absent_window_s ÷ (N − 1)` seconds (rounded
