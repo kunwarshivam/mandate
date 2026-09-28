@@ -518,13 +518,33 @@ mod stub_tests {
     /// `None` is any count: the fold, which journals nothing and only reads an event back, and
     /// this module's own writer of the protection event.
     const ALLOWED: [(&str, &str, Option<usize>); 7] = [
-        ("crates/mandate-executor/src/types.rs", "BracketLegs {", Some(1)),
+        (
+            "crates/mandate-executor/src/types.rs",
+            "BracketLegs {",
+            Some(1),
+        ),
         ("crates/mandate-executor/src/types.rs", "OcoLegs {", Some(1)),
         ("crates/mandate-executor/src/fold.rs", "OcoLegs {", Some(1)),
-        ("crates/mandate-executor/src/protection.rs", "OcoLegs {", Some(1)),
-        ("crates/mandate-executor/src/protection.rs", "text(\"placed\")", Some(1)),
-        ("crates/mandate-executor/src/fold.rs", "\"ProtectionChanged\"", None),
-        ("crates/mandate-executor/src/protection.rs", "\"ProtectionChanged\"", None),
+        (
+            "crates/mandate-executor/src/protection.rs",
+            "OcoLegs {",
+            Some(1),
+        ),
+        (
+            "crates/mandate-executor/src/protection.rs",
+            "text(\"placed\")",
+            Some(1),
+        ),
+        (
+            "crates/mandate-executor/src/fold.rs",
+            "\"ProtectionChanged\"",
+            None,
+        ),
+        (
+            "crates/mandate-executor/src/protection.rs",
+            "\"ProtectionChanged\"",
+            None,
+        ),
     ];
 
     /// The registries that name the protection event once each without writing it.
@@ -695,7 +715,10 @@ mod stub_tests {
         let (mut state, aapl) = protected()?;
         let msft = InstrumentId::new("MSFT")?;
         for purpose in ALL {
-            assert!(!awaits_cancel(&state, &aapl, purpose), "{purpose:?}: no sequence");
+            assert!(
+                !awaits_cancel(&state, &aapl, purpose),
+                "{purpose:?}: no sequence"
+            );
         }
         for instrument in [&aapl, &msft] {
             state.exiting.insert(
@@ -1169,14 +1192,22 @@ mod sequence_tests {
         assert_eq!(kept, before, "and nothing else changed");
 
         let started = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
-        assert_eq!(cancels(&started), vec![OCO], "the exit cancels the protection");
+        assert_eq!(
+            cancels(&started),
+            vec![OCO],
+            "the exit cancels the protection"
+        );
         assert_eq!(actions(&started), vec!["unprotected_start"]);
         assert_eq!(submitted(&started), 0, "and waits for the confirmation");
 
         assert!(stub(&executor.run(quote("138")?, &ports)));
         let released = executor.run(cancel_accepted(OCO), &ports)?;
         assert_eq!(actions(&released), vec!["cancelled"]);
-        assert_eq!(submitted(&released), 1, "the confirmation releases the exit");
+        assert_eq!(
+            submitted(&released),
+            1,
+            "the confirmation releases the exit"
+        );
         assert_eq!(
             executor.run(quote("137")?, &ports)?,
             Vec::new(),
@@ -1213,7 +1244,11 @@ mod sequence_tests {
             }
             let answer = executor.run(sell(EXIT, "5", limit, purpose)?, &ports);
             let case = format!("{purpose:?} at {limit} against {seen:?}");
-            assert_eq!(executor.state.exiting.contains_key(&aapl()?), starts, "{case}");
+            assert_eq!(
+                executor.state.exiting.contains_key(&aapl()?),
+                starts,
+                "{case}"
+            );
             if starts {
                 let effects = answer?;
                 assert_eq!(actions(&effects), vec!["unprotected_start"], "{case}");
@@ -1364,7 +1399,11 @@ mod sequence_tests {
                 .any(|effect| matches!(effect, Effect::Notify(note) if note.message_key == "unprotected_interval_limit"))
         );
         assert_eq!(
-            executor.state.unprotected.last().map(|interval| interval.alerted),
+            executor
+                .state
+                .unprotected
+                .last()
+                .map(|interval| interval.alerted),
             Some(true)
         );
         let again = executor.run(Input::Tick(RiskClock::from_secs(31)), &ports)?;
