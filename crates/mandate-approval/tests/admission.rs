@@ -88,7 +88,7 @@ fn a_response_to_an_approval_not_pending_is_refused() {
     );
     for response in [grant(), skip()] {
         let elsewhere = mandate_approval::Response {
-            approval: ApprovalRef::of_requested_event("01J9ZQ4Y8N6K3V5T2R1M0P7XWZ"),
+            approval: ApprovalRef::of_requested_event("01J9ZQ4Y8N6K3V5T2R1M0P7XWZ").unwrap(),
             ..response
         };
         assert_eq!(
