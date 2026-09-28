@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use mandate_canon::Value;
+use mandate_canon::{Key, Object, Value};
 
 use crate::ApprovalError;
 use crate::admit::Request;
@@ -40,17 +40,25 @@ pub struct Notification {
 }
 
 /// # Errors
-/// [`ApprovalError::Unimplemented`] until E8-1.
+/// Never: the notification is built from the request's id alone.
 pub fn notification_for(request: &Request) -> Result<Notification, ApprovalError> {
-    let _ = request;
-    Err(ApprovalError::Unimplemented { story: "E8-1" })
+    Ok(Notification {
+        subject: request.id.clone(),
+        text: GenericText::ApprovalNeeded,
+    })
 }
 
 /// The payload a channel sends: `{"subject": <id>, "text": <key>}` and nothing else.
 ///
 /// # Errors
-/// [`ApprovalError::Unimplemented`] until E8-1.
+/// Never in practice: both keys are fixed and valid.
 pub fn notification_payload(notification: &Notification) -> Result<Value, ApprovalError> {
-    let _ = notification;
-    Err(ApprovalError::Unimplemented { story: "E8-1" })
+    let key = |k| Key::new(k).map_err(|_| ApprovalError::Unrepresentable { what: "key" });
+    let text = match notification.text {
+        GenericText::ApprovalNeeded => "approval_needed",
+    };
+    let mut members = Object::new();
+    members.insert(key("subject")?, Value::Str(notification.subject.0.clone()));
+    members.insert(key("text")?, Value::Str(text.to_owned()));
+    Ok(Value::Object(members))
 }
