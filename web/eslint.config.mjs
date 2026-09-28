@@ -35,10 +35,24 @@ export const SAFETY_RULES = {
   ],
 };
 
+/** apca-w3 is licensed for the contrast tests only, and its colorparsley dependency is AGPL-3.0 (web/COLOR.md). */
+const APCA_MESSAGE = "APCA is for the contrast tests only: import it from src/test/apca.ts in a test, never in app code.";
+const APP_RULES = {
+  ...SAFETY_RULES,
+  "no-restricted-imports": [
+    "error",
+    {
+      paths: [...SAFETY_RULES["no-restricted-imports"][1].paths, { name: "apca-w3", message: APCA_MESSAGE }, { name: "colorparsley", message: APCA_MESSAGE }],
+      patterns: [{ group: ["**/test/apca", "@/test/apca"], message: APCA_MESSAGE }],
+    },
+  ],
+};
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   { files: ["src/**/*.{ts,tsx}"], rules: SAFETY_RULES },
+  { files: ["src/**/*.{ts,tsx}"], ignores: ["src/test/**", "src/**/*.test.{ts,tsx}"], rules: APP_RULES },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

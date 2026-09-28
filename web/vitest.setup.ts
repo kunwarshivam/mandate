@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
+import { resetCharts } from "./src/test/chart-mock";
 
 vi.mock("next/navigation", async () => {
   const { navigation } = await import("./src/test/navigation");
@@ -14,8 +15,15 @@ vi.mock("next/navigation", async () => {
   };
 });
 
+vi.mock("lightweight-charts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("lightweight-charts")>();
+  const { mockChartModule } = await import("./src/test/chart-mock");
+  return { ...actual, ...mockChartModule };
+});
+
 afterEach(() => {
   cleanup();
+  resetCharts();
 });
 
 const dom = typeof window !== "undefined";

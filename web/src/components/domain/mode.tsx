@@ -45,14 +45,14 @@ export function ModeBadge({ mode, className }: { mode: AgentMode; className?: st
 
 /** A restriction wears the colour of whoever imposed it. */
 export const SOURCE_FIELD: Record<RestrictionSource, string> = {
-  mandate: "bg-marigold-soft",
+  mandate: "bg-mandate-soft",
   account: "bg-lapis-soft",
   owner: "bg-muted",
   market: "bg-muted",
 };
 
 export const SOURCE_TAG: Record<RestrictionSource, string> = {
-  mandate: "bg-marigold text-marigold-foreground",
+  mandate: "bg-mandate text-mandate-strong ring-1 ring-mandate-edge ring-inset",
   account: "bg-lapis text-lapis-foreground",
   owner: "bg-ink text-ink-foreground",
   market: "bg-card text-foreground ring-1 ring-foreground ring-inset",
