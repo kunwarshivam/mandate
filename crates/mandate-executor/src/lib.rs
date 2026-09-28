@@ -95,7 +95,7 @@ pub use error::{ExecutorError, JsonError};
 pub use gate::PartialGateDecision;
 pub use ids::{ClientOrderId, IntentId, PREFIX};
 pub use ports::{BrokerConnector, ConnectorError, IdGen, InstrumentSnapshot, MandateView, Ports};
-pub use protection::{LadderPrice, LadderReference};
+pub use protection::{LadderPrice, LadderReference, is_protected};
 pub use reconcile::reconcile;
 pub use state::{
     ExecutorState, FOLD_VERSION, IntentOutcome, IntentRecord, ObservedAccount, UnresolvedAppend,
