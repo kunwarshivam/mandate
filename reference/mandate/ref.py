@@ -318,7 +318,7 @@ def semantic(m, ctx):
         errs.add("V-035")
     if any(i["asset_class"] not in u["asset_classes"] for i in inst):
         errs.add("V-039")
-    if sum(-D(x["factor"]).as_tuple().exponent for x in lad if x["action"] == "scale_sizes" and x["factor"] is not None) > 24:
+    if sum(-D(x["factor"]).as_tuple().exponent for x in lad if x["action"] == "scale_sizes" and x["factor"] is not None) > 12:
         errs.add("V-040")
     carry = D(ctx.get("connection_loss_carry_usd", "0"))
     if carry >= D(m["capital"]["max_loss_from_allocation"]) * D(m["capital"]["allocation_usd"]):
