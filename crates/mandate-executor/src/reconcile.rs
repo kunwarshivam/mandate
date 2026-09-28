@@ -1812,4 +1812,35 @@ mod tests {
         );
         Ok(())
     }
+
+    /// A followed stream's journaled fact answers E7-4 slice 5's stub rather than being dropped,
+    /// through the real `handle`, and leaves the state as it was.
+    #[test]
+    fn a_journaled_fact_from_a_followed_stream_answers_the_copy_stub() -> Result<(), ExecutorError>
+    {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = reporting(&ports)?;
+        let before = executor.state.clone();
+        let fact = FoldedEvent {
+            stream: "clock:ws1".to_owned(),
+            seq: Seq(1),
+            event_id: EventId("clock:ws1-1".to_owned()),
+            event_type: "TradingDayStarted".to_owned(),
+            causation_id: None,
+            payload: object(vec![("date", Value::Str("2026-09-22".to_owned()))])?,
+        };
+        assert_eq!(
+            handle(&mut executor.state, Input::Journal(fact), &ports).map(|_| ()),
+            Err(ExecutorError::Unimplemented { story: "E7-4" })
+        );
+        assert_eq!(executor.state, before, "a refused step changes nothing");
+        Ok(())
+    }
 }

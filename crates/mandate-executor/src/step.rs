@@ -129,7 +129,7 @@ fn started(
 fn step(batch: &mut Batch<'_, '_>, input: Input) -> Result<(), ExecutorError> {
     match input {
         Input::Started(_) => Err(ExecutorError::AlreadyStarted),
-        Input::Journal(_) => Ok(()),
+        Input::Journal(_) => copied_facts(),
         Input::Market(observation) => watched(&batch.view, &observation),
         Input::Tick(_) => {
             lookups_due(batch);
@@ -172,6 +172,15 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
         | BrokerOutcome::Activities { .. }
         | BrokerOutcome::AccountWideAccepted => later_slice(),
     }
+}
+
+/// A journaled event from a followed stream is a fact the executor copies into the account stream
+/// with its `causation_id` — `AgentModeApplied` from `AgentModeChanged`, `TradingDayStarted`,
+/// `ClockAdvanced` crossing midnight New York, `OwnerAcknowledged` (journal spec §2). That copy is
+/// E7-4 slice 5's (the trading day, DEC-160); until it lands the input answers its stub, never a
+/// silent `Ok(())` that drops the fact (#244 round 1, the coordinator's ruling 5861479849).
+fn copied_facts() -> Result<(), ExecutorError> {
+    Err(ExecutorError::Unimplemented { story: "E7-4" })
 }
 
 /// Reconciliation's broker reads and the kill switch (trading-domain spec §5.5, §11): the later
