@@ -520,8 +520,13 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   refusing default, the base refused without any one required fact, and a property against an oracle
   that reads the journal backwards),
   `crates/mandate-spec/tests/common/mod.rs` (a mandate as a canonical value, built by hand);
-  `crates/mandate-domain/tests/domain.rs` (live). The classification tests arrive with the last tests
-  PR. Planted bugs per test: the task brief.
+  `crates/mandate-spec/tests/change.rs` (§9.2 row by row in both directions, the DEC-121 pinning
+  switch as a whole and each way it fails to be one, the autonomy shapes, the literal version-vector
+  digest, and four properties: step-up exactly when some path increases risk, the join over changed
+  paths against hand-written per-edit classes, an allocation-only change classified by its direction,
+  and MI-11 against a first-match evaluator of the test's own; DEC-172);
+  `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
+  tests PR.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
   through `crates/mandate-refcases/src/mandate.rs`; families G, A, and B stay with streams G and H
   and fail as "not interpreted until" their owning story, and family N is stream J's (below). A rejection that carries no reason

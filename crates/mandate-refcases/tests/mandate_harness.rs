@@ -354,6 +354,94 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
     );
 }
 
+/// Every MC-C case passes as the fixture states it, and fails, naming the member, when any one of its
+/// expectations is edited or dropped; and the one invalid case, which states no `step_up_required`,
+/// fails when it is given one saying step-up is needed.
+///
+/// The change arm's read-every-key half (DEC-172 item 4). Editing shows each member is compared, and
+/// dropping shows none is optional: the arm reads `step_up_required` as absent only where the case
+/// itself says `invalid`, so leaving it out elsewhere cannot pass.
+#[test]
+#[ignore = "pending E10-3"]
+fn every_change_case_passes_and_fails_on_each_edited_expectation() {
+    let fixture = fixture();
+    let ids = ids_of(&fixture, "change");
+    assert_eq!(ids.len(), 48, "family C is 48 cases");
+    let expectation = |doctored: &mut Json, id: &str| -> Json {
+        doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .map(|c| c["expect"].take())
+            .expect("the case")
+    };
+    let put = |doctored: &mut Json, id: &str, expect: Json| {
+        if let Some(case) = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+        {
+            case["expect"] = expect;
+        }
+    };
+    let mut edits = 0;
+    for id in &ids {
+        if let Err(failure) = run(fixture.clone(), id) {
+            panic!("{id} must pass as the fixture states it: {failure}");
+        }
+        let expect = expectation(&mut fixture.clone(), id);
+        let members: Vec<String> = expect
+            .as_object()
+            .expect("an expectation")
+            .keys()
+            .cloned()
+            .collect();
+        for member in members {
+            let mut edited_expect = expect.clone();
+            edited_expect[&member] = edited(&expect[&member]);
+            let mut dropped_expect = expect.clone();
+            dropped_expect
+                .as_object_mut()
+                .expect("an expectation")
+                .remove(&member);
+            for (how, changed) in [("edited", edited_expect), ("dropped", dropped_expect)] {
+                let mut doctored = fixture.clone();
+                put(&mut doctored, id, changed);
+                let failure = run(doctored, id)
+                    .expect_err("an edited or dropped expectation must fail the case");
+                assert!(
+                    failure.contains(&member),
+                    "{id}: a {how} `{member}` must fail on `{member}`, got: {failure}"
+                );
+                edits += 1;
+            }
+        }
+    }
+    assert_eq!(
+        edits,
+        2 * (47 * 5 + 4),
+        "five members of each case, four of the invalid one, each edited and dropped"
+    );
+    let invalid = ids
+        .iter()
+        .find(|id| {
+            let mut copy = fixture.clone();
+            expectation(&mut copy, id)["classification"] == "invalid"
+        })
+        .expect("an invalid case");
+    let mut doctored = fixture.clone();
+    let mut expect = expectation(&mut fixture.clone(), invalid);
+    expect["step_up_required"] = Json::Bool(true);
+    put(&mut doctored, invalid, expect);
+    let failure = run(doctored, invalid).expect_err("an invalid change is refused, not stepped up");
+    assert!(
+        failure.contains("step_up_required"),
+        "{invalid}: got {failure}"
+    );
+}
+
 /// Every MC-R case passes as the fixture states it, and fails, naming the member and its step, when any
 /// one expectation of any one step is edited.
 ///
