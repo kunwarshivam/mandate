@@ -14,8 +14,11 @@ use mandate_executor::{
 };
 use mandate_time::UtcNanos;
 
-use crate::error::{ClientError, TransportError, WireError};
+use mandate_accounting::InstrumentId;
+
+use crate::error::{ClientError, ReadError, TransportError, WireError};
 use crate::http::{HttpRequest, Method, Response, TradingTransport};
+use crate::read::AssetSnapshot;
 use crate::wire;
 
 /// Tells the time and waits between retries. The client paces against `now`, so a `pause` must
@@ -187,6 +190,15 @@ impl<T: TradingTransport, P: Pause> TradingClient<T, P> {
                     .await
             }
         }
+    }
+
+    /// One instrument's asset record, `GET /v2/assets/{symbol}` (trading-domain spec §3.1, E7-8),
+    /// stamped with the clock's now so its reader can refuse it once it is too old. It is a read
+    /// of the broker's reference data, not a [`BrokerRequest`]: the executor's vocabulary is
+    /// stream K's and this read does not change it.
+    pub async fn asset(&self, instrument: &InstrumentId) -> Result<AssetSnapshot, ReadError> {
+        let _ = (&self.transport, &self._pause, instrument);
+        Err(ReadError::Unimplemented { story: "E7-8" })
     }
 
     /// Cancels one of our orders. Alpaca cancels by **its** order id, so the order is looked up by

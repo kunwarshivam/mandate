@@ -28,7 +28,6 @@ fn the_unchanged_fixture_acts() {
 /// MC-E01, EI-4, EI-5, PB-8: a grant acts with exactly the bound order, never re-priced to the
 /// moved mark, and only while every check passes.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_grant_acts_with_the_bound_order_only_while_every_check_passes() {
     let mut now = current();
     now.mark_now = Some(price("188"));
@@ -46,7 +45,6 @@ fn a_grant_acts_with_the_bound_order_only_while_every_check_passes() {
 
 /// MC-E17, PB-5, check 8.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_changed_version_skips() {
     the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
@@ -58,7 +56,6 @@ fn a_changed_version_skips() {
 
 /// MC-E18, check 9: any mode stricter than normal skips.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_mode_other_than_normal_skips() {
     the_unchanged_fixture_acts();
     for mode in [ModeNow::ExitsOnly, ModeNow::Paused, ModeNow::Stopped] {
@@ -73,7 +70,6 @@ fn a_mode_other_than_normal_skips() {
 
 /// Check 9: a restricted instrument, or one no longer in the working universe, skips.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_restricted_or_removed_instrument_skips() {
     the_unchanged_fixture_acts();
     let restricted = mandate_approval::Current {
@@ -94,7 +90,6 @@ fn a_restricted_or_removed_instrument_skips() {
 
 /// MC-E19, PB-6, check 10: `deny` is never overridden.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_reclassified_deny_skips() {
     the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
@@ -110,7 +105,6 @@ fn a_reclassified_deny_skips() {
 /// MC-E20, check 10: an ask by another trigger is a question the owner has not seen; `auto` and
 /// the same trigger act.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_ask_by_another_trigger_skips_and_auto_or_the_same_trigger_acts() {
     let other = mandate_approval::Current {
         classification: Classification::Ask {
@@ -132,7 +126,6 @@ fn an_ask_by_another_trigger_skips_and_auto_or_the_same_trigger_acts() {
 
 /// Check 11, FR-6.5: a dry-run denial skips with the gate's own reason.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_gate_denial_skips_with_the_gates_reason() {
     the_unchanged_fixture_acts();
     let now = mandate_approval::Current {
@@ -151,7 +144,6 @@ fn a_gate_denial_skips_with_the_gates_reason() {
 
 /// DEC-156 item 2: the first failing re-validation check names the skip.
 #[test]
-#[ignore = "pending E8-3"]
 fn the_first_failing_revalidation_check_names_the_skip() {
     let now = mandate_approval::Current {
         mandate_version: "v4".to_owned(),
@@ -183,7 +175,6 @@ fn band(req: &str, now: &str, class: AssetClass) -> bool {
 
 /// MC-E21, MC-E22, PB-7: exactly at the band is inside; one unit over, either way, is outside.
 #[test]
-#[ignore = "pending E8-3"]
 fn drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not() {
     assert!(band("100", "101", AssetClass::UsEquity));
     assert!(band("100", "99", AssetClass::UsEquity));
@@ -196,7 +187,6 @@ fn drift_exactly_at_the_band_is_inside_and_one_unit_over_either_way_is_not() {
 
 /// MC-E23: no mark at the request or now is outside the band (fail closed).
 #[test]
-#[ignore = "pending E8-3"]
 fn no_mark_is_outside_the_band() {
     let p = Some(price("100"));
     assert!(!answer(
@@ -218,7 +208,6 @@ fn no_mark_is_outside_the_band() {
 
 /// MC-E24, DEC-156 item 3: 100 bp for equities, 200 bp for crypto.
 #[test]
-#[ignore = "pending E8-3"]
 fn crypto_uses_200_bp_and_equities_100() {
     assert_eq!(answer("band_bp", band_bp(AssetClass::UsEquity)), 100);
     assert_eq!(answer("band_bp", band_bp(AssetClass::Crypto)), 200);

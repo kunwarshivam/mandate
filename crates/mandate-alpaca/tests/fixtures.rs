@@ -9,15 +9,21 @@ mod common;
 use std::collections::BTreeSet;
 use std::fs;
 
-use common::{every_scenario, fixtures_dir, looks_like_key_id, scenario};
-use mandate_alpaca::{KEY_ID_VAR, SECRET_VAR};
+use common::{
+    data_fixtures_dir, data_scenario, every_data_scenario, every_scenario, fixtures_dir,
+    looks_like_key_id, scenario,
+};
+use mandate_alpaca::{KEY_ID_VAR, SECRET_VAR, is_paper_trading_path};
 
 /// Every scenario the task brief's fixture plan names, so one that was dropped is a failure and
 /// not a silent gap.
-const REQUIRED: [&str; 23] = [
+const REQUIRED: [&str; 26] = [
     "account_active",
     "account_blocked",
     "activities_fills",
+    "asset_absent",
+    "asset_crypto",
+    "asset_equity",
     "cancel_all_account_scope",
     "cancel_confirmed",
     "cancel_rejected_already_filled",
@@ -95,8 +101,109 @@ fn the_provenance_table_names_every_scenario_once() {
     assert_eq!(recorded.len(), 11, "eleven were recorded against paper");
     assert_eq!(
         hand_built.len(),
-        12,
-        "twelve were built by hand from the spec"
+        15,
+        "twelve were built by hand from the spec, and E7-8's three asset reads"
+    );
+}
+
+/// The latest-quote scenarios E7-8 names (DEC-168).
+const REQUIRED_DATA: [&str; 4] = [
+    "quote_crypto",
+    "quote_crypto_absent",
+    "quote_equity",
+    "quote_equity_absent",
+];
+
+/// The data host's scenarios, as its README declares them, and nothing else in the directory.
+#[test]
+fn the_data_provenance_table_names_every_scenario_once() {
+    let readme = fs::read_to_string(data_fixtures_dir().join("README.md"))
+        .expect("alpaca-data/README.md declares each scenario's provenance");
+    let mut declared = BTreeSet::new();
+    for row in readme.lines().filter(|line| line.starts_with("| `")) {
+        let cells: Vec<&str> = row.split('|').map(str::trim).collect();
+        let (Some(name), Some(provenance), Some(why)) = (cells.get(1), cells.get(2), cells.get(3))
+        else {
+            panic!("a provenance row has three cells: {row}");
+        };
+        match *provenance {
+            "recorded" => assert!(why.is_empty(), "a recording needs no reason: {row}"),
+            "hand-built" => assert!(!why.is_empty(), "a hand-built scenario says why: {row}"),
+            other => panic!("`{other}` is neither `recorded` nor `hand-built`: {row}"),
+        }
+        assert!(
+            declared.insert(name.trim_matches('`').to_owned()),
+            "{name} is named twice"
+        );
+    }
+    let present: BTreeSet<String> = every_data_scenario().into_iter().collect();
+    let required: BTreeSet<String> = REQUIRED_DATA.iter().map(|n| (*n).to_owned()).collect();
+    assert_eq!(declared, present, "the table and the directory list agree");
+    assert_eq!(present, required, "and both are the scenarios E7-8 names");
+}
+
+/// Every data scenario is one `GET` of a latest-quote path on the data host, with a JSON body,
+/// and names no credential, no trading path, and no live trading host.
+#[test]
+fn every_data_fixture_is_one_latest_quote_read_and_holds_no_credential() {
+    let secrets: Vec<String> = [KEY_ID_VAR, SECRET_VAR]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .filter(|value| !value.is_empty())
+        .collect();
+    let mut files: u32 = 0;
+    for name in every_data_scenario() {
+        let recorded = data_scenario(&name);
+        assert_eq!(recorded.exchanges.len(), 1, "{name} is one read");
+        for exchange in &recorded.exchanges {
+            let path = exchange.path_and_query.as_str();
+            let latest = (path.starts_with("/v2/stocks/")
+                && path.ends_with("/quotes/latest?feed=iex"))
+                || path.starts_with("/v1beta3/crypto/us/latest/quotes?symbols=");
+            assert!(
+                latest,
+                "{name} names `{path}`, which is not a latest-quote read"
+            );
+            assert_eq!(exchange.method, mandate_alpaca::Method::Get, "{name}");
+            assert_eq!(exchange.body, None, "{name} sends no body");
+            assert!(!is_paper_trading_path(path), "{name} is not a trading path");
+            serde_json::from_slice::<serde_json::Value>(&exchange.response)
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        let dir = data_fixtures_dir().join(&name);
+        for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+            let path = entry.expect("a readable entry").path();
+            let text =
+                fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let lower = text.to_ascii_lowercase();
+            assert!(
+                !lower.contains("apca-api") && !lower.contains("secret-key"),
+                "{} names an authorisation header",
+                path.display()
+            );
+            assert!(
+                !text
+                    .split(|c: char| !c.is_ascii_alphanumeric())
+                    .any(looks_like_key_id),
+                "{} holds something shaped like a key ID",
+                path.display()
+            );
+            assert!(
+                secrets.iter().all(|s| !text.contains(s.as_str())),
+                "{} holds a credential value",
+                path.display()
+            );
+            assert!(
+                !text.contains("//api.alpaca.markets"),
+                "{} names a live host (ES-23)",
+                path.display()
+            );
+            files = files.saturating_add(1);
+        }
+    }
+    assert!(
+        files >= 12,
+        "the scan must see every data file, saw {files}"
     );
 }
 
@@ -187,7 +294,7 @@ fn every_fixture_is_well_formed_and_its_requests_line_up_with_its_responses() {
         for (index, exchange) in recorded.exchanges.iter().enumerate() {
             assert!(
                 mandate_alpaca::is_paper_trading_path(&exchange.path_and_query),
-                "{name} exchange {index} names `{}`, which is not one of the seven endpoints",
+                "{name} exchange {index} names `{}`, which is not one of the allowed endpoints",
                 exchange.path_and_query
             );
             assert!(
