@@ -569,6 +569,45 @@ mod tests {
         Ok(())
     }
 
+    /// The reviewer's probe on #262 round 2: an empty pinned list recorded only through an index
+    /// below it names nothing, so `/universe/pinned_instruments` itself is added unconfirmed, and with
+    /// `admission: auto` unrecorded, V-020 and V-022 both fire (DEC-169 item 5's empty-container case).
+    #[test]
+    fn a_record_below_an_empty_array_leaves_the_array_unconfirmed() -> Result<(), String> {
+        let draft = mandate(&[
+            ("/universe/pinned", "false"),
+            ("/universe/pinned_instruments", "[]"),
+            ("/autonomy/admission", r#""auto""#),
+        ])?;
+        let context = ValidationContext::from_journal(
+            &draft,
+            args(conn("conn_alpaca_paper_01")?)?,
+            &records(&draft, &["/universe/pinned_instruments/0"])?,
+        )
+        .map_err(|e| e.to_string())?;
+        let pinned = context
+            .provenance
+            .entries()
+            .get(&Pointer::new("/universe/pinned_instruments"));
+        if pinned
+            != Some(&Provenance {
+                source: Source::UserEntered,
+                confirmed: false,
+            })
+        {
+            return Err(format!(
+                "`/universe/pinned_instruments` must be added unconfirmed, got {pinned:?}"
+            ));
+        }
+        let report = validate(&draft, &context).map_err(|e| e.to_string())?;
+        for code in [Violation::V020, Violation::V022] {
+            if !report.violations.contains(&code) {
+                return Err(format!("{code} must fire, got {:?}", report.violations));
+            }
+        }
+        Ok(())
+    }
+
     /// Every leaf of `value` below `path`, as the oracle enumerates it: its own walk, sharing nothing
     /// with the fill's.
     fn leaves(value: &Value, path: &str, out: &mut Vec<String>) {
