@@ -35,12 +35,19 @@ export interface Command {
   record?: CommandRecord;
 }
 
+/** D6 lets model output sit behind "View model output"; the response records whether the owner opened it before responding. */
+export interface ApprovalRecord {
+  screen: "D6";
+  modelOutputExpanded: boolean;
+}
+
 export interface ApprovalResponse {
   approvalId: string;
   response: "approve" | "skip";
   phase: "sent" | "recorded" | "decided" | "unknown";
   sentAt: Iso;
   recordedAt?: Iso;
+  record: ApprovalRecord;
 }
 
 interface Runtime {
@@ -50,7 +57,7 @@ interface Runtime {
   commands: Command[];
   responses: Record<string, ApprovalResponse>;
   send: (kind: CommandKind, agentId: string | null, record?: CommandRecord) => Command;
-  respond: (approvalId: string, response: "approve" | "skip") => void;
+  respond: (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => void;
 }
 
 const RuntimeContext = createContext<Runtime | null>(null);
@@ -244,8 +251,8 @@ export function RuntimeProvider({
   );
 
   const respond = useCallback(
-    (approvalId: string, response: "approve" | "skip") => {
-      const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current };
+    (approvalId: string, response: "approve" | "skip", record: ApprovalRecord) => {
+      const entry: ApprovalResponse = { approvalId, response, phase: "sent", sentAt: nowRef.current, record };
       setResponses((map) => ({ ...map, [approvalId]: entry }));
       window.setTimeout(() => {
         const at = nowRef.current;
