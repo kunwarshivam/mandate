@@ -1,6 +1,6 @@
 [files]
 # reference/ is frozen; fixtures and lockfiles are generated.
-extend-exclude = ["reference/", "fixtures/", "Cargo.lock", "python/uv.lock"]
+extend-exclude = ["reference/", "fixtures/", "Cargo.lock", "python/uv.lock", "web/package-lock.json", "web/node_modules/"]
 
 [default]
 extend-ignore-re = [

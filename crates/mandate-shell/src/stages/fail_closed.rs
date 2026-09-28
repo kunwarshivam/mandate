@@ -513,6 +513,25 @@ fn an_uninterpretable_broker_answer_stops_and_is_not_handed_on() -> Result<(), S
     Ok(())
 }
 
+/// #241 review round 2, minor 3: a submission the connector refused before it left the process
+/// stops the run, is asked once, and is never handed to the executor or asked again.
+#[test]
+fn a_request_that_was_not_sent_stops_the_run_and_is_never_asked_again() -> Result<(), String> {
+    let world = World::default();
+    let mut stages = world.stages();
+    stages.connector = Box::new(ScriptedConnector {
+        world: world.clone(),
+        script: Script::NotSent,
+    });
+    let error = refusal(run_with(&mut stages)?)?;
+    assert_eq!(error.code(), "broker_answer_uninterpretable");
+    assert!(error.to_string().contains("(refused_path)"), "{error}");
+    let tally = world.tally.borrow();
+    assert_eq!(tally.submissions, 1);
+    assert_eq!(tally.executor_broker_inputs, 0);
+    Ok(())
+}
+
 /// PB-12, TI-12: a reconciliation mismatch pauses and alerts, and nothing in the tracer lifts it:
 /// the agent stream's last mode is the startup hold's `paused`.
 #[test]
