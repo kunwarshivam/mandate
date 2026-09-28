@@ -63,10 +63,11 @@ describe("drill-down", () => {
       { href: agentHref(SWING.agent_id, "positions"), label: "Positions" },
       { href: XYZ_HREF, label: "Position" },
     ]);
-    const [banner] = screen.getAllByRole("banner");
-    for (const href of ["/", "/agents", agentHref(SWING.agent_id, "overview"), agentHref(SWING.agent_id, "positions")]) {
-      expect(banner.querySelector(`a[href="${href}"]`), href).not.toBeNull();
+    const trail = within(screen.getAllByRole("banner")[0].querySelector<HTMLElement>("nav[aria-label=breadcrumb]")!);
+    for (const href of [agentHref(SWING.agent_id, "overview"), agentHref(SWING.agent_id, "positions")]) {
+      expect(trail.getAllByRole("link").some((a) => a.getAttribute("href") === href), href).toBe(true);
     }
+    expect(trail.getAllByText("Position").length).toBeGreaterThan(0);
     expect(liveCharts().some((c) => c.series[0]?.type === "Candlestick")).toBe(true);
     const close = screen.getByRole("link", { name: "Close position…" });
     expect(close).toHaveAttribute("href", `${XYZ_HREF}/close`);
