@@ -736,6 +736,8 @@ pub enum Script {
     UnknownThenAbsent,
     /// The broker answers something the connector cannot read.
     Unreadable,
+    /// The connector refuses the submission before it leaves the process.
+    NotSent,
 }
 
 /// The broker, scripted. It counts every submission before anything interprets it and checks the
@@ -766,6 +768,9 @@ impl Connector for ScriptedConnector {
                 Script::Accept => Ok(BrokerOutcome::Submitted(accepted(order)?)),
                 Script::UnknownThenAbsent => Err(ConnectorError::Unknown(BrokerUnknown::Timeout)),
                 Script::Unreadable => Err(ConnectorError::Unreadable { code: "wire" }),
+                Script::NotSent => Err(ConnectorError::NotSent {
+                    code: "refused_path",
+                }),
             };
         }
         if let BrokerRequest::GetOrderByClientId(client) = request {

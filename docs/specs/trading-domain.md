@@ -2,13 +2,21 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.10 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.11 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 amendment [DEC-160](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.11:** protective order IDs name the entry they protect (§2.3). A protective leg the broker
+  created, which no submission recorded, belongs to the entry's agent when its ID names the entry,
+  otherwise to the agent whose attributed lots make up the whole open quantity; failing both it is
+  unattributed, and the instrument holds new openings (`protection_unattributed`, checked before
+  `add_blocked_by_protective_order`, §9.1) until the leg is attributed or gone. Exit sequences and
+  an agent-scoped kill switch cancel an unattributed leg by its own ID, so it never holds an exit
+  (§5.4, [DEC-160](../project/04-decision-log.md#decisions)). Every reference case is unchanged;
+  registering `protection_unattributed` is Proposed (founder).
 - **v0.10:** corporate-action rules found while implementing E3-2
   ([DEC-92 to DEC-94](../project/04-decision-log.md#decisions)). A split that leaves no share
   removes the whole basis (DEC-92); otherwise the residual formula is unchanged and never removes
@@ -141,6 +149,14 @@ Crypto uses the broker's `price_increment`.
 - **Intent ID:** ULID. **`client_order_id`:** `"{intent_ulid}-{attempt}"` (≤ 128 characters);
   `attempt` increments only after the broker confirms the previous attempt `Rejected`; retries of
   an unconfirmed attempt reuse the same ID.
+- **Protective orders** ([DEC-160](../project/04-decision-log.md#decisions)): a protective order
+  the platform places is named for the entry it protects. The parent is
+  `"{entry}-p{protection}"`, where `{entry}` is the entry order's `client_order_id` and
+  `{protection}` is the alphanumeric ID of the `ProtectionChanged` event that records the
+  placement; a bracket's or OCO's legs are the parent's ID followed by `-tp` (the take-profit) or
+  `-sl` (the stop). A re-placement keeps `{entry}` and takes its own event's `{protection}`. The
+  entry is read back as everything before the last `-p`; an ID that does not parse this way names
+  no entry. This grammar supersedes any other derivation of a protective order's ID.
 - **Fill ID:** the broker's execution ID; fills are de-duplicated by it.
 
 ## 3. Instruments and eligibility
@@ -287,7 +303,7 @@ queued by the broker for the next eligible session.
    concentration; no new orders in that instrument (`unknown_order_in_flight`) until resolved.
 
 **Risk-reducing orders at the first gate decision:** rules 4–6 exclude the agent's own protective
-orders and resting opening orders in the instrument, because the executor cancels them first
+orders, any unattributed protective leg (§5.4), and resting opening orders in the instrument, because the executor cancels them first
 (rule 5, §5.4); the gate re-run immediately before submission applies every rule in full. Bracket
 protective legs are checked against position + entry quantity.
 
@@ -335,12 +351,30 @@ protective legs are checked against position + entry quantity.
   exits are marketable** (§5.6). The unprotected interval is bounded as for equities.
 - A stop-limit may not fill on a gap; disclosed to the owner.
 
+**Ownership of broker-created legs** ([DEC-160](../project/04-decision-log.md#decisions)):
+
+- A bracket's or OCO's legs are created by the broker, so no `OrderSubmitted` records them. When
+  `ProtectionChanged` records them placed, each joins the order set as a live protective sell of the
+  covered quantity, reserving nothing.
+- A leg's owner is, in this order: the agent of the entry its `client_order_id` names (§2.3);
+  otherwise the position's **single holder**, the one agent whose attributed lots (§8.1: bought by
+  that agent's own orders, net of its own sells) make up the whole currently open quantity.
+- Otherwise the leg is **unattributed** and the executor never guesses an owner. While an
+  unattributed leg rests, every new opening in the instrument is **held**
+  (`protection_unattributed`, §9.1). A reconciliation (§11) establishes the leg's presence, not its
+  owner, so the hold ends only when the leg is attributed or is gone (canceled, filled, expired).
+- An unattributed leg never holds an exit (`AGENTS.md` rule 13). The instrument's exit sequences
+  and its protection re-placement cancel it as step 1, with the instrument's other protective
+  orders, and an agent-scoped kill switch in the instrument cancels it by its own
+  `client_order_id`, never by cancel-all (§5.5). Protection for any quantity that remains is then
+  re-placed as after any exit.
+
 ### 5.5 Kill switch
 
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg in an instrument it closes (§5.4), each by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -717,7 +751,10 @@ including allows, is journaled with the checks evaluated.
    per-instrument position limit), mandate order size, then re-entry cooldown
    ([mandate spec §5.3](mandate.md#53-position-exposure-order-size-count-and-cooldown))
 3. Session, auction window, and halt (§4.3, §4.4)
-4. Order constraints (§5.3, in list order)
+4. Order constraints (§5.3, in list order), then §5.4's two checks on an opening in an instrument
+   with resting protective orders: an unattributed leg holds it (`protection_unattributed`), which
+   comes first as the more specific cause, then a plain risk-increasing order is denied
+   (`add_blocked_by_protective_order`)
 5. Mark freshness and price collar (§8.2, §9.6)
 6. Market-conduct controls (§9.6, including the close window and the mandate's orders per day)
 7. Buying power (§9.5), then gross exposure (§9.3: the account at 1×, then the agent's mandate

@@ -8,6 +8,14 @@ names. This file is founder-owned (CODEOWNERS): adding a row is the approval.
 Safety-critical crates may also use only the external crates listed in their `allowed_external`
 entry in `xtask/layers.toml`.
 
+The web app's npm rows (`web/`, DEC-200) are one summary row per top-level framework. A row also
+covers the packages that framework's standard setup installs with it (TypeScript and ESLint with
+Next.js, `react-dom` with React, Testing Library with Vitest, and the `radix-ui`,
+`class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, and `tw-animate-css` packages
+the shadcn/ui components import); any other npm package needs its own row. `cargo xtask deps` reads only the
+cargo and python rows, so the npm rows are reviewed, not machine-checked; `web/package-lock.json`
+is the exact record.
+
 | Name | Ecosystem | Used by | Purpose | Alternatives considered | License | Approved |
 |---|---|---|---|---|---|---|
 | `anyhow` | cargo | xtask; mandate-cli | Error context in tooling and binaries only (ES-09) | Plain `Box<dyn Error>` | MIT OR Apache-2.0 | DEC-72 |
@@ -34,3 +42,11 @@ entry in `xtask/layers.toml`.
 | `pyyaml` | python | mandate-tools | Loading reference-case YAML exactly as the reference implementation does (ES-11) | ruamel.yaml (YAML 1.2 typing differs) | MIT | DEC-72 |
 | `pytest` | python | python workspace (dev) | Test runner | unittest | MIT | DEC-72 |
 | `ruff` | python | python workspace (dev) | Lint and format | flake8 + black | MIT | DEC-72 |
+| `next` | npm | `web/` | The web app framework: Next.js 16 with the App Router, server rendering for the record screens (brief §4.1), routing, and the build; telemetry disabled | Remix / React Router, Vite with a client-only React app (no server rendering for record screens) | MIT | founder, DEC-200 |
+| `react` | npm | `web/` | UI library, React 19, with `react-dom` | Vue, Svelte, Solid (HLD §11 names React, and shadcn/ui and Motion are built for it) | MIT | founder, DEC-200 |
+| `tailwindcss` | npm | `web/` | Styling with design tokens as CSS variables, Tailwind CSS v4 | CSS Modules, vanilla-extract, styled-components (runtime CSS-in-JS, a poor fit for server components) | MIT | founder, DEC-200 |
+| `motion` | npm | `web/` | Animation (motion.dev, formerly Framer Motion), with `prefers-reduced-motion` respected | CSS transitions only (no layout or exit animation), GSAP (its own license, not OSI-approved), React Spring | MIT | founder, DEC-200 |
+| `shadcn/ui` | npm | `web/` | Accessible UI primitives copied into `web/` as source through the `shadcn` CLI, so the components are ours to review and change | Radix Themes, MUI, Chakra UI (packaged components that are harder to restyle and audit) | MIT | founder, DEC-200 |
+| `vitest` | npm | `web/` (dev) | Component and unit tests, with Testing Library | Jest (needs its own TypeScript and ESM transform) | MIT | founder, DEC-200 |
+| `@playwright/test` | npm | `web/` (dev) | End-to-end tests, added later | Cypress (runs inside the browser; Playwright drives Chromium, Firefox, and WebKit from one API) | Apache-2.0 | founder, DEC-200 |
+| `impeccable` | npm | `web/` (dev tool, run in CI by `.github/workflows/web.yml`, pinned `4.1.0`) | The Impeccable detector: `impeccable detect src/` fails the web workflow on UI anti-patterns and generic AI aesthetics (DEC-200). A JavaScript launcher with its engine as a per-platform optional dependency (`@impeccable/cli-linux-x64` in CI); telemetry off through `IMPECCABLE_NO_TELEMETRY` and `DO_NOT_TRACK` | Review passes by the vendored skills alone (nothing in CI); ESLint rules written for the project (no design rules exist to reuse) | Apache-2.0 | founder, DEC-200 |
