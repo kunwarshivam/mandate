@@ -32,7 +32,7 @@ Designed for first ([brief §2.1](../docs/product/09-product-experience.md#21-wh
 
 ## Product Purpose
 
-Mandate lets someone hand a clear mandate to an autonomous trading agent and trust it: the agent
+Owlhead lets someone hand a clear mandate to an autonomous trading agent and trust it: the agent
 acts inside limits the owner set and confirmed, asks only when the owner's rules say so, and every
 decision is recorded ([vision](../docs/product/01-vision-and-strategy.md)). Success is an owner who
 knows, at a glance, what each agent may do, what it is doing, and how to stop it.
@@ -46,7 +46,7 @@ The combination, shown working: a binding mandate the agent cannot exceed, per-a
 expiry and a safe default, and an exportable decision record, on the owner's own paper account,
 with no custody ([competitive landscape](../docs/product/03-competitive-landscape.md#summary)). Not
 "the only one with controls": every element exists somewhere, and the pitch is that they work
-together. Brokers now open accounts to agents and state that they do not supervise them; Mandate is
+together. Brokers now open accounts to agents and state that they do not supervise them; Owlhead is
 the supervision the owner sets.
 
 ## Operating Context
@@ -70,7 +70,7 @@ The safety principles constrain the visuals as much as the flows
 | P2 | The owner sets the envelope and can see it | Provenance on every envelope field; proposed values look inactive until confirmed |
 | P3 | The platform explains and never persuades | Approve and Skip carry equal weight, in size, colour, position, and motion; no "recommended", no profit estimate, no scorecard |
 | P4 | Silence is safe, and the screen says so | "If you do nothing, this action is skipped" on every request; the deadline is neutral and static, never an alarm |
-| P5 | Notifications carry nothing about trading | Generic page titles, opaque IDs in URLs, nothing cached on the device except the theme |
+| P5 | Notifications carry nothing about trading | Generic page titles, opaque IDs in URLs, nothing stored on the device |
 | P6 | Show the state truthfully | Stale values keep their age; unknown orders read "unknown"; no calm green "all good" the system cannot prove |
 | P7 | Limits in dollars where decisions are made | Every limit is a dollar amount with headroom; `profit_stop` is a level, never a progress bar |
 | P8 | What the owner saw is what gets recorded | Record screens render deterministically; nothing optimistic ("submitted" only after the server records it) |
@@ -87,9 +87,14 @@ Vitest. No third-party analytics, session replay, or telemetry.
 
 ## Brand Commitments
 
-- **Name and assets.** "Mandate" (working name). The mark (two folded bands forming an M) and the
-  lowercase serif wordmark in `assets/brand/`, drawn in the current text colour; brand ink
-  `#171717` on paper `#F7F4ED`.
+- **Name.** The product's public name is **Owlhead**, at owlhead.ai (DEC-201, founder,
+  2026-09-28). "Mandate" stays the internal codename for code, crates and repo paths, and "mandate"
+  stays the product's word for the owner's binding envelope ("Your mandate"). Every user-facing
+  surface says Owlhead.
+- **Wordmark and mark.** The UI sets "OWLHEAD" as a typographic wordmark in the display face (Big
+  Shoulders Display 800, capitals), in the current text colour. There is no symbol: the old M mark
+  in `assets/brand/` no longer fits and is not used in the UI, and a new mark is follow-up work that
+  needs a founder-approved design. There is no favicon until that mark exists.
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
@@ -132,7 +137,7 @@ Vitest. No third-party analytics, session replay, or telemetry.
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA: body text at least 4.5:1 and large text 3:1 in every theme (`src/lib/tokens.test.ts`
-checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
+WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in the one light theme
+(`src/lib/tokens.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
 with a visible focus ring; layouts hold at 360 px wide; motion respects `prefers-reduced-motion`
 (fewer, gentler animations, keeping opacity and colour changes that aid comprehension).
