@@ -17,6 +17,9 @@ table's, not the id's.
 | `account_active` | recorded | |
 | `account_blocked` | hand-built | needs a blocked account, which no client call can provoke |
 | `activities_fills` | recorded | |
+| `asset_absent` | hand-built | E7-8: no paper credentials were available to record it; the shape is the recorded `submit_rejected` reject body with Alpaca's asset-not-found message |
+| `asset_crypto` | hand-built | E7-8: no paper credentials were available to record it; Alpaca's documented asset record for `BTC/USD`, read on the slash-free path `position_path` already uses |
+| `asset_equity` | hand-built | E7-8: no paper credentials were available to record it; Alpaca's documented asset record for `AAPL` |
 | `cancel_all_account_scope` | hand-built | the coordinator's ruling: cancel-all is never exercised against the shared paper account (`AGENTS.md` rule 13's blast radius) |
 | `cancel_confirmed` | recorded | |
 | `cancel_rejected_already_filled` | hand-built | needs an order that filled before its cancel, so a filled position |

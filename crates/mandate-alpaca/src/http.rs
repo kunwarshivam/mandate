@@ -88,8 +88,9 @@ const fn ordinary(method: Method, path: &'static str) -> Endpoint {
 /// It is on the method as well, because `GET /v2/orders` lists the open orders and
 /// `DELETE /v2/orders` cancels every one of them. There is no funding, transfer, or journal
 /// endpoint here and no way to add one at runtime (`AGENTS.md` rule 8: no custody of funds), and
-/// no `DELETE /v2/positions`, which would close every position at once.
-pub const ENDPOINTS: [Endpoint; 11] = [
+/// no `DELETE /v2/positions`, which would close every position at once. `GET /v2/assets/{symbol}`
+/// is the instrument read of E7-8 (trading-domain spec §3.1, DEC-168).
+pub const ENDPOINTS: [Endpoint; 12] = [
     ordinary(Method::Post, "/v2/orders"),
     ordinary(Method::Get, "/v2/orders"),
     ordinary(Method::Get, "/v2/orders:by_client_order_id"),
@@ -99,6 +100,7 @@ pub const ENDPOINTS: [Endpoint; 11] = [
     ordinary(Method::Get, "/v2/positions/{symbol}"),
     ordinary(Method::Get, "/v2/account"),
     ordinary(Method::Get, "/v2/account/activities"),
+    ordinary(Method::Get, "/v2/assets/{symbol}"),
     Endpoint {
         method: Method::Delete,
         path: "/v2/orders",
@@ -169,6 +171,11 @@ impl HttpRequest {
     /// One instrument's position, `GET /v2/positions/{symbol}`, on [`position_path`]'s path.
     pub fn position(instrument: &InstrumentId) -> Result<Self, TransportError> {
         Self::new(Method::Get, &position_path(instrument)?, None)
+    }
+
+    /// One instrument's asset record, `GET /v2/assets/{symbol}`, on [`asset_path`]'s path (E7-8).
+    pub fn asset(instrument: &InstrumentId) -> Result<Self, TransportError> {
+        Self::new(Method::Get, &asset_path(instrument)?, None)
     }
 
     /// [`Self::close_position`] after its scope is shown, split out so this crate's tests, which
@@ -323,7 +330,18 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
 }
 
 /// `/v2/positions/{symbol}` for one instrument, the one path both the positions read and the
-/// account-wide close are built on.
+/// account-wide close are built on, with the symbol written as [`symbol_segment`] writes it.
+pub fn position_path(instrument: &InstrumentId) -> Result<String, TransportError> {
+    Ok(format!("/v2/positions/{}", symbol_segment(instrument)?))
+}
+
+/// `/v2/assets/{symbol}` for one instrument, the instrument read of E7-8, with the symbol written
+/// as [`symbol_segment`] writes it.
+pub fn asset_path(instrument: &InstrumentId) -> Result<String, TransportError> {
+    Ok(format!("/v2/assets/{}", symbol_segment(instrument)?))
+}
+
+/// One instrument's symbol as one path segment.
 ///
 /// A crypto pair is written without its slash, `BTC/USD` as `BTCUSD`: Alpaca answers
 /// `/v2/positions/BTC/USD` with a 404 and `/v2/positions/BTCUSD` with the position (alpaca-py
@@ -332,8 +350,8 @@ fn path_matches(endpoint: &str, path_and_query: &str) -> bool {
 /// segment of `wire`'s symbol alphabet, letters, digits and `.`, starting with a letter or a
 /// digit. Anything else — a third segment, an empty half, a dot segment, a percent sign, a query
 /// — is [`TransportError::RefusedPath`], so a hostile instrument id is never folded into another
-/// symbol's path, and the allowlist still judges what this returns.
-pub fn position_path(instrument: &InstrumentId) -> Result<String, TransportError> {
+/// symbol's path, and the allowlist still judges the path it is put in.
+pub fn symbol_segment(instrument: &InstrumentId) -> Result<String, TransportError> {
     let symbol = instrument.as_str();
     let segment = match symbol.split_once('/') {
         None => symbol.to_owned(),
@@ -342,22 +360,27 @@ pub fn position_path(instrument: &InstrumentId) -> Result<String, TransportError
         }
         Some(_) => return Err(TransportError::RefusedPath),
     };
-    let symbol_like = segment
-        .bytes()
-        .next()
-        .is_some_and(|b| b.is_ascii_alphanumeric())
-        && segment
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'.');
-    if symbol_like {
-        Ok(format!("/v2/positions/{segment}"))
+    if is_symbol_like(&segment) {
+        Ok(segment)
     } else {
         Err(TransportError::RefusedPath)
     }
 }
 
+/// One segment of `wire`'s symbol alphabet: letters, digits and `.`, starting with a letter or a
+/// digit.
+pub(crate) fn is_symbol_like(segment: &str) -> bool {
+    segment
+        .bytes()
+        .next()
+        .is_some_and(|b| b.is_ascii_alphanumeric())
+        && segment
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'.')
+}
+
 /// One half of a crypto pair: letters and digits only, and at least one.
-fn is_pair_half(half: &str) -> bool {
+pub(crate) fn is_pair_half(half: &str) -> bool {
     !half.is_empty() && half.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 

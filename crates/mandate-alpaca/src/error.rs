@@ -137,6 +137,76 @@ impl WireError {
     ];
 }
 
+/// Why one read of an instrument or of its latest quote (E7-8) produced no fact.
+///
+/// Every variant is a refusal: a caller holding one has no instrument snapshot and no quote, and
+/// nothing it does on the strength of either may add risk (`AGENTS.md` rule 3). An answer that is
+/// missing, that this crate cannot read, or that is older than the caller's bound is never
+/// completed with a guess, a default, or an earlier answer (DEC-85, DEC-168).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ReadError {
+    /// The body of every stub in the E7-8 tests PR (DEC-77, DEC-83).
+    #[error("{story} has not been implemented yet")]
+    Unimplemented { story: &'static str },
+    /// The broker has no such instrument, or no quote for it.
+    #[error("the broker has no such instrument, or no quote for it")]
+    Absent,
+    /// The answer describes an instrument other than the one asked about.
+    #[error("the answer names another instrument")]
+    OtherInstrument,
+    /// A quote side the broker sent with no price, which no mark or collar can be taken from.
+    #[error("the quote has a side with no price")]
+    OneSided,
+    /// The answer is older than the bound the caller passed.
+    #[error("the answer is older than the caller's bound")]
+    Stale,
+    /// The answer is stamped after the clock's now, so its age cannot be known.
+    #[error("the answer is stamped after the clock's now")]
+    AheadOfClock,
+    /// A `429` or a `5xx`: the broker is overloaded or failing, and said nothing about the
+    /// instrument.
+    #[error("the broker is overloaded or failing")]
+    Overloaded,
+    /// A status this read does not interpret, such as a `403` for a feed the account may not read.
+    #[error("the broker answered with a status this read does not interpret")]
+    UnexpectedStatus { status: u16 },
+    #[error(transparent)]
+    Wire(#[from] WireError),
+    #[error(transparent)]
+    Transport(#[from] TransportError),
+}
+
+impl ReadError {
+    /// Stable reason code (ADR-0001 ES-09). A wire or transport failure answers its own code.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Unimplemented { .. } => "unimplemented",
+            Self::Absent => "absent",
+            Self::OtherInstrument => "other_instrument",
+            Self::OneSided => "one_sided",
+            Self::Stale => "stale",
+            Self::AheadOfClock => "ahead_of_clock",
+            Self::Overloaded => "overloaded",
+            Self::UnexpectedStatus { .. } => "unexpected_status",
+            Self::Wire(error) => error.code(),
+            Self::Transport(error) => error.code(),
+        }
+    }
+
+    /// The codes of this enum's own variants, in the order [`Self::code`] matches them. The wire
+    /// and transport codes are their enums' own.
+    pub const CODES: [&'static str; 8] = [
+        "unimplemented",
+        "absent",
+        "other_instrument",
+        "one_sided",
+        "stale",
+        "ahead_of_clock",
+        "overloaded",
+        "unexpected_status",
+    ];
+}
+
 /// Why one client call did not produce a broker fact.
 ///
 /// A parse failure is deliberately **not** an unknown broker outcome: the broker answered, and

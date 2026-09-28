@@ -294,7 +294,10 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`;
   `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
   credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
-  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`.
+  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`,
+  and E7-8's reference-data reads (DEC-168): `crates/mandate-alpaca/src/read.rs` (the asset record
+  and the latest quote as exact values, and their refusals) and `crates/mandate-alpaca/src/data.rs`
+  (the data host's own request type and transport trait).
   In prose: `mandate-executor` (`fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
@@ -316,7 +319,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/hand.rs`, `crates/mandate-alpaca/tests/properties.rs`,
   `crates/mandate-alpaca/tests/fixtures.rs`, `crates/mandate-alpaca/tests/common/mod.rs`,
   `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
-  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`. In prose: the hand cases of the brief
+  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`; for E7-8,
+  `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
+  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`. In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
@@ -585,8 +590,7 @@ proves each pending test fails on them (DEC-110).
 
 - **Spec:** the [M7 brief](../../../docs/project/tasks/M7-escalation-v0.md); mandate spec §6.4;
   DEC-155, DEC-156, DEC-158 (option (c)), DEC-165. The MC-E cases arrive with the M7 spec PR.
-- **Code:** `mandate-approval` (layer 1; E8-1 and E8-2 implemented, E8-3's entry points stubs until
-  its implementation PR):
+- **Code:** `mandate-approval` (layer 1; E8-1, E8-2 and E8-3 implemented):
   `crates/mandate-approval/src/content.rs` (`BoundAction`, `content_object`, `content_hash`,
   `confirmation_code`), `crates/mandate-approval/src/admit.rs` (`admit`: checks 1 to 7),
   `crates/mandate-approval/src/revalidate.rs` (`revalidate`: checks 8 to 12, `GrantedOrder`),
@@ -602,8 +606,9 @@ proves each pending test fails on them (DEC-110).
   `crates/mandate-approval/tests/admission.rs` (checks 1 to 7, lateness, step-up, owner commands,
   the kill switch), `crates/mandate-approval/tests/revalidation.rs` (checks 8 to 12 and drift),
   and `crates/mandate-approval/tests/grant_properties.rs` (the check-table, clock-accumulator,
-  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), pending
-  E8-3.
+  principal, assertion-ledger, scaled-integer drift, field-comparer and kill-switch oracles), all
+  live. In-module tests in `src/stepup.rs` probe step-up evidence at the clock's extremes against an
+  `i128` oracle, and `src/drift.rs` a drift too large to compute.
 - **Run:** `cargo nextest run -p mandate-approval`; `cargo xtask ci pending`.
 
 ## Reference-case harness

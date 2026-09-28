@@ -16,12 +16,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use mandate_alpaca::client::Pause;
+use mandate_alpaca::data::{DataTransport, QuoteRequest};
 use mandate_alpaca::error::TransportError;
 use mandate_alpaca::http::{HttpRequest, Method, Response, TradingTransport};
 use mandate_time::UtcNanos;
 
 pub fn fixtures_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/alpaca-trading")
+}
+
+/// The latest-quote scenarios of E7-8, recorded against the data host's shape.
+pub fn data_fixtures_dir() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/alpaca-data")
 }
 
 /// One recorded exchange: exactly what was sent and exactly what came back.
@@ -53,7 +59,16 @@ fn method_of(word: &str) -> Method {
 /// Loads one scenario. A malformed fixture is a panic here rather than a silent skip: the
 /// fixtures are the tests PR's contract.
 pub fn scenario(name: &str) -> Scenario {
-    let dir = fixtures_dir().join(name);
+    scenario_in(&fixtures_dir(), name)
+}
+
+/// Loads one latest-quote scenario.
+pub fn data_scenario(name: &str) -> Scenario {
+    scenario_in(&data_fixtures_dir(), name)
+}
+
+fn scenario_in(root: &Path, name: &str) -> Scenario {
+    let dir = root.join(name);
     let requests = fs::read_to_string(dir.join("requests.txt"))
         .unwrap_or_else(|e| panic!("{name}/requests.txt: {e}"));
     let statuses = fs::read_to_string(dir.join("statuses.txt"))
@@ -101,8 +116,17 @@ pub fn scenario(name: &str) -> Scenario {
 
 /// Every scenario directory, sorted, so a scan cannot miss one that was added later.
 pub fn every_scenario() -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(fixtures_dir())
-        .unwrap_or_else(|e| panic!("{}: {e}", fixtures_dir().display()))
+    scenarios_in(&fixtures_dir())
+}
+
+/// Every latest-quote scenario directory, sorted.
+pub fn every_data_scenario() -> Vec<String> {
+    scenarios_in(&data_fixtures_dir())
+}
+
+fn scenarios_in(root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(root)
+        .unwrap_or_else(|e| panic!("{}: {e}", root.display()))
         .filter_map(|entry| {
             let path = entry.ok()?.path();
             path.is_dir()
@@ -173,6 +197,61 @@ impl TradingTransport for FakeTransport {
     }
 }
 
+/// Answers each latest-quote read with the next scripted reply and records what was asked, the
+/// data host's counterpart of [`FakeTransport`].
+#[derive(Clone, Default)]
+pub struct FakeDataTransport {
+    script: Arc<Mutex<DataScript>>,
+}
+
+#[derive(Default)]
+struct DataScript {
+    replies: VecDeque<Result<Response, TransportError>>,
+    sent: Vec<QuoteRequest>,
+}
+
+impl FakeDataTransport {
+    pub fn serving(replies: impl IntoIterator<Item = Result<Response, TransportError>>) -> Self {
+        let fake = Self::default();
+        if let Ok(mut script) = fake.script.lock() {
+            script.replies.extend(replies);
+        }
+        fake
+    }
+
+    /// A transport that replays one latest-quote scenario, in order.
+    pub fn replaying(scenario: &Scenario) -> Self {
+        Self::serving(scenario.exchanges.iter().map(|exchange| {
+            Ok(Response {
+                status: exchange.status,
+                body: exchange.response.clone(),
+            })
+        }))
+    }
+
+    /// Everything the client sent, in order.
+    pub fn sent(&self) -> Vec<QuoteRequest> {
+        self.script
+            .lock()
+            .map(|script| script.sent.clone())
+            .unwrap_or_default()
+    }
+}
+
+impl DataTransport for FakeDataTransport {
+    async fn send(&self, request: &QuoteRequest) -> Result<Response, TransportError> {
+        let mut script = match self.script.lock() {
+            Ok(script) => script,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        script.sent.push(request.clone());
+        script
+            .replies
+            .pop_front()
+            .unwrap_or(Err(TransportError::Timeout))
+    }
+}
+
 /// A clock that starts at a fixed instant and moves only when paused, so a retry test is
 /// deterministic and instant.
 #[derive(Clone, Default)]
@@ -181,6 +260,14 @@ pub struct FakeClock {
 }
 
 impl FakeClock {
+    /// A clock reading `at`, so a read of a dated answer can be judged against a known now.
+    pub fn at(at: UtcNanos) -> Self {
+        let since_epoch = Duration::new(u64::try_from(at.secs()).unwrap_or(0), at.nanos());
+        Self {
+            elapsed: Arc::new(Mutex::new(since_epoch)),
+        }
+    }
+
     pub fn elapsed(&self) -> Duration {
         self.elapsed.lock().map(|at| *at).unwrap_or_default()
     }
