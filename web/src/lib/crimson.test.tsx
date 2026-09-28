@@ -9,12 +9,13 @@ import { SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
-import { colorTokens, tokenValue } from "./tokens";
+import { colorTokensFor, tokenValue } from "./tokens";
 
 /** Crimson is the kill switch and nothing else (web/DESIGN.md): the sheet's kill-switch links and the record screens' switches. */
 const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Activate the kill switch|Stop all agents on this account|Close everything on this account)/;
 
-const CRIMSON_VALUE = /oklch\(\s*0\.415[\s_]+0\.164[\s_]+27\b/;
+/** The kill switch's fill (both themes) and its dark-mode edge; in light mode the edge is the fill. */
+const CRIMSON_VALUE = /oklch\(\s*(0\.44[\s_]+0\.173|0\.76[\s_]+0\.138)[\s_]+27\b/;
 const CRIMSON_NAME = /-crimson\b/;
 
 const root = resolve(process.cwd(), "src");
@@ -79,16 +80,21 @@ describe("crimson in the source", () => {
       .map((file) => relative(root, file));
     expect(writing).toEqual(["app/globals.css"]);
     expect(tokenValue("crimson")).toMatch(CRIMSON_VALUE);
+    expect(tokenValue("crimson", "dark")).toMatch(CRIMSON_VALUE);
+    expect(tokenValue("crimson-edge", "dark")).toMatch(CRIMSON_VALUE);
   });
 
   it("is read only by the crimson utilities, never aliased by another variable", () => {
     const css = readFileSync(join(root, "app/globals.css"), "utf8");
     const readers = Array.from(css.matchAll(/--([a-z0-9-]+):\s*[^;]*var\(--crimson[a-z-]*\)/g), (m) => m[1]);
-    expect(readers.sort()).toEqual(["color-crimson", "color-crimson-foreground"]);
+    expect(readers.sort()).toEqual(["color-crimson", "color-crimson-edge", "color-crimson-foreground"]);
   });
 
   it("is no other token's value", () => {
-    for (const t of colorTokens.filter((c) => c.meaning !== "kill")) expect(t.value, t.name).not.toBe(tokenValue("crimson"));
+    for (const theme of ["light", "dark"] as const) {
+      const kill = new Set([tokenValue("crimson", theme), tokenValue("crimson-edge", theme)]);
+      for (const t of colorTokensFor(theme).filter((c) => c.meaning !== "kill")) expect(kill.has(t.value), `${theme} ${t.name}`).toBe(false);
+    }
   });
 
   it.each(["components/stop/stop-sheet.tsx", "components/stop/record-screen.tsx"])(
@@ -97,7 +103,7 @@ describe("crimson in the source", () => {
       const button = readFileSync(join(root, "components/stop/kill-switch-button.tsx"), "utf8");
       const lines = button.split("\n").filter((line) => CRIMSON_NAME.test(line));
       expect(lines).toHaveLength(1);
-      expect(lines[0].trim()).toMatch(/^appearance === "filled" \? "bg-crimson text-crimson-foreground[^"]*" : "border-2 border-crimson [^"]*",$/);
+      expect(lines[0].trim()).toMatch(/^appearance === "filled" \? "border-crimson-edge bg-crimson text-crimson-foreground[^"]*" : "border-crimson-edge bg-card [^"]*",$/);
       const source = readFileSync(join(root, file), "utf8");
       expect(source).not.toMatch(CRIMSON_NAME);
       const titles = Array.from(source.matchAll(/<KillSwitchButton\b[^>]*\btitle="([^"]+)"/g), (m) => m[1]);

@@ -1,11 +1,10 @@
 /**
- * The colour tokens in navy and brass (DEC-202), one entry per CSS custom property in `globals.css`
- * (the test `tokens.test.ts` keeps the two in step). Values come from `palette.ts`; this file adds
- * what each token means. The design page and the contrast checks read it. Dark values live in
- * `INK_AND_GOLD_DARK` and the `data-mode="dark"` block of `globals.css`.
+ * The colour tokens in Ink and Gold (DEC-204), one entry per CSS custom property in `globals.css`
+ * (the test `tokens.test.ts` keeps the two in step, in both themes). Values come from `palette.ts`;
+ * this file adds what each token means. The design page and the contrast checks read it.
  */
 import { PAIRS } from "./contrast-pairs";
-import { PALETTE, type RampRef, TOKEN_NAMES, type TokenName } from "./palette";
+import { PALETTES, type RampRef, type ThemeName, TOKEN_NAMES, type TokenName } from "./palette";
 
 export type Meaning = "surface" | "text" | "mandate" | "account" | "stopped" | "kill" | "result" | "status";
 
@@ -18,48 +17,54 @@ export interface ColorToken {
 }
 
 export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> = {
-  background: { meaning: "surface", role: "Wells, the sidebar, hover and pressed rows: slate, barely tinted toward navy" },
-  card: { meaning: "surface", role: "The page and every reading surface: sheets, dialogs, charts" },
+  background: { meaning: "surface", role: "Wells, the sidebar, hover and pressed rows: paper in light, the deepest ink in dark" },
+  card: { meaning: "surface", role: "The page and every reading surface: sheets, dialogs, charts. Off-white in light, ink in dark" },
   muted: { meaning: "surface", role: "Quiet fills: skeletons, the range pill track, chart grid" },
   border: { meaning: "surface", role: "Hairlines between rows" },
-  foreground: { meaning: "text", role: "Text, and the ring on an exits-only mode" },
-  "muted-foreground": { meaning: "text", role: "Secondary text, labels, ages" },
-  primary: { meaning: "account", role: "Navy as the primary action, links, and focus" },
+  foreground: { meaning: "text", role: "Text, the mark, and the ring on an exits-only mode" },
+  "muted-foreground": { meaning: "text", role: "Secondary text, labels, ages, and a mandate level's dashed line on a chart" },
+  primary: { meaning: "account", role: "The primary action and links: ink in light, paper in dark" },
   "primary-foreground": { meaning: "account", role: "Text on a primary action" },
-  lapis: { meaning: "account", role: "The account, in navy: its chart line, its connection, the paper hatch, links" },
-  "lapis-foreground": { meaning: "account", role: "Text on navy" },
-  "lapis-muted": { meaning: "account", role: "Secondary text on navy and on ink" },
-  "lapis-soft": { meaning: "account", role: "An account notice: reconciliation, unknown order, activity at the broker" },
-  "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside a navy surface" },
-  "lapis-line": { meaning: "account", role: "Hairlines inside a navy surface" },
-  mandate: { meaning: "mandate", role: "Your mandate: the pale brass tint the envelope, limits and rails sit on" },
-  "mandate-foreground": { meaning: "mandate", role: "Text on the mandate tint" },
-  "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate tint" },
-  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label" },
-  "mandate-marker": { meaning: "mandate", role: "Rail fill, level marks, and mandate price lines on charts" },
+  lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
+  "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
+  "lapis-muted": { meaning: "account", role: "Secondary text on the account fill and on ink; a hovered account pill" },
+  "lapis-soft": { meaning: "account", role: "The account's pale gold: the current tab and range pill, an approval card, an account notice" },
+  "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
+  "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
+  mandate: { meaning: "mandate", role: "Your mandate: the pale gold field the envelope, limits and rails sit on" },
+  "mandate-foreground": { meaning: "mandate", role: "Text on the mandate field" },
+  "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate field" },
+  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: gold-700 in light, never lighter" },
+  "mandate-marker": { meaning: "mandate", role: "Rail fill and level marks on the envelope and the equity ladder" },
   "mandate-edge": { meaning: "mandate", role: "Lines inside the mandate field: Kumo's line and hairline roles there" },
   "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
   selection: { meaning: "mandate", role: "Selected text" },
-  ink: { meaning: "stopped", role: "A stopped or paused agent, and the Stop control" },
+  ink: { meaning: "stopped", role: "A stopped or paused agent, and the Stop control: ink in light, paper in dark" },
   "ink-foreground": { meaning: "stopped", role: "Text on ink" },
   "ink-line": { meaning: "stopped", role: "Hairlines inside an ink surface" },
-  crimson: { meaning: "kill", role: "The kill switch, and nothing else" },
+  crimson: { meaning: "kill", role: "The kill switch's fill, and nothing else" },
   "crimson-foreground": { meaning: "kill", role: "Text on crimson" },
+  "crimson-edge": { meaning: "kill", role: "The kill switch's edge: crimson in light, a lighter crimson in dark so the switch clears 3:1 on the sheet" },
   gain: { meaning: "result", role: "A gain as text, always with a plus sign and the word; an up candle" },
   loss: { meaning: "result", role: "A loss as text, always with a minus sign and the word; a down candle" },
-  warning: { meaning: "status", role: "Warning, amber: Kumo's warning role, on no screen yet" },
-  info: { meaning: "status", role: "Info text, in the brand hue: Kumo's info role" },
+  warning: { meaning: "status", role: "Warning, amber: Kumo's warning role, on no screen" },
+  info: { meaning: "status", role: "Info text: Kumo's info role, in the muted type" },
   "gain-soft": { meaning: "status", role: "Success tint" },
   "loss-soft": { meaning: "status", role: "Loss tint" },
   "warning-soft": { meaning: "status", role: "Warning tint" },
   "info-soft": { meaning: "status", role: "Info tint" },
-  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on (blue)" },
-  "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on (orange)" },
+  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on: blue in both themes" },
+  "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on: raspberry in light, orange in dark" },
   "gain-cvd-soft": { meaning: "status", role: "Success tint when colour-blind friendly is on" },
   "loss-cvd-soft": { meaning: "status", role: "Loss tint when colour-blind friendly is on" },
 };
 
-export const colorTokens: ColorToken[] = TOKEN_NAMES.map((name) => ({ name, ...TOKEN_ROLES[name], ...PALETTE.tokens[name] }));
+export function colorTokensFor(theme: ThemeName): ColorToken[] {
+  return TOKEN_NAMES.map((name) => ({ name, ...TOKEN_ROLES[name], ...PALETTES[theme].tokens[name] }));
+}
+
+/** The light theme, the `:root` block of `globals.css`; `colorTokensFor("dark")` is its `data-mode="dark"` block. */
+export const colorTokens: ColorToken[] = colorTokensFor("light");
 
 /** Text/background pairs that carry reading text. Each must reach WCAG AA (4.5:1). */
 export const textPairs = PAIRS.filter((p) => p.kind !== "mark");
@@ -67,8 +72,8 @@ export const textPairs = PAIRS.filter((p) => p.kind !== "mark");
 /** Non-text marks that must reach 3:1 against their surface (WCAG 1.4.11). */
 export const markPairs = PAIRS.filter((p) => p.kind === "mark");
 
-export function tokenValue(name: string): string {
-  const token = colorTokens.find((t) => t.name === name);
+export function tokenValue(name: string, theme: ThemeName = "light"): string {
+  const token = colorTokensFor(theme).find((t) => t.name === name);
   if (!token) throw new Error(`unknown token ${name}`);
   return token.value;
 }

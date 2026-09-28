@@ -3,8 +3,8 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHART_FONT } from "@/components/charts/options";
 import { contrastRatio, parseOklch, toHex } from "./color";
-import { hatchInk } from "./palette";
-import { colorTokens, markPairs, textPairs, tokenValue } from "./tokens";
+import { PALETTES, TOKEN_NAMES, type ThemeName, hatchInk } from "./palette";
+import { colorTokens, colorTokensFor, markPairs, textPairs, tokenValue } from "./tokens";
 
 const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -18,6 +18,9 @@ function block(selector: string): Record<string, string> {
 }
 
 const declared = block(":root");
+const declaredDark = block('html:root[data-mode="dark"]');
+const BLOCKS: Record<ThemeName, Record<string, string>> = { light: declared, dark: declaredDark };
+const THEMES: ThemeName[] = ["light", "dark"];
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
@@ -28,27 +31,28 @@ function sources(dir: string): string[] {
 }
 
 describe("colour tokens", () => {
-  it.each(colorTokens.map((t) => [t.name, t] as const))("%s matches globals.css", (_, token) => {
-    expect(declared[token.name]).toBe(token.value);
+  it.each(THEMES.flatMap((theme) => colorTokensFor(theme).map((t) => [theme, t.name, t] as const)))("%s %s matches globals.css", (theme, _, token) => {
+    expect(BLOCKS[theme][token.name]).toBe(token.value);
   });
 
-  it("declares the paper hatch from the palette, and no colour token the palette does not name", () => {
-    expect(declared["hatch-ink"]).toBe(hatchInk());
-    const named = new Set(colorTokens.map((t) => t.name));
-    const colours = Object.entries(declared).filter(([, v]) => /^oklch\(/.test(v)).map(([k]) => k);
-    expect(colours.filter((k) => !named.has(k as never) && k !== "hatch-ink")).toEqual([]);
+  it.each(THEMES)("declares the %s paper hatch from the palette, and no colour token the palette does not name", (theme) => {
+    const block = BLOCKS[theme];
+    expect(block["hatch-ink"]).toBe(hatchInk(PALETTES[theme]));
+    const named = new Set<string>(TOKEN_NAMES);
+    const colours = Object.entries(block).filter(([, v]) => /^oklch\(/.test(v)).map(([k]) => k);
+    expect(colours.filter((k) => !named.has(k) && k !== "hatch-ink")).toEqual([]);
   });
 
   it("every colour is OKLCH", () => {
     for (const t of colorTokens) expect(() => parseOklch(t.value)).not.toThrow();
   });
 
-  it.each(textPairs.map((p) => [p.fg, p.bg] as const))("%s on %s reaches WCAG AA (4.5:1)", (fg, bg) => {
-    expect(contrastRatio(tokenValue(fg), tokenValue(bg))).toBeGreaterThanOrEqual(4.5);
+  it.each(THEMES.flatMap((theme) => textPairs.map((p) => [theme, p.fg, p.bg] as const)))("%s: %s on %s reaches WCAG AA (4.5:1)", (theme, fg, bg) => {
+    expect(contrastRatio(tokenValue(fg, theme), tokenValue(bg, theme))).toBeGreaterThanOrEqual(4.5);
   });
 
-  it.each(markPairs.map((p) => [p.fg, p.bg] as const))("%s marks on %s reach 3:1", (fg, bg) => {
-    expect(contrastRatio(tokenValue(fg), tokenValue(bg))).toBeGreaterThanOrEqual(3);
+  it.each(THEMES.flatMap((theme) => markPairs.map((p) => [theme, p.fg, p.bg] as const)))("%s: %s marks on %s reach 3:1", (theme, fg, bg) => {
+    expect(contrastRatio(tokenValue(fg, theme), tokenValue(bg, theme))).toBeGreaterThanOrEqual(3);
   });
 
   it("converts OKLCH white and black to sRGB hex", () => {
@@ -57,31 +61,44 @@ describe("colour tokens", () => {
     expect(contrastRatio("oklch(0 0 0)", "oklch(1 0 0)")).toBeCloseTo(21, 0);
   });
 
-  it("keeps crimson for the kill switch distinct from the colour of a loss", () => {
-    expect(tokenValue("crimson")).not.toBe(tokenValue("loss"));
-    expect(parseOklch(tokenValue("crimson")).h - parseOklch(tokenValue("loss")).h).toBeGreaterThanOrEqual(15);
+  it.each(THEMES)("keeps crimson for the kill switch distinct from the colour of a loss in %s", (theme) => {
+    for (const kill of ["crimson", "crimson-edge"]) {
+      expect(tokenValue(kill, theme)).not.toBe(tokenValue("loss", theme));
+      expect(parseOklch(tokenValue(kill, theme)).h - parseOklch(tokenValue("loss", theme)).h).toBeGreaterThanOrEqual(15);
+    }
   });
 
-  it("tints every neutral: no pure grey, black, or white", () => {
-    for (const t of colorTokens.filter((c) => c.meaning === "surface" || c.meaning === "text")) {
+  it.each(THEMES)("tints every neutral in %s: no pure grey, black, or white", (theme) => {
+    for (const t of colorTokensFor(theme).filter((c) => c.meaning === "surface" || c.meaning === "text")) {
       expect(parseOklch(t.value).c, t.name).toBeGreaterThan(0);
     }
   });
 
-  it("has no purple or violet hue", () => {
-    for (const t of colorTokens) {
+  it.each(THEMES)("has no purple or violet hue in %s", (theme) => {
+    for (const t of colorTokensFor(theme)) {
       const { c, h } = parseOklch(t.value);
       if (c > 0.04) expect(h < 280 || h > 330, `${t.name} hue ${h}`).toBe(true);
     }
   });
 
-  it("is light only: no dark theme block, no dark variant, no dark: class", () => {
+  it("switches to dark by tokens alone: one dark block re-declares every colour, and our source has no dark: class", () => {
+    expect(Object.keys(declaredDark).filter((k) => /^oklch\(/.test(declaredDark[k])).sort()).toEqual([...TOKEN_NAMES, "hatch-ink"].sort());
+    expect(declared["color-scheme"]).toBeUndefined();
+    expect(css.slice(css.indexOf(":root {"), css.indexOf("}", css.indexOf(":root {")))).toContain("color-scheme: light");
+    expect(css.slice(css.indexOf('html:root[data-mode="dark"] {'), css.indexOf("}", css.indexOf('html:root[data-mode="dark"] {')))).toContain("color-scheme: dark");
     expect(css).not.toMatch(/^\.dark\s*\{/m);
-    expect(css).not.toContain("@custom-variant dark");
-    expect(css).toContain("color-scheme: light");
     for (const file of sources(resolve(process.cwd(), "src"))) {
-      expect(readFileSync(file, "utf8"), file).not.toMatch(/\bdark:/);
+      expect(readFileSync(file, "utf8"), file).not.toMatch(/(^|[\s"'`])dark:[a-z[]/m);
     }
+  });
+
+  it("keeps the dark variant only for Kumo, whose own classes use it, and points it at the class the theme script sets", () => {
+    expect(css).toContain("@custom-variant dark (&:where(.dark, .dark *));");
+    const kumo = readFileSync(resolve(process.cwd(), "node_modules/@cloudflare/kumo/dist/styles/theme-kumo.css"), "utf8");
+    const kumoJs = readdirSync(resolve(process.cwd(), "node_modules/@cloudflare/kumo/dist"), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".js"))
+      .some((e) => /\bdark:/.test(readFileSync(join(e.parentPath, e.name), "utf8")));
+    expect(kumoJs || /\.dark\b/.test(kumo)).toBe(true);
   });
 
   it("rounds only by the radius scale, and never rounds past a pill", () => {

@@ -8,7 +8,7 @@ import { type Vision, composite, hexOf, parseOklch, simulateHex, toHex } from "@
 import { checkCvd, checkPalette } from "@/lib/contrast";
 import { CVD_DISTINCT, CVD_VISIONS, KUMO_PAIRS, type KumoScope, REQUIREMENT } from "@/lib/contrast-pairs";
 import { dec } from "@/lib/decimal";
-import { PALETTE, RAMPS, STEPS, TOKEN_NAMES, type TokenName, hatchInk } from "@/lib/palette";
+import { PALETTE, PALETTES, type Palette, RAMPS, STEPS, TOKEN_NAMES, type ThemeName, type TokenName, hatchInk } from "@/lib/palette";
 import { TOKEN_ROLES } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 
@@ -35,8 +35,8 @@ const VISION_LABEL: Record<Vision, string> = { normal: "Normal", deuteranopia: "
 
 const SCOPE_LABEL: Record<KumoScope, string> = {
   root: "The page",
-  navy: "Navy, the sidebar's account block",
-  field: "The mandate's brass tint",
+  account: "The account fill: ink in light, paper in dark",
+  field: "The mandate's gold tint",
   ink: "Ink, the Stop control",
 };
 
@@ -75,7 +75,7 @@ function Preview() {
 
 /** Kumo's own role names, drawn in each surface scope so the remap in kumo-theme.css shows. */
 function KumoScopes() {
-  const scopes: KumoScope[] = ["root", "navy", "field", "ink"];
+  const scopes: KumoScope[] = ["root", "account", "field", "ink"];
   return (
     <div className="grid gap-(--seam) sm:grid-cols-2">
       {scopes.map((scope) => (
@@ -104,12 +104,117 @@ function Swatch({ color, className }: { color: string; className?: string }) {
   return <span className={cn("block h-8 border", className)} style={{ background: color }} aria-hidden />;
 }
 
-export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
-  const contrast = checkPalette();
-  const cvd = checkCvd();
-  const passing = contrast.filter((r) => r.passWcag).length;
-  const hatchOnCard = hexOf(composite(PALETTE.tokens[PALETTE.hatch.ref].value, PALETTE.hatch.alpha, PALETTE.tokens.card.value));
+const THEME_LABEL: Record<ThemeName, string> = { light: "Light", dark: "Dark" };
+const THEMES = Object.keys(PALETTES) as ThemeName[];
 
+function hatchOnCard(palette: Palette): string {
+  return hexOf(composite(palette.tokens[palette.hatch.ref].value, palette.hatch.alpha, palette.tokens.card.value));
+}
+
+function ContrastTable({ palette }: { palette: Palette }) {
+  const contrast = checkPalette(palette);
+  const passing = contrast.filter((r) => r.passWcag).length;
+  const t = palette.tokens;
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-h2">
+        {THEME_LABEL[palette.theme]}: {passing} of {contrast.length} pass
+      </h3>
+      <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
+        <table className="w-full min-w-[46rem] text-sm">
+          <caption className="sr-only">Contrast by pair, {palette.theme}</caption>
+          <thead>
+            <tr className="border-b border-foreground text-left">
+              {["Sample", "Pair", "Use", "Kind", "WCAG", "Result"].map((h) => (
+                <th key={h} scope="col" className="py-2 pr-3 field-label">
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {contrast.map((r) => (
+              <tr key={`${r.fg}-${r.bg}-${r.kind}-${r.use}`} className="border-b">
+                <td className="py-1.5 pr-3">
+                  <span className="inline-flex h-7 w-14 items-center justify-center border font-semibold" style={{ background: t[r.bg].value, color: t[r.fg].value }}>
+                    {r.kind === "mark" ? <span className="block h-3 w-8" style={{ background: t[r.fg].value }} /> : "Aa"}
+                  </span>
+                </td>
+                <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-normal">
+                  {r.fg} / {r.bg}
+                </th>
+                <td className="py-1.5 pr-3 text-caption text-muted-foreground">{r.use}</td>
+                <td className="py-1.5 pr-3 text-caption">{r.kind}</td>
+                <td className="py-1.5 pr-3 font-mono tabular">{r.ratio.toFixed(2)}:1</td>
+                <td className="py-1.5 text-caption">
+                  <Verdict pass={r.passWcag} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CvdTable({ palette }: { palette: Palette }) {
+  const t = palette.tokens;
+  return (
+    <div className="grid gap-2">
+      <h3 className="text-h2">{THEME_LABEL[palette.theme]}</h3>
+      <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
+        <table className="w-full min-w-[56rem] text-sm">
+          <caption className="sr-only">Colour-vision checks, {palette.theme}</caption>
+          <thead>
+            <tr className="border-b border-foreground text-left">
+              <th scope="col" className="py-2 pr-3 field-label">
+                Check
+              </th>
+              {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
+                <th key={v} scope="col" className="py-2 pr-3 field-label">
+                  {VISION_LABEL[v]}
+                </th>
+              ))}
+              <th scope="col" className="py-2 field-label">
+                Result
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {checkCvd(palette).map((c) => {
+              const a = t[c.a].value;
+              const b = t[c.b].value;
+              return (
+                <tr key={`${c.a}-${c.b}`} className="border-b align-top">
+                  <th scope="row" className="py-2 pr-3 text-left font-normal">
+                    <span className="block font-semibold">{c.what}</span>
+                    <span className="block font-mono text-caption text-muted-foreground">
+                      {c.a} / {c.b}
+                    </span>
+                    <span className="block text-caption text-muted-foreground">{c.why}</span>
+                  </th>
+                  {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
+                    <td key={v} className="py-2 pr-3">
+                      <span className="flex">
+                        <Swatch color={v === "normal" ? a : simulateHex(a, v)} className="w-8" />
+                        <Swatch color={v === "normal" ? b : simulateHex(b, v)} className="w-8" />
+                      </span>
+                      <span className="font-mono text-caption tabular">{(v === "normal" ? c.normal : c.byVision[v]).toFixed(3)}</span>
+                    </td>
+                  ))}
+                  <td className="py-2 text-caption">{c.requiredHere ? <Verdict pass={c.pass} /> : <span className="text-muted-foreground">Information{c.pass ? ", apart" : ", close"}</span>}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
   return (
     <div className="grid gap-(--section-gap)">
       <header className="grid gap-3">
@@ -121,21 +226,21 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
           <Link href={`/palette?cvd=${colourBlind ? "0" : "1"}`} className="inline-flex h-11 items-center px-3 text-primary underline underline-offset-2">
             Colour-blind friendly: {colourBlind ? "on" : "off"}
           </Link>
-          <span className="text-caption text-muted-foreground">Alt+Shift+C toggles it anywhere.</span>
+          <span className="text-caption text-muted-foreground">Alt+Shift+C toggles it anywhere. The theme menu in the header switches the samples below between light and dark.</span>
         </nav>
       </header>
 
-      <Block title="In use" lead="The account on navy, the mandate on a pale brass tint under a brass rule, results in the status family, and figures with a plain zero.">
+      <Block title="In use" lead="The account on its ink fill, the mandate on a pale gold tint under a gold rule, results in the status family, and figures with a plain zero. Drawn in the current theme.">
         <Preview />
       </Block>
 
-      <Block title="Kumo surfaces" lead="Kumo components read their own role names; kumo-theme.css points each one at a palette token, and re-points them inside each data-surface region.">
+      <Block title="Kumo surfaces" lead="Kumo components read their own role names; kumo-theme.css points each one at a palette token, and re-points them inside each data-surface region. Drawn in the current theme.">
         <KumoScopes />
       </Block>
 
-      <Block title="Ramps" lead="OKLCH, eleven steps per hue at constant hue, one lightness curve for every ramp, chroma rising to a hump in the middle. Status ramps share lightness and chroma and differ only in hue.">
+      <Block title="Ramps" lead="OKLCH, thirteen steps per hue at constant hue, one lightness curve for every ramp, chroma rising to a hump in the middle. Light mode reads from the top of each ramp, dark mode from the bottom. Gain and loss share lightness and chroma and differ only in hue.">
         <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
-          <table className="w-full min-w-[60rem] text-caption">
+          <table className="w-full min-w-[68rem] text-caption">
             <caption className="sr-only">Colour ramps</caption>
             <thead>
               <tr className="border-b border-foreground text-left">
@@ -179,46 +284,67 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
         </div>
       </Block>
 
-      <Block title="Semantic tokens" lead="Components use these names only; each maps to a ramp step.">
+      <Block title="Semantic tokens" lead="Components use these names only; each maps to a ramp step in each theme.">
         <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
-          <table className="w-full min-w-[48rem] text-sm">
+          <table className="w-full min-w-[60rem] text-sm">
             <caption className="sr-only">Semantic tokens</caption>
             <thead>
               <tr className="border-b border-foreground text-left">
-                {["Swatch", "Token", "Ramp step", "OKLCH", "Hex", "Role"].map((h) => (
-                  <th key={h} scope="col" className="py-2 pr-3 field-label">
-                    {h}
+                <th scope="col" className="py-2 pr-3 field-label">
+                  Token
+                </th>
+                {THEMES.map((theme) => (
+                  <th key={theme} scope="col" className="py-2 pr-3 field-label">
+                    {THEME_LABEL[theme]}
                   </th>
                 ))}
+                <th scope="col" className="py-2 pr-3 field-label">
+                  Role
+                </th>
               </tr>
             </thead>
             <tbody>
               {TOKEN_NAMES.map((n: TokenName) => (
-                <tr key={n} className="border-b">
-                  <td className="w-12 py-1.5 pr-3">
-                    <Swatch color={`var(--${n})`} className="h-6" />
-                  </td>
+                <tr key={n} className="border-b align-top">
                   <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-semibold">
                     --{n}
                   </th>
-                  <td className="py-1.5 pr-3 font-mono text-caption">{PALETTE.tokens[n].ref}</td>
-                  <td className="py-1.5 pr-3 font-mono text-caption">{PALETTE.tokens[n].value}</td>
-                  <td className="py-1.5 pr-3 font-mono text-caption">{toHex(PALETTE.tokens[n].value)}</td>
+                  {THEMES.map((theme) => {
+                    const token = PALETTES[theme].tokens[n];
+                    return (
+                      <td key={theme} className="py-1.5 pr-3">
+                        <span className="flex items-start gap-2">
+                          <Swatch color={token.value} className="h-6 w-8 shrink-0" />
+                          <span className="grid font-mono text-caption">
+                            <span>{token.ref}</span>
+                            <span className="text-muted-foreground">
+                              {token.value} {toHex(token.value)}
+                            </span>
+                          </span>
+                        </span>
+                      </td>
+                    );
+                  })}
                   <td className="py-1.5 text-caption text-muted-foreground">{TOKEN_ROLES[n].role}</td>
                 </tr>
               ))}
-              <tr className="border-b">
-                <td className="py-1.5 pr-3">
-                  <span className="hatch block h-6 border border-lapis bg-card" aria-hidden />
-                </td>
+              <tr className="border-b align-top">
                 <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-semibold">
                   --hatch-ink
                 </th>
-                <td className="py-1.5 pr-3 font-mono text-caption">
-                  {PALETTE.hatch.ref} at {PALETTE.hatch.alpha}
-                </td>
-                <td className="py-1.5 pr-3 font-mono text-caption">{hatchInk()}</td>
-                <td className="py-1.5 pr-3 font-mono text-caption">{hatchOnCard} on card</td>
+                {THEMES.map((theme) => {
+                  const palette = PALETTES[theme];
+                  return (
+                    <td key={theme} className="py-1.5 pr-3 font-mono text-caption">
+                      <span className="block">
+                        {palette.hatch.ref} at {palette.hatch.alpha}
+                      </span>
+                      <span className="block text-muted-foreground">
+                        {hatchInk(palette)}, {hatchOnCard(palette)} on card
+                      </span>
+                    </td>
+                  );
+                })}
                 <td className="py-1.5 text-caption text-muted-foreground">The paper hatch lines</td>
               </tr>
             </tbody>
@@ -228,95 +354,20 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
 
       <Block
         title="Contrast"
-        lead={`WCAG 2.2 ratio for every semantic pair: ${passing} of ${contrast.length} pass. Body text needs ${REQUIREMENT.body.wcag}:1 and marks ${REQUIREMENT.mark.wcag}:1. APCA (Lc ${REQUIREMENT.body.apca} for body text, Lc ${REQUIREMENT.mark.apca} for marks) is checked in the tests, not here: apca-w3 is a dev dependency and never ships.`}
+        lead={`WCAG 2.2 ratio for every semantic pair in each theme. Body text needs ${REQUIREMENT.body.wcag}:1 and marks ${REQUIREMENT.mark.wcag}:1. APCA (Lc ${REQUIREMENT.body.apca} for body text, Lc ${REQUIREMENT.mark.apca} for marks) is checked in the tests, not here: apca-w3 is a dev dependency and never ships.`}
       >
-        <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
-          <table className="w-full min-w-[46rem] text-sm">
-            <caption className="sr-only">Contrast by pair</caption>
-            <thead>
-              <tr className="border-b border-foreground text-left">
-                {["Sample", "Pair", "Use", "Kind", "WCAG", "Result"].map((h) => (
-                  <th key={h} scope="col" className="py-2 pr-3 field-label">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {contrast.map((r) => (
-                <tr key={`${r.fg}-${r.bg}-${r.kind}-${r.use}`} className="border-b">
-                  <td className="py-1.5 pr-3">
-                    <span className="inline-flex h-7 w-14 items-center justify-center border font-semibold" style={{ background: `var(--${r.bg})`, color: `var(--${r.fg})` }}>
-                      {r.kind === "mark" ? <span className="block h-3 w-8" style={{ background: `var(--${r.fg})` }} /> : "Aa"}
-                    </span>
-                  </td>
-                  <th scope="row" className="py-1.5 pr-3 text-left font-mono text-caption font-normal">
-                    {r.fg} / {r.bg}
-                  </th>
-                  <td className="py-1.5 pr-3 text-caption text-muted-foreground">{r.use}</td>
-                  <td className="py-1.5 pr-3 text-caption">{r.kind}</td>
-                  <td className="py-1.5 pr-3 font-mono tabular">{r.ratio.toFixed(2)}:1</td>
-                  <td className="py-1.5 text-caption">
-                    <Verdict pass={r.passWcag} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        {THEMES.map((theme) => (
+          <ContrastTable key={theme} palette={PALETTES[theme]} />
+        ))}
       </Block>
 
       <Block
         title="Colour vision"
-        lead={`Machado 2009 simulation at full severity. Distance is OKLab ΔE; two things that must never be confused need ${CVD_DISTINCT} under each simulated vision. Checks marked information show where a hue is not relied on.`}
+        lead={`Machado 2009 simulation at full severity. Distance is OKLab ΔE; two things that must never be confused need ${CVD_DISTINCT} under each simulated vision. Checks marked information show where a hue is not relied on in that theme.`}
       >
-        <div className="-mx-(--page-x) overflow-x-auto px-(--page-x)">
-          <table className="w-full min-w-[56rem] text-sm">
-            <caption className="sr-only">Colour-vision checks</caption>
-            <thead>
-              <tr className="border-b border-foreground text-left">
-                <th scope="col" className="py-2 pr-3 field-label">
-                  Check
-                </th>
-                {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
-                  <th key={v} scope="col" className="py-2 pr-3 field-label">
-                    {VISION_LABEL[v]}
-                  </th>
-                ))}
-                <th scope="col" className="py-2 field-label">
-                  Result
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {cvd.map((c) => {
-                const a = PALETTE.tokens[c.a].value;
-                const b = PALETTE.tokens[c.b].value;
-                return (
-                  <tr key={`${c.a}-${c.b}`} className="border-b align-top">
-                    <th scope="row" className="py-2 pr-3 text-left font-normal">
-                      <span className="block font-semibold">{c.what}</span>
-                      <span className="block font-mono text-caption text-muted-foreground">
-                        {c.a} / {c.b}
-                      </span>
-                      <span className="block text-caption text-muted-foreground">{c.why}</span>
-                    </th>
-                    {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
-                      <td key={v} className="py-2 pr-3">
-                        <span className="flex">
-                          <Swatch color={v === "normal" ? a : simulateHex(a, v)} className="w-8" />
-                          <Swatch color={v === "normal" ? b : simulateHex(b, v)} className="w-8" />
-                        </span>
-                        <span className="font-mono text-caption tabular">{(v === "normal" ? c.normal : c.byVision[v]).toFixed(3)}</span>
-                      </td>
-                    ))}
-                    <td className="py-2 text-caption">{c.required ? <Verdict pass={c.pass} /> : <span className="text-muted-foreground">Information{c.pass ? ", apart" : ", close"}</span>}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        {THEMES.map((theme) => (
+          <CvdTable key={theme} palette={PALETTES[theme]} />
+        ))}
       </Block>
     </div>
   );

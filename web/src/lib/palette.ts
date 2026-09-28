@@ -1,35 +1,46 @@
 /**
- * Owlhead's palette, navy and brass (web/COLOR.md): OKLCH ramps, and the semantic tokens mapped
- * onto their steps. `globals.css` writes the same values, and `tokens.test.ts` fails when the two
- * drift. Components use only the semantic tokens.
+ * Owlhead's palette, Ink and Gold (DEC-204, web/COLOR.md): OKLCH ramps on one lightness curve, and
+ * the semantic tokens of both themes mapped onto their steps. `globals.css` writes the same values,
+ * and `tokens.test.ts` fails when the two drift. Components use only the semantic tokens.
  */
 import { formatOklch, maxChroma } from "./color";
 
-export const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950] as const;
+/** Thirteen steps: 850 and 975 give dark mode its borders and its page, below the usual eleven. */
+export const STEPS = [50, 100, 200, 300, 400, 500, 600, 700, 800, 850, 900, 950, 975] as const;
 export type Step = (typeof STEPS)[number];
 
-/** One perceptual lightness curve for every ramp: small steps at the light end, where tints live. */
+/**
+ * One perceptual lightness curve for every ramp. Light mode reads from the top (paper surfaces at
+ * 50 to 200, ink text at 800 and 950); dark mode reads from the bottom (ink surfaces at 850 to 975,
+ * paper text at 100 and 300). 300 and 400 are where dark-mode text and marks clear APCA.
+ */
 export const LIGHTNESS: Record<Step, number> = {
-  50: 0.985,
-  100: 0.962,
-  200: 0.925,
-  300: 0.865,
+  50: 0.992,
+  100: 0.975,
+  200: 0.91,
+  300: 0.88,
   400: 0.76,
   500: 0.62,
   600: 0.52,
-  700: 0.415,
-  800: 0.365,
-  900: 0.295,
-  950: 0.225,
+  700: 0.44,
+  800: 0.38,
+  850: 0.31,
+  900: 0.24,
+  950: 0.2,
+  975: 0.16,
 };
 
 /** Chroma rises to a hump in the middle of the ramp and falls off toward white and black. */
-const HUMP: Record<Step, number> = { 50: 0.12, 100: 0.25, 200: 0.45, 300: 0.7, 400: 0.9, 500: 1, 600: 1, 700: 0.92, 800: 0.82, 900: 0.7, 950: 0.55 };
+const HUMP: Record<Step, number> = { 50: 0.1, 100: 0.25, 200: 0.45, 300: 0.7, 400: 0.9, 500: 1, 600: 1, 700: 0.92, 800: 0.82, 850: 0.62, 900: 0.42, 950: 0.3, 975: 0.2 };
 
-/** Neutrals lean toward the brand hue, between C 0.006 and 0.015. */
-const NEUTRAL_CHROMA: Record<Step, number> = { 50: 0.006, 100: 0.008, 200: 0.01, 300: 0.012, 400: 0.014, 500: 0.015, 600: 0.015, 700: 0.015, 800: 0.014, 900: 0.013, 950: 0.012 };
+/** Paper leans warm (hue 85) and ink leans cool (hue 255), both between C 0.003 and 0.01. */
+const PAPER_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.006, 400: 0.006, 500: 0.007, 600: 0.007, 700: 0.008, 800: 0.008, 850: 0.008, 900: 0.008, 950: 0.008, 975: 0.008 };
+const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.01, 850: 0.01, 900: 0.01, 950: 0.008, 975: 0.008 };
 
-export type RampId = "slate" | "navy" | "brass" | "green" | "red" | "amber" | "blue" | "cvd-blue" | "cvd-orange" | "crimson";
+/** Gold fades faster than the hump at the dark end, so the mandate's field in dark mode is a quiet tint, not a brown block. */
+const GOLD_CHROMA: Record<Step, number> = { 50: 0.007, 100: 0.035, 200: 0.065, 300: 0.1, 400: 0.126, 500: 0.125, 600: 0.105, 700: 0.088, 800: 0.075, 850: 0.045, 900: 0.03, 950: 0.022, 975: 0.015 };
+
+export type RampId = "paper" | "ink" | "gold" | "green" | "red" | "amber" | "cvd-blue" | "cvd-rose" | "cvd-orange" | "crimson";
 
 export interface Ramp {
   id: RampId;
@@ -51,11 +62,13 @@ function build(hue: number, chroma: (step: Step) => number): Record<Step, string
   return steps;
 }
 
-export const STATUS_HUES = { green: 150, red: 12, amber: 70, blue: 258, "cvd-blue": 245, "cvd-orange": 55 } as const;
+export const GOLD_HUE = 82;
+export const STATUS_HUES = { green: 150, red: 12 } as const;
+export const CVD_HUES = { "cvd-blue": 245, "cvd-rose": 350, "cvd-orange": 50 } as const;
 
 /**
- * The status colours share lightness and chroma at every step and differ only in hue, so none of
- * them is louder than another: chroma is the most the weakest hue (amber) can show there.
+ * Gain and loss share lightness and chroma at every step and differ only in hue, so a loss is
+ * never louder than a gain or the other way round: chroma is the most the weaker hue can show there.
  */
 function statusChroma(step: Step): number {
   const l = LIGHTNESS[step];
@@ -68,15 +81,15 @@ function ramp(id: RampId, name: string, hue: number, use: string, chroma: (step:
 }
 
 export const RAMPS: Record<RampId, Ramp> = {
-  slate: ramp("slate", "Slate", 255, "Neutrals: page, fields, text, ink", (s) => NEUTRAL_CHROMA[s]),
-  navy: ramp("navy", "Navy", 258, "Brand: the account and the platform", (s) => HUMP[s] * 0.125),
-  brass: ramp("brass", "Brass", 80, "Your mandate: the tint, its rule and markers, its labels", (s) => HUMP[s] * 0.12),
-  green: ramp("green", "Green", STATUS_HUES.green, "Gain and success", statusChroma),
-  red: ramp("red", "Red", STATUS_HUES.red, "Loss, as text and markers only", statusChroma),
-  amber: ramp("amber", "Amber", STATUS_HUES.amber, "Warning; on no screen yet", statusChroma),
-  blue: ramp("blue", "Blue", STATUS_HUES.blue, "Info, in the brand hue", statusChroma),
-  "cvd-blue": ramp("cvd-blue", "Colour-blind blue", STATUS_HUES["cvd-blue"], "Gain when colour-blind friendly is on (Okabe-Ito blue)", statusChroma),
-  "cvd-orange": ramp("cvd-orange", "Colour-blind orange", STATUS_HUES["cvd-orange"], "Loss when colour-blind friendly is on (Okabe-Ito orange)", statusChroma),
+  paper: ramp("paper", "Paper", 85, "Light neutrals: the page, cards and hairlines in light mode, and the type in dark mode", (s) => PAPER_CHROMA[s]),
+  ink: ramp("ink", "Ink", 255, "Dark neutrals: type, primary actions, the Stop control and the mark in light mode, and the surfaces in dark mode", (s) => INK_CHROMA[s]),
+  gold: ramp("gold", "Gold", GOLD_HUE, "The one accent: your mandate's field, rules, markers and labels, and the account's line", (s) => GOLD_CHROMA[s]),
+  green: ramp("green", "Green", STATUS_HUES.green, "Gain", statusChroma),
+  red: ramp("red", "Red", STATUS_HUES.red, "Loss, as text and candles only", statusChroma),
+  amber: ramp("amber", "Amber", 70, "Kumo's warning role; on no screen", (s) => HUMP[s] * 0.15),
+  "cvd-blue": ramp("cvd-blue", "Colour-blind blue", CVD_HUES["cvd-blue"], "Gain when colour-blind friendly is on, in both themes", (s) => HUMP[s] * 0.16),
+  "cvd-rose": ramp("cvd-rose", "Colour-blind raspberry", CVD_HUES["cvd-rose"], "Loss when colour-blind friendly is on, light mode", (s) => HUMP[s] * 0.16),
+  "cvd-orange": ramp("cvd-orange", "Colour-blind orange", CVD_HUES["cvd-orange"], "Loss when colour-blind friendly is on, dark mode", (s) => HUMP[s] * 0.16),
   crimson: ramp("crimson", "Crimson", 27, "The kill switch, and nothing else", (s) => HUMP[s] * 0.2),
 };
 
@@ -108,6 +121,7 @@ export const TOKEN_NAMES = [
   "ink-line",
   "crimson",
   "crimson-foreground",
+  "crimson-edge",
   "gain",
   "loss",
   "warning",
@@ -130,178 +144,146 @@ export interface TokenValue {
   ref: RampRef;
 }
 
+export type ThemeName = "light" | "dark";
+
 export interface Palette {
+  theme: ThemeName;
   name: string;
   summary: string;
+  refs: Record<TokenName, RampRef>;
   tokens: Record<TokenName, TokenValue>;
   /** The paper hatch: this colour at this opacity, masked into diagonal lines. */
   hatch: { ref: TokenName; alpha: number };
 }
 
-function refValue(ref: RampRef): TokenValue {
+export function rampValue(ref: RampRef): string {
   const at = ref.lastIndexOf("-");
   const id = ref.slice(0, at) as RampId;
   const step = Number(ref.slice(at + 1)) as Step;
-  return { value: RAMPS[id].steps[step], ref };
+  return RAMPS[id].steps[step];
 }
 
 /**
- * Navy for the account, slate neutrals, the status family, crimson for the kill switch. The
- * mandate is a pale brass tint under a brass rule, with brass markers and dark brass labels, so it
- * stays present without shouting. `lapis` keeps its name: it is the account's colour, now navy-800.
+ * Light: paper surfaces and ink type. Ink is the primary action, the account's fill, the Stop
+ * control and a stopped agent. Gold is the mandate (a pale field under a gold rule, gold markers,
+ * gold-700 labels) and the account's chart line. `lapis` keeps its name as the account's role.
  */
 export const TOKEN_REFS: Record<TokenName, RampRef> = {
-  background: "slate-100",
-  card: "slate-50",
-  muted: "slate-200",
-  border: "slate-300",
-  foreground: "slate-950",
-  "muted-foreground": "slate-700",
-  primary: "navy-800",
-  "primary-foreground": "slate-50",
-  lapis: "navy-800",
-  "lapis-foreground": "slate-50",
-  "lapis-muted": "navy-200",
-  "lapis-soft": "navy-100",
-  "lapis-strong": "navy-900",
-  "lapis-line": "navy-600",
-  mandate: "brass-100",
-  "mandate-foreground": "slate-950",
-  "mandate-muted": "slate-700",
-  "mandate-strong": "brass-700",
-  "mandate-marker": "brass-500",
-  "mandate-edge": "brass-500",
-  "mandate-soft": "brass-50",
-  selection: "brass-200",
-  ink: "slate-950",
-  "ink-foreground": "slate-50",
-  "ink-line": "slate-700",
+  background: "paper-100",
+  card: "paper-50",
+  muted: "paper-200",
+  border: "paper-200",
+  foreground: "ink-950",
+  "muted-foreground": "ink-800",
+  primary: "ink-950",
+  "primary-foreground": "paper-50",
+  lapis: "ink-950",
+  "lapis-foreground": "paper-50",
+  "lapis-muted": "paper-200",
+  "lapis-soft": "gold-100",
+  "lapis-strong": "ink-800",
+  "lapis-line": "gold-500",
+  mandate: "gold-100",
+  "mandate-foreground": "ink-950",
+  "mandate-muted": "ink-800",
+  "mandate-strong": "gold-700",
+  "mandate-marker": "gold-500",
+  "mandate-edge": "gold-500",
+  "mandate-soft": "gold-100",
+  selection: "gold-200",
+  ink: "ink-950",
+  "ink-foreground": "paper-50",
+  "ink-line": "ink-700",
   crimson: "crimson-700",
-  "crimson-foreground": "slate-50",
+  "crimson-foreground": "paper-50",
+  "crimson-edge": "crimson-700",
   gain: "green-700",
   loss: "red-700",
   warning: "amber-700",
-  info: "blue-700",
+  info: "ink-800",
   "gain-soft": "green-100",
   "loss-soft": "red-100",
   "warning-soft": "amber-100",
-  "info-soft": "blue-100",
+  "info-soft": "paper-100",
   "gain-cvd": "cvd-blue-700",
-  "loss-cvd": "cvd-orange-700",
+  "loss-cvd": "cvd-rose-800",
   "gain-cvd-soft": "cvd-blue-100",
-  "loss-cvd-soft": "cvd-orange-100",
-};
-
-/** Ink and gold: the values `globals.css` writes, which take precedence over the ramp steps above. */
-export const INK_AND_GOLD: Record<TokenName, string> = {
-  background: "oklch(0.975 0.004 85)",
-  card: "oklch(0.992 0.003 85)",
-  muted: "oklch(0.91 0.006 85)",
-  border: "oklch(0.91 0.006 85)",
-  foreground: "oklch(0.19 0.008 255)",
-  "muted-foreground": "oklch(0.43 0.01 255)",
-  primary: "oklch(0.19 0.008 255)",
-  "primary-foreground": "oklch(0.992 0.003 85)",
-  lapis: "oklch(0.19 0.008 255)",
-  "lapis-foreground": "oklch(0.992 0.003 85)",
-  "lapis-muted": "oklch(0.91 0.006 85)",
-  "lapis-soft": "oklch(0.965 0.035 90)",
-  "lapis-strong": "oklch(0.43 0.01 255)",
-  "lapis-line": "oklch(0.66 0.13 80)",
-  mandate: "oklch(0.965 0.035 90)",
-  "mandate-foreground": "oklch(0.19 0.008 255)",
-  "mandate-muted": "oklch(0.43 0.01 255)",
-  "mandate-strong": "oklch(0.52 0.105 78)",
-  "mandate-marker": "oklch(0.76 0.135 85)",
-  "mandate-edge": "oklch(0.76 0.135 85)",
-  "mandate-soft": "oklch(0.965 0.035 90)",
-  selection: "oklch(0.965 0.035 90)",
-  ink: "oklch(0.19 0.008 255)",
-  "ink-foreground": "oklch(0.992 0.003 85)",
-  "ink-line": "oklch(0.43 0.01 255)",
-  crimson: "oklch(0.44 0.17 27)",
-  "crimson-foreground": "oklch(0.992 0.003 85)",
-  gain: "oklch(0.53 0.13 155)",
-  loss: "oklch(0.56 0.18 25)",
-  warning: "oklch(0.415 0.087 70)",
-  info: "oklch(0.43 0.01 255)",
-  "gain-soft": "oklch(0.962 0.017 155)",
-  "loss-soft": "oklch(0.962 0.017 25)",
-  "warning-soft": "oklch(0.962 0.017 70)",
-  "info-soft": "oklch(0.975 0.004 85)",
-  "gain-cvd": "oklch(0.415 0.087 245)",
-  "loss-cvd": "oklch(0.415 0.087 55)",
-  "gain-cvd-soft": "oklch(0.962 0.017 245)",
-  "loss-cvd-soft": "oklch(0.962 0.017 55)",
+  "loss-cvd-soft": "cvd-rose-100",
 };
 
 /**
- * Ink and gold in the dark: the `html:root[data-mode="dark"]` block in `globals.css`. Ink surfaces
- * and off-white type; primary actions, the Stop control and stopped states become an off-white fill
- * with ink type; gold carries the account's line, selection and the mandate's labels.
+ * Dark: ink surfaces and paper type. Primary actions, the Stop control and stopped states turn to a
+ * paper fill with ink type. Gold keeps its meanings, one step lighter for marks (400) and two for
+ * labels (300). Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
+ * the dark sheet while its label keeps 7:1 on the fill.
  */
-export const INK_AND_GOLD_DARK: Record<TokenName, string> = {
-  background: "oklch(0.16 0.008 255)",
-  card: "oklch(0.2 0.009 255)",
-  muted: "oklch(0.24 0.01 255)",
-  border: "oklch(0.31 0.01 255)",
-  foreground: "oklch(0.96 0.004 85)",
-  "muted-foreground": "oklch(0.78 0.006 85)",
-  primary: "oklch(0.96 0.004 85)",
-  "primary-foreground": "oklch(0.19 0.008 255)",
-  lapis: "oklch(0.96 0.004 85)",
-  "lapis-foreground": "oklch(0.19 0.008 255)",
-  "lapis-muted": "oklch(0.43 0.01 255)",
-  "lapis-soft": "oklch(0.28 0.04 85)",
-  "lapis-strong": "oklch(0.86 0.006 85)",
-  "lapis-line": "oklch(0.8 0.125 85)",
-  mandate: "oklch(0.28 0.04 85)",
-  "mandate-foreground": "oklch(0.96 0.004 85)",
-  "mandate-muted": "oklch(0.78 0.006 85)",
-  "mandate-strong": "oklch(0.8 0.125 85)",
-  "mandate-marker": "oklch(0.8 0.125 85)",
-  "mandate-edge": "oklch(0.8 0.125 85)",
-  "mandate-soft": "oklch(0.23 0.02 85)",
-  selection: "oklch(0.34 0.06 85)",
-  ink: "oklch(0.96 0.004 85)",
-  "ink-foreground": "oklch(0.19 0.008 255)",
-  "ink-line": "oklch(0.64 0.008 85)",
-  crimson: "oklch(0.55 0.19 27)",
-  "crimson-foreground": "oklch(0.96 0.004 85)",
-  gain: "oklch(0.74 0.15 155)",
-  loss: "oklch(0.7 0.17 25)",
-  warning: "oklch(0.78 0.12 70)",
-  info: "oklch(0.78 0.006 85)",
-  "gain-soft": "oklch(0.26 0.04 155)",
-  "loss-soft": "oklch(0.26 0.04 25)",
-  "warning-soft": "oklch(0.26 0.04 70)",
-  "info-soft": "oklch(0.24 0.01 255)",
-  "gain-cvd": "oklch(0.74 0.12 245)",
-  "loss-cvd": "oklch(0.74 0.13 55)",
-  "gain-cvd-soft": "oklch(0.26 0.04 245)",
-  "loss-cvd-soft": "oklch(0.26 0.04 55)",
+export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
+  background: "ink-975",
+  card: "ink-950",
+  muted: "ink-900",
+  border: "ink-850",
+  foreground: "paper-100",
+  "muted-foreground": "paper-300",
+  primary: "paper-100",
+  "primary-foreground": "ink-950",
+  lapis: "paper-100",
+  "lapis-foreground": "ink-950",
+  "lapis-muted": "ink-850",
+  "lapis-soft": "gold-850",
+  "lapis-strong": "paper-300",
+  "lapis-line": "gold-400",
+  mandate: "gold-850",
+  "mandate-foreground": "paper-100",
+  "mandate-muted": "paper-300",
+  "mandate-strong": "gold-300",
+  "mandate-marker": "gold-400",
+  "mandate-edge": "gold-400",
+  "mandate-soft": "gold-900",
+  selection: "gold-800",
+  ink: "paper-100",
+  "ink-foreground": "ink-950",
+  "ink-line": "paper-500",
+  crimson: "crimson-700",
+  "crimson-foreground": "paper-50",
+  "crimson-edge": "crimson-400",
+  gain: "green-300",
+  loss: "red-300",
+  warning: "amber-300",
+  info: "paper-300",
+  "gain-soft": "green-900",
+  "loss-soft": "red-900",
+  "warning-soft": "amber-900",
+  "info-soft": "ink-900",
+  "gain-cvd": "cvd-blue-300",
+  "loss-cvd": "cvd-orange-300",
+  "gain-cvd-soft": "cvd-blue-900",
+  "loss-cvd-soft": "cvd-orange-900",
 };
 
-function tokensOf(values: Record<TokenName, string>): Record<TokenName, TokenValue> {
-  return Object.fromEntries(TOKEN_NAMES.map((n) => [n, { ...refValue(TOKEN_REFS[n]), value: values[n] }])) as Record<TokenName, TokenValue>;
+function tokensOf(refs: Record<TokenName, RampRef>): Record<TokenName, TokenValue> {
+  return Object.fromEntries(TOKEN_NAMES.map((n) => [n, { ref: refs[n], value: rampValue(refs[n]) }])) as Record<TokenName, TokenValue>;
 }
 
 export const PALETTE: Palette = {
-  name: "Ink and gold",
-  summary: "Ink for text and actions, gold for your mandate and the account's line: a pale gold panel, gold markers, dark gold labels.",
+  theme: "light",
+  name: "Ink and Gold",
+  summary: "Paper surfaces, ink type and actions, gold for your mandate and the account's line: a pale gold field, gold rules and markers, dark gold labels.",
+  refs: TOKEN_REFS,
+  tokens: tokensOf(TOKEN_REFS),
   hatch: { ref: "lapis", alpha: 0.3 },
-  tokens: tokensOf(INK_AND_GOLD),
 };
 
-/** The paper hatch in the dark is the mid grey over the gold tint, so it still reads as paper. */
+/** The paper hatch in the dark is the mid grey, so it still reads as paper on an ink card. */
 export const PALETTE_DARK: Palette = {
-  name: "Ink and gold, dark",
-  summary: "Ink surfaces and off-white type; off-white primary actions; gold for your mandate, the account's line and selection.",
+  theme: "dark",
+  name: "Ink and Gold, dark",
+  summary: "Ink surfaces, paper type and paper primary actions; gold for your mandate and the account's line, a step lighter.",
+  refs: TOKEN_REFS_DARK,
+  tokens: tokensOf(TOKEN_REFS_DARK),
   hatch: { ref: "ink-line", alpha: 0.4 },
-  tokens: tokensOf(INK_AND_GOLD_DARK),
 };
 
-export const PALETTES = { light: PALETTE, dark: PALETTE_DARK } as const;
+export const PALETTES: Record<ThemeName, Palette> = { light: PALETTE, dark: PALETTE_DARK };
 
 export function hatchInk(palette: Palette = PALETTE): string {
   return palette.tokens[palette.hatch.ref].value.replace(")", ` / ${palette.hatch.alpha})`);
