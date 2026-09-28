@@ -4,6 +4,11 @@
 # A documentation-only change takes the short path in both jobs (DEC-112): no toolchain, just
 # typos, the spec guard, and the trailer check (`.github/scripts/docs-checks.sh`). So does a change
 # that touches only documentation and `web/`, whose checks run in `web.yml` (DEC-200).
+# Every diff-based check compares against the first parent of the merge commit a `pull_request`
+# run checks out, main's tip the PR was merged onto: xtask's `choose_base` and
+# `.github/scripts/base-ref.sh` read `GITHUB_EVENT_NAME` for it, and `fetch-depth: 0` keeps both
+# parents. The PR's `base.sha` is not the base: main's changes since it would count as the PR's.
+# `MANDATE_BASE_REF` stays an override for local runs and is not set here.
 name: ci
 
 on:
@@ -30,7 +35,6 @@ jobs:
     permissions:
       contents: read
     env:
-      MANDATE_BASE_REF: ${{ github.event.pull_request.base.sha }}
       MANDATE_PR_BODY: ${{ github.event.pull_request.body }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -39,14 +43,14 @@ jobs:
           persist-credentials: false
       - name: Classify the change (DEC-112)
         id: change
-        run: .github/scripts/docs-only.sh "$MANDATE_BASE_REF" | tee -a "$GITHUB_OUTPUT"
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
       - uses: taiki-e/install-action@9983c65e42da123ff25d1f78505eb6de315aa172 # v2.87.20
         if: steps.change.outputs.docs_only == 'true'
         with:
           tool: typos@1.50.2
       - name: Documentation-only checks (typos, spec guard, trailers)
         if: steps.change.outputs.docs_only == 'true'
-        run: .github/scripts/docs-checks.sh "$MANDATE_BASE_REF"
+        run: .github/scripts/docs-checks.sh
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         if: steps.change.outputs.docs_only != 'true'
         with:
@@ -79,7 +83,6 @@ jobs:
     permissions:
       contents: read
     env:
-      MANDATE_BASE_REF: ${{ github.event.pull_request.base.sha }}
       MANDATE_PG_URL: postgres://postgres:postgres@localhost:5432/postgres
       MANDATE_PG_REQUIRED: "1"
     steps:
@@ -89,7 +92,7 @@ jobs:
           persist-credentials: false
       - name: Classify the change (DEC-112)
         id: change
-        run: .github/scripts/docs-only.sh "$MANDATE_BASE_REF" | tee -a "$GITHUB_OUTPUT"
+        run: .github/scripts/docs-only.sh | tee -a "$GITHUB_OUTPUT"
       - name: Documentation-only change
         if: steps.change.outputs.docs_only == 'true'
         run: echo "docs-only change; the fast job ran the documentation checks (DEC-112)"
