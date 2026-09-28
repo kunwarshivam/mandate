@@ -617,6 +617,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
   starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
   it starts ready (#231 review, follow-up c).
+- **Blocks E7-4 slice 5 (the trading day):** `mandate-executor` must copy the cross-stream facts
+  journal spec §2 gives it (`AgentModeApplied` from the agent stream's `AgentModeChanged`,
+  `TradingDayStarted`, `ClockAdvanced` crossing midnight America/New_York, `OwnerAcknowledged` from the
+  control stream), each with its `causation_id`. Today `step`'s `Input::Journal(_) => Ok(())` copies
+  nothing, silently, so `properties::every_copied_draft_cites_its_origin` sees no copied draft under any
+  script and passes vacuously. The slice that adds the producer also adds a generator step (a clock
+  advance crossing midnight New York, an owner acknowledgment) and asserts `seen > 0` on scripts
+  containing it, shown failing under the do-nothing plant (#244 round 1, finding 3).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected

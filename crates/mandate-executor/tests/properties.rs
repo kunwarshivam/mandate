@@ -1551,15 +1551,24 @@ proptest! {
                 && field(d, "client_order_id") == Some(entry.as_str())
                 && field(d, "state") == Some("filled")
         });
+        let held = |at: usize| {
+            script.contains(&Step::KillSwitch)
+                || run.drafts.iter().take(at).any(|d| {
+                    d.event_type == "KillSwitchActivated"
+                        || (d.event_type == "AgentModeApplied"
+                            && matches!(field(d, "to"), Some("paused" | "stopped")))
+                })
+        };
         prop_assert!(
             !leads(&script)
-                || completed.is_none_or(|at| run.drafts.iter().skip(at).any(|d| {
+                || completed.is_none_or(|at| held(at) || run.drafts.iter().skip(at).any(|d| {
                     d.event_type == "ProtectionChanged"
                         && field(d, "action") == Some("placed")
                         && field(d, "instrument") == Some(CPHC)
                 })),
-            "the protected lead's entry filled completely, so its bracket legs are placed (§5.4), \
-             and there is protection for this property to judge"
+            "the protected lead's entry filled completely with the agent in no mode that may hold \
+             protection (no kill switch, not paused or stopped: AGENTS.md rule 13, §5.5), so its \
+             bracket legs are placed (§5.4), and there is protection for this property to judge"
         );
         let accountant = ProtectionAccountant::of(&run.drafts);
         let ledger = ShadowLedger::of(&run.drafts);
@@ -1658,14 +1667,14 @@ proptest! {
     #[ignore = "pending E7-4"]
     fn no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding(script in scripted()) {
         let run = play(&script);
-        for (batch, working) in run.kill_batches.iter().zip(&run.kill_working) {
+        if let (Some(batch), Some(true)) = (run.kill_batches.first(), run.kill_working.first()) {
             prop_assert!(
-                !*working
-                    || batch
-                        .iter()
-                        .any(|e| matches!(e, Effect::Broker(BrokerRequest::Cancel { .. }))),
-                "a kill switch with the agent's order working at the broker cancels it (§5.5), \
-                 so cancels are on the table for this property to judge"
+                batch
+                    .iter()
+                    .any(|e| matches!(e, Effect::Broker(BrokerRequest::Cancel { .. }))),
+                "the first kill switch, with the agent's order working at the broker and no cancel \
+                 yet asked for it, cancels it (§5.5), so cancels are on the table for this property \
+                 to judge"
             );
         }
         let mut instrument_of: BTreeMap<String, String> = BTreeMap::new();
