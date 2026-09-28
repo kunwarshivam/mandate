@@ -178,18 +178,17 @@ pub(crate) fn described(
 /// §5.7's last row: a status outside the table pauses the agent and alerts the owner. The order
 /// is left in its state, because a status that cannot be mapped is a state that cannot be derived.
 fn unmapped(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
-    let agent = batch
-        .view
-        .orders
-        .get(id)
-        .map(|order| order.agent.0.clone())
-        .unwrap_or_default();
+    let (agent, to) = match batch.view.orders.get(id).map(|order| order.agent.clone()) {
+        Some(Some(agent)) => (agent.0, "paused"),
+        Some(None) => (EVERY_AGENT.to_owned(), "exits_only"),
+        None => (String::new(), "paused"),
+    };
     let applied = batch.journal(
         "AgentModeApplied",
         None,
         vec![
             ("agent", text(agent)),
-            ("to", text("paused")),
+            ("to", text(to)),
             ("restriction", text("broker_status_unmapped")),
             ("originated", Value::Bool(true)),
         ],

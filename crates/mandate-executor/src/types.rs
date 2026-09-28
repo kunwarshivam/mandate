@@ -325,7 +325,11 @@ pub enum StatusMapping {
 pub struct Order {
     pub client_order_id: ClientOrderId,
     pub intent_id: Option<IntentId>,
-    pub agent: AgentId,
+    /// The agent the order belongs to. `None` only for a protective leg the broker created that
+    /// DEC-160's leg-agent rule could not attribute: it is in the order set like every other leg,
+    /// so a reconciliation finds it present and its lifecycle folds, but it counts toward no
+    /// agent's sub-ledger and holds openings in its instrument until it is attributed or done.
+    pub agent: Option<AgentId>,
     pub instrument: InstrumentId,
     pub side: Side,
     pub qty: Qty,

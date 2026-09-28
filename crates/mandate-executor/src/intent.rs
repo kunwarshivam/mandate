@@ -287,7 +287,7 @@ fn send_again(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), Execu
         batch,
         request,
         order.intent_id.as_ref(),
-        &order.agent,
+        order.agent.as_ref().ok_or_else(unknown)?,
         attempt,
     )
 }
