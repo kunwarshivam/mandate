@@ -105,7 +105,7 @@ export const motionTokens = [
 
 /** The gutters before and after the founder's "reduce gutter space" (2026-09-28). */
 export const spacingTokens = [
-  { name: "--sidebar-width", before: "15rem", after: "12rem", use: "Desktop side navigation" },
+  { name: "--nav-width", before: "15rem", after: "12rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
   { name: "--content-max", before: "72rem", after: "90rem", use: "Widest content column" },
   { name: "--page-x", before: "1rem / 1.5rem / 2rem", after: "0.75rem / 1rem / 1.5rem", use: "Page padding at phone / tablet / desktop" },
   { name: "--page-top", before: "1.5rem", after: "1rem / 1.25rem", use: "Space above the page title" },

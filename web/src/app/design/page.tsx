@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import type { CSSProperties, ReactNode } from "react";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@cloudflare/kumo/components/button";
+import { Skeleton } from "@/components/domain/skeleton";
 import { Deadline } from "@/components/approvals/deadline";
 import { MotionSamples } from "@/components/design/motion-samples";
 import { AsOf } from "@/components/domain/as-of";
@@ -238,22 +238,24 @@ export default function DesignPage() {
         </div>
       </Block>
 
-      <Block title="Components" lead="shadcn/ui primitives in Placard tokens. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
+      <Block title="Components" lead="Kumo components in Placard tokens: square, flat, no shadows. Stop and kill-switch actions are never disabled, so no disabled state is shown for them.">
         <div className="grid gap-(--section-gap)">
           <div className="grid gap-(--block-gap)">
             <h3 className="text-heading">Actions</h3>
             <div className="flex flex-wrap items-center gap-2">
-              <Button size="lg">Primary</Button>
-              <Button size="lg" variant="outline">
+              <Button size="lg" variant="primary" className="h-11">
+                Primary
+              </Button>
+              <Button size="lg" variant="secondary" className="h-11">
+                Secondary
+              </Button>
+              <Button size="lg" variant="outline" className="h-11">
                 Outline
               </Button>
-              <Button size="lg" variant="ghost">
+              <Button size="lg" variant="ghost" className="h-11">
                 Ghost
               </Button>
-              <Button size="lg" variant="link">
-                Link
-              </Button>
-              <Button size="lg" variant="outline" disabled>
+              <Button size="lg" variant="outline" className="h-11" disabled>
                 Disabled
               </Button>
             </div>
@@ -261,7 +263,7 @@ export default function DesignPage() {
               <StopControl />
               <span className="inline-flex h-11 items-center bg-crimson px-4 font-bold text-crimson-foreground">Kill switch (crimson, only here)</span>
             </div>
-            <p className="text-sm text-muted-foreground">Approve and Skip use the same outline variant and size, side by side, with nothing preselected.</p>
+            <p className="text-sm text-muted-foreground">Approve and Skip use the same secondary variant and size, side by side, with nothing preselected.</p>
           </div>
           <div className="grid gap-(--block-gap)">
             <h3 className="text-heading">Labels</h3>

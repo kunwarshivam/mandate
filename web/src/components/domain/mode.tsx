@@ -2,13 +2,13 @@
 
 import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
-import { CircleCheck, CirclePause, CircleSlash, LogOut } from "lucide-react";
+import { CheckCircle, PauseCircle, Prohibit, SignOut } from "@phosphor-icons/react";
 import type { ActiveRestriction, AgentMode } from "@/fixtures/types";
 import { clock } from "@/lib/format";
 import { MODE_LABEL, MODE_MEANING } from "@/lib/labels";
 import { type RestrictionSource, SOURCE_LABEL, describeRestriction } from "@/lib/restrictions";
 
-const MODE_ICON = { normal: CircleCheck, exits_only: LogOut, paused: CirclePause, stopped: CircleSlash } as const;
+const MODE_ICON = { normal: CheckCircle, exits_only: SignOut, paused: PauseCircle, stopped: Prohibit } as const;
 
 /**
  * A mode is a sign read from across the room: running is quiet, exits only is outlined in ink

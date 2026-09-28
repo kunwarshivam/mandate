@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "@phosphor-icons/react/ssr";
 import type { Position, WorkingOrder } from "@/fixtures/types";
 import { price, quantity, usd } from "@/lib/format";
 import { ORDER_STATE_LABEL, PURPOSE_LABEL } from "@/lib/labels";
