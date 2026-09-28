@@ -237,6 +237,16 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `Skip(Drift)`, both pass. `a_grant_acts_with_the_bound_order_only_while_every_check_passes` and
   the re-validation property still catch that constant. Give each of the two tests the paired
   positive, "the unchanged fixture acts", in a tests correction.
+  *Follow-up (#275 review, minor 2; the coordinator's ruling, rule 13):* when
+  `owner_command(OwnerExit, …)` returns `CommandAuthority::Refused`, only the owner-exit
+  privilege is withdrawn: selling equities outside the regular session at the confirmed bid.
+  The exit itself is never withdrawn. The runtime must still route that owner exit, either as a
+  regular-session exit or as the displayed-bid-confirmed exit once the owner confirms a fresh bid.
+  The refusal never holds it, drops it, or turns it into a no-op. **Test obligation, in the
+  runtime's tests PR (3 of 4):** a test commits an owner exit whose step-up is stale at commit
+  and asserts two things. First, the refusal is journaled. Second, the exit is still routed as
+  a regular-session exit and reaches the executor, so no step-up outcome can remove an owner's
+  risk reduction. The mandate spec §6.1 wording goes with the M7 spec PR.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
