@@ -689,18 +689,12 @@ fn protection_changed(
     at: RiskClock,
 ) -> Result<(), ExecutorError> {
     let instrument = instrument(payload)?;
-    match required_text(payload, "action")? {
+    let action = required_text(payload, "action")?;
+    match action {
         "placed" => {
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
-            let prices = optional_price(payload, "stop")?
-                .map(|stop| -> Result<ProtectionPrices, ExecutorError> {
-                    Ok(ProtectionPrices {
-                        stop,
-                        take_profit: optional_price(payload, "take_profit")?,
-                    })
-                })
-                .transpose()?;
+            let prices = prices_of(payload)?;
             legs(state, &instrument, &orders, covered, created_on(payload)?);
             let protection = state
                 .protection
@@ -737,14 +731,7 @@ fn protection_changed(
                 optional_text(payload, "entry"),
                 optional_text(payload, "agent"),
             ) {
-                let prices = optional_price(payload, "stop")?
-                    .map(|stop| -> Result<ProtectionPrices, ExecutorError> {
-                        Ok(ProtectionPrices {
-                            stop,
-                            take_profit: optional_price(payload, "take_profit")?,
-                        })
-                    })
-                    .transpose()?;
+                let prices = prices_of(payload)?;
                 state.exiting.insert(
                     instrument.clone(),
                     ExitSequence {
@@ -762,28 +749,36 @@ fn protection_changed(
                 alerted: false,
             });
         }
-        "interval_limit" => {
-            if let Some(open) = state
-                .unprotected
-                .iter_mut()
-                .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
-            {
-                open.alerted = true;
+        "interval_limit" | "unprotected_end" => {
+            let ends = action == "unprotected_end";
+            if ends {
+                state.exiting.remove(&instrument);
             }
-        }
-        "unprotected_end" => {
-            state.exiting.remove(&instrument);
             if let Some(open) = state
                 .unprotected
                 .iter_mut()
                 .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
             {
-                open.ended_at = Some(at);
+                if ends {
+                    open.ended_at = Some(at);
+                } else {
+                    open.alerted = true;
+                }
             }
         }
         _ => return Err(refused("action")),
     }
     Ok(())
+}
+
+/// The prices a `ProtectionChanged` names: its stop and, unless crypto's, its take-profit.
+fn prices_of(payload: &Value) -> Result<Option<ProtectionPrices>, ExecutorError> {
+    optional_price(payload, "stop")?
+        .map(|stop| {
+            let take_profit = optional_price(payload, "take_profit")?;
+            Ok(ProtectionPrices { stop, take_profit })
+        })
+        .transpose()
 }
 
 /// DEC-160's leg-agent rule (trading-domain spec §2.3, §5.4): a protective order the broker
