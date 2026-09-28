@@ -1,0 +1,106 @@
+import { type Dec, dec, sign, toFixed } from "./decimal";
+
+export const MINUS = "\u2212";
+
+function group(whole: string): string {
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function toDec(value: string | Dec): Dec {
+  return typeof value === "string" ? dec(value) : value;
+}
+
+/** "$1,234.50"; negative values carry a true minus sign. */
+export function usd(value: string | Dec, places = 2): string {
+  const fixed = toFixed(toDec(value), places);
+  const negative = fixed.startsWith("-");
+  const [whole, fraction] = (negative ? fixed.slice(1) : fixed).split(".");
+  const body = `$${group(whole)}${fraction ? `.${fraction}` : ""}`;
+  return negative ? `${MINUS}${body}` : body;
+}
+
+/** "+$123.45" or "−$67.89"; zero has no sign. Colour never carries the sign alone. */
+export function signedUsd(value: string | Dec): string {
+  const v = toDec(value);
+  const s = sign(v);
+  const body = usd(s < 0 ? -v : v);
+  return s > 0 ? `+${body}` : s < 0 ? `${MINUS}${body}` : body;
+}
+
+export type Direction = "gain" | "loss" | "flat";
+
+export function direction(value: string | Dec): Direction {
+  const s = sign(toDec(value));
+  return s > 0 ? "gain" : s < 0 ? "loss" : "flat";
+}
+
+export function directionWord(value: string | Dec): string {
+  const d = direction(value);
+  return d === "gain" ? "gain" : d === "loss" ? "loss" : "no change";
+}
+
+/** Prices keep the instrument's own precision; at least two places. */
+export function price(value: string): string {
+  const places = Math.max(2, (value.split(".")[1] ?? "").length);
+  return usd(value, places);
+}
+
+export function quantity(value: string): string {
+  const [whole, fraction] = value.split(".");
+  return `${group(whole)}${fraction ? `.${fraction}` : ""}`;
+}
+
+/** A fraction of one as a percentage, e.g. "0.075" → "7.5%". */
+export function percent(value: string | Dec, places = 1): string {
+  const scaled = toDec(value) * 100n;
+  const fixed = toFixed(scaled, places).replace(/\.0+$/, "");
+  return `${fixed.startsWith("-") ? MINUS + fixed.slice(1) : fixed}%`;
+}
+
+/**
+ * Wall-clock time as written in the fixture's own offset, "14:02:11". Read from the ISO string
+ * itself so rendering never depends on the viewer's time zone setting.
+ */
+export function clock(iso: string): string {
+  const match = /T(\d{2}:\d{2}:\d{2})/.exec(iso);
+  if (!match) throw new Error(`not an ISO timestamp: ${iso}`);
+  return match[1];
+}
+
+export function clockShort(iso: string): string {
+  return clock(iso).slice(0, 5);
+}
+
+export function dateLabel(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${months[m - 1]} ${d}, ${y}`;
+}
+
+export function zoneLabel(iso: string): string {
+  return iso.endsWith("-04:00") || iso.endsWith("-05:00") ? "ET" : "UTC";
+}
+
+/** "3 min ago", "42 s ago", "2 h ago". Whole units only; never a live-ticking seconds display. */
+export function ago(fromIso: string, nowIso: string): string {
+  const seconds = Math.max(0, Math.round((Date.parse(nowIso) - Date.parse(fromIso)) / 1000));
+  if (seconds < 60) return `${seconds} s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} min ago`;
+  return `${Math.floor(minutes / 60)} h ago`;
+}
+
+/** Remaining time until a deadline in whole minutes, neutral wording. */
+export function remaining(deadlineIso: string, nowIso: string): string {
+  const seconds = Math.round((Date.parse(deadlineIso) - Date.parse(nowIso)) / 1000);
+  if (seconds <= 0) return "deadline passed";
+  if (seconds < 60) return "less than 1 min left";
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes} min left`;
+}
+
+export function seconds(n: number): string {
+  if (n % 3600 === 0) return `${n / 3600} h`;
+  if (n % 60 === 0) return `${n / 60} min`;
+  return `${n} s`;
+}
