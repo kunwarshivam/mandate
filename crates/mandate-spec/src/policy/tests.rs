@@ -785,3 +785,34 @@ fn overlapping_sets_meet_as_their_intersection() -> Checked {
     }
     Ok(())
 }
+
+/// The platform base is the **outermost** level, not merely one of them: a workspace level looser than
+/// the base is itself reported against it, which only an ancestor can do (DEC-128 item 30(g), nit 1 of
+/// #263 round 2).
+#[test]
+fn the_platform_base_is_the_outermost_level() -> Checked {
+    let ctx = context()?;
+    let loose_workspace = level(
+        LevelName::Workspace,
+        vec![(PolicyKey::MaxLossFromAllocation, dec("0.6")?)],
+    );
+    match ValidatedMandate::new(mandate(&[])?, &ctx, &[loose_workspace]) {
+        Err(Rejected::Rules { report, policy })
+            if report.is_valid()
+                && policy
+                    .iter()
+                    .map(|v| (v.key, v.level, v.limit_level))
+                    .collect::<Vec<_>>()
+                    == vec![(
+                        PolicyKey::MaxLossFromAllocation,
+                        LevelName::Workspace,
+                        LevelName::Platform,
+                    )] =>
+        {
+            Ok(())
+        }
+        other => Err(format!(
+            "the workspace's 0.6 breaks the base's 0.5 above it, got {other:?}"
+        )),
+    }
+}

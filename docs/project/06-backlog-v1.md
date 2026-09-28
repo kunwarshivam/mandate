@@ -559,6 +559,16 @@ From E10-1's slice-V implementation (DEC-161):
   constant `goal::status` answering `Ok(Done{..})` passes 2 of its 9 tests and `Ok(Running)` passes 1.
   Each needs its opposite pair so that no constant passes (#240's standard), in a tests correction
   ahead of the goal implementation.
+- **`reference/mandate/ref.py`: `violates` reads a level's `null` as a limit** (#263 round 2). For
+  `two_approver_above_usd` a level stating `null` should state nothing (DEC-128 item 30(b)); `ref.py`'s
+  `violates` compares against it. Align the reference with the crate.
+- **`PolicyOverlay::effective`'s `(Some(ceiling), Absent)` arm returns the ceiling without checking its
+  type against the key** (#263 round 2, minor). A wrong-typed ceiling is refused elsewhere
+  (`invalid_input`, item 30(d)); this arm should refuse it too.
+- **Stream H: a gate holding a `Purpose` narrows only through `AddingPurpose::try_from`** (#263 round 2,
+  nit 2). `PolicyOverlay::narrow` takes an `AddingPurpose`, so an exit's built-in AUTO cannot reach it
+  (DEC-128 item 30(i)); the builder and the gate must convert with `try_from` and leave an exit's
+  decision untouched on `Err`, never map an exit onto `Open` or `Increase`.
 - **`ValidationContext::from_journal` (stream F, DEC-169):** implemented; its 17 tests are live.
   Stream L's E7-10 (DEC-168) maps the records to `JournaledFact`: `AccountSnapshotRecorded`,
   `ConnectionEstablished`, `ConnectionRevoked`, `DisclosureAccepted`, `AgentDeployed` and
