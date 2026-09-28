@@ -885,6 +885,9 @@ pub fn class_allowed(class: AssetClass, allowed: &BTreeSet<AssetClass>) -> bool 
 /// `None` exactly when there is no stop: protection is disabled, or its stop is null. The sum is exact
 /// (a [`Ratio`](mandate_num::Ratio) holds both operands' places), and a value it cannot hold is
 /// [`SpecError::OutOfRange`] naming the field, never a rounded distance (DEC-128 item 4).
+///
+/// Without the offset the result is the document's own stop, in its `open_fraction` grammar; with it,
+/// the sum, in the `positive_decimal` grammar, because two open fractions can sum past one.
 pub fn worst_case_stop_distance(mandate: &Mandate) -> Result<Option<SchemaDec>, SpecError> {
     let protection = &mandate.protection;
     let stop = match (protection.enabled, &protection.stop_distance) {

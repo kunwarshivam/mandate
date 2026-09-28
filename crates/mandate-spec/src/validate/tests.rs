@@ -1292,7 +1292,8 @@ fn each_warning_fires_on_its_condition_alone() -> Checked {
     Ok(())
 }
 
-/// The four figures on the crypto branch, where the offset is added, and the base's own.
+/// The four figures on the crypto branch, where the offset is added, and the base's own; and no
+/// position-at-stop figure when protection is off, even with a stop still written (V-008).
 #[test]
 fn the_worst_case_adds_the_crypto_offset_only_with_crypto() -> Checked {
     let ctx = context()?;
@@ -1306,9 +1307,18 @@ fn the_worst_case_adds_the_crypto_offset_only_with_crypto() -> Checked {
         &ctx,
     )?
     .worst_case;
+    let disabled_with_a_stop = report(
+        &[
+            ("/protection/enabled", "false"),
+            ("/protection/take_profit_distance", "null"),
+        ],
+        &ctx,
+    )?
+    .worst_case;
     let expected = [
         (with_offset.one_position_at_stop_usd, Some(usd("82.5")?)),
         (offset_only.one_position_at_stop_usd, Some(usd("75")?)),
+        (disabled_with_a_stop.one_position_at_stop_usd, None),
         (Some(with_offset.daily_loss_budget_usd), Some(usd("200")?)),
         (
             Some(with_offset.flatten_trigger_loss_usd),
@@ -1645,16 +1655,36 @@ fn w006_warns_of_auto_admission_only_with_a_research_agent() -> Checked {
     ];
     let auto = ("/autonomy/admission", r#""auto""#);
     let with_auto: Owned<'_> = agent.iter().copied().chain([auto]).collect();
-    let rows: Vec<(&str, Owned<'_>, Vec<Warning>)> = vec![
-        ("auto with a research agent", with_auto, vec![Warning::W006]),
-        ("ask with a research agent", agent.to_vec(), vec![]),
-        ("auto with none", vec![auto], vec![]),
+    let envelope_only = [
+        ("/universe/pinned", "false"),
+        ("/universe/pinned_instruments", "[]"),
+        ("/behavior/research", RESEARCH),
+        auto,
     ];
-    for (name, patches, expected) in rows {
+    let rows: Vec<(&str, Owned<'_>, Vec<Warning>, Vec<Violation>)> = vec![
+        (
+            "auto with a research agent",
+            with_auto,
+            vec![Warning::W006],
+            vec![],
+        ),
+        ("ask with a research agent", agent.to_vec(), vec![], vec![]),
+        ("auto with none", vec![auto], vec![], vec![]),
+        (
+            "auto with a research envelope but no admitting model (DEC-161 item 10)",
+            envelope_only.to_vec(),
+            vec![],
+            vec![Violation::V036],
+        ),
+    ];
+    for (name, patches, warnings, violations) in rows {
         let report = report(&patches, &ctx)?;
-        let wanted: BTreeSet<Warning> = expected.into_iter().collect();
-        if report.warnings != wanted || !report.violations.is_empty() {
-            return Err(format!("{name}: expected {wanted:?} alone, got {report:?}"));
+        let wanted: BTreeSet<Warning> = warnings.into_iter().collect();
+        let refused: BTreeSet<Violation> = violations.into_iter().collect();
+        if report.warnings != wanted || report.violations != refused {
+            return Err(format!(
+                "{name}: expected {wanted:?} and {refused:?}, got {report:?}"
+            ));
         }
     }
     Ok(())
@@ -1689,6 +1719,14 @@ fn the_worst_case_stop_distance_adds_the_offset_only_with_crypto() -> Checked {
             Some("1.15"),
         ),
         ("protection disabled", disabled.to_vec(), None),
+        (
+            "protection disabled with its stop still written (V-008)",
+            vec![
+                ("/protection/enabled", "false"),
+                ("/protection/take_profit_distance", "null"),
+            ],
+            None,
+        ),
     ];
     for (name, patches, expected) in rows {
         let got = super::worst_case_stop_distance(&mandate(&patches)?)
