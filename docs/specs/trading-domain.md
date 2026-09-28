@@ -2,13 +2,21 @@
 
 | | |
 |---|---|
-| **Status** | **Approved** v0.11 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 amendment [DEC-160](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | **Approved** v0.12 (v0.8 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.9 amendment [DEC-86](../project/04-decision-log.md#decisions); v0.10 amendment [DEC-92 to DEC-94](../project/04-decision-log.md#decisions); v0.11 and v0.12 amendments [DEC-160](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Scope** | US stocks, ETFs, and crypto spot on Alpaca ([DEC-23](../project/04-decision-log.md#decisions)) |
 | **Implements** | PRD 6.2, 6.4, 6.5, 6.7; backlog E2–E7 |
 | **Reference cases** | [reference-cases/trading-domain.yaml](reference-cases/trading-domain.yaml) (schema v3) |
 
 ## Change history
 
+- **v0.12:** each exit-ladder rung after the first, and the triggered-stop watchdog's exit, get a
+  deterministic `client_order_id` (§2.3); a watchdog exit no single agent holds is cancelled by
+  every kill switch covering its instrument, and no agent's own (§5.5). An exit with nothing to
+  price from is never refused: a
+  risk exit, protective order, or owner exit goes at its intent's own limit, never below an owner
+  exit's floor, and a discretionary exit is held until a price arrives, each journaled with an
+  owner alert (§5.6, [DEC-160](../project/04-decision-log.md#decisions)). Every reference case is
+  unchanged.
 - **v0.11:** protective order IDs name the entry they protect (§2.3). A protective leg the broker
   created, which no submission recorded, belongs to the entry's agent when its ID names the entry,
   otherwise to the agent whose attributed lots make up the whole open quantity; failing both it is
@@ -157,6 +165,21 @@ Crypto uses the broker's `price_increment`.
   `-sl` (the stop). A re-placement keeps `{entry}` and takes its own event's `{protection}`. The
   entry is read back as everything before the last `-p`; an ID that does not parse this way names
   no entry. This grammar supersedes any other derivation of a protective order's ID.
+- **Exit-ladder rungs** ([DEC-160](../project/04-decision-log.md#decisions)): each rung is a new
+  order (§5.6), so each takes its own ID. The first rung keeps the exit intent's
+  `client_order_id`; rung `{n}` for n ≥ 1 is that ID followed by `-l{n}`, with n derived from the
+  journaled rung count, so a restart derives the same ID and a retry of an unconfirmed rung reuses
+  it. The suffix is lowercase and an intent ID is an uppercase ULID, so a rung's ID never reads
+  back as a protective order's (no `-p`) and never collides with another intent's.
+- **The triggered-stop watchdog's exit** ([DEC-160](../project/04-decision-log.md#decisions)) has
+  no agent intent. The executor journals it as its own intent, purpose `risk_exit`, whose
+  `client_order_id` carries `"w-{event}"` where an intent's carries its ULID; `{event}` is the ID
+  of the journaled watchdog record (a ULID, [journal spec](journal.md) §2), so a restart derives
+  the same ID. A ULID has no hyphen and no lowercase letter, so the ID never matches an intent's
+  and never reads back as a protective order's. Its agent is the position's single holder (§5.4's
+  leg-agent rule); failing one, it belongs to no agent (`*`): every kill switch whose scope covers
+  the instrument may cancel it by its own ID, and no agent-scoped kill switch treats it as that
+  agent's own.
 - **Fill ID:** the broker's execution ID; fills are de-duplicated by it.
 
 ## 3. Instruments and eligibility
@@ -339,7 +362,8 @@ protective legs are checked against position + entry quantity.
 - **Triggered-stop watchdog:** if a sane risk mark has been at or below a resting stop's stop price
   for `stop_watchdog_s` (default 60 seconds) in a session where the stop can trigger, with no fill,
   or is below a stop-limit's limit price, the executor cancels it, confirms, and exits the held
-  quantity through the exit price ladder (§5.6) as a `risk_exit`, and alerts the owner.
+  quantity through the exit price ladder (§5.6) as a `risk_exit` (its ID and agent, §2.3), and
+  alerts the owner.
 
 **Crypto (simple orders only):**
 
@@ -374,7 +398,7 @@ protective legs are checked against position + entry quantity.
 | Scope | Cancel | Close |
 |---|---|---|
 | Account or workspace | Broker cancel-all endpoint (`Unknown` orders included) | Broker close-position endpoint per instrument |
-| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg in an instrument it closes (§5.4), each by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
+| Agent (owner kill switch, `flatten_and_pause`, daily-loss flatten, lifetime floor) | Only the agent's orders, and any unattributed protective leg (§5.4) or unattributed watchdog exit (§2.3) in an instrument it closes, each by `client_order_id`, confirming each; never cancel-all | Sell exactly the agent's sub-ledger quantity; never close-position (other agents' and the owner's unattributed shares are untouched) |
 
 Sequence: apply the final mode first (`paused` for mandate limits; `stopped` for an owner kill
 switch) → cancel → confirm → close (market orders only in the regular session outside auction
@@ -405,6 +429,13 @@ protection is canceled), the executor uses the **exit price ladder** (sell; buy 
    increased by `exit_offset_step`, repricing from the current reference bid.
 3. The offset never exceeds `max_exit_offset`. At the floor, the order rests and the owner is
    alerted.
+4. **Nothing to price from** ([DEC-160](../project/04-decision-log.md#decisions); rules 3 and
+   13): with no fresh sane bid, no sane bid within the last 5 minutes, and no last trade, the exit
+   is never refused. A `risk_exit`, an `owner_exit`, or a protective order goes at its intent's own
+   limit, never below an owner exit's floor price (§5.5); the fallback is journaled and the owner
+   alerted. A `discretionary_exit` is held and re-evaluated on every tick; the hold is journaled
+   once, never dropped, and the owner alerted as for the fallback. The ladder resumes stepping
+   from the next priceable quote or trade: a fallback price is never where the ladder ends.
 
 | Tier | `exit_offset` | `exit_offset_step` | `max_exit_offset` |
 |---|---|---|---|
