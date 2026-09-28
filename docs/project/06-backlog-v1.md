@@ -545,14 +545,25 @@ round 1), as the coordinator ruled there:
 From E10-1's slice-V implementation (DEC-161):
 
 - **`ValidationContext::from_journal` (stream F, DEC-169):** the tests PR lands the `context` module's
-  stub and 14 `pending E10-1` tests; the implementation follows. Stream L's E7-10 (DEC-168) maps the
+  stub and 17 `pending E10-1` tests; the implementation follows. Stream L's E7-10 (DEC-168) maps the
   control-stream records (`AccountSnapshotRecorded`, `AgentDeployed`/`AgentStopped`,
   `ConnectionEstablished`, `DisclosureAccepted`, `MandateVersionCreated`/`MandateConfirmed`,
   `ConfigSnapshotRegistered`, `PlatformOperatorAction`) to `JournaledFact`; `AgentFlat` needs a source
   there too (the account ledger's flat-in-every-instrument signal).
-
-- **E17-1 slice (stream F, next):** V-003, V-034 to V-037, V-039, W-006, and `worst_case_stop_distance`
-  (DEC-161 item 1). MC-V05, MC-V53 to MC-V61, MC-V64, and MC-V65 pass once it lands.
+- **MC-V status PR (stream F, after the E17-1 slice):** V-003, V-034 to V-037, V-039, W-006, and
+  `worst_case_stop_distance` landed in their own slice (DEC-161 items 1 and 10), so all 67 MC-V cases pass
+  locally; a status-only PR moves them to `passing` (DEC-77 item 3).
+- **Confirmation-screen PR: the stop distance and the figures disagree on precision** (#252 review,
+  minor 3). `worst_case_stop_distance` sums at a `Ratio`'s 24 places, while the four figures stop at
+  `Fraction`'s 9 (`out_of_range` past it, DEC-161 item 3). A document with a 10- to 24-place stop gets a
+  distance but no figures. The screen that shows both must pick one boundary.
+- **Blocks any production caller of `validate`: an unmentioned envelope path reads as confirmed**
+  (#252 review, minor 4; the coordinator's ruling there). `ProvenanceMap::at` defaults an unmentioned
+  path to `user_entered` and confirmed, and V-020 and V-022 read only the entries present, so a
+  document with no entries passes both, even with `admission: auto`. The fix lands in the
+  `ValidationContext::from_journal` implementation PR (DEC-169): an unmentioned envelope path is
+  unconfirmed, fires V-020, and an `auto` under it fires V-022. No production caller may use
+  `validate` or `ValidatedMandate::new` until then.
 - **Stream H:** `ConditionField::is_unit_bounded` and `mandate-builder`'s `well_typed` omit
   `thesis_confidence`, which §6.3 types "decimal in [0, 1]"; `validate` bounds it (DEC-161 item 5), so the
   order path's re-check is looser than the load check. Fix both with the builder's
@@ -662,12 +673,27 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   account has been observed and the startup `ReconciliationRun` recorded, so a script that stops
   starting ready fails at its start rather than at a later assertion; and update `play`'s doc to say
   it starts ready (#231 review, follow-up c).
+- **Blocks E7-4 slice 5 (the trading day):** `mandate-executor` must copy the cross-stream facts
+  journal spec §2 gives it (`AgentModeApplied` from the agent stream's `AgentModeChanged`,
+  `TradingDayStarted`, `ClockAdvanced` crossing midnight America/New_York, `OwnerAcknowledged` from the
+  control stream), each with its `causation_id`. Today `step`'s `Input::Journal(_) => Ok(())` copies
+  nothing, silently, so `properties::every_copied_draft_cites_its_origin` sees no copied draft under any
+  script and passes vacuously. The slice that adds the producer also adds a generator step (a clock
+  advance crossing midnight New York, an owner acknowledgment) and asserts `seen > 0` on scripts
+  containing it, shown failing under the do-nothing plant (#244 round 1, finding 3). Until then
+  `Input::Journal` answers a loud `Unimplemented { story: "E7-4" }` naming slice 5, landing first in
+  E7-4 slice 1 rather than dropping the fact (the coordinator's ruling on #244, 5861479849).
 - **E7-4 slice 1 (stream K):** align `mandate-executor`'s `ClientOrderId::for_protection` to the
   trading-domain spec's §2.3 protective grammar (`{entry}-p{protection}`, legs `-tp` and `-sl`,
   replacing `md-p-<origin>`), and make `mandate-alpaca`'s `wire.rs` keep each leg's
   `client_order_id` instead of reading `legs[].id` only. Until both land, DEC-160's ID branch receives
   no input, and every leg is attributed by the single holder or is unattributed
   ([DEC-160](04-decision-log.md#decisions), #243 round 1).
+- **E7-4 slices 2 and 3 (stream K):** `properties::protective_sell_quantity_never_exceeds_the_position_in_any_script`
+  wants the `ProtectionChanged placed` at or after the entry's completion with no lag. That is right
+  on the normal path (§5.4's legs activate at completion), but a re-placement after a
+  cancelled-then-filled entry may lag by up to `max_unprotected_s`. If a slice turns it red there,
+  allow that bound rather than loosening the assertion elsewhere (#244 round 3, minor 3).
 - **E7-4:** gate `mandate-executor`'s `resubmit` for an order with no `intent_id`. It sends again without running the gate; no slice through 6 writes such an order, but protective orders will, so it must be gated before they ship (#202 review, the coordinator's ruling, comment 5857629810).
 - Fold `crypto_status` in `mandate-executor`. `AccountStateObserved` journals it, and §7.3 requires it `ACTIVE` for crypto orders, but the fold keeps no field for it until the gate's crypto check reads one; the journal holds it, so the fold can add it without a new event (#198 review, round 1, finding 8a).
 - Give a §7.3 account restriction in `mandate-executor` a lift path. §7.3 says a detected
