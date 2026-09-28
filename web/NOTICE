@@ -1,0 +1,11 @@
+Owlhead web
+
+This product includes TradingView Lightweight Charts, licensed under the
+Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0).
+
+TradingView Lightweight Charts™
+Copyright (с) 2025 TradingView, Inc. https://www.tradingview.com/
+
+The charts link to https://www.tradingview.com/ where they appear (the
+dashboard's account chart and /design), as the library's attribution notice
+asks; the logo inside the chart is turned off (`attributionLogo: false`).

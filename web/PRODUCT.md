@@ -104,8 +104,9 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   in the page metadata or the share card.
 - **Palette (DEC-202).** "Navy and brass": navy #183D73, brass #AC7D1B as the one accent (rules,
   borders, large type, never body text), dark brass #634606, brass tint #FDF1DC, slate ink #181C21
-  and off-white #F7FAFE, at about 60/30/10 neutrals, navy and brass. The brand assets use these
-  values now (`src/components/brand/palette.ts`); the UI tokens move onto them in the palette port.
+  and off-white #F7FAFE, at about 60/30/10 neutrals, navy and brass. The brand assets take these
+  values from `src/lib/brand-palette.ts`, and the UI tokens are ramp steps of the same
+  palette (`COLOR.md`).
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro

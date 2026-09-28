@@ -9,7 +9,7 @@ import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
 import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
-import { getScenario } from "@/lib/get-workspace";
+import { getColourBlind, getScenario } from "@/lib/get-workspace";
 import { scenariosEnabled } from "@/lib/scenario";
 
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
@@ -48,8 +48,9 @@ export const viewport: Viewport = {
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const scenario = await getScenario();
   const workspace = buildWorkspace(scenario);
+  const colourBlind = await getColourBlind();
   return (
-    <html lang="en" data-mode="light" data-theme="placard">
+    <html lang="en" data-mode="light" data-theme="placard" data-cvd={colourBlind ? "on" : undefined}>
       <body>
         <div className="isolate">
           <RoleProvider>
@@ -57,7 +58,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
               <AppShell>
                 <ViewTransition>{children}</ViewTransition>
               </AppShell>
-              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} /> : null}
+              {scenariosEnabled ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
             </Providers>
           </RoleProvider>
         </div>

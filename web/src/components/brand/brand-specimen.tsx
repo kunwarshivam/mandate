@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { LOCKUP_GAP, OwlheadLockup, OwlheadMark, OwlheadWordmark } from "./Logo";
-import { BRAND_PALETTE, NAVY, OFF_WHITE, hexContrast } from "./palette";
+import { BRAND_PALETTE, NAVY, OFF_WHITE, hexContrast } from "@/lib/brand-palette";
 
 const DO = [
   "Navy on a light surface, always: one colour at a time.",

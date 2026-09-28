@@ -6,7 +6,7 @@ import { inflateSync } from "node:zlib";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { MARK_SOURCE, NAVY, OFF_WHITE, OUTPUTS, PUBLIC_DIR, generateBrandAssets } from "../../../scripts/brand-assets.mjs";
 import { MARK_PATH } from "./Logo";
-import { brandHex, NAVY as PALETTE_NAVY, OFF_WHITE as PALETTE_OFF_WHITE } from "./palette";
+import { brandHex, NAVY as PALETTE_NAVY, OFF_WHITE as PALETTE_OFF_WHITE } from "@/lib/brand-palette";
 
 type Rgba = [number, number, number, number];
 

@@ -1,5 +1,5 @@
 import { OwlheadLockup, OwlheadMark } from "@/components/brand/Logo";
-import { NAVY } from "@/components/brand/palette";
+import { NAVY } from "@/lib/brand-palette";
 import { cn } from "@/lib/utils";
 
 /**

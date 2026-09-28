@@ -1,10 +1,7 @@
-import type { ReactNode } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import * as agentSection from "@/app/agents/[agentId]/[...section]/page";
-import * as killSwitch from "@/app/agents/[agentId]/kill-switch/page";
 import * as agent from "@/app/agents/[agentId]/page";
-import * as release from "@/app/agents/[agentId]/release/page";
 import * as agentsNew from "@/app/agents/new/page";
 import * as agents from "@/app/agents/page";
 import * as alerts from "@/app/alerts/page";
@@ -12,11 +9,10 @@ import * as approval from "@/app/approvals/[approvalId]/page";
 import * as approvals from "@/app/approvals/page";
 import * as auditScreen from "@/app/audit/[screen]/page";
 import * as audit from "@/app/audit/page";
-import * as closeAll from "@/app/connections/[connectionId]/close-all/page";
-import * as stopAll from "@/app/connections/[connectionId]/stop-all/page";
 import * as connections from "@/app/connections/page";
 import * as design from "@/app/design/page";
 import * as dashboard from "@/app/page";
+import * as positions from "@/app/positions/page";
 import * as settingsScreen from "@/app/settings/[screen]/page";
 import * as settings from "@/app/settings/page";
 import { AppShell } from "@/components/shell/app-shell";
@@ -25,47 +21,10 @@ import { recordHref } from "@/components/stop/commands";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { canOpen, homeFor, routeNeeds } from "@/lib/access";
 import { ROLES, type Role, can } from "@/lib/roles";
-import { AGENT_SECTIONS, SCREENS, SECTION_INDEX, agentHref, screensIn } from "@/lib/screens";
+import { AGENT_SECTIONS, RECORD_TITLE, SCREENS, SECTION_INDEX, agentHref, decisionHref, orderHref, positionHref, screensIn } from "@/lib/screens";
 import { isDisabled, renderWithRuntime } from "@/test/harness";
+import { pageFor } from "@/test/app-routes";
 import { setPathname } from "@/test/navigation";
-
-/** What Next would render for a path, resolved the same way the app directory does. */
-async function pageFor(path: string): Promise<ReactNode> {
-  const parts = path.split("/").filter(Boolean);
-  const [head, second, ...rest] = parts;
-  const params = <T,>(p: T) => ({ params: Promise.resolve(p) });
-  switch (head) {
-    case undefined:
-      return <dashboard.default />;
-    case "agents":
-      if (!second) return <agents.default />;
-      if (second === "new" && rest.length === 0) return <agentsNew.default />;
-      if (rest.length === 0) return agent.default(params({ agentId: second }));
-      if (rest.length === 1 && rest[0] === "kill-switch") return killSwitch.default(params({ agentId: second }));
-      if (rest.length === 1 && rest[0] === "release") return release.default(params({ agentId: second }));
-      return agentSection.default(params({ agentId: second, section: rest }));
-    case "approvals":
-      if (!second) return <approvals.default />;
-      return approval.default(params({ approvalId: second }));
-    case "alerts":
-      return <alerts.default />;
-    case "connections":
-      if (!second) return <connections.default />;
-      if (rest.length === 1 && rest[0] === "stop-all") return stopAll.default(params({ connectionId: second }));
-      if (rest.length === 1 && rest[0] === "close-all") return closeAll.default(params({ connectionId: second }));
-      throw new Error(`no page for ${path}`);
-    case "audit":
-      if (!second) return <audit.default />;
-      return auditScreen.default(params({ screen: second }));
-    case "settings":
-      if (!second) return <settings.default />;
-      return settingsScreen.default(params({ screen: second }));
-    case "design":
-      return <design.default />;
-    default:
-      throw new Error(`no page for ${path}`);
-  }
-}
 
 const AGENT = AGENT_IDS.swing;
 const CONNECTION = buildWorkspace("normal").connection.connection_id;
@@ -73,12 +32,28 @@ const CONNECTION = buildWorkspace("normal").connection.connection_id;
 /** The kill-switch and release record screens (D10, D11). */
 const STOP_RECORDS = [recordHref("kill", AGENT_IDS.btc), recordHref("release", AGENT_IDS.btc), recordHref("stop_all", CONNECTION), recordHref("close_all", CONNECTION)];
 
+const WS = buildWorkspace("normal");
+const SWING = WS.agents.find((a) => a.agent_id === AGENT)!;
+const BTC = WS.agents.find((a) => a.agent_id === AGENT_IDS.btc)!;
+const XYZ = SWING.positions.find((p) => p.instrument.symbol === "XYZ")!;
+
+/** One of each record: a stock and a crypto position, the close page, a working and a finished order, and a decision. */
+const RECORDS = [
+  positionHref(AGENT, XYZ.instrument.asset_id),
+  `${positionHref(AGENT, XYZ.instrument.asset_id)}/close`,
+  positionHref(AGENT_IDS.btc, BTC.positions[0].instrument.asset_id),
+  orderHref(AGENT, SWING.orders[0].client_order_id),
+  orderHref(AGENT, SWING.past_orders[0].client_order_id),
+  decisionHref(AGENT, WS.decisions.find((d) => d.agent_id === AGENT)!.event_id),
+];
+
 const PATHS = [
   ...SCREENS.map((s) => s.href),
   SECTION_INDEX.audit.href,
   SECTION_INDEX.workspace.href,
   ...AGENT_SECTIONS.map((s) => agentHref(AGENT, s.key)),
   `/approvals/${APPROVAL_IDS.swingXyz}`,
+  ...RECORDS,
   "/design",
   ...STOP_RECORDS,
 ];
@@ -134,13 +109,21 @@ describe("route coverage", () => {
     await expect(pageFor(`/agents/${AGENT}/nope`)).rejects.toThrow("NEXT_NOT_FOUND");
     await expect(pageFor(`/agents/${AGENT}/overview`)).rejects.toThrow("NEXT_NOT_FOUND");
   });
+
+  it("sends a record whose ID has the wrong shape to not found", async () => {
+    await expect(pageFor(`/agents/${AGENT}/positions/XYZ`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/positions/${XYZ.instrument.asset_id}/sell`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/orders/${SWING.orders[0].client_order_id.slice(4)}`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/decisions/cid_01JB5GQ`)).rejects.toThrow("NEXT_NOT_FOUND");
+    await expect(pageFor(`/agents/${AGENT}/approvals/${APPROVAL_IDS.swingXyz}`)).rejects.toThrow("NEXT_NOT_FOUND");
+  });
 });
 
 describe("titles", () => {
   const generic = /^[A-Z][a-z]+( [a-z]+)*$/;
 
   it("keeps static titles generic", () => {
-    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design]) {
+    for (const mod of [dashboard, agents, agentsNew, agent, approvals, approval, alerts, connections, audit, settings, design, positions]) {
       const title = mod.metadata.title;
       const text = typeof title === "object" && title && "absolute" in title ? title.absolute.replace(/ · Owlhead$/, "") : String(title);
       expect(text).toMatch(generic);
@@ -153,11 +136,21 @@ describe("titles", () => {
       expect(meta.title).toBe(s.label);
     }
   });
+
+  it("names records by kind, never by agent, instrument or ID", async () => {
+    const expected = [RECORD_TITLE.position, RECORD_TITLE["close-position"], RECORD_TITLE.position, RECORD_TITLE.order, RECORD_TITLE.order, RECORD_TITLE.decision];
+    for (const [i, path] of RECORDS.entries()) {
+      const [, , agentId, ...section] = path.split("/");
+      const meta = await agentSection.generateMetadata({ params: Promise.resolve({ agentId, section }) });
+      expect(meta.title, path).toBe(expected[i]);
+      expect(String(meta.title)).toMatch(generic);
+    }
+  });
 });
 
 /** PX-11, restated here without `routeNeeds`, so the two can disagree and fail. */
 function mayOpen(role: Role, path: string): boolean {
-  const stop = /\/(kill-switch|release|stop-all|close-all)$/.test(path);
+  const stop = /\/(kill-switch|release|stop-all|close-all)$/.test(path) || /^\/agents\/[^/]+\/positions\/[^/]+\/close$/.test(path);
   const auditPath = path === "/audit" || path.startsWith("/audit/");
   switch (role) {
     case "owner":
