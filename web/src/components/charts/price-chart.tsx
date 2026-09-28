@@ -83,7 +83,7 @@ export function PositionChart({ agent, position }: { agent: Agent; position: Pos
 }
 
 /** Small and neutral: the instrument today and the limit the agent proposes, nothing that steers. */
-export function ApprovalChart({ approval, className }: { approval: Approval; className?: string }) {
+export function ApprovalChart({ approval, className }: { approval: Pick<Approval, "bound" | "requested_at">; className?: string }) {
   const market = useMarket();
   const symbol = market.symbols[approval.bound.symbol];
   const points = useMemo(() => {

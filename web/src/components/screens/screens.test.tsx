@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { type ReactElement, useEffect } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentRoute from "@/app/agents/[agentId]/page";
@@ -234,9 +234,16 @@ describe("D5 inbox and D6 request", () => {
       </>
     );
 
+    const approval = findApproval(buildWorkspace("approvals"), APPROVAL_IDS.btc)!;
+    const modelLines = approval.evidence.flatMap((e) => e.lines);
+
     const closed = renderScreen(`/approvals/${APPROVAL_IDS.btc}`, both(APPROVAL_IDS.btc), "approvals");
     fireEvent.click(within(main()).getByRole("button", { name: "Approve" }));
-    expect(recordFor(APPROVAL_IDS.btc)).toEqual({ screen: "D6", modelOutputExpanded: false });
+    const first = recordFor(APPROVAL_IDS.btc);
+    expect(first).toMatchObject({ screen: "D6", environment: "paper", modelOutputExpanded: false });
+    expect(first.shown).toContain(`Why you are asked: ${approval.trigger}`);
+    expect(first.shown).toContain("If you do nothing, this action is skipped.");
+    for (const line of modelLines) expect(first.shown).not.toContain(line);
     closed.unmount();
 
     renderScreen(`/approvals/${APPROVAL_IDS.btc}`, both(APPROVAL_IDS.btc), "approvals");
@@ -244,7 +251,68 @@ describe("D5 inbox and D6 request", () => {
     fireEvent.click(view);
     fireEvent.click(view);
     fireEvent.click(within(main()).getByRole("button", { name: "Skip" }));
-    expect(recordFor(APPROVAL_IDS.btc)).toEqual({ screen: "D6", modelOutputExpanded: true });
+    const second = recordFor(APPROVAL_IDS.btc);
+    expect(second).toMatchObject({ screen: "D6", environment: "paper", modelOutputExpanded: true });
+    for (const line of modelLines) expect(second.shown).toContain(line);
+  });
+
+  it("keeps the request as the owner confirmed it, with who has approved so far as it read, and live progress outside it (§4.1)", () => {
+    function Responses() {
+      const { responses } = useRuntime();
+      return <output data-slot="responses" data-json={JSON.stringify(responses)} />;
+    }
+    renderScreen(
+      `/approvals/${APPROVAL_IDS.lmn}`,
+      <>
+        <ApprovalRequestScreen approvalId={APPROVAL_IDS.lmn} />
+        <Responses />
+      </>,
+      "approvals",
+    );
+    const record = main().querySelector<HTMLElement>("[data-slot=record]")!;
+    const confirmed = record.innerHTML;
+    const approvers = record.querySelector("[data-slot=approvers]")!.textContent!;
+    expect(approvers).toBe("Needs 2 approvers. Approved so far: Priya (approver) at 14:02:31.");
+
+    fireEvent.click(within(main()).getByRole("button", { name: "Approve" }));
+    const stored = JSON.parse(document.querySelector("[data-slot=responses]")!.getAttribute("data-json")!)[APPROVAL_IDS.lmn].record;
+    expect(stored.shown).toContain(approvers);
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS * 3));
+
+    expect(record.innerHTML).toBe(confirmed);
+    const after = main().querySelector<HTMLElement>("[data-slot=after-confirm]")!;
+    expect(record.contains(after)).toBe(false);
+    expect(within(after).getByRole("heading", { name: "After you responded" })).toBeInTheDocument();
+    expect(after).toHaveTextContent(/Approved so far: Priya \(approver\) at 14:02:31, You at \d{2}:\d{2}:\d{2}\./);
+  });
+
+  it("withdraws Approve and Skip when the request closes before a response, and keeps the request as it was shown", () => {
+    const elsewhere: { send?: ReturnType<typeof useRuntime>["send"] } = {};
+    function Elsewhere() {
+      const { send } = useRuntime();
+      useEffect(() => {
+        elsewhere.send = send;
+      }, [send]);
+      return null;
+    }
+    const approval = findApproval(buildWorkspace("approvals"), APPROVAL_IDS.btc)!;
+    renderScreen(
+      `/approvals/${APPROVAL_IDS.btc}`,
+      <>
+        <ApprovalRequestScreen approvalId={APPROVAL_IDS.btc} />
+        <Elsewhere />
+      </>,
+      "approvals",
+    );
+    const record = main().querySelector<HTMLElement>("[data-slot=record]")!;
+    const opened = record.innerHTML;
+    act(() => elsewhere.send!("pause", approval.agent_id));
+    act(() => vi.advanceTimersByTime(RECORD_AFTER_MS));
+
+    expect(record.innerHTML).toBe(opened);
+    expect(within(main()).queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(within(main()).queryByRole("button", { name: "Skip" })).toBeNull();
+    expect(within(main()).getByRole("region", { name: "Outcome" })).toHaveTextContent("Canceled: you paused the agent.");
   });
 
   it("shows nothing as approved or submitted until the runtime records it", () => {
