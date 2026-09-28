@@ -1859,6 +1859,48 @@ pub(crate) mod tests {
         Ok(())
     }
 
+    /// `agent-a`'s 10 AAPL, protected by one resting OCO (`md-oco-1`) that its lots own.
+    pub(crate) fn protected_by_an_oco(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = Executor::opened(ports)?;
+        let clock = || crate::payload::clock(crate::types::RiskClock::from_secs(0));
+        let text = |raw: &str| Value::Str(raw.to_owned());
+        executor.commit_one(
+            "OrderSubmitted",
+            object(vec![
+                ("client_order_id", text("md-buy-a")),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("10")),
+                ("limit", text("150")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            "FillApplied",
+            object(vec![
+                ("fill_id", text("f-a")),
+                ("client_order_id", text("md-buy-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty_gross", text("10")),
+                ("price", text("150")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        executor.commit_one(
+            concat!("Protection", "Changed"),
+            object(vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-oco-1")),
+                ("qty", text("10")),
+                ("risk_clock", clock()?),
+            ])?,
+        )?;
+        Ok(executor)
+    }
+
     /// Two agents' buys of 5 AAPL each, and a broker-created OCO leg for the 10 that DEC-160's
     /// rule cannot give to either.
     fn two_holders_and_an_ownerless_leg(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
