@@ -51,6 +51,9 @@ MUTANTS = {
         '            for lid in [k for k, v in holders.items() if v == th["instrument_id"] and k != th["lineage_id"]]:\n'
         '                del holders[lid]\n', ""),
     "V-040 is never raised": ('        errs.add("V-040")', '        pass'),
+    "V-040 bounds only the whole product": (
+        'if sum(-D(x["factor"]).as_tuple().exponent for x in lad if x["action"] == "scale_sizes" and x["factor"] is not None) > 12:',
+        'if not (lambda p: p == p.quantize(D("1e-12")))(__import__("math").prod([D(x["factor"]) for x in lad if x["action"] == "scale_sizes"], start=D(1))):'),
     "admission ignores the leveraged-ETP disclosure": (
         '        u["leveraged_etps_enabled"] and u["leveraged_etp_disclosure_version"] in inp.get("disclosures_accepted", []))',
         '        u["leveraged_etps_enabled"])'),
