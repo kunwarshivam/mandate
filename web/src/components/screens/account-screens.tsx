@@ -7,7 +7,8 @@ import { SourceTag } from "@/components/domain/mode";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { Timeline } from "@/components/domain/timeline";
 import type { HealthState, TimelineEvent } from "@/fixtures/types";
-import { ago, clock } from "@/lib/format";
+import { clock } from "@/lib/format";
+import { Age } from "@/components/domain/as-of";
 import { useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
@@ -32,8 +33,8 @@ function Alerts() {
               <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
               <span className="text-sm">
                 {h.state === "ok" ? null : <span className="mr-2 rounded-sm border border-foreground px-1.5 text-label">{STATE_WORD[h.state]}</span>}
-                <span className="text-muted-foreground">
-                  as of <span className="font-mono tabular">{clock(h.as_of)}</span>, {ago(h.as_of, now)}
+                <span className="whitespace-nowrap text-muted-foreground">
+                  as of <span className="font-mono tabular">{clock(h.as_of)}</span>, <Age at={h.as_of} now={now} />
                 </span>
               </span>
             </li>

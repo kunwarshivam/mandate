@@ -1,14 +1,16 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import type { HealthState, Workspace } from "@/fixtures/types";
-import { ago, clock } from "@/lib/format";
+import { clock } from "@/lib/format";
+import { Age } from "@/components/domain/as-of";
 import { FixtureTag } from "@/components/domain/placeholders";
 
 interface Item {
   key: string;
   state: HealthState | "loading";
-  text: string;
+  text: ReactNode;
 }
 
 function items(ws: Workspace, now: string): Item[] {
@@ -19,7 +21,15 @@ function items(ws: Workspace, now: string): Item[] {
   const md: Item =
     h.market_data.state === "ok"
       ? { key: "market", state: "ok", text: `Market data as of ${clock(h.market_data.as_of)}` }
-      : { key: "market", state: h.market_data.state, text: `Market data stale: as of ${clock(h.market_data.as_of)}, ${ago(h.market_data.as_of, now)}` };
+      : {
+          key: "market",
+          state: h.market_data.state,
+          text: (
+            <>
+              Market data stale: as of {clock(h.market_data.as_of)}, <Age at={h.market_data.as_of} now={now} />
+            </>
+          ),
+        };
   const deployment: Item =
     h.deployment.state === "ok"
       ? { key: "deployment", state: "ok", text: `Deployment answered at ${clock(h.deployment.as_of)}` }
@@ -46,6 +56,11 @@ const STATE_LABEL: Record<Item["state"], string | null> = {
   down: "Down",
 };
 
+/**
+ * One line at a fixed height whatever the text says: the market age changes every few seconds, and
+ * a strip that rewrapped would move the whole page. Phones scroll it sideways; wider screens clip
+ * each item with an ellipsis, healthy ones first.
+ */
 export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
   const list = items(ws, now);
   const degraded = list.filter((i) => i.state === "stale" || i.state === "down").length;
@@ -57,22 +72,26 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       data-degraded={degraded > 0 ? "" : undefined}
       tabIndex={0}
       className={cn(
-        "flex items-center gap-x-5 gap-y-1 overflow-x-auto py-2 text-caption whitespace-nowrap text-muted-foreground outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:flex-wrap sm:overflow-x-visible",
+        "flex h-9 shrink-0 items-center gap-x-5 overflow-x-auto overflow-y-hidden text-caption whitespace-nowrap text-muted-foreground tabular outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:overflow-x-hidden",
         degraded > 0 && "bg-background",
         className,
       )}
     >
       {degraded > 0 ? (
-        <span className="font-semibold text-foreground" data-slot="degraded-count">
+        <span className="shrink-0 font-semibold text-foreground" data-slot="degraded-count">
           {degraded} degraded
         </span>
       ) : null}
       {list.map((i) => {
         const label = STATE_LABEL[i.state];
         return (
-          <span key={i.key} data-state={i.state} className={cn("inline-flex items-center gap-1.5", label && "font-medium text-foreground")}>
+          <span
+            key={i.key}
+            data-state={i.state}
+            className={cn("shrink-0 sm:min-w-0 sm:truncate", label ? "font-medium text-foreground sm:shrink" : "sm:shrink-[4]")}
+          >
             {label ? (
-              <span className="rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
+              <span className="mr-1.5 rounded-sm bg-foreground px-1.5 text-xs font-semibold text-background" aria-hidden>
                 {label}
               </span>
             ) : null}
