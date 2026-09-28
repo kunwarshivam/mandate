@@ -167,8 +167,8 @@ describe("brand assets (npm run brand)", () => {
     const xs = navy.map(([x]) => x);
     const ys = navy.map(([, y]) => y);
     const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
-    expect(Math.abs(left - (1199 - right))).toBeLessThanOrEqual(30);
-    expect(Math.abs(top - (629 - bottom))).toBeLessThanOrEqual(4);
+    expect(Math.abs(left - (1199 - right))).toBeLessThanOrEqual(2);
+    expect(Math.abs(top - (629 - bottom))).toBeLessThanOrEqual(2);
     expect(navy.some(([x, y]) => x < 345 && y > 190 && y < 450)).toBe(true);
     expect(navy.some(([x, y]) => x > 445 && y > 190 && y < 312)).toBe(true);
     const ink = all.filter(([, , p]) => p.join() !== opaque(OFF_WHITE).join());
