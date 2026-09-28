@@ -20,6 +20,9 @@ afterEach(() => {
 
 const dom = typeof window !== "undefined";
 
+// jsdom runs no CSS animations, so Base UI would keep closed popups mounted waiting for their exit.
+if (dom) Object.assign(globalThis, { BASE_UI_ANIMATIONS_DISABLED: true });
+
 if (dom && !window.matchMedia) {
   Object.defineProperty(window, "matchMedia", {
     writable: true,

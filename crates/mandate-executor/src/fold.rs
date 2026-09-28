@@ -15,12 +15,13 @@ use crate::payload::{
     required_text, usd,
 };
 use crate::state::{
-    Adoption, ExecutorState, IntentOutcome, IntentRecord, ObservedAccount, OrderDetail,
+    Adoption, ExecutorState, ExitSequence, IntentOutcome, IntentRecord, ObservedAccount,
+    OrderDetail,
 };
 use crate::types::{
-    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, Order,
-    OrderState, OrderType, Protection, Purpose, RiskClock, SubmitOrder, TimeInForce,
-    UnprotectedInterval,
+    AccountState, ActivityCursor, AgentId, EventId, FillId, FoldedEvent, IntentBody, Mode, OcoLegs,
+    Order, OrderState, OrderType, Protection, ProtectionPrices, Purpose, RiskClock, SubmitOrder,
+    TimeInForce, UnprotectedInterval,
 };
 
 /// The copied cross-stream facts of journal spec §2 this crate interprets. Each carries a
@@ -343,7 +344,19 @@ fn request_of(
         limit_price: optional_price(payload, "limit")?,
         stop_price: optional_price(payload, "stop_price")?,
         bracket: None,
-        oco: None,
+        oco: match (
+            optional_text(payload, "order_class"),
+            optional_price(payload, "take_profit")?,
+            optional_price(payload, "stop")?,
+        ) {
+            (Some("oco"), Some(take_profit), Some(stop)) => Some(OcoLegs {
+                take_profit,
+                stop,
+                qty: qty(payload, "qty")?,
+            }),
+            (Some("oco"), _, _) => return Err(refused("order_class")),
+            _ => None,
+        },
         extended_hours: flag(payload, "extended_hours"),
         purpose: optional_text(payload, "purpose").map_or(Ok(Purpose::Open), purpose_of)?,
     })
@@ -469,7 +482,33 @@ fn order_state_changed(
             }
         }
     }
+    let ended = (next.is_terminal() && order.purpose == Purpose::Protective)
+        .then(|| (order.instrument.clone(), order.qty));
+    if let Some((instrument, qty)) = ended {
+        leaves_protection(state, &instrument, &id, qty);
+    }
     Ok(())
+}
+
+/// A protective order gone by any path — confirmed cancel, fill, expiry, reject — leaves its
+/// instrument's protection with the quantity it covered, and the protection goes with its last
+/// order (§5.4), so nothing waits on, or counts, an order the broker no longer holds.
+fn leaves_protection(
+    state: &mut ExecutorState,
+    instrument: &InstrumentId,
+    id: &ClientOrderId,
+    qty: Qty,
+) {
+    let Some(protection) = state.protection.get_mut(instrument) else {
+        return;
+    };
+    if protection.resting.contains(id) {
+        protection.resting.retain(|resting| resting != id);
+        protection.covered_qty = protection.covered_qty.checked_sub(qty).unwrap_or(Qty::ZERO);
+    }
+    if protection.resting.is_empty() {
+        state.protection.remove(instrument);
+    }
 }
 
 /// `OrderAbandoned` ends an intent. An intent abandoned before it was ever submitted has no order
@@ -676,10 +715,12 @@ fn protection_changed(
     at: RiskClock,
 ) -> Result<(), ExecutorError> {
     let instrument = instrument(payload)?;
-    match required_text(payload, "action")? {
+    let action = required_text(payload, "action")?;
+    match action {
         "placed" => {
             let orders = protective_orders(payload)?;
             let covered = qty(payload, "qty")?;
+            let prices = prices_of(payload)?;
             legs(state, &instrument, &orders, covered, created_on(payload)?);
             let protection = state
                 .protection
@@ -688,8 +729,10 @@ fn protection_changed(
                     instrument,
                     resting: Vec::new(),
                     covered_qty: Qty::ZERO,
+                    prices: None,
                 });
             protection.resting.extend(orders);
+            protection.prices = prices.or(protection.prices);
             protection.covered_qty = protection.covered_qty.checked_add(covered)?;
         }
         "cancelled" => {
@@ -708,24 +751,60 @@ fn protection_changed(
                 }
             }
         }
-        "unprotected_start" => state.unprotected.push(UnprotectedInterval {
-            instrument,
-            started_at: at,
-            ended_at: None,
-            alerted: false,
-        }),
-        "unprotected_end" => {
+        "unprotected_start" => {
+            if let (Some(intent), Some(entry), Some(agent)) = (
+                optional_text(payload, "intent_id"),
+                optional_text(payload, "entry"),
+                optional_text(payload, "agent"),
+            ) {
+                let prices = prices_of(payload)?;
+                state.exiting.insert(
+                    instrument.clone(),
+                    ExitSequence {
+                        intent: IntentId(EventId(intent.to_owned())),
+                        entry: ClientOrderId::parse(entry)?,
+                        agent: AgentId(agent.to_owned()),
+                        prices,
+                    },
+                );
+            }
+            state.unprotected.push(UnprotectedInterval {
+                instrument,
+                started_at: at,
+                ended_at: None,
+                alerted: false,
+            });
+        }
+        "interval_limit" | "unprotected_end" => {
+            let ends = action == "unprotected_end";
+            if ends {
+                state.exiting.remove(&instrument);
+            }
             if let Some(open) = state
                 .unprotected
                 .iter_mut()
                 .find(|interval| interval.instrument == instrument && interval.ended_at.is_none())
             {
-                open.ended_at = Some(at);
+                if ends {
+                    open.ended_at = Some(at);
+                } else {
+                    open.alerted = true;
+                }
             }
         }
         _ => return Err(refused("action")),
     }
     Ok(())
+}
+
+/// The prices a `ProtectionChanged` names: its stop and, unless crypto's, its take-profit.
+fn prices_of(payload: &Value) -> Result<Option<ProtectionPrices>, ExecutorError> {
+    optional_price(payload, "stop")?
+        .map(|stop| {
+            let take_profit = optional_price(payload, "take_profit")?;
+            Ok(ProtectionPrices { stop, take_profit })
+        })
+        .transpose()
 }
 
 /// DEC-160's leg-agent rule (trading-domain spec §2.3, §5.4): a protective order the broker
@@ -1545,7 +1624,7 @@ mod buying_power_tests {
 mod protection_tests {
     use mandate_accounting::{InstrumentId, Side};
     use mandate_canon::Value;
-    use mandate_num::{Qty, Usd};
+    use mandate_num::{Price, Qty, Usd};
     use mandate_time::Date;
 
     use super::fold;
@@ -1554,8 +1633,8 @@ mod protection_tests {
     use crate::payload::{clock, object, text};
     use crate::state::ExecutorState;
     use crate::types::{
-        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OrderState, Purpose, RiskClock,
-        Seq, WorkspaceId,
+        AccountRef, AccountScope, AgentId, EventId, FoldedEvent, OrderState, ProtectionPrices,
+        Purpose, RiskClock, Seq, WorkspaceId,
     };
 
     /// One paper account stream, folded event by event.
@@ -1739,6 +1818,64 @@ mod protection_tests {
             assert_eq!(stream.state.reservations.get(&id(leg)?), Some(&Usd::ZERO));
         }
         assert!(ownerless(&stream).is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn a_placement_folds_its_prices_and_a_later_one_without_prices_keeps_them()
+    -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        let aapl = aapl()?;
+        stream.bought("agent-a", "md-buy-1", "10")?;
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-oco-1")),
+                ("qty", text("6")),
+                ("take_profit", text("170")),
+                ("stop", text("140")),
+            ],
+            None,
+        )?;
+        let placed = Some(ProtectionPrices {
+            stop: Price::parse("140")?,
+            take_profit: Some(Price::parse("170")?),
+        });
+        let prices = |stream: &Stream| {
+            stream
+                .state
+                .protection
+                .get(&aapl)
+                .and_then(|protection| protection.prices)
+        };
+        assert_eq!(prices(&stream), placed);
+        stream.protection("placed", "md-oco-2", "4")?;
+        assert_eq!(
+            prices(&stream),
+            placed,
+            "a placement that names no stop keeps the prices it cannot replace"
+        );
+        stream.fold(
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text("md-sl-3")),
+                ("qty", text("1")),
+                ("stop", text("135")),
+            ],
+            None,
+        )?;
+        assert_eq!(
+            prices(&stream),
+            Some(ProtectionPrices {
+                stop: Price::parse("135")?,
+                take_profit: None,
+            }),
+            "the latest placement's own prices, a stop without a take-profit included"
+        );
         Ok(())
     }
 
@@ -2013,6 +2150,35 @@ mod protection_tests {
             })
         );
         assert_eq!(stream.state, before, "and nothing is folded");
+        Ok(())
+    }
+
+    /// §5.4's bound alerts one instrument's open interval, never another's.
+    #[test]
+    fn an_interval_limit_marks_only_its_own_open_interval() -> Result<(), ExecutorError> {
+        let mut stream = Stream::opened()?;
+        for (instrument, action) in [
+            ("MSFT", "unprotected_start"),
+            ("AAPL", "unprotected_start"),
+            ("AAPL", "interval_limit"),
+        ] {
+            stream.fold(
+                concat!("Protection", "Changed"),
+                vec![
+                    ("instrument", text(instrument)),
+                    ("action", text(action)),
+                    ("orders", text("")),
+                ],
+                None,
+            )?;
+        }
+        let alerted: Vec<(&str, bool)> = stream
+            .state
+            .unprotected
+            .iter()
+            .map(|interval| (interval.instrument.as_str(), interval.alerted))
+            .collect();
+        assert_eq!(alerted, vec![("MSFT", false), ("AAPL", true)]);
         Ok(())
     }
 

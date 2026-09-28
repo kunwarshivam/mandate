@@ -1,33 +1,63 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { Fingerprint } from "@phosphor-icons/react";
+import { Fingerprint, X } from "@phosphor-icons/react";
+
+export type PasskeyResult = "verified" | "failed";
 
 /**
- * G3: a mocked passkey check. The real one is a WebAuthn assertion bound to this one action; here
- * the "passkey" answers after a short wait. Cancelling means the action did not happen. Built on the
- * Base UI primitive because Kumo's Dialog cannot aim initial focus at the popup, and focus must land
- * on the dialog itself, never on an action.
+ * One passkey request bound to one action. It calls `answer` at most once and returns a function
+ * that abandons the request; after that, `answer` is never called.
+ */
+export type Passkey = (action: string, answer: (result: PasskeyResult) => void) => () => void;
+
+export const PASSKEY_ANSWER_MS = 900;
+
+/** The real check is a WebAuthn assertion; this one verifies after a short wait. */
+export const mockPasskey: Passkey = (_action, answer) => {
+  const id = window.setTimeout(() => answer("verified"), PASSKEY_ANSWER_MS);
+  return () => window.clearTimeout(id);
+};
+
+export const PasskeyContext = createContext<Passkey>(mockPasskey);
+
+/**
+ * G3. Cancelled or failed means the action did not happen: only a verified answer to the request
+ * still in flight reaches `onVerified`. Built on the Base UI primitive because Kumo's Dialog cannot
+ * aim initial focus at the popup, and focus must land on the dialog itself, never on an action.
  */
 export function StepUpDialog({
   action,
   open,
   onVerified,
   onCancel,
-  verifyAfterMs = 900,
+  onFailed,
 }: {
   action: string;
   open: boolean;
   onVerified: () => void;
   onCancel: () => void;
-  verifyAfterMs?: number;
+  onFailed: () => void;
 }) {
+  const passkey = useContext(PasskeyContext);
   const [waiting, setWaiting] = useState(false);
   const popupRef = useRef<HTMLDivElement>(null);
-  const timer = useRef<number | undefined>(undefined);
+  const abandon = useRef<(() => void) | null>(null);
 
-  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const [shownOpen, setShownOpen] = useState(open);
+  if (open !== shownOpen) {
+    setShownOpen(open);
+    if (!open) setWaiting(false);
+  }
+
+  useEffect(() => () => abandon.current?.(), []);
+
+  useEffect(() => {
+    if (open) return;
+    abandon.current?.();
+    abandon.current = null;
+  }, [open]);
 
   const focusOnMount = (node: HTMLDivElement | null) => {
     popupRef.current = node;
@@ -35,17 +65,29 @@ export function StepUpDialog({
   };
 
   const cancel = () => {
-    window.clearTimeout(timer.current);
+    abandon.current?.();
+    abandon.current = null;
     setWaiting(false);
     onCancel();
   };
 
   const verify = () => {
-    setWaiting(true);
-    timer.current = window.setTimeout(() => {
+    if (abandon.current) return;
+    let live = true;
+    const release = passkey(action, (result) => {
+      if (!live) return;
+      live = false;
+      abandon.current = null;
       setWaiting(false);
-      onVerified();
-    }, verifyAfterMs);
+      if (result === "verified") onVerified();
+      else onFailed();
+    });
+    if (!live) return;
+    setWaiting(true);
+    abandon.current = () => {
+      live = false;
+      release();
+    };
   };
 
   return (
@@ -59,13 +101,19 @@ export function StepUpDialog({
           className="fixed top-1/2 left-1/2 z-[60] grid w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 gap-4 border-2 border-foreground bg-card p-4 text-foreground outline-none"
         >
           <div className="grid gap-1.5">
-            <Dialog.Title className="flex items-center gap-2 text-title">
+            <Dialog.Title className="flex items-center gap-2 pr-10 text-title">
               <Fingerprint className="size-6 shrink-0 text-lapis" aria-hidden />
               Confirm it is you
             </Dialog.Title>
             <Dialog.Description className="text-sm text-muted-foreground">
               Use your passkey to authorize this one action. Paper account; simulated funds.
             </Dialog.Description>
+            <Dialog.Close
+              aria-label="Close"
+              className="absolute top-2 right-2 grid size-11 place-items-center outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
+            >
+              <X className="size-5" aria-hidden />
+            </Dialog.Close>
           </div>
           <p className="border-t-2 border-foreground bg-muted px-3 py-2.5 font-bold text-foreground" data-slot="step-up-action">
             {action}

@@ -34,7 +34,6 @@ fn dec(text: &str) -> PolicyValue {
 
 /// MC-P01: the organization allows 0.1 and the workspace 0.08, and the mandate asks for 0.09. Both are ancestors; the workspace is the one that binds, and the one an author has to argue with.
 #[test]
-#[ignore = "pending E10-1"]
 fn a_violation_names_the_nearest_broken_ancestor() {
     let document = with_all(&[
         ("/risk/max_drawdown", Some(s("0.09"))),
@@ -68,7 +67,6 @@ fn a_violation_names_the_nearest_broken_ancestor() {
 
 /// A stricter mandate value can only stay conformant.
 #[test]
-#[ignore = "pending E10-1"]
 fn tightening_a_key_never_creates_a_violation() {
     let mandate = Mandate::parse(&base()).expect("the base parses");
     let chain = [platform_base().expect("the platform base")];
@@ -101,7 +99,6 @@ fn tightening_a_key_never_creates_a_violation() {
 ///
 /// A set is a subset.
 #[test]
-#[ignore = "pending E10-1"]
 fn each_key_kind_compares_in_its_own_direction() {
     let mandate = Mandate::parse(&base()).expect("the base parses");
     let too_loose_max = [
@@ -183,7 +180,6 @@ fn each_key_kind_compares_in_its_own_direction() {
 ///
 /// Every other key: a level that states nothing constrains nothing.
 #[test]
-#[ignore = "pending E10-1"]
 fn absence_constrains_nothing_except_where_no_limit_is_looser_than_any_limit() {
     for key in [PolicyKey::TwoApproverAboveUsd, PolicyKey::StopDistanceMax] {
         assert!(
@@ -222,7 +218,6 @@ fn absence_constrains_nothing_except_where_no_limit_is_looser_than_any_limit() {
 
 /// §4.3's runtime overlay: when an ancestor turns `auto_allowed` off, every `auto` evaluates as `ask` at the next evaluation. That is a tightening the order path applies on its own.
 #[test]
-#[ignore = "pending E10-1"]
 fn the_overlay_narrows_auto_to_ask_without_a_new_version() {
     let mandate = Mandate::parse(&base()).expect("the base parses");
     let forbidden = [
@@ -235,22 +230,23 @@ fn the_overlay_narrows_auto_to_ask_without_a_new_version() {
     let result = check(&mandate, &forbidden).expect("evaluable");
     assert!(!result.overlay.auto_allowed());
     assert_eq!(
-        result
-            .overlay
-            .narrow(mandate_domain::AutonomyDecision::Auto),
+        result.overlay.narrow(
+            mandate_spec::policy::AddingPurpose::Open,
+            mandate_domain::AutonomyDecision::Auto
+        ),
         mandate_domain::AutonomyDecision::Ask
     );
     assert_eq!(
-        result
-            .overlay
-            .narrow(mandate_domain::AutonomyDecision::Deny),
+        result.overlay.narrow(
+            mandate_spec::policy::AddingPurpose::Open,
+            mandate_domain::AutonomyDecision::Deny
+        ),
         mandate_domain::AutonomyDecision::Deny,
         "and it never loosens a deny"
     );
 }
 
 #[test]
-#[ignore = "pending E10-1"]
 fn the_platform_base_and_the_two_profiles_carry_the_values_the_spec_states() {
     let base_level = platform_base().expect("the platform base");
     assert_eq!(base_level.name, LevelName::Platform);

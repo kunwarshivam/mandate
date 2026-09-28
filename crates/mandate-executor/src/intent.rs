@@ -10,7 +10,7 @@ use crate::error::ExecutorError;
 use crate::gate::{Proposal, account_stream_checks};
 use crate::ids::{ClientOrderId, IntentId};
 use crate::payload::{int, text};
-use crate::protection::sequenced;
+use crate::protection::{awaits_cancel, begin_exit, exit_limit, sequenced};
 use crate::state::IntentOutcome;
 use crate::types::{
     AgentId, BrokerRequest, IntentBody, IntentHandoff, OrderType, SubmitOrder, TimeInForce,
@@ -77,6 +77,7 @@ pub(crate) fn gate_and_submit(
     if too_old(batch, intent) {
         return abandon(batch, intent, "intent_too_old");
     }
+    begin_exit(batch, intent)?;
     if gate(batch, intent, true)? == ALLOW {
         submit(batch, intent)?;
     }
@@ -137,7 +138,7 @@ fn gate(
     Ok(verdict)
 }
 
-fn intent_of(
+pub(crate) fn intent_of(
     batch: &Batch<'_, '_>,
     intent: &IntentId,
 ) -> Result<(AgentId, IntentBody), ExecutorError> {
@@ -165,7 +166,11 @@ fn submit(batch: &mut Batch<'_, '_>, intent: &IntentId) -> Result<(), ExecutorEr
     else {
         return Ok(());
     };
+    if awaits_cancel(&batch.view, &instrument, purpose) {
+        return Ok(());
+    }
     sequenced(&batch.view, &instrument, purpose)?;
+    let limit = exit_limit(batch, &instrument, purpose, limit)?;
     let tif = match batch.ports.instruments.asset_class(&instrument) {
         Some(AssetClass::Crypto) => TimeInForce::Gtc,
         _ => TimeInForce::Day,
@@ -197,6 +202,19 @@ pub(crate) fn send(
     agent: &AgentId,
     attempt: u32,
 ) -> Result<(), ExecutorError> {
+    journal_submission(batch, &request, intent, agent, attempt)?;
+    batch.broker(BrokerRequest::Submit(request));
+    Ok(())
+}
+
+/// `OrderSubmitted` for `request`, before a sequence records more and then sends it.
+pub(crate) fn journal_submission(
+    batch: &mut Batch<'_, '_>,
+    request: &SubmitOrder,
+    intent: Option<&IntentId>,
+    agent: &AgentId,
+    attempt: u32,
+) -> Result<(), ExecutorError> {
     let mut pairs = vec![
         ("client_order_id", text(request.client_order_id.as_str())),
         ("agent", text(agent.0.clone())),
@@ -218,8 +236,12 @@ pub(crate) fn send(
     if let Some(stop) = request.stop_price {
         pairs.push(("stop_price", text(stop.to_string())));
     }
+    if let Some(oco) = &request.oco {
+        pairs.push(("order_class", text("oco")));
+        pairs.push(("take_profit", text(oco.take_profit.to_string())));
+        pairs.push(("stop", text(oco.stop.to_string())));
+    }
     batch.journal("OrderSubmitted", None, pairs)?;
-    batch.broker(BrokerRequest::Submit(request));
     Ok(())
 }
 
@@ -354,7 +376,9 @@ mod sequence_call_tests {
     use crate::reconcile::tests::{
         Everything, Ids, executor_config, fees, protected_by_an_oco, submitted,
     };
-    use crate::types::{AgentId, EventId, Input, IntentBody, IntentHandoff, Purpose, RiskClock};
+    use crate::types::{
+        AgentId, EventId, Input, IntentBody, IntentHandoff, MarketObservation, Purpose, RiskClock,
+    };
 
     fn exit(intent: &str) -> Result<Input, ExecutorError> {
         Ok(Input::Intent(IntentHandoff {
@@ -371,12 +395,12 @@ mod sequence_call_tests {
         }))
     }
 
-    /// #258 round 1, major 1; DEC-160 4. `submit` asks `sequenced` before any exit in a
-    /// protected instrument goes out, so an exit there is never sent beside the resting legs: it
-    /// answers the loud stub instead, which slice 3a replaces with the sequence. That stub is a
-    /// denied exit once reachable, which is why nothing creates protection before exits through it
-    /// work (`AGENTS.md` rule 13, DEC-160 4). Once no protective order rests, the same exit is
-    /// submitted.
+    /// #258 round 1, major 1; DEC-160 4. `submit` asks `sequenced` before an exit in a protected
+    /// instrument goes out, so one no sequence runs for — after slice 3a, a passive exit, a sell
+    /// limit above the latest bid — is never sent beside the resting legs: it answers the loud stub
+    /// slice 3b replaces. That stub is a denied exit once reachable, which is why nothing creates
+    /// protection before exits through it work (`AGENTS.md` rule 13, DEC-160 4). Once no
+    /// protective order rests, the same exit is submitted.
     #[test]
     fn an_exit_where_protection_rests_answers_the_sequence_stub() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -388,6 +412,20 @@ mod sequence_call_tests {
             fees: &fees,
         };
         let mut executor = protected_by_an_oco(&ports)?;
+        let bid = Price::parse("149")?;
+        executor.run(
+            Input::Market(MarketObservation {
+                instrument: InstrumentId::new("AAPL")?,
+                bid: Some(bid),
+                bid_size: Some(Qty::parse("100")?),
+                ask: Some(bid),
+                last_trade: Some(bid),
+                mark: Some(bid),
+                sane: true,
+                observed_at: RiskClock::from_secs(0),
+            }),
+            &ports,
+        )?;
         assert_eq!(
             executor.run(exit("01JABCDEFGHJKMNPQRSTVWXYZ1")?, &ports),
             Err(ExecutorError::Unimplemented { story: "E7-4" })

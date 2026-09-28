@@ -262,7 +262,6 @@ impl AdmitCase {
 
 /// EI-10, EI-11, EI-14, EI-15, EI-16, DEC-156 item 2: admission is the brief's check table.
 #[test]
-#[ignore = "pending E8-3"]
 fn admission_matches_the_check_table() {
     check(admit_case(), |case| {
         let (r, resp, c) = case.build();
@@ -275,7 +274,6 @@ fn admission_matches_the_check_table() {
 /// EI-2, EI-15: across dropped, duplicated, and out-of-order ticks, nothing at or after the
 /// deadline by the accumulator's own clock is admitted, and a valid response before it is.
 #[test]
-#[ignore = "pending E8-3"]
 fn silence_and_lateness_never_admit() {
     let steps = prop::collection::vec((prop::bool::ANY, -60i64..120), 1..20);
     check(steps, |steps| {
@@ -307,7 +305,6 @@ fn silence_and_lateness_never_admit() {
 
 /// EI-10: across every actor kind and responder, only a listed user is admitted.
 #[test]
-#[ignore = "pending E8-3"]
 fn only_a_listed_user_is_admitted() {
     let kinds = prop::sample::select(vec![
         ActorKind::System,
@@ -337,7 +334,6 @@ fn only_a_listed_user_is_admitted() {
 
 /// EI-11: an assertion is admitted once per workspace, and only inside its window.
 #[test]
-#[ignore = "pending E8-3"]
 fn an_assertion_is_admitted_once_and_only_inside_its_window() {
     let grants = prop::collection::vec((0u8..4, -320i64..10), 1..16);
     check(grants, |grants| {
@@ -513,7 +509,6 @@ impl RevalidateCase {
 /// EI-5 and EI-4: re-validation acts only when every check passes, with drift judged on integers,
 /// and the act is the bound order field for field.
 #[test]
-#[ignore = "pending E8-3"]
 fn revalidation_acts_only_when_every_check_passes_and_never_widens() {
     check(revalidate_case(), |case| {
         let mut r = request();
@@ -568,7 +563,6 @@ fn evidence_shape() -> impl Strategy<Value = (Option<StepUp>, bool, Vec<u8>)> {
 /// EI-8, EI-11, PB-14b, DEC-158 option (c): whatever its evidence, a kill switch stops and
 /// flattens; only valid evidence at commit adds the owner-exit privileges.
 #[test]
-#[ignore = "pending E8-3"]
 fn a_kill_switch_is_never_refused_whatever_its_evidence() {
     check(evidence_shape(), |(evidence, live, used)| {
         let used: BTreeSet<AssertionId> = used.into_iter().map(assertion).collect();
@@ -591,7 +585,6 @@ fn a_kill_switch_is_never_refused_whatever_its_evidence() {
 /// PX-4, DEC-156 item 8, EI-11: pause always applies; resume, Stop, and acknowledge are judged
 /// when processed; an owner exit when committed.
 #[test]
-#[ignore = "pending E8-3"]
 fn owner_commands_match_the_freshness_table() {
     let kinds = prop::sample::select(vec![
         OwnerCommandKind::Pause,

@@ -48,7 +48,14 @@ impl<'p, 'a> Batch<'p, 'a> {
     /// The id the next draft will carry: `(epoch, head, ordinal)`, so a retry of the same batch
     /// at the same head derives the same ids and the append answers `AlreadyCommitted`.
     pub(crate) fn next_id(&self) -> EventId {
-        self.ports.ids.event_id(self.epoch, self.head, self.drafted)
+        self.id_after(0)
+    }
+
+    /// The id of the draft `later` places after the next, for a record naming a later event.
+    pub(crate) fn id_after(&self, later: u32) -> EventId {
+        self.ports
+            .ids
+            .event_id(self.epoch, self.head, self.drafted.saturating_add(later))
     }
 
     /// Drafts one account-stream event stamped with the batch's risk clock, folds it into the

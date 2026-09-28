@@ -1,4 +1,3 @@
-import type { ComponentType } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as agentsNew from "@/app/agents/new/page";
@@ -6,28 +5,13 @@ import * as agents from "@/app/agents/page";
 import * as approvals from "@/app/approvals/page";
 import * as audit from "@/app/audit/page";
 import * as design from "@/app/design/page";
-import ErrorScreen from "@/app/error";
-import Loading from "@/app/loading";
-import NotFound from "@/app/not-found";
 import * as dashboard from "@/app/page";
 import * as settings from "@/app/settings/page";
 import { SCENARIOS } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
+import { ROUTES } from "@/test/routes";
 import { AppShell } from "./app-shell";
-
-const ROUTES: Array<[string, ComponentType]> = [
-  ["/", dashboard.default],
-  ["/agents", agents.default],
-  ["/agents/new", agentsNew.default],
-  ["/approvals", approvals.default],
-  ["/audit", audit.default],
-  ["/settings", settings.default],
-  ["/design", design.default],
-  ["/loading", Loading],
-  ["/not-found", NotFound],
-  ["/error", () => <ErrorScreen error={new Error("render failed")} reset={() => {}} />],
-];
 
 const SCENARIO_IDS = SCENARIOS.map((s) => s.id);
 
