@@ -294,7 +294,10 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   gate's call site), `crates/mandate-executor/src/ports.rs`, `crates/mandate-executor/src/error.rs`;
   `crates/mandate-alpaca/src/http.rs` (the paper host, the endpoint allowlist, `secrecy`-held
   credentials), `crates/mandate-alpaca/src/wire.rs`, `crates/mandate-alpaca/src/client.rs`,
-  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`.
+  `crates/mandate-alpaca/src/record.rs` (the redaction pass), `crates/mandate-alpaca/src/error.rs`,
+  and E7-8's reference-data reads (DEC-168): `crates/mandate-alpaca/src/read.rs` (the asset record
+  and the latest quote as exact values, and their refusals) and `crates/mandate-alpaca/src/data.rs`
+  (the data host's own request type and transport trait).
   In prose: `mandate-executor` (`fold` and `handle` over the account stream, the intent protocol,
   `ClientOrderId` with three derivations and no free constructor, the section 5.7 order state machine,
   reservations released by the whole terminal set, the protective sequences and the exit ladder,
@@ -316,7 +319,9 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `crates/mandate-alpaca/tests/hand.rs`, `crates/mandate-alpaca/tests/properties.rs`,
   `crates/mandate-alpaca/tests/fixtures.rs`, `crates/mandate-alpaca/tests/common/mod.rs`,
   `crates/mandate-alpaca/tests/fixtures/record.sh`, and the recorded scenarios under
-  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`. In prose: the hand cases of the brief
+  `crates/mandate-alpaca/tests/fixtures/alpaca-trading/`; for E7-8,
+  `crates/mandate-alpaca/tests/reads.rs` and the latest-quote scenarios under
+  `crates/mandate-alpaca/tests/fixtures/alpaca-data/`. In prose: the hand cases of the brief
   (the submission chain, the `Unknown` lookup discipline, the
   status mapping, the protective and kill-switch sequences, the ladder, the restriction table, error
   codes), twelve `fault::crash_at_*` cases at the enumerated submission steps, and property tests
