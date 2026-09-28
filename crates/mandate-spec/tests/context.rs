@@ -9,14 +9,14 @@ mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use common::{b, s, with, with_all};
+use common::{b, base, s, with, with_all};
 use mandate_canon::Digest;
 use mandate_domain::{AssetId, Environment};
 use mandate_num::{NumError, Usd};
 use mandate_spec::context::{AgentId, ContextArgs, JournaledFact, LOSS_CARRY_DAYS, Membership};
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::validate::{GroupId, PreviousVersion, RegisteredModel, validate};
-use mandate_spec::{Mandate, SpecError, ValidationContext};
+use mandate_spec::{Mandate, SpecError, ValidationContext, Violation};
 use mandate_time::Date;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
@@ -78,7 +78,7 @@ fn args() -> ContextArgs {
         agent: agent("a"),
         connection_id: conn(OURS),
         validation_date: date("2026-09-24"),
-        provenance: ProvenanceMap::default(),
+        provenance: owner_confirmed_everything(),
         membership: Some(Membership {
             workspace_users: 1,
             approver_users: 1,
@@ -88,8 +88,24 @@ fn args() -> ContextArgs {
     }
 }
 
+/// One entry at the document root: the owner entered and confirmed every field.
+fn owner_confirmed_everything() -> ProvenanceMap {
+    ProvenanceMap::new(BTreeMap::from([(
+        Pointer::new(""),
+        Provenance {
+            source: Source::UserEntered,
+            confirmed: true,
+        },
+    )]))
+}
+
+/// The draft every fold test validates for: the common base.
+fn draft() -> Mandate {
+    Mandate::parse(&base()).expect("the base parses")
+}
+
 fn fold(facts: &[JournaledFact]) -> ValidationContext {
-    ValidationContext::from_journal(args(), facts).expect("the facts fold")
+    ValidationContext::from_journal(&draft(), args(), facts).expect("the facts fold")
 }
 
 fn snapshot(connection: &str, equity: &str) -> JournaledFact {
@@ -352,7 +368,7 @@ fn membership_is_what_the_identity_service_supplied_and_zero_without_it() {
         workspace_users: 3,
         approver_users: 2,
     });
-    let read = ValidationContext::from_journal(two, &facts).expect("the facts fold");
+    let read = ValidationContext::from_journal(&draft(), two, &facts).expect("the facts fold");
     assert_eq!(
         (
             read.workspace_users,
@@ -363,7 +379,7 @@ fn membership_is_what_the_identity_service_supplied_and_zero_without_it() {
     );
     let mut none = args();
     none.membership = None;
-    let read = ValidationContext::from_journal(none, &facts).expect("the facts fold");
+    let read = ValidationContext::from_journal(&draft(), none, &facts).expect("the facts fold");
     assert_eq!(
         (
             read.workspace_users,
@@ -380,7 +396,7 @@ fn the_owners_arguments_reach_the_context_unchanged() {
     let mut given = args();
     given.validation_date = date("2026-10-01");
     given.provenance = ProvenanceMap::new(BTreeMap::from([(
-        Pointer::new("/name"),
+        Pointer::new(""),
         Provenance {
             source: Source::PlatformDefault,
             confirmed: false,
@@ -388,7 +404,7 @@ fn the_owners_arguments_reach_the_context_unchanged() {
     )]));
     given.instrument_groups = BTreeMap::from([(asset(X), GroupId::new("sp500"))]);
     given.eligibility_failures = assets(&[Y]);
-    let read = ValidationContext::from_journal(given.clone(), &[snapshot(OURS, "7")])
+    let read = ValidationContext::from_journal(&draft(), given.clone(), &[snapshot(OURS, "7")])
         .expect("the facts fold");
     assert_eq!(read.validation_date, given.validation_date);
     assert_eq!(read.provenance, given.provenance);
@@ -402,10 +418,119 @@ fn the_owners_arguments_reach_the_context_unchanged() {
 fn a_sum_the_arithmetic_cannot_hold_is_an_error() {
     let most = "79228162514264337593543950335";
     let facts = [active("b", OURS, most, &[]), active("c", OURS, most, &[])];
-    match ValidationContext::from_journal(args(), &facts) {
+    match ValidationContext::from_journal(&draft(), args(), &facts) {
         Err(SpecError::Num(NumError::Overflow)) => {}
         other => panic!("expected an overflow, got {other:?}"),
     }
+}
+
+fn entry(source: Source, confirmed: bool) -> Provenance {
+    Provenance { source, confirmed }
+}
+
+/// DEC-169 item 5 (the coordinator's ruling on #252): the draft's provenance is kept as given, and
+/// every part of the document no entry covers is added as `user_entered` and unconfirmed. The walk
+/// stops at a covered path, descends only where an entry lies below, and never adds the system fields.
+#[test]
+#[ignore = "pending E10-1"]
+fn an_unmentioned_envelope_path_is_added_unconfirmed() {
+    let mut given = args();
+    given.provenance = ProvenanceMap::new(BTreeMap::from([
+        (
+            Pointer::new("/risk/max_drawdown"),
+            entry(Source::UserEntered, true),
+        ),
+        (
+            Pointer::new("/behavior/signal_models/0/weight"),
+            entry(Source::UserStated, true),
+        ),
+        (
+            Pointer::new("/notifications"),
+            entry(Source::PlatformDefault, true),
+        ),
+    ]));
+    let read = ValidationContext::from_journal(&draft(), given.clone(), &[snapshot(OURS, "1")])
+        .expect("the facts fold");
+    let entries = read.provenance.entries();
+    for (path, kept) in given.provenance.entries() {
+        assert_eq!(entries.get(path), Some(kept), "`{path}` is kept as given");
+    }
+    let unconfirmed = entry(Source::UserEntered, false);
+    for added in [
+        "/risk/max_daily_loss",
+        "/risk/drawdown_ladder",
+        "/behavior/signal_models/0/id",
+        "/behavior/signal_models/0/params",
+        "/behavior/description",
+        "/autonomy",
+        "/capital",
+        "/name",
+    ] {
+        assert_eq!(
+            entries.get(&Pointer::new(added)),
+            Some(&unconfirmed),
+            "`{added}` is mentioned by no entry"
+        );
+    }
+    for absent in [
+        "",
+        "/risk",
+        "/behavior",
+        "/behavior/signal_models",
+        "/behavior/signal_models/0",
+        "/notifications/channels",
+        "/mandate_schema_version",
+        "/source_text_ref",
+    ] {
+        assert!(
+            !entries.contains_key(&Pointer::new(absent)),
+            "`{absent}` is covered, holds an entry below it, or is a system field"
+        );
+    }
+    assert_eq!(
+        read.account_equity_usd,
+        usd("1"),
+        "and the facts are still read"
+    );
+}
+
+/// The coordinator's test on #252: a document with `admission: auto` and no provenance entries is
+/// refused with V-022 (and V-020), where `ProvenanceMap::at`'s default alone would pass it.
+#[test]
+#[ignore = "pending E10-1"]
+fn auto_with_no_provenance_is_v022() {
+    let mandate =
+        Mandate::parse(&with("/autonomy/admission", Some(s("auto")))).expect("the document parses");
+    let mut given = args();
+    given.provenance = ProvenanceMap::default();
+    let facts = [
+        snapshot(OURS, "25000"),
+        established(OURS, Environment::Paper),
+        JournaledFact::ModelRegistered {
+            id: model_id("quant.momentum"),
+            model: momentum("1.0.0"),
+        },
+    ];
+    let context = ValidationContext::from_journal(&mandate, given, &facts).expect("the facts fold");
+    let report = validate(&mandate, &context).expect("the mandate is evaluable");
+    for code in [Violation::V020, Violation::V022] {
+        assert!(
+            report.violations.contains(&code),
+            "{code} must be reported, got {:?}",
+            report.violations
+        );
+    }
+    let mut confirmed = args();
+    confirmed.provenance = owner_confirmed_everything();
+    let context =
+        ValidationContext::from_journal(&mandate, confirmed, &facts).expect("the facts fold");
+    assert!(
+        validate(&mandate, &context)
+            .expect("the mandate is evaluable")
+            .violations
+            .is_empty(),
+        "the same draft, confirmed by its owner, breaks nothing"
+    );
 }
 
 /// The base mandate with leveraged ETPs on, so the disclosure is one of the facts it needs.
@@ -439,6 +564,7 @@ fn required_facts() -> Vec<(&'static str, Option<JournaledFact>)> {
             }),
         ),
         ("membership", None),
+        ("provenance", None),
     ]
 }
 
@@ -460,7 +586,11 @@ fn with_every_fact_the_base_is_valid_and_without_any_one_it_is_refused() {
         if left_out == "membership" {
             given.membership = None;
         }
-        let context = ValidationContext::from_journal(given, &facts).expect("the facts fold");
+        if left_out == "provenance" {
+            given.provenance = ProvenanceMap::default();
+        }
+        let context =
+            ValidationContext::from_journal(&mandate, given, &facts).expect("the facts fold");
         let report = validate(&mandate, &context).expect("the mandate is evaluable");
         assert!(
             !report.violations.is_empty(),
@@ -471,7 +601,8 @@ fn with_every_fact_the_base_is_valid_and_without_any_one_it_is_refused() {
         .into_iter()
         .filter_map(|(_, fact)| fact)
         .collect();
-    let context = ValidationContext::from_journal(args(), &facts).expect("the facts fold");
+    let context =
+        ValidationContext::from_journal(&mandate, args(), &facts).expect("the facts fold");
     let report = validate(&mandate, &context).expect("the mandate is evaluable");
     assert!(
         report.violations.is_empty(),
@@ -714,7 +845,7 @@ fn the_fold_agrees_with_an_oracle_that_reads_the_journal_backwards() {
     let mut runner = TestRunner::default();
     let outcome = runner.run(&prop::collection::vec(step(), 1..40), |steps| {
         let facts: Vec<JournaledFact> = steps.iter().map(to_fact).collect();
-        let read = ValidationContext::from_journal(args(), &facts)
+        let read = ValidationContext::from_journal(&draft(), args(), &facts)
             .map_err(|e| TestCaseError::fail(format!("{e:?}")))?;
         let expected = oracle(&steps);
         prop_assert_eq!(read.account_equity_usd, cents(expected.equity_cents));
@@ -793,7 +924,7 @@ fn the_oracle_itself_reads_a_hand_written_journal() {
     );
     assert_eq!(expected.claims, BTreeSet::from([X, Z]));
     let facts: Vec<JournaledFact> = steps.iter().map(to_fact).collect();
-    let read = ValidationContext::from_journal(args(), &facts).expect("the facts fold");
+    let read = ValidationContext::from_journal(&draft(), args(), &facts).expect("the facts fold");
     assert_eq!(read.account_equity_usd, usd("25000"));
     assert_eq!(read.claimed_by_other_agents, assets(&[X, Z]));
 }

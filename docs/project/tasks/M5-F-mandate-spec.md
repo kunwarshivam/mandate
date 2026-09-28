@@ -399,7 +399,8 @@ Stream L's E7-10 maps the journal records to facts. What no event carries (the a
 connection, the date, the draft's provenance, the membership, the instrument groups, the eligibility
 failures) comes in `ContextArgs`. A missing fact takes the value that refuses, so the V-rule reading
 it fires: equity 0, an empty registry (never `None`), zero users, and an unknown or revoked
-connection as `live`.
+connection as `live`. It also takes the draft, and every part of the document the draft's provenance
+does not mention is added as unconfirmed, so V-020 and V-022 cannot pass on a record with no entries.
 
 ### Rule numbering and error codes
 

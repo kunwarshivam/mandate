@@ -12,6 +12,11 @@
 //! no registration is an empty registry (V-007, and never `None`, which means "not checked"), no
 //! membership is zero users (V-024), and a connection with no environment, or a revoked one, is
 //! `live` (V-001 on a paper mandate). Each of those makes a V-rule fire; none skips a check.
+//!
+//! **An envelope path the draft's provenance does not mention is unconfirmed** (DEC-169 item 5, the
+//! coordinator's ruling on #252): the fold adds a `user_entered`, unconfirmed entry for every part of
+//! the document no entry covers, so V-020 fires on it and an `auto` under it is V-022. A record that
+//! lost its provenance can therefore never read as the owner having confirmed everything.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -20,6 +25,7 @@ use mandate_domain::{AssetId, Environment};
 use mandate_num::Usd;
 use mandate_time::Date;
 
+use crate::Mandate;
 use crate::SpecError;
 use crate::document::{ConnectionId, ModelId, ProvenanceMap};
 use crate::validate::{GroupId, RegisteredModel, ValidationContext};
@@ -106,6 +112,7 @@ pub struct ContextArgs {
     pub connection_id: ConnectionId,
     pub validation_date: Date,
     /// The draft's own provenance, from its `MandateVersionCreated` and `MandateConfirmed` records.
+    /// Every part of the document no entry covers is added to the context as unconfirmed.
     pub provenance: ProvenanceMap,
     /// `None` when the identity service supplied nothing, which counts zero users.
     pub membership: Option<Membership>,
@@ -117,15 +124,17 @@ pub struct ContextArgs {
 pub const LOSS_CARRY_DAYS: u32 = 90;
 
 impl ValidationContext {
-    /// The context `validate` reads, folded from `facts` in journal order.
+    /// The context `validate` reads for `draft`, folded from `facts` in journal order.
     ///
-    /// `Err` only when a sum cannot be held exactly (the allocations or the loss carry overflow
-    /// `Usd`); a missing fact is never an error, it is the refusing value the module doc names.
+    /// `Err` when a sum cannot be held exactly (the allocations or the loss carry overflow `Usd`), or
+    /// when `draft` has no canonical form; a missing fact is never an error, it is the refusing value
+    /// the module doc names.
     pub fn from_journal<'a>(
+        draft: &Mandate,
         args: ContextArgs,
         facts: impl IntoIterator<Item = &'a JournaledFact>,
     ) -> Result<Self, SpecError> {
-        let _ = (args, facts.into_iter().count());
+        let _ = (draft, args, facts.into_iter().count());
         Err(SpecError::Unimplemented)
     }
 }
