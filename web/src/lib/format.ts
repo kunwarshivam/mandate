@@ -57,13 +57,6 @@ export function percent(value: string | Dec, places = 1): string {
   return `${fixed.startsWith("-") ? MINUS + fixed.slice(1) : fixed}%`;
 }
 
-/** "+1.07%" or "−0.36%"; a change that rounds to zero is "0%", with no sign. */
-export function signedPercent(value: string | Dec, places = 1): string {
-  const text = percent(value, places);
-  if (text === "0%" || text === `${MINUS}0%`) return "0%";
-  return direction(value) === "gain" ? `+${text}` : text;
-}
-
 /**
  * Wall-clock time as written in the fixture's own offset, "14:02:11". Read from the ISO string
  * itself so rendering never depends on the viewer's time zone setting.

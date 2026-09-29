@@ -5,7 +5,7 @@ const RECORD_ROUTE = /^\/(approvals\/[^/]+|agents\/[^/]+\/(kill-switch|release|p
 /**
  * The record screens: an approval request, a kill switch and its release, stopping or closing a
  * connection, and closing a position. What the owner reads there is fixed (`useFrozen`), so the
- * frame beside it shows the status strip, never moving quotes.
+ * frame beside it shows the status strip, never the moving agent wire.
  */
 export function isRecordRoute(pathname: string): boolean {
   return RECORD_ROUTE.test(pathname);

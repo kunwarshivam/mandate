@@ -419,32 +419,10 @@ function capAtHighWater(agent: Agent, symbols: Record<string, Built>, end: numbe
 }
 
 const cache = new WeakMap<Workspace, Market>();
-/** A workspace rebuilt with the same content, as each render of a scenario is, shares its market. */
-const byContent = new Map<string, Market>();
-const BY_CONTENT_MAX = 8;
-
-/** Everything `buildMarket` reads from the workspace, and nothing else. */
-function contentKey(ws: Workspace): string {
-  return JSON.stringify([ws.now, ws.health.market_data, ws.agents, ws.approvals.map((a) => [a.bound.symbol, a.bound.asset_class])]);
-}
 
 export function buildMarket(ws: Workspace): Market {
   const hit = cache.get(ws);
   if (hit) return hit;
-  const key = contentKey(ws);
-  const same = byContent.get(key);
-  if (same) {
-    cache.set(ws, same);
-    return same;
-  }
-  const market = build(ws);
-  cache.set(ws, market);
-  byContent.set(key, market);
-  if (byContent.size > BY_CONTENT_MAX) byContent.delete(byContent.keys().next().value!);
-  return market;
-}
-
-function build(ws: Workspace): Market {
   const start = unix(WINDOW_START_ISO);
   const stale = ws.health.market_data.state !== "ok";
   const end = floorMinute(stale ? unix(ws.health.market_data.as_of) : unix(ws.now));
@@ -482,7 +460,9 @@ function build(ws: Workspace): Market {
     account.push({ time: t, value });
   }
 
-  return { start, end, symbols, equity, account };
+  const market: Market = { start, end, symbols, equity, account };
+  cache.set(ws, market);
+  return market;
 }
 
 /** Every `step` seconds from `from`, always keeping the last point. */

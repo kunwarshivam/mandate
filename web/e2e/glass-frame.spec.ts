@@ -1,7 +1,7 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
 /**
- * The frame is frosted glass: the header, the ticker tape under it, the tab bar on phones and the
+ * The frame is frosted glass: the header, the agent wire under it, the tab bar on phones and the
  * dock on desktops sit over the page as it scrolls and blur what passes underneath. Nothing else is glass. Where the owner asks for less
  * transparency, or in forced colours, the frame is the solid card.
  */
@@ -98,7 +98,7 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
 
   for (const [width, height, frame] of [
     [390, 844, ["header", "nav Main"]],
-    [1440, 900, ["header", "div ticker", "nav Primary"]],
+    [1440, 900, ["header", "div wire", "nav Primary"]],
   ] as const) {
     test(`${width} px: nothing but the frame is glass`, async ({ page }) => {
       await page.setViewportSize({ width, height });

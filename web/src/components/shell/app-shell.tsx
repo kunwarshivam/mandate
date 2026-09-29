@@ -3,12 +3,12 @@
 import { type CSSProperties, type ReactNode, useMemo } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@cloudflare/kumo/components/sidebar";
-import { buildMarket } from "@/fixtures/market";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { allFeedsOk, quotes } from "@/lib/quotes";
+import { allFeedsOk } from "@/lib/feeds";
 import { can, useRole } from "@/lib/roles";
+import { wireItems } from "@/lib/wire";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
@@ -16,7 +16,7 @@ import { AppSidebar } from "./app-sidebar";
 import { Dock } from "./dock";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
-import { Ticker } from "./ticker";
+import { Wire } from "./wire";
 
 /** The nav width, handed to Kumo's Sidebar, which otherwise sets its own. */
 const SIDEBAR_STYLE = { "--sidebar-width": "var(--nav-width)" } as CSSProperties;
@@ -33,7 +33,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
   const seesAgents = can(role, "agents.view");
   // A record screen is frozen, and a stale or failing feed must be read in full: both keep the strip.
-  const tape = useMemo(() => (seesAgents && allFeedsOk(ws) && !isRecordRoute(pathname) ? quotes(ws, buildMarket(ws)) : []), [ws, seesAgents, pathname]);
+  const wire = seesAgents && ws.agents.length > 0 && allFeedsOk(ws) && !isRecordRoute(pathname);
+  const items = useMemo(() => (wire ? wireItems(ws, now, role) : []), [wire, ws, now, role]);
 
   return (
     <Sidebar.Provider collapsible="icon" mobileBreakpoint={1024} style={SIDEBAR_STYLE}>
@@ -43,8 +44,8 @@ export function AppShell({ children }: { children: ReactNode }) {
       <AppSidebar />
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
         <AppHeader />
-        {tape.length > 0 ? <Ticker ws={ws} now={now} quotes={tape} className="hidden sm:flex" /> : null}
-        <div className={tape.length > 0 ? "sm:hidden" : undefined}>
+        {wire ? <Wire ws={ws} now={now} items={items} className="hidden sm:flex" /> : null}
+        <div className={wire ? "sm:hidden" : undefined}>
           <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
         </div>
         <AccountBanners />

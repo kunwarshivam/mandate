@@ -92,7 +92,7 @@
   --dock-h: 3.75rem;
   --dock-gap: 1rem;
   --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
-  /* The status strip and the ticker tape share one height, so either replacing the other moves nothing. */
+  /* The status strip and the agent wire share one height, so either replacing the other moves nothing. */
   --status-row: 2.125rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -348,7 +348,7 @@ html:root[data-cvd="on"] {
     /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
     scroll-padding-top: 5rem;
     @media (min-width: 40rem) {
-      &:has([data-slot="ticker"]) {
+      &:has([data-slot="wire"]) {
         scroll-padding-top: calc(5rem + var(--status-row));
       }
     }
@@ -508,23 +508,23 @@ html:root[data-cvd="on"] {
 }
 
 /*
- * The ticker tape: two copies of the row, each at least as wide as the tape, slide left by one copy
- * and start over, so the loop has no seam. The pointer or focus on the tape holds it still.
+ * The agent wire: two copies of the row, each at least as wide as the wire, slide left by one copy
+ * and start over, so the loop has no seam. The pointer or focus on the wire holds it still.
  */
-@keyframes ticker {
+@keyframes wire {
   to {
     translate: -50% 0;
   }
 }
-[data-slot="ticker-tape"] {
+[data-slot="wire-tape"] {
   container-type: inline-size;
   & ul {
     min-width: 100cqw;
   }
-  & [data-slot="ticker-track"] {
-    animation: ticker calc(var(--ticker-items, 4) * 9s) linear infinite;
+  & [data-slot="wire-track"] {
+    animation: wire calc(var(--wire-items, 4) * 12s) linear infinite;
   }
-  &:is(:hover, :focus-within) [data-slot="ticker-track"] {
+  &:is(:hover, :focus-within) [data-slot="wire-track"] {
     animation-play-state: paused;
   }
 }
@@ -570,9 +570,9 @@ html:root[data-cvd="on"] {
   [data-slot="skeleton"] {
     animation: none !important;
   }
-  [data-slot="ticker-tape"] {
+  [data-slot="wire-tape"] {
     overflow-x: auto;
-    & [data-slot="ticker-track"] {
+    & [data-slot="wire-track"] {
       animation: none;
     }
     & [data-copy] {

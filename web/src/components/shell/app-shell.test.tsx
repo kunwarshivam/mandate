@@ -137,17 +137,17 @@ describe("Owlhead", () => {
 });
 
 describe("the frame", () => {
-  it("frosts the header, the ticker tape, the phone tab bar and the desktop dock, and nothing else", () => {
+  it("frosts the header, the agent wire, the phone tab bar and the desktop dock, and nothing else", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");
-    const ticker = document.querySelector<HTMLElement>("[data-slot=ticker]");
+    const wire = document.querySelector<HTMLElement>("[data-slot=wire]");
     const tabs = document.querySelector<HTMLElement>("nav[aria-label=Main].grid");
     const dock = screen.getByRole("navigation", { name: "Primary" });
-    for (const frame of [header, ticker, tabs, dock]) {
+    for (const frame of [header, wire, tabs, dock]) {
       expect(frame).toHaveClass("glass");
       expect(frame).not.toHaveClass("bg-card");
     }
-    expect([...document.querySelectorAll(".glass")]).toEqual([header, ticker, tabs, dock]);
+    expect([...document.querySelectorAll(".glass")]).toEqual([header, wire, tabs, dock]);
   });
 });
 

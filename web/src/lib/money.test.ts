@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { add, dec, div, mul, ratio, toDecimalString, toFixed } from "./decimal";
-import { MINUS, age, ago, clock, direction, directionWord, percent, price, quantity, remaining, signedPercent, signedUsd, usd } from "./format";
+import { MINUS, age, ago, clock, direction, directionWord, percent, price, quantity, remaining, signedUsd, usd } from "./format";
 
 describe("decimal", () => {
   it("adds without binary floating-point error", () => {
@@ -80,13 +80,5 @@ describe("format", () => {
       expect(age(from, now)).toBe(text);
       expect(ago(from, now)).toBe(`${text} ago`);
     }
-  });
-
-  it("signs a percentage change, with a true minus, and no sign on a change that rounds to zero", () => {
-    expect(signedPercent("0.0107", 2)).toBe("+1.07%");
-    expect(signedPercent("-0.0036", 2)).toBe(`${MINUS}0.36%`);
-    expect(signedPercent("0.00001", 2)).toBe("0%");
-    expect(signedPercent("-0.00001", 2)).toBe("0%");
-    expect(signedPercent("0")).toBe("0%");
   });
 });
