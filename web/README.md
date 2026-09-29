@@ -100,8 +100,8 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `owlhead-theme` cookie. The dark theme is tokens alone: there is no `dark:` class in `src/`.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
-- **Type.** Mona Sans for everything, in sentence case, with tabular figures and a plain zero;
-  weight 600 at most. Self-hosted through `@fontsource-variable/mona-sans`.
+- **Type.** Public Sans for everything (DEC-209), in sentence case, with tabular figures and a
+  plain zero; weight 600 at most. Self-hosted through `@fontsource-variable/public-sans`.
 - **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
   (DEC-203), ink on light and off-white on dark (DEC-204), with no tagline. The icons, favicons and
   share image are the ink mark on off-white. `npm run brand` regenerates the favicons, app icons, share image and manifest in
