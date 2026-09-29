@@ -63,7 +63,12 @@ describe("the Supabase clients", () => {
   });
 
   it("decide who is signed in from verified claims, never from getSession()", () => {
-    for (const path of ["src/lib/supabase/server.ts", "src/lib/supabase/proxy.ts", "src/proxy.ts"]) {
+    for (const path of [
+      "src/lib/supabase/server.ts",
+      "src/lib/supabase/proxy.ts",
+      "src/proxy.ts",
+      "src/app/(site)/auth/callback/route.ts",
+    ]) {
       expect(read(path), path).not.toMatch(/getSession\(/);
     }
     expect(read("src/lib/supabase/proxy.ts")).toContain("await supabase.auth.getClaims()");
