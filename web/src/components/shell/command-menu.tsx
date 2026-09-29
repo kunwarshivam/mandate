@@ -9,6 +9,9 @@ import { can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS } from "@/lib/screens";
 import { OPEN_STOP_EVENT } from "./stop-control";
 
+/** Opens the palette from elsewhere: Search in the phone's More sheet. */
+export const OPEN_COMMAND_EVENT = "owlhead:open-command";
+
 interface Command {
   id: string;
   title: string;
@@ -25,7 +28,7 @@ interface CommandGroup {
  * ⌘K. "Stop…" is always the first command for a role that may stop. Titles come from the screen
  * list and from owner-given agent labels only: model output never becomes a command title. Nothing
  * typed here is kept; there are no recents. From `lg` the trigger is a wide bar, centred in the
- * header between its two sides; below it, an icon beside the theme menu. Both open the same palette.
+ * header between its two sides; below it, Search in the tab bar's More sheet opens the same palette.
  */
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
@@ -41,8 +44,13 @@ export function CommandMenu() {
         setOpen((o) => !o);
       }
     };
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_COMMAND_EVENT, onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_COMMAND_EVENT, onOpen);
+    };
   }, []);
 
   const groups = useMemo<CommandGroup[]>(() => {
@@ -90,15 +98,6 @@ export function CommandMenu() {
         <MagnifyingGlass className="size-4.5 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-left">Jump to an agent or screen…</span>
         <kbd className="inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-card px-1.5 font-sans text-label text-muted-foreground">⌘K</kbd>
-      </button>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-keyshortcuts="Meta+K Control+K"
-        className="press inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
-      >
-        <MagnifyingGlass className="size-4.5" aria-hidden />
-        <span className="sr-only">Go to…</span>
       </button>
       <CommandPalette.Root<CommandGroup, Command>
         open={open}

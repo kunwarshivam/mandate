@@ -10,7 +10,7 @@ import { agentHref } from "../src/lib/screens";
  */
 
 const WIDTHS = [320, 360, 375, 390, 414, 430, 480, 600, 640, 768, 820, 1024, 1180, 1280, 1440, 1920];
-/** Tailwind's `lg`, and the breakpoint `AppShell` hands Kumo's Sidebar: from here up the dock carries the nav. */
+/** Tailwind's `lg`: from here up the dock carries the nav, and below it the tab bar (DEC-207). */
 const DESKTOP = 1024;
 /** Phones and tablets, landscape included. */
 const TOUCH_MAX = 1180;
@@ -94,7 +94,13 @@ test.describe("Stop is fully visible at every width (brief §5, rule 13)", () =>
         await page.goto(route.path);
         await page.waitForLoadState("networkidle");
         if (width < DESKTOP) {
-          await expectStopVisible(page, width, "sidebar closed");
+          await expectStopVisible(page, width, "at the top");
+          await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+          await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+          await expectStopVisible(page, width, "with More open");
+          await page.getByRole("banner").getByRole("button", { name: "Stop", exact: true }).click();
+          await expect(page.getByRole("dialog", { name: /^Stop/ }), "Stop opens its sheet over More").toBeVisible();
+          await expect(page.getByRole("dialog", { name: "More" })).toBeHidden();
           return;
         }
         await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();

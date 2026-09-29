@@ -1,7 +1,8 @@
 "use client";
 
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import type { UTCTimestamp } from "lightweight-charts";
+import { CaretDown } from "@phosphor-icons/react";
 import { AsOf } from "@/components/domain/as-of";
 import { HeroFigure, SignedMoney } from "@/components/domain/money";
 import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
@@ -25,6 +26,9 @@ const RANGE_WORDS: Record<EquityRange, string> = {
   "1Y": "past year",
   All: "since the first agent deployed",
 };
+
+/** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
+const ACCOUNT_PHONE_HEIGHT = 180;
 
 /** The change's soft pill: its tint by sign, and the type in the gain or loss colour. */
 const PILL: Record<Direction, string> = {
@@ -112,6 +116,8 @@ function EquityHero({
   footer: ReactNode;
 }) {
   const [scrub, setScrub] = useState<ScrubPoint>(null);
+  const [levelsOpen, setLevelsOpen] = useState(false);
+  const legendId = useId();
   const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
   const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points }), [points, tone]);
   const now = points[points.length - 1];
@@ -157,11 +163,29 @@ function EquityHero({
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
           height={tone === "account" ? 260 : 280}
+          phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />
       )}
       <RangePicker label={rangeLabel} value={range} options={EQUITY_RANGES} onChange={onRange} />
-      {legend}
+      {legend ? (
+        <div className="grid gap-2 lg:contents">
+          <button
+            type="button"
+            data-slot="levels-toggle"
+            aria-expanded={levelsOpen}
+            aria-controls={legendId}
+            onClick={() => setLevelsOpen((o) => !o)}
+            className="press -mx-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md px-2 text-sm font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
+          >
+            Levels
+            <CaretDown aria-hidden className={cn("size-3.5 transition-transform duration-(--duration-hover) motion-reduce:transition-none", levelsOpen && "rotate-180")} />
+          </button>
+          <div id={legendId} data-slot="levels" className={cn("lg:contents", !levelsOpen && "max-lg:hidden")}>
+            {legend}
+          </div>
+        </div>
+      ) : null}
       <div className="text-caption leading-6 text-muted-foreground *:mr-1.5 *:align-middle">{footer}</div>
     </section>
   );
@@ -200,11 +224,11 @@ export function AccountEquityChart() {
       footer={
         <>
           <span>Simulated funds on paper.</span>
-          <span data-slot="unmanaged">
+          <span data-slot="unmanaged" className="max-lg:hidden">
             Includes <span className="font-mono tabular">{usd(unmanaged)}</span> no agent manages.
           </span>
           <AsOf at={asOf} now={now} stale={stale} />
-          <FixtureTag />
+          <FixtureTag className="max-lg:hidden" />
           <ChartCredit className="mt-1" />
         </>
       }
@@ -238,7 +262,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
       onRange={setRange}
       rangeLabel="Equity range"
       empty={points.length < 2 ? <p className="rounded-lg bg-background px-4 py-6 text-sm text-muted-foreground">No equity history yet. It starts when the agent deploys.</p> : undefined}
-      legend={<LevelLegend levels={drawn} offChart={offChart} />}
+      legend={drawn.length + offChart.length > 0 ? <LevelLegend levels={drawn} offChart={offChart} /> : undefined}
       footer={
         <>
           <span>Paper P&amp;L, simulated.</span>

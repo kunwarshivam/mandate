@@ -14,15 +14,3 @@ export function Wordmark({ className }: { className?: string }) {
     </span>
   );
 }
-
-/**
- * The Owlhead brand in the header of the phone and tablet sheet, ink on light and off-white on dark.
- * Never reversed out of a block of colour. Decorative, like `Wordmark`.
- */
-export function SidebarBrand({ className }: { className?: string }) {
-  return (
-    <span className={cn("inline-flex items-center", className)} style={{ color: "var(--logo)" }}>
-      <OwlheadLockup title="" className="h-7 w-auto" />
-    </span>
-  );
-}

@@ -102,13 +102,12 @@ export const motionTokens = [
   { name: "--duration-reveal", value: "240 ms, 30 ms stagger", use: "A list settles in once: rise 6 px and fade" },
   { name: "--duration-number", value: "240 ms", use: "A figure that changes rolls to its new value; deadlines never move" },
   { name: "--duration-draw", value: "700 ms", use: "The equity line draws in from the left on first load" },
-  { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet" },
+  { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet and the phone's More sheet" },
   { name: "--duration-dialog", value: "240 ms in, 150 ms out", use: "Step-up dialog" },
 ];
 
 /** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--nav-width", calm: "14rem", dense: "14rem", use: "The phone and tablet navigation sheet, handed to Kumo's Sidebar" },
   { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
   { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },

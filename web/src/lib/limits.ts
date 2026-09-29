@@ -1,6 +1,6 @@
 import type { Agent, LadderRung } from "@/fixtures/types";
 import { type Dec, ONE, ZERO, add, dec, max, min, mul, sub } from "./decimal";
-import { percent } from "./format";
+import { percent, usd } from "./format";
 
 /**
  * An agent's limits in dollars, from mandate spec §5.2 to §5.7. Each is derived from the mandate
@@ -156,4 +156,33 @@ export function nextLevel(limits: AgentLimits): NextLevel | null {
   }
   const stop = limits.levels.find((l) => l.kind === "profit_stop" && !l.reached);
   return stop ? { level: stop, distance: sub(stop.at, E), side: "above" } : null;
+}
+
+function levelNoun(level: Level): string {
+  switch (level.kind) {
+    case "floor":
+      return "lifetime floor";
+    case "rung":
+      return `${level.label.toLowerCase()} level`;
+    case "daily":
+      return "daily loss limit";
+    case "high_water_mark":
+      return "high-water mark";
+    case "profit_stop":
+      return "profit stop";
+    default: {
+      const unhandled: never = level.kind;
+      throw new Error(`unhandled level ${String(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * An agent's headroom in one line, from the next level where its behaviour changes: "$274.45 above
+ * its daily loss limit". A distance to a limit, never a result, so it needs no disclosure.
+ */
+export function headroomLine(agent: Agent): string {
+  const next = nextLevel(agentLimits(agent));
+  if (!next) return "No limit level ahead";
+  return `${usd(next.distance)} ${next.side === "below" ? "above" : "below"} its ${levelNoun(next.level)}`;
 }

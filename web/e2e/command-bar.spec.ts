@@ -95,16 +95,19 @@ test("a press opens the command palette, and ⌘K does the same", async ({ page 
   await expect(palette).toBeVisible();
 });
 
-for (const width of [768, 1023]) {
-  test(`${width} px: the bar folds to the compact icon`, async ({ page }) => {
+for (const width of [390, 768, 1023]) {
+  test(`${width} px: the bar gives way to Search in the More sheet, and the header keeps its height`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.goto("/");
+    await page.waitForLoadState("networkidle");
     await expect(bar(page)).toBeHidden();
-    const compact = page.getByRole("banner").getByRole("button", { name: "Go to…", exact: true });
-    await expect(compact).toBeVisible();
-    const box = (await compact.boundingBox())!;
-    expect([box.width, box.height]).toEqual([44, 44]);
+    await expect(page.getByRole("banner").getByRole("button", { name: "Go to…", exact: true })).toHaveCount(0);
     expect((await page.locator("header").boundingBox())!.height).toBe(65);
+    await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+    await page.getByRole("dialog", { name: "More" }).getByRole("button", { name: /^Search/ }).click();
+    const palette = page.getByRole("dialog").filter({ has: page.getByRole("combobox", { name: "Command" }) });
+    await expect(palette).toBeVisible();
+    await expect(palette.getByRole("combobox", { name: "Command" })).toBeFocused();
   });
 }
 

@@ -64,15 +64,32 @@ export function hiddenToTheRight(itemRights: readonly number[], visibleRight: nu
   return itemRights.filter((right) => right > visibleRight + 0.5).length;
 }
 
+const isDegraded = (i: Item) => i.state === "stale" || i.state === "down";
+
 /**
  * One line at a fixed height whatever the text says: the market age changes every few seconds, and
  * a strip that rewrapped would move the whole page. Phones scroll it sideways, with a flat "+N" cue
  * at the right edge while items lie past it; wider screens clip each item with an ellipsis, healthy
  * ones first. The cue overlays the strip, so it appearing or going moves nothing.
+ *
+ * The `banner` variant is the phone's (DEC-207): the same row, words and height, listing only the
+ * feeds that are stale or down, and rendered only while one is.
  */
-export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
-  const list = healthItems(ws, now);
-  const degraded = list.filter((i) => i.state === "stale" || i.state === "down").length;
+export function StatusStrip({
+  ws,
+  now,
+  className,
+  variant = "strip",
+}: {
+  ws: Workspace;
+  now: string;
+  className?: string;
+  variant?: "strip" | "banner";
+}) {
+  const banner = variant === "banner";
+  const all = healthItems(ws, now);
+  const list = banner ? all.filter(isDegraded) : all;
+  const degraded = all.filter(isDegraded).length;
   const strip = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState(0);
   const reduceMotion = useReducedMotion();
@@ -97,8 +114,8 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
       <div
         ref={strip}
         role="region"
-        aria-label="System status"
-        data-slot="status-strip"
+        aria-label={banner ? "Feed warning" : "System status"}
+        data-slot={banner ? "feed-banner" : "status-strip"}
         data-degraded={degraded > 0 ? "" : undefined}
         tabIndex={0}
         className={cn(
@@ -128,7 +145,7 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
             </span>
           );
         })}
-        <FixtureTag className="ml-auto" />
+        {banner ? null : <FixtureTag className="ml-auto" />}
       </div>
       {hidden > 0 ? (
         <button

@@ -1,18 +1,20 @@
 import { expect, test } from "@playwright/test";
+import { APPROVAL_IDS } from "../src/fixtures/workspace";
 
 /**
- * On phones the status strip scrolls sideways. While items lie past its right edge a flat "+N" cue
+ * Phones keep the full status strip on a record screen (DEC-207), where it scrolls sideways. While items lie past its right edge a flat "+N" cue
  * sits at that edge; pressing it scrolls the strip, and it goes once the last item is in view. It
  * overlays the strip, so it moves nothing, never paints a gradient, and never covers Stop.
  */
 
 const PHONES = [320, 390, 430];
+const RECORD = `/approvals/${APPROVAL_IDS.swingXyz}`;
 
 for (const scenario of ["normal", "stale"]) {
   for (const width of PHONES) {
     test(`${scenario}, ${width} px: the strip shows how many items lie past its edge, and scrolls to them`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
-      await page.goto(`/?scenario=${scenario}`);
+      await page.goto(`${RECORD}?scenario=${scenario}`);
       const strip = page.locator("[data-slot=status-strip]");
       await expect(page.locator("[data-slot=status-strip][data-degraded]")).toHaveCount(scenario === "normal" ? 0 : 1);
       const more = page.locator("[data-slot=status-more]");
@@ -53,7 +55,7 @@ for (const scenario of ["normal", "stale"]) {
 
 test("wider screens clip the strip instead and show no cue", async ({ page }) => {
   await page.setViewportSize({ width: 820, height: 800 });
-  await page.goto("/?scenario=stale");
+  await page.goto(`${RECORD}?scenario=stale`);
   await expect(page.locator("[data-slot=status-strip][data-degraded]")).toHaveCount(1);
   await expect(page.locator("[data-slot=status-more]")).toBeHidden();
 });

@@ -2,16 +2,18 @@
 
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { ArrowRight, CheckCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowRight, CaretRight, Check, CheckCircle, Tray, WarningCircle } from "@phosphor-icons/react";
 import { Deadline } from "@/components/approvals/deadline";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
+import { ModeBadge } from "@/components/domain/mode";
 import { SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
-import type { Approval, Workspace } from "@/fixtures/types";
+import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
-import { price, quantity, usd } from "@/lib/format";
+import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
+import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
@@ -23,19 +25,38 @@ import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 /** The rail beside the account chart shows this many requests; the rest are one link away. */
 const WAITING_SHOWN = 3;
 
+/** A phone's Home shows this much recent activity; the rest is one link away. */
+const ACTIVITY_SHOWN_ON_PHONE = 3;
+
 const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
 
 function lowerFirst(text: string): string {
   return text.charAt(0).toLowerCase() + text.slice(1);
 }
 
-/** Everything the Alerts screen lists, in one line: degraded feeds first, then agent conditions. */
-function alertLines(ws: Workspace): string[] {
+interface AlertLine {
+  key: string;
+  text: string;
+  href: string;
+}
+
+/** Everything the Alerts screen lists: degraded feeds first, then agent conditions, each where it is read in full. */
+function alerts(ws: Workspace): AlertLine[] {
   const feeds = (Object.keys(HEALTH_WORD) as Array<keyof typeof HEALTH_WORD>)
     .filter((k) => ws.health[k].state !== "ok")
-    .map((k) => `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : "stale"}`);
-  const agents = ws.agents.flatMap((a) => a.restrictions.map((r) => `${a.label}: ${lowerFirst(RESTRICTIONS[r.code].label)}${r.symbol ? ` (${r.symbol})` : ""}`));
+    .map((k) => ({ key: `feed-${k}`, text: `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : "stale"}`, href: "/alerts" }));
+  const agents = ws.agents.flatMap((a) =>
+    a.restrictions.map((r) => ({
+      key: `${a.agent_id}-${r.code}-${r.symbol ?? ""}`,
+      text: `${a.label}: ${lowerFirst(RESTRICTIONS[r.code].label)}${r.symbol ? ` (${r.symbol})` : ""}`,
+      href: `/agents/${a.agent_id}`,
+    })),
+  );
   return [...feeds, ...agents];
+}
+
+function alertLines(ws: Workspace): string[] {
+  return alerts(ws).map((a) => a.text);
 }
 
 function AlertsSummary({ ws }: { ws: Workspace }) {
@@ -113,6 +134,103 @@ function Waiting({ ws, open, now }: { ws: Workspace; open: Approval[]; now: stri
   );
 }
 
+function requestSentence(ws: Workspace, a: Approval) {
+  return (
+    <>
+      {findAgent(ws, a.agent_id)?.label ?? "An agent"} asks to buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of{" "}
+      <span className="font-mono tabular">{price(a.bound.limit)}</span>
+    </>
+  );
+}
+
+const NEEDS_ROW =
+  "press group -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset";
+
+/**
+ * The phone's first question, answered first (DEC-207): the requests waiting for you, soonest
+ * deadline first, each with the static time it is skipped at, then the open alerts. Each row opens
+ * where it is read in full. With nothing, it says so plainly. The only place Home shows a request.
+ */
+function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; className?: string }) {
+  const lines = alerts(ws);
+  const count = open.length + lines.length;
+  return (
+    <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className={cn("grid content-start gap-2", className)}>
+      <h2 id="needs-you-title" className="flex items-center gap-2.5 text-h2">
+        Needs you
+        {count > 0 ? (
+          <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-lapis px-2 font-mono text-label text-lapis-foreground tabular">
+            {count}
+            <span className="sr-only">{count === 1 ? " item" : " items"}</span>
+          </span>
+        ) : null}
+      </h2>
+      {count === 0 ? (
+        <p data-slot="all-clear" className="flex min-h-11 items-center gap-2.5 text-sm text-muted-foreground">
+          <Check aria-hidden className="size-5 shrink-0" />
+          All clear. Nothing needs you.
+        </p>
+      ) : (
+        <ul className="grid">
+          {open.map((a) => (
+            <li key={a.approval_id} data-kind="request" className="border-b border-border/70 last:border-b-0">
+              <Link href={`/approvals/${a.approval_id}`} className={NEEDS_ROW}>
+                <Tray aria-hidden weight="fill" className="mt-0.5 size-5 text-lapis" />
+                <span className="grid gap-0.5">
+                  <span className="font-medium text-pretty">{requestSentence(ws, a)}</span>
+                  <span data-slot="deadline" className="text-sm text-muted-foreground">
+                    Skipped at{" "}
+                    <time dateTime={a.deadline} className="font-mono tabular">
+                      {clock(a.deadline)} {zoneLabel(a.deadline)}
+                    </time>{" "}
+                    if you do nothing
+                  </span>
+                </span>
+                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+              </Link>
+            </li>
+          ))}
+          {lines.map((l) => (
+            <li key={l.key} data-kind="alert" className="border-b border-border/70 last:border-b-0">
+              <Link href={l.href} className={NEEDS_ROW}>
+                <WarningCircle aria-hidden weight="fill" className="mt-0.5 size-5 text-foreground" />
+                <span className="font-medium text-pretty">{l.text}</span>
+                <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * An agent on a phone: its name, its state in a word with its glyph, and its headroom to the next
+ * level where its behaviour changes. No P&L, so no disclosure to repeat; the row opens the agent.
+ */
+function PhoneAgentRow({ agent }: { agent: Agent }) {
+  return (
+    <li data-slot="phone-agent" className="border-b border-border/70 last:border-b-0">
+      <Link
+        href={`/agents/${agent.agent_id}`}
+        className="press -mx-2 grid min-h-11 grid-cols-[minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+      >
+        <span className="grid min-w-0 gap-1">
+          <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+            <span className="font-semibold">{agent.label}</span>
+            <ModeBadge mode={agent.mode} />
+          </span>
+          <span data-slot="headroom" className="text-sm text-muted-foreground tabular">
+            {headroomLine(agent)}
+          </span>
+        </span>
+        <CaretRight aria-hidden className="size-4 text-muted-foreground" />
+      </Link>
+    </li>
+  );
+}
+
 function Dashboard() {
   const { ws, now } = useRuntime();
   const canAudit = useCan("audit.view");
@@ -127,51 +245,67 @@ function Dashboard() {
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
       <h1 className="sr-only">Dashboard</h1>
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-x-14">
+        <NeedsYou ws={ws} open={open} className="lg:hidden" />
         <div data-slot="account-board" data-layout="main" className="reveal grid min-w-0 gap-5">
-          {open.length > 0 ? (
-            <Link
-              href={open.length === 1 ? `/approvals/${open[0].approval_id}` : "/approvals"}
-              data-slot="waiting-notice"
-              className="press -mb-1 flex min-h-11 w-fit max-w-full items-center gap-2.5 rounded-full bg-lapis-soft py-1.5 pr-4 pl-1.5 text-sm font-medium text-lapis outline-none hover:bg-lapis-muted focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
-            >
-              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-lapis font-mono text-label text-lapis-foreground tabular">{open.length}</span>
-              <span className="truncate">{open.length === 1 ? "Request waiting for you" : "Requests waiting for you"}</span>
-              <ArrowRight aria-hidden className="size-4 shrink-0" />
-            </Link>
-          ) : null}
           <AccountEquityChart />
         </div>
-        <div data-layout="rail" className="grid content-start gap-6 lg:pt-1">
+        <div data-layout="rail" className="grid content-start gap-6 max-lg:hidden lg:pt-1">
           <Waiting ws={ws} open={open} now={now} />
           <AlertsSummary ws={ws} />
         </div>
       </div>
 
       <Section title="Agents" action={<SectionLink href="/agents">All agents</SectionLink>}>
-        <ul className="grid">
+        <ul className="grid max-lg:hidden">
           {ws.agents.map((agent, i) => (
             <li key={agent.agent_id} className="grid">
               <AgentCard agent={agent} now={now} marketStale={marketStale} index={i + 2} />
             </li>
           ))}
         </ul>
+        <ul aria-label="Agents" data-slot="phone-agents" className="grid lg:hidden">
+          {ws.agents.map((agent) => (
+            <PhoneAgentRow key={agent.agent_id} agent={agent} />
+          ))}
+        </ul>
       </Section>
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-14">
-        <Section title="Recent activity" action={canAudit ? <SectionLink href="/audit/decisions">All decisions</SectionLink> : undefined}>
+        <Section
+          title="Recent activity"
+          action={
+            canAudit ? (
+              <SectionLink href="/audit/decisions" className="max-lg:hidden">
+                All decisions
+              </SectionLink>
+            ) : undefined
+          }
+        >
           {ws.decisions.length === 0 ? (
             <p className="text-sm text-muted-foreground">No decisions yet.</p>
           ) : (
             <ol className="grid">
-              {ws.decisions.slice(0, 6).map((d) => (
-                <GateDecisionRow key={d.event_id} decision={d} agent={findAgent(ws, d.agent_id)} showAgent href={decisionHref(d.agent_id, d.event_id)} />
+              {ws.decisions.slice(0, 6).map((d, i) => (
+                <GateDecisionRow
+                  key={d.event_id}
+                  decision={d}
+                  agent={findAgent(ws, d.agent_id)}
+                  showAgent
+                  href={decisionHref(d.agent_id, d.event_id)}
+                  className={i >= ACTIVITY_SHOWN_ON_PHONE ? "max-lg:hidden" : "max-lg:[&:nth-child(3)]:border-b-0"}
+                />
               ))}
             </ol>
           )}
+          {canAudit && ws.decisions.length > 0 ? (
+            <SectionLink href="/audit/decisions" className="w-fit lg:hidden">
+              See all activity
+            </SectionLink>
+          ) : null}
         </Section>
 
-        <Section title="Positions" action={<SectionLink href="/positions">All positions</SectionLink>}>
+        <Section title="Positions" action={<SectionLink href="/positions">All positions</SectionLink>} className="max-lg:hidden">
           {positions.length === 0 ? (
             <p className="text-sm text-muted-foreground">No agent holds a position.</p>
           ) : (
