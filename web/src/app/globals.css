@@ -260,14 +260,14 @@ html:root[data-cvd="on"] {
   --color-warning-soft: var(--warning-soft);
   --color-info-soft: var(--info-soft);
 
-  --font-sans: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  --font-mono: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
   /* One tight scale (web/DESIGN.md, Type). Weight steps are 400, 500 and 600, never bolder. */
   --text-hero: clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem);
   --text-hero--line-height: 1.05;
-  --text-hero--letter-spacing: -0.035em;
+  --text-hero--letter-spacing: -0.03em;
   --text-hero--font-weight: 600;
   --text-h1: 1.75rem;
   --text-h1--line-height: 1.2;
@@ -300,7 +300,7 @@ html:root[data-cvd="on"] {
   --text-lg: 1.125rem;
   --text-lg--line-height: calc(1.75 / 1.125);
 
-  /* ch is the width of a zero; Mona Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
+  /* ch is the width of a zero; Public Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
   --container-measure: 58ch;
 
   --radius-xs: 0.25rem;

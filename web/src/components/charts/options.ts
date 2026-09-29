@@ -63,7 +63,7 @@ export function setChartMode(mode: ThemeMode): void {
   Object.assign(CHART_COLOR, CHART_COLORS[mode]);
 }
 
-export const CHART_FONT = "'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif";
+export const CHART_FONT = "'Public Sans Variable', ui-sans-serif, system-ui, sans-serif";
 
 const ET_TIME = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 const ET_DAY = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });

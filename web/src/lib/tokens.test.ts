@@ -160,19 +160,27 @@ describe("figures with a plain zero", () => {
   const theme = block("@theme inline");
   const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
 
-  it("sets the body, the figures class and the charts in one face, Mona Sans, with no second family", () => {
-    for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Mona Sans Variable", ui-sans-serif,/);
-    expect(CHART_FONT).toMatch(/^'Mona Sans Variable', ui-sans-serif,/);
-    expect(Object.keys(pkg.dependencies).filter((d) => d.startsWith("@fontsource"))).toEqual(["@fontsource-variable/mona-sans"]);
+  it("sets the body, the figures class and the charts in one face, Public Sans, with no second family", () => {
+    for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Public Sans Variable", ui-sans-serif,/);
+    expect(CHART_FONT).toMatch(/^'Public Sans Variable', ui-sans-serif,/);
+    expect(Object.keys(pkg.dependencies).filter((d) => d.startsWith("@fontsource"))).toEqual(["@fontsource-variable/public-sans"]);
     expect(css).not.toMatch(/@font-face/);
   });
 
   it("ships the face self-hosted from the package, with no font from a third-party host", () => {
-    const file = resolve(process.cwd(), "node_modules/@fontsource-variable/mona-sans/files/mona-sans-latin-wght-normal.woff2");
-    expect(existsSync(file)).toBe(true);
+    for (const subset of ["latin", "latin-ext"]) {
+      const file = resolve(process.cwd(), `node_modules/@fontsource-variable/public-sans/files/public-sans-${subset}-wght-normal.woff2`);
+      expect(existsSync(file), subset).toBe(true);
+    }
     const layout = readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8");
-    expect(layout).toContain('import "@fontsource-variable/mona-sans";');
+    expect(layout).toContain('import "@fontsource-variable/public-sans";');
     expect(layout).not.toMatch(/next\/font|fonts\.googleapis|fonts\.gstatic/);
+  });
+
+  it("never tracks a role tighter than -0.04em, where the hero's figures start to touch", () => {
+    for (const [k, v] of Object.entries(theme).filter(([k]) => k.endsWith("--letter-spacing"))) {
+      expect(Number.parseFloat(v), k).toBeGreaterThanOrEqual(-0.04);
+    }
   });
 
   it("uses weights 400 to 600 only: no heavy display weights", () => {
