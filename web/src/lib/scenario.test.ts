@@ -31,8 +31,8 @@ describe("the fixture scenario switch is on in next dev and the e2e build only",
     expect(scenarioSwitcherShown).toBe(false);
   });
 
-  it("ignores ?scenario= and sets no scenario cookie when it is off", () => {
-    const response = proxy(new NextRequest("http://127.0.0.1:4317/agents?scenario=stale"));
+  it("ignores ?scenario= and sets no scenario cookie when it is off", async () => {
+    const response = await proxy(new NextRequest("http://127.0.0.1:4317/agents?scenario=stale"));
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.getSetCookie().join("; ")).not.toContain(SCENARIO_COOKIE);
