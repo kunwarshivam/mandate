@@ -359,6 +359,8 @@ pub(crate) fn protection_cancelled(
 /// instrument where a sequence runs and no protective order rests any more, once the sequence's
 /// exit is terminal, denied or abandoned **and** no other exit there is working or waiting, the
 /// position is re-protected and the interval ends — so Σ resting sells never exceeds the position.
+/// A passive sequence is ended the same way when its exit is denied or abandoned rather than
+/// placed as the new OCO, so the position never stays unprotected with no interval open (rule 3).
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     release_waiting(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
@@ -368,7 +370,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, sequence)| (instrument.clone(), sequence.clone()))
         .collect();
     for (instrument, sequence) in sequences {
-        if rests(&batch.view, &instrument) || sequence.passive {
+        if rests(&batch.view, &instrument) {
             continue;
         }
         let exit = ClientOrderId::for_intent(&sequence.intent)?;
@@ -2616,6 +2618,52 @@ mod sequence_tests {
         Ok(())
     }
 
+    /// Rule 3: a passive exit that ends without its OCO once the old one's cancel is confirmed —
+    /// here abandoned, too old at the confirmation (§5.7) — never leaves the position
+    /// unprotected, with no interval to bound or alert it: the sequence ends by re-placing the
+    /// recorded OCO for the position held, as a marketable sequence's finished exit does (found by
+    /// #286 round 1's mutation run).
+    #[test]
+    fn an_abandoned_passive_exit_re_places_the_protection() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Tiered,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = protected(&ports)?;
+        executor.run(quote("150")?, &ports)?;
+        executor.run(sell(EXIT, "10", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        executor.run(Input::Tick(RiskClock::from_secs(121)), &ports)?;
+        let late = executor.run(cancel_accepted(OCO), &ports)?;
+        assert!(
+            drafted(&late).contains(&"OrderAbandoned"),
+            "{:?}",
+            drafted(&late)
+        );
+        assert_eq!(
+            ocos(&late)
+                .into_iter()
+                .map(|(_, qty, legs, purpose)| (qty, legs, purpose))
+                .collect::<Vec<_>>(),
+            vec![(
+                Qty::parse("10")?,
+                legs("170", "140", "10")?,
+                Purpose::Protective
+            )],
+            "the recorded OCO, for the whole position"
+        );
+        assert_eq!(
+            actions(&late),
+            vec!["cancelled", "placed", "unprotected_end"]
+        );
+        assert!(executor.state.exiting.is_empty(), "no stale sequence");
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
     /// A restart between the cancel and its confirmation resumes the passive sequence from the
     /// journal: the confirmation still places the OCO, never a plain sell.
     #[test]
@@ -3227,6 +3275,42 @@ mod sequence_tests {
         assert!(queried(&early).is_empty() && submitted(&early) == 0);
         let due = executor.run(Input::Tick(RiskClock::from_secs(55)), &ports)?;
         assert_eq!(queried(&due), vec![second]);
+        Ok(())
+    }
+
+    /// Rule 5's release pass takes only exits for waiting ones (rule 2): an intent that adds risk,
+    /// allowed on the journal with no order — which no batch writes, a submission following its
+    /// allow in the same batch — never has its agent's openings cancelled for it, nor is it
+    /// submitted, by a tick.
+    #[test]
+    fn the_release_pass_never_takes_an_add_for_a_waiting_exit() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held_with_a_resting_buy(&ports)?;
+        committed(
+            &mut executor,
+            "IntentReceived",
+            vec![
+                ("intent_id", text(SECOND)),
+                ("agent", text("agent-a")),
+                ("kind", text("order")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("increase")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "GateDecided",
+            vec![("intent_id", text(SECOND)), ("verdict", text("allow"))],
+        )?;
+        let tick = executor.run(Input::Tick(RiskClock::from_secs(20)), &ports)?;
+        assert!(
+            cancels(&tick).is_empty() && submitted(&tick) == 0 && queried(&tick).is_empty(),
+            "{:?}",
+            drafted(&tick)
+        );
         Ok(())
     }
 
