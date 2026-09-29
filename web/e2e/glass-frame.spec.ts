@@ -68,10 +68,20 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
     await page.waitForLoadState("networkidle");
     const glass = await tokenColor(page, "--glass");
     expect(glass).not.toBe(await tokenColor(page, "--card"));
-    for (const frame of [header(page), dock(page)]) expect(await paint(frame)).toEqual({ background: glass, filter: BLUR, image: "none" });
+    expect(await paint(header(page))).toEqual({ background: glass, filter: BLUR, image: "none" });
     const painted = await overBlack(page, glass);
     const card = await overBlack(page, await tokenColor(page, "--card"), 0.72);
     painted.forEach((v, i) => expect(Math.abs(v - card[i]), "the glass is the card's own colour, at 72%").toBeLessThanOrEqual(1));
+
+    const dockGlass = await tokenColor(page, "--dock-glass");
+    expect(await paint(dock(page))).toEqual({ background: dockGlass, filter: BLUR, image: "none" });
+    const dense = await overBlack(page, dockGlass);
+    const card85 = await overBlack(page, await tokenColor(page, "--card"), 0.85);
+    dense.forEach((v, i) => expect(Math.abs(v - card85[i]), "the dock's glass is the card at 85%").toBeLessThanOrEqual(1));
+    const edge = await dock(page).evaluate((el) => getComputedStyle(el).borderTopColor);
+    const edgeOverBlack = await overBlack(page, edge);
+    const type15 = await overBlack(page, await tokenColor(page, "--foreground"), 0.15);
+    edgeOverBlack.forEach((v, i) => expect(Math.abs(v - type15[i]), "the dock's edge is the type colour at 15%").toBeLessThanOrEqual(1));
 
     await scrollBy(page, 330);
     expect((await header(page).boundingBox())?.y, "the header stays at the top").toBe(0);

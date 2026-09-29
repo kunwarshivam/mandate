@@ -87,7 +87,7 @@ describe("route coverage", () => {
     for (const href of hrefs) await expect(pageFor(href), href).resolves.toBeDefined();
   });
 
-  it.each(["Audit", "More screens"])("the dock's %s menu links only to paths with a page", async (menu) => {
+  it.each(["Audit", "More"])("the dock's %s menu links only to paths with a page", async (menu) => {
     await renderPath("/");
     fireEvent.click(within(screen.getByRole("navigation", { name: "Primary" })).getByRole("button", { name: menu }));
     const hrefs = internalHrefs(await screen.findByRole("menu"));

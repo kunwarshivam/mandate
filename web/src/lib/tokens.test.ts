@@ -137,6 +137,44 @@ describe("the frame's glass", () => {
     expect(worst(tokenValue("ink", theme)), "ink").toBeGreaterThanOrEqual(3);
   });
 
+  describe("the dock's denser glass", () => {
+    const pct = (name: string, of: string) => {
+      const m = new RegExp(`^color-mix\\(in oklab, var\\(--${of}\\) (\\d+)%, transparent\\)$`).exec(declared[name] ?? "");
+      if (!m) throw new Error(`--${name} is not a mix of --${of}`);
+      return Number(m[1]) / 100;
+    };
+    const glassAlpha = pct("dock-glass", "card");
+    const current = pct("dock-current", "foreground");
+    const hover = pct("dock-hover", "foreground");
+
+    it("is the card at 85% with the type colour at 15% for its edge, a 14% tint for the current pill and half that on hover", () => {
+      expect(glassAlpha).toBe(0.85);
+      expect(pct("dock-edge", "foreground")).toBe(0.15);
+      expect(current).toBe(0.14);
+      expect(hover).toBe(current / 2);
+      expect(declaredDark["dock-glass"], "one declaration serves both themes").toBeUndefined();
+    });
+
+    it.each(THEMES)("keeps every label at 4.5:1 and the pill visible over any token scrolling under the dock, in %s", (theme) => {
+      const card = tokenValue("card", theme);
+      const fg = tokenValue("foreground", theme);
+      const under = colorTokensFor(theme).map((t) => t.value);
+      const tint = (alpha: number, u: string) => {
+        const glass = composite(card, glassAlpha, u);
+        const ink = toRgb255(fg);
+        return ink.map((v, i) => Math.round(v * alpha + glass[i] * (1 - alpha))) as typeof glass;
+      };
+      for (const u of under) {
+        const glass = composite(card, glassAlpha, u);
+        expect(rgbContrast(toRgb255(tokenValue("muted-foreground", theme)), glass), `idle label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(toRgb255(fg), tint(hover, u)), `hovered label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(toRgb255(fg), tint(current, u)), `current label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(tint(current, u), glass), `the pill against the glass over ${u}`).toBeGreaterThanOrEqual(1.3);
+      }
+      expect(rgbContrast(toRgb255(tokenValue("muted", theme)), toRgb255(card)), "muted alone would not show the pill").toBeLessThan(1.3);
+    });
+  });
+
   it("blurs and saturates what is behind, with the WebKit prefix", () => {
     expect(utility).toContain("background-color: var(--glass);");
     expect(utility).toContain("border-color: var(--glass-edge);");

@@ -4,7 +4,6 @@ import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { Tooltip } from "@cloudflare/kumo/components/tooltip";
 import { Buildings, DotsThree, GearSix, House, type Icon as PhosphorIcon, Scroll } from "@phosphor-icons/react";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
@@ -79,15 +78,32 @@ export function isCurrent(pathname: string, href: string): boolean {
   }
 }
 
+/** The dock's own names, where a screen's full name is longer than a dock label needs to be. */
+const DOCK_LABEL: Partial<Record<string, string>> = { agents: "Agents" };
+
 const ITEM =
-  "press relative grid size-11.5 shrink-0 place-items-center rounded-2xl text-muted-foreground outline-none hover:bg-card hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring data-current:bg-card data-current:text-foreground data-current:ring-1 data-current:ring-border";
+  "group press relative flex h-12.5 min-w-16 shrink-0 flex-col items-center justify-center gap-0.5 rounded-2xl px-2 text-muted-foreground outline-none hover:bg-(--dock-hover) hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring data-current:bg-(--dock-current) data-current:text-foreground forced-colors:data-current:outline-2 forced-colors:data-current:outline-solid";
+
+/** The label, with room kept for its semibold weight so the dock does not shift when the current section changes. */
+function Label({ children }: { children: string }) {
+  return (
+    <span className="grid text-xs whitespace-nowrap">
+      <span data-slot="dock-label" className="col-start-1 row-start-1 font-medium group-data-current:font-semibold">
+        {children}
+      </span>
+      <span aria-hidden className="invisible col-start-1 row-start-1 font-semibold">
+        {children}
+      </span>
+    </span>
+  );
+}
 
 function Count({ n }: { n: number }) {
   if (n === 0) return null;
   return (
     <span
       data-slot="approvals-count"
-      className="absolute top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
+      className="absolute top-0.5 left-[calc(50%+0.125rem)] inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
     >
       {n}
       <span className="sr-only"> open</span>
@@ -97,37 +113,28 @@ function Count({ n }: { n: number }) {
 
 function DockLink({ screen, current, count }: { screen: Screen; current: boolean; count: number }) {
   const Icon = SCREEN_ICON[screen.key] ?? House;
+  const label = DOCK_LABEL[screen.key] ?? screen.label;
   return (
-    <Tooltip
-      content={screen.label}
-      side="top"
-      render={<Link href={screen.href} aria-current={current ? "page" : undefined} data-current={current ? "" : undefined} className={ITEM} />}
-    >
-      <Icon className="size-5.5" weight={current ? "fill" : "regular"} aria-hidden />
-      <span className="sr-only">{screen.label}</span>
+    <Link href={screen.href} aria-current={current ? "page" : undefined} data-current={current ? "" : undefined} className={ITEM}>
+      <Icon className="size-5" weight={current ? "fill" : "regular"} aria-hidden />
+      <Label>{label}</Label>
       {screen.key === "approvals" ? <Count n={count} /> : null}
-    </Tooltip>
+    </Link>
   );
 }
 
 function DockMenuButton({ label, icon: Icon, current, children }: { label: string; icon: PhosphorIcon; current: boolean; children: ReactNode }) {
   return (
     <DropdownMenu>
-      <Tooltip
-        content={label}
-        side="top"
-        render={
-          <DropdownMenu.Trigger
-            render={<button type="button" />}
-            aria-label={label}
-            aria-current={current ? "true" : undefined}
-            data-current={current ? "" : undefined}
-            className={ITEM}
-          />
-        }
+      <DropdownMenu.Trigger
+        render={<button type="button" />}
+        aria-current={current ? "true" : undefined}
+        data-current={current ? "" : undefined}
+        className={ITEM}
       >
-        <Icon className="size-5.5" weight={current ? "fill" : "regular"} aria-hidden />
-      </Tooltip>
+        <Icon className="size-5" weight={current ? "fill" : "regular"} aria-hidden />
+        <Label>{label}</Label>
+      </DropdownMenu.Trigger>
       <DropdownMenu.Content side="top" align="center" sideOffset={12} className="min-w-56">
         {children}
       </DropdownMenu.Content>
@@ -154,10 +161,11 @@ function MenuLinks({ groups, pathname }: { groups: MenuGroup[]; pathname: string
 
 /**
  * The desktop navigation (from 64rem): a floating glass dock centred at the bottom of the viewport,
- * in place of the sidebar. The owner's everyday screens sit on it; Audit and "More screens" open
- * menus with every other screen, so nothing the sidebar reached is lost. The account the sidebar's
- * header named heads "More screens" (the header's own "More" is alerts and the account menu). The dock sits in the page's bottom padding and scroll padding, so it never
- * covers content, a focused control or an approval's pinned choices, and it never reaches the header.
+ * in place of the sidebar. Every item is an icon over its name, and the current section sits on a
+ * pill. The owner's everyday screens sit on it; Audit and More open menus with every other screen,
+ * so nothing the sidebar reached is lost, and the account the sidebar's header named heads More.
+ * The dock sits in the page's bottom padding and scroll padding, so it never covers content, a
+ * focused control or an approval's pinned choices, and it never reaches the header.
  */
 export function Dock({ approvals }: { approvals: number }) {
   const pathname = usePathname();
@@ -169,17 +177,21 @@ export function Dock({ approvals }: { approvals: number }) {
   const within = (groups: MenuGroup[]) => groups.some((g) => g.links.some((l) => isCurrent(pathname, l.href)));
 
   return (
-    <nav aria-label="Primary" data-slot="dock" className="glass flex items-center gap-1 rounded-3xl border p-1.5 shadow-lg">
+    <nav
+      aria-label="Primary"
+      data-slot="dock"
+      className="glass flex items-center gap-1 rounded-3xl border p-1.5 shadow-md [--glass-edge:var(--dock-edge)] [--glass:var(--dock-glass)]"
+    >
       {links.map((s) => (
         <DockLink key={s.key} screen={s} current={isCurrent(pathname, s.href)} count={approvals} />
       ))}
-      {links.length > 0 ? <span aria-hidden className="mx-1 h-6 w-px bg-border" /> : null}
+      {links.length > 0 ? <span aria-hidden data-slot="dock-divider" className="mx-1 h-8 w-px bg-(--dock-edge)" /> : null}
       {audit.length > 0 ? (
         <DockMenuButton label="Audit" icon={Scroll} current={pathname === "/audit" || pathname.startsWith("/audit/")}>
           <MenuLinks groups={audit} pathname={pathname} />
         </DockMenuButton>
       ) : null}
-      <DockMenuButton label="More screens" icon={DotsThree} current={within(more)}>
+      <DockMenuButton label="More" icon={DotsThree} current={within(more)}>
         <DropdownMenu.Group>
           <DropdownMenu.Label>Account</DropdownMenu.Label>
           <DropdownMenu.Item icon={Buildings} selected>

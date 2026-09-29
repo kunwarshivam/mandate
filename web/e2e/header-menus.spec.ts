@@ -25,7 +25,7 @@ for (const { width, button, items } of CASES) {
     await page.waitForLoadState("networkidle");
     const menu = page.getByRole("menu");
     await expect(async () => {
-      await page.getByRole("button", { name: button, exact: true }).click();
+      await page.getByRole("banner").getByRole("button", { name: button, exact: true }).click();
       await expect(menu).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 15_000 });
     for (const item of items) await expect(menu).toContainText(item);

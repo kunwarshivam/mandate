@@ -64,6 +64,15 @@
    */
   --glass: color-mix(in oklab, var(--card) 72%, transparent);
   --glass-edge: color-mix(in oklab, var(--foreground) 8%, transparent);
+  /*
+   * The dock carries the navigation, so its glass is denser and its edge firmer than the header's.
+   * The current section's pill is a tint of the type colour: muted is only 1.1:1 on the dark card, and
+   * a solid ink fill belongs to Stop. At 14% the pill holds 1.3:1 on the glass in light and 1.5:1 in dark.
+   */
+  --dock-glass: color-mix(in oklab, var(--card) 85%, transparent);
+  --dock-edge: color-mix(in oklab, var(--foreground) 15%, transparent);
+  --dock-current: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --dock-hover: color-mix(in oklab, var(--foreground) 7%, transparent);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -88,8 +97,8 @@
   --row-y: 1rem;
   --seam: 0.5rem;
   --tab-bar: 4rem;
-  /* The desktop dock: 46px items in 6px of padding and a hairline, floating 1rem above the bottom edge. */
-  --dock-h: 3.75rem;
+  /* The desktop dock: 50px labelled items in 6px of padding and a hairline, floating 1rem above the bottom edge. */
+  --dock-h: 4rem;
   --dock-gap: 1rem;
   --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
   /* The status strip and the agent wire share one height, so either replacing the other moves nothing. */

@@ -22,37 +22,62 @@ async function openMenu(name: string) {
 }
 
 describe("the desktop dock", () => {
-  it("carries the everyday screens in order, each named, then the Audit and More screens menus", () => {
-    renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(within(dock()).getAllByRole("link").map((l) => [l.textContent?.replace(/\d+ open$/, ""), l.getAttribute("href")])).toEqual([
-      ["Home", "/"],
-      ["Approvals", "/approvals"],
-      ["Alerts", "/alerts"],
-      ["All agents", "/agents"],
-      ["Positions", "/positions"],
-      ["Connections", "/connections"],
-    ]);
-    expect(within(dock()).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["Audit", "More screens"]);
-    for (const b of within(dock()).getAllByRole("button")) expect(b).toHaveAttribute("aria-haspopup", "menu");
+  it("labels every item under its icon: the everyday screens in order, then the Audit and More menus", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
+    const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
+    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
+    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
+    expect(names(within(dock()).getAllByRole("button"))).toEqual(["Audit", "More"]);
+    expect(within(dock()).getByRole("link", { name: /^Approvals\s*\d+\s*open$/ })).toBeInTheDocument();
+    expect(within(dock()).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+    for (const b of within(dock()).getAllByRole("button")) {
+      expect(b).toHaveAttribute("aria-haspopup", "menu");
+      expect(b).not.toHaveAttribute("aria-label");
+    }
+    for (const label of dock().querySelectorAll("[data-slot=dock-label]")) {
+      expect(label).toHaveClass("font-medium", "group-data-current:font-semibold");
+      expect(label.parentElement).toHaveClass("text-xs");
+    }
   });
 
-  it("marks the current screen, and only it, with aria-current", () => {
+  it("has no tooltips: the labels name every item, and no dock item has a shortcut to add", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    for (const item of [...within(dock()).getAllByRole("link"), ...within(dock()).getAllByRole("button")]) {
+      fireEvent.mouseEnter(item);
+      fireEvent.focus(item);
+      expect(item).not.toHaveAttribute("aria-describedby");
+      expect(item).not.toHaveAttribute("aria-keyshortcuts");
+    }
+    expect(document.querySelector(".kumo-tooltip-popup")).toBeNull();
+  });
+
+  it("reserves a divider between the everyday screens and the menus", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const divider = dock().querySelector("[data-slot=dock-divider]");
+    expect(divider).toHaveAttribute("aria-hidden");
+    expect(divider?.nextElementSibling).toHaveTextContent(/^Audit/);
+  });
+
+  it("marks the current screen, and only it, with aria-current and the pill", () => {
     setPathname("/positions");
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const current = within(dock()).getAllByRole("link").filter((l) => l.getAttribute("aria-current") === "page");
     expect(current.map((l) => l.getAttribute("href"))).toEqual(["/positions"]);
     expect(current[0]).toHaveAttribute("data-current");
+    expect(dock().querySelectorAll("[data-current]")).toHaveLength(1);
+    expect(current[0]).toHaveClass("data-current:bg-(--dock-current)", "hover:bg-(--dock-hover)");
+    expect(current[0].className).not.toMatch(/bg-(ink|primary|foreground|lapis|mandate)\b/);
   });
 
-  it("keeps All agents current inside an agent, but not on New agent, which lives in More screens", () => {
+  it("keeps Agents current inside an agent, but not on New agent, which lives in More", () => {
     setPathname(`/agents/${AGENT_IDS.btc}/orders`);
     const { unmount } = renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(within(dock()).getByRole("link", { name: "All agents" })).toHaveAttribute("aria-current", "page");
+    expect(within(dock()).getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
     unmount();
     setPathname("/agents/new");
     renderWithRuntime(<AppShell>{null}</AppShell>);
     expect(within(dock()).queryByRole("link", { current: "page" })).toBeNull();
-    expect(within(dock()).getByRole("button", { name: "More screens" })).toHaveAttribute("aria-current", "true");
+    expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
   });
 
   it("marks the Audit menu current on any audit screen, and the screen inside the menu", async () => {
@@ -64,10 +89,10 @@ describe("the desktop dock", () => {
     expect(within(menu).getByRole("menuitem", { name: "Audit overview" })).not.toHaveAttribute("aria-current");
   });
 
-  it("heads More screens with the account, then the workspace screens", async () => {
+  it("heads More with the account, then the workspace screens", async () => {
     setPathname("/settings/policies");
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const menu = await openMenu("More screens");
+    const menu = await openMenu("More");
     expect(menu).toHaveTextContent(/^Account/);
     expect(within(menu).getByRole("menuitem", { name: /Alpaca paper/ })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: "Policies" })).toHaveAttribute("aria-current", "page");
@@ -119,7 +144,7 @@ describe("what the dock reaches", () => {
     expect(reached.has(SECTION_INDEX.audit.href)).toBe(audits);
   });
 
-  it("puts the audit screens in Audit and every other screen in More screens, under their group labels", () => {
+  it("puts the audit screens in Audit and every other screen in More, under their group labels", () => {
     for (const g of menuGroups("audit", "owner")) expect(g.label).toBe(GROUP_LABEL.audit);
     expect(menuGroups("more", "owner").map((g) => g.label)).not.toContain(GROUP_LABEL.audit);
     expect(menuFor("audit")).toBe("audit");

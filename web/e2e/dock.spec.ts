@@ -3,14 +3,13 @@ import { APPROVAL_IDS } from "../src/fixtures/workspace";
 import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
 
 /**
- * From 1024 px the dock carries the navigation: a floating glass bar centred at the bottom, with a
- * label on hover and on focus for every item, menus a keyboard can open, move through and close,
- * and every screen the sidebar reached one press or one menu away. It never covers a focused
- * control, an approval's choices, the header or Stop. Below 1024 px the tab bar carries it instead.
+ * From 1024 px the dock carries the navigation: a floating glass bar centred at the bottom, every
+ * item an icon over its name, the current section on a pill, menus a keyboard can open, move through
+ * and close, and every screen the sidebar reached one press or one menu away. It never covers a
+ * focused control, an approval's choices, the header or Stop. Below 1024 px the tab bar carries it instead.
  */
 
 const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
-const tooltip = (page: Page) => page.locator(".kumo-tooltip-popup");
 
 async function open(page: Page, path: string, width = 1440, height = 900) {
   await page.setViewportSize({ width, height });
@@ -18,73 +17,95 @@ async function open(page: Page, path: string, width = 1440, height = 900) {
   await page.waitForLoadState("networkidle");
 }
 
-test("its shape: a rounded glass bar of 46 px items with 22 px icons", async ({ page }) => {
+async function tokenColor(page: Page, token: string): Promise<string> {
+  return page.evaluate((token) => {
+    const probe = document.createElement("div");
+    probe.style.backgroundColor = `var(${token})`;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return value;
+  }, token);
+}
+
+test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide, with 20 px icons over 12 px labels", async ({ page }, testInfo) => {
   await open(page, "/");
   const found = await dock(page).evaluate((el) => {
     const style = getComputedStyle(el);
-    const item = el.querySelector("a")!;
-    const icon = item.querySelector("svg")!.getBoundingClientRect();
     return {
       radius: parseFloat(style.borderTopLeftRadius),
       padding: parseFloat(style.paddingTop),
       shadow: style.boxShadow,
       height: el.getBoundingClientRect().height,
-      item: [item.getBoundingClientRect().width, item.getBoundingClientRect().height],
-      icon: [icon.width, icon.height],
+      items: [...el.querySelectorAll<HTMLElement>("a, button")].map((item) => {
+        const icon = item.querySelector("svg")!.getBoundingClientRect();
+        const label = getComputedStyle(item.querySelector("[data-slot=dock-label]")!);
+        return { width: item.getBoundingClientRect().width, height: item.getBoundingClientRect().height, icon: [icon.width, icon.height], size: label.fontSize, weight: label.fontWeight };
+      }),
     };
   });
   expect(found.radius).toBeGreaterThanOrEqual(20);
   expect(found.radius).toBeLessThanOrEqual(24);
   expect(found.padding).toBe(6);
-  expect(found.item).toEqual([46, 46]);
-  expect(found.icon).toEqual([22, 22]);
-  expect(found.height, "the dock's height matches --dock-h").toBe(60);
-  expect(found.shadow).not.toBe("none");
+  expect(found.height, "the dock's height matches --dock-h").toBe(64);
+  expect(found.items).toHaveLength(8);
+  for (const item of found.items) {
+    expect(item.width).toBeGreaterThanOrEqual(64);
+    expect(item.height).toBe(50);
+    expect(item.icon).toEqual([20, 20]);
+    expect(item.size).toBe("12px");
+  }
+  if (testInfo.project.name.includes("dark")) expect(found.shadow, "flat in dark").toMatch(/^(none|rgba\(0, 0, 0, 0\) 0px 0px 0px 0px(, rgba\(0, 0, 0, 0\) 0px 0px 0px 0px)*)$/);
+  else expect(found.shadow, "the light theme's shadow-md, no stronger").toMatch(/0px 4px 12px -2px/);
 });
 
-test("the current screen's item is a raised card tile", async ({ page }) => {
+test("the current section sits on a tinted pill with a semibold label; hover is a lighter pill", async ({ page }) => {
   await open(page, "/positions");
   const current = dock(page).getByRole("link", { name: "Positions" });
+  const idle = dock(page).getByRole("link", { name: "Alerts" });
   await expect(current).toHaveAttribute("aria-current", "page");
-  const [tile, idle, card] = await Promise.all([
-    current.evaluate((el) => getComputedStyle(el).backgroundColor),
-    dock(page).getByRole("link", { name: "Alerts" }).evaluate((el) => getComputedStyle(el).backgroundColor),
-    page.evaluate(() => {
-      const probe = document.createElement("div");
-      probe.style.backgroundColor = "var(--card)";
-      document.body.append(probe);
-      const value = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return value;
-    }),
+  const paint = (el: HTMLElement) => ({ bg: getComputedStyle(el).backgroundColor, weight: getComputedStyle(el.querySelector("[data-slot=dock-label]")!).fontWeight });
+  const [pill, rest, tint, hoverTint, ink, mandate] = await Promise.all([
+    current.evaluate(paint),
+    idle.evaluate(paint),
+    tokenColor(page, "--dock-current"),
+    tokenColor(page, "--dock-hover"),
+    tokenColor(page, "--foreground"),
+    tokenColor(page, "--mandate"),
   ]);
-  expect(tile).toBe(card);
-  expect(idle).toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/);
+  expect(pill.bg).toBe(tint);
+  expect(pill.bg, "not a solid ink fill").not.toBe(ink);
+  expect(pill.bg, "not the mandate's colour").not.toBe(mandate);
+  expect(pill.weight).toBe("600");
+  expect(rest.bg).toMatch(/^rgba\(0, 0, 0, 0\)$|^transparent$/);
+  expect(rest.weight).toBe("500");
+  await idle.hover();
+  await expect.poll(() => idle.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(hoverTint);
+  expect(hoverTint).not.toBe(tint);
 });
 
-test("every item has a label on hover and on keyboard focus, and a visible focus ring", async ({ page }) => {
+test("the labels name every item: no tooltip on hover or focus, and a visible focus ring", async ({ page }) => {
   await open(page, "/");
   const items = dock(page).locator("a, button");
-  const names = await items.evaluateAll((els) => els.map((el) => el.getAttribute("aria-label") ?? el.textContent?.replace(/\d+ open$/, "")));
-  expect(names).toEqual(["Home", "Approvals", "Alerts", "All agents", "Positions", "Connections", "Audit", "More screens"]);
+  const names = await items.evaluateAll((els) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent));
+  expect(names).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections", "Audit", "More"]);
   await items.nth(4).hover();
-  await expect(tooltip(page)).toHaveText("Positions");
-  await page.mouse.move(0, 450);
-  await expect(tooltip(page)).toHaveCount(0);
+  await page.waitForTimeout(600);
+  await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);
 
   await page.locator("#main").focus();
-  const first = items.first();
-  await first.focus();
+  await items.first().focus();
   await page.keyboard.press("Tab");
   const second = items.nth(1);
   await expect(second).toBeFocused();
-  await expect(tooltip(page)).toHaveText("Approvals");
+  await page.waitForTimeout(600);
+  await expect(page.locator(".kumo-tooltip-popup")).toHaveCount(0);
   expect(await second.evaluate((el) => getComputedStyle(el).boxShadow), "the focus ring").not.toBe("none");
 });
 
 test("the menus open, move and close from the keyboard, and focus comes back to the button", async ({ page }) => {
   await open(page, "/");
-  const more = dock(page).getByRole("button", { name: "More screens" });
+  const more = dock(page).getByRole("button", { name: "More", exact: true });
   await more.focus();
   await page.keyboard.press("Enter");
   const menu = page.getByRole("menu");
@@ -109,8 +130,8 @@ test("the menus open, move and close from the keyboard, and focus comes back to 
 test("every screen the sidebar reached is one press or one menu away", async ({ page }) => {
   await open(page, "/");
   const reached = new Set(await dock(page).locator(":scope > a").evaluateAll((els) => els.map((el) => el.getAttribute("href"))));
-  for (const menu of ["Audit", "More screens"]) {
-    await dock(page).getByRole("button", { name: menu }).click();
+  for (const menu of ["Audit", "More"]) {
+    await dock(page).getByRole("button", { name: menu, exact: true }).click();
     const list = page.getByRole("menu");
     await expect(list).toBeVisible();
     for (const href of await list.getByRole("menuitem").evaluateAll((els) => els.map((el) => el.getAttribute("href")))) if (href) reached.add(href);
