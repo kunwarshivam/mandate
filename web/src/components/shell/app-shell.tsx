@@ -9,6 +9,7 @@ import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allFeedsOk } from "@/lib/feeds";
 import { can, useRole } from "@/lib/roles";
 import { wireItems } from "@/lib/wire";
+import { InlineDisclosures } from "@/components/domain/placeholders";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
 import { AppHeader } from "./app-header";
@@ -55,7 +56,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           data-density={densityFor(pathname)}
           className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)] outline-none lg:pb-[calc(var(--dock-clearance)+2rem)]"
         >
-          {canOpen(role, pathname) ? children : <AccessDenied role={role} />}
+          <InlineDisclosures inline={isRecordRoute(pathname)}>{canOpen(role, pathname) ? children : <AccessDenied role={role} />}</InlineDisclosures>
         </main>
       </div>
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
