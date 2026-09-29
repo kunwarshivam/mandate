@@ -223,8 +223,14 @@ test("tabbing through a long page, no focused control sits under the header or t
   expect(covered).toEqual([]);
 });
 
+test("starts at 64rem: at 1024 px the wire takes the strip's place", async ({ page }) => {
+  await open(page, "/", 1024, 800);
+  await expect(wire(page)).toBeVisible();
+  await expect(page.locator("[data-slot=status-strip]")).toBeHidden();
+});
+
 for (const width of [390, 800, 1023]) {
-  test(`below lg (${width} px), neither the wire nor the strip while every feed answers`, async ({ page }) => {
+  test(`below 64rem (${width} px), neither the wire nor the strip while every feed answers`, async ({ page }) => {
     await open(page, "/", width, 844);
     await expect(wire(page)).toBeHidden();
     await expect(page.locator("[data-slot=status-strip]")).toBeHidden();
