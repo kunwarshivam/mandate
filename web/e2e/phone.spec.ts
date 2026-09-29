@@ -135,6 +135,42 @@ for (const width of PHONES) {
       await expect(page.locator("[data-slot=status-strip]")).toBeHidden();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
     });
+
+    test("Stop in the phone header is quiet on a calm screen and loud on risk, 44 px either way", async ({ page }) => {
+      for (const [scenario, tone] of [
+        ["normal", "quiet"],
+        ["stale", "loud"],
+      ] as const) {
+        await open(page, `/?scenario=${scenario}`, width);
+        const stop = header(page).getByRole("button", { name: "Stop", exact: true });
+        await expect(stop).toHaveAttribute("data-tone", tone);
+        await expect(stop).toBeEnabled();
+        const pill = (await stop.locator("[data-slot=stop-pill]").boundingBox())!;
+        expect(pill.height, `${scenario}: the visible pill`).toBeGreaterThanOrEqual(MIN_TARGET);
+      }
+    });
+
+    test("the stale banner and a loud Stop stand together, and the open More sheet leaves Stop pressable", async ({ page }) => {
+      await open(page, "/?scenario=stale", width);
+      const stop = header(page).getByRole("button", { name: "Stop", exact: true });
+      const banner = page.getByRole("region", { name: "Feed warning" });
+      await expect(stop).toHaveAttribute("data-tone", "loud");
+      await expect(banner).toBeVisible();
+      await expect(stop).toBeInViewport({ ratio: 1 });
+      const [s, b] = [(await stop.boundingBox())!, (await banner.boundingBox())!];
+      expect(b.y, "the banner sits under Stop, never over it").toBeGreaterThanOrEqual(s.y + s.height - 0.5);
+      await openMore(page);
+      await expect(stop, "More is not modal: Stop stays in the accessibility tree").toBeVisible();
+      await expect(stop).toHaveAttribute("data-tone", "loud");
+      const uncovered = await stop.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return hit === el || el.contains(hit);
+      });
+      expect(uncovered, "Stop is the element at its own centre with More open").toBe(true);
+      await stop.click();
+      await expect(page.getByRole("dialog", { name: /^Stop/ })).toBeVisible();
+    });
   });
 }
 

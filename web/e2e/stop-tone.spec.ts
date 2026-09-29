@@ -33,6 +33,8 @@ interface Found {
   pill: Box;
   headerHeight: number;
   headerBg: Rgba;
+  /** The solid card the header's glass is mixed from. */
+  cardBg: Rgba;
   pillBg: Rgba;
   border: Rgba;
   text: Rgba;
@@ -77,6 +79,14 @@ async function inspect(page: Page): Promise<Found> {
       pill: box(pill),
       headerHeight: header.getBoundingClientRect().height,
       headerBg: toRgba(getComputedStyle(header).backgroundColor),
+      cardBg: (() => {
+        const probe = document.createElement("div");
+        probe.style.backgroundColor = "var(--card)";
+        document.body.append(probe);
+        const value = toRgba(getComputedStyle(probe).backgroundColor);
+        probe.remove();
+        return value;
+      })(),
       pillBg: toRgba(s.backgroundColor),
       border: toRgba(s.borderTopColor),
       text: toRgba(s.color),
@@ -118,10 +128,11 @@ test.describe("Stop is quiet on a calm screen", () => {
       await expect(stop).not.toHaveAttribute("aria-describedby");
       await expect(stop).toHaveAccessibleDescription("");
       const f = await inspect(page);
-      expect(f.pillBg, "the quiet pill sits on the header's own colour").toEqual(f.headerBg);
+      expect(f.headerBg[3], "the header is glass").toBeLessThan(255);
+      expect(f.pillBg, "the quiet pill is the solid card the header's glass is mixed from").toEqual(f.cardBg);
       expect(f.border, "outline and label are the same ink").toEqual(f.text);
       expect(f.borderWidth, "a 2px outline").toBe(2);
-      expect(contrast(f.border, f.headerBg), "outline against the header").toBeGreaterThanOrEqual(MARK_CONTRAST);
+      expect(contrast(f.border, f.cardBg), "outline against the header's card").toBeGreaterThanOrEqual(MARK_CONTRAST);
       expect(contrast(f.text, f.pillBg), "label on the quiet pill").toBeGreaterThanOrEqual(LABEL_CONTRAST);
     });
   }
@@ -146,8 +157,8 @@ test.describe("Stop turns loud when something needs you", () => {
       await expect(stop).toHaveText("Stop");
       const f = await inspect(page);
       expect(f.pillBg, "filled in the ink of its own outline").toEqual(f.border);
-      expect(f.pillBg).not.toEqual(f.headerBg);
-      expect(contrast(f.pillBg, f.headerBg), "the fill against the header").toBeGreaterThanOrEqual(MARK_CONTRAST);
+      expect(f.pillBg).not.toEqual(f.cardBg);
+      expect(contrast(f.pillBg, f.cardBg), "the fill against the header's card").toBeGreaterThanOrEqual(MARK_CONTRAST);
       expect(contrast(f.text, f.pillBg), "label on the loud pill").toBeGreaterThanOrEqual(LABEL_CONTRAST);
     });
   }
@@ -222,7 +233,7 @@ test.describe("Stop never flickers or disables on a page change", () => {
               requestAnimationFrame(tick);
             }),
         );
-        await page.locator("[data-sidebar-wrapper]").locator(`a[href="${href}"]`).first().click();
+        await page.getByRole("navigation", { name: "Primary" }).locator(`a[href="${href}"]`).first().click();
         const { tones, disabled } = await sampled;
         await expect(page).toHaveURL(href);
         expect(new Set(tones), `${href}: tones seen`).toEqual(new Set([tone]));
