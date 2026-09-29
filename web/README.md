@@ -61,7 +61,8 @@ development.
   `schemas/mandate.schema.json`: decimals are strings, IDs are opaque (ULIDs with a type prefix),
   and content references are `sha256:` hashes. The two main mandates are
   `reference/mandate/bases.py`'s `btc_accumulator` and `two_stock_swing`.
-- The status strip carries a "Fixture data" tag, and P&L values are fixture values, not a record.
+- The status strip carries a "Fixture data" tag (on a phone, the More sheet and the foot of the
+  page do), and P&L values are fixture values, not a record.
 - Money never passes through a float: `src/lib/decimal.ts` works on scaled integers.
 - `src/lib/mock-runtime.tsx` stands in for the workspace deployment. Commands and approval responses
   are held in memory and shown as recorded only after a delay, so the screens never display an
@@ -116,6 +117,13 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
-- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone
-  sidebar, the breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
+- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone's
+  tab bar and More sheet, the breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
   screens not built yet say "Coming in the next slice" with what they will be for.
+- **The phone is a remote control** (DEC-207). Below 64rem the header holds the mark, the paper
+  badge and Stop; four tabs (Home, Approvals, Agents, More) replace the sidebar, and More holds
+  Search, the account switcher and every other screen. Home leads with what needs you, agents show
+  their headroom rather than P&L, an agent page is its state, equity and headroom with its sections
+  as links, and a request is one screen with Approve and Skip pinned. Tablet and desktop are
+  unchanged. `web/DESIGN.md` ("Phone") has the rules; `e2e/phone.spec.ts` checks them at 320, 375,
+  390 and 430px.
