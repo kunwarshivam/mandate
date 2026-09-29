@@ -95,7 +95,10 @@ impl Stage {
     }
 
     /// The stable reason code the run reports when this stage does not answer (ADR-0001 ES-09). The
-    /// process exits with it and prints it on one line of stderr.
+    /// process exits with it and prints it on one line of stderr. The connector's is
+    /// `broker_request_not_sent`, a request that never left the process; one the broker answered
+    /// and the connector could not read is `broker_answer_uninterpretable` instead, which
+    /// [`crate::ShellError::code`] tells apart by the cause (#248 review).
     pub fn code(self) -> &'static str {
         match self {
             Self::FlattenProbe => "exit_path_unavailable",
@@ -110,7 +113,7 @@ impl Stage {
             Self::Journal => "append_not_committed",
             Self::Sink => "intent_not_handed",
             Self::Executor => "executor_refused",
-            Self::Connector => "broker_answer_uninterpretable",
+            Self::Connector => "broker_request_not_sent",
         }
     }
 
