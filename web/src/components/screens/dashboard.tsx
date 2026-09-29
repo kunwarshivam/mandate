@@ -11,9 +11,9 @@ import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
+import { alertLines } from "@/lib/attention";
 import { price, quantity, usd } from "@/lib/format";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
 import { decisionHref, positionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
@@ -23,23 +23,8 @@ import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 /** The rail beside the account chart shows this many requests; the rest are one link away. */
 const WAITING_SHOWN = 3;
 
-const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
-
-function lowerFirst(text: string): string {
-  return text.charAt(0).toLowerCase() + text.slice(1);
-}
-
-/** Everything the Alerts screen lists, in one line: degraded feeds first, then agent conditions. */
-function alertLines(ws: Workspace): string[] {
-  const feeds = (Object.keys(HEALTH_WORD) as Array<keyof typeof HEALTH_WORD>)
-    .filter((k) => ws.health[k].state !== "ok")
-    .map((k) => `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : "stale"}`);
-  const agents = ws.agents.flatMap((a) => a.restrictions.map((r) => `${a.label}: ${lowerFirst(RESTRICTIONS[r.code].label)}${r.symbol ? ` (${r.symbol})` : ""}`));
-  return [...feeds, ...agents];
-}
-
 function AlertsSummary({ ws }: { ws: Workspace }) {
-  const lines = alertLines(ws);
+  const lines = alertLines(ws).map((a) => a.text);
   const Icon = lines.length === 0 ? CheckCircle : WarningCircle;
   return (
     <Link
