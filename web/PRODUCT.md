@@ -102,7 +102,8 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   favicon, app icons and share image are the ink mark on an off-white tile, the same in every
   browser theme. The brand is never ultramarine and never on a coloured block.
 - **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
-  in the page metadata or the share card.
+  in the page metadata or the share card. The one exception is the landing page's `description`,
+  for search results (DEC-212); its share card still carries the name and the image alone.
 - **Palette (DEC-205, replacing DEC-204's gold and warm paper).** Ink and Ultramarine, light and
   dark: ink #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night
   #0B0D11); ultramarine #547EEE as the one accent (lines, rails, marks; never body text, never a
