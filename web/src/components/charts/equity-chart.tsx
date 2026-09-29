@@ -169,7 +169,7 @@ function EquityHero({
       )}
       <RangePicker label={rangeLabel} value={range} options={EQUITY_RANGES} onChange={onRange} />
       {legend ? (
-        <div className="grid gap-2">
+        <div className="grid gap-2 lg:contents">
           <button
             type="button"
             data-slot="levels-toggle"
@@ -181,7 +181,7 @@ function EquityHero({
             Levels
             <CaretDown aria-hidden className={cn("size-3.5 transition-transform duration-(--duration-hover) motion-reduce:transition-none", levelsOpen && "rotate-180")} />
           </button>
-          <div id={legendId} data-slot="levels" className={cn(!levelsOpen && "max-lg:hidden")}>
+          <div id={legendId} data-slot="levels" className={cn("lg:contents", !levelsOpen && "max-lg:hidden")}>
             {legend}
           </div>
         </div>
