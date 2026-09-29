@@ -1,5 +1,5 @@
 /**
- * Owlhead's palette, Ink and Gold (DEC-204, web/COLOR.md): OKLCH ramps on one lightness curve, and
+ * Owlhead's palette, Ink and Ultramarine (DEC-205, web/COLOR.md): OKLCH ramps on one lightness curve, and
  * the semantic tokens of both themes mapped onto their steps. `globals.css` writes the same values,
  * and `tokens.test.ts` fails when the two drift. Components use only the semantic tokens.
  */
@@ -33,14 +33,18 @@ export const LIGHTNESS: Record<Step, number> = {
 /** Chroma rises to a hump in the middle of the ramp and falls off toward white and black. */
 const HUMP: Record<Step, number> = { 50: 0.1, 100: 0.25, 200: 0.45, 300: 0.7, 400: 0.9, 500: 1, 600: 1, 700: 0.92, 800: 0.82, 850: 0.62, 900: 0.42, 950: 0.3, 975: 0.2 };
 
-/** Paper leans warm (hue 85) and ink leans cool (hue 255), both between C 0.003 and 0.01. */
+/** Paper and ink share the cool hue 255, both between C 0.003 and 0.01: paper is a cool white, ink a cool near-black. */
 const PAPER_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.006, 400: 0.006, 500: 0.007, 600: 0.007, 700: 0.008, 800: 0.008, 850: 0.008, 900: 0.008, 950: 0.008, 975: 0.008 };
 const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.01, 850: 0.01, 900: 0.01, 950: 0.008, 975: 0.008 };
 
-/** Gold fades faster than the hump at the dark end, so the mandate's field in dark mode is a quiet tint, not a brown block. */
-const GOLD_CHROMA: Record<Step, number> = { 50: 0.007, 100: 0.035, 200: 0.065, 300: 0.1, 400: 0.126, 500: 0.125, 600: 0.105, 700: 0.088, 800: 0.075, 850: 0.045, 900: 0.03, 950: 0.022, 975: 0.015 };
+/**
+ * Ultramarine is vivid from 400 to 700 and quiet at both ends. sRGB holds little blue chroma at high
+ * lightness, so 50 to 400 take what the gamut allows; 800 to 975 fade fast, so the dark selection and
+ * the mandate's field in dark mode are calm dark tints, not blue blocks.
+ */
+const ULTRAMARINE_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.011, 200: 0.041, 300: 0.056, 400: 0.118, 500: 0.175, 600: 0.16, 700: 0.136, 800: 0.08, 850: 0.05, 900: 0.034, 950: 0.026, 975: 0.018 };
 
-export type RampId = "paper" | "ink" | "gold" | "green" | "red" | "amber" | "cvd-blue" | "cvd-rose" | "cvd-orange" | "crimson";
+export type RampId = "paper" | "ink" | "ultramarine" | "green" | "red" | "amber" | "cvd-teal" | "cvd-rose" | "cvd-orange" | "crimson";
 
 export interface Ramp {
   id: RampId;
@@ -62,9 +66,10 @@ function build(hue: number, chroma: (step: Step) => number): Record<Step, string
   return steps;
 }
 
-export const GOLD_HUE = 82;
+export const NEUTRAL_HUE = 255;
+export const ULTRAMARINE_HUE = 266;
 export const STATUS_HUES = { green: 150, red: 12 } as const;
-export const CVD_HUES = { "cvd-blue": 245, "cvd-rose": 350, "cvd-orange": 50 } as const;
+export const CVD_HUES = { "cvd-teal": 205, "cvd-rose": 350, "cvd-orange": 50 } as const;
 
 /**
  * Gain and loss share lightness and chroma at every step and differ only in hue, so a loss is
@@ -81,13 +86,13 @@ function ramp(id: RampId, name: string, hue: number, use: string, chroma: (step:
 }
 
 export const RAMPS: Record<RampId, Ramp> = {
-  paper: ramp("paper", "Paper", 85, "Light neutrals: the page, cards and hairlines in light mode, and the type in dark mode", (s) => PAPER_CHROMA[s]),
-  ink: ramp("ink", "Ink", 255, "Dark neutrals: type, primary actions, the Stop control and the mark in light mode, and the surfaces in dark mode", (s) => INK_CHROMA[s]),
-  gold: ramp("gold", "Gold", GOLD_HUE, "The one accent: your mandate's field, rules, markers and labels, and the account's line", (s) => GOLD_CHROMA[s]),
+  paper: ramp("paper", "Paper", NEUTRAL_HUE, "Light neutrals: the page, cards and hairlines in light mode, and the type in dark mode", (s) => PAPER_CHROMA[s]),
+  ink: ramp("ink", "Ink", NEUTRAL_HUE, "Dark neutrals: type, primary actions, the Stop control and the mark in light mode, and the surfaces in dark mode", (s) => INK_CHROMA[s]),
+  ultramarine: ramp("ultramarine", "Ultramarine", ULTRAMARINE_HUE, "The one accent: your mandate's field, rules, markers and labels, and the account's line", (s) => ULTRAMARINE_CHROMA[s]),
   green: ramp("green", "Green", STATUS_HUES.green, "Gain", statusChroma),
   red: ramp("red", "Red", STATUS_HUES.red, "Loss, as text and candles only", statusChroma),
   amber: ramp("amber", "Amber", 70, "Kumo's warning role; on no screen", (s) => HUMP[s] * 0.15),
-  "cvd-blue": ramp("cvd-blue", "Colour-blind blue", CVD_HUES["cvd-blue"], "Gain when colour-blind friendly is on, in both themes", (s) => HUMP[s] * 0.16),
+  "cvd-teal": ramp("cvd-teal", "Colour-blind teal", CVD_HUES["cvd-teal"], "Gain when colour-blind friendly is on, in both themes", (s) => HUMP[s] * 0.16),
   "cvd-rose": ramp("cvd-rose", "Colour-blind raspberry", CVD_HUES["cvd-rose"], "Loss when colour-blind friendly is on, light mode", (s) => HUMP[s] * 0.16),
   "cvd-orange": ramp("cvd-orange", "Colour-blind orange", CVD_HUES["cvd-orange"], "Loss when colour-blind friendly is on, dark mode", (s) => HUMP[s] * 0.16),
   crimson: ramp("crimson", "Crimson", 27, "The kill switch, and nothing else", (s) => HUMP[s] * 0.2),
@@ -165,8 +170,9 @@ export function rampValue(ref: RampRef): string {
 
 /**
  * Light: paper surfaces and ink type. Ink is the primary action, the account's fill, the Stop
- * control and a stopped agent. Gold is the mandate (a pale field under a gold rule, gold markers,
- * gold-700 labels) and the account's chart line. `lapis` keeps its name as the account's role.
+ * control and a stopped agent. Ultramarine is the mandate (a pale field under an ultramarine rule,
+ * ultramarine markers, ultramarine-700 labels) and the account's chart line. `lapis` keeps its name
+ * as the account's role.
  */
 export const TOKEN_REFS: Record<TokenName, RampRef> = {
   background: "paper-100",
@@ -180,17 +186,17 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   lapis: "ink-950",
   "lapis-foreground": "paper-50",
   "lapis-muted": "paper-200",
-  "lapis-soft": "gold-100",
+  "lapis-soft": "ultramarine-100",
   "lapis-strong": "ink-800",
-  "lapis-line": "gold-500",
-  mandate: "gold-100",
+  "lapis-line": "ultramarine-500",
+  mandate: "ultramarine-100",
   "mandate-foreground": "ink-950",
   "mandate-muted": "ink-800",
-  "mandate-strong": "gold-700",
-  "mandate-marker": "gold-500",
-  "mandate-edge": "gold-500",
-  "mandate-soft": "gold-100",
-  selection: "gold-200",
+  "mandate-strong": "ultramarine-700",
+  "mandate-marker": "ultramarine-500",
+  "mandate-edge": "ultramarine-500",
+  "mandate-soft": "ultramarine-100",
+  selection: "ultramarine-200",
   ink: "ink-950",
   "ink-foreground": "paper-50",
   "ink-line": "ink-700",
@@ -205,16 +211,16 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   "loss-soft": "red-100",
   "warning-soft": "amber-100",
   "info-soft": "paper-100",
-  "gain-cvd": "cvd-blue-700",
-  "loss-cvd": "cvd-rose-800",
-  "gain-cvd-soft": "cvd-blue-100",
+  "gain-cvd": "cvd-teal-700",
+  "loss-cvd": "cvd-rose-850",
+  "gain-cvd-soft": "cvd-teal-100",
   "loss-cvd-soft": "cvd-rose-100",
 };
 
 /**
  * Dark: ink surfaces and paper type. Primary actions, the Stop control and stopped states turn to a
- * paper fill with ink type. Gold keeps its meanings, one step lighter for marks (400) and two for
- * labels (300). Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
+ * paper fill with ink type. Ultramarine keeps its meanings, one step lighter for marks (400) and two
+ * for labels (300). Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
  * the dark sheet while its label keeps 7:1 on the fill.
  */
 export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
@@ -229,17 +235,17 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   lapis: "paper-100",
   "lapis-foreground": "ink-950",
   "lapis-muted": "ink-850",
-  "lapis-soft": "gold-850",
+  "lapis-soft": "ultramarine-850",
   "lapis-strong": "paper-300",
-  "lapis-line": "gold-400",
-  mandate: "gold-850",
+  "lapis-line": "ultramarine-400",
+  mandate: "ultramarine-850",
   "mandate-foreground": "paper-100",
   "mandate-muted": "paper-300",
-  "mandate-strong": "gold-300",
-  "mandate-marker": "gold-400",
-  "mandate-edge": "gold-400",
-  "mandate-soft": "gold-900",
-  selection: "gold-800",
+  "mandate-strong": "ultramarine-300",
+  "mandate-marker": "ultramarine-400",
+  "mandate-edge": "ultramarine-400",
+  "mandate-soft": "ultramarine-900",
+  selection: "ultramarine-800",
   ink: "paper-100",
   "ink-foreground": "ink-950",
   "ink-line": "paper-500",
@@ -254,9 +260,9 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   "loss-soft": "red-900",
   "warning-soft": "amber-900",
   "info-soft": "ink-900",
-  "gain-cvd": "cvd-blue-300",
+  "gain-cvd": "cvd-teal-300",
   "loss-cvd": "cvd-orange-300",
-  "gain-cvd-soft": "cvd-blue-900",
+  "gain-cvd-soft": "cvd-teal-900",
   "loss-cvd-soft": "cvd-orange-900",
 };
 
@@ -266,8 +272,8 @@ function tokensOf(refs: Record<TokenName, RampRef>): Record<TokenName, TokenValu
 
 export const PALETTE: Palette = {
   theme: "light",
-  name: "Ink and Gold",
-  summary: "Paper surfaces, ink type and actions, gold for your mandate and the account's line: a pale gold field, gold rules and markers, dark gold labels.",
+  name: "Ink and Ultramarine",
+  summary: "Cool paper surfaces, ink type and actions, ultramarine for your mandate and the account's line: a pale ultramarine field, ultramarine rules and markers, deep ultramarine labels.",
   refs: TOKEN_REFS,
   tokens: tokensOf(TOKEN_REFS),
   hatch: { ref: "lapis", alpha: 0.3 },
@@ -276,8 +282,8 @@ export const PALETTE: Palette = {
 /** The paper hatch in the dark is the mid grey, so it still reads as paper on an ink card. */
 export const PALETTE_DARK: Palette = {
   theme: "dark",
-  name: "Ink and Gold, dark",
-  summary: "Ink surfaces, paper type and paper primary actions; gold for your mandate and the account's line, a step lighter.",
+  name: "Ink and Ultramarine, dark",
+  summary: "Ink surfaces, paper type and paper primary actions; ultramarine for your mandate and the account's line, a step lighter.",
   refs: TOKEN_REFS_DARK,
   tokens: tokensOf(TOKEN_REFS_DARK),
   hatch: { ref: "ink-line", alpha: 0.4 },

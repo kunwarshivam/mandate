@@ -1,5 +1,5 @@
 /**
- * The colour tokens in Ink and Gold (DEC-204), one entry per CSS custom property in `globals.css`
+ * The colour tokens in Ink and Ultramarine (DEC-205), one entry per CSS custom property in `globals.css`
  * (the test `tokens.test.ts` keeps the two in step, in both themes). Values come from `palette.ts`;
  * this file adds what each token means. The design page and the contrast checks read it.
  */
@@ -28,13 +28,13 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
   "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
   "lapis-muted": { meaning: "account", role: "Secondary text on the account fill and on ink; a hovered account pill" },
-  "lapis-soft": { meaning: "account", role: "The account's pale gold: the current tab and range pill, an approval card, an account notice" },
+  "lapis-soft": { meaning: "account", role: "The account's pale ultramarine: the current tab and range pill, an approval card, an account notice" },
   "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
   "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
-  mandate: { meaning: "mandate", role: "Your mandate: the pale gold field the envelope, limits and rails sit on" },
+  mandate: { meaning: "mandate", role: "Your mandate: the pale ultramarine field the envelope, limits and rails sit on" },
   "mandate-foreground": { meaning: "mandate", role: "Text on the mandate field" },
   "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate field" },
-  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: gold-700 in light, never lighter" },
+  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: ultramarine-700 in light, never lighter" },
   "mandate-marker": { meaning: "mandate", role: "Rail fill and level marks on the envelope and the equity ladder" },
   "mandate-edge": { meaning: "mandate", role: "Lines inside the mandate field: Kumo's line and hairline roles there" },
   "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
@@ -53,7 +53,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   "loss-soft": { meaning: "status", role: "Loss tint" },
   "warning-soft": { meaning: "status", role: "Warning tint" },
   "info-soft": { meaning: "status", role: "Info tint" },
-  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on: blue in both themes" },
+  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on: teal in both themes" },
   "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on: raspberry in light, orange in dark" },
   "gain-cvd-soft": { meaning: "status", role: "Success tint when colour-blind friendly is on" },
   "loss-cvd-soft": { meaning: "status", role: "Loss tint when colour-blind friendly is on" },

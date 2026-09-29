@@ -1,5 +1,5 @@
 /**
- * The brand's colours, taken from the Ink and Gold palette (DEC-204) so the two cannot drift.
+ * The brand's colours, taken from the Ink and Ultramarine palette (DEC-205) so the two cannot drift.
  * `scripts/brand-assets.mjs` writes the ink and off-white as literals; `brand-assets.test.ts` holds
  * them equal.
  */
@@ -11,9 +11,9 @@ const hex = (palette: Palette, token: TokenName) => toHex(palette.tokens[token].
 export const BRAND_PALETTE = [
   { name: "Ink", hex: hex(PALETTE, "foreground"), role: "The mark and the type on a light surface, and the primary action" },
   { name: "Off-white", hex: hex(PALETTE, "card"), role: "The mark on a dark surface; the tile behind the app icons and the share image" },
-  { name: "Gold", hex: hex(PALETTE, "mandate-marker"), role: "The one accent: your mandate's rules and markers, and the account's line. Never text, never a block" },
-  { name: "Dark gold", hex: hex(PALETTE, "mandate-strong"), role: "Gold as text on a light surface" },
-  { name: "Gold tint", hex: hex(PALETTE, "mandate"), role: "Your mandate's field" },
+  { name: "Ultramarine", hex: hex(PALETTE, "mandate-marker"), role: "The one accent: your mandate's rules and markers, and the account's line. Never text, never a block" },
+  { name: "Deep ultramarine", hex: hex(PALETTE, "mandate-strong"), role: "Ultramarine as text on a light surface" },
+  { name: "Ultramarine tint", hex: hex(PALETTE, "mandate"), role: "Your mandate's field" },
   { name: "Night", hex: hex(PALETTE_DARK, "background"), role: "The page in dark mode" },
 ] as const;
 

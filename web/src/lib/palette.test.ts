@@ -5,8 +5,8 @@ import { composite, contrastRatio, inGamut, parseOklch, rgbContrast, toRgb255 } 
 import { apcaLc, passesApca } from "@/test/apca";
 import { MARKERS } from "../../scripts/no-apca.mjs";
 import { checkCvd, checkPalette, measure } from "./contrast";
-import { CVD_DISTINCT, HATCH_MAX, HATCH_MIN, KUMO_PAIRS, type KumoScope, PAIRS, STOP_CONTRAST } from "./contrast-pairs";
-import { GOLD_HUE, LIGHTNESS, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName } from "./palette";
+import { CVD_DISTINCT, CVD_VISIONS, HATCH_MAX, HATCH_MIN, KUMO_PAIRS, type KumoScope, PAIRS, STOP_CONTRAST } from "./contrast-pairs";
+import { LIGHTNESS, NEUTRAL_HUE, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName, ULTRAMARINE_HUE } from "./palette";
 
 const SRC = resolve(process.cwd(), "src");
 const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
@@ -70,12 +70,12 @@ const SCOPES: Record<ThemeName, Record<KumoScope, Record<string, string>>> = { l
 const hueDistance = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
 const rampOf = (ref: string) => ref.slice(0, ref.lastIndexOf("-")) as RampId;
 const stepOf = (ref: string) => Number(ref.slice(ref.lastIndexOf("-") + 1)) as Step;
-const CHROMATIC: RampId[] = ["gold", "green", "red", "amber", "cvd-blue", "cvd-rose", "cvd-orange", "crimson"];
+const CHROMATIC: RampId[] = ["ultramarine", "green", "red", "amber", "cvd-teal", "cvd-rose", "cvd-orange", "crimson"];
 
-/** The only tokens that may carry gold: the mandate's and the account's gold roles, and the text selection. */
-const GOLD_TOKENS: TokenName[] = ["mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-soft", "lapis-line", "selection"];
-/** Gold that is saturated enough to shout: lines, marks and labels, never a surface. */
-const SATURATED_GOLD: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
+/** The only tokens that may carry ultramarine: the mandate's and the account's accent roles, and the text selection. */
+const ULTRAMARINE_TOKENS: TokenName[] = ["mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-soft", "lapis-line", "selection"];
+/** Ultramarine that is saturated enough to shout: lines, marks and labels, never a surface. */
+const SATURATED_ULTRAMARINE: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
 
 describe("ramps", () => {
   it.each(Object.values(RAMPS).map((r) => [r.id, r] as const))("%s has thirteen in-gamut steps at one hue on the shared lightness curve", (_, ramp) => {
@@ -102,9 +102,10 @@ describe("ramps", () => {
     expect(cs[cs.length - 1]).toBeLessThan(cs[peak]);
   });
 
-  it("tints paper warm (hue 85) and ink cool (hue 255), both between C 0.003 and 0.01", () => {
-    expect(RAMPS.paper.hue).toBe(85);
-    expect(RAMPS.ink.hue).toBe(255);
+  it("tints paper and ink cool (hue 255), both between C 0.003 and 0.01: a cool white page", () => {
+    expect(RAMPS.paper.hue).toBe(NEUTRAL_HUE);
+    expect(RAMPS.ink.hue).toBe(NEUTRAL_HUE);
+    expect(NEUTRAL_HUE).toBe(255);
     for (const id of ["paper", "ink"] as const) {
       for (const s of STEPS) {
         const { c } = parseOklch(RAMPS[id].steps[s]);
@@ -114,10 +115,18 @@ describe("ramps", () => {
     }
   });
 
-  it("keeps gold a warm gold, not a yellow and not an orange", () => {
-    expect(RAMPS.gold.hue).toBe(GOLD_HUE);
-    expect(GOLD_HUE).toBeGreaterThanOrEqual(75);
-    expect(GOLD_HUE).toBeLessThanOrEqual(90);
+  it("keeps ultramarine an ultramarine: bluer than the cool neutrals, and short of violet", () => {
+    expect(RAMPS.ultramarine.hue).toBe(ULTRAMARINE_HUE);
+    expect(ULTRAMARINE_HUE).toBeGreaterThan(NEUTRAL_HUE);
+    expect(ULTRAMARINE_HUE).toBeGreaterThanOrEqual(260);
+    expect(ULTRAMARINE_HUE).toBeLessThanOrEqual(272);
+  });
+
+  it("makes ultramarine vivid from 400 to 700 but quiet at 100, 850 and 900, where it is a field", () => {
+    const c = (s: Step) => parseOklch(RAMPS.ultramarine.steps[s]).c;
+    for (const s of [400, 500, 600, 700] as const) expect(c(s), `ultramarine-${s}`).toBeGreaterThanOrEqual(0.11);
+    for (const s of [500, 600] as const) expect(c(s), `ultramarine-${s}`).toBeLessThanOrEqual(0.18);
+    for (const s of [100, 850, 900] as const) expect(c(s), `ultramarine-${s}`).toBeLessThanOrEqual(0.05);
   });
 
   it("matches gain and loss in lightness and chroma, differing only in hue", () => {
@@ -130,9 +139,15 @@ describe("ramps", () => {
     expect(hueDistance(RAMPS.red.hue, RAMPS.crimson.hue)).toBeGreaterThanOrEqual(15);
   });
 
-  it("keeps the colour-blind alternates near Okabe-Ito blue, reddish purple and orange", () => {
-    expect(RAMPS["cvd-blue"].hue).toBeGreaterThanOrEqual(235);
-    expect(RAMPS["cvd-blue"].hue).toBeLessThanOrEqual(250);
+  /**
+   * The gain was Okabe-Ito blue (245) until the accent became ultramarine (266): 21 degrees apart,
+   * a blue gain and ultramarine text merge under red-green deficiency. Teal still reads as up (blues
+   * and greens do, for people with CVD) and stays clear of ultramarine, orange and raspberry.
+   */
+  it("keeps the colour-blind alternates at teal (between Okabe-Ito sky blue and bluish green), reddish purple and orange", () => {
+    expect(RAMPS["cvd-teal"].hue).toBeGreaterThanOrEqual(200);
+    expect(RAMPS["cvd-teal"].hue).toBeLessThanOrEqual(215);
+    expect(hueDistance(RAMPS["cvd-teal"].hue, ULTRAMARINE_HUE)).toBeGreaterThanOrEqual(50);
     expect(RAMPS["cvd-rose"].hue).toBeGreaterThanOrEqual(340);
     expect(RAMPS["cvd-rose"].hue).toBeLessThanOrEqual(355);
     expect(RAMPS["cvd-orange"].hue).toBeGreaterThanOrEqual(45);
@@ -140,7 +155,7 @@ describe("ramps", () => {
   });
 });
 
-describe.each(THEMES)("Ink and Gold, %s", (theme) => {
+describe.each(THEMES)("Ink and Ultramarine, %s", (theme) => {
   const palette = PALETTES[theme];
   const t = palette.tokens;
   const refs = palette.refs;
@@ -164,23 +179,23 @@ describe.each(THEMES)("Ink and Gold, %s", (theme) => {
     expect(refs.primary).toBe(refs.foreground);
   });
 
-  it("gives gold only to the gold tokens", () => {
-    const gold = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "gold");
-    expect(gold.filter((n) => !GOLD_TOKENS.includes(n))).toEqual([]);
-    for (const n of GOLD_TOKENS) expect(rampOf(refs[n]), n).toBe("gold");
+  it("gives ultramarine only to the ultramarine tokens", () => {
+    const accent = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "ultramarine");
+    expect(accent.filter((n) => !ULTRAMARINE_TOKENS.includes(n))).toEqual([]);
+    for (const n of ULTRAMARINE_TOKENS) expect(rampOf(refs[n]), n).toBe("ultramarine");
   });
 
-  it("carries no other yellow or gold: outside the gold tokens, nothing warm is saturated (warning is on no screen)", () => {
-    for (const n of TOKEN_NAMES.filter((n) => !GOLD_TOKENS.includes(n) && n !== "warning" && n !== "warning-soft")) {
+  it("carries no second blue: outside the ultramarine tokens, nothing within 30 degrees of its hue is saturated", () => {
+    for (const n of TOKEN_NAMES.filter((n) => !ULTRAMARINE_TOKENS.includes(n))) {
       const { c, h } = parseOklch(t[n].value);
-      expect(h >= 60 && h <= 110 && c > 0.02, `${n} ${t[n].value}`).toBe(false);
+      expect(hueDistance(h, ULTRAMARINE_HUE) < 30 && c > 0.02, `${n} ${t[n].value}`).toBe(false);
     }
   });
 
-  it("never paints saturated gold as a surface: every gold background is a quiet tint", () => {
+  it("never paints saturated ultramarine as a surface: every ultramarine background is a quiet tint", () => {
     const backgrounds = new Set(PAIRS.map((p) => p.bg));
-    expect(SATURATED_GOLD.filter((n) => backgrounds.has(n))).toEqual([]);
-    for (const n of GOLD_TOKENS.filter((n) => !SATURATED_GOLD.includes(n))) {
+    expect(SATURATED_ULTRAMARINE.filter((n) => backgrounds.has(n))).toEqual([]);
+    for (const n of ULTRAMARINE_TOKENS.filter((n) => !SATURATED_ULTRAMARINE.includes(n))) {
       const { l, c } = parseOklch(t[n].value);
       if (theme === "light") expect(l, n).toBeGreaterThanOrEqual(0.9);
       else expect(l, n).toBeLessThanOrEqual(0.4);
@@ -188,8 +203,8 @@ describe.each(THEMES)("Ink and Gold, %s", (theme) => {
     }
   });
 
-  it("paints no Kumo surface, fill or tint in saturated gold, in any scope", () => {
-    const saturated = new Set(SATURATED_GOLD.map((n) => t[n].value));
+  it("paints no Kumo surface, fill or tint in saturated ultramarine, in any scope", () => {
+    const saturated = new Set(SATURATED_ULTRAMARINE.map((n) => t[n].value));
     const surfaces = /^color-kumo-(canvas|elevated|recessed|base|tint|overlay|control|fill|fill-hover|contrast|brand|brand-hover|badge-[a-z]+|banner-[a-z]+|[a-z]+-tint)$/;
     for (const [scope, values] of Object.entries(SCOPES[theme])) {
       for (const [role, value] of Object.entries(values)) if (surfaces.test(role)) expect(saturated.has(value), `${scope}: --${role}`).toBe(false);
@@ -230,34 +245,34 @@ describe.each(THEMES)("Ink and Gold, %s", (theme) => {
   });
 });
 
-describe("Ink and Gold, the light theme's gold", () => {
+describe("Ink and Ultramarine, the light theme's accent", () => {
   const refs = PALETTE.refs;
 
-  it("sets the mandate as a gold-100 field under gold-500 rules and markers, with gold-700 labels", () => {
-    expect(refs.mandate).toBe("gold-100");
-    expect(refs["mandate-edge"]).toBe("gold-500");
-    expect(refs["mandate-marker"]).toBe("gold-500");
-    expect(refs["mandate-strong"]).toBe("gold-700");
-    expect(refs["lapis-line"]).toBe("gold-500");
+  it("sets the mandate as an ultramarine-100 field under ultramarine-500 rules and markers, with ultramarine-700 labels", () => {
+    expect(refs.mandate).toBe("ultramarine-100");
+    expect(refs["mandate-edge"]).toBe("ultramarine-500");
+    expect(refs["mandate-marker"]).toBe("ultramarine-500");
+    expect(refs["mandate-strong"]).toBe("ultramarine-700");
+    expect(refs["lapis-line"]).toBe("ultramarine-500");
   });
 
-  it("never sets gold text lighter than gold-700", () => {
-    const goldText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "gold");
-    expect(goldText.length).toBeGreaterThan(0);
-    for (const p of goldText) expect(stepOf(refs[p.fg]), `${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(700);
-    for (const n of GOLD_TOKENS.filter((n) => n.endsWith("-strong"))) expect(stepOf(refs[n]), n).toBeGreaterThanOrEqual(700);
+  it("never sets ultramarine text lighter than ultramarine-700", () => {
+    const accentText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "ultramarine");
+    expect(accentText.length).toBeGreaterThan(0);
+    for (const p of accentText) expect(stepOf(refs[p.fg]), `${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(700);
+    for (const n of ULTRAMARINE_TOKENS.filter((n) => n.endsWith("-strong"))) expect(stepOf(refs[n]), n).toBeGreaterThanOrEqual(700);
   });
 });
 
-describe("Ink and Gold, the dark theme", () => {
+describe("Ink and Ultramarine, the dark theme", () => {
   const refs = PALETTE_DARK.refs;
 
-  it("keeps gold's meanings a step lighter: gold-400 rules and markers, gold-300 labels, a gold-850 field", () => {
-    expect(refs.mandate).toBe("gold-850");
-    expect(refs["mandate-edge"]).toBe("gold-400");
-    expect(refs["mandate-marker"]).toBe("gold-400");
-    expect(refs["lapis-line"]).toBe("gold-400");
-    expect(refs["mandate-strong"]).toBe("gold-300");
+  it("keeps ultramarine's meanings a step lighter: ultramarine-400 rules and markers, ultramarine-300 labels, an ultramarine-850 field", () => {
+    expect(refs.mandate).toBe("ultramarine-850");
+    expect(refs["mandate-edge"]).toBe("ultramarine-400");
+    expect(refs["mandate-marker"]).toBe("ultramarine-400");
+    expect(refs["lapis-line"]).toBe("ultramarine-400");
+    expect(refs["mandate-strong"]).toBe("ultramarine-300");
   });
 
   it("keeps the kill switch's crimson fill and lightens only its edge", () => {
@@ -315,7 +330,7 @@ describe("apca-w3 stays in the tests", () => {
   });
 });
 
-describe("Kumo in Ink and Gold", () => {
+describe("Kumo in Ink and Ultramarine", () => {
   const kumoRoles = [...new Set(Array.from(kumoTheme.matchAll(/--((?:text-)?color-kumo-[a-z0-9-]+):/g), (m) => m[1]))].filter((n) => !n.includes("neutral"));
 
   it("re-points every colour role Kumo defines, so none of Kumo's own colours shows", () => {
@@ -352,7 +367,7 @@ describe("Kumo in Ink and Gold", () => {
     expect(contrastRatio(root["text-color-kumo-inverse"], root["color-kumo-brand"])).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });
 
-  it.each(THEMES)("paints the account surface in the account fill, the field in the gold tint under a gold line, and ink in ink, in %s", (theme) => {
+  it.each(THEMES)("paints the account surface in the account fill, the field in the ultramarine tint under an ultramarine line, and ink in ink, in %s", (theme) => {
     const t = PALETTES[theme].tokens;
     expect(SCOPES[theme].account["color-kumo-base"]).toBe(t.lapis.value);
     expect(SCOPES[theme].field["color-kumo-base"]).toBe(t.mandate.value);
@@ -375,8 +390,27 @@ describe("Kumo in Ink and Gold", () => {
 describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
   const results = checkCvd(PALETTES[theme]);
 
-  it.each(results.filter((c) => c.requiredHere).map((c) => [c.what, c] as const))("%s stays distinct under deuteranopia and protanopia", (_, c) => {
-    for (const [vision, d] of Object.entries(c.byVision)) expect(d, `${vision} ΔE ${d.toFixed(3)}`).toBeGreaterThanOrEqual(CVD_DISTINCT);
+  it.each(results.filter((c) => c.requiredHere).map((c) => [c.what, c] as const))("%s stays distinct under its simulated visions", (_, c) => {
+    expect(c.requiredVisions.length).toBeGreaterThanOrEqual(2);
+    for (const vision of c.requiredVisions) expect(c.byVision[vision], `${vision} ΔE ${c.byVision[vision].toFixed(3)}`).toBeGreaterThanOrEqual(CVD_DISTINCT);
+  });
+
+  it("keeps the accent's marks, gain, loss and crimson apart under deuteranopia, protanopia and tritanopia", () => {
+    const core = [
+      ["gain-cvd", "loss-cvd"],
+      ["gain-cvd", "crimson"],
+      ["loss-cvd", "crimson"],
+      ["gain-cvd", "mandate-marker"],
+      ["loss-cvd", "mandate-marker"],
+      ["gain-cvd", "lapis-line"],
+      ["loss-cvd", "lapis-line"],
+    ];
+    for (const [a, b] of core) {
+      const c = results.find((r) => r.a === a && r.b === b)!;
+      expect(c.requiredHere, `${a} / ${b}`).toBe(true);
+      expect(c.requiredVisions, `${a} / ${b}`).toEqual(CVD_VISIONS);
+    }
+    expect(CVD_VISIONS).toEqual(["deuteranopia", "protanopia", "tritanopia"]);
   });
 
   it("needs the colour-blind friendly remap: default gain and loss merge under deuteranopia", () => {
@@ -384,7 +418,7 @@ describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
     expect(def.byVision.deuteranopia).toBeLessThan(CVD_DISTINCT);
   });
 
-  it("keeps every colour-blind alternate apart from gold and crimson where it is required", () => {
+  it("keeps every colour-blind alternate apart from ultramarine and crimson where it is required", () => {
     const required = results.filter((c) => c.requiredHere && (c.a.endsWith("-cvd") || c.b.endsWith("-cvd")));
     const against = new Set(required.flatMap((c) => [c.a, c.b]));
     for (const n of ["crimson", "mandate-marker", "lapis-line", "mandate-strong"] as const) expect(against.has(n), n).toBe(true);
@@ -397,9 +431,9 @@ describe("colour-blind friendly", () => {
     expect(body).toEqual({ gain: "var(--gain-cvd)", loss: "var(--loss-cvd)", "gain-soft": "var(--gain-cvd-soft)", "loss-soft": "var(--loss-cvd-soft)" });
   });
 
-  it("uses blue for a gain in both themes, raspberry for a loss in light and orange in dark", () => {
-    expect(rampOf(PALETTE.refs["gain-cvd"])).toBe("cvd-blue");
-    expect(rampOf(PALETTE_DARK.refs["gain-cvd"])).toBe("cvd-blue");
+  it("uses teal for a gain in both themes, raspberry for a loss in light and orange in dark", () => {
+    expect(rampOf(PALETTE.refs["gain-cvd"])).toBe("cvd-teal");
+    expect(rampOf(PALETTE_DARK.refs["gain-cvd"])).toBe("cvd-teal");
     expect(rampOf(PALETTE.refs["loss-cvd"])).toBe("cvd-rose");
     expect(rampOf(PALETTE_DARK.refs["loss-cvd"])).toBe("cvd-orange");
   });
@@ -417,13 +451,17 @@ describe("colour usage in components", () => {
     expect(users).toEqual([]);
   });
 
+  it("reserves warning because amber would read as a loss: it sits within 25 degrees of the colour-blind orange loss", () => {
+    expect(hueDistance(RAMPS.amber.hue, RAMPS["cvd-orange"].hue)).toBeLessThanOrEqual(25);
+  });
+
   it("uses no raw colour values in components", () => {
     const raw = /(oklch|rgb|hsl)a?\(|#[0-9a-f]{6}\b/i;
     const offenders = files.filter((f) => f.path.startsWith("components/") && !specimens.test(f.path) && raw.test(f.text)).map((f) => f.path);
     expect(offenders).toEqual([]);
   });
 
-  it("paints saturated gold only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
+  it("paints saturated ultramarine only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
     const fill = /\bbg-(mandate-strong|mandate-marker|mandate-edge|lapis-line)\b/;
     const allowed = ["components/domain/envelope.tsx", "components/charts/chart-parts.tsx", "components/kumo/page-header/page-header.tsx"];
     expect(files.filter((f) => fill.test(f.text) && !specimens.test(f.path) && !allowed.includes(f.path)).map((f) => f.path)).toEqual([]);
@@ -433,8 +471,8 @@ describe("colour usage in components", () => {
     expect(all.filter((f) => /data-palette|PALETTE_COOKIE|PALETTE_PARAM|\?palette=|KeyP\b/.test(f.text)).map((f) => f.path)).toEqual([]);
   });
 
-  it("leaves no trace of the palettes and the system it replaced: no navy, brass, slate, marigold or Placard", () => {
-    const old = /\b(navy|brass|slate|marigold|placard)\b/i;
+  it("leaves no trace of the palettes and the system it replaced: no gold, navy, brass, slate, marigold or Placard", () => {
+    const old = /\b(gold|navy|brass|slate|marigold|placard)\b/i;
     expect(all.filter((f) => old.test(f.text)).map((f) => `${f.path}: ${f.text.match(old)?.[0]}`)).toEqual([]);
   });
 });

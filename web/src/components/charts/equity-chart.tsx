@@ -156,8 +156,9 @@ function EquityHero({
 }
 
 /**
- * The account as a gold line, on paper: every agent's equity together, plus what no agent manages. The
- * fixture holds that part flat, so the chart ends at the broker's figure and moves with the agents.
+ * The account as an ultramarine line, on paper: every agent's equity together, plus what no agent
+ * manages. The fixture holds that part flat, so the chart ends at the broker's figure and moves with
+ * the agents.
  */
 export function AccountEquityChart() {
   const { ws } = useRuntime();
