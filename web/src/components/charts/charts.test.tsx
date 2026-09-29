@@ -304,6 +304,8 @@ describe("the hero chart scrubs", () => {
       expect(pill.querySelector("[data-placeholder]")).toBeNull();
       const disclosure = pill.parentElement!.querySelector<HTMLElement>(":scope > [data-slot=disclosure]");
       expect(within(disclosure!).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
+      expect(pill.parentElement, "the symbol keeps the pill's line and baseline at every width").toHaveClass("flex", "items-baseline", "text-sm");
+      expect(pill.parentElement!.className).not.toMatch(/flex-col/);
     }
     expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
     expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);

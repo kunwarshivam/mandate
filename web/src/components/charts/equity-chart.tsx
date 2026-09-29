@@ -140,16 +140,16 @@ function EquityHero({
           {shown ? <HeroFigure value={usdLabel(shown.value)} instant={scrubbing} /> : "—"}
         </p>
         {points.length >= 2 && shown ? (
-          // The disclosure keeps a line of its own until the widest scrubbed pill fits beside it, so it never hops lines mid-scrub.
-          <p className="flex flex-col items-start gap-1.5 pt-1 @xl:flex-row @xl:items-center @xl:gap-2">
-            <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 text-sm font-medium", PILL[changeTone])}>
+          // The symbol never takes a line of its own (DEC-210): it keeps the pill's line and baseline at every width, and a narrow pill wraps inside itself instead.
+          <p className="flex items-baseline gap-2 pt-1 text-sm">
+            <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit min-w-0 max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 font-medium", PILL[changeTone])}>
               <SignedMoney value={changeText} instant={scrubbing} />
               {pct ? <span className="font-mono tabular">({pct})</span> : null}
               <span className="text-muted-foreground tabular" data-slot="hero-when">
                 {scrubbing ? formatTime(shown.time as UTCTimestamp) : words}
               </span>
             </span>
-            <Placeholder name="performance" />
+            <Placeholder name="performance" className="shrink-0" />
           </p>
         ) : (
           <Placeholder name="performance" className="w-fit" />
