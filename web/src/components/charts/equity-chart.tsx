@@ -26,6 +26,9 @@ const RANGE_WORDS: Record<EquityRange, string> = {
   All: "since the first agent deployed",
 };
 
+/** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
+const ACCOUNT_PHONE_HEIGHT = 180;
+
 /** The change's soft pill: its tint by sign, and the type in the gain or loss colour. */
 const PILL: Record<Direction, string> = {
   gain: "bg-gain-soft text-gain",
@@ -157,6 +160,7 @@ function EquityHero({
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
           height={tone === "account" ? 260 : 280}
+          phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />
       )}
@@ -200,11 +204,11 @@ export function AccountEquityChart() {
       footer={
         <>
           <span>Simulated funds on paper.</span>
-          <span data-slot="unmanaged">
+          <span data-slot="unmanaged" className="max-lg:hidden">
             Includes <span className="font-mono tabular">{usd(unmanaged)}</span> no agent manages.
           </span>
           <AsOf at={asOf} now={now} stale={stale} />
-          <FixtureTag />
+          <FixtureTag className="max-lg:hidden" />
           <ChartCredit className="mt-1" />
         </>
       }

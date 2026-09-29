@@ -40,7 +40,9 @@ async function smallTargets(root: Locator) {
     const small: string[] = [];
     for (const c of el.querySelectorAll<HTMLElement>("a[href], button, [role=button], input, select, summary")) {
       if (!c.checkVisibility()) continue;
-      const r = c.getBoundingClientRect();
+      // A stretched link's ::after fills its positioned row, which is the target a finger meets.
+      const stretched = getComputedStyle(c, "::after").position === "absolute";
+      const r = (stretched ? (c.offsetParent ?? c) : c).getBoundingClientRect();
       if (r.width < min - 0.5 || r.height < min - 0.5) small.push(`${c.tagName} ${(c.getAttribute("aria-label") ?? c.textContent ?? "").trim().slice(0, 40)} ${Math.round(r.width)}x${Math.round(r.height)}`);
     }
     return small;
@@ -134,6 +136,91 @@ for (const width of PHONES) {
     });
   });
 }
+
+for (const width of PHONES) {
+  test.describe(`${width} px, Home`, () => {
+    test("Needs you comes first, the request with a static time, then the account, the agents and recent activity", async ({ page }) => {
+      await open(page, "/?scenario=stale", width);
+      const headings = await page.locator("#main h2").locator("visible=true").evaluateAll((els) => els.map((el) => el.textContent?.replace(/\d+ items?$/, "").trim()));
+      expect(headings).toEqual(["Needs you", "Account equity", "Agents", "Recent activity"]);
+      const rows = page.locator("[data-slot=needs-you] li");
+      expect(await rows.evaluateAll((els) => els.map((el) => el.getAttribute("data-kind")))).toEqual(["request", "alert", "alert", "alert", "alert"]);
+      await expect(rows.first()).toContainText(/Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
+      await expect(rows.first()).not.toContainText("left");
+      expect(await smallTargets(page.locator("[data-slot=needs-you]"))).toEqual([]);
+      await expect(page.locator("#main").getByText(/asks to buy|asked you to buy/).locator("visible=true")).toHaveCount(1);
+    });
+
+    test("the range picker sits wholly above the tab bar on the first screen", async ({ page }) => {
+      await open(page, "/", width);
+      const picker = (await page.locator("[data-slot=account-equity] [data-slot=range-picker]").boundingBox())!;
+      const bar = (await tabBar(page).boundingBox())!;
+      expect(picker.y).toBeGreaterThan(0);
+      expect(picker.y + picker.height, "the range picker ends above the tab bar").toBeLessThanOrEqual(bar.y);
+      const canvas = (await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!;
+      expect(canvas.height).toBe(180);
+      expect(await smallTargets(page.locator("[data-slot=range-picker]"))).toEqual([]);
+    });
+
+    test("agent rows carry the name, the state and the headroom, and no P&L", async ({ page }) => {
+      await open(page, "/", width);
+      const rows = page.locator("[data-slot=phone-agent]");
+      await expect(rows).toHaveCount(3);
+      for (const row of await rows.all()) {
+        await expect(row).toBeVisible();
+        await expect(row.locator("[data-slot=headroom]")).toHaveText(/^\$[\d,]+\.\d{2} (above|below) its /);
+        await expect(row.locator("[data-direction], [data-placeholder=performance]")).toHaveCount(0);
+        await expect(row).not.toContainText(/P&L|today|[+−]\$/);
+      }
+      await expect(page.locator("[data-slot=agent-band]").first()).toBeHidden();
+      expect(await smallTargets(page.locator("[data-slot=phone-agents]"))).toEqual([]);
+    });
+
+    test("recent activity shows three entries and See all activity, and positions stay off Home", async ({ page }) => {
+      await open(page, "/", width);
+      const activity = page.getByRole("region", { name: "Recent activity" });
+      await expect(activity.locator("ol > li").locator("visible=true")).toHaveCount(3);
+      await expect(activity.getByRole("link", { name: "See all activity" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Positions" })).toBeHidden();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      expect(await smallTargets(activity)).toEqual([]);
+    });
+  });
+}
+
+test("Home says all clear once the one request is answered", async ({ page }) => {
+  await open(page, "/", 390);
+  await page.locator("[data-slot=needs-you] li[data-kind=request] a").click();
+  await expect(page).toHaveURL(/\/approvals\/apr_/);
+  await page.getByRole("button", { name: "Skip", exact: true }).click();
+  await expect(page.locator("[data-phase=sent], [data-phase=recorded], [data-status]").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Outcome" })).toBeVisible({ timeout: 10_000 });
+  await expect(async () => {
+    await tabBar(page).getByRole("link", { name: "Home" }).click();
+    await expect(page).toHaveURL("/", { timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
+  const clear = page.locator("[data-slot=all-clear]");
+  await expect(clear).toBeVisible();
+  await expect(clear).toHaveText("All clear. Nothing needs you.");
+});
+
+test("desktop Home keeps its rail, its agent bands with P&L and disclosure, and positions", async ({ page }) => {
+  await open(page, "/", 1440, 900);
+  await expect(page.locator("[data-slot=needs-you]")).toBeHidden();
+  await expect(page.locator("[data-slot=waiting]")).toBeVisible();
+  await expect(page.locator("[data-slot=alerts-summary]")).toBeVisible();
+  const bands = page.locator("[data-slot=agent-band]");
+  await expect(bands).toHaveCount(3);
+  for (const band of await bands.all()) {
+    await expect(band).toBeVisible();
+    await expect(band.locator("[data-placeholder=performance]")).toBeVisible();
+    await expect(band.locator("[data-direction]").first()).toBeVisible();
+  }
+  await expect(page.locator("[data-slot=phone-agent]").first()).toBeHidden();
+  await expect(page.getByRole("region", { name: "Positions" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Recent activity" }).locator("ol > li").locator("visible=true")).toHaveCount(6);
+  expect((await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(260);
+});
 
 test("the banner says the deployment is unreachable", async ({ page }) => {
   await open(page, "/?scenario=unreachable", 390);

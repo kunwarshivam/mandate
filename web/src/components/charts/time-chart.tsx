@@ -1,6 +1,6 @@
 "use client";
 
-import { type PointerEvent, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type PointerEvent, useCallback, useId, useLayoutEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import {
   AreaSeries,
@@ -106,6 +106,7 @@ export function TimeChart({
   levels = NO_LEVELS,
   markers = NO_MARKERS,
   height = 280,
+  phoneHeight,
   compact = false,
   valueFormat = usdLabel,
   onScrub,
@@ -118,6 +119,8 @@ export function TimeChart({
   levels?: ChartLevel[];
   markers?: ChartMarker[];
   height?: number;
+  /** A shorter plot below `lg`, where the chart shares the first screen with what needs you. */
+  phoneHeight?: number;
   compact?: boolean;
   valueFormat?: (n: number) => string;
   onScrub?: (point: ScrubPoint) => void;
@@ -230,8 +233,13 @@ export function TimeChart({
         onPointerUp={release}
         onPointerCancel={release}
         onPointerLeave={release}
-        className={cn("relative w-full bg-card", hero && "touch-pan-y select-none", hero && !reducedMotion && "draw-in")}
-        style={{ height }}
+        className={cn(
+          "relative w-full bg-card",
+          phoneHeight !== undefined && "h-(--chart-phone) lg:h-(--chart-height)",
+          hero && "touch-pan-y select-none",
+          hero && !reducedMotion && "draw-in",
+        )}
+        style={phoneHeight === undefined ? { height } : ({ "--chart-height": `${height}px`, "--chart-phone": `${phoneHeight}px` } as CSSProperties)}
       />
       <p id={summaryId} className="sr-only">
         {summary}

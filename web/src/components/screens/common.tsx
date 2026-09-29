@@ -24,11 +24,14 @@ export function Section({ title, action, children, className, id }: { title: str
 }
 
 /** A quiet link beside a section heading: to the full list behind it. */
-export function SectionLink({ href, children }: { href: string; children: ReactNode }) {
+export function SectionLink({ href, children, className }: { href: string; children: ReactNode; className?: string }) {
   return (
     <Link
       href={href}
-      className="-mx-2 inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-sm font-medium text-lapis outline-none hover:bg-lapis-soft focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        "-mx-2 inline-flex min-h-9 items-center gap-1 rounded-md px-2 text-sm font-medium text-lapis outline-none hover:bg-lapis-soft focus-visible:ring-2 focus-visible:ring-ring max-lg:min-h-11",
+        className,
+      )}
     >
       {children}
       <ArrowRight aria-hidden className="size-3.5" />
