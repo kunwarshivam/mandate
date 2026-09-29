@@ -76,7 +76,7 @@ describe("command palette", () => {
   });
 
   it.each([
-    ["the command bar", /^Search agents, orders, or jump to…/],
+    ["the command bar", /^Jump to an agent or screen…/],
     ["the compact trigger", "Go to…"],
   ])("opens from %s, with the same commands as ⌘K", (_, name) => {
     renderWithRuntime(<AppShell>{null}</AppShell>);

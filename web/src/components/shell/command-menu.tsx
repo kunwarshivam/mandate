@@ -88,7 +88,7 @@ export function CommandMenu() {
         className="press hidden h-10 min-w-60 flex-[0_1_23.75rem] items-center gap-2.5 rounded-lg border border-border bg-muted pr-1.5 pl-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:flex min-[100rem]:flex-[0_1_28.75rem]"
       >
         <MagnifyingGlass className="size-4.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate text-left">Search agents, orders, or jump to…</span>
+        <span className="min-w-0 flex-1 truncate text-left">Jump to an agent or screen…</span>
         <kbd className="inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-card px-1.5 font-sans text-label text-muted-foreground">⌘K</kbd>
       </button>
       <button

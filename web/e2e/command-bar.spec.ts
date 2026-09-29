@@ -63,7 +63,7 @@ for (const width of [1024, 1280, 1440]) {
 test("its look: a muted fill, a hairline, a 12 px radius, the prompt and the ⌘K key", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(bar(page)).toHaveAccessibleName("Search agents, orders, or jump to… ⌘K");
+  await expect(bar(page)).toHaveAccessibleName("Jump to an agent or screen… ⌘K");
   const style = await bar(page).evaluate((el) => {
     const s = getComputedStyle(el);
     const probe = document.createElement("div");
