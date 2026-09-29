@@ -17,7 +17,7 @@ export interface ColorToken {
 }
 
 export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> = {
-  background: { meaning: "surface", role: "Wells, the sidebar, hover and pressed rows: paper in light, the deepest ink in dark" },
+  background: { meaning: "surface", role: "Wells, hover and pressed rows: paper in light, the deepest ink in dark" },
   card: { meaning: "surface", role: "The page and every reading surface: sheets, dialogs, charts. Off-white in light, ink in dark" },
   muted: { meaning: "surface", role: "Quiet fills: skeletons, the range pill track, chart grid" },
   border: { meaning: "surface", role: "Hairlines between rows" },
@@ -116,7 +116,7 @@ export const spacingTokens = [
   { name: "--block-gap", calm: "1rem", dense: "0.75rem", use: "Between a heading and its content" },
   { name: "--row-y", calm: "1rem", dense: "0.5rem", use: "Vertical padding of a list or table row" },
   { name: "--tab-bar", calm: "4rem", dense: "4rem", use: "The phone tab bar, plus the safe area" },
-  { name: "--dock-h / --dock-gap", calm: "3.75rem / 1rem", dense: "the same", use: "The desktop dock and the space below it; content and scroll padding clear both" },
+  { name: "--dock-h / --dock-gap", calm: "4rem / 1rem", dense: "the same", use: "The desktop dock and the space below it; content, scroll padding and toasts clear both (`--dock-clearance`)" },
   { name: "--status-row", calm: "2.125rem", dense: "2.125rem", use: "The status strip and the agent wire under the header, one height so either can replace the other" },
 ];
 

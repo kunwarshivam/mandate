@@ -193,15 +193,15 @@ Every fill stays one flat colour.
 
 ## The frame's glass
 
-The sticky header, the agent wire under it, the phone tab bar and the desktop dock are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours. The desktop dock swaps in denser values, `--dock-glass` (the card at 85%) and `--dock-edge` (the type colour at 15%), and marks the current section with `--dock-current`, the type colour at 14%, and hover with `--dock-hover` at 7%: tints of the type colour, never solid ink (Stop's) or ultramarine (the mandate's).
+The sticky header, the agent wire under it, the phone tab bar and the desktop dock are frosted glass ([DEC-208](../docs/project/04-decision-log.md#decisions)); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours. The desktop dock swaps in denser values, `--dock-glass` (the card at 85%) and `--dock-edge` (the type colour at 15%), and marks the current section with `--dock-current`, the type colour at 14%, and hover with `--dock-hover` at 7%: tints of the type colour, never solid ink (Stop's) or ultramarine (the mandate's).
 
 The blur only averages what scrolls underneath, so the worst case is a solid colour under the glass: ink (a primary action, the hero figure) in light mode, paper in dark. `tokens.test.ts` composites the glass over every token in each theme and requires 4.5:1 for body and muted text and 3:1 for the Stop pill against it:
 
 | Over the darkest (light) or lightest (dark) token | Light, 72% | Dark, 72% |
 |---|---|---|
-| Body text, and the Stop pill against the glass | 9.53:1 | 6.85:1 |
-| Muted text (breadcrumbs, icons) | 5.24:1 | 5.11:1 |
-| The same muted text at 60% | 3.81:1, fails | 3.35:1, fails |
+| Body text, and the Stop pill against the glass | 9.51:1 | 6.75:1 |
+| Muted text (breadcrumbs, icons) | 5.23:1 | 5.07:1 |
+| The same muted text at 60% | 3.84:1, fails | 3.37:1, fails |
 
 The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The agent wire is ink and muted text only, never a gain, loss or crimson colour, so the glass's own measure covers it.
 
@@ -215,7 +215,7 @@ The paper badge, the command bar (the muted fill) and Stop keep their own solid 
 
 ## Contrast results
 
-71 semantic pairs (53 text pairs at body targets, 18 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 226 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
+71 semantic pairs (53 text pairs at body targets, 18 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 226 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
 
 Lowest margins:
 
@@ -275,3 +275,4 @@ Every required check passes in both themes, and the accent's marks, gain, loss a
 - **2026-09-28, the first palette chosen (DEC-202).** Three palettes were compared side by side in a dev panel, and the founder chose a blue brand with a warm metallic accent for the mandate. It shipped as the only palette, with this document's method: OKLCH ramps on one lightness curve, WCAG and APCA in the tests, and simulated colour vision.
 - **2026-09-28, Ink and Gold (DEC-204).** With the consumer-grade redesign the founder previewed Ink and Gold, in light and dark, and approved it. The blue brand gave way to ink; the accent became gold; neutrals split into warm paper and cool ink; the ramps grew to thirteen steps so dark mode could reach APCA; the kill switch gained its dark-mode edge; and the colour-blind alternates were chosen per theme so they stay apart from gold and crimson. The method and the tests were kept and extended to both themes.
 - **2026-09-29, Ink and Ultramarine (DEC-205).** The founder compared seven accents in a live preview (gold, iris, ultramarine, petrol, jade, plum and graphite), with page colours, and chose ultramarine on a cool-white page. The accent ramp moved to hue 266 with its own chroma table, and paper moved to hue 255, the same as ink. The colour-blind gain moved from blue to teal and the light-mode loss one step darker, so both stay apart from the new accent; tritanopia joined the simulated visions; and the reason warning stays off every screen became the orange loss rather than the gold. Everything else in DEC-204 stands.
+- **2026-09-29, the frame's glass and the phone meter ([DEC-208](../docs/project/04-decision-log.md#decisions), [DEC-207](../docs/project/04-decision-log.md#decisions)).** The header, the wire, the phone tab bar and the dock became glass: two derived tokens, the card at 72% (85% for the dock) and the type colour at 8% (15%) for the edge, measured over every token in each theme with the combined palette. The dock marks the current section with a tint of the type colour, never ink or ultramarine. The phone's headroom meter joined the pairs: its ink fill on the muted track, and its post in deep ultramarine, since the ultramarine marker measured 2.87:1 on the light track.

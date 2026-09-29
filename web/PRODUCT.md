@@ -110,6 +110,12 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   mandate's field; crimson for the kill switch alone. About 60/30/10 paper, ink and ultramarine.
   The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
   UI palette (`COLOR.md`).
+- **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular
+  figures except the display hero figure (DEC-208); the wordmark stays the one serif, as outlines.
+- **The frame (DEC-208).** Glass on the frame only (the header and the phone tab bar, and on
+  desktop the dock and the agent wire that take their place), flat everywhere else, with no
+  gradient (DEC-200). The agent wire names what the agents are doing and never an amount won or
+  lost.
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
@@ -136,7 +142,8 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   agents on one Alpaca paper connection, approvals, gate decisions, and scenarios (normal, empty,
   loading, stale, paused, drawdown, reconciliation, unknown order, unreachable, approvals).
 - No customers, testimonials, track record, or performance figures exist. Nothing may imply them:
-  P&L is shown only as paper, simulated, next to `[[DISCLOSURE-PERFORMANCE]]`.
+  P&L is shown only as paper, simulated, beside `[[DISCLOSURE-PERFORMANCE]]` (behind an info
+  symbol on screen, inline in print and on record screens, DEC-210).
 - No drafted compliance wording exists; placeholders stand in for it.
 
 ## Product Principles
@@ -153,7 +160,7 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in the one light theme
-(`src/lib/tokens.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
+WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in both the light and the dark theme
+(`src/lib/palette.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
 with a visible focus ring; layouts hold at 360 px wide; motion respects `prefers-reduced-motion`
 (fewer, gentler animations, keeping opacity and colour changes that aid comprehension).

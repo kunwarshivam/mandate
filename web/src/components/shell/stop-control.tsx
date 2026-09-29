@@ -31,7 +31,7 @@ export function useStopAttention(ws: Workspace): string[] {
 
 /**
  * The Stop control is always rendered for a role that may stop, and never disabled. It does not
- * wait for the dashboard, the sidebar, or any model to load (brief §5, rule 13). It is quiet until
+ * wait for the dashboard, the dock, or any model to load (brief §5, rule 13). It is quiet until
  * something needs the owner (DEC-206): an ink outline on the header, then the filled ink pill,
  * the only filled thing in the header, while `stopAttention` gives a reason. Both tones share one
  * box, so nothing moves when it turns, and the hit area is 44px tall at every width. The command

@@ -125,7 +125,7 @@ export const KUMO_PAIRS: KumoPair[] = [
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-recessed", kind: "body", use: "Kumo text on a recessed surface" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-control", kind: "body", use: "Text in a Kumo control" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-overlay", kind: "body", use: "Text in a Kumo popover, dropdown or toast" },
-  { scope: "root", fg: "text-color-kumo-strong", bg: "color-kumo-tint", kind: "body", use: "The sidebar's current page" },
+  { scope: "root", fg: "text-color-kumo-strong", bg: "color-kumo-tint", kind: "body", use: "A highlighted item in a Kumo menu, select or tab list" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-fill-hover", kind: "body", use: "A hovered Kumo item" },
   { scope: "root", fg: "text-color-kumo-subtle", bg: "color-kumo-base", kind: "body", use: "Kumo secondary text" },
   { scope: "root", fg: "text-color-kumo-subtle", bg: "color-kumo-canvas", kind: "body", use: "Kumo secondary text on the page" },

@@ -4,7 +4,7 @@ import { BRAND_PALETTE, INK, NIGHT, OFF_WHITE, hexContrast } from "@/lib/brand-p
 
 const DO = [
   "Ink on a light surface and off-white on a dark one: one colour at a time, the colour of the type around it.",
-  "The mark alone where the lockup does not fit: a phone header, a collapsed sidebar, a favicon.",
+  "The mark alone where the lockup does not fit: a phone header, a favicon.",
   "Clear space of a quarter of the mark's height on every side, the same as the gap inside the lockup.",
   "The committed SVGs or the Logo components, scaled as a whole.",
 ];

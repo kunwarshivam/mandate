@@ -105,7 +105,7 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
 - **Type.** Public Sans for everything (DEC-209), in sentence case, with tabular figures and a
-  plain zero; weight 600 at most. Self-hosted through `@fontsource-variable/public-sans`.
+  plain zero (the display hero figure alone is proportional, DEC-208); weight 600 at most. Self-hosted through `@fontsource-variable/public-sans`.
 - **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
   (DEC-203), ink on light and off-white on dark (DEC-204), with no tagline. The icons, favicons and
   share image are the ink mark on off-white. `npm run brand` regenerates the favicons, app icons, share image and manifest in
@@ -120,11 +120,17 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
+- **The frame** (DEC-208). The header and the phone tab bar are frosted glass, and nothing else
+  is but the two bars that join them on desktop: from 64rem a labelled floating dock replaces the
+  sidebar, and an agent wire of what the agents are doing runs under the header while every feed
+  answers (the status strip otherwise). The header carries a wide command bar and breadcrumbs
+  that fold rather than truncate the current page. Stop's desktop pill and the command bar are
+  both 40px; Stop's tap area stays 44px.
 - **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone's
   tab bar and More sheet, the breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
   screens not built yet say "Coming in the next slice" with what they will be for.
 - **The phone is a remote control** (DEC-207). Below 64rem the header holds the mark, the paper
-  badge and Stop; four tabs (Home, Approvals, Agents, More) replace the sidebar, and More holds
+  badge and Stop; four tabs (Home, Approvals, Agents, More) are the one navigation, and More holds
   Search, the account switcher and every other screen. Home leads with what needs you, agents show
   their headroom rather than P&L, an agent page is its state, equity and headroom with its sections
   as links, and a request is one screen with Approve and Skip pinned. Tablet and desktop are
