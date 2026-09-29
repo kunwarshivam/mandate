@@ -77,6 +77,8 @@ fn every_owned_case_key_is_read() {
 /// A family another stream owns fails with that stream's story, so nobody can mistake it for covered.
 /// Family N (`admission`, `lineage`, `thesis_expiry`, `stagger`) left this list when stream J's
 /// harness interpreted it (E17-3, DEC-77 stage 4); its own oracle is in `src/mandate/research.rs`.
+/// Family A (`autonomy`) left it when stream H's did (E6-2, DEC-162); its oracle is in
+/// `src/mandate/autonomy.rs`.
 #[test]
 fn a_family_another_stream_owns_fails_with_its_story() {
     let fixture = fixture();
@@ -84,7 +86,6 @@ fn a_family_another_stream_owns_fails_with_its_story() {
         ("gate", "E6-3"),
         ("agent_flatten", "E6-3"),
         ("builder", "E6-2"),
-        ("autonomy", "E6-2"),
     ];
     let mut seen = 0;
     for (kind, story) in expected {
@@ -102,7 +103,7 @@ fn a_family_another_stream_owns_fails_with_its_story() {
             "{id} (`{kind}`) must name {story}, got: {failure}"
         );
     }
-    assert_eq!(seen, 4, "all four unowned kinds are dispatched");
+    assert_eq!(seen, 3, "all three unowned kinds are dispatched");
 }
 
 /// A wrong expected value fails its case, and a right one passes: MC-S01 and the first rejection
