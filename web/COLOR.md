@@ -215,14 +215,14 @@ The paper badge, the command bar (the muted fill) and Stop keep their own solid 
 
 ## Contrast results
 
-61 semantic pairs (47 text pairs at body targets, 14 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 206 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
+71 semantic pairs (53 text pairs at body targets, 18 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 226 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
 
 Lowest margins:
 
 - **Light.** Secondary text on a quiet field (`muted-foreground` on `muted`): 7.66:1, Lc 75.4. A gain on the page: 6.85:1, Lc 80.0. The ultramarine line and the mandate rule against the page: 3.49:1, Lc 59.8. The ultramarine marks must not get lighter than ultramarine-500.
 - **Dark.** Secondary text on the account's pressed fill: 9.17:1, Lc 76.4. Ultramarine text on the dark field: 9.19:1, Lc −77.1. The ultramarine marker on the dark field: 6.10:1, Lc −54.6. The kill switch's edge on the dark sheet: 7.97:1, Lc −56.8.
 
-The focus ring is `mandate-strong`: at least 7.42:1 against every light surface and 9.19:1 against every dark one.
+The focus ring is `mandate-strong`: at least 7.42:1 against the page, cards and the tinted fields in light and 9.19:1 in dark; on a quiet field (`muted`) it is 6.11:1 and 11.43:1. The same colour is the post that ends a phone headroom meter, on its `muted` track, where the ink fill measures 13.86:1 and 15.30:1.
 
 | Pair | Light WCAG / Lc | Dark WCAG / Lc |
 |---|---|---|

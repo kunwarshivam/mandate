@@ -213,14 +213,14 @@ function HeadroomMeter({ label, share }: { label: string; share: number }) {
         className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-foreground transition-transform duration-(--duration-hover) motion-reduce:transition-none"
         style={{ transform: `scaleX(${share})` }}
       />
-      <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-marker" aria-hidden />
+      <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-strong" aria-hidden />
     </div>
   );
 }
 
 /**
  * An agent's limits on a phone, one hairline row each: the room left, the limit, and a thin meter in
- * ink with the mandate's marker where the agent stops. Distances to limits, never results, so no gain
+ * ink with the mandate's post where the agent stops. Distances to limits, never results, so no gain
  * or loss colour and no disclosure to repeat (DEC-207).
  */
 export function Headroom({ agent, className }: { agent: Agent; className?: string }) {

@@ -258,7 +258,7 @@ describe("an agent on a phone", () => {
       expect(meter).toHaveAttribute("role", "img");
       expect(meter).toHaveAccessibleName(/\w/);
       expect(meter.querySelector(".bg-foreground")).not.toBeNull();
-      expect(meter.querySelector(".bg-mandate-marker")).not.toBeNull();
+      expect(meter.querySelector(".bg-mandate-strong")).not.toBeNull();
     }
     expect(headroom().querySelector("[data-direction], [data-placeholder=performance]")).toBeNull();
     expect(headroom().innerHTML).not.toMatch(/\b(text|bg|ring|border)-(gain|loss|crimson)/);
