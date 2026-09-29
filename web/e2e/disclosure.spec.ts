@@ -15,7 +15,8 @@ const PAGES = ["/", "/positions", `/agents/${AGENT_IDS.swing}`];
 
 const triggers = (page: Page) => page.locator("main").getByRole("button", { name: "Performance disclosure" });
 const popover = (page: Page) => page.getByRole("dialog", { name: "Performance disclosure" });
-const heroTrigger = (page: Page) => page.locator("[data-slot=hero-change]").getByRole("button", { name: "Performance disclosure" });
+/** The hero's symbol sits just outside its change pill, on the pill's line. */
+const heroTrigger = (page: Page) => page.locator("[data-slot=hero-change] + [data-slot=disclosure]").getByRole("button", { name: "Performance disclosure" });
 
 async function open(page: Page, path: string, width: number, height = 900, still = false) {
   if (still) {
@@ -120,7 +121,8 @@ for (const width of [1440, 390, 360]) {
           };
         }),
       );
-      expect(rows.length).toBeGreaterThanOrEqual(5);
+      // A phone's Home shows one P&L, the account hero's: its agent rows show headroom instead (DEC-207).
+      expect(rows.length).toBeGreaterThanOrEqual(width >= 1024 ? 5 : 1);
       for (const r of rows) {
         expect(Math.abs(r.height - r.lineHeight)).toBeLessThanOrEqual(0.5);
         expect(r.baselineGaps.length, "never alone on its line: it wraps with the words before it").toBeGreaterThan(0);
@@ -163,7 +165,7 @@ for (const width of [1440, 390, 360]) {
       const count = await triggers(page).count();
       await page.emulateMedia({ media: "print" });
       for (const t of await triggers(page).all()) await expect(t).toBeHidden();
-      const shown = page.locator("main [data-slot=disclosure] [data-placeholder=performance]");
+      const shown = page.locator("main [data-slot=disclosure]").filter({ visible: true }).locator("[data-placeholder=performance]");
       await expect(shown).toHaveCount(count);
       for (const s of await shown.all()) {
         await expect(s).toBeVisible();
@@ -174,6 +176,42 @@ for (const width of [1440, 390, 360]) {
       await expect(triggers(page).first()).toBeVisible();
       for (const s of await shown.all()) expect((await s.boundingBox())!.width).toBeLessThanOrEqual(1);
     });
+  });
+}
+
+test("at 1440px every agent row on Home keeps its P&L and the symbol beside it", async ({ page }) => {
+  await open(page, "/", 1440);
+  const rows = page.locator("main [data-slot=agent-band]").filter({ visible: true });
+  expect(await rows.count()).toBeGreaterThan(1);
+  for (const row of await rows.all()) {
+    await expect(row.locator("[data-direction]").filter({ visible: true }).first()).toBeVisible();
+    await expect(row.getByRole("button", { name: "Performance disclosure" })).toBeVisible();
+  }
+});
+
+for (const width of [390, 360]) {
+  test(`at ${width}px the phone's agent rows carry no P&L and no symbol, and every P&L left keeps its symbol`, async ({ page }) => {
+    await open(page, "/", width);
+    const rows = page.locator("main [data-slot=phone-agents] > li");
+    expect(await rows.count()).toBeGreaterThan(1);
+    for (const row of await rows.all()) {
+      await expect(row).toBeVisible();
+      await expect(row.locator("[data-direction]")).toHaveCount(0);
+      await expect(row.getByRole("button", { name: "Performance disclosure" })).toHaveCount(0);
+      await expect(row.locator("[data-slot=headroom]")).toBeVisible();
+    }
+    for (const path of ["/", `/agents/${AGENT_IDS.swing}`]) {
+      await open(page, path, width);
+      await expect(heroTrigger(page)).toBeVisible();
+      const visible = await page.locator("main").evaluate((main, region) => {
+        const shown = (el: Element) => (el as HTMLElement).checkVisibility();
+        return Array.from(main.querySelectorAll("[data-direction]"))
+          .filter(shown)
+          .filter((el) => !Array.from(el.closest(region)?.querySelectorAll('button[aria-label="Performance disclosure"]') ?? []).some(shown))
+          .map((el) => el.textContent ?? "");
+      }, REGION);
+      expect(visible, `${path}: every P&L on screen has a visible symbol in its region`).toEqual([]);
+    }
   });
 }
 

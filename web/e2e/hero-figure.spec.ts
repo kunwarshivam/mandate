@@ -4,7 +4,7 @@ import { AGENT_IDS } from "../src/fixtures/workspace";
 /**
  * The hero figure: the balance in the display size, in proportional lining figures, with its cents at
  * half size, muted and raised to the digits' cap height, read as one value; the change on a soft pill
- * toned by its sign, with the disclosure beside it. Scrubbing the chart changes the figure's glyphs
+ * toned by its sign, with the disclosure symbol beside it. Scrubbing the chart changes the figure's glyphs
  * and the pill's, and nothing else moves: not the figure's box, the pill's place or the chart.
  */
 
@@ -165,13 +165,16 @@ test("the change sits on a pill tinted by its sign, and colour-blind friendly wh
     }
     expect(seen).toContain("gain");
     expect(seen).toContain("loss");
+    const symbol = page.locator("[data-slot=hero-change] + [data-slot=disclosure]").getByRole("button", { name: "Performance disclosure" });
+    await expect(symbol).toBeVisible();
+    await expect(symbol).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
     const line = await pill.evaluate((el) => {
-      const disclosure = el.parentElement!.querySelector(":scope > [data-placeholder=performance]")!;
+      const disclosure = el.parentElement!.querySelector(":scope > [data-slot=disclosure] button")!;
       const a = el.getBoundingClientRect();
       const b = disclosure.getBoundingClientRect();
-      return { sameLine: Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) < 2, text: disclosure.textContent, fits: a.width < el.parentElement!.getBoundingClientRect().width };
+      return { sameLine: Math.abs(a.top + a.height / 2 - (b.top + b.height / 2)) < 2, fits: a.width < el.parentElement!.getBoundingClientRect().width };
     });
-    expect(line).toEqual({ sameLine: true, text: "[[DISCLOSURE-PERFORMANCE]]", fits: true });
+    expect(line).toEqual({ sameLine: true, fits: true });
   }
 });
 

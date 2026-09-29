@@ -170,7 +170,7 @@ for (const width of PHONES) {
       for (const row of await rows.all()) {
         await expect(row).toBeVisible();
         await expect(row.locator("[data-slot=headroom]")).toHaveText(/^\$[\d,]+\.\d{2} (above|below) its /);
-        await expect(row.locator("[data-direction], [data-placeholder=performance]")).toHaveCount(0);
+        await expect(row.locator("[data-direction], [data-placeholder=performance], [data-slot=disclosure]")).toHaveCount(0);
         await expect(row).not.toContainText(/P&L|today|[+−]\$/);
       }
       await expect(page.locator("[data-slot=agent-band]").first()).toBeHidden();
@@ -213,7 +213,9 @@ for (const width of PHONES) {
     test("the level legend waits behind Levels", async ({ page }) => {
       await open(page, AGENT, width);
       const hero = page.locator("[data-slot=agent-equity]");
-      await expect(hero.locator("[data-placeholder=performance]").first()).toBeVisible();
+      const disclosure = hero.getByRole("button", { name: "Performance disclosure" });
+      await expect(disclosure).toBeVisible();
+      await expect(disclosure).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
       const toggle = hero.getByRole("button", { name: "Levels" });
       await expect(toggle).toHaveAttribute("aria-expanded", "false");
       await expect(hero.locator("[data-slot=level-legend]")).toBeHidden();
@@ -365,7 +367,7 @@ test("desktop Home keeps its rail, its agent bands with P&L and disclosure, and 
   await expect(bands).toHaveCount(3);
   for (const band of await bands.all()) {
     await expect(band).toBeVisible();
-    await expect(band.locator("[data-placeholder=performance]")).toBeVisible();
+    await expect(band.getByRole("button", { name: "Performance disclosure" })).toBeVisible();
     await expect(band.locator("[data-direction]").first()).toBeVisible();
   }
   await expect(page.locator("[data-slot=phone-agent]").first()).toBeHidden();
