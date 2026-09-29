@@ -191,7 +191,9 @@ fn outcome_of(batch: &mut Batch<'_, '_>, outcome: BrokerOutcome) -> Result<(), E
 ///
 /// Slice 3b takes one: an `AgentModeApplied` on this account's stream to `exits_only`, `paused` or
 /// `stopped` cancels that agent's working openings, or every agent's for `*` (mandate spec §5.9,
-/// interpretation 19). Protective orders stay.
+/// interpretation 19). Protective orders stay. Any `to` other than `normal` is read as stricter,
+/// one of §7.4's three or a string that names no mode: cancelling openings only reduces risk
+/// (rule 3), so an unrecognised mode fails in that direction (#286 round 1, minor 4).
 fn copied(batch: &mut Batch<'_, '_>, event: &FoldedEvent) -> Result<(), ExecutorError> {
     let strict = event.stream == batch.view.account_stream()
         && event.event_type == "AgentModeApplied"
@@ -339,6 +341,56 @@ mod copied_tests {
             };
             let ran = executor.run(Input::Journal(event), &ports)?;
             assert_eq!(cancelled(&ran), expected, "{agent}");
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, minor 4: every mode string but `normal` — §7.4's three stricter modes, and
+    /// strings that name no mode at all — is read as stricter and cancels the agent's openings,
+    /// the risk-reducing direction; only `normal` does not.
+    #[test]
+    fn any_mode_but_normal_is_read_as_stricter() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        for to in [
+            "exits_only",
+            "paused",
+            "stopped",
+            "Normal",
+            "normal ",
+            "",
+            "halted",
+            "normal",
+        ] {
+            let mut executor = Executor::opened(&ports)?;
+            resting_buy(&mut executor, "md-buy-1", "agent-a")?;
+            let event = FoldedEvent {
+                stream: executor.state.account_stream(),
+                seq: Seq(1),
+                event_id: EventId("copied-1".to_owned()),
+                event_type: "AgentModeApplied".to_owned(),
+                causation_id: None,
+                payload: object(vec![
+                    ("agent", Value::Str("agent-a".to_owned())),
+                    ("to", Value::Str(to.to_owned())),
+                ])?,
+            };
+            let answer = executor.run(Input::Journal(event), &ports);
+            if to == "normal" {
+                assert_eq!(
+                    answer,
+                    Err(ExecutorError::Unimplemented { story: "E7-4" }),
+                    "a return to normal is slice 5's copy"
+                );
+            } else {
+                assert_eq!(cancelled(&answer?), vec!["md-buy-1"], "{to:?}");
+            }
         }
         Ok(())
     }
