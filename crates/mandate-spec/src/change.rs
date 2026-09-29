@@ -623,3 +623,6 @@ fn strictest(later: &[Rule], default: AutonomyDecision) -> AutonomyDecision {
 fn loosest(later: &[Rule], default: AutonomyDecision) -> AutonomyDecision {
     later.iter().map(|r| r.then).fold(default, Ord::min)
 }
+
+#[cfg(test)]
+mod tests;
