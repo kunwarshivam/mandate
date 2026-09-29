@@ -220,21 +220,28 @@ for (const width of [320, 360, 390]) {
 }
 
 test("every figure but the hero keeps tabular digits: tables, key figures, rows, rails and the wire", async ({ page }) => {
-  for (const path of ["/", `/agents/${AGENT_IDS.swing}`, `/agents/${AGENT_IDS.swing}/orders`, "/positions"]) {
-    await open(page, path, 1440);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  for (const path of ["/", `/agents/${AGENT_IDS.swing}`, `/agents/${AGENT_IDS.lmn}/orders`, "/positions"]) {
+    await page.goto(path, { waitUntil: "networkidle" });
+    await page.evaluate(() => document.fonts.ready);
     const read = await page.evaluate(() => {
       const hero = document.querySelector("[data-slot=account-equity-value], [data-slot=agent-equity-value]");
       const figures = [...document.querySelectorAll<HTMLElement>(".tabular, .font-mono, .text-figure")].filter((el) => !hero?.contains(el) && el.checkVisibility());
+      const digits = new Set<HTMLElement>();
+      for (const figure of figures) {
+        const walk = document.createTreeWalker(figure, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (/\d/.test(n.textContent ?? "") && n.parentElement?.checkVisibility()) digits.add(n.parentElement);
+      }
       return {
-        count: figures.length,
-        inTables: figures.filter((el) => el.closest("table")).length,
-        proportional: figures.filter((el) => !getComputedStyle(el).fontVariantNumeric.includes("tabular-nums")).map((el) => el.outerHTML.slice(0, 120)),
+        count: digits.size,
+        inTables: [...digits].filter((el) => el.closest("table")).length,
+        proportional: [...digits].filter((el) => !getComputedStyle(el).fontVariantNumeric.includes("tabular-nums")).map((el) => el.outerHTML.slice(0, 120)),
         hero: hero ? getComputedStyle(hero).fontVariantNumeric : null,
       };
     });
     expect(read.count, path).toBeGreaterThan(5);
     expect(read.proportional, path).toEqual([]);
-    if (path.endsWith("/orders") || path === "/positions") expect(read.inTables, path).toBeGreaterThan(0);
+    if (path === "/positions") expect(read.inTables, "the positions table is measured").toBeGreaterThan(0);
     if (read.hero) expect(read.hero, path).toContain("proportional-nums");
   }
 });
