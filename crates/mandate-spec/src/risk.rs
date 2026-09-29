@@ -655,7 +655,12 @@ pub fn reset_lift_order(ladder: &[crate::document::LadderRung]) -> Result<Vec<u8
     Ok(scale.into_iter().map(|(index, _)| index).collect())
 }
 
-/// Every limit's condition at a state, and whether its 1.25x hard level is reached (§5.2, §5.6).
+/// Each rung's, the daily loss's, and the lifetime floor's condition at a state, and whether its 1.25x
+/// hard level is reached (§5.2, §5.6), compared as exact products.
+///
+/// [`LimitKey::ProfitStop`] is never returned: it is a goal's stop condition (§3.1), which the risk
+/// state confirms like a limit but with no hard level. Each rung's lift comparison is made in the same
+/// place and read by the fold, not returned here.
 ///
 /// The floor is read at the mandate's own `max_loss_from_allocation`, so after a loosening version the
 /// caller passes the mandate that version applied.
@@ -663,7 +668,9 @@ pub fn conditions(
     mandate: &ValidatedMandate,
     snapshot: &Snapshot,
 ) -> Result<BTreeMap<LimitKey, (bool, bool)>, SpecError> {
-    limits::Limits::of(mandate)?.conditions(&limits::Figures::of(snapshot))
+    Ok(limits::Limits::of(mandate)?
+        .conditions(&limits::Figures::of(snapshot))?
+        .limits)
 }
 
 fn decimal(value: &SchemaDec, path: &str) -> Result<UsdExact, SpecError> {
