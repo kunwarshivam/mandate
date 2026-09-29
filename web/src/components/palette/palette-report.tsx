@@ -36,7 +36,7 @@ const VISION_LABEL: Record<Vision, string> = { normal: "Normal", deuteranopia: "
 const SCOPE_LABEL: Record<KumoScope, string> = {
   root: "The page",
   account: "The account fill: ink in light, paper in dark",
-  field: "The mandate's gold tint",
+  field: "The mandate's ultramarine tint",
   ink: "Ink, the Stop control",
 };
 
@@ -193,6 +193,9 @@ function CvdTable({ palette }: { palette: Palette }) {
                       {c.a} / {c.b}
                     </span>
                     <span className="block text-caption text-muted-foreground">{c.why}</span>
+                    {c.requiredHere && c.requiredVisions.length < CVD_VISIONS.length ? (
+                      <span className="block text-caption text-muted-foreground">Required under {c.requiredVisions.map((v) => VISION_LABEL[v].toLowerCase()).join(" and ")}</span>
+                    ) : null}
                   </th>
                   {(["normal", ...CVD_VISIONS] as Vision[]).map((v) => (
                     <td key={v} className="py-2 pr-3">
@@ -230,7 +233,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
         </nav>
       </header>
 
-      <Block title="In use" lead="The account on its ink fill, the mandate on a pale gold tint under a gold rule, results in the status family, and figures with a plain zero. Drawn in the current theme.">
+      <Block title="In use" lead="The account on its ink fill, the mandate on a pale ultramarine tint under an ultramarine rule, results in the status family, and figures with a plain zero. Drawn in the current theme.">
         <Preview />
       </Block>
 
@@ -363,7 +366,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
 
       <Block
         title="Colour vision"
-        lead={`Machado 2009 simulation at full severity. Distance is OKLab ΔE; two things that must never be confused need ${CVD_DISTINCT} under each simulated vision. Checks marked information show where a hue is not relied on in that theme.`}
+        lead={`Machado 2009 simulation at full severity. Distance is OKLab ΔE; two things that must never be confused need ${CVD_DISTINCT} under each simulated vision it names (all three unless it says otherwise). Checks marked information show where a hue is not relied on in that theme.`}
       >
         {THEMES.map((theme) => (
           <CvdTable key={theme} palette={PALETTES[theme]} />

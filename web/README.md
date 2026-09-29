@@ -85,13 +85,13 @@ development.
 
 The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
-and dense), in Ink and Gold, light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
+and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
 treatments, and the do and don't list; `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.
 
-- **Colour means one thing each** (Ink and Gold, `web/COLOR.md`). Gold is your mandate and the
+- **Colour means one thing each** (Ink and Ultramarine, `web/COLOR.md`). Ultramarine is your mandate and the
   account's line, ink is the account's actions, a stopped agent and the Stop control, crimson is
   the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
   once in `src/lib/palette.ts`, for both themes, mirrored in `src/app/globals.css`; `tokens.test.ts`

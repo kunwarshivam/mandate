@@ -36,7 +36,7 @@ function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactN
 /**
  * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
  * with every other screen. A role that sees no agents gets its home and More. The current tab's
- * icon fills and sits on a pale pill that glides between tabs; with reduced motion it jumps.
+ * icon fills and sits on a pale ultramarine pill that glides between tabs; with reduced motion it jumps.
  */
 export function TabNav({ approvals }: { approvals: number }) {
   const pathname = usePathname();

@@ -79,20 +79,20 @@ describe("chart builders draw flat, solid colour", () => {
     }
   });
 
-  it("draws the account as a gold line, the mandate's marks in gold, and the grid in a warm paper tint", () => {
+  it("draws the account as an ultramarine line, the mandate's marks in ultramarine, and the grid in a cool paper tint", () => {
     expect(CHART_TOKEN.lapis).toBe("lapis-line");
-    expect(PALETTE.tokens["lapis-line"].ref).toBe("gold-500");
-    expect(PALETTE.tokens["mandate-marker"].ref).toBe("gold-500");
-    expect(PALETTE.tokens["mandate-strong"].ref).toBe("gold-700");
+    expect(PALETTE.tokens["lapis-line"].ref).toBe("ultramarine-500");
+    expect(PALETTE.tokens["mandate-marker"].ref).toBe("ultramarine-500");
+    expect(PALETTE.tokens["mandate-strong"].ref).toBe("ultramarine-700");
     const grid = baseOptions({ reducedMotion: false }).grid;
     expect(grid?.horzLines?.color).toBe(CHART_COLOR.muted);
     expect(grid?.vertLines?.color).toBe(CHART_COLOR.muted);
     const paper = parseOklch(PALETTE.tokens.muted.value);
-    expect(paper.h).toBe(85);
+    expect(paper.h).toBe(255);
     expect(paper.c).toBeGreaterThan(0);
   });
 
-  it("a mandate level is a dashed grey line with a gold label, the account a solid gold line, a proposal dashed ink", () => {
+  it("a mandate level is a dashed grey line with an ultramarine label, the account a solid ultramarine line, a proposal dashed ink", () => {
     const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
     expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mutedForeground, axisLabelColor: CHART_COLOR.mandate, axisLabelTextColor: CHART_COLOR.mandateStrong, lineStyle: LineStyle.Dashed });
     expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Solid });
@@ -186,7 +186,7 @@ describe("AgentEquityChart", () => {
 });
 
 describe("AccountEquityChart", () => {
-  it("ends at the broker's equity, as the account's gold line, with the TradingView credit", () => {
+  it("ends at the broker's equity, as the account's ultramarine line, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
     expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
@@ -341,7 +341,7 @@ describe("the hero chart scrubs", () => {
 });
 
 describe("PositionChart", () => {
-  it("draws candles with the average cost as the account's gold line and the bracket as the mandate's dashed lines, at the position's prices", () => {
+  it("draws candles with the average cost as the account's ultramarine line and the bracket as the mandate's dashed lines, at the position's prices", () => {
     const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
     const [series] = onlyChart(container).series;
     expect(series.type).toBe("Candlestick");

@@ -86,14 +86,14 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
-/** Saturated gold: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
-const SATURATED_GOLD = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
-const MARK_GOLD = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
+/** Saturated ultramarine: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
+const SATURATED_ULTRAMARINE = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
+const MARK_ULTRAMARINE = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
 /** A rail is 8 px tall and a post, tick or bar a few px wide: anything thicker on both sides is a block. */
-const GOLD_MAX_THICKNESS = 8;
+const ULTRAMARINE_MAX_THICKNESS = 8;
 
-/** Elements painted in saturated gold thicker than a line, and text set in gold's mark colours. */
-async function goldMisuse(page: Page): Promise<string[]> {
+/** Elements painted in saturated ultramarine thicker than a line, and text set in ultramarine's mark colours. */
+async function ultramarineMisuse(page: Page): Promise<string[]> {
   return page.evaluate(
     ({ fills, marks, max }) => {
       const resolve = (token: string) => {
@@ -114,14 +114,14 @@ async function goldMisuse(page: Page): Promise<string[]> {
           if (pseudo && (style.content === "none" || style.content === "normal")) continue;
           if (!fill.has(style.backgroundColor)) continue;
           const box = pseudo ? { width: parseFloat(style.width), height: parseFloat(style.height) } : el.getBoundingClientRect();
-          if (Math.min(box.width, box.height) > max) hits.push(`${label(el)}${pseudo ?? ""} is a ${Math.round(box.width)}x${Math.round(box.height)} gold block`);
+          if (Math.min(box.width, box.height) > max) hits.push(`${label(el)}${pseudo ?? ""} is a ${Math.round(box.width)}x${Math.round(box.height)} ultramarine block`);
         }
         const text = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
-        if (text && mark.has(getComputedStyle(el).color)) hits.push(`${label(el)} sets text in a gold mark colour: ${el.textContent?.slice(0, 40)}`);
+        if (text && mark.has(getComputedStyle(el).color)) hits.push(`${label(el)} sets text in an ultramarine mark colour: ${el.textContent?.slice(0, 40)}`);
       }
       return hits;
     },
-    { fills: SATURATED_GOLD, marks: MARK_GOLD, max: GOLD_MAX_THICKNESS },
+    { fills: SATURATED_ULTRAMARINE, marks: MARK_ULTRAMARINE, max: ULTRAMARINE_MAX_THICKNESS },
   );
 }
 
@@ -154,12 +154,12 @@ test.describe("no gradient paints on any route (DEC-200)", () => {
   });
 });
 
-test.describe("gold is a line, never a block, and never text lighter than dark gold (DEC-204)", () => {
+test.describe("ultramarine is a line, never a block, and never text lighter than deep ultramarine (DEC-205)", () => {
   for (const path of ROUTES) {
     test(`desktop ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
-      expect(await goldMisuse(page)).toEqual([]);
+      expect(await ultramarineMisuse(page)).toEqual([]);
     });
   }
 
@@ -169,7 +169,7 @@ test.describe("gold is a line, never a block, and never text lighter than dark g
       test(`phone ${path}`, async ({ page }) => {
         await page.goto(path);
         await page.waitForLoadState("networkidle");
-        expect(await goldMisuse(page)).toEqual([]);
+        expect(await ultramarineMisuse(page)).toEqual([]);
       });
     }
   });
