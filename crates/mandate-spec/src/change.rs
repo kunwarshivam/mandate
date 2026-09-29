@@ -21,7 +21,7 @@ use mandate_domain::AutonomyDecision;
 
 use crate::condition::{Condition, ConditionValue, Operator};
 use crate::document::{
-    Autonomy, Goal, LadderRung, Mandate, Pointer, Rule, ScaleAction, SignalModel, pointer,
+    Approval, Autonomy, Goal, LadderRung, Mandate, Pointer, Rule, ScaleAction, SignalModel, pointer,
 };
 use crate::{SchemaDec, SpecError};
 
@@ -471,15 +471,32 @@ fn is_pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> bool {
 
 /// True when every difference between two unequal autonomy blocks is one of §9.2's six reducing
 /// shapes.
+///
+/// The blocks are destructured whole, here and in [`kept_rule_reduces`], so a field added to
+/// [`Autonomy`], [`Approval`], or [`Rule`] does not compile until it is compared: an uncompared
+/// field would let a change to it alone read as reducing.
 fn autonomy_reduces(old: &Autonomy, new: &Autonomy) -> bool {
-    old.approval.approvers == new.approval.approvers
-        && old.approval.timeout_s == new.approval.timeout_s
+    let Autonomy {
+        rules: _,
+        default,
+        admission,
+        approval:
+            Approval {
+                timeout_s,
+                on_timeout,
+                approvers,
+                two_approver_above_usd,
+            },
+    } = old;
+    approvers == &new.approval.approvers
+        && timeout_s == &new.approval.timeout_s
+        && on_timeout == &new.approval.on_timeout
         && maximum(
-            old.approval.two_approver_above_usd.as_ref(),
+            two_approver_above_usd.as_ref(),
             new.approval.two_approver_above_usd.as_ref(),
         ) != ChangeClass::RiskIncreasing
-        && new.default >= old.default
-        && new.admission >= old.admission
+        && new.default >= *default
+        && new.admission >= *admission
         && rules_reduce(old, new)
 }
 
@@ -517,15 +534,16 @@ fn rules_reduce(old: &Autonomy, new: &Autonomy) -> bool {
 /// A kept rule, one of §9.2's shapes or unchanged: with its condition unchanged it may only make
 /// its `then` stricter; with its condition changed it must keep its `then`, and one value of a
 /// single comparison must move so an `auto` rule matches less often, or an `ask` or `deny` rule more
-/// often with nothing stricter after it (DEC-172 item 9).
+/// often with nothing stricter after it (DEC-172 item 9). The caller matched the two by id.
 fn kept_rule_reduces(old: &Rule, new: &Rule, strictest_after: AutonomyDecision) -> bool {
-    if old.when == new.when {
-        return new.then >= old.then;
+    let Rule { id: _, when, then } = old;
+    if when == &new.when {
+        return new.then >= *then;
     }
-    if old.then != new.then {
+    if then != &new.then {
         return false;
     }
-    match (new.then, how_often(&old.when, &new.when)) {
+    match (new.then, how_often(when, &new.when)) {
         (AutonomyDecision::Auto, Some(Often::Less)) => true,
         (AutonomyDecision::Ask | AutonomyDecision::Deny, Some(Often::More)) => {
             strictest_after <= new.then
