@@ -1,8 +1,8 @@
 import { type ReactElement, useEffect } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as agentRoute from "@/app/agents/[agentId]/page";
-import * as approvalRoute from "@/app/approvals/[approvalId]/page";
+import * as agentRoute from "@/app/(app)/agents/[agentId]/page";
+import * as approvalRoute from "@/app/(app)/approvals/[approvalId]/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, SCENARIOS, buildWorkspace, findApproval } from "@/fixtures/workspace";
 import { clock, price } from "@/lib/format";

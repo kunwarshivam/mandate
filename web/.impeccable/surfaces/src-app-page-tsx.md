@@ -1,8 +1,8 @@
 ---
 version: 1
 slug: "src-app-page-tsx"
-primary_target: "src/app/page.tsx"
-related_targets: ["src/app/agents/[agentId]/page.tsx","src/app/approvals/[approvalId]/page.tsx","src/components/shell/app-shell.tsx","src/components/stop/stop-sheet.tsx","src/components/charts/equity-chart.tsx"]
+primary_target: "src/app/(app)/page.tsx"
+related_targets: ["src/app/(app)/agents/[agentId]/page.tsx","src/app/(app)/approvals/[approvalId]/page.tsx","src/components/shell/app-shell.tsx","src/components/stop/stop-sheet.tsx","src/components/charts/equity-chart.tsx"]
 ---
 
 ## Scope

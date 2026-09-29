@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { act, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as killPage from "@/app/agents/[agentId]/kill-switch/page";
-import * as releasePage from "@/app/agents/[agentId]/release/page";
-import * as closeAllPage from "@/app/connections/[connectionId]/close-all/page";
-import * as stopAllPage from "@/app/connections/[connectionId]/stop-all/page";
+import * as killPage from "@/app/(app)/agents/[agentId]/kill-switch/page";
+import * as releasePage from "@/app/(app)/agents/[agentId]/release/page";
+import * as closeAllPage from "@/app/(app)/connections/[connectionId]/close-all/page";
+import * as stopAllPage from "@/app/(app)/connections/[connectionId]/stop-all/page";
 import type { Scenario } from "@/fixtures/types";
 import { AGENT_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { MODE_LABEL } from "@/lib/labels";

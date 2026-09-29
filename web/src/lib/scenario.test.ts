@@ -64,7 +64,7 @@ describe("a production build does not contain the scenario switcher", () => {
     expect(devOnlyAliases("production")).toEqual({ [SCENARIO_SWITCHER_MODULE]: SCENARIO_SWITCHER_OFF });
     expect(devOnlyAliases("development")).toEqual({});
     expect(read("next.config.ts")).toContain("turbopack: { resolveAlias: devOnlyAliases(process.env.NODE_ENV) },");
-    expect(read("src/app/layout.tsx")).toContain(`from "${SCENARIO_SWITCHER_MODULE}";`);
+    expect(read("src/components/shell/app-frame.tsx")).toContain(`from "${SCENARIO_SWITCHER_MODULE}";`);
     expect(existsSync(join(WEB, SCENARIO_SWITCHER_OFF))).toBe(true);
     expect(SwitcherOff()).toBeNull();
     expect(read(SCENARIO_SWITCHER_OFF)).not.toContain("use client");

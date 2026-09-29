@@ -1,16 +1,9 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import { ViewTransition } from "react";
 import "@fontsource-variable/public-sans";
 import "./globals.css";
-import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
-import { Providers } from "@/components/providers";
-import { AppShell } from "@/components/shell/app-shell";
 import { NIGHT, OFF_WHITE } from "@/lib/brand-palette";
-import { RoleProvider } from "@/lib/roles";
-import { buildWorkspace } from "@/fixtures/workspace";
-import { getColourBlind, getScenario, getThemePref } from "@/lib/get-workspace";
-import { scenarioSwitcherShown } from "@/lib/scenario";
+import { getColourBlind, getThemePref } from "@/lib/get-workspace";
 import { THEME_SCRIPT } from "@/lib/theme";
 
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
@@ -49,9 +42,10 @@ export const viewport: Viewport = {
   colorScheme: "light dark",
 };
 
+/**
+ * The document alone. The app's frame is `(app)/layout.tsx`; the public pages' is `(site)/layout.tsx`.
+ */
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const scenario = await getScenario();
-  const workspace = buildWorkspace(scenario);
   const colourBlind = await getColourBlind();
   const themePref = await getThemePref();
   // "system" is resolved in the head script before paint, so the server's guess can differ.
@@ -71,16 +65,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
       <body>
-        <div className="isolate">
-          <RoleProvider>
-            <Providers key={scenario} workspace={workspace}>
-              <AppShell>
-                <ViewTransition>{children}</ViewTransition>
-              </AppShell>
-              {scenarioSwitcherShown ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
-            </Providers>
-          </RoleProvider>
-        </div>
+        <div className="isolate">{children}</div>
       </body>
     </html>
   );
