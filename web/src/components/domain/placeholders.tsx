@@ -13,7 +13,14 @@ const NAMES = {
   performance: "[[DISCLOSURE-PERFORMANCE]]",
   hypothetical: "[[LEGEND-HYPOTHETICAL]]",
   retailAutoLive: "[[RETAIL-AUTO-LIVE]]",
+  /** The landing page (DEC-212): its footer disclaimer, the investment-advice answer, and the legal links. */
+  siteDisclaimer: "[[SITE-DISCLAIMER]]",
+  notAdvice: "[[NOT-INVESTMENT-ADVICE]]",
+  privacy: "[[PRIVACY-POLICY]]",
+  terms: "[[TERMS-OF-SERVICE]]",
 } as const;
+
+export type PlaceholderName = keyof typeof NAMES;
 
 /**
  * DEC-210: the performance disclosure sits behind an info symbol beside each P&L, one hover or tap
@@ -70,7 +77,7 @@ function PerformanceDisclosure({ className }: { className?: string }) {
   );
 }
 
-export function Placeholder({ name, className }: { name: keyof typeof NAMES; className?: string }) {
+export function Placeholder({ name, className }: { name: PlaceholderName; className?: string }) {
   const inline = useContext(InlineContext);
   if (name === "performance" && !PERFORMANCE_INLINE && !inline) return <PerformanceDisclosure className={className} />;
   return (
