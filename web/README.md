@@ -3,8 +3,9 @@
 The owner's web app for Owlhead, the product's public name at owlhead.ai (DEC-201; "Mandate" stays
 the codename for code and paths, and "mandate" the word for the owner's binding envelope): the shell with the always-present Stop control, the dashboard,
 agent detail, and approvals. This first slice runs entirely on recorded fixture data. It talks to
-no deployment, no broker, and no network service other than Supabase Auth for sign-in, which is
-off unless it is configured (see Sign-in), and it cannot place an order.
+no deployment, no broker, and no network service other than Supabase, for sign-in and for the
+landing page's private beta requests, which is off unless it is configured (see Sign-in), and it
+cannot place an order.
 
 The screens follow the [product-experience brief](../docs/product/09-product-experience.md). The
 stack is DEC-200: Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Cloudflare's
@@ -102,6 +103,21 @@ against a stub Supabase address into `.next-auth-e2e/`, starts it on port 4318
 (`OWLHEAD_AUTH_E2E_PORT` changes it) and never reuses a running server. It checks what a signed-out
 visitor meets, answering the browser's calls to Supabase itself. It cannot sign in: the server would
 verify the session against the project's keys, which a browser stub cannot answer.
+
+## Private beta requests
+
+The landing page (`/welcome`, and `/` when signed out) ends with a form that asks for a place in
+the private beta. It posts to `POST /api/beta` (`src/app/api/beta/route.ts`), which stores each
+request, an email and an optional use, in one of two places:
+
+- **Supabase**, in the `beta_requests` table, once you apply
+  `supabase/migrations/20260929180000_beta_requests.sql` (in the dashboard's SQL editor, or with
+  `supabase db push`). Row level security lets the publishable key add a row and never read one;
+  read the list in the dashboard's table editor or with the secret key.
+- **A local file**, `web/.data/beta-requests.jsonl`, one JSON line per request, while Supabase is
+  not configured or the table does not exist yet. Git ignores `.data/`.
+
+A repeat address counts as stored, so the form never says whether someone is already on the list.
 
 ## The mock-data rule
 
