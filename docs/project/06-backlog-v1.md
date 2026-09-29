@@ -969,3 +969,23 @@ From E6-4's slice L (stream H; the coordinator's ruling on #279, round 1, minor 
   (§3.1). The order path's goal evaluation in `mandate-risk` passes only an ask from a quote that
   passed §5.6's sane-and-fresh filter. It needs a test that a single bad tick never finishes a
   `release` goal.
+
+From E6-4's slice R1 (stream H2; #289's review round 2 approved it, and the freeze rule defers
+these to R2, where the fold starts reading `Limits::conditions`):
+
+- **Pin the shape of the map `conditions` returns (R2's tests correction).** The suite checks only
+  the readings that hold, so two plants pass every test: `LimitKey::ProfitStop` inserted as
+  `(false, false)`, which falsifies `risk::conditions`' doc, and a rung's entry omitted when neither
+  reading holds. Assert that the keys are exactly the three rungs, `MaxDailyLoss` and
+  `LifetimeFloor`, and that `below_lift`'s keys are the three rung indices.
+- **Say which rungs `below_lift` may lift (R2).** §5.5 gives the hysteresis lift to `scale_sizes`
+  rungs only; a latched `exits_only` or `flatten_and_pause` rung lifts only on owner
+  acknowledgment (§5.8). Lifting one because the drawdown receded would add risk without approval.
+  Say so in `Readings::below_lift`'s doc, and have R2's fold test it.
+- **Nits from the same review.** (1) A negative high-water mark would put the hard level below the
+  soft one; the fold never produces one, but state that `H` is the peak of a positive equity, or
+  make it a type. (2) `.gitignore`'s `*.proptest-regressions` does not match the
+  `proptest-regressions/` directory proptest writes; ignore the directory. (3) `floor`, `at_least`
+  and `at_most` in `risk/limits.rs` are `pub(super)` but used only in that file; make them private
+  unless R2 uses them. (4) Say why `Limits` keeps `max_loss_from_allocation` as an unparsed
+  `SchemaDec` (§5.7's loosening check compares it).
