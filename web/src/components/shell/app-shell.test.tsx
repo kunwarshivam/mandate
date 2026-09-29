@@ -219,25 +219,52 @@ describe("the phone frame (DEC-207)", () => {
   });
 
   it("labels fixture data at the foot of a phone screen, where the strip used to", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
+    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
+    expect(shownOnPhone(foot)).toBe(true);
+    expect(within(foot).getByText("Fixture data")).toBeInTheDocument();
+  });
+});
+
+describe("the desktop frame (DEC-215)", () => {
+  it("shows nothing under the header while every feed answers, and labels fixture data at the foot of the page", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const foot = document.querySelector("[data-slot=phone-footer]")!;
-    expect(foot).toHaveClass("lg:hidden");
-    expect(within(foot as HTMLElement).getByText("Fixture data")).toBeInTheDocument();
+    expect(document.querySelector("[data-slot=status-strip]")).toBeNull();
+    expect(document.querySelector("[data-slot=wire]")).toBeNull();
+    const foot = document.querySelector<HTMLElement>("[data-slot=page-footer]")!;
+    expect(foot).not.toHaveClass("lg:hidden");
+    expect(foot).toHaveClass("lg:pb-[calc(var(--dock-clearance)+2rem)]");
+    expect(within(foot).getByText("Fixture data")).toBeInTheDocument();
+  });
+
+  it.each(["stale", "unreachable", "loading"] as const)("shows the full status strip from lg when %s, with its own fixture tag", (scenario) => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, scenario);
+    const strip = screen.getByRole("region", { name: "System status" });
+    expect(strip.parentElement?.parentElement).toHaveClass("max-lg:hidden");
+    expect(within(strip).getByText("Fixture data")).toBeInTheDocument();
+    expect(document.querySelector("[data-slot=page-footer]")).toHaveClass("lg:hidden");
+  });
+
+  it("keeps the full strip at every width on a record screen, and no fixture tag at the foot", () => {
+    setPathname(`/approvals/${APPROVAL_IDS.swingXyz}`);
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const strip = screen.getByRole("region", { name: "System status" });
+    expect(strip.parentElement?.parentElement).not.toHaveClass("max-lg:hidden");
+    expect(within(document.querySelector<HTMLElement>("[data-slot=page-footer]")!).queryByText("Fixture data")).toBeNull();
   });
 });
 
 describe("the frame", () => {
-  it("frosts the header, the agent wire, the phone tab bar and the desktop dock, and nothing else", () => {
+  it("frosts the header, the phone tab bar and the desktop dock, and nothing else", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
     const [header] = screen.getAllByRole("banner");
-    const wire = document.querySelector<HTMLElement>("[data-slot=wire]");
     const tabs = document.querySelector<HTMLElement>("nav[aria-label=Main].grid");
     const dock = screen.getByRole("navigation", { name: "Primary" });
-    for (const frame of [header, wire, tabs, dock]) {
+    for (const frame of [header, tabs, dock]) {
       expect(frame).toHaveClass("glass");
       expect(frame).not.toHaveClass("bg-card");
     }
-    expect([...document.querySelectorAll(".glass")]).toEqual([header, wire, tabs, dock]);
+    expect([...document.querySelectorAll(".glass")]).toEqual([header, tabs, dock]);
   });
 });
 

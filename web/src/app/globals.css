@@ -102,7 +102,7 @@
   --dock-h: 4rem;
   --dock-gap: 1rem;
   --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
-  /* The status strip and the agent wire share one height, so either replacing the other moves nothing. */
+  /* The status strip and the phone's feed banner share one height, so either replacing the other moves nothing. */
   --status-row: 2.125rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
@@ -376,11 +376,6 @@ html:root[data-cvd="on"] {
     -webkit-tap-highlight-color: transparent;
     /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
     scroll-padding-top: 5rem;
-    @media (min-width: 64rem) {
-      &:has([data-slot="wire"]) {
-        scroll-padding-top: calc(5rem + var(--status-row));
-      }
-    }
     /* The landing draws no sticky header or dock (DEC-213). */
     &:has([data-slot="landing"]) {
       scroll-padding: 0;
@@ -551,28 +546,6 @@ html:root[data-cvd="on"] {
   }
 }
 
-/*
- * The agent wire: two copies of the row, each at least as wide as the wire, slide left by one copy
- * and start over, so the loop has no seam. The pointer or focus on the wire holds it still.
- */
-@keyframes wire {
-  to {
-    translate: -50% 0;
-  }
-}
-[data-slot="wire-tape"] {
-  container-type: inline-size;
-  & ul {
-    min-width: 100cqw;
-  }
-  & [data-slot="wire-track"] {
-    animation: wire calc(var(--wire-items, 4) * 12s) linear infinite;
-  }
-  &:is(:hover, :focus-within) [data-slot="wire-track"] {
-    animation-play-state: paused;
-  }
-}
-
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -614,15 +587,6 @@ html:root[data-cvd="on"] {
   }
   [data-slot="skeleton"] {
     animation: none !important;
-  }
-  [data-slot="wire-tape"] {
-    overflow-x: auto;
-    & [data-slot="wire-track"] {
-      animation: none;
-    }
-    & [data-copy] {
-      display: none;
-    }
   }
   .press:active:not(:disabled) {
     transform: none;

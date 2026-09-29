@@ -15,7 +15,7 @@ interface Item {
   text: ReactNode;
 }
 
-/** The four feeds, each saying when it was last true: the strip's items, and the wire's feed list. */
+/** The four feeds, each saying when it was last true: the strip's and the banner's items. */
 export function healthItems(ws: Workspace, now: string): Item[] {
   const h = ws.health;
   if (ws.status === "loading") {
