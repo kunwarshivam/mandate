@@ -744,23 +744,86 @@ mod stub_tests {
         Ok(())
     }
 
-    /// A source without its `#[cfg(test)]` items (each from its attribute to the next closing
-    /// brace in column 0), so a pin reads production code alone and a test may name what it pins
-    /// plainly (#258 round 2, minor 2).
-    fn production(source: &str) -> String {
+    /// A source without its `#[cfg(test)]` items, so a pin reads production code alone and a test
+    /// may name what it pins plainly (#258 round 2, minor 2). An item is a `#[cfg(test)]` line in
+    /// column 0, the attributes after it, then either one line ending `;` (`mod doubles;`) or a
+    /// line ending `{` through the next `}` in column 0: rustfmt's two shapes for a top-level
+    /// item. Any other shape is refused, never stripped past, which would hide the production
+    /// lines after it from the pin (#286 round 1, minor 3).
+    fn production(source: &str) -> io::Result<String> {
+        let refused = |at: usize, why: &str| {
+            io::Error::other(format!(
+                "line {}: a #[cfg(test)] item {why}; `production` strips only a one-line `;` \
+                 item or a `{{` block closed by a `}}` in column 0",
+                at.saturating_add(1)
+            ))
+        };
         let mut kept = String::new();
-        let mut in_test = false;
-        for line in source.lines() {
-            if line.starts_with("#[cfg(test)]") {
-                in_test = true;
-            } else if in_test && line == "}" {
-                in_test = false;
-            } else if !in_test {
+        let mut lines = source.lines().enumerate();
+        while let Some((at, line)) = lines.next() {
+            if !line.starts_with("#[cfg(test)]") {
                 kept.push_str(line);
                 kept.push('\n');
+                continue;
+            }
+            if line != "#[cfg(test)]" {
+                return Err(refused(at, "shares its attribute's line"));
+            }
+            let mut item = lines.next();
+            while let Some((_, attribute)) = item.filter(|(_, next)| next.starts_with("#[")) {
+                if !attribute.ends_with(']')
+                    && !lines.any(|(_, next)| next.starts_with(')') || next.starts_with(']'))
+                {
+                    return Err(refused(at, "has an attribute that never closes"));
+                }
+                item = lines.next();
+            }
+            match item {
+                Some((_, head)) if head.ends_with(';') => {}
+                Some((_, head)) if head.ends_with('{') => {
+                    if !lines.any(|(_, next)| next == "}") {
+                        return Err(refused(at, "never closes"));
+                    }
+                }
+                _ => return Err(refused(at, "is neither a one-line item nor a block")),
             }
         }
-        kept
+        Ok(kept)
+    }
+
+    /// One file's production code, or the refusal naming the file.
+    fn read_production(path: &Path) -> io::Result<String> {
+        production(&fs::read_to_string(path)?)
+            .map_err(|refused| io::Error::other(format!("{}: {refused}", path.display())))
+    }
+
+    /// #286 round 1, minor 3: a one-line item mid-file (the `mod x;` shape `stages.rs`,
+    /// `policy.rs` and `validate.rs` use), one under several attributes, and a block are each
+    /// stripped exactly, keeping every production line after them; an item `production` cannot
+    /// strip exactly is refused, loudly, rather than stripped past.
+    #[test]
+    fn production_strips_test_items_exactly_or_refuses() -> io::Result<()> {
+        let source = "fn a() {}\n#[cfg(test)]\nmod doubles;\nfn b() {}\n#[cfg(test)]\n\
+                      #[path = \"common.rs\"]\n#[allow(\n    dead_code,\n    reason = \"r\"\n)]\n\
+                      mod common;\nfn c() {}\n#[cfg(test)]\nmod tests {\n    fn t() {}\n}\n\
+                      fn d() {}\n";
+        assert_eq!(
+            production(source)?,
+            "fn a() {}\nfn b() {}\nfn c() {}\nfn d() {}\n"
+        );
+        for unstrippable in [
+            "#[cfg(test)]\nfn f<T>()\nwhere\n    T: Sized,\n{\n}\nfn b() {}\n",
+            "#[cfg(test)]\nmod tests {\n    fn t() {}\n",
+            "#[cfg(test)] mod doubles;\nfn b() {}\n",
+            "fn b() {}\n#[cfg(test)]\n",
+            "#[cfg(test)]\n#[allow(\n    dead_code,\n",
+        ] {
+            assert!(
+                production(unstrippable).is_err(),
+                "{unstrippable:?} is refused"
+            );
+        }
+        Ok(())
     }
 
     /// What a source may hold of each construction, per file; any file not named holds none.
@@ -830,8 +893,7 @@ mod stub_tests {
             "\"ProtectionChanged\"",
         ];
         for path in found {
-            let source = fs::read_to_string(&path)?;
-            let production = production(&source);
+            let production = read_production(&path)?;
             let relative = path
                 .strip_prefix(&root)
                 .map_or(path.clone(), Path::to_path_buf)
@@ -859,8 +921,8 @@ mod stub_tests {
                 assert!(
                     allowed.is_none_or(|allowed| count == allowed),
                     "{relative} holds `{needle}` {count} time(s), {allowed:?} allowed: protection \
-                     created on an unprotected position makes the stubs reachable \
-                     reachable, a denied exit (AGENTS.md rule 13). Slice 2 creates it no earlier \
+                     created on an unprotected position makes the stubs reachable, a denied \
+                     exit (AGENTS.md rule 13). Slice 2 creates it no earlier \
                      than 3a, 3b and 4 (DEC-160)"
                 );
             }
@@ -878,7 +940,7 @@ mod stub_tests {
         let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         for entry in fs::read_dir(&src)? {
             let path = entry?.path();
-            let source = production(&fs::read_to_string(&path)?);
+            let source = read_production(&path)?;
             assert!(
                 !source.contains(".legs"),
                 "{} reads a broker order's legs; leg ids from the broker wait for the leg \
@@ -1341,7 +1403,7 @@ mod sequence_tests {
         )?;
         committed(
             &mut executor,
-            concat!("Protection", "Changed"),
+            "ProtectionChanged",
             vec![
                 ("instrument", text("AAPL")),
                 ("action", text("placed")),
