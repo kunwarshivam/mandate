@@ -29,7 +29,7 @@ for (const width of [390, 1440]) {
     test("the welcome page leads to sign in, from the header and from the page", async ({ page }) => {
       await page.goto("/welcome");
       await expect(page.getByRole("banner").getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
-      await expect(page.getByRole("main").getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+      await expect(page.getByRole("main").getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/login");
     });
 
     test("the sign-in page has no link to itself, and says sign-in is off in this build", async ({ page }) => {
@@ -41,10 +41,14 @@ for (const width of [390, 1440]) {
   });
 }
 
-test("the public pages keep the app out of search, each with its own title", async ({ page }) => {
+test("the landing page is the one indexed public page, each with its own title", async ({ page }) => {
+  await page.goto("/welcome");
+  await expect(page).toHaveTitle(/^Owlhead$/);
+  await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", /^index, follow$/);
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute("href", "https://owlhead.ai");
   for (const [path, title] of [
-    ["/welcome", /^Owlhead$/],
     ["/login", /^Sign in/],
+    ["/auth/passkey", /^Add a passkey/],
   ] as const) {
     await page.goto(path);
     await expect(page).toHaveTitle(title);

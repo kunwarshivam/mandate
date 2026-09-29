@@ -11,9 +11,7 @@ export default async function SiteLayout({ children }: { children: ReactNode }) 
         Skip to content
       </a>
       <SiteHeader signedIn={signedIn} />
-      <main id="main" tabIndex={-1} className="mx-auto flex w-full max-w-(--content-max) flex-1 flex-col px-(--page-x) pt-(--page-top) pb-(--page-bottom) outline-none">
-        {children}
-      </main>
+      {children}
     </div>
   );
 }
