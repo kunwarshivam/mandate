@@ -259,6 +259,11 @@ html:root[data-cvd="on"] {
   --font-mono: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
   /* One tight scale (web/DESIGN.md, Type). Weight steps are 400, 500 and 600, never bolder. */
+  /* The equity figure scales with its hero's container (cqi), so "−$1,234,567.89" fits at 320px. */
+  --text-display: clamp(2rem, 14cqi, 4.75rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.05em;
+  --text-display--font-weight: 600;
   --text-hero: clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem);
   --text-hero--line-height: 1.05;
   --text-hero--letter-spacing: -0.035em;
