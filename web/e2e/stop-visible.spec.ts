@@ -5,13 +5,13 @@ import { agentHref } from "../src/lib/screens";
 
 /**
  * Stop is always one press away (brief §5, rule 13): at every width, on every main route, with the
- * sidebar open or collapsed, the Stop button sits wholly inside the viewport, nothing covers it,
- * and its label is never clipped. On touch widths it is at least 44 by 44 px.
+ * page at its top or scrolled to its end under the dock, the Stop button sits wholly inside the
+ * viewport, nothing covers it, and its label is never clipped. On touch widths it is at least 44 by 44 px.
  */
 
 const WIDTHS = [320, 360, 375, 390, 414, 430, 480, 600, 640, 768, 820, 1024, 1180, 1280, 1440, 1920];
-/** `AppShell` hands Kumo's Sidebar a 1024 px mobile breakpoint: from here up the sidebar collapses in place. */
-const DESKTOP_SIDEBAR = 1024;
+/** Tailwind's `lg`: from here up the dock carries the nav, and below it the tab bar (DEC-207). */
+const DESKTOP = 1024;
 /** Phones and tablets, landscape included. */
 const TOUCH_MAX = 1180;
 const MIN_TARGET = 44;
@@ -93,18 +93,20 @@ test.describe("Stop is fully visible at every width (brief §5, rule 13)", () =>
         await page.setViewportSize({ width, height: 800 });
         await page.goto(route.path);
         await page.waitForLoadState("networkidle");
-        if (width < DESKTOP_SIDEBAR) {
-          await expectStopVisible(page, width, "sidebar closed");
+        if (width < DESKTOP) {
+          await expectStopVisible(page, width, "at the top");
+          await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+          await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+          await expectStopVisible(page, width, "with More open");
+          await page.getByRole("banner").getByRole("button", { name: "Stop", exact: true }).click();
+          await expect(page.getByRole("dialog", { name: /^Stop/ }), "Stop opens its sheet over More").toBeVisible();
+          await expect(page.getByRole("dialog", { name: "More" })).toBeHidden();
           return;
         }
-        const wrapper = page.locator("[data-sidebar-wrapper]");
-        await expect(wrapper).toHaveAttribute("data-state", "expanded");
-        await expectStopVisible(page, width, "sidebar open");
-        await expect(async () => {
-          await page.getByRole("button", { name: "Collapse sidebar" }).click();
-          await expect(wrapper).toHaveAttribute("data-state", "collapsed", { timeout: 1000 });
-        }).toPass({ timeout: 15_000 });
-        await expectStopVisible(page, width, "sidebar collapsed");
+        await expect(page.getByRole("navigation", { name: "Primary" })).toBeVisible();
+        await expectStopVisible(page, width, "at the top");
+        await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+        await expectStopVisible(page, width, "scrolled to the end");
       });
     }
   }
@@ -144,7 +146,7 @@ test.describe("Stop answers a press while the page cross-fades (brief §5, rule 
               requestAnimationFrame(tick);
             }),
         );
-        const nav = width < DESKTOP_SIDEBAR ? page.getByRole("navigation", { name: "Main" }) : page.locator("[data-sidebar-wrapper]");
+        const nav = page.getByRole("navigation", { name: width < DESKTOP ? "Main" : "Primary" });
         await nav.locator(`a[href="${href}"]`).first().click();
         const { frames, missed, covering } = await sampled;
         await expect(page).toHaveURL(href);

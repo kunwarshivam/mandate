@@ -6,40 +6,40 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Owlhead's calm system in Ink and Gold (DEC-204, web/DESIGN.md, web/COLOR.md). Every colour is a
- * ramp step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift. Colour
- * carries four meanings and nothing else: the mandate tokens (gold) are your mandate, lapis is the
- * account (an ink fill, a gold line), ink is a stopped agent and the Stop control, crimson is the
- * kill switch.
+ * Owlhead's calm system in Ink and Ultramarine (DEC-205, web/DESIGN.md, web/COLOR.md). Every colour
+ * is a ramp step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift.
+ * Colour carries four meanings and nothing else: the mandate tokens (ultramarine) are your mandate,
+ * lapis is the account (an ink fill, an ultramarine line), ink is a stopped agent and the Stop
+ * control, crimson is the kill switch.
  */
 :root {
-  --background: oklch(0.975 0.004 85);
-  --card: oklch(0.992 0.003 85);
-  --muted: oklch(0.91 0.006 85);
-  --border: oklch(0.91 0.006 85);
+  --background: oklch(0.975 0.004 255);
+  --card: oklch(0.992 0.003 255);
+  --muted: oklch(0.91 0.006 255);
+  --border: oklch(0.91 0.006 255);
   --foreground: oklch(0.2 0.008 255);
   --muted-foreground: oklch(0.38 0.01 255);
   --primary: oklch(0.2 0.008 255);
-  --primary-foreground: oklch(0.992 0.003 85);
+  --primary-foreground: oklch(0.992 0.003 255);
   --lapis: oklch(0.2 0.008 255);
-  --lapis-foreground: oklch(0.992 0.003 85);
-  --lapis-muted: oklch(0.91 0.006 85);
-  --lapis-soft: oklch(0.975 0.023 82);
+  --lapis-foreground: oklch(0.992 0.003 255);
+  --lapis-muted: oklch(0.91 0.006 255);
+  --lapis-soft: oklch(0.975 0.011 266);
   --lapis-strong: oklch(0.38 0.01 255);
-  --lapis-line: oklch(0.62 0.123 82);
-  --mandate: oklch(0.975 0.023 82);
+  --lapis-line: oklch(0.62 0.175 266);
+  --mandate: oklch(0.975 0.011 266);
   --mandate-foreground: oklch(0.2 0.008 255);
   --mandate-muted: oklch(0.38 0.01 255);
-  --mandate-strong: oklch(0.44 0.087 82);
-  --mandate-marker: oklch(0.62 0.123 82);
-  --mandate-edge: oklch(0.62 0.123 82);
-  --mandate-soft: oklch(0.975 0.023 82);
-  --selection: oklch(0.91 0.065 82);
+  --mandate-strong: oklch(0.44 0.136 266);
+  --mandate-marker: oklch(0.62 0.175 266);
+  --mandate-edge: oklch(0.62 0.175 266);
+  --mandate-soft: oklch(0.975 0.011 266);
+  --selection: oklch(0.91 0.041 266);
   --ink: oklch(0.2 0.008 255);
-  --ink-foreground: oklch(0.992 0.003 85);
+  --ink-foreground: oklch(0.992 0.003 255);
   --ink-line: oklch(0.44 0.01 255);
   --crimson: oklch(0.44 0.173 27);
-  --crimson-foreground: oklch(0.992 0.003 85);
+  --crimson-foreground: oklch(0.992 0.003 255);
   --crimson-edge: oklch(0.44 0.173 27);
   --gain: oklch(0.44 0.117 150);
   --loss: oklch(0.44 0.117 12);
@@ -48,15 +48,31 @@
   --gain-soft: oklch(0.975 0.011 150);
   --loss-soft: oklch(0.975 0.011 12);
   --warning-soft: oklch(0.975 0.017 70);
-  --info-soft: oklch(0.975 0.004 85);
-  --gain-cvd: oklch(0.44 0.107 245);
-  --loss-cvd: oklch(0.38 0.131 350);
-  --gain-cvd-soft: oklch(0.975 0.012 245);
+  --info-soft: oklch(0.975 0.004 255);
+  --gain-cvd: oklch(0.44 0.072 205);
+  --loss-cvd: oklch(0.31 0.099 350);
+  --gain-cvd-soft: oklch(0.975 0.024 205);
   --loss-cvd-soft: oklch(0.975 0.013 350);
   --hatch-ink: oklch(0.2 0.008 255 / 0.3);
   --paper: var(--card);
   --logo: var(--foreground);
   --backdrop: color-mix(in oklch, var(--ink) 40%, transparent);
+  /*
+   * The frame's frosted glass (the header and the phone tab bar). 72% card keeps muted text at 5.2:1
+   * even with solid ink scrolling underneath; at 60% it would fall to 3.8:1. Mixed in OKLab: mixed
+   * with transparent in OKLCH, Chromium drops the hue and the ink glass turns faintly pink.
+   */
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
+  --glass-edge: color-mix(in oklab, var(--foreground) 8%, transparent);
+  /*
+   * The dock carries the navigation, so its glass is denser and its edge firmer than the header's.
+   * The current section's pill is a tint of the type colour: muted is only 1.1:1 on the dark card, and
+   * a solid ink fill belongs to Stop. At 14% the pill holds 1.3:1 on the glass in light and 1.5:1 in dark.
+   */
+  --dock-glass: color-mix(in oklab, var(--card) 85%, transparent);
+  --dock-edge: color-mix(in oklab, var(--foreground) 15%, transparent);
+  --dock-current: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --dock-hover: color-mix(in oklab, var(--foreground) 7%, transparent);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -71,7 +87,6 @@
   --radius: 0.5rem;
 
   /* Layout (web/DESIGN.md, Space). Calm is the default density; audit and admin opt into dense. */
-  --nav-width: 14rem;
   --content-max: 68rem;
   --page-x: 1.25rem;
   --page-top: 1.5rem;
@@ -81,6 +96,12 @@
   --row-y: 1rem;
   --seam: 0.5rem;
   --tab-bar: 4rem;
+  /* The desktop dock: 50px labelled items in 6px of padding and a hairline, floating 1rem above the bottom edge. */
+  --dock-h: 4rem;
+  --dock-gap: 1rem;
+  --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
+  /* The status strip and the agent wire share one height, so either replacing the other moves nothing. */
+  --status-row: 2.125rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
@@ -102,8 +123,8 @@
 }
 
 /*
- * Dark: ink surfaces, paper type, gold a step lighter for the account's line, the mandate's marks and
- * labels. Primary actions and the Stop control turn to a paper fill with ink type; crimson keeps its
+ * Dark: ink surfaces, paper type, ultramarine a step lighter for the account's line, the mandate's
+ * marks and labels. Primary actions and the Stop control turn to a paper fill with ink type; crimson keeps its
  * fill and lightens its edge. Still flat: no shadows, no glows.
  */
 html:root[data-mode="dark"] {
@@ -111,45 +132,47 @@ html:root[data-mode="dark"] {
   --card: oklch(0.2 0.008 255);
   --muted: oklch(0.24 0.01 255);
   --border: oklch(0.31 0.01 255);
-  --foreground: oklch(0.975 0.004 85);
-  --muted-foreground: oklch(0.88 0.006 85);
-  --primary: oklch(0.975 0.004 85);
+  --foreground: oklch(0.975 0.004 255);
+  --muted-foreground: oklch(0.88 0.006 255);
+  --primary: oklch(0.975 0.004 255);
   --primary-foreground: oklch(0.2 0.008 255);
-  --lapis: oklch(0.975 0.004 85);
+  --lapis: oklch(0.975 0.004 255);
   --lapis-foreground: oklch(0.2 0.008 255);
   --lapis-muted: oklch(0.31 0.01 255);
-  --lapis-soft: oklch(0.31 0.045 82);
-  --lapis-strong: oklch(0.88 0.006 85);
-  --lapis-line: oklch(0.76 0.126 82);
-  --mandate: oklch(0.31 0.045 82);
-  --mandate-foreground: oklch(0.975 0.004 85);
-  --mandate-muted: oklch(0.88 0.006 85);
-  --mandate-strong: oklch(0.88 0.1 82);
-  --mandate-marker: oklch(0.76 0.126 82);
-  --mandate-edge: oklch(0.76 0.126 82);
-  --mandate-soft: oklch(0.24 0.03 82);
-  --selection: oklch(0.38 0.075 82);
-  --ink: oklch(0.975 0.004 85);
+  --lapis-soft: oklch(0.31 0.05 266);
+  --lapis-strong: oklch(0.88 0.006 255);
+  --lapis-line: oklch(0.76 0.118 266);
+  --mandate: oklch(0.31 0.05 266);
+  --mandate-foreground: oklch(0.975 0.004 255);
+  --mandate-muted: oklch(0.88 0.006 255);
+  --mandate-strong: oklch(0.88 0.056 266);
+  --mandate-marker: oklch(0.76 0.118 266);
+  --mandate-edge: oklch(0.76 0.118 266);
+  --mandate-soft: oklch(0.24 0.034 266);
+  --selection: oklch(0.38 0.08 266);
+  --ink: oklch(0.975 0.004 255);
   --ink-foreground: oklch(0.2 0.008 255);
-  --ink-line: oklch(0.62 0.007 85);
+  --ink-line: oklch(0.62 0.007 255);
   --crimson: oklch(0.44 0.173 27);
-  --crimson-foreground: oklch(0.992 0.003 85);
+  --crimson-foreground: oklch(0.992 0.003 255);
   --crimson-edge: oklch(0.76 0.138 27);
   --gain: oklch(0.88 0.062 150);
   --loss: oklch(0.88 0.062 12);
   --warning: oklch(0.88 0.089 70);
-  --info: oklch(0.88 0.006 85);
+  --info: oklch(0.88 0.006 255);
   --gain-soft: oklch(0.24 0.063 150);
   --loss-soft: oklch(0.24 0.063 12);
   --warning-soft: oklch(0.24 0.05 70);
   --info-soft: oklch(0.24 0.01 255);
-  --gain-cvd: oklch(0.88 0.061 245);
+  --gain-cvd: oklch(0.88 0.111 205);
   --loss-cvd: oklch(0.88 0.068 50);
-  --gain-cvd-soft: oklch(0.24 0.058 245);
+  --gain-cvd-soft: oklch(0.24 0.039 205);
   --loss-cvd-soft: oklch(0.24 0.061 50);
-  --hatch-ink: oklch(0.62 0.007 85 / 0.4);
+  --hatch-ink: oklch(0.62 0.007 255 / 0.4);
   --paper: var(--mandate);
   --backdrop: color-mix(in oklch, var(--background) 72%, transparent);
+  /* Muted text keeps 5.1:1 even with solid paper scrolling underneath; at 60% it would fall to 3.35:1. */
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
 
   color-scheme: dark;
 }
@@ -159,15 +182,25 @@ html:root[data-mode="dark"] {
   --tw-shadow: 0 0 #0000;
 }
 
+/*
+ * Kumo's toasts sit 2rem above the bottom right corner, under the dock's layer, and the dock reaches
+ * that corner's column below 1440px. From 64rem they rise clear of the dock instead.
+ */
+@media (min-width: 64rem) {
+  [role="region"][aria-label="Notifications"] {
+    bottom: calc(var(--dock-clearance) + 1rem);
+  }
+}
+
 /* Scrims darken the page in both modes; an off-white ink scrim would light it up. */
 .dark [data-slot="sheet-backdrop"] {
   background-color: var(--backdrop);
 }
 
 /*
- * Colour-blind friendly (web/COLOR.md): a gain turns blue, and a loss raspberry in light or orange in
- * dark, which stay apart from each other, from gold and from crimson under deuteranopia and
- * protanopia. Charts read the same attribute, since a canvas cannot read CSS.
+ * Colour-blind friendly (web/COLOR.md): a gain turns teal, and a loss raspberry in light or orange in
+ * dark, which stay apart from each other, from ultramarine and from crimson under deuteranopia,
+ * protanopia and tritanopia. Charts read the same attribute, since a canvas cannot read CSS.
  */
 html:root[data-cvd="on"] {
   --gain: var(--gain-cvd);
@@ -245,14 +278,19 @@ html:root[data-cvd="on"] {
   --color-warning-soft: var(--warning-soft);
   --color-info-soft: var(--info-soft);
 
-  --font-sans: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
-  --font-mono: "Mona Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
   /* One tight scale (web/DESIGN.md, Type). Weight steps are 400, 500 and 600, never bolder. */
+  /* The equity figure scales with its hero's container (cqi), so "−$1,234,567.89" fits at 320px. */
+  --text-display: clamp(2rem, 14cqi, 4.75rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.03em;
+  --text-display--font-weight: 600;
   --text-hero: clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem);
   --text-hero--line-height: 1.05;
-  --text-hero--letter-spacing: -0.035em;
+  --text-hero--letter-spacing: -0.03em;
   --text-hero--font-weight: 600;
   --text-h1: 1.75rem;
   --text-h1--line-height: 1.2;
@@ -285,7 +323,7 @@ html:root[data-cvd="on"] {
   --text-lg: 1.125rem;
   --text-lg--line-height: calc(1.75 / 1.125);
 
-  /* ch is the width of a zero; Mona Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
+  /* ch is the width of a zero; Public Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
   --container-measure: 58ch;
 
   --radius-xs: 0.25rem;
@@ -330,16 +368,21 @@ html:root[data-cvd="on"] {
     scrollbar-color: var(--border) transparent;
     scrollbar-width: thin;
     -webkit-tap-highlight-color: transparent;
-    /* Keep a focused or anchored element clear of the sticky header, the tab bar, and the pinned response. */
+    /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
     scroll-padding-top: 5rem;
+    @media (min-width: 64rem) {
+      &:has([data-slot="wire"]) {
+        scroll-padding-top: calc(5rem + var(--status-row));
+      }
+    }
     scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
     @media (min-width: 64rem) {
-      scroll-padding-bottom: 1rem;
+      scroll-padding-bottom: calc(var(--dock-clearance) + 1rem);
     }
     &:has([data-slot="approval-choices"]) {
       scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 8rem);
       @media (min-width: 64rem) {
-        scroll-padding-bottom: 8rem;
+        scroll-padding-bottom: calc(var(--dock-clearance) + 8rem);
       }
     }
   }
@@ -376,7 +419,7 @@ html:root[data-cvd="on"] {
   }
 }
 
-/* Base UI marks the entering and leaving frames; the Stop sheet and step-up dialog time them. */
+/* Base UI marks the entering and leaving frames; the Stop sheet, More sheet and step-up dialog time them. */
 [data-slot="stop-sheet"] {
   transition: transform var(--duration-sheet) var(--ease-drawer);
 }
@@ -385,6 +428,17 @@ html:root[data-cvd="on"] {
   transform: translateX(100%);
 }
 [data-slot="stop-sheet"][data-ending-style] {
+  transition-duration: var(--duration-sheet-exit);
+  transition-timing-function: var(--ease-out);
+}
+[data-slot="more-sheet"] {
+  transition: transform var(--duration-sheet) var(--ease-drawer);
+}
+[data-slot="more-sheet"][data-starting-style],
+[data-slot="more-sheet"][data-ending-style] {
+  transform: translateY(100%);
+}
+[data-slot="more-sheet"][data-ending-style] {
   transition-duration: var(--duration-sheet-exit);
   transition-timing-function: var(--ease-out);
 }
@@ -462,6 +516,53 @@ html:root[data-cvd="on"] {
   }
 }
 
+/*
+ * Frosted glass, for the frame alone: the sticky header and the phone tab bar, with the page
+ * scrolling underneath. Everything else stays flat. Solid card where the browser cannot blur, where
+ * the owner asks for less transparency, and in forced colours.
+ */
+@utility glass {
+  background-color: var(--glass);
+  border-color: var(--glass-edge);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--card);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (forced-colors: active) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/*
+ * The agent wire: two copies of the row, each at least as wide as the wire, slide left by one copy
+ * and start over, so the loop has no seam. The pointer or focus on the wire holds it still.
+ */
+@keyframes wire {
+  to {
+    translate: -50% 0;
+  }
+}
+[data-slot="wire-tape"] {
+  container-type: inline-size;
+  & ul {
+    min-width: 100cqw;
+  }
+  & [data-slot="wire-track"] {
+    animation: wire calc(var(--wire-items, 4) * 12s) linear infinite;
+  }
+  &:is(:hover, :focus-within) [data-slot="wire-track"] {
+    animation-play-state: paused;
+  }
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -496,12 +597,22 @@ html:root[data-cvd="on"] {
     scroll-behavior: auto !important;
   }
   [data-slot="stop-sheet"],
+  [data-slot="more-sheet"],
   [data-slot="step-up-dialog"],
   [data-slot="sheet-backdrop"] {
     transition: none !important;
   }
   [data-slot="skeleton"] {
     animation: none !important;
+  }
+  [data-slot="wire-tape"] {
+    overflow-x: auto;
+    & [data-slot="wire-track"] {
+      animation: none;
+    }
+    & [data-copy] {
+      display: none;
+    }
   }
   .press:active:not(:disabled) {
     transform: none;

@@ -61,7 +61,8 @@ development.
   `schemas/mandate.schema.json`: decimals are strings, IDs are opaque (ULIDs with a type prefix),
   and content references are `sha256:` hashes. The two main mandates are
   `reference/mandate/bases.py`'s `btc_accumulator` and `two_stock_swing`.
-- The status strip carries a "Fixture data" tag, and P&L values are fixture values, not a record.
+- The status strip carries a "Fixture data" tag (on a phone, the More sheet and the foot of the
+  page do), and P&L values are fixture values, not a record.
 - Money never passes through a float: `src/lib/decimal.ts` works on scaled integers.
 - `src/lib/mock-runtime.tsx` stands in for the workspace deployment. Commands and approval responses
   are held in memory and shown as recorded only after a delay, so the screens never display an
@@ -74,22 +75,25 @@ development.
 - Compliance text appears only as the placeholders `[[DISCLOSURE-PERFORMANCE]]`,
   `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`. Every P&L figure (a signed gain or loss,
   or a dollar figure labelled realized, unrealized, P&L, gain or loss) has
-  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item; `src/app/disclosure.test.tsx`
-  renders every route in every scenario and fails otherwise.
+  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item: behind an info symbol that
+  opens it on hover, click, tap or Enter, and inline on record screens and in print (DEC-210);
+  `src/app/disclosure.test.tsx` renders every route in every scenario and fails otherwise. Counsel
+  must confirm the symbol before launch; `PERFORMANCE_INLINE` in
+  `src/components/domain/placeholders.tsx` puts the text back inline everywhere.
 
 ## Design system
 
 The visual system is the calm, consumer-grade redesign of DEC-204: one hero number per screen, a
 scrubbable equity chart at the centre, generous space, few boxes, soft corners, two densities (calm
-and dense), in Ink and Gold, light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
+and dense), in Ink and Ultramarine (DEC-205), light or dark, and with no gamification. `web/DESIGN.md` holds the rules, the tokens, the state
 treatments, and the do and don't list; `web/PRODUCT.md` holds the audience, voice, and the safety
 rules that constrain visuals. `/design` (not linked from the navigation) renders the tokens with
 their OKLCH values and computed contrast, the type scale, the spacing in both densities, the radius scale,
  every state treatment, the components, and motion samples.
 
-- **Colour means one thing each** (Ink and Gold, `web/COLOR.md`). Gold is your mandate and the
-  account's line, ink is the account's actions, a stopped agent and the Stop control, crimson is
-  the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
+- **Colour means one thing each** (Ink and Ultramarine, `web/COLOR.md`). Ultramarine is your mandate and the
+  account's line, ink is the account's actions, a stopped agent and the Stop control (an outline
+  until something needs you, then filled; DEC-206), crimson is the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
   once in `src/lib/palette.ts`, for both themes, mirrored in `src/app/globals.css`; `tokens.test.ts`
   and `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA in either theme.
 - **APCA is dev only.** `apca-w3` (its own limited licence) and its AGPL-3.0 dependency
@@ -100,8 +104,8 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `owlhead-theme` cookie. The dark theme is tokens alone: there is no `dark:` class in `src/`.
 - **No gradients** (DEC-200). CI fails on any gradient in `src/` and runs the Impeccable detector
   (`.github/workflows/web.yml`).
-- **Type.** Mona Sans for everything, in sentence case, with tabular figures and a plain zero;
-  weight 600 at most. Self-hosted through `@fontsource-variable/mona-sans`.
+- **Type.** Public Sans for everything (DEC-209), in sentence case, with tabular figures and a
+  plain zero (the display hero figure alone is proportional, DEC-208); weight 600 at most. Self-hosted through `@fontsource-variable/public-sans`.
 - **Brand.** The founder's Owlhead mark and the lowercase "owlhead" wordmark, as outlines
   (DEC-203), ink on light and off-white on dark (DEC-204), with no tagline. The icons, favicons and
   share image are the ink mark on off-white. `npm run brand` regenerates the favicons, app icons, share image and manifest in
@@ -116,6 +120,19 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
-- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The sidebar, the
-  breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
+- **The frame** (DEC-208). The header and the phone tab bar are frosted glass, and nothing else
+  is but the two bars that join them on desktop: from 64rem a labelled floating dock replaces the
+  sidebar, and an agent wire of what the agents are doing runs under the header while every feed
+  answers (the status strip otherwise). The header carries a wide command bar and breadcrumbs
+  that fold rather than truncate the current page. Stop's desktop pill and the command bar are
+  both 40px; Stop's tap area stays 44px.
+- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone's
+  tab bar and More sheet, the breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
   screens not built yet say "Coming in the next slice" with what they will be for.
+- **The phone is a remote control** (DEC-207). Below 64rem the header holds the mark, the paper
+  badge and Stop; four tabs (Home, Approvals, Agents, More) are the one navigation, and More holds
+  Search, the account switcher and every other screen. Home leads with what needs you, agents show
+  their headroom rather than P&L, an agent page is its state, equity and headroom with its sections
+  as links, and a request is one screen with Approve and Skip pinned. Tablet and desktop are
+  unchanged. `web/DESIGN.md` ("Phone") has the rules; `e2e/phone.spec.ts` checks them at 320, 375,
+  390 and 430px.

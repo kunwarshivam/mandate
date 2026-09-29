@@ -17,6 +17,7 @@ import { useFrozen } from "@/lib/frozen";
 import { APPROVAL_STATUS_LABEL, PURPOSE_LABEL, RISK_CAP_LABEL, RISK_FIGURE_LABEL } from "@/lib/labels";
 import { type ApprovalResponse, approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
+import { cn } from "@/lib/utils";
 import { WorkspaceGate } from "./common";
 
 /** Approve and Skip share one variant and one size, and neither is focused or selected first (PX-10). */
@@ -166,8 +167,13 @@ function Request({ approvalId }: { approvalId: string }) {
   const answer = (choice: "approve" | "skip") =>
     respond(approval.approval_id, choice, { screen: "D6", environment: snap.environment, shown: requestLines(snap, modelOutputExpanded), modelOutputExpanded });
 
+  /*
+   * A sticky bar cannot pass the end of its article. On a phone the shell leaves main's 2.5rem and the
+   * footer's 2rem below the article, besides the tab bar's clearance, so while the choices are the last
+   * thing on the page the article gives that space back and they stay on the tab bar to the very end.
+   */
   return (
-    <article className="mx-auto grid w-full max-w-2xl grid-cols-1 gap-6" aria-labelledby="request-title">
+    <article className={cn("mx-auto grid w-full max-w-2xl grid-cols-1 gap-6", open && !response && "max-lg:-mb-[calc(4.5rem-1px)]")} aria-labelledby="request-title">
       <Link href="/approvals" className={BACK}>
         <ArrowLeft className="size-4" aria-hidden />
         Approvals
@@ -288,7 +294,7 @@ function Request({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-6"
+          className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1.5rem)]"
         >
           <div className="grid gap-1">
             <p className="text-h3">If you do nothing, this action is skipped.</p>

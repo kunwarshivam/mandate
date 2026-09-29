@@ -1,14 +1,15 @@
 "use client";
 
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useId, useMemo, useState } from "react";
 import type { UTCTimestamp } from "lightweight-charts";
+import { CaretDown } from "@phosphor-icons/react";
 import { AsOf } from "@/components/domain/as-of";
-import { AnimatedValue, SignedMoney } from "@/components/domain/money";
+import { HeroFigure, SignedMoney } from "@/components/domain/money";
 import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
 import type { Point } from "@/fixtures/market";
 import type { Agent, Workspace } from "@/fixtures/types";
 import { add, dec, sub, toFixed } from "@/lib/decimal";
-import { usd } from "@/lib/format";
+import { type Direction, direction, usd } from "@/lib/format";
 import { EQUITY_RANGES, type EquityRange, drawable, equityWindow, mandateLevels, rangeStart } from "@/lib/chart-data";
 import { useRuntime } from "@/lib/mock-runtime";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,16 @@ const RANGE_WORDS: Record<EquityRange, string> = {
   "3M": "past 3 months",
   "1Y": "past year",
   All: "since the first agent deployed",
+};
+
+/** Short enough on a phone that the range picker clears the tab bar under what needs you (DEC-207). */
+const ACCOUNT_PHONE_HEIGHT = 180;
+
+/** The change's soft pill: its tint by sign, and the type in the gain or loss colour. */
+const PILL: Record<Direction, string> = {
+  gain: "bg-gain-soft text-gain",
+  loss: "bg-loss-soft text-loss",
+  flat: "bg-muted text-foreground",
 };
 
 const DAY_WORD = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
@@ -105,6 +116,8 @@ function EquityHero({
   footer: ReactNode;
 }) {
   const [scrub, setScrub] = useState<ScrubPoint>(null);
+  const [levelsOpen, setLevelsOpen] = useState(false);
+  const legendId = useId();
   const onScrub = useCallback((p: ScrubPoint) => setScrub(p), []);
   const series = useMemo<ChartSeries>(() => ({ kind: "area", tone, points }), [points, tone]);
   const now = points[points.length - 1];
@@ -113,6 +126,8 @@ function EquityHero({
   const change = shown ? Math.round((shown.value - base) * 100) / 100 : 0;
   const scrubbing = scrub !== null;
   const pct = shown ? signedPercent(change, base) : null;
+  const changeText = change.toFixed(2);
+  const changeTone = direction(changeText);
 
   return (
     <section aria-labelledby={titleId} data-slot={slot} data-scrubbing={scrubbing ? "" : undefined} className="@container grid content-start gap-5">
@@ -120,17 +135,21 @@ function EquityHero({
         <h2 id={titleId} className="text-sm font-medium text-muted-foreground">
           {title}
         </h2>
-        <p className="text-hero tabular" data-slot={valueSlot}>
-          {shown ? <AnimatedValue value={usdLabel(shown.value)} instant={scrubbing} /> : "—"}
+        {/* Proportional figures: tabular digits leave visible gaps at the display size, and the pill sits on its own line, so nothing moves with the width. */}
+        <p className="text-display proportional-nums lining-nums" data-slot={valueSlot}>
+          {shown ? <HeroFigure value={usdLabel(shown.value)} instant={scrubbing} /> : "—"}
         </p>
         {points.length >= 2 && shown ? (
-          <p data-slot="hero-change" className="flex min-h-6 flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-            <SignedMoney value={change.toFixed(2)} instant={scrubbing} className="font-medium" />
-            {pct ? <span className={cn("font-mono tabular", change > 0 && "text-gain", change < 0 && "text-loss")}>({pct})</span> : null}
-            <span className="text-muted-foreground tabular" data-slot="hero-when">
-              {scrubbing ? formatTime(shown.time as UTCTimestamp) : words}
+          // The symbol never takes a line of its own (DEC-210): it keeps the pill's line and baseline at every width, and a narrow pill wraps inside itself instead.
+          <p className="flex items-baseline gap-2 pt-1 text-sm">
+            <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit min-w-0 max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 font-medium", PILL[changeTone])}>
+              <SignedMoney value={changeText} instant={scrubbing} />
+              {pct ? <span className="font-mono tabular">({pct})</span> : null}
+              <span className="text-muted-foreground tabular" data-slot="hero-when">
+                {scrubbing ? formatTime(shown.time as UTCTimestamp) : words}
+              </span>
             </span>
-            <Placeholder name="performance" className="ml-1" />
+            <Placeholder name="performance" className="shrink-0" />
           </p>
         ) : (
           <Placeholder name="performance" className="w-fit" />
@@ -145,19 +164,38 @@ function EquityHero({
           axis={(levels?.length ?? 0) > 0}
           onScrub={onScrub}
           height={tone === "account" ? 260 : 280}
+          phoneHeight={tone === "account" ? ACCOUNT_PHONE_HEIGHT : undefined}
           className="-mx-1"
         />
       )}
       <RangePicker label={rangeLabel} value={range} options={EQUITY_RANGES} onChange={onRange} />
-      {legend}
+      {legend ? (
+        <div className="grid gap-2 lg:contents">
+          <button
+            type="button"
+            data-slot="levels-toggle"
+            aria-expanded={levelsOpen}
+            aria-controls={legendId}
+            onClick={() => setLevelsOpen((o) => !o)}
+            className="press -mx-2 inline-flex min-h-11 w-fit items-center gap-1.5 rounded-md px-2 text-sm font-semibold outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring lg:hidden"
+          >
+            Levels
+            <CaretDown aria-hidden className={cn("size-3.5 transition-transform duration-(--duration-hover) motion-reduce:transition-none", levelsOpen && "rotate-180")} />
+          </button>
+          <div id={legendId} data-slot="levels" className={cn("lg:contents", !levelsOpen && "max-lg:hidden")}>
+            {legend}
+          </div>
+        </div>
+      ) : null}
       <div className="text-caption leading-6 text-muted-foreground *:mr-1.5 *:align-middle">{footer}</div>
     </section>
   );
 }
 
 /**
- * The account as a gold line, on paper: every agent's equity together, plus what no agent manages. The
- * fixture holds that part flat, so the chart ends at the broker's figure and moves with the agents.
+ * The account as an ultramarine line, on paper: every agent's equity together, plus what no agent
+ * manages. The fixture holds that part flat, so the chart ends at the broker's figure and moves with
+ * the agents.
  */
 export function AccountEquityChart() {
   const { ws } = useRuntime();
@@ -188,11 +226,11 @@ export function AccountEquityChart() {
       footer={
         <>
           <span>Simulated funds on paper.</span>
-          <span data-slot="unmanaged">
+          <span data-slot="unmanaged" className="max-lg:hidden">
             Includes <span className="font-mono tabular">{usd(unmanaged)}</span> no agent manages.
           </span>
           <AsOf at={asOf} now={now} stale={stale} />
-          <FixtureTag />
+          <FixtureTag className="max-lg:hidden" />
           <ChartCredit className="mt-1" />
         </>
       }
@@ -226,7 +264,7 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
       onRange={setRange}
       rangeLabel="Equity range"
       empty={points.length < 2 ? <p className="rounded-lg bg-background px-4 py-6 text-sm text-muted-foreground">No equity history yet. It starts when the agent deploys.</p> : undefined}
-      legend={<LevelLegend levels={drawn} offChart={offChart} />}
+      legend={drawn.length + offChart.length > 0 ? <LevelLegend levels={drawn} offChart={offChart} /> : undefined}
       footer={
         <>
           <span>Paper P&amp;L, simulated.</span>
@@ -239,10 +277,10 @@ export function AgentEquityChart({ agent }: { agent: Agent }) {
 
 export function EquityChartSkeleton() {
   return (
-    <div className="grid gap-5">
+    <div className="@container grid gap-5">
       <div className="grid gap-2">
         <span className="h-4 w-28 rounded-sm bg-muted" />
-        <span className="h-12 w-56 rounded-md bg-muted" />
+        <span className="h-[1lh] w-[5.5em] rounded-md bg-muted text-display" />
       </div>
       <ChartSkeleton height={260} label="Loading equity" />
     </div>

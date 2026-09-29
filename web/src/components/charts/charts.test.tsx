@@ -9,6 +9,7 @@ import { agentLimits } from "@/lib/limits";
 import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
+import { spoken } from "@/test/spoken";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
 import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
@@ -78,20 +79,20 @@ describe("chart builders draw flat, solid colour", () => {
     }
   });
 
-  it("draws the account as a gold line, the mandate's marks in gold, and the grid in a warm paper tint", () => {
+  it("draws the account as an ultramarine line, the mandate's marks in ultramarine, and the grid in a cool paper tint", () => {
     expect(CHART_TOKEN.lapis).toBe("lapis-line");
-    expect(PALETTE.tokens["lapis-line"].ref).toBe("gold-500");
-    expect(PALETTE.tokens["mandate-marker"].ref).toBe("gold-500");
-    expect(PALETTE.tokens["mandate-strong"].ref).toBe("gold-700");
+    expect(PALETTE.tokens["lapis-line"].ref).toBe("ultramarine-500");
+    expect(PALETTE.tokens["mandate-marker"].ref).toBe("ultramarine-500");
+    expect(PALETTE.tokens["mandate-strong"].ref).toBe("ultramarine-700");
     const grid = baseOptions({ reducedMotion: false }).grid;
     expect(grid?.horzLines?.color).toBe(CHART_COLOR.muted);
     expect(grid?.vertLines?.color).toBe(CHART_COLOR.muted);
     const paper = parseOklch(PALETTE.tokens.muted.value);
-    expect(paper.h).toBe(85);
+    expect(paper.h).toBe(255);
     expect(paper.c).toBeGreaterThan(0);
   });
 
-  it("a mandate level is a dashed grey line with a gold label, the account a solid gold line, a proposal dashed ink", () => {
+  it("a mandate level is a dashed grey line with an ultramarine label, the account a solid ultramarine line, a proposal dashed ink", () => {
     const level = (tone: ChartLevel["tone"]): ChartLevel => ({ key: tone, label: tone, price: 1, tone });
     expect(priceLineFor(level("mandate"))).toMatchObject({ color: CHART_COLOR.mutedForeground, axisLabelColor: CHART_COLOR.mandate, axisLabelTextColor: CHART_COLOR.mandateStrong, lineStyle: LineStyle.Dashed });
     expect(priceLineFor(level("account"))).toMatchObject({ color: CHART_COLOR.lapis, axisLabelColor: CHART_COLOR.ink, axisLabelTextColor: CHART_COLOR.inkForeground, lineStyle: LineStyle.Solid });
@@ -185,7 +186,7 @@ describe("AgentEquityChart", () => {
 });
 
 describe("AccountEquityChart", () => {
-  it("ends at the broker's equity, as the account's gold line, with the TradingView credit", () => {
+  it("ends at the broker's equity, as the account's ultramarine line, with the TradingView credit", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const [series] = onlyChart(container).series;
     expect(series.options.lineColor).toBe(CHART_COLOR.lapis);
@@ -226,11 +227,27 @@ describe("the hero chart scrubs", () => {
     const point = data[Math.floor(data.length / 2)];
     hover(chart, point);
     const h = hero(container);
-    expect(h.value.textContent).toBe(usdLabel(point.value));
+    expect(spoken(h.value)).toBe(usdLabel(point.value));
+    expect(h.value.querySelector("[data-slot=cents]")).toHaveTextContent(usdLabel(point.value).slice(-3));
     expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
     expect(h.section).toHaveAttribute("data-scrubbing");
     const change = Math.round((point.value - data[0].value) * 100) / 100;
     expect(h.change.querySelector("[data-direction]")).toHaveTextContent(usdLabel(Math.abs(change)).replace("\u2212", ""));
+  });
+
+  it("sets the hero figure in proportional lining figures, and the pill's figures tabular", () => {
+    for (const ui of [<AccountEquityChart key="account" />, <AgentEquityChart key="agent" agent={WS.agents[0]} />]) {
+      const { container, unmount } = renderWithRuntime(ui);
+      const h = hero(container);
+      expect(h.value).toHaveClass("text-display", "proportional-nums", "lining-nums");
+      expect(h.value).not.toHaveClass("tabular");
+      expect(h.value.querySelector(".tabular, .font-mono")).toBeNull();
+      const figures = [...h.change.querySelectorAll(".font-mono")];
+      expect(figures.length).toBeGreaterThan(0);
+      for (const f of figures) expect(f).toHaveClass("tabular");
+      expect(h.when).toHaveClass("tabular");
+      unmount();
+    }
   });
 
   it("returns to now when the pointer leaves the line", () => {
@@ -265,6 +282,35 @@ describe("the hero chart scrubs", () => {
     }
   });
 
+  it("sets the change on a soft pill toned by its sign, neutral at exactly zero, with the disclosure outside it on the same line", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const low = data.reduce((a, b) => (b.value < a.value ? b : a));
+    const high = data.reduce((a, b) => (b.value > a.value ? b : a));
+    for (const [point, tone, fill, ink, word] of [
+      [high, "gain", "bg-gain-soft", "text-gain", "gain"],
+      [low, "loss", "bg-loss-soft", "text-loss", "loss"],
+      [data[0], "flat", "bg-muted", "text-foreground", "no change"],
+    ] as const) {
+      hover(chart, point);
+      const pill = hero(container).change;
+      expect(pill).toHaveAttribute("data-tone", tone);
+      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "w-fit", "px-3", "py-1", "font-medium", fill, ink]));
+      for (const other of ["bg-gain-soft", "bg-loss-soft", "bg-muted"].filter((c) => c !== fill)) expect(pill).not.toHaveClass(other);
+      expect(pill.querySelector("[data-direction]")).toHaveAttribute("data-direction", tone);
+      expect(pill).toHaveTextContent(word);
+      expect(pill.querySelector("[data-slot=hero-when]")).toHaveClass("text-muted-foreground");
+      expect(pill.querySelector("[data-placeholder]")).toBeNull();
+      const disclosure = pill.parentElement!.querySelector<HTMLElement>(":scope > [data-slot=disclosure]");
+      expect(within(disclosure!).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
+      expect(pill.parentElement, "the symbol keeps the pill's line and baseline at every width").toHaveClass("flex", "items-baseline", "text-sm");
+      expect(pill.parentElement!.className).not.toMatch(/flex-col/);
+    }
+    expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
+    expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+  });
+
   it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
     const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
     const chart = onlyChart(container);
@@ -274,7 +320,7 @@ describe("the hero chart scrubs", () => {
     const canvas = container.querySelector<HTMLElement>("[data-slot=chart-canvas]")!;
     fireEvent.pointerDown(canvas, { pointerType: "touch", clientX: 40 });
     expect(chart.pinned).toEqual({ price: target.value, time: target.time });
-    expect(hero(container).value.textContent).toBe(usdLabel(target.value));
+    expect(spoken(hero(container).value)).toBe(usdLabel(target.value));
     fireEvent.pointerUp(canvas, { pointerType: "touch", clientX: 40 });
     expect(chart.pinned).toBeNull();
     expect(hero(container).value).toHaveTextContent(usdLabel(data.at(-1)!.value));
@@ -312,7 +358,7 @@ describe("the hero chart scrubs", () => {
 });
 
 describe("PositionChart", () => {
-  it("draws candles with the average cost as the account's gold line and the bracket as the mandate's dashed lines, at the position's prices", () => {
+  it("draws candles with the average cost as the account's ultramarine line and the bracket as the mandate's dashed lines, at the position's prices", () => {
     const { container } = renderWithRuntime(<PositionChart agent={SWING} position={XYZ} />);
     const [series] = onlyChart(container).series;
     expect(series.type).toBe("Candlestick");

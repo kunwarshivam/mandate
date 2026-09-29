@@ -10,14 +10,30 @@ import { STRETCHED_LINK } from "./positions";
  * A gate decision in plain language: the action, the verdict, and the rule, never an error code.
  * The verdict carries no meaning colour: an allowed action is a quiet chip, a held one is outlined.
  */
-export function GateDecisionRow({ decision, agent, showAgent = false, href }: { decision: GateDecision; agent: Agent | undefined; showAgent?: boolean; href?: string }) {
+export function GateDecisionRow({
+  decision,
+  agent,
+  showAgent = false,
+  href,
+  className,
+}: {
+  decision: GateDecision;
+  agent: Agent | undefined;
+  showAgent?: boolean;
+  href?: string;
+  className?: string;
+}) {
   const label = verdictLabel(decision);
   const rule = decision.reason_code && agent ? gateRule(decision.reason_code, agent.mandate) : null;
   const allowed = decision.verdict === "allow";
   return (
     <li
       data-verdict={decision.verdict}
-      className={cn("grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 border-b border-border/70 py-(--row-y) last:border-b-0", href && "group relative transition-colors duration-(--duration-hover) hover:bg-background")}
+      className={cn(
+        "grid grid-cols-[3.25rem_minmax(0,1fr)] gap-3 border-b border-border/70 py-(--row-y) last:border-b-0",
+        href && "group relative transition-colors duration-(--duration-hover) hover:bg-background",
+        className,
+      )}
     >
       <time dateTime={decision.at} className="pt-0.5 font-mono text-caption text-muted-foreground tabular">
         {clock(decision.at).slice(0, 5)}

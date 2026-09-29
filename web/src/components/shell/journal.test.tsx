@@ -75,6 +75,27 @@ describe("command palette", () => {
     expect(screen.getByRole("dialog", { name: /Stop/ })).toBeInTheDocument();
   });
 
+  it("opens from the command bar, with the same commands as ⌘K", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const header = screen.getAllByRole("banner")[0];
+    expect(screen.queryByRole("option")).toBeNull();
+    fireEvent.click(within(header).getByRole("button", { name: /^Jump to an agent or screen…/ }));
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Stop…");
+    expect(screen.getByRole("combobox", { name: "Command" })).toBeInTheDocument();
+  });
+
+  it("opens from Search in the phone's More sheet, with the same commands as ⌘K, and no search button in the header", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(within(screen.getAllByRole("banner")[0]).queryByRole("button", { name: "Go to…" })).toBeNull();
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "More" }));
+    fireEvent.click(within(screen.getByRole("dialog", { name: "More" })).getByRole("button", { name: /^Search/ }));
+    act(() => vi.advanceTimersByTime(0));
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Stop…");
+    expect(screen.getByRole("combobox", { name: "Command" })).toBeInTheDocument();
+  });
+
   it("offers no Stop… to a viewer", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role: "viewer" });
     act(() => {

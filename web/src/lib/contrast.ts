@@ -3,7 +3,7 @@
  * Used by the dev-only `/palette` route and the tests. APCA is measured only in the tests
  * (`src/test/apca.ts`): apca-w3's licence covers that use, so no app code may import it.
  */
-import { contrastRatio, deltaEOK } from "./color";
+import { contrastRatio, deltaEOK, type Vision } from "./color";
 import { CVD_CHECKS, CVD_DISTINCT, CVD_VISIONS, type CvdCheck, PAIRS, type Pair, type PairKind, REQUIREMENT } from "./contrast-pairs";
 import { PALETTE, type Palette } from "./palette";
 
@@ -30,6 +30,8 @@ export function checkPalette(palette: Palette = PALETTE): PairResult[] {
 export interface CvdResult extends CvdCheck {
   normal: number;
   byVision: Record<string, number>;
+  /** The visions this check must hold under: its own list, or every simulated vision. */
+  requiredVisions: Vision[];
   pass: boolean;
   /** Whether this theme relies on the pair staying apart. */
   requiredHere: boolean;
@@ -40,11 +42,13 @@ export function checkCvd(palette: Palette = PALETTE): CvdResult[] {
     const a = palette.tokens[check.a].value;
     const b = palette.tokens[check.b].value;
     const byVision = Object.fromEntries(CVD_VISIONS.map((v) => [v, deltaEOK(a, b, v)]));
+    const requiredVisions = check.visions ?? CVD_VISIONS;
     return {
       ...check,
       normal: deltaEOK(a, b),
       byVision,
-      pass: Object.values(byVision).every((d) => d >= CVD_DISTINCT),
+      requiredVisions,
+      pass: requiredVisions.every((v) => byVision[v] >= CVD_DISTINCT),
       requiredHere: check.required.includes(palette.theme),
     };
   });

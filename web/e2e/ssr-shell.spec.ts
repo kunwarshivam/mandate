@@ -1,20 +1,21 @@
 import { type Page, type Route, expect, test } from "@playwright/test";
 import { recordHref } from "../src/components/stop/commands";
 import { AGENT_IDS, APPROVAL_IDS } from "../src/fixtures/workspace";
+import { isRecordRoute } from "../src/lib/frozen";
 import { agentHref } from "../src/lib/screens";
 
 /**
  * The shell is laid out by CSS from the first server render (brief §5, rule 13: Stop does not depend
- * on the dashboard having loaded). Kumo's Sidebar picks its desktop rail or its mobile sheet in JS,
- * and its server snapshot is "desktop", so until the client bundle runs a phone would get the rail in
- * flow, a squeezed content column, and Stop pushed off-screen. With JavaScript off, and with it on
- * but the bundle held back, a phone gets the phone shell: no rail, the full-width content column, the
- * tab bar, Stop in the header wholly on screen, and nothing wider than the viewport.
+ * on the dashboard having loaded), and nothing in it picks a layout in JS, so there is nothing for a
+ * phone to wait for. With JavaScript off, and with it on but the bundle held back, a phone gets the
+ * phone shell (DEC-207): the full-width content column, the tab bar, Stop in the header wholly on
+ * screen, the status strip only on a record screen, and nothing wider than the viewport. A desktop
+ * gets the desktop shell from the same markup: the dock at the bottom and the full-width column.
  */
 
 const PHONES = [320, 360, 390, 430];
 const DESKTOPS = [1024, 1440];
-/** Tailwind's `lg`, and the breakpoint `AppShell` hands Kumo's Sidebar. */
+/** Tailwind's `lg`: below it the tab bar carries the navigation. */
 const LG = 1024;
 const HEIGHT = 844;
 
@@ -46,11 +47,11 @@ async function measureShell(page: Page) {
     const stop = Array.from(header?.querySelectorAll("button") ?? []).find((b) => b.textContent?.trim() === "Stop") ?? null;
     const stopBox = box(stop);
     const hit = stopBox ? document.elementFromPoint(stopBox.left + stopBox.width / 2, stopBox.top + stopBox.height / 2) : null;
-    const rail = document.querySelector<HTMLElement>('aside[data-sidebar="sidebar"]:not([data-mobile])');
-    const railStyle = rail ? getComputedStyle(rail) : null;
-    const sheet = document.querySelector('[data-sidebar="sidebar"][data-mobile]');
-    const tabBar = Array.from(document.querySelectorAll("nav")).find((n) => n.getAttribute("aria-label") === "Main" && !n.hasAttribute("data-mobile")) ?? null;
-    const strip = document.querySelector<HTMLElement>('[data-slot="status-strip"]');
+    const sidebar = document.querySelector("[data-sidebar]");
+    const tabBar = Array.from(document.querySelectorAll("nav")).find((n) => n.getAttribute("aria-label") === "Main") ?? null;
+    const shown = (el: Element | null) => (el && el.getClientRects().length > 0 ? el : null);
+    const strip = shown(document.querySelector<HTMLElement>('[data-slot="status-strip"]')) as HTMLElement | null;
+    const dock = document.querySelector<HTMLElement>('nav[data-slot="dock"]');
     return {
       innerWidth: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
@@ -59,10 +60,11 @@ async function measureShell(page: Page) {
       stopUncovered: stop !== null && hit !== null && (hit === stop || stop.contains(hit)),
       covering: stop && hit && hit !== stop && !stop.contains(hit) ? `<${hit.tagName.toLowerCase()} class="${(hit.getAttribute("class") ?? "").slice(0, 80)}">` : null,
       stopClipped: stop !== null && stop.scrollWidth > stop.clientWidth,
-      rail: rail && railStyle ? { display: railStyle.display, position: railStyle.position, box: box(rail) } : null,
-      sheet: box(sheet),
+      sidebar: sidebar !== null,
       content: box(document.getElementById("main")?.parentElement ?? null),
       tabBar: tabBar && getComputedStyle(tabBar.parentElement!).display !== "none" ? box(tabBar) : null,
+      dock: dock && getComputedStyle(dock.parentElement!).display !== "none" ? { box: box(dock), position: getComputedStyle(dock.parentElement!).position } : null,
+      main: box(document.getElementById("main")),
       strip: strip ? { box: box(strip), scrollWidth: strip.scrollWidth, clientWidth: strip.clientWidth, overflowX: getComputedStyle(strip).overflowX } : null,
     };
   });
@@ -84,32 +86,35 @@ function expectStopOnScreen(found: Shell, width: number, state: string) {
   expect(found.stopClipped, `${state}: Stop's label fits`).toBe(false);
 }
 
-function expectPhoneShell(found: Shell, width: number, state: string) {
+function expectPhoneShell(found: Shell, width: number, state: string, record: boolean) {
   expectStopOnScreen(found, width, state);
-  if (found.rail) {
-    expect(found.rail.display, `${state}: the desktop rail takes no room`).toBe("none");
-    expect(found.rail.box?.width, `${state}: the desktop rail's width`).toBe(0);
-  }
-  if (found.sheet) expect(found.sheet.right, `${state}: the closed sheet sits off-canvas`).toBeLessThanOrEqual(0);
+  expect(found.sidebar, `${state}: no sidebar`).toBe(false);
   expect(found.content?.left, `${state}: the content column starts at the left edge`).toBe(0);
   expect(found.content?.width, `${state}: the content column takes the full width`).toBe(width);
+  expect(found.dock, `${state}: no dock`).toBeNull();
   expect(found.tabBar, `${state}: the tab bar shows`).not.toBeNull();
   expect(found.tabBar!.bottom, `${state}: the tab bar sits at the bottom`).toBeLessThanOrEqual(HEIGHT);
   expect(found.tabBar!.width, `${state}: the tab bar spans the viewport`).toBe(width);
+  if (!record) {
+    expect(found.strip, `${state}: no status strip while every feed answers`).toBeNull();
+    return;
+  }
   const strip = found.strip!;
+  expect(strip, `${state}: a record screen keeps the status strip`).not.toBeNull();
   expect(strip.box!.right, `${state}: the status strip ends inside the viewport`).toBeLessThanOrEqual(width);
   expect(strip.overflowX, `${state}: the status strip scrolls inside itself`).toBe("auto");
 }
 
 function expectDesktopShell(found: Shell, width: number, state: string) {
   expectStopOnScreen(found, width, state);
-  expect(found.rail, `${state}: the desktop rail renders`).not.toBeNull();
-  expect(found.rail!.display, `${state}: the desktop rail shows`).not.toBe("none");
-  expect(found.rail!.position, `${state}: the desktop rail is pinned`).toBe("sticky");
-  expect(found.rail!.box!.left, `${state}: the desktop rail's left edge`).toBe(0);
-  expect(found.rail!.box!.width, `${state}: the desktop rail's width`).toBeGreaterThan(0);
-  expect(found.rail!.box!.height, `${state}: the desktop rail fills the viewport's height`).toBe(HEIGHT);
-  expect(found.content!.left, `${state}: the content column starts after the rail`).toBe(found.rail!.box!.right);
+  expect(found.sidebar, `${state}: no sidebar`).toBe(false);
+  expect(found.content!.left, `${state}: the content column starts at the left edge`).toBe(0);
+  expect(found.content!.width, `${state}: the content column takes the full width`).toBe(width);
+  expect(Math.abs((found.main!.left + found.main!.right) / 2 - width / 2), `${state}: the page is centred in it`).toBeLessThanOrEqual(1);
+  expect(found.dock, `${state}: the dock shows`).not.toBeNull();
+  expect(found.dock!.position, `${state}: the dock is fixed`).toBe("fixed");
+  expect(found.dock!.box!.bottom, `${state}: the dock floats above the bottom edge`).toBeLessThan(HEIGHT);
+  expect(Math.abs((found.dock!.box!.left + found.dock!.box!.right) / 2 - width / 2), `${state}: the dock is centred`).toBeLessThanOrEqual(1);
   expect(found.tabBar, `${state}: no tab bar`).toBeNull();
 }
 
@@ -121,16 +126,14 @@ test.describe("With JavaScript off, phones get the phone shell (brief §5, rule 
         test(route.name, async ({ page }) => {
           await page.goto(route.path);
           await stylesLoaded(page);
-          const found = await measureShell(page);
-          expect(found.sheet, "no script has run, so Kumo's sheet has not mounted").toBeNull();
-          expectPhoneShell(found, width, "server markup");
+          expectPhoneShell(await measureShell(page), width, "server markup", isRecordRoute(route.path));
         });
       }
     });
   }
 });
 
-test.describe("With JavaScript off, desktops get the pinned rail", () => {
+test.describe("With JavaScript off, desktops get the dock", () => {
   for (const width of DESKTOPS) {
     test.describe(`${width} px`, () => {
       test.use({ javaScriptEnabled: false, viewport: { width, height: HEIGHT } });
@@ -171,18 +174,23 @@ test.describe("With JavaScript on, phones show no desktop flash before hydration
           await stylesLoaded(page);
           await page.evaluate(() => new Promise((frame) => requestAnimationFrame(() => requestAnimationFrame(frame))));
           await expect.poll(() => held.length, "the client bundle is held back").toBeGreaterThan(0);
+          const record = isRecordRoute(route.path);
           const before = await measureShell(page);
-          expect(before.sheet, "before hydration Kumo's sheet has not mounted").toBeNull();
-          expectPhoneShell(before, width, "before hydration");
+          expectPhoneShell(before, width, "before hydration", record);
 
           release = true;
           for (const r of held.splice(0)) await r.continue();
-          await expect(page.locator('[data-sidebar="sidebar"][data-mobile]'), "React hydrated and Kumo mounted its sheet").toBeAttached();
+          const more = page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" });
+          const sheet = page.getByRole("dialog", { name: "More" });
+          await expect(async () => {
+            await more.click();
+            await expect(sheet, "React hydrated: More opens its sheet").toBeVisible({ timeout: 1000 });
+          }).toPass();
+          await page.keyboard.press("Escape");
+          await expect(sheet).toBeHidden();
           await page.waitForLoadState("networkidle");
           const after = await measureShell(page);
-          expect(after.rail, "after hydration Kumo renders no desktop rail").toBeNull();
-          expect(after.sheet, "after hydration the sheet is mounted").not.toBeNull();
-          expectPhoneShell(after, width, "after hydration");
+          expectPhoneShell(after, width, "after hydration", record);
           expect(after.stop, "Stop does not move when React takes over").toEqual(before.stop);
           expect(errors.filter((e) => /hydrat|#418|#423|#425/i.test(e)), "hydration errors").toEqual([]);
         });

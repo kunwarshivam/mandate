@@ -93,8 +93,10 @@ export function AgentCard({
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
         <span>Paper P&amp;L, simulated</span>
         <SignedMoney value={agent.pnl_total} className="text-caption" />
-        <span>since deployed</span>
-        <Placeholder name="performance" />
+        <span className="inline-flex items-center gap-x-2 whitespace-nowrap">
+          since deployed
+          <Placeholder name="performance" />
+        </span>
         {marketStale && markAt ? <AsOf at={markAt} now={now} stale /> : null}
       </p>
 

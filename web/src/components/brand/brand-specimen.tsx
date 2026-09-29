@@ -4,14 +4,14 @@ import { BRAND_PALETTE, INK, NIGHT, OFF_WHITE, hexContrast } from "@/lib/brand-p
 
 const DO = [
   "Ink on a light surface and off-white on a dark one: one colour at a time, the colour of the type around it.",
-  "The mark alone where the lockup does not fit: a phone header, a collapsed sidebar, a favicon.",
+  "The mark alone where the lockup does not fit: a phone header, a favicon.",
   "Clear space of a quarter of the mark's height on every side, the same as the gap inside the lockup.",
   "The committed SVGs or the Logo components, scaled as a whole.",
 ];
 
 const DONT = [
-  "Set it on a colour: no mark on gold, the kill switch's red, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
-  "Recolour it: no gold mark, no second colour, no colour fade, shadow, or outline.",
+  "Set it on a colour: no mark on ultramarine, the kill switch's red, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
+  "Recolour it: no ultramarine mark, no second colour, no colour fade, shadow, or outline.",
   "Stretch, rotate, crop, or redraw it, or rebuild the wordmark in live type or another face.",
   "Use the founder's shaded original in product UI: the UI is flat colour (DEC-200).",
   "Go below 16 px for the mark or 96 px wide for the lockup, or set it on a busy field.",

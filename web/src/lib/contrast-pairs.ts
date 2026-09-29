@@ -32,7 +32,7 @@ export const PAIRS: Pair[] = [
   { fg: "foreground", bg: "background", kind: "body", use: "Body text on the page" },
   { fg: "foreground", bg: "card", kind: "body", use: "Body text on a card field" },
   { fg: "foreground", bg: "muted", kind: "body", use: "Text on a quiet field" },
-  { fg: "foreground", bg: "lapis-soft", kind: "body", use: "Text on the account's pale gold: an approval card, an account notice" },
+  { fg: "foreground", bg: "lapis-soft", kind: "body", use: "Text on the account's pale ultramarine: an approval card, an account notice" },
   { fg: "foreground", bg: "mandate-soft", kind: "body", use: "Mandate notice text" },
   { fg: "foreground", bg: "gain-soft", kind: "body", use: "Text on a success tint" },
   { fg: "foreground", bg: "loss-soft", kind: "body", use: "Text on a loss tint" },
@@ -40,10 +40,14 @@ export const PAIRS: Pair[] = [
   { fg: "muted-foreground", bg: "background", kind: "body", use: "Secondary text on the page" },
   { fg: "muted-foreground", bg: "card", kind: "body", use: "Secondary text on a card field" },
   { fg: "muted-foreground", bg: "muted", kind: "body", use: "Secondary text on a quiet field" },
-  { fg: "muted-foreground", bg: "lapis-soft", kind: "body", use: "Secondary text on the account's pale gold" },
+  { fg: "muted-foreground", bg: "lapis-soft", kind: "body", use: "Secondary text on the account's pale ultramarine" },
   { fg: "muted-foreground", bg: "mandate-soft", kind: "body", use: "Secondary text in a mandate notice" },
   { fg: "muted-foreground", bg: "info-soft", kind: "body", use: "Secondary text on an info tint" },
-  { fg: "lapis", bg: "lapis-soft", kind: "body", use: "The current range and tab on their pale gold pill, a link in an approval card" },
+  { fg: "muted-foreground", bg: "gain-soft", kind: "body", use: "The time on the hero's change pill, for a gain" },
+  { fg: "muted-foreground", bg: "loss-soft", kind: "body", use: "The time on the hero's change pill, for a loss" },
+  { fg: "muted-foreground", bg: "gain-cvd-soft", kind: "body", use: "The time on the hero's change pill, colour-blind gain" },
+  { fg: "muted-foreground", bg: "loss-cvd-soft", kind: "body", use: "The time on the hero's change pill, colour-blind loss" },
+  { fg: "lapis", bg: "lapis-soft", kind: "body", use: "The current range and tab on their pale ultramarine pill, a link in an approval card" },
   { fg: "primary", bg: "background", kind: "body", use: "Links on the page" },
   { fg: "primary", bg: "card", kind: "body", use: "Links on a card field" },
   { fg: "primary-foreground", bg: "primary", kind: "body", use: "Primary action label" },
@@ -57,9 +61,11 @@ export const PAIRS: Pair[] = [
   { fg: "mandate-strong", bg: "mandate", kind: "body", use: "Mandate heading, labels, the \"Your mandate\" tag, and a mandate level's price label on a chart axis" },
   { fg: "mandate-strong", bg: "mandate-soft", kind: "body", use: "A mandate label in a mandate notice" },
   { fg: "mandate-strong", bg: "card", kind: "body", use: "A mandate label on a card field, and the focus ring (`--ring`)" },
-  { fg: "mandate-strong", bg: "background", kind: "body", use: "A mandate label on the page, and the focus ring there" },
+  { fg: "mandate-strong", bg: "background", kind: "body", use: "A mandate label on the page, the focus ring there, and the post that ends a phone headroom meter" },
   { fg: "foreground", bg: "selection", kind: "body", use: "Selected text" },
-  { fg: "ink-foreground", bg: "ink", kind: "body", use: "Stop control, a paused or stopped mode pill, a proposal's axis label" },
+  { fg: "ink-foreground", bg: "ink", kind: "body", use: "The loud Stop control, a paused or stopped mode pill, a proposal's axis label" },
+  { fg: "ink", bg: "card", kind: "body", use: "The quiet Stop control's label and octagon on the header" },
+  { fg: "ink", bg: "background", kind: "body", use: "The quiet Stop control's label and octagon, hovered" },
   { fg: "lapis-muted", bg: "ink", kind: "body", use: "Secondary text inside an ink surface" },
   { fg: "crimson-foreground", bg: "crimson", kind: "body", use: "Kill switch label and its description" },
   { fg: "gain", bg: "card", kind: "body", use: "A gain on a card field, and an up candle on a chart" },
@@ -80,12 +86,16 @@ export const PAIRS: Pair[] = [
   { fg: "mandate-strong", bg: "mandate", kind: "mark", use: "The post where a limit stops the agent" },
   { fg: "mandate-edge", bg: "background", kind: "mark", use: "The mandate field's edge against the page" },
   { fg: "mandate-marker", bg: "card", kind: "mark", use: "The sparkline's limit rule, and level marks on a card field" },
+  { fg: "mandate-strong", bg: "muted", kind: "mark", use: "The post where a limit stops the agent, on a phone headroom meter's track" },
+  { fg: "foreground", bg: "muted", kind: "mark", use: "The used share of a phone headroom meter against its track" },
   { fg: "lapis-line", bg: "card", kind: "mark", use: "The account's equity line on a chart" },
   { fg: "lapis-line", bg: "background", kind: "mark", use: "The current tab's bar" },
-  { fg: "lapis-line", bg: "lapis-soft", kind: "mark", use: "The ring of the current tab and range on their pale gold pill" },
-  { fg: "muted-foreground", bg: "card", kind: "mark", use: "A mandate level's dashed line on a chart" },
+  { fg: "lapis-line", bg: "lapis-soft", kind: "mark", use: "The ring of the current tab and range on their pale ultramarine pill" },
+  { fg: "muted-foreground", bg: "card", kind: "mark", use: "A mandate level's dashed line on a chart; the performance disclosure symbol on a card field" },
+  { fg: "muted-foreground", bg: "background", kind: "mark", use: "The performance disclosure symbol on a hovered agent row" },
+  { fg: "muted-foreground", bg: "mandate", kind: "mark", use: "The performance disclosure symbol on the mandate field" },
   { fg: "ink", bg: "background", kind: "mark", use: "A paused or stopped mode field against the page" },
-  { fg: "ink", bg: "card", kind: "mark", use: "The exits-only ring on a card field, a proposal's dashed line on a chart" },
+  { fg: "ink", bg: "card", kind: "mark", use: "The quiet Stop control's outline on the header, the exits-only ring on a card field, a proposal's dashed line on a chart" },
   { fg: "lapis", bg: "card", kind: "mark", use: "Paper badge border, the account's marker on the equity ladder" },
   { fg: "lapis", bg: "mandate", kind: "mark", use: "The account's marker on the mandate field" },
   { fg: "crimson-edge", bg: "card", kind: "mark", use: "The kill switch's edge against the Stop sheet" },
@@ -115,7 +125,7 @@ export const KUMO_PAIRS: KumoPair[] = [
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-recessed", kind: "body", use: "Kumo text on a recessed surface" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-control", kind: "body", use: "Text in a Kumo control" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-overlay", kind: "body", use: "Text in a Kumo popover, dropdown or toast" },
-  { scope: "root", fg: "text-color-kumo-strong", bg: "color-kumo-tint", kind: "body", use: "The sidebar's current page" },
+  { scope: "root", fg: "text-color-kumo-strong", bg: "color-kumo-tint", kind: "body", use: "A highlighted item in a Kumo menu, select or tab list" },
   { scope: "root", fg: "text-color-kumo-default", bg: "color-kumo-fill-hover", kind: "body", use: "A hovered Kumo item" },
   { scope: "root", fg: "text-color-kumo-subtle", bg: "color-kumo-base", kind: "body", use: "Kumo secondary text" },
   { scope: "root", fg: "text-color-kumo-subtle", bg: "color-kumo-canvas", kind: "body", use: "Kumo secondary text on the page" },
@@ -143,11 +153,11 @@ export const KUMO_PAIRS: KumoPair[] = [
   { scope: "account", fg: "text-color-kumo-default", bg: "color-kumo-tint", kind: "body", use: "A current or hovered item on an account fill" },
   { scope: "account", fg: "text-color-kumo-subtle", bg: "color-kumo-tint", kind: "body", use: "Secondary text on an account tint" },
   { scope: "account", fg: "color-kumo-focus", bg: "color-kumo-base", kind: "mark", use: "Focus ring on an account fill" },
-  { scope: "field", fg: "text-color-kumo-default", bg: "color-kumo-base", kind: "body", use: "Text on the mandate's gold field" },
-  { scope: "field", fg: "text-color-kumo-strong", bg: "color-kumo-base", kind: "body", use: "Mandate labels in dark gold" },
+  { scope: "field", fg: "text-color-kumo-default", bg: "color-kumo-base", kind: "body", use: "Text on the mandate's ultramarine field" },
+  { scope: "field", fg: "text-color-kumo-strong", bg: "color-kumo-base", kind: "body", use: "Mandate labels in deep ultramarine" },
   { scope: "field", fg: "text-color-kumo-subtle", bg: "color-kumo-base", kind: "body", use: "Secondary text on the mandate field" },
-  { scope: "field", fg: "color-kumo-line", bg: "color-kumo-base", kind: "mark", use: "The gold rule and hairlines on the mandate field" },
-  { scope: "field", fg: "color-kumo-line", bg: "color-kumo-canvas", kind: "mark", use: "The gold rule against the page" },
+  { scope: "field", fg: "color-kumo-line", bg: "color-kumo-base", kind: "mark", use: "The ultramarine rule and hairlines on the mandate field" },
+  { scope: "field", fg: "color-kumo-line", bg: "color-kumo-canvas", kind: "mark", use: "The ultramarine rule against the page" },
   { scope: "ink", fg: "text-color-kumo-default", bg: "color-kumo-base", kind: "body", use: "Text on ink" },
   { scope: "ink", fg: "text-color-kumo-subtle", bg: "color-kumo-base", kind: "body", use: "Secondary text on ink" },
   { scope: "ink", fg: "color-kumo-focus", bg: "color-kumo-base", kind: "mark", use: "Focus ring on ink" },
@@ -155,7 +165,11 @@ export const KUMO_PAIRS: KumoPair[] = [
 
 /** Two colours that must never be confused need this OKLab distance under the simulated vision. */
 export const CVD_DISTINCT = 0.1;
-export const CVD_VISIONS: Vision[] = ["deuteranopia", "protanopia"];
+/**
+ * Deuteranopia and protanopia are the red-green deficiencies (about 1 in 12 men of northern European
+ * descent); tritanopia, the blue-yellow one, is rare, but a blue accent is where it bites.
+ */
+export const CVD_VISIONS: Vision[] = ["deuteranopia", "protanopia", "tritanopia"];
 
 export interface CvdCheck {
   a: TokenName;
@@ -163,32 +177,35 @@ export interface CvdCheck {
   what: string;
   /** The themes in which the pair must stay apart; empty for a check that is information only. */
   required: ThemeName[];
+  /** The visions under which a required pair must stay apart, when not all of `CVD_VISIONS`. */
+  visions?: Vision[];
   why: string;
 }
 
 const BOTH: ThemeName[] = ["light", "dark"];
 
 export const CVD_CHECKS: CvdCheck[] = [
-  { a: "gain-cvd", b: "loss-cvd", what: "Gain versus loss, colour-blind friendly", required: BOTH, why: "The remap exists for this pair; candles use it too." },
+  { a: "gain-cvd", b: "loss-cvd", what: "Gain versus loss, colour-blind friendly", required: BOTH, why: "The remap exists for this pair; candles use it too. A teal gain merges with a raspberry loss at the same depth, so the light loss is a step darker." },
   { a: "gain", b: "loss", what: "Gain versus loss, default", required: [], why: "Green and red at matched lightness merge; the sign and the word carry the meaning, and the preference remaps them." },
   { a: "gain-cvd", b: "crimson", what: "Colour-blind gain versus the kill switch", required: BOTH, why: "A gain must never read as the kill switch." },
   { a: "loss-cvd", b: "crimson", what: "Colour-blind loss versus the kill switch", required: BOTH, why: "A dark orange loss merges with crimson in light mode, so the light loss is raspberry." },
-  { a: "gain-cvd", b: "mandate-marker", what: "Colour-blind gain versus the mandate's gold marks", required: BOTH, why: "Candles and mandate marks share the position chart and the envelope." },
-  { a: "loss-cvd", b: "mandate-marker", what: "Colour-blind loss versus the mandate's gold marks", required: BOTH, why: "The same, for a down candle." },
-  { a: "gain-cvd", b: "lapis-line", what: "Colour-blind gain versus the account's gold line", required: BOTH, why: "An up candle beside the account's line." },
-  { a: "loss-cvd", b: "lapis-line", what: "Colour-blind loss versus the account's gold line", required: BOTH, why: "A down candle beside the account's line." },
-  { a: "gain-cvd", b: "mandate-strong", what: "Colour-blind gain versus gold text", required: BOTH, why: "Gains and mandate labels sit close together on the agent screen." },
+  { a: "gain-cvd", b: "mandate-marker", what: "Colour-blind gain versus the mandate's ultramarine marks", required: BOTH, why: "Candles and mandate marks share the position chart and the envelope." },
+  { a: "loss-cvd", b: "mandate-marker", what: "Colour-blind loss versus the mandate's ultramarine marks", required: BOTH, why: "The same, for a down candle." },
+  { a: "gain-cvd", b: "lapis-line", what: "Colour-blind gain versus the account's ultramarine line", required: BOTH, why: "An up candle beside the account's line." },
+  { a: "loss-cvd", b: "lapis-line", what: "Colour-blind loss versus the account's ultramarine line", required: BOTH, why: "A down candle beside the account's line." },
   {
-    a: "loss-cvd",
+    a: "gain-cvd",
     b: "mandate-strong",
-    what: "Colour-blind loss versus gold text",
+    what: "Colour-blind gain versus ultramarine text",
     required: ["light"],
-    why: "In dark mode every readable colour is pale, and pale orange and pale gold meet under red-green deficiency; a raspberry loss would merge with the blue gain instead. Gold text is always a labelled word and a loss always carries its minus sign.",
+    visions: ["deuteranopia", "protanopia"],
+    why: "Gains and mandate labels sit close together on the agent screen, which is why the gain is teal, not blue. Where blue and teal meet (tritanopia, and every pale colour of dark mode under red-green deficiency) the pair is information only: ultramarine text is always a labelled word in a fixed place, and a gain always carries its plus sign.",
   },
+  { a: "loss-cvd", b: "mandate-strong", what: "Colour-blind loss versus ultramarine text", required: BOTH, why: "A loss and a mandate label can share a row." },
   { a: "muted", b: "ink", what: "Mode: running versus paused or stopped", required: BOTH, why: "Lightness alone separates them." },
   { a: "card", b: "ink", what: "Mode: exits-only ring on a card field", required: BOTH, why: "Lightness alone separates them." },
   { a: "ink", b: "crimson", what: "Pause (ink) versus kill switch (crimson)", required: BOTH, why: "Side by side in the Stop sheet; protanopia darkens red toward ink." },
-  { a: "lapis-line", b: "muted-foreground", what: "Account line versus a mandate level's line", required: BOTH, why: "On every agent's equity chart: the account is a gold line, a mandate level a dashed grey one." },
+  { a: "lapis-line", b: "muted-foreground", what: "Account line versus a mandate level's line", required: BOTH, why: "On every agent's equity chart: the account is an ultramarine line, a mandate level a dashed grey one." },
   { a: "lapis", b: "mandate-marker", what: "Account marker versus mandate marks", required: BOTH, why: "On the equity ladder the account's dot sits among the mandate's ticks." },
   { a: "lapis", b: "mandate", what: "Account fill versus mandate field", required: BOTH, why: "The Meaning Rule's two biggest fields." },
   { a: "mandate-edge", b: "background", what: "Mandate field edge versus the page", required: BOTH, why: "The field must read as its own region." },

@@ -1,8 +1,8 @@
 import type { Capability } from "./roles";
 
 /**
- * Every screen the navigation can reach, with what it is for. The sidebar, the breadcrumbs, the
- * command palette, and the route-coverage test all read this list, so a link cannot point at a
+ * Every screen the navigation can reach, with what it is for. The dock, the phone's More sheet, the
+ * breadcrumbs, the command palette, and the route-coverage test all read this list, so a link cannot point at a
  * screen that does not exist. A screen that is not built yet renders "coming in the next slice"
  * with its purpose, never a dead link.
  */
@@ -75,7 +75,7 @@ export const SCREENS: readonly Screen[] = [
   { key: "settings-profile", href: "/settings/profile", label: "Profile", purpose: "Your name, passkeys, and sign-in sessions.", group: "workspace", built: false, needs: "workspace.view" },
 ];
 
-/** Index pages for the two sections whose children live in the sidebar. */
+/** Index pages for the two sections whose children live in the dock's menus. */
 export const SECTION_INDEX = {
   audit: { href: "/audit", label: "Audit", purpose: "The journal, read back: decisions, timelines, traces, and proof it is intact." },
   workspace: { href: "/settings", label: "Workspace", purpose: "Rules, people, and the plumbing behind this workspace." },

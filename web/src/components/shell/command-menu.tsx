@@ -9,6 +9,9 @@ import { can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS } from "@/lib/screens";
 import { OPEN_STOP_EVENT } from "./stop-control";
 
+/** Opens the palette from elsewhere: Search in the phone's More sheet. */
+export const OPEN_COMMAND_EVENT = "owlhead:open-command";
+
 interface Command {
   id: string;
   title: string;
@@ -24,7 +27,8 @@ interface CommandGroup {
 /**
  * ⌘K. "Stop…" is always the first command for a role that may stop. Titles come from the screen
  * list and from owner-given agent labels only: model output never becomes a command title. Nothing
- * typed here is kept; there are no recents.
+ * typed here is kept; there are no recents. From `lg` the trigger is a wide bar, centred in the
+ * header between its two sides; below it, Search in the tab bar's More sheet opens the same palette.
  */
 export function CommandMenu() {
   const [open, setOpen] = useState(false);
@@ -40,8 +44,13 @@ export function CommandMenu() {
         setOpen((o) => !o);
       }
     };
+    const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_COMMAND_EVENT, onOpen);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_COMMAND_EVENT, onOpen);
+    };
   }, []);
 
   const groups = useMemo<CommandGroup[]>(() => {
@@ -83,11 +92,12 @@ export function CommandMenu() {
         type="button"
         onClick={() => setOpen(true)}
         aria-keyshortcuts="Meta+K Control+K"
-        className="press inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-sm text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring max-lg:w-11 lg:bg-background lg:pr-2 lg:pl-3.5 lg:hover:bg-muted"
+        data-slot="command-bar"
+        className="press hidden h-10 min-w-60 flex-[0_1_23.75rem] items-center gap-2.5 rounded-lg border border-border bg-muted pr-1.5 pl-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:flex min-[100rem]:flex-[0_1_28.75rem]"
       >
-        <MagnifyingGlass className="size-4.5 lg:size-4" aria-hidden />
-        <span className="max-lg:sr-only">Go to…</span>
-        <kbd className="ml-4 hidden h-6 items-center rounded-md bg-card px-1.5 font-sans text-label text-muted-foreground lg:inline-flex">⌘K</kbd>
+        <MagnifyingGlass className="size-4.5 shrink-0" aria-hidden />
+        <span className="min-w-0 flex-1 truncate text-left">Jump to an agent or screen…</span>
+        <kbd className="inline-flex h-6 shrink-0 items-center rounded-md border border-border bg-card px-1.5 font-sans text-label text-muted-foreground">⌘K</kbd>
       </button>
       <CommandPalette.Root<CommandGroup, Command>
         open={open}
