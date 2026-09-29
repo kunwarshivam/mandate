@@ -280,6 +280,54 @@ for (const width of PHONES) {
   });
 }
 
+for (const width of PHONES) {
+  test.describe(`${width} px, approvals`, () => {
+    test("the inbox gives each request one hairline row with its static time", async ({ page }) => {
+      await open(page, "/approvals?scenario=approvals", width);
+      const rows = page.getByRole("region", { name: "Open, by deadline" }).getByRole("link");
+      expect(await rows.count()).toBeGreaterThan(1);
+      for (const row of await rows.all()) {
+        await expect(row).toBeVisible();
+        expect(await row.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+        expect(await row.evaluate((el) => getComputedStyle(el.parentElement!).borderBottomWidth)).toBe("1px");
+        await expect(row.locator("[data-slot=deadline]")).toHaveText(/^Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing\s*$/, { useInnerText: true });
+        await expect(row.locator("[data-slot=remaining]")).toBeHidden();
+      }
+      expect(await smallTargets(page.locator("#main"))).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+
+    test("a request fills the screen, with Approve and Skip equal and pinned above the tab bar", async ({ page }) => {
+      await open(page, "/approvals?scenario=approvals", width);
+      await page.getByRole("region", { name: "Open, by deadline" }).getByRole("link").first().click();
+      await expect(page).toHaveURL(/\/approvals\/apr_/);
+      const approve = page.getByRole("button", { name: "Approve", exact: true });
+      const skip = page.getByRole("button", { name: "Skip", exact: true });
+      await expect(approve).toBeVisible();
+      const bar = (await tabBar(page).boundingBox())!;
+      for (const scroll of ["top", "bottom"] as const) {
+        await page.evaluate((to) => window.scrollTo(0, to === "top" ? 0 : document.documentElement.scrollHeight), scroll);
+        await page.waitForTimeout(150);
+        const a = (await approve.boundingBox())!;
+        const s = (await skip.boundingBox())!;
+        expect(a.width, `equal width at the ${scroll}`).toBeCloseTo(s.width, 0);
+        expect(a.height).toBeCloseTo(s.height, 0);
+        expect(a.y).toBeCloseTo(s.y, 0);
+        expect(a.height).toBeGreaterThanOrEqual(MIN_TARGET);
+        expect(a.y + a.height, `the choices sit above the tab bar at the ${scroll}`).toBeLessThanOrEqual(bar.y);
+        expect(a.y + a.height, `and are pinned on it at the ${scroll}`).toBeGreaterThan(bar.y - 24);
+      }
+      const styles = await Promise.all([approve, skip].map((b) => b.evaluate((el) => { const cs = getComputedStyle(el); return [cs.backgroundColor, cs.color, cs.fontWeight, cs.fontSize, cs.borderRadius].join(" "); })));
+      expect(styles[0]).toBe(styles[1]);
+      const response = page.getByRole("region", { name: "Your response" });
+      await expect(response.locator("time")).toHaveText(/^\d\d:\d\d:\d\d [A-Z]+$/);
+      await expect(response.locator("[data-slot=remaining]"), "the request states the minutes left, as the brief asks").toHaveText(/^\(\d+ min left\)$/);
+      await expect(header(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+  });
+}
+
 test("desktop agent keeps its tabs, its mandate card and the full overview, with the legend open", async ({ page }) => {
   await open(page, AGENT, 1440, 900);
   await expect(page.getByRole("navigation", { name: "Agent sections" })).toBeVisible();

@@ -13,6 +13,8 @@ import { renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { shownOnDesktop, shownOnPhone } from "@/test/viewport";
 import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
+import { ApprovalRequestScreen } from "./approval-request";
+import { ApprovalsInboxScreen } from "./approvals-inbox";
 import { DashboardScreen } from "./dashboard";
 
 /** The phone layouts (DEC-207), read from the breakpoint classes; `e2e/phone.spec.ts` checks the real layout. */
@@ -305,6 +307,43 @@ describe("an agent on a phone", () => {
     const current = within(links).getAllByRole("link").filter((a) => a.getAttribute("aria-current") === "page");
     expect(current.map((a) => a.textContent?.replace(/\d+$/, ""))).toEqual([label]);
     expect(main().lastElementChild?.lastElementChild).toBe(links);
+  });
+});
+
+describe("approvals on a phone", () => {
+  const inbox = () => agentPage("/approvals", <ApprovalsInboxScreen />, "approvals");
+
+  it("lists each request as one hairline row with its static time, and keeps the tinted rows and the minutes on desktop", () => {
+    inbox();
+    const open = within(main()).getByRole("region", { name: "Open, by deadline" });
+    const links = within(open).getAllByRole("link");
+    expect(links.length).toBe(buildWorkspace("approvals").approvals.filter((a) => a.status === "delivered").length);
+    for (const link of links) {
+      expect(link.parentElement).toHaveClass("max-lg:border-b");
+      expect(link).toHaveClass("bg-lapis-soft", "max-lg:bg-transparent", "max-lg:rounded-xl");
+      const remaining = link.querySelector<HTMLElement>("[data-slot=remaining]")!;
+      expect(remaining).toHaveTextContent(/min left/);
+      expect(shownOnPhone(remaining)).toBe(false);
+      expect(shownOnDesktop(remaining)).toBe(true);
+      expect(shownOnPhone(link.querySelector("time")!)).toBe(true);
+      expect(onPhone(link.querySelectorAll("svg")).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("gives a request one screen, with Approve and Skip equal and pinned above the tab bar", () => {
+    agentPage(`/approvals/${APPROVAL_IDS.swingXyz}`, <ApprovalRequestScreen approvalId={APPROVAL_IDS.swingXyz} />);
+    const bar = within(main()).getByRole("region", { name: "Your response" });
+    expect(bar).toHaveClass("sticky", "bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))]", "lg:bottom-0");
+    const approve = within(bar).getByRole("button", { name: "Approve" });
+    const skip = within(bar).getByRole("button", { name: "Skip" });
+    expect(approve.className).toBe(skip.className);
+    expect(approve.dataset.variant).toBe(skip.dataset.variant);
+    expect(approve.parentElement).toBe(skip.parentElement);
+    expect(approve.parentElement).toHaveClass("grid-cols-2");
+    expect(document.activeElement).not.toBe(approve);
+    expect(document.activeElement).not.toBe(skip);
+    expect(bar.querySelector("[data-slot=deadline] time")).not.toBeNull();
+    expect(main().querySelectorAll("article")).toHaveLength(1);
   });
 });
 
