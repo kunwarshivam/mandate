@@ -158,6 +158,10 @@ impl ShellError {
     /// The stable reason code the process exits with (ADR-0001 ES-09).
     pub fn code(&self) -> &'static str {
         match self {
+            Self::Refused {
+                stage: Stage::Connector,
+                cause: Cause::Connector(ConnectorError::Unreadable { .. }),
+            } => "broker_answer_uninterpretable",
             Self::Refused { stage, .. } => stage.code(),
             Self::Runtime(e) => e.code(),
             Self::NonPaperEnvironment => "non_paper_environment",

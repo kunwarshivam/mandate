@@ -311,7 +311,6 @@ fn edited(value: &Json) -> Json {
 /// the check the removed test made, and which that test could not keep making once E10-1's slice P moved
 /// the stub these cases stop at (DEC-77).
 #[test]
-#[ignore = "pending E6-4"]
 fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
     let ids = ids_of(&fixture, "goal");
@@ -354,6 +353,94 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
     );
 }
 
+/// Every MC-C case passes as the fixture states it, and fails, naming the member, when any one of its
+/// expectations is edited or dropped; and the one invalid case, which states no `step_up_required`,
+/// fails when it is given one saying step-up is needed.
+///
+/// The change arm's read-every-key half (DEC-172 item 4). Editing shows each member is compared, and
+/// dropping shows none is optional: the arm reads `step_up_required` as absent only where the case
+/// itself says `invalid`, so leaving it out elsewhere cannot pass.
+#[test]
+#[ignore = "pending E10-3"]
+fn every_change_case_passes_and_fails_on_each_edited_expectation() {
+    let fixture = fixture();
+    let ids = ids_of(&fixture, "change");
+    assert_eq!(ids.len(), 48, "family C is 48 cases");
+    let expectation = |doctored: &mut Json, id: &str| -> Json {
+        doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+            .map(|c| c["expect"].take())
+            .expect("the case")
+    };
+    let put = |doctored: &mut Json, id: &str, expect: Json| {
+        if let Some(case) = doctored["cases"]
+            .as_array_mut()
+            .expect("a case list")
+            .iter_mut()
+            .find(|c| c["id"] == id)
+        {
+            case["expect"] = expect;
+        }
+    };
+    let mut edits = 0;
+    for id in &ids {
+        if let Err(failure) = run(fixture.clone(), id) {
+            panic!("{id} must pass as the fixture states it: {failure}");
+        }
+        let expect = expectation(&mut fixture.clone(), id);
+        let members: Vec<String> = expect
+            .as_object()
+            .expect("an expectation")
+            .keys()
+            .cloned()
+            .collect();
+        for member in members {
+            let mut edited_expect = expect.clone();
+            edited_expect[&member] = edited(&expect[&member]);
+            let mut dropped_expect = expect.clone();
+            dropped_expect
+                .as_object_mut()
+                .expect("an expectation")
+                .remove(&member);
+            for (how, changed) in [("edited", edited_expect), ("dropped", dropped_expect)] {
+                let mut doctored = fixture.clone();
+                put(&mut doctored, id, changed);
+                let failure = run(doctored, id)
+                    .expect_err("an edited or dropped expectation must fail the case");
+                assert!(
+                    failure.contains(&member),
+                    "{id}: a {how} `{member}` must fail on `{member}`, got: {failure}"
+                );
+                edits += 1;
+            }
+        }
+    }
+    assert_eq!(
+        edits,
+        2 * (47 * 5 + 4),
+        "five members of each case, four of the invalid one, each edited and dropped"
+    );
+    let invalid = ids
+        .iter()
+        .find(|id| {
+            let mut copy = fixture.clone();
+            expectation(&mut copy, id)["classification"] == "invalid"
+        })
+        .expect("an invalid case");
+    let mut doctored = fixture.clone();
+    let mut expect = expectation(&mut fixture.clone(), invalid);
+    expect["step_up_required"] = Json::Bool(true);
+    put(&mut doctored, invalid, expect);
+    let failure = run(doctored, invalid).expect_err("an invalid change is refused, not stepped up");
+    assert!(
+        failure.contains("step_up_required"),
+        "{invalid}: got {failure}"
+    );
+}
+
 /// Every MC-R case passes as the fixture states it, and fails, naming the member and its step, when any
 /// one expectation of any one step is edited.
 ///
@@ -364,7 +451,10 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
 ///
 /// A non-empty name set (`restrictions`, `instrument_restrictions`, `pending`) is edited name by name,
 /// for the same reason as the journal below: `edited` replaces a list's first element only, so a second
-/// name was never swept (#276 review, and the coordinator's ruling there).
+/// name was never swept (#276 review, and the coordinator's ruling there). Each such set is also edited
+/// once with its first name dropped and once with a stranger added, because substitution alone keeps
+/// the set's size and so cannot tell an equality from a subset or a superset comparison, and a fold
+/// that drops a restriction is the loosening direction (#283 review, and the coordinator's ruling there).
 ///
 /// A non-empty journal is edited member by member in every event, not by replacing its first event:
 /// replacing the first event left every later event's members unswept, so a fold that journalled the
@@ -450,6 +540,31 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
                     );
                     edits += 1;
                 }
+                if !names.is_empty() {
+                    let shorter: Vec<Json> = names.iter().skip(1).cloned().collect();
+                    let mut longer = names.to_vec();
+                    longer.push(json!("not_a_name"));
+                    for (edit, list) in
+                        [("one name dropped", shorter), ("a stranger added", longer)]
+                    {
+                        let mut doctored = fixture.clone();
+                        doctored["cases"]
+                            .as_array_mut()
+                            .expect("a case list")
+                            .iter_mut()
+                            .find(|c| c["id"] == id.as_str())
+                            .expect("the case")["steps"][index]["expect"][member] =
+                            Json::Array(list);
+                        let failure = run(doctored, id).expect_err(
+                            "a name set with a name dropped or added must fail the case",
+                        );
+                        assert!(
+                            failure.contains(&step) && failure.contains(member.as_str()),
+                            "{id}: `{member}` with {edit} at {step} must fail there, naming it, got: {failure}"
+                        );
+                        edits += 1;
+                    }
+                }
                 if !listed.is_empty() {
                     continue;
                 }
@@ -472,10 +587,11 @@ fn every_risk_state_case_passes_and_fails_on_each_edited_expectation() {
         }
     }
     assert_eq!(
-        edits, 1_939,
+        edits, 2_097,
         "every member of every step of the 24 cases was edited once, every member of every one of the \
-         138 journal events, and every one of the 106 names the three name sets list, each in place of \
-         its list's first element alone"
+         138 journal events, every one of the 106 names the three name sets list, each in place of its \
+         list's first element alone, and each of the 79 non-empty name sets once with a name dropped \
+         and once with a stranger added"
     );
 }
 

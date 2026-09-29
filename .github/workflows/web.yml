@@ -5,6 +5,15 @@
 # The Impeccable detector (Apache-2.0, `docs/dependencies.md`) fails on any primary finding and
 # reads `web/.impeccable/config.json` when it exists. It flags gradient text and AI-typical palettes
 # but not a plain gradient, so the founder's no-gradients rule (DEC-200) has its own check.
+# That check reads source; the Playwright suite (`web/e2e/`) reads computed styles in Chromium
+# against `next start`, which catches a gradient or mask Kumo paints from its own stylesheet.
+# `npm run build` is the production build, and its postbuild checks fail if it contains the scenario
+# switcher or takes a scenario. The suite then builds its own copy into `.next-e2e`, with the scenario
+# switch on (`web/scripts/e2e-build.mjs`), and runs in light and dark: about 9 minutes on two workers.
+# A second, short suite (`web/playwright.auth.config.ts`) builds with sign-in on against a stub Supabase
+# address, into `.next-auth-e2e`, and checks what a signed-out visitor meets (DEC-211).
+# Only the Chromium headless shell is installed, cached per Playwright version; on a cache hit
+# only its system libraries are installed.
 name: web
 
 on:
@@ -23,7 +32,7 @@ concurrency:
 jobs:
   web:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
@@ -68,3 +77,36 @@ jobs:
         if: steps.app.outputs.present == 'true'
       - run: npm run build
         if: steps.app.outputs.present == 'true'
+      - name: Playwright version
+        id: playwright
+        if: steps.app.outputs.present == 'true' && hashFiles('web/playwright.config.ts') != ''
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browsers
+        if: steps.playwright.outputs.version != ''
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      # Chromium's libraries come from Ubuntu's archive. The runner also lists packages.microsoft.com,
+      # which has answered 403 for noble; one failing source fails `apt-get update` and the install.
+      - name: Drop the runner's Microsoft package source
+        if: steps.playwright.outputs.version != ''
+        run: grep -rls 'packages\.microsoft\.com' /etc/apt/sources.list /etc/apt/sources.list.d/ | tee /dev/stderr | xargs -r sudo rm -f
+      - name: Install Chromium
+        if: steps.playwright.outputs.version != '' && steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Install Chromium's system libraries
+        if: steps.playwright.outputs.version != '' && steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+      - name: Computed styles in Chromium (DEC-200)
+        if: steps.playwright.outputs.version != ''
+        run: npm run test:e2e
+      - name: Sign-in on, signed out (DEC-211)
+        if: steps.playwright.outputs.version != '' && hashFiles('web/playwright.auth.config.ts') != ''
+        run: npm run test:e2e:auth
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && steps.playwright.outputs.version != ''
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7

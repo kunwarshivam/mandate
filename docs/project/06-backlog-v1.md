@@ -587,9 +587,9 @@ round 1), as the coordinator ruled there:
   and a canonical `Object` is a `BTreeMap`, so it pins determinism, not the order-independence its name
   claims. Fix it in the next tests correction that touches the file, from key-shuffled JSON text read
   through `mandate_canon::parse`.
-- No live `mandate-spec` test pins an absolute version digest: both canonical tests compare against the
-  same `mandate-canon` writer, so a non-canonical writer survives them. E10-3's status PR adds one
-  assertion against `btc_accumulator`'s literal `sha256:9fb03f7e…` beside `mandate::version_vector`.
+- Done in E10-3's tests PR (`tests/change.rs::the_version_vector_is_pinned_by_its_literal_digest`):
+  a live `mandate-spec` test now pins `btc_accumulator`'s literal `sha256:9fb03f7e…`, so a
+  non-canonical writer no longer survives the canonical tests.
 
 - `tests/vocabulary.rs::every_error_variant_has_its_own_stable_code` lacks `(ParseError::Diverged, "diverged")`.
   The code is pinned by the module test `a_mandate_changed_after_parsing_has_no_version`, but not in the
@@ -959,3 +959,13 @@ From E6-4's V-040 spec change (stream H; the coordinator's ruling on #251, round
   it builds a six-rung ladder `maxItems: 5` forbids. Draw 1 to 3 scale rungs, and pin the
   five-rung, 2-place ladder. (3) The function imports `combinations` inside its body; move the
   import to the top of `reference/mandate/fuzz.py`.
+
+From E6-4's slice L (stream H; the coordinator's ruling on #279, round 1, minor 3):
+
+- **The caller of `goal::status` pins the sane-and-fresh ask (stream G).** `GoalInputs::ask` values a
+  remainder against the minimum order, and `goal::status` cannot tell a bad tick from a real quote.
+  One print far below the market would make any remainder look worth less than the minimum and
+  finish the goal, and with `on_complete: release` that cancels protection and retires the agent
+  (§3.1). The order path's goal evaluation in `mandate-risk` passes only an ask from a quote that
+  passed §5.6's sane-and-fresh filter. It needs a test that a single bad tick never finishes a
+  `release` goal.
