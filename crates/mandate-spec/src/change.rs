@@ -81,6 +81,10 @@ pub const PIN_SWITCH_PATHS: [&str; 5] = [
 /// version has an empty working universe and can open nothing, so pinning hands the agent instruments
 /// it could not trade before. DEC-121's reason for calling pinning reducing — that it removes the
 /// platform's discretion — does not apply when there was no discretion to remove.
+///
+/// `paths` must be [`changed_paths`] of the same two documents. Any other list is `false`, the answer
+/// that needs step-up, so a caller cannot make a change reducing by leaving a path out (DEC-172
+/// item 2).
 pub fn pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> Result<bool, SpecError> {
     let _ = (old, new, paths);
     Err(SpecError::Unimplemented)
@@ -93,6 +97,9 @@ pub fn pinning_switch(old: &Mandate, new: &Mandate, paths: &[Pointer]) -> Result
 /// increasing. MI-11 is the property that matters here, and its oracle does not look at this function
 /// at all: it evaluates generated actions under both rule sets and asserts the new decision is never
 /// less strict.
+///
+/// Two identical rule sets are [`ChangeClass::Neutral`]: nothing changed, so nothing was made
+/// stricter either (DEC-172 item 3).
 pub fn classify_autonomy(
     old: &crate::document::Autonomy,
     new: &crate::document::Autonomy,
