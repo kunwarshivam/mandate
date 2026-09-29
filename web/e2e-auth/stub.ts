@@ -7,13 +7,18 @@ const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-headers": "*",
   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+  "access-control-expose-headers": "x-supabase-api-version",
 };
 
 export interface Answer {
   status: number;
   body?: unknown;
   contentType?: string;
+  headers?: Record<string, string>;
 }
+
+/** Supabase dates its error format; from this version an error's `code` is its machine-readable name. */
+export const API_VERSION = { "x-supabase-api-version": "2024-01-01" };
 
 /**
  * Answers the browser's requests to Supabase's Auth API. `answers` maps a path under `/auth/v1`
@@ -29,7 +34,7 @@ export async function stubSupabase(page: Page, answers: Record<string, Answer>) 
     const contentType = answer.contentType ?? "application/json";
     return route.fulfill({
       status: answer.status,
-      headers: CORS,
+      headers: { ...CORS, ...answer.headers },
       contentType,
       body: contentType === "application/json" ? JSON.stringify(answer.body ?? {}) : String(answer.body ?? ""),
     });

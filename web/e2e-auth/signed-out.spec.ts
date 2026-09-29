@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { STUB_SUPABASE, stubSupabase } from "./stub";
+import { API_VERSION, STUB_SUPABASE, stubSupabase } from "./stub";
 
 /**
  * Sign-in on, no one signed in (DEC-211). The proxy's decisions run for real against the build; the
@@ -58,9 +58,9 @@ test("next cannot send a visitor off the site", async ({ page, baseURL }) => {
   expect(new URL(page.url()).searchParams.get("redirect_to")).toBe(`${baseURL}/auth/callback?next=%2F`);
 });
 
-test("a passkey sign-in says so when passkeys are off on the project", async ({ page }) => {
+test("a passkey sign-in says so when passkeys are off on the project, as Supabase answers today", async ({ page }) => {
   await stubSupabase(page, {
-    "/passkeys/authentication/options": { status: 422, body: { code: 422, error_code: "passkey_disabled", msg: "Passkeys are disabled" } },
+    "/passkeys/authentication/options": { status: 404, headers: API_VERSION, body: { code: "passkey_disabled", message: "Passkeys are disabled" } },
   });
   await page.goto("/login");
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
