@@ -9,7 +9,7 @@ import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
-import { type AgentLimits, type Level, type Rail, agentLimits, nextLevel } from "@/lib/limits";
+import { type AgentLimits, type Level, type Rail, agentLimits, headroomAbove, nextLevel } from "@/lib/limits";
 import { agentHref } from "@/lib/screens";
 import { ModeBadge } from "./mode";
 import { Placeholder } from "./placeholders";
@@ -193,7 +193,7 @@ interface HeadroomRowData {
 function headroomRows(limits: AgentLimits): HeadroomRowData[] {
   const daily = limits.levels.find((l) => l.kind === "daily");
   return limits.rails.map((rail) => {
-    const left = rail.key === "daily" && daily ? sub(limits.equity, daily.at) : sub(rail.cap, rail.used);
+    const left = rail.key === "daily" && daily ? headroomAbove(limits, daily) : sub(rail.cap, rail.used);
     return {
       key: rail.key,
       label: rail.key === "daily" ? "Daily loss limit" : rail.label,

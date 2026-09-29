@@ -92,8 +92,8 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
  every state treatment, the components, and motion samples.
 
 - **Colour means one thing each** (Ink and Ultramarine, `web/COLOR.md`). Ultramarine is your mandate and the
-  account's line, ink is the account's actions, a stopped agent and the Stop control, crimson is
-  the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
+  account's line, ink is the account's actions, a stopped agent and the Stop control (an outline
+  until something needs you, then filled; DEC-206), crimson is the kill switch and nothing else. Gains and losses are the only other hues, as text beside a sign and the word. Values live
   once in `src/lib/palette.ts`, for both themes, mirrored in `src/app/globals.css`; `tokens.test.ts`
   and `palette.test.ts` fail if they drift or a pair drops below WCAG AA or APCA in either theme.
 - **APCA is dev only.** `apca-w3` (its own limited licence) and its AGPL-3.0 dependency

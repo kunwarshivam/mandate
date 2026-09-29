@@ -12,10 +12,10 @@ import { Placeholder } from "@/components/domain/placeholders";
 import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
+import { alertLines } from "@/lib/attention";
 import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
 import { decisionHref, positionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
@@ -28,39 +28,8 @@ const WAITING_SHOWN = 3;
 /** A phone's Home shows this much recent activity; the rest is one link away. */
 const ACTIVITY_SHOWN_ON_PHONE = 3;
 
-const HEALTH_WORD = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
-
-function lowerFirst(text: string): string {
-  return text.charAt(0).toLowerCase() + text.slice(1);
-}
-
-interface AlertLine {
-  key: string;
-  text: string;
-  href: string;
-}
-
-/** Everything the Alerts screen lists: degraded feeds first, then agent conditions, each where it is read in full. */
-function alerts(ws: Workspace): AlertLine[] {
-  const feeds = (Object.keys(HEALTH_WORD) as Array<keyof typeof HEALTH_WORD>)
-    .filter((k) => ws.health[k].state !== "ok")
-    .map((k) => ({ key: `feed-${k}`, text: `${HEALTH_WORD[k]} ${ws.health[k].state === "down" ? "down" : "stale"}`, href: "/alerts" }));
-  const agents = ws.agents.flatMap((a) =>
-    a.restrictions.map((r) => ({
-      key: `${a.agent_id}-${r.code}-${r.symbol ?? ""}`,
-      text: `${a.label}: ${lowerFirst(RESTRICTIONS[r.code].label)}${r.symbol ? ` (${r.symbol})` : ""}`,
-      href: `/agents/${a.agent_id}`,
-    })),
-  );
-  return [...feeds, ...agents];
-}
-
-function alertLines(ws: Workspace): string[] {
-  return alerts(ws).map((a) => a.text);
-}
-
 function AlertsSummary({ ws }: { ws: Workspace }) {
-  const lines = alertLines(ws);
+  const lines = alertLines(ws).map((a) => a.text);
   const Icon = lines.length === 0 ? CheckCircle : WarningCircle;
   return (
     <Link
@@ -152,7 +121,7 @@ const NEEDS_ROW =
  * where it is read in full. With nothing, it says so plainly. The only place Home shows a request.
  */
 function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; className?: string }) {
-  const lines = alerts(ws);
+  const lines = alertLines(ws);
   const count = open.length + lines.length;
   return (
     <section aria-labelledby="needs-you-title" data-slot="needs-you" data-count={count} className={cn("grid content-start gap-2", className)}>
