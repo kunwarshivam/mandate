@@ -7,7 +7,7 @@ import { expect, test } from "@playwright/test";
  * Supabase and the sign-in page says it is off.
  */
 
-const APP_CONTROLS = ["[data-slot=stop-control]", "[data-slot=dock]", "[data-slot=wire]"];
+const APP_CONTROLS = ["[data-slot=stop-control]", "[data-slot=dock]"];
 
 for (const width of [390, 1440]) {
   test.describe(`at ${width}px`, () => {
@@ -23,7 +23,7 @@ for (const width of [390, 1440]) {
     });
 
     for (const path of ["/login", "/auth/passkey"]) {
-      test(`${path} is in the site frame, with no Stop, dock, wire or paper badge`, async ({ page }) => {
+      test(`${path} is in the site frame, with no Stop, dock or paper badge`, async ({ page }) => {
         await page.goto(path);
         const header = page.getByRole("banner");
         await expect(header).toHaveClass(/\bglass\b/);

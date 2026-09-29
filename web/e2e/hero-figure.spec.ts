@@ -219,7 +219,7 @@ for (const width of [320, 360, 390]) {
   });
 }
 
-test("every figure but the hero keeps tabular digits: tables, key figures, rows, rails and the wire", async ({ page }) => {
+test("every figure but the hero keeps tabular digits: tables, key figures, rows and rails", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   for (const path of ["/", `/agents/${AGENT_IDS.swing}`, `/agents/${AGENT_IDS.lmn}/orders`, "/positions"]) {
     await page.goto(path, { waitUntil: "networkidle" });
@@ -239,7 +239,7 @@ test("every figure but the hero keeps tabular digits: tables, key figures, rows,
         hero: hero ? getComputedStyle(hero).fontVariantNumeric : null,
       };
     });
-    expect(read.count, path).toBeGreaterThan(5);
+    expect(read.count, path).toBeGreaterThanOrEqual(5);
     expect(read.proportional, path).toEqual([]);
     if (path === "/positions") expect(read.inTables, "the positions table is measured").toBeGreaterThan(0);
     if (read.hero) expect(read.hero, path).toContain("proportional-nums");

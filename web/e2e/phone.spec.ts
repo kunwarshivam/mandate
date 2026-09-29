@@ -122,7 +122,6 @@ for (const width of PHONES) {
       await open(page, "/?scenario=normal", width);
       await expect(page.locator("[data-slot=status-strip]")).toBeHidden();
       await expect(page.locator("[data-slot=feed-banner]")).toHaveCount(0);
-      await expect(page.locator("[data-slot=wire]")).toBeHidden();
     });
 
     test("a one-line banner under the header when a feed is stale, in the strip's words", async ({ page }) => {

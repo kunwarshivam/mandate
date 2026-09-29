@@ -119,7 +119,7 @@ export const spacingTokens = [
   { name: "--row-y", calm: "1rem", dense: "0.5rem", use: "Vertical padding of a list or table row" },
   { name: "--tab-bar", calm: "4rem", dense: "4rem", use: "The phone tab bar, plus the safe area" },
   { name: "--dock-h / --dock-gap", calm: "4rem / 1rem", dense: "the same", use: "The desktop dock and the space below it; content, scroll padding and toasts clear both (`--dock-clearance`)" },
-  { name: "--status-row", calm: "2.125rem", dense: "2.125rem", use: "The status strip and the agent wire under the header, one height so either can replace the other" },
+  { name: "--status-row", calm: "2.125rem", dense: "2.125rem", use: "The status strip and the phone's feed banner under the header, one height so either can replace the other" },
 ];
 
 export const radiusTokens = [

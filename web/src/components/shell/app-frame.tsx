@@ -11,7 +11,7 @@ import { SessionProvider } from "@/lib/session";
 import { signedInUser } from "@/lib/supabase/server";
 
 /**
- * The app's frame over the fixture workspace: the shell with Stop, the dock and the wire. The `(app)`
+ * The app's frame over the fixture workspace: the shell with Stop and the dock. The `(app)`
  * layout wraps every screen in it, and the root not-found page wraps an unknown address in it, so
  * Stop stays in the header there too (brief P1).
  */
