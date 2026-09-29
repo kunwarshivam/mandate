@@ -1,59 +1,84 @@
 "use client";
 
 import type { ReactNode } from "react";
-import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { canOpen } from "@/lib/access";
+import { isRecordRoute } from "@/lib/frozen";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
-import { Wordmark } from "./brand";
-import { EnvironmentBadge } from "./environment-badge";
-import { SideNav, TabNav } from "./nav";
+import { allFeedsOk } from "@/lib/feeds";
+import { useRole } from "@/lib/roles";
+import { cn } from "@/lib/utils";
+import { FixtureTag, InlineDisclosures } from "@/components/domain/placeholders";
+import { AccessDenied } from "./access-denied";
+import { AccountBanners } from "./account-banners";
+import { AppHeader } from "./app-header";
+import { Dock } from "./dock";
+import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
-import { StopControl } from "./stop-control";
 
+/** Audit and admin read like a console; everything an owner lives in stays calm (DEC-204). */
+export function densityFor(pathname: string): "calm" | "dense" {
+  return /^\/(audit|settings|connections)(\/|$)/.test(pathname) ? "dense" : "calm";
+}
+
+/**
+ * The frame: the header, then nothing while every feed answers (DEC-215). From `lg` up, the status
+ * strip while a feed is stale or down, and the dock; below `lg` (DEC-207), a one-line banner of the
+ * failing feeds, and the tab bar. A record screen keeps the full strip at every width, because a
+ * decision is read against every feed's age, not against the absence of a warning. With no strip,
+ * the "Fixture data" tag sits at the foot of the page.
+ */
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
+  const { role } = useRole();
+  const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
+  const record = isRecordRoute(pathname);
+  const fresh = allFeedsOk(ws);
+  const strip = record || !fresh;
+  const banner = !record && !fresh && ws.status !== "loading";
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)]">
+    <div className="relative isolate flex min-h-svh w-full">
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <aside className="sticky top-0 hidden h-dvh flex-col gap-6 border-r bg-background py-4 lg:flex">
-        <Link href="/" className="px-4 text-foreground" aria-label="Owlhead, dashboard">
-          <Wordmark className="text-[2rem]" />
-        </Link>
-        <SideNav approvals={open} />
-        <div className="mt-auto grid gap-0.5 bg-lapis px-4 py-3 text-lapis-foreground" data-slot="account">
-          <span className="label-caps text-lapis-muted">Account</span>
-          <span className="text-sm font-bold">{ws.connection.broker}</span>
-          <span className="font-mono text-caption break-all text-lapis-muted" translate="no">
-            {ws.connection.connection_id}
-          </span>
-        </div>
-      </aside>
-      <div className="flex min-w-0 flex-col">
-        <header className="sticky top-0 z-30 border-b bg-background">
-          <div className="flex h-14 items-center gap-2 px-(--page-x) sm:gap-3">
-            <Link href="/" className="text-foreground lg:hidden" aria-label="Owlhead, dashboard">
-              <Wordmark className="text-2xl" />
-            </Link>
-            <EnvironmentBadge environment={ws.environment} />
-            <div className="ml-auto flex items-center">
-              <StopControl />
-            </div>
+      <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
+        <AppHeader />
+        {strip ? (
+          <div className={record ? undefined : "max-lg:hidden"}>
+            <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
           </div>
-          <StatusStrip ws={ws} now={now} className="border-t px-(--page-x)" />
-        </header>
+        ) : null}
+        {banner ? (
+          <div className="lg:hidden">
+            <StatusStrip ws={ws} now={now} variant="banner" className="px-(--page-x)" />
+          </div>
+        ) : null}
+        <AccountBanners />
         <main
           id="main"
           tabIndex={-1}
-          className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-28 outline-none lg:pb-(--page-bottom)"
+          data-density={densityFor(pathname)}
+          className={cn("mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-10 outline-none", strip && "lg:pb-[calc(var(--dock-clearance)+2rem)]")}
         >
-          {children}
+          <InlineDisclosures inline={isRecordRoute(pathname)}>{canOpen(role, pathname) ? children : <AccessDenied role={role} />}</InlineDisclosures>
         </main>
+        <div
+          data-slot="page-footer"
+          className={cn(
+            "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
+            strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+          )}
+        >
+          {record ? null : <FixtureTag />}
+        </div>
       </div>
       <div className="fixed inset-x-0 bottom-0 z-30 lg:hidden">
         <TabNav approvals={open} />
+      </div>
+      <div className="fixed bottom-[calc(var(--dock-gap)+env(safe-area-inset-bottom))] left-1/2 z-30 hidden -translate-x-1/2 lg:block">
+        <Dock approvals={open} />
       </div>
     </div>
   );

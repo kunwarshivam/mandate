@@ -82,8 +82,8 @@ a word, never colour alone; compliance text appears only as named placeholders s
 `[[DISCLOSURE-PERFORMANCE]]` (rule 9); model output is quoted and attributed, never a headline or a
 button label (rule 4).
 
-Stack (DEC-200): Next.js 16, React 19, TypeScript strict, Tailwind v4, shadcn/ui primitives, Motion,
-Vitest. No third-party analytics, session replay, or telemetry.
+Stack (DEC-200): Next.js 16, React 19, TypeScript strict, Tailwind v4, Kumo components on Base UI,
+Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or telemetry.
 
 ## Brand Commitments
 
@@ -91,10 +91,33 @@ Vitest. No third-party analytics, session replay, or telemetry.
   2026-09-28). "Mandate" stays the internal codename for code, crates and repo paths, and "mandate"
   stays the product's word for the owner's binding envelope ("Your mandate"). Every user-facing
   surface says Owlhead.
-- **Wordmark and mark.** The UI sets "OWLHEAD" as a typographic wordmark in the display face (Big
-  Shoulders Display 800, capitals), in the current text colour. There is no symbol: the old M mark
-  in `assets/brand/` no longer fits and is not used in the UI, and a new mark is follow-up work that
-  needs a founder-approved design. There is no favicon until that mark exists.
+- **Mark and wordmark (DEC-203).** The mark is the founder's artwork, traced into one flat
+  single-colour path (`src/components/brand/owlhead-mark.svg`); the shaded original is not used in
+  the UI. The wordmark is lowercase "owlhead" in P052 Roman, committed as outlines only
+  (`owlhead-wordmark.svg`): no font file is committed and the UI loads no font for it. The lockup is
+  the mark and the wordmark side by side. The old M mark in `assets/brand/` is the codename's and is
+  not used in the UI.
+- **Ink on light, off-white on dark** (DEC-204, amending DEC-203). In the app the mark, wordmark
+  and lockup take the type colour: ink #14161A on the light theme, off-white on the dark one. The
+  favicon, app icons and share image are the ink mark on an off-white tile, the same in every
+  browser theme. The brand is never volt and never on a coloured block.
+- **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
+  in the page metadata or the share card. The one exception is the landing page's `description`,
+  for search results (DEC-212); its share card still carries the name and the image alone.
+- **Palette (DEC-214, replacing DEC-205's ultramarine).** Ink and Volt, light and dark: ink
+  #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night #0B0D11); volt
+  #7C9217 as the one accent (lines, rails, marks; never body text, never a block), deep volt
+  #4C5A09 for volt as text, volt tint #F2FCD7 for the mandate's field, and neon volt #C8E928 as
+  the highlight, always under ink type; crimson for the kill switch alone. About 60/30/10 paper,
+  ink and volt.
+  The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
+  UI palette (`COLOR.md`).
+- **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular
+  figures except the display hero figure (DEC-208); the wordmark stays the one serif, as outlines.
+- **The frame (DEC-208, DEC-215).** Glass on the frame only (the header and the phone tab bar,
+  and on desktop the dock that takes its place), flat everywhere else, with no gradient
+  (DEC-200). Nothing runs under the header while every feed answers; the status strip shows when
+  one does not, and on record screens.
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
@@ -121,13 +144,15 @@ Vitest. No third-party analytics, session replay, or telemetry.
   agents on one Alpaca paper connection, approvals, gate decisions, and scenarios (normal, empty,
   loading, stale, paused, drawdown, reconciliation, unknown order, unreachable, approvals).
 - No customers, testimonials, track record, or performance figures exist. Nothing may imply them:
-  P&L is shown only as paper, simulated, next to `[[DISCLOSURE-PERFORMANCE]]`.
+  P&L is shown only as paper, simulated, beside `[[DISCLOSURE-PERFORMANCE]]` (behind an info
+  symbol on screen, inline in print and on record screens, DEC-210).
 - No drafted compliance wording exists; placeholders stand in for it.
 
 ## Product Principles
 
-1. **Stopping is never harder than starting.** The way to reduce risk is the most visible thing on
-   every screen.
+1. **Stopping is never harder than starting.** The way to reduce risk is on every screen, one tap
+   away and never disabled, and it becomes the most visible thing on the screen when something
+   needs you (DEC-206).
 2. **Limits are the product.** The owner's envelope, in dollars, is what the screen is about; the
    agent's activity is read against it.
 3. **Truth over reassurance.** Show age, uncertainty, and unknowns plainly; never decorate a state
@@ -137,7 +162,7 @@ Vitest. No third-party analytics, session replay, or telemetry.
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in the one light theme
-(`src/lib/tokens.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
+WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in both the light and the dark theme
+(`src/lib/palette.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
 with a visible focus ring; layouts hold at 360 px wide; motion respects `prefers-reduced-motion`
 (fewer, gentler animations, keeping opacity and colour changes that aid comprehension).

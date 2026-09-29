@@ -1,0 +1,226 @@
+/*
+ * Kumo in Owlhead's calm system, Ink and Volt (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
+ * its roles inside `@layer base`; these rules are unlayered, so they win without `!important`.
+ * Every role points at a semantic token from globals.css, never at a raw colour.
+ *
+ * Kumo's brand is the account's colour: ink in light mode, paper in dark. Its danger is ink too:
+ * crimson belongs to the kill switch alone, and a loss is never a fill. Its warning is amber, which
+ * no screen uses (a test holds that line, because at text lightness amber sits 20 degrees from the
+ * colour-blind orange loss and would read as a loss). Its info is the muted type; its success is the
+ * gain green. Its orange badge is the mandate's volt tint, and its purple, teal and blue
+ * collapse to the account; its red badge is ink, never red.
+ */
+:root,
+[data-theme="owlhead"] {
+  --text-color-kumo-default: var(--foreground);
+  --text-color-kumo-strong: var(--foreground);
+  --text-color-kumo-inverse: var(--card);
+  --text-color-kumo-subtle: var(--muted-foreground);
+  --text-color-kumo-inactive: var(--lapis-muted);
+  --text-color-kumo-placeholder: var(--muted-foreground);
+  --text-color-kumo-brand: var(--lapis);
+  --text-color-kumo-link: var(--lapis);
+  --text-color-kumo-info: var(--info);
+  --text-color-kumo-success: var(--gain);
+  --text-color-kumo-danger: var(--ink);
+  --text-color-kumo-warning: var(--warning);
+  --text-color-kumo-badge-orange-subtle: var(--mandate-strong);
+  --text-color-kumo-badge-teal-subtle: var(--lapis);
+  --text-color-kumo-badge-neutral-subtle: var(--foreground);
+  --text-color-kumo-badge-inverted: var(--card);
+
+  --color-kumo-canvas: var(--card);
+  --color-kumo-elevated: var(--card);
+  --color-kumo-recessed: var(--background);
+  --color-kumo-base: var(--card);
+  --color-kumo-tint: var(--muted);
+  --color-kumo-contrast: var(--ink);
+  --color-kumo-overlay: var(--card);
+  --color-kumo-control: var(--card);
+  --color-kumo-interact: var(--border);
+  --color-kumo-fill: var(--muted);
+  --color-kumo-fill-hover: var(--lapis-soft);
+  --color-kumo-brand: var(--lapis);
+  --color-kumo-brand-hover: var(--lapis-strong);
+  --color-kumo-line: var(--border);
+  --color-kumo-hairline: var(--border);
+  --color-kumo-focus: var(--ring);
+  --color-kumo-shadow-edge: var(--border);
+  --color-kumo-shadow-drop: transparent;
+  --color-kumo-arrow-edge: var(--border);
+  --color-kumo-arrow-stroke: var(--border);
+  --color-kumo-info-tint: var(--info-soft);
+  --color-kumo-info: var(--info);
+  --color-kumo-warning-tint: var(--warning-soft);
+  --color-kumo-warning: var(--warning);
+  --color-kumo-danger-tint: var(--muted);
+  --color-kumo-danger: var(--ink);
+  --color-kumo-success-tint: var(--gain-soft);
+  --color-kumo-success: var(--gain);
+  --color-kumo-banner-info: var(--info-soft);
+  --color-kumo-banner-warning: var(--warning-soft);
+  --color-kumo-badge-red: var(--ink);
+  --color-kumo-badge-green: var(--gain);
+  --color-kumo-badge-orange: var(--mandate);
+  --color-kumo-badge-purple: var(--lapis);
+  --color-kumo-badge-teal: var(--lapis);
+  --color-kumo-badge-teal-subtle: var(--lapis-soft);
+  --color-kumo-badge-blue: var(--lapis);
+  --color-kumo-badge-neutral: var(--muted-foreground);
+  --color-kumo-badge-inverted: var(--ink);
+}
+
+/*
+ * Dark: every role above follows its token, which globals.css re-points. These three change
+ * meaning, because the brand and contrast fills turn off-white: inactive text dims to the mid grey,
+ * and type on an inverted fill is ink rather than the (now dark) card.
+ */
+html:root[data-mode="dark"] {
+  --text-color-kumo-inactive: var(--ink-line);
+  --text-color-kumo-inverse: var(--ink-foreground);
+  --text-color-kumo-badge-inverted: var(--ink-foreground);
+}
+
+/* Surfaces: a region painted in one of the meanings re-points every role inside it. `account` is an ink (dark: paper) fill. */
+[data-surface="account"] {
+  --foreground: var(--lapis-foreground);
+  --muted-foreground: var(--lapis-muted);
+  --card: var(--lapis);
+  --muted: var(--lapis-strong);
+  --border: var(--lapis-line);
+  --ring: var(--lapis-foreground);
+  --text-color-kumo-default: var(--lapis-foreground);
+  --text-color-kumo-strong: var(--lapis-foreground);
+  --text-color-kumo-subtle: var(--lapis-muted);
+  --text-color-kumo-link: var(--lapis-foreground);
+  --color-kumo-base: var(--lapis);
+  --color-kumo-control: var(--lapis);
+  --color-kumo-tint: var(--lapis-strong);
+  --color-kumo-fill: var(--lapis-strong);
+  --color-kumo-line: var(--lapis-line);
+  --color-kumo-hairline: var(--lapis-line);
+  --color-kumo-focus: var(--lapis-foreground);
+  --color-kumo-brand: var(--lapis-foreground);
+  background-color: var(--lapis);
+  color: var(--lapis-foreground);
+}
+
+/* Your mandate: the pale volt field, with deep volt for its strong text and volt for its lines. */
+[data-surface="field"] {
+  --text-color-kumo-default: var(--mandate-foreground);
+  --text-color-kumo-strong: var(--mandate-strong);
+  --text-color-kumo-subtle: var(--mandate-muted);
+  --color-kumo-base: var(--mandate);
+  --color-kumo-line: var(--mandate-edge);
+  --color-kumo-hairline: var(--mandate-edge);
+  background-color: var(--mandate);
+  color: var(--mandate-foreground);
+}
+
+[data-surface="ink"] {
+  --foreground: var(--ink-foreground);
+  --muted-foreground: var(--lapis-muted);
+  --card: var(--ink);
+  --border: var(--ink-line);
+  --ring: var(--ink-foreground);
+  --text-color-kumo-default: var(--ink-foreground);
+  --text-color-kumo-strong: var(--ink-foreground);
+  --text-color-kumo-subtle: var(--lapis-muted);
+  --color-kumo-base: var(--ink);
+  --color-kumo-control: var(--ink);
+  --color-kumo-line: var(--ink-line);
+  --color-kumo-focus: var(--ink-foreground);
+  background-color: var(--ink);
+  color: var(--ink-foreground);
+}
+
+/*
+ * Kumo's arbitrary radii are not theme-driven; they join the radius scale here, so a control and
+ * the sheet around it round by the same steps (web/DESIGN.md, Shape).
+ */
+.rounded-\[5px\] {
+  border-radius: var(--radius-sm);
+}
+.rounded-tl-\[5px\] {
+  border-top-left-radius: var(--radius-sm);
+}
+.rounded-tr-\[5px\] {
+  border-top-right-radius: var(--radius-sm);
+}
+.rounded-bl-\[5px\] {
+  border-bottom-left-radius: var(--radius-sm);
+}
+.rounded-br-\[5px\] {
+  border-bottom-right-radius: var(--radius-sm);
+}
+
+.rounded-\[10px\] {
+  border-radius: var(--radius-lg);
+}
+
+/*
+ * Flat fills (DEC-200). Kumo paints an overlay span on emphasis buttons, fades on sticky table
+ * cells and tab scroll buttons, scroll masks on the sidebar, layer dialog and tab list, and a
+ * shimmer on skeletons.
+ * Primary is the only emphasis variant we allow (destructive is lint-banned), so the overlay takes
+ * the brand token, which is also the emphasis end colour Kumo computes for primary.
+ */
+[data-kumo-component="Button"] > span[aria-hidden="true"].absolute,
+[data-kumo-component="LinkButton"] > span[aria-hidden="true"].absolute {
+  background-image: none;
+  background-color: var(--color-kumo-brand);
+  box-shadow: none;
+}
+
+[class*="linear-to-"] {
+  background-image: none;
+}
+
+[class*="linear-to-"][class*="from-kumo-base"] {
+  background-color: var(--color-kumo-base);
+}
+
+[class*="linear-to-"][class*="from-kumo-recessed"] {
+  background-color: var(--color-kumo-recessed);
+}
+
+[class*="before:from-transparent"]::before {
+  background-image: none;
+  background-color: transparent;
+}
+
+[class*="mask-image"],
+[data-overflowing] {
+  mask-image: none;
+  -webkit-mask-image: none;
+  animation: none;
+}
+
+.skeleton {
+  background-image: none;
+  background-color: var(--muted);
+  animation: none;
+}
+
+.skeleton-line {
+  background-color: var(--muted);
+}
+
+.skeleton-line::after {
+  content: none;
+  background-image: none;
+  animation: none;
+}
+
+.kumo-chart-shimmer {
+  animation: none;
+}
+
+/* Sixteen pixels on touch screens, so iOS does not zoom into a field. */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}

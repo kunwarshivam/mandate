@@ -174,8 +174,9 @@ As decided in [ADR-0001](docs/adr/0001-engineering-setup.md).
   `static.crates.io`, `pypi.org`, and `files.pythonhosted.org`, never from `astral.sh`, so it runs
   behind restrictive egress proxies. It also sets `python-install-mirror` in uv's user config
   (`~/.config/uv/uv.toml`) so later `uv` calls fetch Python from GitHub too. Work under `web/`
-  (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`, and
-  `registry.npmjs.org`, for `npm ci`; `install.sh` installs no Node.js and fetches from neither.
+  (DEC-200) also needs `nodejs.org`, for the Node.js release pinned in `web/.nvmrc`,
+  `registry.npmjs.org`, for `npm ci`, and `cdn.playwright.dev`, for the Chromium download that
+  local end-to-end runs need; `install.sh` installs no Node.js and fetches from none of them.
 - **Before proposing any change, run `cargo xtask check`.** It runs every per-PR job: lint (fmt,
   clippy `-D warnings`, crate layering, typos, ruff), test (nextest, doctests, pytest), reference-case
   fixture drift, the reference implementation checks, supply chain (cargo-deny, the dependency

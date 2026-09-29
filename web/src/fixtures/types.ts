@@ -248,6 +248,28 @@ export interface GateDecision {
   action: { side: "buy" | "sell"; qty: Decimal; symbol: string; limit_price: Decimal; purpose: Purpose };
   /** For an allow: what happened next in plain words. */
   then?: string;
+  /** The order an allow led to, if one was sent. */
+  client_order_id?: string;
+  /** The approval request an allow led to, if the mandate asked the owner. */
+  approval_id?: string;
+}
+
+/** An execution at the broker, as journaled. */
+export interface Fill {
+  fill_id: string;
+  client_order_id: string;
+  instrument: InstrumentRef;
+  side: "buy" | "sell";
+  qty: Decimal;
+  price: Decimal;
+  at: Iso;
+}
+
+/** An order that reached a final state. `note` says why, in owner words. */
+export interface PastOrder extends WorkingOrder {
+  state: "Filled" | "Canceled" | "Rejected" | "Expired" | "Replaced" | "Abandoned";
+  closed_at: Iso;
+  note: string;
 }
 
 export type TimelineKind = "fill" | "order" | "mode" | "approval" | "gate" | "protection" | "reconciliation" | "version";
@@ -286,6 +308,8 @@ export interface Agent {
   state: LimitState;
   positions: Position[];
   orders: WorkingOrder[];
+  past_orders: PastOrder[];
+  fills: Fill[];
   goal_progress: { spent_usd: Decimal; held_qty: Decimal } | null;
   deployed_at: Iso;
 }
@@ -365,11 +389,14 @@ export type Scenario =
   | "reconciliation"
   | "unknown-order"
   | "unreachable"
-  | "approvals";
+  | "approvals"
+  | "result-unknown";
 
 export interface Workspace {
   scenario: Scenario;
   status: "ready" | "loading" | "unreachable";
+  /** Whether the deployment answers commands with a journal entry, or goes quiet after taking them. */
+  journal: "answers" | "silent";
   now: Iso;
   environment: Environment;
   connection: Connection;

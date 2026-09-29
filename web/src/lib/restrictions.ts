@@ -6,8 +6,8 @@ import type { ActiveRestriction, AgentMode, RestrictionCode } from "@/fixtures/t
  * can end it.
  */
 /**
- * Who imposed a restriction decides its colour (web/DESIGN.md): your mandate is marigold, the
- * account is lapis, your own stop is ink, and market data carries no meaning colour.
+ * Who imposed a restriction decides its colour (web/DESIGN.md): your mandate is volt, the
+ * account is the account colour, your own stop is ink, and market data carries no meaning colour.
  */
 export type RestrictionSource = "mandate" | "account" | "owner" | "market";
 

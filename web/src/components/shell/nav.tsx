@@ -1,89 +1,96 @@
 "use client";
 
+import { type ReactNode, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "motion/react";
+import { DotsThreeOutline } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Gauge, Inbox, ScrollText, Settings2, Workflow } from "lucide-react";
+import { useRole } from "@/lib/roles";
+import { isCurrent } from "./dock";
+import { MoreSheet, moreGroups, phoneTabs } from "./more-sheet";
 
-export const NAV = [
-  { href: "/", label: "Dashboard", icon: Gauge },
-  { href: "/approvals", label: "Approvals", icon: Inbox },
-  { href: "/agents", label: "Agents", icon: Workflow },
-  { href: "/audit", label: "Audit", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings2 },
-] as const;
+const TAB =
+  "press relative grid h-(--tab-bar) min-w-0 place-items-center content-center gap-1 px-0.5 text-[0.6875rem] leading-tight font-medium text-muted-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset";
 
-function isActive(pathname: string, href: string): boolean {
-  return href === "/" ? pathname === "/" : pathname === href || pathname.startsWith(`${href}/`);
-}
-
-/** The approvals badge carries a count and nothing else. */
-function Count({ n }: { n: number }) {
-  if (n === 0) return null;
+function TabFace({ active, icon, label, badge }: { active: boolean; icon: ReactNode; label: string; badge?: ReactNode }) {
   return (
-    <span data-slot="approvals-count" className="ml-auto inline-flex h-6 min-w-6 items-center justify-center bg-foreground px-1.5 font-mono text-caption font-bold text-background tabular">
-      {n}
-      <span className="sr-only"> open</span>
-    </span>
+    <>
+      <span className="relative grid h-7 w-14 place-items-center">
+        {active ? (
+          <motion.span
+            layoutId="tab-pill"
+            className="absolute inset-0 rounded-full bg-lapis-soft ring-1 ring-inset ring-lapis-line"
+            transition={{ type: "spring", duration: 0.3, bounce: 0.1 }}
+            aria-hidden
+          />
+        ) : null}
+        {icon}
+        {badge}
+      </span>
+      <span className="max-w-full truncate">{label}</span>
+    </>
   );
 }
 
-export function SideNav({ approvals }: { approvals: number }) {
-  const pathname = usePathname();
-  return (
-    <nav aria-label="Main" className="grid">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = isActive(pathname, href);
-        return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex h-11 items-center gap-3 px-4 font-medium text-foreground transition-colors duration-(--duration-hover) hover:bg-muted",
-              active && "bg-lapis font-bold text-lapis-foreground hover:bg-lapis",
-            )}
-          >
-            <Icon className="size-4" aria-hidden />
-            {label}
-            {href === "/approvals" ? <Count n={approvals} /> : null}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
-
+/**
+ * The phone's one navigation (DEC-207): Home, Approvals with its count, Agents, and More, a sheet
+ * with every other screen. A role that sees no agents gets its home and More. The current tab's
+ * icon fills and sits on a pale volt pill that glides between tabs; with reduced motion it jumps.
+ */
 export function TabNav({ approvals }: { approvals: number }) {
   const pathname = usePathname();
+  const { role } = useRole();
+  const [more, setMore] = useState(false);
+  const tabs = phoneTabs(role);
+  const onTab = tabs.some((t) => isCurrent(pathname, t.href));
+  const inMore = !onTab && moreGroups(role).some((g) => g.links.some((l) => isCurrent(pathname, l.href)));
+  const moreActive = more || inMore;
   return (
-    <nav aria-label="Main" className="grid grid-cols-5 border-t-2 border-foreground bg-card pb-[env(safe-area-inset-bottom)]">
-      {NAV.map(({ href, label, icon: Icon }) => {
-        const active = isActive(pathname, href);
+    <nav
+      aria-label="Main"
+      className="glass grid border-t pb-[env(safe-area-inset-bottom)]"
+      style={{ gridTemplateColumns: `repeat(${tabs.length + 1}, minmax(0, 1fr))` }}
+    >
+      {tabs.map(({ href, label, icon: Icon }) => {
+        const active = !more && isCurrent(pathname, href);
         return (
-          <Link
-            key={href}
-            href={href}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "press relative grid h-14 min-w-0 place-items-center content-center gap-0.5 px-0.5 text-[0.6875rem] leading-tight font-medium text-muted-foreground",
-              active && "font-bold text-foreground",
-            )}
-          >
-            <span className="relative">
-              <Icon className="size-5" aria-hidden />
-              {href === "/approvals" && approvals > 0 ? (
-                <span data-slot="approvals-count" className="absolute -top-2 -right-3 inline-flex h-4.5 min-w-4.5 items-center justify-center bg-foreground px-1 font-mono text-label font-bold text-background tabular">
-                  {approvals}
-                  <span className="sr-only"> open</span>
-                </span>
-              ) : null}
-            </span>
-            <span className="max-w-full truncate">{label}</span>
-            {active ? <span className="absolute inset-x-3 top-0 h-1 bg-lapis" aria-hidden /> : null}
+          <Link key={href} href={href} aria-current={isCurrent(pathname, href) ? "page" : undefined} className={cn(TAB, active && "text-lapis")}>
+            <TabFace
+              active={active}
+              label={label}
+              icon={<Icon className="relative size-5.5" weight={active ? "fill" : "regular"} aria-hidden />}
+              badge={
+                href === "/approvals" && approvals > 0 ? (
+                  <span
+                    data-slot="approvals-count"
+                    className="absolute -top-1 right-1 inline-flex h-4.5 min-w-4.5 items-center justify-center rounded-full bg-lapis px-1 font-mono text-[0.6875rem] font-semibold text-lapis-foreground tabular ring-2 ring-card"
+                  >
+                    {approvals}
+                    <span className="sr-only"> open</span>
+                  </span>
+                ) : null
+              }
+            />
           </Link>
         );
       })}
+      <button
+        type="button"
+        data-slot="more-tab"
+        aria-haspopup="dialog"
+        aria-expanded={more}
+        aria-current={inMore ? "page" : undefined}
+        onClick={() => setMore(true)}
+        className={cn(TAB, moreActive && "text-lapis")}
+      >
+        <TabFace
+          active={moreActive}
+          label="More"
+          icon={<DotsThreeOutline className="relative size-5.5" weight={moreActive ? "fill" : "regular"} aria-hidden />}
+        />
+      </button>
+      <MoreSheet open={more} onOpenChange={setMore} />
     </nav>
   );
 }

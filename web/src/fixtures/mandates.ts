@@ -53,7 +53,7 @@ export const btcAccumulator: Mandate = {
   name: "btc-accumulator",
   source_text_ref: "sha256:60fc25912e951fe42f1be657ff72f3a8eb3903f3c666f85fcd63dc2b117d0145",
   environment: "paper",
-  connection_id: "conn_alpaca_paper_01",
+  connection_id: "con_01JB3K7M9Q2W4E6R8T0Y1V3X5P",
   capital: { allocation_usd: "10000", max_loss_from_allocation: "0.1" },
   goal: {
     type: "accumulate",

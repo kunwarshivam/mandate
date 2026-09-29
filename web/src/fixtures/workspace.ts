@@ -3,6 +3,8 @@
  * internally consistent (equity = allocation + realized + market value − cost basis) and to sit
  * inside every limit they are not meant to break; none is a performance record.
  */
+import { add, dec, toFixed } from "@/lib/decimal";
+import { BTC_HISTORY, LMN_HISTORY, SWING_HISTORY } from "./history";
 import { INSTRUMENTS, btcAccumulator, lmnCore, provenance, twoStockSwing } from "./mandates";
 import type { Agent, Approval, CancelReason, GateDecision, Health, Scenario, TimelineEvent, Workspace } from "./types";
 
@@ -85,6 +87,7 @@ const btc: Agent = {
       time_in_force: "gtc",
     },
   ],
+  ...BTC_HISTORY,
   goal_progress: { spent_usd: "6666.67", held_qty: "0.12" },
   deployed_at: t("09:30:00", "2026-09-21"),
 };
@@ -163,6 +166,7 @@ const swing: Agent = {
       time_in_force: "gtc",
     },
   ],
+  ...SWING_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-22"),
 };
@@ -191,6 +195,7 @@ const lmn: Agent = {
   },
   positions: [],
   orders: [],
+  ...LMN_HISTORY,
   goal_progress: null,
   deployed_at: t("09:30:00", "2026-09-23"),
 };
@@ -383,6 +388,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "2", symbol: "XYZ", limit_price: "141.3", purpose: "increase" },
     then: "Asked you for approval (your rule “low_score”).",
+    approval_id: APPROVAL_IDS.swingXyz,
   },
   {
     event_id: "01JBWPQ5E6EYCNDY0YP57RCYBV",
@@ -400,6 +406,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "0.01", symbol: "BTC/USD", limit_price: "55900", purpose: "increase" },
     then: "Submitted without asking (your rule “routine”); resting at the broker.",
+    client_order_id: "cid_01JBH3BV4H15G5E4G7X0NTH82F",
   },
   {
     event_id: "01JBN5SXS5AA819X9YP981068V",
@@ -417,6 +424,7 @@ const decisions: GateDecision[] = [
     reason_code: null,
     action: { side: "buy", qty: "5", symbol: "QRS", limit_price: "98.76", purpose: "open" },
     then: "Approved by you; submitted and filled.",
+    client_order_id: "cid_01JCGPZ78Y1223KHAFF3AMAPB9",
   },
   {
     event_id: "01JBCD1GDJFMGT83PXT891WB09",
@@ -465,13 +473,21 @@ const healthy: Health = {
   relay: { state: "ok", as_of: t("14:05:10") },
 };
 
+/** Cash and the owner's own ABC shares: the part of the broker's equity that no agent manages. */
+const UNMANAGED_EQUITY = "3412.8";
+
+function brokerEquity(agents: Agent[]): string {
+  return toFixed(add(dec(UNMANAGED_EQUITY), ...agents.map((a) => dec(a.state.equity))), 2);
+}
+
 function base(scenario: Scenario): Workspace {
   return structuredClone({
     scenario,
     status: "ready",
+    journal: "answers",
     now: NOW,
     environment: "paper",
-    connection: { connection_id: "conn_alpaca_paper_01", broker: "Alpaca paper", account_equity: "25000", day_trading_regime: "intraday_margin" },
+    connection: { connection_id: "con_01JB3K7M9Q2W4E6R8T0Y1V3X5P", broker: "Alpaca paper", account_equity: brokerEquity([btc, swing, lmn]), day_trading_regime: "intraday_margin" },
     health: healthy,
     agents: [btc, swing, lmn],
     approvals: [pendingSwing, ...resolved],
@@ -505,6 +521,7 @@ export const SCENARIOS: Array<{ id: Scenario; label: string }> = [
   { id: "unknown-order", label: "Unknown order" },
   { id: "unreachable", label: "Deployment unreachable" },
   { id: "approvals", label: "Pending approvals" },
+  { id: "result-unknown", label: "Result unknown" },
 ];
 
 export function isScenario(value: unknown): value is Scenario {
@@ -570,7 +587,12 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
       b.pnl_today = "-70";
       b.state = { ...b.state, equity: "9530", equity_day_start: "9600", size_factor: "0.5" };
       b.positions[0] = { ...b.positions[0], mark: "51843.58", market_value: "6221.23", unrealized_pnl: "-445.44" };
+      ws.connection.account_equity = brokerEquity(ws.agents);
+      const canceled = b.orders.filter((o) => o.purpose !== "protective");
       b.orders = b.orders.filter((o) => o.purpose === "protective");
+      b.past_orders.unshift(
+        ...canceled.map((o) => ({ ...o, state: "Canceled" as const, closed_at: t("14:01:12"), note: "Canceled on entering exits-only." })),
+      );
       ws.decisions.unshift({
         event_id: "01JBEZT39S3D19T33BSWM75ANC",
         at: t("14:04:30"),
@@ -633,6 +655,8 @@ export function buildWorkspace(scenario: Scenario = "normal"): Workspace {
     case "approvals":
       ws.approvals = [pendingSwing, pendingBtc, pendingLmn, ...resolved];
       return ws;
+    case "result-unknown":
+      return { ...ws, journal: "silent" };
     default: {
       const unhandled: never = scenario;
       throw new Error(`unhandled scenario ${String(unhandled)}`);

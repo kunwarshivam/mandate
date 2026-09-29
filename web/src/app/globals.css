@@ -1,36 +1,80 @@
+@source "../../node_modules/@cloudflare/kumo/dist/**/*.{js,jsx,ts,tsx}";
+@import "@cloudflare/kumo/styles/tailwind";
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./kumo-theme.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Placard (web/DESIGN.md). Colour values live in src/lib/tokens.ts as well; tokens.test.ts fails
- * when the two drift. Colour carries four meanings and nothing else: marigold is your mandate,
- * lapis is the account, ink is a stopped agent and the Stop control, crimson is the kill switch.
- * Light only: dark mode is follow-up work, not a half-designed theme.
+ * Owlhead's calm system in Ink and Volt (DEC-205, web/DESIGN.md, web/COLOR.md). Every colour
+ * is a ramp step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift.
+ * Colour carries four meanings and nothing else: the mandate tokens (volt) are your mandate,
+ * lapis is the account (an ink fill, a volt line), ink is a stopped agent and the Stop
+ * control, crimson is the kill switch.
  */
 :root {
-  --background: oklch(0.975 0.005 250);
-  --card: oklch(0.995 0.002 250);
-  --muted: oklch(0.935 0.01 250);
-  --border: oklch(0.8 0.02 255);
-  --foreground: oklch(0.21 0.035 258);
-  --muted-foreground: oklch(0.44 0.035 258);
-  --primary: oklch(0.36 0.1 258);
-  --primary-foreground: oklch(0.975 0.005 250);
-  --lapis: oklch(0.36 0.1 258);
-  --lapis-foreground: oklch(0.975 0.005 250);
-  --lapis-muted: oklch(0.84 0.03 255);
-  --lapis-soft: oklch(0.93 0.03 255);
-  --marigold: oklch(0.85 0.155 84);
-  --marigold-foreground: oklch(0.21 0.035 258);
-  --marigold-muted: oklch(0.36 0.05 70);
-  --marigold-soft: oklch(0.955 0.05 90);
-  --ink: oklch(0.21 0.035 258);
-  --ink-foreground: oklch(0.975 0.005 250);
-  --crimson: oklch(0.47 0.19 27);
-  --crimson-foreground: oklch(0.985 0.004 250);
-  --gain: oklch(0.44 0.11 155);
-  --loss: oklch(0.49 0.18 10);
+  --background: oklch(0.975 0.004 255);
+  --card: oklch(0.992 0.003 255);
+  --muted: oklch(0.91 0.006 255);
+  --border: oklch(0.91 0.006 255);
+  --foreground: oklch(0.2 0.008 255);
+  --muted-foreground: oklch(0.38 0.01 255);
+  --primary: oklch(0.2 0.008 255);
+  --primary-foreground: oklch(0.992 0.003 255);
+  --lapis: oklch(0.2 0.008 255);
+  --lapis-foreground: oklch(0.992 0.003 255);
+  --lapis-muted: oklch(0.91 0.006 255);
+  --lapis-soft: oklch(0.975 0.05 120);
+  --lapis-strong: oklch(0.38 0.01 255);
+  --lapis-line: oklch(0.62 0.14 120);
+  --mandate: oklch(0.975 0.05 120);
+  --mandate-foreground: oklch(0.2 0.008 255);
+  --mandate-muted: oklch(0.38 0.01 255);
+  --mandate-strong: oklch(0.44 0.1 120);
+  --mandate-marker: oklch(0.62 0.14 120);
+  --mandate-edge: oklch(0.62 0.14 120);
+  --mandate-soft: oklch(0.975 0.05 120);
+  --selection: oklch(0.91 0.19 120);
+  --highlight: oklch(0.88 0.2 120);
+  --highlight-foreground: oklch(0.2 0.008 255);
+  --ink: oklch(0.2 0.008 255);
+  --ink-foreground: oklch(0.992 0.003 255);
+  --ink-line: oklch(0.44 0.01 255);
+  --crimson: oklch(0.44 0.173 27);
+  --crimson-foreground: oklch(0.992 0.003 255);
+  --crimson-edge: oklch(0.44 0.173 27);
+  --gain: oklch(0.44 0.117 150);
+  --loss: oklch(0.44 0.117 12);
+  --warning: oklch(0.44 0.092 70);
+  --info: oklch(0.38 0.01 255);
+  --gain-soft: oklch(0.975 0.011 150);
+  --loss-soft: oklch(0.975 0.011 12);
+  --warning-soft: oklch(0.975 0.017 70);
+  --info-soft: oklch(0.975 0.004 255);
+  --gain-cvd: oklch(0.44 0.072 205);
+  --loss-cvd: oklch(0.31 0.099 350);
+  --gain-cvd-soft: oklch(0.975 0.024 205);
+  --loss-cvd-soft: oklch(0.975 0.013 350);
+  --hatch-ink: oklch(0.2 0.008 255 / 0.3);
+  --paper: var(--card);
+  --logo: var(--foreground);
+  --backdrop: color-mix(in oklch, var(--ink) 40%, transparent);
+  /*
+   * The frame's frosted glass (the header and the phone tab bar). 72% card keeps muted text at 5.2:1
+   * even with solid ink scrolling underneath; at 60% it would fall to 3.8:1. Mixed in OKLab: mixed
+   * with transparent in OKLCH, Chromium drops the hue and the ink glass turns faintly pink.
+   */
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
+  --glass-edge: color-mix(in oklab, var(--foreground) 8%, transparent);
+  /*
+   * The dock carries the navigation, so its glass is denser and its edge firmer than the header's.
+   * The current section's pill is a tint of the type colour: muted is only 1.1:1 on the dark card, and
+   * a solid ink fill belongs to Stop. At 14% the pill holds 1.3:1 on the glass in light and 1.5:1 in dark.
+   */
+  --dock-glass: color-mix(in oklab, var(--card) 85%, transparent);
+  --dock-edge: color-mix(in oklab, var(--foreground) 15%, transparent);
+  --dock-current: color-mix(in oklab, var(--foreground) 14%, transparent);
+  --dock-hover: color-mix(in oklab, var(--foreground) 7%, transparent);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -41,48 +85,154 @@
   --accent-foreground: var(--foreground);
   --destructive: var(--loss);
   --input: var(--border);
-  --ring: var(--lapis);
-  --radius: 0rem;
+  --ring: var(--mandate-strong);
+  --radius: 0.5rem;
 
-  --hatch-ink: oklch(0.36 0.1 258 / 0.3);
-
-  /* Layout: the gutters the founder asked to tighten (DESIGN.md, Space). */
-  --sidebar-width: 12rem;
-  --content-max: 90rem;
-  --page-x: 0.75rem;
-  --page-top: 1rem;
-  --page-bottom: 2.5rem;
-  --section-gap: 1.5rem;
-  --block-gap: 0.75rem;
-  --seam: 0.375rem;
+  /* Layout (web/DESIGN.md, Space). Calm is the default density; audit and admin opt into dense. */
+  --content-max: 68rem;
+  --page-x: 1.25rem;
+  --page-top: 1.5rem;
+  --page-bottom: 4rem;
+  --section-gap: 3rem;
+  --block-gap: 1rem;
+  --row-y: 1rem;
+  --seam: 0.5rem;
+  --tab-bar: 4rem;
+  /* The desktop dock: 50px labelled items in 6px of padding and a hairline, floating 1rem above the bottom edge. */
+  --dock-h: 4rem;
+  --dock-gap: 1rem;
+  --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
+  /* The status strip and the phone's feed banner share one height, so either replacing the other moves nothing. */
+  --status-row: 2.125rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: linear(0, 0.0105 1.1%, 0.0435 2.3%, 0.1789 5%, 0.3776 7.9%, 0.7612 13.2%, 0.9003 15.9%, 1.0103 18.8%, 1.0753 21.7%, 1.0979 23.7%, 1.1044 25.9%, 1.0967 28.4%, 1.0229 36.9%, 1.0022 41.6%, 0.9936 47.3%, 0.9988 64.7%, 1);
   --duration-press: 140ms;
   --duration-release: 80ms;
   --duration-hover: 160ms;
-  --duration-reveal: 200ms;
+  --duration-reveal: 240ms;
   --stagger: 30ms;
-  --duration-sheet: 280ms;
+  --duration-number: 240ms;
+  --duration-sheet: 320ms;
   --duration-sheet-exit: 200ms;
-  --duration-dialog: 220ms;
+  --duration-dialog: 240ms;
   --duration-dialog-exit: 150ms;
+  --duration-draw: 700ms;
 
   color-scheme: light;
 }
 
+/*
+ * Dark: ink surfaces, paper type, volt a step lighter for the account's line, the mandate's
+ * marks and labels. Primary actions and the Stop control turn to a paper fill with ink type; crimson keeps its
+ * fill and lightens its edge. Still flat: no shadows, no glows.
+ */
+html:root[data-mode="dark"] {
+  --background: oklch(0.16 0.008 255);
+  --card: oklch(0.2 0.008 255);
+  --muted: oklch(0.24 0.01 255);
+  --border: oklch(0.31 0.01 255);
+  --foreground: oklch(0.975 0.004 255);
+  --muted-foreground: oklch(0.88 0.006 255);
+  --primary: oklch(0.975 0.004 255);
+  --primary-foreground: oklch(0.2 0.008 255);
+  --lapis: oklch(0.975 0.004 255);
+  --lapis-foreground: oklch(0.2 0.008 255);
+  --lapis-muted: oklch(0.31 0.01 255);
+  --lapis-soft: oklch(0.31 0.06 120);
+  --lapis-strong: oklch(0.88 0.006 255);
+  --lapis-line: oklch(0.76 0.17 120);
+  --mandate: oklch(0.31 0.06 120);
+  --mandate-foreground: oklch(0.975 0.004 255);
+  --mandate-muted: oklch(0.88 0.006 255);
+  --mandate-strong: oklch(0.91 0.19 120);
+  --mandate-marker: oklch(0.76 0.17 120);
+  --mandate-edge: oklch(0.76 0.17 120);
+  --mandate-soft: oklch(0.24 0.045 120);
+  --selection: oklch(0.38 0.075 120);
+  --highlight: oklch(0.88 0.2 120);
+  --highlight-foreground: oklch(0.2 0.008 255);
+  --ink: oklch(0.975 0.004 255);
+  --ink-foreground: oklch(0.2 0.008 255);
+  --ink-line: oklch(0.62 0.007 255);
+  --crimson: oklch(0.44 0.173 27);
+  --crimson-foreground: oklch(0.992 0.003 255);
+  --crimson-edge: oklch(0.76 0.138 27);
+  --gain: oklch(0.88 0.062 150);
+  --loss: oklch(0.88 0.062 12);
+  --warning: oklch(0.88 0.089 70);
+  --info: oklch(0.88 0.006 255);
+  --gain-soft: oklch(0.24 0.063 150);
+  --loss-soft: oklch(0.24 0.063 12);
+  --warning-soft: oklch(0.24 0.05 70);
+  --info-soft: oklch(0.24 0.01 255);
+  --gain-cvd: oklch(0.88 0.111 205);
+  --loss-cvd: oklch(0.88 0.068 50);
+  --gain-cvd-soft: oklch(0.24 0.039 205);
+  --loss-cvd-soft: oklch(0.24 0.061 50);
+  --hatch-ink: oklch(0.62 0.007 255 / 0.4);
+  --paper: var(--mandate);
+  --backdrop: color-mix(in oklch, var(--background) 72%, transparent);
+  /* Muted text keeps 5.1:1 even with solid paper scrolling underneath; at 60% it would fall to 3.35:1. */
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
+
+  color-scheme: dark;
+}
+
+/* Flat in dark: nothing floats on a shadow, so sheets and menus sit on their hairline. */
+.dark :is(.shadow-md, .shadow-lg, .shadow-xl, .shadow-2xl) {
+  --tw-shadow: 0 0 #0000;
+}
+
+/*
+ * Kumo's toasts sit 2rem above the bottom right corner, under the dock's layer, and the dock reaches
+ * that corner's column below 1440px. From 64rem they rise clear of the dock instead.
+ */
+@media (min-width: 64rem) {
+  [role="region"][aria-label="Notifications"] {
+    bottom: calc(var(--dock-clearance) + 1rem);
+  }
+}
+
+/* Scrims darken the page in both modes; an off-white ink scrim would light it up. */
+.dark [data-slot="sheet-backdrop"] {
+  background-color: var(--backdrop);
+}
+
+/*
+ * Colour-blind friendly (web/COLOR.md): a gain turns teal, and a loss raspberry in light or orange in
+ * dark, which stay apart from each other, from volt and from crimson under deuteranopia,
+ * protanopia and tritanopia. Charts read the same attribute, since a canvas cannot read CSS.
+ */
+html:root[data-cvd="on"] {
+  --gain: var(--gain-cvd);
+  --loss: var(--loss-cvd);
+  --gain-soft: var(--gain-cvd-soft);
+  --loss-soft: var(--loss-cvd-soft);
+}
+
 @media (min-width: 40rem) {
   :root {
-    --page-x: 1rem;
+    --page-x: 1.75rem;
   }
 }
 
 @media (min-width: 64rem) {
   :root {
-    --page-x: 1.5rem;
-    --page-top: 1.25rem;
+    --page-x: 2.5rem;
+    --page-top: 2.25rem;
+    --section-gap: 3.5rem;
   }
+}
+
+/* Dense: audit and admin read like a console, tables first, rows close together. */
+[data-density="dense"] {
+  --content-max: 90rem;
+  --section-gap: 2rem;
+  --block-gap: 0.75rem;
+  --row-y: 0.5rem;
 }
 
 @theme inline {
@@ -108,49 +258,104 @@
   --color-lapis-foreground: var(--lapis-foreground);
   --color-lapis-muted: var(--lapis-muted);
   --color-lapis-soft: var(--lapis-soft);
-  --color-marigold: var(--marigold);
-  --color-marigold-foreground: var(--marigold-foreground);
-  --color-marigold-muted: var(--marigold-muted);
-  --color-marigold-soft: var(--marigold-soft);
+  --color-lapis-strong: var(--lapis-strong);
+  --color-lapis-line: var(--lapis-line);
+  --color-mandate: var(--mandate);
+  --color-mandate-foreground: var(--mandate-foreground);
+  --color-mandate-muted: var(--mandate-muted);
+  --color-mandate-strong: var(--mandate-strong);
+  --color-mandate-marker: var(--mandate-marker);
+  --color-mandate-edge: var(--mandate-edge);
+  --color-mandate-soft: var(--mandate-soft);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
+  --color-ink-line: var(--ink-line);
   --color-crimson: var(--crimson);
   --color-crimson-foreground: var(--crimson-foreground);
+  --color-crimson-edge: var(--crimson-edge);
   --color-gain: var(--gain);
   --color-loss: var(--loss);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-gain-soft: var(--gain-soft);
+  --color-loss-soft: var(--loss-soft);
+  --color-warning-soft: var(--warning-soft);
+  --color-info-soft: var(--info-soft);
 
-  --font-display: "Big Shoulders Display Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-sans: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: var(--font-display);
-  --font-mono: "Atkinson Hyperlegible Next Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans);
+  --font-mono: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
 
-  --text-display: 3rem;
-  --text-display--line-height: 0.9;
-  --text-display--font-weight: 800;
-  --text-title: 2rem;
-  --text-title--line-height: 0.95;
-  --text-title--font-weight: 800;
-  --text-heading: 1.5rem;
-  --text-heading--line-height: 1;
-  --text-heading--font-weight: 800;
+  /* One tight scale (web/DESIGN.md, Type). Weight steps are 400, 500 and 600, never bolder. */
+  /* The equity figure scales with its hero's container (cqi), so "−$1,234,567.89" fits at 320px. */
+  --text-display: clamp(2rem, 14cqi, 4.75rem);
+  --text-display--line-height: 0.95;
+  --text-display--letter-spacing: -0.03em;
+  --text-display--font-weight: 600;
+  --text-hero: clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem);
+  --text-hero--line-height: 1.05;
+  --text-hero--letter-spacing: -0.03em;
+  --text-hero--font-weight: 600;
+  --text-h1: 1.75rem;
+  --text-h1--line-height: 1.2;
+  --text-h1--letter-spacing: -0.02em;
+  --text-h1--font-weight: 600;
+  --text-h2: 1.25rem;
+  --text-h2--line-height: 1.3;
+  --text-h2--letter-spacing: -0.01em;
+  --text-h2--font-weight: 600;
+  --text-h3: 1rem;
+  --text-h3--line-height: 1.4;
+  --text-h3--font-weight: 600;
+  --text-figure: 1.375rem;
+  --text-figure--line-height: 1.2;
+  --text-figure--letter-spacing: -0.015em;
+  --text-figure--font-weight: 500;
   --text-caption: 0.8125rem;
-  --text-caption--line-height: 1.35;
-  --text-label: 0.75rem;
-  --text-label--line-height: 1.2;
-  --text-label--font-weight: 700;
+  --text-caption--line-height: 1.4;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.35;
+  --text-label--font-weight: 500;
 
-  --radius-xs: 0rem;
-  --radius-sm: 0rem;
-  --radius-md: 0rem;
-  --radius-lg: 0rem;
-  --radius-xl: 0rem;
-  --radius-2xl: 0rem;
-  --radius-3xl: 0rem;
-  --radius-4xl: 0rem;
+  /* Kumo sets a pixel type scale for a 14 px product; rem keeps the owner's size. */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: 1.5;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(1.75 / 1.125);
+
+  /* ch is the width of a zero; Public Sans letters run narrower, so 58ch keeps prose under 80 characters (max-w-measure). */
+  --container-measure: 58ch;
+
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+  --radius-3xl: 1.5rem;
+  --radius-4xl: 2rem;
 
   --ease-out: var(--ease-out);
   --ease-in-out: var(--ease-in-out);
   --ease-drawer: var(--ease-drawer);
+
+  /* Controls are flat. Only things that float over the page (menus, sheets, dialogs) cast a shadow. */
+  --shadow-2xs: 0 0 #0000;
+  --shadow-xs: 0 0 #0000;
+  --shadow-sm: 0 0 #0000;
+  --shadow-md: 0 4px 12px -2px color-mix(in oklch, var(--lapis-strong) 10%, transparent), 0 1px 3px color-mix(in oklch, var(--lapis-strong) 8%, transparent);
+  --shadow-lg: 0 12px 32px -8px color-mix(in oklch, var(--lapis-strong) 16%, transparent), 0 2px 6px color-mix(in oklch, var(--lapis-strong) 8%, transparent);
+  --shadow-xl: 0 20px 48px -12px color-mix(in oklch, var(--lapis-strong) 20%, transparent), 0 4px 10px color-mix(in oklch, var(--lapis-strong) 8%, transparent);
+  --shadow-2xl: 0 28px 64px -16px color-mix(in oklch, var(--lapis-strong) 24%, transparent);
+
+  --color-white: var(--card);
+  --color-black: var(--ink);
 }
 
 @layer base {
@@ -159,27 +364,46 @@
   }
   html {
     @apply font-sans;
-    /* Placard reads at 17 px when the browser default is 16 px, and follows the owner's setting. */
-    font-size: 106.25%;
     font-synthesis: none;
+    font-optical-sizing: auto;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    caret-color: var(--foreground);
-    accent-color: var(--lapis);
+    caret-color: var(--lapis-line);
+    accent-color: var(--lapis-line);
     scrollbar-color: var(--border) transparent;
-    -webkit-tap-highlight-color: color-mix(in oklch, var(--lapis) 20%, transparent);
+    scrollbar-width: thin;
+    -webkit-tap-highlight-color: transparent;
+    /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
+    scroll-padding-top: 5rem;
+    /* The landing draws no sticky header or dock (DEC-213). */
+    &:has([data-slot="landing"]) {
+      scroll-padding: 0;
+    }
+    scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
+    @media (min-width: 64rem) {
+      scroll-padding-bottom: calc(var(--dock-clearance) + 1rem);
+    }
+    &:has([data-slot="approval-choices"]) {
+      scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 8rem);
+      @media (min-width: 64rem) {
+        scroll-padding-bottom: calc(var(--dock-clearance) + 8rem);
+      }
+    }
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-card text-foreground;
   }
   h1, h2, h3 {
-    font-family: var(--font-display);
-    text-transform: uppercase;
+    font-weight: 600;
     text-wrap: balance;
   }
   p {
     text-wrap: pretty;
+  }
+  a {
+    text-underline-offset: 0.2em;
+    text-decoration-thickness: 1px;
   }
   a, button, summary, [role="button"] {
     touch-action: manipulation;
@@ -192,30 +416,55 @@
     outline-offset: 2px;
   }
   ::selection {
-    background-color: var(--marigold);
-    color: var(--marigold-foreground);
+    background-color: var(--selection);
+    color: var(--foreground);
   }
   .font-mono {
     font-variant-numeric: tabular-nums;
   }
 }
 
-/* shadcn Sheet and Dialog keep their markup; only their timing is ours. */
-[data-slot="sheet-content"] {
-  --tw-duration: var(--duration-sheet);
-  --tw-ease: var(--ease-drawer);
+/* Base UI marks the entering and leaving frames; the Stop sheet, More sheet and step-up dialog time them. */
+[data-slot="stop-sheet"] {
+  transition: transform var(--duration-sheet) var(--ease-drawer);
 }
-[data-slot="sheet-content"][data-state="closed"] {
-  --tw-duration: var(--duration-sheet-exit);
-  --tw-ease: var(--ease-out);
+[data-slot="stop-sheet"][data-starting-style],
+[data-slot="stop-sheet"][data-ending-style] {
+  transform: translateX(100%);
 }
-[data-slot="dialog-content"] {
-  --tw-duration: var(--duration-dialog);
-  --tw-ease: var(--ease-out);
+[data-slot="stop-sheet"][data-ending-style] {
+  transition-duration: var(--duration-sheet-exit);
+  transition-timing-function: var(--ease-out);
 }
-[data-slot="dialog-content"][data-state="closed"] {
-  --tw-duration: var(--duration-dialog-exit);
-  --tw-ease: var(--ease-out);
+[data-slot="more-sheet"] {
+  transition: transform var(--duration-sheet) var(--ease-drawer);
+}
+[data-slot="more-sheet"][data-starting-style],
+[data-slot="more-sheet"][data-ending-style] {
+  transform: translateY(100%);
+}
+[data-slot="more-sheet"][data-ending-style] {
+  transition-duration: var(--duration-sheet-exit);
+  transition-timing-function: var(--ease-out);
+}
+[data-slot="step-up-dialog"] {
+  transition: opacity var(--duration-dialog) var(--ease-out), transform var(--duration-dialog) var(--ease-spring);
+}
+[data-slot="step-up-dialog"][data-starting-style],
+[data-slot="step-up-dialog"][data-ending-style] {
+  opacity: 0;
+  transform: translateY(0.5rem) scale(0.97);
+}
+[data-slot="step-up-dialog"][data-ending-style] {
+  transition-duration: var(--duration-dialog-exit);
+  transition-timing-function: var(--ease-out);
+}
+[data-slot="sheet-backdrop"] {
+  transition: opacity var(--duration-sheet) var(--ease-out);
+}
+[data-slot="sheet-backdrop"][data-starting-style],
+[data-slot="sheet-backdrop"][data-ending-style] {
+  opacity: 0;
 }
 
 /* Pressing eases in over the press duration; letting go springs back faster. */
@@ -230,22 +479,23 @@
 }
 
 /*
- * A field wipes in from its leading edge the first time it renders, like a panel slid into a
- * sign frame. Set `--i` for a 30 ms stagger. CSS transitions, so a re-render interrupts cleanly.
+ * A list settles in the first time it renders: each row rises 6 px and fades in, 30 ms after the
+ * one above. Set `--i` for the stagger. CSS transitions, so a re-render interrupts cleanly.
  */
 @utility reveal {
-  transition-property: clip-path;
+  transition-property: opacity, translate;
   transition-duration: var(--duration-reveal);
   transition-timing-function: var(--ease-out);
-  transition-delay: calc(var(--i, 0) * var(--stagger));
+  transition-delay: calc(min(var(--i, 0), 8) * var(--stagger));
   @starting-style {
-    clip-path: inset(0 100% 0 0);
+    opacity: 0;
+    translate: 0 0.375rem;
   }
 }
 
 /*
- * The paper hatch: diagonal lapis lines on the account's own colour, the signature of simulated
- * funds. An SVG tile masks a flat token colour (DEC-200: flat colour only).
+ * The paper hatch: diagonal lines in the account's ink, the signature of simulated funds. An SVG
+ * tile masks a flat token colour (DEC-200: flat colour only).
  */
 @utility hatch {
   position: relative;
@@ -256,9 +506,43 @@
     inset: 0;
     z-index: -1;
     pointer-events: none;
+    border-radius: inherit;
     background-color: var(--hatch-ink);
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1l2-2M0 7l7-7M6 8l2-2' stroke='black' stroke-width='1.6'/%3E%3C/svg%3E");
     mask-size: 7px 7px;
+  }
+}
+
+/* The hero line draws in from the left on first load; a new range redraws in place, with no wipe. */
+@utility draw-in {
+  transition: clip-path var(--duration-draw) var(--ease-out);
+  @starting-style {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+/*
+ * Frosted glass, for the frame alone: the sticky header and the phone tab bar, with the page
+ * scrolling underneath. Everything else stays flat. Solid card where the browser cannot blur, where
+ * the owner asks for less transparency, and in forced colours.
+ */
+@utility glass {
+  background-color: var(--glass);
+  border-color: var(--glass-edge);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--card);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (forced-colors: active) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 
@@ -266,29 +550,40 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A field label: the one place outside display headings where capitals are allowed. */
-@utility label-caps {
+/* A field label, in sentence case: the calm system has no capitals-only signage. */
+@utility field-label {
   font-size: var(--text-label);
   line-height: var(--text-label--line-height);
   font-weight: var(--text-label--font-weight);
-  text-transform: uppercase;
+  color: var(--muted-foreground);
 }
 
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 180ms;
+/* Only the page content cross-fades. The root is not captured and the overlay lets clicks through,
+   because a captured element and the overlay above it ignore hits, and Stop must answer one mid-fade. */
+:root {
+  view-transition-name: none;
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 200ms;
   animation-timing-function: var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    --tw-enter-translate-x: 0 !important;
-    --tw-enter-translate-y: 0 !important;
-    --tw-exit-translate-x: 0 !important;
-    --tw-exit-translate-y: 0 !important;
-    --tw-enter-scale: 1 !important;
-    --tw-exit-scale: 1 !important;
     scroll-behavior: auto !important;
+  }
+  [data-slot="stop-sheet"],
+  [data-slot="more-sheet"],
+  [data-slot="step-up-dialog"],
+  [data-slot="sheet-backdrop"] {
+    transition: none !important;
   }
   [data-slot="skeleton"] {
     animation: none !important;
@@ -296,10 +591,17 @@
   .press:active:not(:disabled) {
     transform: none;
   }
-  .reveal {
+  .draw-in {
     transition: none;
     @starting-style {
       clip-path: none;
+    }
+  }
+  .reveal {
+    transition: none;
+    @starting-style {
+      opacity: 1;
+      translate: none;
     }
   }
   ::view-transition-group(*),

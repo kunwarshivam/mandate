@@ -1,174 +1,373 @@
 ---
 name: Owlhead
-description: Autonomous trading agents under a mandate you set. Paper trading only.
-direction: Placard
+description: The design system of the Owlhead web app. Paper trading only.
+direction: Calm, in Ink and Volt, light and dark (DEC-204, DEC-205, DEC-214)
 ---
 
-# Owlhead design system: Placard
+# Owlhead design system
 
-Placard is the design of the Owlhead web app, chosen by the founder on 2026-09-28 ("I like placard better, let's start there, reduce gutter space"). The product name is Owlhead ([DEC-201](../docs/project/04-decision-log.md#decisions)); "mandate" is the product's word for the owner's binding envelope. Every value below is shipped: `src/app/globals.css` holds the CSS, `src/lib/tokens.ts` mirrors the colours for `/design` and the tests, and `src/lib/tokens.test.ts` fails when the two drift or a pair loses contrast. `/design` renders all of it over the real components.
+The Owlhead web app is calm and consumer-grade: the polish of Robinhood, Public or Wealthfront, with none of their gamification ([DEC-204](../docs/project/04-decision-log.md#decisions), the founder, 2026-09-28). It is set in Ink and Volt, in a light and a dark theme ([DEC-205](../docs/project/04-decision-log.md#decisions), which replaced DEC-204's gold accent and warm paper, and [DEC-214](../docs/project/04-decision-log.md#decisions), which moved the accent from ultramarine to volt; the founder, 2026-09-29), with the founder's logo ([DEC-203](../docs/project/04-decision-log.md#decisions), amended by DEC-204) and every safety behaviour of the earlier direction. The product name is Owlhead (DEC-201); "mandate" is the product's word for the owner's binding envelope. The [product-experience brief](../docs/product/09-product-experience.md) binds: where this file and the brief disagree, the brief wins.
+
+Every value below is shipped. `src/lib/palette.ts` holds the colour ramps and both themes' tokens (the reasoning and the measurements are in [COLOR.md](COLOR.md)), `src/app/globals.css` holds the CSS, `src/lib/tokens.ts` describes each token, and `src/lib/tokens.test.ts` and `src/lib/palette.test.ts` fail when they drift or a pair loses contrast in either theme. `/design` renders all of it over the real components, in whichever theme is on.
 
 ## Overview
 
-The screen is transit signage. Flat colour fields own whole regions and are read before words: a lapis board for the account, a marigold field for your mandate, ink for an agent that is stopped or paused, and crimson for the kill switch and nothing else. Condensed capitals name things; a hyperlegible sans says everything else in sentence case. Every corner is square.
+Each screen has one hero number, a chart as its centrepiece, and generous space around both. Space separates things before a line does, and a line before a box. Boxes are few and each one means something: the pale volt field is your mandate, a pale volt card with an ink action is the account asking for you, a quiet well holds secondary facts. Type is one family in one tight scale, sentence case throughout. Motion answers the owner and then gets out of the way.
 
-**The Control Rule.** Stop is on every screen, ink on paper, one tap from anywhere, and never disabled by loading, stale data or errors. Nothing else may be ink-filled at that size in the header.
+**The Control Rule.** Stop is on every screen at the right of the header, one tap from anywhere, at every width from 320px, and never disabled by loading, stale data, errors or a page transition. It is quiet until something needs you ([DEC-206](../docs/project/04-decision-log.md#decisions)): an ink outline on a calm screen, and the filled ink pill (off-white in dark mode) while there is a risk reason, in the same place and the same size. Nothing else in the header is filled in ink.
 
-**The No-Nudge Rule.** Approve and Skip are the same outline button at the same size, side by side, with nothing preselected. The default (skip) is stated in words beside the deadline, and nothing counts down, pulses or changes colour as the deadline nears.
+**The No-Nudge Rule.** Approve and Skip are the same button: the same variant, size, weight and width, side by side in a fixed order, with nothing preselected and no autofocus. The default (skip) is stated in words beside a static deadline. Nothing counts down, pulses or changes colour as the deadline nears.
 
-**The Meaning Rule.** A colour means one thing everywhere. If a region is marigold, your mandate is speaking; if it is lapis, the account is. Nothing is coloured for decoration.
+**The Meaning Rule.** A colour means one thing everywhere. Volt is your mandate, and the account's line; ink is the account's actions, a stopped agent and the Stop control; crimson is the kill switch and nothing else. Nothing is coloured for decoration.
+
+**No gamification.** No confetti, streaks, badges, levels, celebratory motion or "you're on a roll". A gain is shown exactly as plainly as a loss.
 
 ## Colors
 
-Strategy: Committed. Four meaning colours on tinted neutrals, all OKLCH, all flat. Light only.
+Strategy: Restrained. Ink and Volt ([COLOR.md](COLOR.md)): cool paper and ink neutrals, one volt accent, crimson for the kill switch, all OKLCH ramp steps, all flat. About 60% of a screen is paper (ink in dark), 30% type and ink actions, 10% volt.
 
-| Colour | Meaning | Token | Value | Used for |
-|---|---|---|---|---|
-| Marigold | Your mandate | `--marigold` | `oklch(0.85 0.155 84)` #fdc43f | The envelope field, limit rails, restriction tags a limit imposed, `::selection` |
-| Lapis | The account | `--lapis` (= `--primary`, `--ring`) | `oklch(0.36 0.1 258)` #173c70 | The account block, the paper hatch, the current page in navigation, primary actions, links, focus rings, the equity knob, empty boards |
-| Ink | Stopped or paused agent | `--ink` | `oklch(0.21 0.035 258)` #0e1928 | Paused and stopped mode fields, the exits-only ring, the Stop control and the Stop sheet header |
-| Crimson | Kill switch | `--crimson` | `oklch(0.47 0.19 27)` #ac0311 | The kill-switch actions in the Stop sheet. Nothing else |
+| Colour | Meaning | Tokens | Light | Dark | Used for |
+|---|---|---|---|---|---|
+| Volt | Your mandate | `--mandate` (field), `--mandate-marker` (rails, marks), `--mandate-strong` (labels), `--mandate-edge` (lines inside the field) | volt-100 #F2FCD7 / volt-500 #7C9217 / volt-700 #4C5A09 | volt-850 #2C350E / volt-400 #A4C025 / volt-200 #D2F34A | The mandate field (envelope, limit rails, the approval's risk), the axis labels of mandate levels, the "Your mandate" tag, `::selection`, the focus ring |
+| Ink and a volt line | The account | `--lapis` (= `--primary`), `--lapis-line`, `--lapis-soft` | ink-950 #14161A, volt-500, volt-100 | paper-100 #F5F7F9, volt-400, volt-850 | Primary actions and counts in ink; the account's equity line, the current tab's bar and the range pill's ring in volt |
+| Ink | Stopped or paused agent | `--ink` | ink-950 #14161A | paper-100 #F5F7F9 | Paused and stopped mode pills, the exits-only ring, the Stop control, an agent's equity line |
+| Crimson | Kill switch | `--crimson`, `--crimson-edge` | crimson-700 #9C0C12, edge the same | crimson-700 #9C0C12, edge crimson-400 #FD8C81 | The kill-switch choices in the Stop sheet and the switch on the kill-switch record screens. Nothing else |
 
-Supporting tokens:
+The account's token is still called `lapis`, so class names stay stable. On a chart the account is a solid volt line and a mandate level a dashed grey line with a volt label, so the two never read as one.
 
-| Token | Value | Role |
+Supporting tokens, every one a ramp step (the full list, with both themes, is in [COLOR.md](COLOR.md)):
+
+| Token | Light / dark | Role |
 |---|---|---|
-| `--background` | `oklch(0.975 0.005 250)` #f4f7fa | Page |
-| `--card` | `oklch(0.995 0.002 250)` #fcfdff | Fields that hold reading text: sheets, dialogs, panels |
-| `--muted` | `oklch(0.935 0.01 250)` #e5eaf0 | Quiet fields: a running agent's mode, system notices, skeletons |
-| `--border` | `oklch(0.8 0.02 255)` #b5bfcb | Hairlines between rows |
-| `--foreground` | `oklch(0.21 0.035 258)` #0e1928 | Text and 2px rules |
-| `--muted-foreground` | `oklch(0.44 0.035 258)` #475366 | Secondary text, ages |
-| `--lapis-muted` / `--lapis-soft` | `oklch(0.84 0.03 255)` / `oklch(0.93 0.03 255)` | Secondary text on lapis / an account notice field |
-| `--marigold-muted` / `--marigold-soft` | `oklch(0.36 0.05 70)` / `oklch(0.955 0.05 90)` | Secondary text on marigold / a mandate notice field |
-| `--marigold-foreground`, `--ink-foreground`, `--lapis-foreground`, `--crimson-foreground` | | Text on each meaning colour |
-| `--gain` / `--loss` | `oklch(0.44 0.11 155)` / `oklch(0.49 0.18 10)` | Text only, always with a sign and the word ("+$123.45 gain") |
-| `--hatch-ink` | lapis at 30% | The paper hatch lines |
+| `--card` / `--background` | paper-50 / paper-100; ink-950 / ink-975 | The body and cards (and, at 72%, the frame's `--glass`) / wells, hover |
+| `--muted` / `--border` | paper-200; ink-900 / ink-850 | Skeletons, the chart grid / hairlines (drawn at 70%) |
+| `--foreground` / `--muted-foreground` | ink-950 / ink-800; paper-100 / paper-300 | Text / secondary text, labels, ages |
+| `--gain` / `--loss` | green-700 / red-700; green-300 / red-300 | Text and candles only, always with a sign. Headline figures show the word too ("+$123.45 gain"); in table and list rows the word is read to screen readers |
+| `--gain-cvd` / `--loss-cvd` | cvd-teal-700 / cvd-rose-850 (raspberry); cvd-teal-300 / cvd-orange-300 | Gain and loss when colour-blind friendly is on |
+| `--warning` / `--info` and their `-soft` tints | amber-700 / ink-800; amber-300 / paper-300 | Status text on its tint. Warning is on no screen (see Kumo) |
+| `--hatch-ink` | ink at 30%; paper-500 at 40% | The paper hatch lines |
 
-Rules the tests enforce: every neutral is tinted toward lapis (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; body pairs reach 4.5:1 and marks 3:1; there is no `.dark` block and no `dark:` class anywhere in `src/`. `src/lib/crimson.test.tsx` renders every route in every scenario, the Stop sheet in every context, the passkey check, and the result of every Stop choice, and fails if crimson paints anything but a kill-switch choice (Kill switch, Stop all agents, Close everything) or the kill-switch specimen on `/design`; in the source, only `globals.css`, the Stop sheet's two kill-switch tones, and `/design` may name it.
+**Volt usage rules** (tested; details in [COLOR.md](COLOR.md#volt-usage-rules)):
 
-No gradients of any kind (fills, text, masks, fades or glows). The paper hatch is an SVG mask over a flat token colour.
+- Volt only through the volt tokens. No other token is a saturated colour within 30 degrees of its hue.
+- In light mode, volt is never text lighter than volt-700 (`--mandate-strong`). Volt-500 is for lines, marks and rails only.
+- Volt is never a large block. Saturated volt is painted only as lines, rails, ticks and swatches no thicker than 8px; every volt surface is a pale tint (dark in dark mode). `e2e/flat-fills.spec.ts` measures this on every route in both themes.
+- The one saturated volt fill is the highlight (`--highlight`, neon volt-300 in both themes), and it always carries ink type (`--highlight-foreground`). Today only the landing page uses it.
 
-**Dark mode** is follow-up work. Placard is a daylight sign system and a dark variant needs its own design pass for the meaning colours; shipping half of one would break the Meaning Rule. The app sets `color-scheme: light` and stores nothing in the browser.
+**Colour-blind friendly.** `<html data-cvd="on">` remaps gain to teal and loss to raspberry in light mode or orange in dark mode (each alternate stays apart from the volt marks and from crimson under simulated deuteranopia, protanopia and tritanopia), and charts read the same attribute. It is a development preference until settings exist: `?cvd=1` or `?cvd=0`, Alt+Shift+C, or the checkbox in the scenario switcher, kept in the `mandate-cvd` cookie. `/palette` (development only) shows the ramps, tokens, contrast and colour-vision results for each theme.
+
+Rules the tests enforce, in both themes: every token is a ramp step and every neutral is paper or ink (no pure black, white or grey); no purple or violet; loss stays at least 15 degrees of hue away from crimson so the kill switch owns its red; every semantic pair and every Kumo role pair in each surface scope meets WCAG 2.2 AA (4.5:1 body, 3:1 marks) and APCA (Lc 75 body, Lc 45 marks, in the tests only); the colour-vision pairs that must stay apart do; no component uses warning or a raw colour value. `src/lib/crimson.test.tsx` renders every route in every scenario, the Stop sheet in every context, the passkey check, the result of every Stop choice, and each record screen through its passkey check and recorded result, and fails if crimson paints anything but a kill-switch choice (Kill switch, Activate the kill switch, Stop all agents, Close everything) or the kill-switch specimen on `/design`; in the source, only `globals.css`, the palette and its contrast pairs, `KillSwitchButton`'s two tones, and `/design` may name it.
+
+No gradients of any kind (fills, text, masks, fades or glows). CI greps `src/` for them, and `e2e/flat-fills.spec.ts` reads computed styles on every route in both themes. The paper hatch is an SVG mask over a flat token colour.
+
+## Dark mode
+
+Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in the header, or the More sheet on phones. The choice is the only thing the browser stores, in the `owlhead-theme` cookie, so the server renders an explicit choice and a head script resolves System before first paint.
+
+- **Tokens alone.** `html:root[data-mode="dark"]` in `globals.css` re-points every token to the other end of the same ramps; components do not change. There is no `dark:` class anywhere in `src/` (a test fails on one). `<html>` also carries `.dark`, only because Kumo's own classes use the `dark` variant.
+- **Every meaning stays.** Ink surfaces with paper type; paper primary actions and the loud Stop control with ink type, and the quiet one a paper outline with paper type; volt lighter for lines (volt-400) and text (volt-200); the mandate field a dark volt tint (volt-850); crimson still the only filled crimson, with a lighter edge (crimson-400) so the kill switch holds 3:1 against the sheet.
+- **Flat.** Nothing floats on a shadow in dark mode: menus, sheets and dialogs sit on their hairline.
+- **Charts** redraw from the dark palette when the mode changes (`setChartMode`).
+- **The brand** is off-white on dark (`--logo`), and the browser's theme colour follows (off-white #FBFDFE, night #0B0D11).
+- Playwright runs every e2e spec in a light and a dark project.
 
 ## Typography
 
-| Role | Face | Size / line height | Weight | Case |
-|---|---|---|---|---|
-| Display (page titles, the Stop sheet title) | Big Shoulders Display | 3rem / 0.9 | 800 | Capitals |
-| Title (agent names on detail, dialog titles) | Big Shoulders Display | 2rem / 0.95 | 800 | Capitals |
-| Heading (sections, "Your mandate") | Big Shoulders Display | 1.5rem / 1 | 800 | Capitals |
-| Figure (big money values) | Big Shoulders Display | 2.75rem | 700 | Tabular |
-| Body | Atkinson Hyperlegible Next | 1rem (17px) / 1.5 | 400 | Sentence case |
-| Small | Atkinson Hyperlegible Next | 0.875rem / 1.45 | 400 | Sentence case |
-| Caption (ages, secondary facts) | Atkinson Hyperlegible Next | 0.8125rem / 1.35 | 400 | Sentence case |
-| Label (field labels, chips) | Atkinson Hyperlegible Next | 0.75rem / 1.2 | 700 | Capitals (`label-caps`) |
+**Public Sans**, one variable family for everything ([DEC-209](../docs/project/04-decision-log.md#decisions); `@fontsource-variable/public-sans`, SIL OFL 1.1, self-hosted; the Latin file is about 26 KB and Latin Extended about 18 KB). Why it:
 
-The root size is 106.25%, so body reads at 17px when the browser default is 16px and follows the owner's own setting. `h1`–`h3` are set in the display face and uppercased in CSS, so the source text stays sentence case for screen readers and tests. Capitals appear only in display headings and field labels; body, buttons, notices and navigation are sentence case. No letter-spacing is added anywhere.
+- **Serious, not a default.** The U.S. Web Design System's grotesque, drawn from Libre Franklin, so it comes from the Franklin Gothic line of newspapers and financial pages. It reads plain and sturdy where Inter, Geist and Mona Sans read as the generic product default (Impeccable's reflex list).
+- **Open when small, steady when large.** It stays even at 13 to 14 px in a dense price table and holds together at the hero size; the other candidates were either narrow small or loud large.
+- **Figures.** Tabular, lining figures (`tnum`; lining is the default) everywhere but the display hero with a flagged 1, a straight 7 and a plain oval zero narrower than the O, so money lines up and never reads as a code. The tabular feature sets the digits only, so commas and points keep their own widths. The true minus sign (U+2212) is in the font.
+- **One family, full range.** Weights 100 to 900 in one file, so the scale is built from size and three weights, never from a second family. It covers Latin Extended-A (all but Ĳ, ŉ and ſ) and Vietnamese.
+- **Licence and hosting.** OFL, from npm, no font from a third-party host.
 
-Every figure uses tabular digits. Identifiers (connection ids, order ids) use the same sans with tabular figures and `translate="no"`; there is no monospace face. Reading text is held to about 65 characters (`max-w-prose` or narrower).
+**No figure face.** The hero number stays in Public Sans. A serif hero that echoed the P052 wordmark was tried (Literata, Brygada 1918 and Alegreya, with raised cents) and turned down: money would be set in two faces, since the key figures, rows and mandate rails stay sans; warm paper under a serif display is a look the product brief lists as an AI cliché; and it competes with the wordmark, which stays the product's one serif.
 
-The wordmark is "OWLHEAD" set in Big Shoulders Display 800, capitals, in the current text colour: the condensed face is drawn for capitals, and the lowercase version read as a word rather than a name. There is no symbol and no favicon until a founder-approved mark exists.
+| Role | Class | Size / line height | Weight | Tracking | Use |
+|---|---|---|---|---|---|
+| Display | `text-display` | `clamp(2rem, 14cqi, 4.75rem)` / 0.95 | 600 | -0.03em | The equity figure over a hero chart: account equity, an agent's equity (see Charts). Proportional lining figures |
+| Hero | `text-hero` | `clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem)` / 1.05 | 600 | -0.03em | One per screen where there is no equity figure: the approval's action |
+| H1 | `text-h1` | 1.75rem / 1.2 | 600 | -0.02em | A page title |
+| H2 | `text-h2` | 1.25rem / 1.3 | 600 | -0.01em | A section |
+| H3 | `text-h3` | 1rem / 1.4 | 600 | 0 | A group or a row's name |
+| Figure | `text-figure` | 1.375rem / 1.2 | 500 | -0.015em | Key figures beside the hero |
+| Body | `text-base` | 1rem / 1.5 | 400 | 0 | Reading text |
+| Small | `text-sm` | 0.875rem / 1.43 | 400 | 0 | Rows, notices |
+| Caption | `text-caption` | 0.8125rem / 1.4 | 400 | 0 | Ages, disclosures, secondary facts |
+| Label | `text-label`, `field-label` | 0.8125rem / 1.35 | 500 | 0 | Field labels and chips, muted, sentence case |
 
-## Layout and space
+Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family), except the display hero figure: at 76px tabular digits leave visible gaps around a 1, so it is set in proportional lining figures (`proportional-nums lining-nums`). Its change pill sits on its own line, so the figure's width changing as it scrubs moves nothing else (`e2e/hero-figure.spec.ts`). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Public Sans letters run narrower). The display and hero sizes' -0.03em keeps the figures of `$28,478.36` close without the comma touching them; no role is tracked tighter than -0.04em, and `tokens.test.ts` fails on one that is. The root size is the browser's own, so the owner's setting carries.
 
-Operate first: the dashboard answers "does anything need me?" and "is each agent inside its mandate?" in its first viewport. The approval request is phone first, with the trigger, the risk in dollars and the default readable before the response controls, and the response area pinned above the tab bar. Layouts hold from 360px up.
+The brand is not set in this face: the wordmark is drawn as outlines (see Brand).
 
-Desktop has a side navigation and a wide content column; below 64rem the navigation becomes a bottom tab bar and the header keeps the wordmark, the paper badge and Stop.
+## Brand
 
-The founder asked for less gutter space. Before and after:
+The Owlhead mark is the founder's artwork, traced into one flat path; the wordmark is lowercase "owlhead" in P052 Roman, as outlines ([DEC-203](../docs/project/04-decision-log.md#decisions)). The sources are `src/components/brand/owlhead-mark.svg` and `owlhead-wordmark.svg`, and `src/components/brand/Logo.tsx` inlines the same paths in `currentColor` as `OwlheadMark`, `OwlheadWordmark` and `OwlheadLockup`. No font file is committed and the UI loads no font for the wordmark.
 
-| Token | Use | Before | After |
+- **Ink on light, off-white on dark** (DEC-204). In the app the brand takes `--logo`, which is the type colour: ink #14161A on the light theme, off-white on the dark one. It is never volt and never on a coloured block. There is no tagline.
+- **Lockup.** The mark, then the wordmark at half the mark's height after a gap of a quarter of it, centred vertically. The clear space around it is that same quarter. Minimum sizes: 16px for the mark, 96px wide for the lockup.
+- **In the shell.** The top header carries the brand at every width: the lockup from 64rem, the mark alone below. It is the link to the role's home.
+- **Palette.** `src/lib/brand-palette.ts` derives the brand values from the UI palette, so they cannot drift: ink #14161A, off-white #FBFDFE, volt #7C9217, deep volt #4C5A09, volt tint #F2FCD7, night #0B0D11. The `/design` Brand block shows them with their contrast on off-white and on night.
+- **Generated assets.** `npm run brand` (`scripts/brand-assets.mjs`, rendering with `@resvg/resvg-js`) writes `public/` from the mark and `brand/og-image.svg`:
+  - `favicon.svg`, `favicon-16.png`, `favicon-32.png`, `favicon-48.png` and `favicon.ico` (the three PNG files in one ICO): the ink mark on an off-white square tile, as large as fits (87.5% of the tile's height, 1px above and below at 16px), the same in light and dark tabs, so the tile carries its own ground.
+  - `apple-touch-icon.png` (180), `pwa-192.png` and `pwa-512.png`: the ink mark at 76% of an off-white tile's height. `pwa-maskable-512.png` is scaled to sit inside the 80% safe circle.
+  - `og-image.png`: the 1200×630 share image, the ink lockup centred on off-white.
+  - `site.webmanifest`: Owlhead, theme and background #FBFDFE.
+
+  The generated files are committed with the script. `src/components/brand/brand-assets.test.ts` regenerates them into a temporary directory and fails if a byte differs, and checks their pixels (the tile, the colours, the centring, the safe zone).
+- **`/design`** renders the Brand block: the mark, wordmark and lockup on off-white and on night, clear space, minimum sizes, do and don't, and the palette with its contrast.
+
+## Layout, space and density
+
+Mobile first, from 320px. Below 64rem the phone has a top header (the mark, the paper badge, Stop) and a bottom tab bar, and is a remote control (see Phone); from 64rem a floating dock at the bottom centre replaces the tab bar, nothing runs under the header while every feed answers (see Status strip), and no sidebar takes width from the content. Screens are one column on a phone and, from 64rem, a full-width main column with a 20rem rail beside it for "Waiting for you" and key figures. From 64rem the content's bottom padding and the scroll padding clear the dock, so the last row and a focused control are never under it, and toasts rise above it.
+
+**Two densities** share every token (DEC-204). Calm is the default and is for the retail-facing screens an owner lives in: Home, agents, approvals. Dense is for audit, settings and connections, where more rows on screen matter more than air; the shell sets `data-density="dense"` on those routes.
+
+| Token | Use | Calm | Dense |
 |---|---|---|---|
-| `--sidebar-width` | Desktop side navigation | 15rem | 12rem |
-| `--content-max` | Widest content column | 72rem | 90rem |
-| `--page-x` | Page padding at phone / tablet (40rem) / desktop (64rem) | 1rem / 1.5rem / 2rem | 0.75rem / 1rem / 1.5rem |
-| `--page-top` | Space above the page title | 1.5rem | 1rem / 1.25rem (desktop) |
-| `--page-bottom` | Space below the last section (desktop; phones clear the tab bar) | 4rem | 2.5rem |
-| `--section-gap` | Between sections of a screen | 2.5rem | 1.5rem |
-| `--block-gap` | Between a heading and its content, and between rows of fields | 1rem to 1.5rem | 0.75rem |
-| `--seam` | Between adjacent colour fields | 1rem (card gaps) | 0.375rem |
+| `--dock-h` / `--dock-gap` | The desktop dock and the space below it; content, scroll padding and toasts clear both (`--dock-clearance`) | 4rem / 1rem | the same |
+| `--status-row` | The status strip and the phone's feed banner under the header, one height so either can replace the other | 2.125rem | 2.125rem |
+| `--content-max` | Widest content column | 68rem | 90rem |
+| `--container-measure` | Reading measure (`max-w-measure`): under 80 characters a line | 58ch | 58ch |
+| `--page-x` | Page padding at phone / tablet (40rem) / desktop (64rem) | 1.25rem / 1.75rem / 2.5rem | the same |
+| `--page-top` | Space above the first line of a screen | 1.5rem / 2.25rem (desktop) | the same |
+| `--page-bottom` | Space below the last section (desktop; phones clear the tab bar) | 4rem | the same |
+| `--section-gap` | Between sections of a screen | 3rem / 3.5rem (desktop) | 2rem |
+| `--block-gap` | Between a heading and its content | 1rem | 0.75rem |
+| `--row-y` | Vertical padding of a list or table row | 1rem | 0.5rem |
+| `--tab-bar` | The phone tab bar, plus the safe area | 4rem | 4rem |
+| `--seam` | The gap between swatches on `/palette` only | 0.5rem | 0.5rem |
 
-What did not shrink: touch targets are at least 44px on phones (Stop, sheet and dialog close buttons, large buttons, list rows and Stop-sheet choices are `h-11`/`min-h-11` or taller; tabs are 56px), and reading text keeps its measure even in the wider column.
+Touch targets are at least 44px on phones in both densities: Stop (44px at every width, its pill 40px from 64rem), sheet and dialog close buttons, large buttons, list rows (which are whole-row links) and Stop-sheet choices are `h-11`/`min-h-11` or taller; tabs are 64px.
 
-## Elevation and depth
+**Few boxes.** A list is rows on the page separated by 1px hairlines (`border-border/70`), with a well-coloured hover. A section heading has no rule under it; space sets it apart. A box appears only when it carries meaning: the mandate field (`rounded-2xl bg-mandate`), an approval or account notice (`rounded-2xl bg-lapis-soft`), a well for secondary facts or a recorded outcome (`rounded-2xl bg-background`). A box never sits inside another box of the same kind.
 
-None. Depth comes from colour fields and 2px foreground rules, not shadows. Adjacent fields sit on a 6px seam of page colour; a field never sits inside another field. Overlays dim the page with foreground at 35%, with no blur. No glass, no hard offset shadows.
+**Nothing moves the page.** Live values (ages, deadlines, figures that roll) sit in fixed-width tabular slots, so a tick never shifts the layout. `e2e/no-layout-jitter.spec.ts` ticks the market data's age across each boundary where its wording changes (10 s, a minute, ten minutes, an hour), at every 8px width from 640px to 1600px, and fails if the header's height or the top of `main` moves.
 
-## Shapes
+## Shape and depth
 
-Radius is 0 everywhere (`--radius: 0rem`, every Tailwind radius token 0). A sign has no corners to round. Rules are 2px foreground for structure (section headings, the tab bar, dialog footers) and 1px `--border` hairlines between rows. A 4px foreground top rule marks a system notice (unreachable, error).
+Soft, consistent corners, rounder the larger the surface:
+
+| Radius | Value | Use |
+|---|---|---|
+| `xs` / `sm` | 0.25rem / 0.375rem | Placeholder and fixture chips, keyboard hints, chart ticks; Kumo's own 5px radius maps to `sm` |
+| `lg` / `xl` | 0.75rem / 1rem | Menus, restriction notes, the Stop sheet's choices, the kill-switch buttons, an unknown order |
+| `2xl` | 1.25rem | Panels: the mandate field, an approval card, a well, a hovered agent row |
+| `3xl` | 1.5rem | The Stop sheet's leading edge, the step-up dialog, the desktop dock |
+| `full` | 9999px | Buttons, mode and source pills, provenance, the Stop control, the paper badge, the range pill, the tab bar's current pill |
+
+Controls and panels are flat. In light mode only what floats above the page casts a shadow: Kumo's menus and popovers (its `shadow-md` and `shadow-lg`), the desktop dock (`shadow-md`, the softer of the two, since its 15% edge already sets it off), the Stop sheet and step-up dialog (`shadow-2xl`), each a soft ink-tinted shadow with no hard offset. In dark mode nothing casts a shadow. Overlays dim the page with ink at 40%, with no blur.
+
+**Glass on the frame only** ([DEC-208](../docs/project/04-decision-log.md#decisions)). The sticky header, the phone tab bar and the desktop dock are frosted glass: the page scrolls underneath them and shows through, blurred. The `glass` utility in `globals.css` paints `--glass`, the card at 72% in both themes, blurs and saturates what is behind (`blur(22px) saturate(1.8)`), and draws the hairline in `--glass-edge`, the type colour at 8%. 72% is the least that keeps muted header text at AA over anything that scrolls under it: over solid ink in light mode, or solid paper in dark, muted text holds at least 5.0:1 and body text 6.7:1 (at 60% muted text would fall to 3.84:1 in light and 3.37:1 in dark); `tokens.test.ts` measures the glass over every token in each theme. The dock carries the navigation, so its glass is denser: `--dock-glass`, the card at 85%, with its edge in `--dock-edge`, the type colour at 15%. The frame is the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours. Everything else stays flat: cards, the phone's More sheet, controls, menus, popovers, sheets and dialogs have no glass. `e2e/glass-frame.spec.ts` checks that only the frame blurs at each width (the header and the dock on desktop; the header and the tab bar on phones), that the page passes under it, and the solid fallbacks.
 
 ## Components
 
-- **Header.** Wordmark (phones), the paper badge, and Stop, on the page colour with a hairline. Below it, the status strip.
-- **Paper badge.** `PAPER · simulated funds`: a 2px lapis border over the lapis hatch. Below 25rem the words "simulated funds" become screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
-- **Side navigation.** Rows 44px tall; the current page is a solid lapis field. The approvals count is a square foreground chip.
-- **Tab bar.** A 2px foreground top rule; the current tab has a 4px lapis bar on its top edge and bold text.
-- **Account block.** The foot of the side navigation is a lapis field with the broker and connection id.
-- **Stop control.** An ink button, 44px tall, with the stop icon. Opens the Stop sheet.
-- **Stop sheet.** An ink header with the display title; sections under heading rules; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Account notices wear lapis-soft with an account tag.
-- **Step-up dialog.** Title, the one action in a muted box under a 2px rule, and Cancel / Use passkey in a muted footer. The waiting message sits in the footer's live region.
-- **Buttons.** Primary lapis, outline (2px foreground border on card), ghost, link. Every button presses to 0.97.
-- **Mode badge.** A square chip in the mode's field colour with an icon and the label in capitals.
-- **Source tag.** Who imposed a restriction: marigold "Your mandate", lapis "The account", ink "You", outlined "Market data".
-- **Limit rail.** On marigold: the label, the dollar value against its cap, a track with an ink fill and a 4px post at the limit, and the headroom and consequence in words.
-- **Provenance.** "You said", "You entered" and "From template" are bordered captions; anything the platform authored ("Proposed by the platform", "Platform default") has a dashed 2px border, so it reads as not yet yours by shape, not colour.
+- **Header.** Always rendered, never held back by loading: 64px, sticky, frosted glass over the page (see Shape and depth), a hairline below. On the left the brand (the mark, and the lockup from 64rem), the workspace switcher (fixtures, from 64rem) and breadcrumbs; in the middle the command bar; on the right the theme menu, the paper badge, the approvals count, Alerts, the user menu, and Stop. Stop is last, never shrinks, and is fully on screen at every width from 320px (`e2e/stop-visible.spec.ts`). As the header narrows, the other items give way first: below 100rem the paper badge keeps "simulated funds" for screen readers only; below 100rem the command bar narrows from 460px to 380px; below 90rem the workspace switcher becomes an icon; below 80rem Alerts and the user menu fold into an "Alerts and account" menu. The current page's crumb never truncates ([DEC-208](../docs/project/04-decision-log.md#decisions)): where the trail is narrower than 20rem the earlier crumbs fold into an "Earlier pages" menu (…) before it, and under 10rem the trail hides. Below 64rem the header holds three things, the mark (which opens Home), the paper badge and Stop, and the More sheet carries everything else (see Phone); the dock carries it on desktop.
+- **Command bar** ([DEC-208](../docs/project/04-decision-log.md#decisions)). From 64rem, the ⌘K trigger is a 40px bar in the middle of the header, 380 to 460px wide: a search icon, "Jump to an agent or screen…" in muted text (the palette jumps to screens and agents; it searches nothing else) and a ⌘K key, on the muted fill with a hairline and a 12px radius. It is centred in the header wherever both sides fit beside it (from 1440px) and narrows rather than overlap the brand, the switcher, the badge, the header's buttons or Stop at 1024, 1280 and 1440px (`e2e/command-bar.spec.ts`). Below 64rem it goes, and Search in the More sheet opens the command palette, as ⌘K does.
+- **Stop control.** A pill with a filled octagon and "Stop" that opens the Stop sheet, in two tones that share one box ([DEC-206](../docs/project/04-decision-log.md#decisions)):
+  - *Quiet*, the default: a 2px ink outline (paper in dark) on the header's own colour, with the octagon and label in ink. Hover is the well.
+  - *Loud*, while `stopAttention` (`src/lib/attention.ts`) gives a reason: the filled ink pill with paper type (paper with ink type in dark), the only filled thing in the header. The reasons are risk only: an open alert other than your own pause or stop (a degraded feed, or an agent restricted by its mandate, the account or market data, which covers exits only and a halt); an agent in exits only; an agent near a loss limit, meaning it has used 80% of the daily loss budget, of a drawdown rung's depth or of the capital the floor lets go (`NEAR_LIMIT_USED` in `src/lib/limits.ts`, reached levels included); an unreachable deployment; an order in flight, meaning the broker has not confirmed it (recorded, sending, a cancel or replace unanswered, or unknown; a resting order, partly filled or not, is confirmed). A request waiting for approval is not a reason. While the workspace loads, the last known tone holds, starting quiet.
+  - The hit area is 44px tall at every width. The pill is 44px below 64rem and 40px from 64rem, the command bar's height, with the label at `text-sm`; `e2e/stop-tone.spec.ts` holds the two to one height and one centre line.
+  - The accessible name is always "Stop". When loud, `aria-describedby` points at a hidden line such as "Needs attention: 1 alert, Agent 1 is near its daily loss limit". There is no badge, dot or count on the button.
+  - The tone changes colour only, over `--duration-hover`, and instantly under reduced motion. It never pulses, glows or animates to draw the eye. Under forced colours both tones keep their border. `e2e/stop-tone.spec.ts` measures both tones' boxes at 320, 390, 1024 and 1440px, their contrast in both themes, forced colours and reduced motion.
+- **Paper badge.** A pill outlined in the account's ink over the ink hatch: `PAPER · simulated funds`. Below 30rem "simulated funds" becomes screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
+- **Dock** ([DEC-208](../docs/project/04-decision-log.md#decisions)). From 64rem, the primary navigation (`nav` "Primary") is a glass dock floating 1rem above the bottom edge, centred, 64px tall with a 24px radius, on the dock's denser glass and firmer edge (see Shape and depth). Every item is a 20px icon over its name in 12px medium type, at least 64px wide and 50px tall: Home, Approvals (with its count as a pill in the account's ink), Alerts, Agents, Positions and Connections, then a hairline, then the Audit and More menus. Audit holds the audit overview and every audit screen; More opens with the account (Alpaca paper, the account switcher's place on desktop), then the remaining agent and workspace screens with the workspace overview. Both are Kumo menus. There are no tooltips: the labels name every item, and no dock item has a keyboard shortcut to add. The current section sits on a pill of `--dock-current`, the type colour at 14%, with a filled icon, a semibold label and `aria-current` (`page` on a link, `true` on a menu that holds the current screen); it stays current inside the section, so an agent's pages mark Agents and an audit screen marks Audit. Hover is the same pill at half the tint (`--dock-hover`). The pill is never a solid ink fill, which is Stop's, nor volt, which is the mandate's; `--muted` would be only 1.1:1 on the dark card. Over any token scrolling under it (`tokens.test.ts`), labels hold at least 7.1:1 idle and 9.8:1 current in light, 8.0:1 and 7.0:1 in dark, and the pill stands off the glass at 1.3:1 in light and 1.4:1 in dark. Each label keeps room for its semibold weight, so the dock does not move when the section changes. In forced colours the pill becomes an outline. Every screen a role may open is on the dock or one menu away (`routes.test.tsx`); an agent's own sections are the page's tabs (on a phone, a list of links at the foot of the page). `e2e/dock-labels.spec.ts` checks the labels at 1024, 1280, 1440 and 1920px, the current section on every route, the contrast in both themes, that nothing on a long page, no toast and no control in the Stop sheet ends under the dock, and the keyboard order; `e2e/dock.spec.ts` checks the shape, the menus and focused controls, and `e2e/sticky-nav.spec.ts` that it stays put.
+- **More sheet.** Below 64rem, from the tab bar's More: a bottom sheet on the card, with no glass and a 24px top radius, sliding up like the Stop sheet (instant under reduced motion). It stops below the header and is not modal, so Stop stays in view, pressable and in the accessibility tree while it is open. At the top the account (the broker) and the workspace switcher; then Search, which opens the command palette; then every screen the role may open that is not a tab, grouped as on the dock (Positions, Alerts, Connections, Audit, Settings and the rest), as 44px rows; then the theme and the feeds with the "Fixture data" tag. While someone is signed in, the account section also shows their address, and Sign out follows the theme (see Sign-in and the public pages). Choosing a screen closes the sheet, and More is marked current on any screen it holds (`more-sheet.test.tsx`, `e2e/phone.spec.ts`).
+- **Tab bar.** Below 64rem: frosted glass like the header, a hairline above, four tabs 64px tall, Home, Approvals (with its count), Agents and More, over the safe-area inset. The current tab's icon fills and sits on a pale volt pill with a volt ring that slides between tabs (a 300ms spring with 10% bounce; instant under reduced motion); its label turns ink.
+- **Status strip** ([DEC-215](../docs/project/04-decision-log.md#decisions)). A 34px row under the header, flat, not glass: each feed's state and age, and what is degraded, with a "Fixture data" tag. On every record screen (a request, a kill switch, a release, a close, Stop all, Close everything) it shows at every width. Elsewhere nothing sits under the header while every feed answers, and the "Fixture data" tag moves to the foot of the page, clear of the tab bar or the dock. While a feed is stale or failing, or the workspace is loading or unreachable, the full strip shows from 64rem; below 64rem a banner of the same height and wording (`Feed warning`) lists just what is degraded, and not while the workspace is loading (`e2e/desktop-frame.spec.ts`, `e2e/phone.spec.ts`).
+- **Page header.** The title with the paper badge beside it, an optional description, route tabs as links, and actions. Exactly one tab is current, the exact match or else the deepest section the page sits under, underlined with a 2px volt bar under its label ([DEC-208](../docs/project/04-decision-log.md#decisions); `e2e/agent-tabs.spec.ts`). Record screens (an agent, a request) always carry the badge in the title row.
+- **Theme menu.** Light, Dark and System, as a menu in the header, and in the More sheet below 64rem.
+- **Command palette (⌘K).** "Stop…" is the first command for every role that may stop. Titles come from the screen list and owner-given agent labels; nothing typed is kept and there are no recents.
+- **Hero equity chart.** See Charts.
+- **Agent row (Home).** A whole-row link: the name and mode pill, "mandate · holdings" in muted text, a sparkline against the daily loss limit, equity with today's change, and a caption line with the simulated paper P&L and its disclosure symbol, which opens its popover without opening the agent. Restrictions follow as small tinted notes in the colour of whoever imposed them. Hover is the well.
+- **Waiting for you.** In the rail on desktop: each open approval as a pale volt card with the request in a sentence, the static deadline and an ink "Open request" pill. On a phone the requests lead Home's Needs you instead (see Phone).
+- **Stop sheet.** G2, the chooser, from the right with a 24px leading radius. A calm header (an ink octagon, the title, the paper badge); sections with plain headings; per-agent rows that expand to Pause (ink), Kill switch (crimson) and Stop-and-release (outline); account-wide Pause (ink), Stop all (crimson) and Close everything (crimson outline). Pause, Resume and Stop of a flat agent act in the sheet. The kill switch, release, Stop all and Close everything are links to their record screens, and the sheet closes on the way. Account notices wear `lapis-soft` with an account tag.
+- **Kill-switch button.** `KillSwitchButton` alone draws crimson: filled (crimson with off-white type, a 2px `crimson-edge`) or outline (the card with a 2px `crimson-edge` and ink type). Its label keeps 7:1 in both themes.
+- **Kill-switch and release record screens (D10, D11).** Pages at `/agents/{agent_id}/kill-switch`, `/agents/{agent_id}/release`, `/connections/{connection_id}/stop-all` and `/connections/{connection_id}/close-all`, with opaque IDs, in a centred column. The title carries the paper badge; the document title names the environment. Every list shows expanded: orders it cancels, positions it sells or releases, agents it stops, and what it leaves alone. Release carries its "yours and unprotected" warning on the mandate field. Each agent's mode pill is part of the record. The passkey check (G3) opens from the page, and the command carries every line shown and every badge as it read, so the journal keeps what the owner confirmed.
+- **Step-up dialog.** A 24px-radius dialog: the title, the one action in a well, and Cancel / Use passkey as pills. The waiting message sits in the footer's live region.
+- **Buttons.** Pills. Primary ink (paper in dark), secondary on the muted fill, outline (a hairline border on the page), ghost, link. Every button presses to 0.97.
+- **Mode pill.** A 24px pill with an icon and the mode in sentence case: running is the well with muted text; exits only is outlined in ink; paused and stopped are solid ink with a filled icon.
+- **Source tag.** Who imposed a restriction, as a pill: "Your mandate" (volt tint, deep volt text, volt ring), "The account" (volt tint, ink text), "You" (solid ink), "Market data" (outlined).
+- **Limit rail.** On the mandate field: the label, the dollar value against its cap, an 8px rounded track with a volt fill and a thin deep volt post at the limit, and the headroom and consequence in words.
+- **Provenance.** "You said", "You entered" and "From template" are hairline pills; anything the platform authored ("Proposed by the platform", "Platform default") has a dashed border, so it reads as not yet yours by shape, not colour.
+- **Performance disclosure** ([DEC-210](../docs/project/04-decision-log.md#decisions)). Beside every P&L, exactly where the dashed `[[DISCLOSURE-PERFORMANCE]]` tag stood, an info symbol (Phosphor `Info`, 16px, muted, the type colour on hover or while open) opens the disclosure text in a Kumo popover, the one the freshness popover uses. It opens on hover after 150ms and stays open while the pointer is over the symbol or the popover; a click or tap toggles it and a tap outside closes it; focus alone does not open it, Enter or Space does, and Escape closes it and gives focus back. Its accessible name is "Performance disclosure" and the text is its description (`aria-describedby`, kept in the same row), so a screen reader hears it without opening anything. It takes one line of the text beside it and no more: a zero-width space gives the button the text's line height and baseline, and the target, a 24px circle (44px on touch) drawn as a pseudo-element, adds no width or height. On desktop a row is no taller for its symbol and no figure moves; on a phone the symbol wraps with the words before it, never alone on a line, and no row is taller than it was with the tag. Opening it moves nothing. The symbol holds at least 3:1 on the card, the well and the mandate field in both themes (`contrast-pairs.ts`). Where nothing can be hovered or opened the full tag stands inline instead: in print (the symbol hides and the tag prints), and on every record screen (`InlineDisclosures`, from `isRecordRoute`), because a record screen counts collapsed content as not shown (brief §4.1); no record screen shows a P&L today, and no export or share image carries one. On a phone the agent rows carry headroom and no P&L, so no symbol; every P&L a phone still shows (the account hero, an agent's hero) keeps its symbol, and desktop agent rows keep theirs. `[[LEGEND-HYPOTHETICAL]]` and `[[RETAIL-AUTO-LIVE]]` stay visible tags. Counsel must confirm the symbol meets the "clear and prominent" standard before launch; `PERFORMANCE_INLINE` in `placeholders.tsx` puts the tag back inline everywhere in one line. `src/app/disclosure.test.tsx` and `e2e/disclosure.spec.ts` hold all of this.
+
+## Phone
+
+**The phone is a remote control** (DEC-207). Below 64rem an owner comes to do four things: see whether anything needs them, approve or skip, stop, and glance at how they are doing. Everything else is one press away under More or in a section link. From 64rem nothing here applies and tablet and desktop are unchanged; between 40rem and 64rem the same structure uses the wider page padding. The switch is breakpoint classes (`lg:hidden`, `max-lg:hidden`), never a script media query, so the desktop DOM only gains hidden elements. Hairline rows, no cards, no gradients.
+
+- **Frame.** The header holds three things: the mark (to Home), the paper badge and Stop. Stop is quiet or loud exactly as on desktop, from the same `stopAttention`, with a 44px pill; the stale banner and a loud Stop stand together, the banner under the header, and the More sheet stops below the header and is not modal, so Stop stays pressable while it is open. There is no menu, no search button and no sidebar sheet: one navigation, the four-tab bar (Home, Approvals with its count, Agents, More), with More opening the More sheet. No status strip except on record screens, which keep it; a stale or failing feed, or an unreachable workspace, shows a one-line banner of the strip's height and words under the header. The "Fixture data" tag sits at the foot of the page, above the tab bar's clearance.
+- **Home.** Needs you comes first: requests, soonest first, each a row to its record with the static time it is skipped at ("Skipped at 14:14:58 ET if you do nothing"), then the alerts, each to where it is read in full. With neither, "All clear. Nothing needs you." with a check, in muted text. A request appears once on Home: the rail and its "Waiting for you" cards are desktop only, and the phone's old "Requests waiting for you" chip is gone. Then the account hero, as on desktop, with a 180px chart so its range picker sits wholly above the tab bar on the first screen. Then one row per agent: the name (semibold), the mode pill (its glyph and word) and the headroom from `headroomLine` ("$274.45 above its daily loss limit"), a distance to a limit rather than a result, so no P&L, no disclosure and no disclosure repeated per row; the whole row opens the agent. Then the last three activity entries and "See all activity". No positions; the unmanaged-cash footnote is desktop only.
+- **Agent.** The name with the mode pill beside it, and Stop this agent. Any waiting request as a row with its static time. The equity hero with its disclosure symbol and chart; the level legend waits behind a 44px "Levels" button (`aria-expanded`), collapsed. Then **Headroom**: one hairline row per limit (each position, total holdings, the daily loss limit, orders today) with the room left and the limit in words and a 4px meter, the muted track filled in ink with the mandate's deep volt post (`mandate-strong`) at the limit; no gain or loss colour and no disclosure. Room under the daily loss limit is equity's distance to that level, the figure Home states. Then the broker check, pending breaches, the gap caveat and "View full mandate". The route tabs give way to "This agent", a plain list of every section at the foot of every agent screen (Overview, Positions and Orders with their counts, Decisions, Approvals, Mandate, Prove, Activity), the current one marked. Key figures, positions, orders, decisions, activity and the mandate card are desktop only on the Overview; each is a section link away.
+- **Approvals.** The inbox is one hairline row per request, marked by the tray, with the time alone. A request is one screen: its frozen record, then Approve and Skip, equal in size and weight, in a bar pinned on the tab bar to the very end of the page. The request states the deadline as an absolute time and the whole minutes left, as the brief requires (never seconds, never pulsing); a row gives the time alone. Nothing is optimistic, and the passkey step-up is unchanged.
+- **Tests.** `phone-screens.test.tsx`, `app-shell.test.tsx` and `more-sheet.test.tsx` read the breakpoint classes; `e2e/phone.spec.ts` checks the real layout at 320, 375, 390 and 430px in both themes and with reduced motion (three header controls, four tabs, every screen through More, no sidebar, the banner only when stale, Needs you's order and its all-clear, no P&L on the agent rows, the range picker clear of the tab bar, Levels collapsed, Headroom rows, the section links, Approve and Skip equal and pinned, no sideways scroll, 44px targets), and at 1440px that Home and an agent keep the desktop structure.
+
+## Sign-in and the public pages
+
+([DEC-211](../docs/project/04-decision-log.md#decisions)) The pages that need no account, `/welcome`, `/login` and `/auth/passkey`, sit in the `(site)` route group with a frame of their own (`src/app/(site)/layout.tsx`): the app's tokens, Public Sans, light and dark, and the same 64px glass header with its hairline, holding only the Owlhead lockup, which opens `/`, and one outline pill at the right, "Sign in" ("Open Owlhead" while signed in, and nothing on the sign-in pages themselves). There is no Stop, paper badge, dock, tab bar or header control, because nothing on these pages acts on an account. The content is one centred column on the page's card colour: no cards, no gradients, and no glass below the header.
+
+- **Sign in** (`/login`). A 24rem column: "Sign in" as the page's heading, one muted line ("New to Owlhead? Continue with Google to create your account. After that, a passkey signs you in."), then two full-width 48px pills, "Continue with Google" (primary, ink) and "Sign in with a passkey" (outline). While the email flag is on, a hairline, the label "Or get a sign-in link by email", a 48px field and "Email me a link" (outline). A pressed pill shows a spinner in place of its icon (it holds still under reduced motion), the others disable, and a polite live region names the step ("Opening Google…", "Waiting for your passkey…", "Sending…"). Messages sit in a well above the pills and never say whether an account or an address exists: one sentence for any sign-in that did not finish, one for a passkey request cancelled or timed out, one for a browser without passkeys, "Passkeys aren't turned on yet; continue with Google." while the project has them off, and after any email request "If that address can sign in, we've sent a link." Only a failed connection reads differently, since it says nothing about an account. With sign-in off the page says so and links to the app.
+- **Add a passkey** (`/auth/passkey`). When a sign-in with Google or an email link finds no passkey on the account: a fingerprint in ink, "Add a passkey", one line ("Next time, sign in with your fingerprint, face or device PIN instead of Google."), then "Add a passkey" (primary) and "Not now" (outline), which goes on without one.
+- **Welcome** (`/welcome`, and `/` for a signed-out visitor, at the same address). The landing page (see Landing below), with `/` as its canonical address. It brings its own `<main>` and draws its own window, so the frame adds no `<main>` and hides the site header there (`OffLanding`); the sign-in pages sit in `SiteMain`, the centred column.
+- **In the app.** While someone is signed in, the account menus show their address under "You, owner" and end with Sign out after a separator; the More sheet shows the same two lines under the account and a Sign out row after the theme. Settings > Profile gains a Passkeys section: one hairline row per passkey with its name and when it was added and last used (in UTC, read from the timestamp), Rename (an inline field, 120 characters at most) and Delete (an inline confirmation in a well, which says when Google will be the only way in), and "Add a passkey" beside the heading. With sign-in off none of this renders.
+- **Tests.** `login-panel.test.tsx`, `passkey-enrol.test.tsx`, `passkeys-section.test.tsx` and `account-session.test.tsx`; `e2e/site-layout.spec.ts` checks the frame at 390 and 1440px in both themes, and `e2e-auth/` what a signed-out visitor meets with sign-in on.
+## Landing
+
+**The landing page at owlhead.ai** ([DEC-213](../docs/project/04-decision-log.md#decisions), superseding DEC-212's page) is for signed-out visitors: `Landing` in `src/components/site/landing.tsx`, rendered at `/welcome` with no site header. It is one page of text in the manner of a 1990s home page, drawn inside a period browser window on a dithered desktop, and it gathers interest in the private beta.
+
+- **Structure.** The browser window (`retro.tsx`): a title bar, a menu bar and a toolbar that are scenery (`aria-hidden`), a Location field with the address, a row of guide links to the page's own sections, and a status bar. Inside: the name as ASCII art (`ascii.ts`, with an `sr-only` "Owlhead" as the `h1`), one subhead, a blinking "New" tag beside the beta notice, and "Last updated" with a sign-in link. Then a sticky contents list beside nine numbered sections: what we're building, why, how it works, how it stays in check, the record (a working tamper demo, `record-trace.tsx`), who it's for, where we are (working now, on paper, and coming during the beta, under a construction strip), questions, and "Ask for a place" with the guestbook form. A footer carries 88x31 badges, the disclaimer and a sign-in link.
+- **Type.** DotGothic16 for the body, VT323 for the address and the ASCII art, Pixelify Sans for the window chrome, buttons and bold words. All three are self-hosted from `@fontsource` and imported only by `landing.tsx`; the product stays in Public Sans. The families live in `letter.module.css` classes, because `tailwind-merge` reads an arbitrary `font-[...]` as a weight.
+- **Colour.** The app's tokens and nothing else, so dark mode follows with no `dark:` classes: bevelled grey chrome from `card`, `muted` and `foreground`, links in `mandate-strong` that hover to the `highlight`, and the one filled button on the highlight with ink type. The construction strip and the edited line of the record use the reserved warning tint, since the page shows no gain or loss for amber to be mistaken for. No gradients (the dither and the tape are SVG patterns over flat fills).
+- **The guestbook.** `beta-form.tsx` posts `{ email, role, website }` to `POST /api/beta` (`website` is a honeypot). The route validates with `parseBetaRequest` (`src/lib/beta.ts`) and stores through `src/lib/beta-store.ts`: the `beta_requests` table in Supabase (`supabase/migrations/20260929180000_beta_requests.sql`: the publishable key may insert and never read), or, while Supabase is not configured or the table does not exist yet, one JSON line per request in `web/.data/beta-requests.jsonl` (gitignored). A repeat address counts as stored, so the form never reveals who is on the list. A bad email answers 400 and the field says so; any other failure asks the visitor to try again later.
+- **Copy.** Plain English, sentence case, short sentences, no em or en dashes and no exclamation marks. No performance, returns, percentages, signed amounts, testimonials, "profit", "guaranteed" or "beat the market". What is not built is listed under "Coming during the beta", and live trading waits on legal sign-off. The compliance lines are plain words (a footer disclaimer, and "Is this investment advice?" answered in the questions), for counsel to review before launch.
+- **Motion.** Only the "New" tag blinks, and only with motion allowed (`prefers-reduced-motion: no-preference`).
+- **Tests.** `landing.test.tsx` (structure, links, the guestbook, the record demo, the copy rules, the tokens and contrast of every pair the page uses in both themes), `metadata.test.ts` and `beta.test.ts`; `e2e/landing.spec.ts` checks 320, 390, 1024 and 1440px in both themes, gradients, reduced motion, layout shift as the fonts load, the keyboard outline, the contents links, the record demo and the guestbook; `e2e-auth/signed-out.spec.ts` posts a bad email to the real route.
+
+## Charts
+
+TradingView Lightweight Charts (`lightweight-charts`, Apache-2.0, pinned exactly), styled in `src/components/charts/options.ts`. Canvas cannot read CSS variables, so the tokens are converted to hex once per theme (`CHART_COLORS`), and `setChartMode` switches between them.
+
+**The scrubbable hero equity chart** (`src/components/charts/equity-chart.tsx`) is the signature of the system: on Home, account equity; on an agent, that agent's equity.
+
+- **One hero number** ([DEC-208](../docs/project/04-decision-log.md#decisions) item 6). Above the line: the value in the display size, in proportional lining figures (see Typography), which scales with the hero's own width (`cqi`), so a seven-digit value with a minus sign fits at 320px and the figure reaches 4.75rem on a desktop. The cents (the point and two digits) are half size, in the muted type colour, and raised by their own cap height so their tops meet the digits' (`HeroFigure` in `src/components/domain/money.tsx`). Drawn in parts, the figure still has one whole screen-reader copy, rolling or scrubbed, so it is read once as "$28,478.36". Below it, the change from the start of the range sits on a soft pill (the gain or loss tint, `--muted` at exactly zero, the figures in the gain or loss colour, so the colour-blind alternates carry through): its sign, the word ("gain", "loss"), the percentage, and "today" or the range in words in the muted type. The performance disclosure symbol (see Components) sits just outside the pill, on the pill's line and baseline at every width, never on a line of its own (DEC-210); in a narrow hero the pill wraps inside itself first. `e2e/hero-figure.spec.ts` checks the sizes, the tracking and figures, the one accessible name, the pill's tints, the fit at 320 to 390px, that scrubbing changes only the figure's glyphs (its height, the pill and the chart stay put), and that every other figure on Home, an agent and the positions and orders tables stays tabular.
+- **Scrub.** Hold or hover on the line and the hero value, the change and the date follow the pointer, instantly (no roll while scrubbing). Let go and they return to now, where a live change rolls in. The crosshair is a hairline with no labels, because the hero figure reads it out. On touch, a horizontal drag scrubs and a vertical one still scrolls the page (`touch-pan-y`).
+- **Ranges.** 1D, 1W, 1M, 3M, 1Y and All as a quiet segmented control; the current range sits on a pale volt pill with a volt ring that glides to the next (the same 300ms spring, a jump under reduced motion). A new range redraws the line in place.
+- **Draw-in.** On first load the line draws in from the left over 700ms. Under reduced motion it is simply there.
+- **Mandate levels.** The agent's daily loss limit, drawdown floor, lifetime floor, stop and take-profit are 1px dashed grey price lines, each labelled on the axis with a pale volt tag in deep volt type. When two levels sit closer than their labels are tall, the lower one keeps its line and drops its label. The price scale widens to include them, and a compact legend below lists every level in words and says which are outside the range shown.
+- **Stale.** When the latest point is old, its age is shown beside the date ("as of 14:02, 3 min ago"). Nothing is extrapolated.
+- **Flat.** The background is `ColorType.Solid`; an area's top and bottom colours are the same token; no series animates (`LastPriceAnimationMode.Disabled`). `charts.test.tsx` checks every builder for this, and that every chart colour is its token in each theme.
+- **Colour follows ownership.** Account equity is a 2px volt line over a pale volt fill; an agent's equity a 2px ink line over the card; mandate levels dashed grey with volt labels; average cost a solid volt line; a proposal an agent asks about in ink, dashed. Candles are gain and loss, or the colour-blind alternates when colour-blind friendly is on; pre-market and after-hours candles are the border colour.
+- **Levels are labelled lines, never progress bars.**
+- **Accessible.** The canvas is `role="img"` with a label, and a written summary (first, last, low, high) is its description. The ranges are a labelled group of pressed-state buttons, 44px tall on phones. The hero value has a stable screen-reader copy that never animates, and it is not a live region, so scrubbing does not flood a screen reader.
+- **States.** Loading shows the chart's outline and no line. Empty, unreachable and error draw no chart and invent no values. A paused or restricted agent still shows its chart and levels. If the canvas cannot be drawn, the chart says so and the figures around it stay.
+- **Attribution.** `attributionLogo: false` inside the chart; a text link to TradingView under the account chart and on `/design`, and the notice in `web/NOTICE`.
+- **Fixtures.** Bars, fills and equity curves come from a seeded generator (`src/fixtures/market.ts`) that reproduces the fixture's positions, P&L and equity; the account curve ends on the broker's equity.
+
+Sparklines (agent rows) are SVG: a 1.5px line that scales with its box, and the daily loss limit as a 1px dashed volt line.
 
 ## Motion
 
-Emil Kowalski's rules: motion explains a change, stays under 300ms, is interruptible, and never animates keyboard-driven or high-frequency actions.
+Emil Kowalski's rules: motion answers an action or shows what changed; it is quick, interruptible, starts from where it is, and never animates keyboard-driven or high-frequency actions. Interactions stay under 300ms; the line's draw-in, once on load, is the one longer moment.
 
 | Token | Value | Use |
 |---|---|---|
 | `--ease-out` | `cubic-bezier(0.23, 1, 0.32, 1)` | Entrances, press, reveals, number changes |
-| `--ease-in-out` | `cubic-bezier(0.77, 0, 0.175, 1)` | Things that move on screen: chevrons, expand and collapse |
+| `--ease-in-out` | `cubic-bezier(0.77, 0, 0.175, 1)` | Things that move on screen: chevrons, the range pill |
 | `--ease-drawer` | `cubic-bezier(0.32, 0.72, 0, 1)` | The Stop sheet |
+| `--ease-spring` | `linear()` spring, about 10% overshoot | The step-up dialog settling in; never a deadline or a figure |
 | `--duration-press` / `--duration-release` | 140ms / 80ms | Press to scale 0.97; the release is faster than the press |
-| `--duration-hover` | 160ms | Colour changes on hover and on a mode change |
-| `--duration-reveal` + `--stagger` | 200ms, 30ms apart | A field wipes in from its leading edge (clip-path), once, on first render |
-| `--duration-sheet` | 280ms in, 200ms out | Stop sheet |
-| `--duration-dialog` | 220ms in, 150ms out | Step-up dialog |
-| Number roll | 200ms | A changed value rolls up and out; a stable screen-reader copy never animates |
+| `--duration-hover` | 160ms | Colour changes on hover, on a mode change, and when Stop turns loud or quiet |
+| `--duration-reveal` + `--stagger` | 240ms, 30ms apart (at most 8 steps) | A list settles in once: each row rises 6px and fades in (`reveal`) |
+| `--duration-number` | 240ms | A changed value rolls up and out; a stable screen-reader copy never animates |
+| `--duration-draw` | 700ms | The hero line draws in from the left on first load (`draw-in`) |
+| `--duration-sheet` | 320ms in, 200ms out | Stop sheet |
+| `--duration-dialog` | 240ms in, 150ms out | Step-up dialog |
+| Page change | 200ms | The page content cross-fades (React's `ViewTransition`). The root is not captured and the overlay lets presses through, so the header and Stop stay live throughout; `e2e/stop-visible.spec.ts` checks Stop takes a press in every frame but the snapshot's own |
 
-Reduced motion drops every movement (translate, scale, clip-path, press) and keeps colour and opacity changes that help comprehension.
+Deadlines, the figures in an approval, and Stop never move, and nothing in the frame moves on its own ([DEC-215](../docs/project/04-decision-log.md#decisions)). Reduced motion drops every movement (translate, scale, clip-path, press, the draw-in, the tab pill's slide) and keeps colour and opacity changes that help comprehension.
 
 ## States
 
-Every state has one flat treatment inside the system. Agent modes and restrictions use meaning colours; system states carry none.
+Every state has one flat treatment. Agent modes and restrictions use meaning colours; system states carry none.
 
 | State | Treatment |
 |---|---|
-| Normal | Muted mode field, foreground text |
-| Exits only | Card field with an inset 2px ink ring: the agent is partly stopped |
-| Paused | Solid ink field, ink-foreground text |
-| Stopped | Solid ink field, ink-foreground text, "Stopped" label |
-| Restriction from your mandate (drawdown, daily loss, floor, goal, hard breach, removed instrument) | Marigold-soft notice with a marigold "Your mandate" tag |
-| Restriction from the account (reconciliation hold, startup reconciliation, unknown order, activity outside Owlhead, account checks) | Lapis-soft notice with a lapis "The account" tag |
-| Restriction from you (owner pause, stopped) | Muted notice with an ink "You" tag |
-| Stale market data | Muted notice with an outlined "Market data" tag; the value keeps its age behind a 2px-bordered "STALE" chip, and the status strip turns muted and counts what is degraded |
-| Unreachable deployment, error | Muted field under a 4px foreground rule with a display heading; says what failed, whether anything changed, and the next step; no agent data is shown or kept |
-| Loading | Skeleton fields in the shape of the screen (muted, with lapis-soft and marigold-soft hints where those fields will be); never a value from an earlier visit |
-| Empty | A lapis board with the one next step on it |
-| Unknown order | Reads "unknown" in words inside the account notice; never a guessed status |
+| Running | Mode pill on the well, muted text |
+| Exits only | Card-colour pill with a 1px ink ring: the agent is partly stopped |
+| Paused | Solid ink pill, filled icon |
+| Stopped | Solid ink pill, filled icon, "Stopped" |
+| Restriction from your mandate (drawdown, daily loss, floor, goal, hard breach, removed instrument) | A pale volt note with a "Your mandate" tag in deep volt |
+| Restriction from the account (reconciliation hold, startup reconciliation, unknown order, activity outside Owlhead, account checks) | A pale volt note with an ink "The account" tag |
+| Restriction from you (owner pause, stopped) | A well-coloured note with an ink "You" tag |
+| Stale market data | A well-coloured note with an outlined "Market data" tag; the value keeps its age in a small "Stale" chip, and the status strip counts what is degraded (the feed banner below 64rem) |
+| Unreachable deployment, error | A well with a heading: what failed, whether anything changed, and the next step; no agent data is shown or kept |
+| Loading | Skeletons in the shape of the screen (the hero, the chart, the rail, rows); never a value from an earlier visit |
+| Empty | "No agents yet" and one pill link: describe your first agent |
+| Unknown order | Reads "unknown" in words inside a pale volt box; never a guessed status |
+
+## Kumo
+
+The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Base UI, themed to the calm system. The rules below are binding; the tests in `src/test/safety-static.test.ts`, `src/lib/roles.test.tsx`, `src/app/routes.test.tsx` and `src/components/shell/journal.test.tsx` hold them.
+
+**Theme.** `src/app/globals.css` imports, in order, Kumo's sources, Kumo's Tailwind styles, Tailwind, then `kumo-theme.css`, which redefines every `--color-kumo-*` and `--text-color-kumo-*` token under `:root, [data-theme="owlhead"]` as a semantic token, so each role follows the theme. The html element carries `data-theme="owlhead"` and `data-mode="light"` or `"dark"`; the app root is `isolate`.
+
+| Kumo role | Value |
+|---|---|
+| Brand, link | The account's ink (paper in dark); brand hover ink-800 (paper-300) |
+| Focus | Deep volt (`--ring`, volt-700; volt-200 in dark) |
+| Danger | Ink. Crimson is not a Kumo colour; only `KillSwitchButton` draws it |
+| Warning | Amber on its tint, so a Kumo warning is honest amber, but no component may use it (a test fails on any `warning` class or `variant="warning"`): at text lightness amber sits 20 degrees from the colour-blind orange loss and would read as a loss |
+| Info / success | The muted type / the gain green, on their tints |
+| Canvas, base, control, overlay | The card |
+| Recessed | The well (background) |
+| Tint, fill | Muted; fill hover is the pale volt tint |
+| Lines | The border hairline |
+| Badge orange | The mandate: volt tint with deep volt text, for mandate fields only |
+| Badge red, green, blue-family, neutral | Ink, gain, the account's ink, muted foreground |
+
+`[data-surface="account" | "field" | "ink"]` rescopes Kumo's roles for content on a coloured field: on the account's ink, text is paper, tints are ink-800 and lines volt; on the mandate field, the base is the volt tint, strong text deep volt and lines volt; on ink, lines are ink-700. In dark mode the same scopes follow their tokens, with inverse text on the paper fills. Kumo's arbitrary radii (5px, 10px) join the radius scale. Kumo's drop shadow is transparent; the 1px shadow-edge hairline stays in the border colour.
+
+**Flat fills.** Kumo paints an overlay on emphasis buttons, fades on sticky table cells and tab scroll buttons, scroll masks on the sidebar, layer dialog and tab list, and a shimmer on skeletons. `kumo-theme.css` flattens each one: the button overlay is one solid brand colour (the end colour Kumo computes for primary, the only emphasis variant we use), masks are removed, and skeletons are static muted fields. A unit test checks that each override is present and that Kumo still ships the class names it targets. The Playwright suite (`e2e/flat-fills.spec.ts`) checks the result in Chromium against `next start`, in both themes: on every route, at desktop and phone widths and with the Stop sheet, passkey dialog, command palette and phone More sheet open, no element or pseudo-element has a computed background image, mask, border image or list image containing a gradient; and on the Kumo surfaces rendered on `/design` (primary and destructive-styled buttons, a table with a sticky header, overflowing tabs and sidebar, skeletons, a layer dialog) the computed background image and mask are `none`, the button overlay is the solid brand fill with no inset shadow, and skeletons do not animate.
+
+**Imports.** One component per import (`@cloudflare/kumo/components/button`); the root barrel is lint-banned and `optimizePackageImports` covers Kumo and Phosphor. Phosphor icons come from `@phosphor-icons/react/ssr` in server components. `LinkProvider` routes Kumo links through `next/link`; `Toasty` and `KumoLocaleProvider` wrap the app. Inputs are 16px on coarse pointers so iOS does not zoom.
+
+**Not used.** Cloudflare's logo and "Powered by Cloudflare"; Kumo's destructive and secondary-destructive variants (lint-banned); Meter (limits are rails in dollars, and goals and profit stops are never progress bars); clipboard copy of agent names or instruments; recents or stored history; select-all on proposals; "Recommended" or "New" badges on models; green "healthy" dots (status shows "as of" times instead); Collapsible or Tabs that hide required content on a record screen (only "View model output" collapses).
+
+**Safety resolutions.**
+
+1. Record screens are pages, never modals: the approval request (D6), and the kill switch and release (D10, D11), which the Stop sheet links to. Dialogs are for the Stop sheet, the passkey step-up and short admin actions. A record screen's content is fixed at first render (`useFrozen` in `src/lib/frozen.ts`) and is what its artifact is built from. If the state underneath changes before the owner confirms, the action is withdrawn (an open passkey check closes and a late answer is ignored) and the screen offers "Show the current version"; it never updates silently. After they confirm, the record stays as they saw it, and live progress (command phases, current modes, who has approved since, the outcome) sits in a dashed "After you confirmed" or "After you responded" area outside it.
+2. Pause, Stop and Kill are never `disabled` or `loading` (lint-banned); progress is status text in a live region. Loading never holds back the header.
+3. No typed confirmation. Stop, kill and release ask for a passkey; Pause does not.
+4. Crimson is the kill switch alone, through `KillSwitchButton`.
+5. Badge orange (the mandate's volt tint) marks mandate fields only.
+6. Titles are generic ("Agent", "Approval request", "Orders"); IDs are opaque; model text never becomes a palette title, page title or button label.
+7. The paper badge is in the header, the Stop sheet title and every record-screen title.
+8. Approve and Skip are both secondary, the same size and class, full-width pills in a fixed order pinned above the tab bar on phones, with no autofocus; the deadline is static text.
+9. A toast appears only after the mock journals the action, and names the action only. A request the deployment took without a journal entry shows the banner "The result is unknown; we are checking." and never a success.
+10. Roles (PX-11) are a fixture switch: approvers pause only, viewers and auditors have no Stop, viewers see requests read-only, auditors see only Audit. Hiding a link is never the guard: `routeNeeds` in `src/lib/access.ts` names the capability each path needs, and the shell renders "Not available to your role" in place of any page the role may not open, so an auditor who types `/` or an agent URL sees that and a link to Audit. The Owlhead link goes to the role's home, and breadcrumbs drop crumbs the role cannot open. The kill-switch, release and close-position pages need `stop.full`. `src/app/routes.test.tsx` renders every route as every role and checks every link on screen.
 
 ## Do's and Don'ts
 
-- Do give every colour field one meaning and keep it on every screen.
-- Do draw every limit as a rail in dollars on marigold, with the point where it stops the agent marked and the headroom in words.
-- Do put a sign and the word beside every gain and loss.
-- Do say "simulated" wherever paper performance appears, beside its disclosure placeholder.
+- Do give each screen one hero number, with its change, the word for it, "simulated" where it is paper, and its disclosure on the next line.
+- Do let space separate things; use a hairline before a box, and a box only when it carries a meaning.
+- Do draw every limit as a rail in dollars on the mandate field, with the point where it stops the agent marked and the headroom in words.
+- Do give every gain and loss its sign (and, on a headline figure, the word), and put the performance disclosure beside every P&L: the symbol on screen, the full `[[DISCLOSURE-PERFORMANCE]]` on a record screen and in print (DEC-210).
 - Do keep Stop in the header on every screen, and keep touch targets at 44px or more on phones.
+- Do keep Stop quiet on a calm screen and let it turn loud only for a risk reason from `stopAttention`, in the same place and size.
+- Do use tabular figures wherever numbers line up or change, and give live values a fixed slot so nothing shifts. The display hero figure alone is proportional, on a line of its own.
+- Do check every screen in light and dark; a new colour is a token with a value in each theme.
 - Don't use crimson for anything but the kill switch, including errors and losses.
+- Don't use volt outside the volt tokens, as a block, or (in light mode) as text lighter than deep volt.
+- Don't write a `dark:` class; the dark theme is tokens alone.
 - Don't colour a system state (stale, unreachable, loading) with a meaning colour.
-- Don't set body, buttons or navigation in capitals, and don't add letter-spacing.
-- Don't round a corner, add a shadow, blur an overlay, or put a field inside a field.
+- Don't set anything in capitals-only, add heavy rules or bands of colour, or go above weight 600.
+- Don't use gradients, glows, or a shadow on anything that does not float, and don't use glass anywhere but the frame (the header, the phone tab bar and the desktop dock).
+- Don't gamify: no confetti, streaks, badges, celebratory motion, or a gain shown louder than a loss.
 - Don't show anything as approved or submitted until the runtime records it.
-- Don't use colour, motion or size to steer a decision.
-- Don't make it look like a retail trading app (neon on black) or a stock SaaS dashboard (rounded cards, hero banner, uniform spacing).
+- Don't use colour, motion or size to steer a decision, and never animate a deadline or a figure being decided on.
+- Don't let a sign-in message say whether an account or an email address exists.
+- Don't pulse, glow, badge or resize Stop to draw the eye, don't make it loud for a request waiting for approval, and don't fill anything else in the header with ink.
 
 ## History
 
 - **2026-09-28, first look rejected.** PR #253's first screenshots (a generic card dashboard) were rejected by the founder as too plain.
-- **2026-09-28, three directions.** Impeccable's `shape` flow produced three concepts over the same fixtures at a dev-only `/directions` route: Vernier (an engineering instrument panel: drafting-film green, one international-orange signal, tick-scale limits), Placard (transit signage: flat meaning fields, condensed capitals, square corners), and Keel (Braun-era hardware: two accents on a warm neutral, rounded panels and pill controls). Each was a full token set and component language, not a hue swap, and each was reviewed with the vendored skills before the founder saw it.
-- **2026-09-28, Placard chosen.** The founder picked Placard and asked for tighter gutters. Vernier, Keel and the picker were deleted; Placard became the app's only design. The product was named Owlhead the same day (DEC-201).
+- **2026-09-28, three directions.** Impeccable's `shape` flow produced three concepts over the same fixtures. The founder picked a transit-signage direction and asked for tighter gutters. The product was named Owlhead the same day (DEC-201).
+- **2026-09-28, Kumo and a dashboard shell.** shadcn/ui, Radix and lucide gave way to Kumo and Phosphor, with a collapsible sidebar, breadcrumbs, ⌘K and agent-scoped navigation.
+- **2026-09-28, a first palette and the logo** (DEC-202, DEC-203), both since superseded or amended by DEC-204.
+- **2026-09-28, the calm redesign in Ink and Gold (DEC-204).** The founder asked for a consumer-grade product at the level of Robinhood, Public or Wealthfront, without gamification. The signage structure and type were superseded: three families gave way to Mona Sans in one tight scale; square fields and 2px rules to soft corners, hairlines and space; the dashboard to one hero number over a scrubbable equity chart; one density to two. The palette became Ink and Gold with a dark theme, and the logo ink on light and off-white on dark. Every safety behaviour stayed.
+- **2026-09-29, glass on the frame only** ([DEC-208](../docs/project/04-decision-log.md#decisions)). From a mockup, the founder approved frosted glass for the sticky header and the phone tab bar, and turned it down anywhere else; the opacity went from the mockup's 58% to 72% so the header's text keeps AA over whatever scrolls under it.
+- **2026-09-29, hero-first number type** ([DEC-208](../docs/project/04-decision-log.md#decisions)). From a mockup, the founder approved a larger equity figure with muted, raised half-size cents, and the day's change on a soft pill toned by its sign. The figure got its own display size, scaled by its container rather than the viewport so long values fit on phones; the approval's action keeps the hero size.
+- **2026-09-29, a dock, a ticker and a command bar** ([DEC-208](../docs/project/04-decision-log.md#decisions)). The founder approved three changes to the frame: on desktop a floating glass dock replaces the sidebar, the lockup moves to the header and the content takes the full width; a ticker tape of held instruments' prices and day changes replaces the status strip under the header while every feed answers; and the ⌘K trigger becomes a wide command bar in the middle of the header.
+- **2026-09-29, an agent wire instead of a ticker** ([DEC-208](../docs/project/04-decision-log.md#decisions)). The founder turned the price ticker down as too much like a brokerage: the strip under the header became a wire of what the agents are doing, in ink and muted text, from 64rem (it was first drawn from 40rem; the phone below 64rem has no wire). The same day, the current page's crumb stopped truncating beside the command bar, and the bar's prompt became "Jump to an agent or screen…", because the palette does not search orders.
+- **2026-09-29, Ink and Ultramarine ([DEC-205](../docs/project/04-decision-log.md#decisions)).** The founder compared seven accents (gold, iris, ultramarine, petrol, jade, plum, graphite) and page colours in a live preview and chose ultramarine on a cool white page. Only DEC-204's gold accent and warm paper changed: the ramp became ultramarine (hue 266) and paper and ink moved to a cool hue (255), with every token name and meaning kept. Colour-blind friendly moved the gain from blue to teal, so it stays apart from the new accent, deepened the light loss one step, and added tritanopia to the simulation.
+- **2026-09-29, a quiet Stop ([DEC-206](../docs/project/04-decision-log.md#decisions)).** The founder found the always-filled 44px Stop pill too big and prominent for a calm screen. Stop became an ink outline, 40px on desktop (the command bar's height), that fills in ink only while something needs the owner. It stays in the same place, the same size, never disabled and never hidden. This amends DEC-204 item 2 ("the header keeps Stop as its dominant control").
+- **2026-09-29, a labelled dock** ([DEC-208](../docs/project/04-decision-log.md#decisions)). The founder asked for a more prominent desktop dock so people are not lost: every item gained its name under the icon, the current section a tinted pill, and the dock a denser glass and a firmer edge; the tooltips went, and "More screens" became "More". The header's folded menu became "Alerts and account", so only the dock says More on desktop.
+- **2026-09-29, the phone is a remote control ([DEC-207](../docs/project/04-decision-log.md#decisions)).** Squeezing the desktop onto a phone had made it crowded: two navigation systems, a status strip on every screen and one request shown three times on Home. The founder approved a simpler phone: three things in the header, four tabs with More for the rest, a banner only when a feed fails, Needs you first on Home with headroom instead of P&L on the agent rows, an agent page of state, equity and headroom with its sections as links, and one request per screen with its choices pinned. Tablet and desktop did not change.
+- **2026-09-29, Public Sans ([DEC-209](../docs/project/04-decision-log.md#decisions)).** The founder called Inter "an AI smell tell" and asked for the face to be chosen with Impeccable. Mona Sans is on the same reflex list, so it gave way to Public Sans after Archivo, Golos Text and Public Sans were rendered in the built app; the hero's tracking went from -0.035em to -0.03em. A serif figure face for the hero, echoing the wordmark, was tried and turned down.
+- **2026-09-29, the performance disclosure behind a symbol** ([DEC-210](../docs/project/04-decision-log.md#decisions)). The dashed `[[DISCLOSURE-PERFORMANCE]]` tag beside every P&L cluttered every screen; the founder asked for it behind a symbol that opens on click and hover. It stays beside every P&L, inline in print and on record screens, pending counsel's confirmation.
+- **2026-09-29, one system from eight branches** ([DEC-208](../docs/project/04-decision-log.md#decisions)). The frame, the dock, the wire, the hero number and the one current section tab were recorded together as DEC-208. Where the branches met: the display figure took Public Sans's -0.03em and proportional lining figures, with every other figure tabular; Stop's desktop pill and the command bar share 40px; the phone's agent rows carry headroom and so no disclosure symbol, while every P&L keeps one; the phone's Stop turns quiet and loud as on desktop; the phone meter's post became the deep accent to hold 3:1 on its track; and the wire starts at 64rem, with the dock.
+- **2026-09-29, sign-in and the public pages' frame** ([DEC-211](../docs/project/04-decision-log.md#decisions)). The founder chose Supabase Auth, with Google for sign-up and the first sign-in and a passkey after. The pages before sign-in got a frame of their own, the app's glass header with only the brand and "Sign in", so the welcome and sign-in pages carry no Stop, dock or wire.
+- **2026-09-29, the landing page** ([DEC-212](../docs/project/04-decision-log.md#decisions)). The founder asked for a public page at owlhead.ai that looks like a serious financial product and like the app, not a brokerage and not an AI template. It is built from the app's own screens and system: hairlines instead of cards, real screenshots instead of illustrations, a ledger of what the agent can't do and what the owner can always do, and compliance text only as placeholders.
+- **2026-09-29, a retro text page and a private beta** ([DEC-213](../docs/project/04-decision-log.md#decisions)). The founder turned the screenshot page down for one page of text that explains what Owlhead is, why and how, and gathers interest: in the manner of a 1990s home page, with a guestbook that records requests for a place in the private beta. The placeholders gave way to plain wording at the founder's direction, and the screenshot pipeline was removed.
+- **2026-09-29, Ink and Volt** ([DEC-214](../docs/project/04-decision-log.md#decisions)). The founder moved the accent from ultramarine to volt (hue 120): olive volt as light mode's text and focus ring, pale volt in dark, and a neon highlight that is always a fill under ink type. Every token kept its name and meaning, and every pair was measured again.
+- **2026-09-29, no agent wire** ([DEC-215](../docs/project/04-decision-log.md#decisions)). On the live dashboard the founder asked for the strip above it to go. The wire was removed, and from 64rem the frame follows the phone: nothing under the header while every feed answers, the full status strip while one is stale or failing and on record screens, and the "Fixture data" tag at the foot of the page.

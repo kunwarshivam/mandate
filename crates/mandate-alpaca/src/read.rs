@@ -6,18 +6,25 @@
 //! about another instrument, and an answer older than the caller's bound are refused
 //! (`AGENTS.md` rule 3). Numbers never pass through a float (ADR-0001 ES-23).
 
+use std::collections::BTreeMap;
 use std::time::Duration;
 
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_num::{Price, Qty};
 use mandate_time::UtcNanos;
+use serde_json::value::RawValue;
+use serde_json::{Map, Value};
 
-use crate::error::ReadError;
+use crate::error::{ReadError, WireError};
+use crate::wire;
 
 /// The listing exchange, as trading-domain spec §3.1 names Alpaca's codes. `CRYPTO` is the code
-/// Alpaca gives every pair; any code the spec does not name is [`Exchange::Other`], which the
-/// eligibility floor treats as ineligible (§3.2 item 2), so an unknown code fails closed there
-/// rather than here.
+/// Alpaca gives every pair; any code the spec does not name is [`Exchange::Other`]. Only
+/// [`Exchange::Nasdaq`], [`Exchange::Nyse`], [`Exchange::Arca`], [`Exchange::Amex`] and
+/// [`Exchange::Bats`] are eligible for an equity opening (§3.2 item 2): [`Exchange::Otc`] and
+/// [`Exchange::Other`] are both ineligible, so a floor reading this must admit the five by name
+/// rather than refuse `Other` alone, and an unknown code fails closed there rather than here
+/// (#277 review, minor 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exchange {
     Nasdaq,
@@ -67,8 +74,8 @@ impl AssetSnapshot {
     /// [`ReadError::Stale`], and one read after `now` is [`ReadError::AheadOfClock`]. `max_age`
     /// is the caller's: spec §3.1's daily refresh is its schedule, not this read's.
     pub fn current(&self, now: UtcNanos, max_age: Duration) -> Result<&Asset, ReadError> {
-        let _ = (now, max_age);
-        Err(ReadError::Unimplemented { story: "E7-8" })
+        judge_age(self.loaded_at, now, max_age)?;
+        Ok(&self.asset)
     }
 }
 
@@ -95,14 +102,305 @@ pub struct LatestQuote {
 }
 
 /// Parses the body of `GET /v2/assets/{symbol}` for `instrument`.
+///
+/// The record must name `instrument` itself; an equity's `attributes` array is required, because
+/// its absence cannot say "not an IPO"; and a pair's three order constraints are required, as
+/// strings under `wire`'s decimal rules (DEC-168 item 6).
 pub fn asset(instrument: &InstrumentId, body: &[u8]) -> Result<Asset, ReadError> {
-    let _ = (instrument, body);
-    Err(ReadError::Unimplemented { story: "E7-8" })
+    let value = wire::json(body)?;
+    let fields = wire::object(&value, "asset")?;
+    if &wire::instrument(fields)? != instrument {
+        return Err(ReadError::OtherInstrument);
+    }
+    let asset_id = wire::broker_id(wire::text(fields, "id")?, "id")?;
+    let class = match wire::text(fields, "class")? {
+        "us_equity" => AssetClass::UsEquity,
+        "crypto" => AssetClass::Crypto,
+        _ => return Err(WireError::WrongType { field: "class" }.into()),
+    };
+    let active = match wire::text(fields, "status")? {
+        "active" => true,
+        "inactive" => false,
+        _ => return Err(WireError::WrongType { field: "status" }.into()),
+    };
+    let attributes = attributes(fields, class)?;
+    let has = |name: &str| attributes.contains(&name);
+    let (min_order_size, min_trade_increment, price_increment) = match class {
+        AssetClass::Crypto => (
+            Some(wire::qty(fields, "min_order_size")?),
+            Some(wire::qty(fields, "min_trade_increment")?),
+            Some(wire::price(fields, "price_increment")?),
+        ),
+        AssetClass::UsEquity => (
+            optional(fields, "min_order_size", wire::qty)?,
+            optional(fields, "min_trade_increment", wire::qty)?,
+            optional(fields, "price_increment", wire::price)?,
+        ),
+    };
+    Ok(Asset {
+        asset_id,
+        instrument: instrument.clone(),
+        class,
+        exchange: exchange(wire::text(fields, "exchange")?),
+        active,
+        tradable: wire::flag(fields, "tradable")?,
+        fractionable: wire::flag(fields, "fractionable")?,
+        ipo: has("ipo"),
+        ptp_no_exception: has("ptp_no_exception"),
+        min_order_size,
+        min_trade_increment,
+        price_increment,
+    })
+}
+
+/// Spec §3.1's exchange codes, matched exactly as Alpaca writes them.
+fn exchange(code: &str) -> Exchange {
+    match code {
+        "NASDAQ" => Exchange::Nasdaq,
+        "NYSE" => Exchange::Nyse,
+        "ARCA" => Exchange::Arca,
+        "AMEX" => Exchange::Amex,
+        "BATS" => Exchange::Bats,
+        "OTC" => Exchange::Otc,
+        "CRYPTO" => Exchange::Crypto,
+        _ => Exchange::Other,
+    }
+}
+
+/// The record's attribute names. An equity must carry the array; a pair may omit it.
+fn attributes(fields: &Map<String, Value>, class: AssetClass) -> Result<Vec<&str>, WireError> {
+    let field = "attributes";
+    match fields.get(field) {
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| item.as_str().ok_or(WireError::WrongType { field }))
+            .collect(),
+        None | Some(Value::Null) if class == AssetClass::Crypto => Ok(Vec::new()),
+        None | Some(Value::Null) => Err(WireError::MissingField { field }),
+        Some(_) => Err(WireError::WrongType { field }),
+    }
+}
+
+/// A decimal field that may be absent or `null`, read by `parse` when it is present.
+fn optional<T>(
+    fields: &Map<String, Value>,
+    field: &'static str,
+    parse: fn(&Map<String, Value>, &'static str) -> Result<T, WireError>,
+) -> Result<Option<T>, WireError> {
+    match fields.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => parse(fields, field).map(Some),
+    }
 }
 
 /// Parses the body of a latest-quote read for `instrument`. Its age is not judged here:
 /// [`crate::DataClient::latest_quote`] judges it against the clock.
+///
+/// An equity's answer is `{"quote": {...}, "symbol": ...}` and must name `instrument`; a pair's is
+/// `{"quotes": {"<pair>": {...}}}` and is found by its key. No quote, or a `null` one, is
+/// [`ReadError::Absent`]. Each price and size is the JSON number's own text (DEC-168 item 3), and
+/// a zero price on either side is [`ReadError::OneSided`].
 pub fn latest_quote(instrument: &InstrumentId, body: &[u8]) -> Result<LatestQuote, ReadError> {
-    let _ = (instrument, body);
-    Err(ReadError::Unimplemented { story: "E7-8" })
+    let top = raw_object(raw_json(body)?, "quote")?;
+    let is_pair = instrument.as_str().contains('/');
+    let (quote, feed) = if is_pair {
+        let quotes = top
+            .get("quotes")
+            .ok_or(WireError::MissingField { field: "quotes" })?;
+        let quotes: Option<BTreeMap<String, &RawValue>> = serde_json::from_str(quotes.get())
+            .map_err(|_| WireError::WrongType { field: "quotes" })?;
+        let quote = quotes
+            .and_then(|quotes| quotes.get(instrument.as_str()).copied())
+            .ok_or(ReadError::Absent)?;
+        (quote, Feed::Crypto)
+    } else {
+        let symbol = top
+            .get("symbol")
+            .ok_or(WireError::MissingField { field: "symbol" })?;
+        let symbol: String = serde_json::from_str(symbol.get())
+            .map_err(|_| WireError::WrongType { field: "symbol" })?;
+        if symbol != instrument.as_str() {
+            return Err(ReadError::OtherInstrument);
+        }
+        let quote = top.get("quote").copied().ok_or(ReadError::Absent)?;
+        (quote, Feed::Iex)
+    };
+    if quote.get() == "null" {
+        return Err(ReadError::Absent);
+    }
+    let fields = raw_object(quote, "quote")?;
+    let stamped = fields
+        .get("t")
+        .ok_or(WireError::MissingField { field: "t" })?;
+    let stamped: String =
+        serde_json::from_str(stamped.get()).map_err(|_| WireError::WrongType { field: "t" })?;
+    Ok(LatestQuote {
+        instrument: instrument.clone(),
+        at: UtcNanos::parse_rfc3339(&stamped).map_err(WireError::from)?,
+        bid: side_price(&fields, "bp")?,
+        bid_size: Qty::parse(&token(&fields, "bs")?).map_err(WireError::from)?,
+        ask: side_price(&fields, "ap")?,
+        ask_size: Qty::parse(&token(&fields, "as")?).map_err(WireError::from)?,
+        feed,
+    })
+}
+
+/// The body as unparsed JSON, or [`WireError::NotJson`].
+fn raw_json(body: &[u8]) -> Result<&RawValue, WireError> {
+    serde_json::from_slice(body).map_err(|_| WireError::NotJson)
+}
+
+/// A JSON object whose values stay unparsed, so each number keeps its own text.
+fn raw_object<'a>(
+    raw: &'a RawValue,
+    field: &'static str,
+) -> Result<BTreeMap<String, &'a RawValue>, WireError> {
+    serde_json::from_str(raw.get()).map_err(|_| WireError::WrongType { field })
+}
+
+/// A quote side's price. A zero price is Alpaca's way of saying the side is empty, which is
+/// [`ReadError::OneSided`], not a price; any other value `Price` cannot hold is unreadable.
+fn side_price(
+    fields: &BTreeMap<String, &RawValue>,
+    field: &'static str,
+) -> Result<Price, ReadError> {
+    let text = token(fields, field)?;
+    if matches!(text.as_str(), "0" | "-0") {
+        return Err(ReadError::OneSided);
+    }
+    Ok(Price::parse(&text).map_err(WireError::from)?)
+}
+
+/// One number field's canonical text, taken from the JSON number token itself, never from a
+/// float: a string, a `null` or any other value is [`WireError::WrongType`], an exponent is
+/// [`WireError::ExponentForm`], and more than 9 places is [`WireError::TooManyPlaces`].
+fn token(fields: &BTreeMap<String, &RawValue>, field: &'static str) -> Result<String, WireError> {
+    let text = fields
+        .get(field)
+        .ok_or(WireError::MissingField { field })?
+        .get();
+    let numeric = text
+        .bytes()
+        .next()
+        .is_some_and(|b| b == b'-' || b.is_ascii_digit());
+    if !numeric {
+        return Err(WireError::WrongType { field });
+    }
+    if text.contains(['e', 'E']) {
+        return Err(WireError::ExponentForm { field });
+    }
+    let places = text.split_once('.').map_or("", |(_, places)| places);
+    if places.len() > wire::MAX_PLACES {
+        return Err(WireError::TooManyPlaces { field });
+    }
+    Ok(wire::canonical(text))
+}
+
+/// Whether an answer stamped `at` is current at `now` under `max_age`: stamped after `now` is
+/// [`ReadError::AheadOfClock`], older than `max_age` is [`ReadError::Stale`], and an age of
+/// exactly `max_age` is current. The age is counted in whole nanoseconds.
+pub(crate) fn judge_age(at: UtcNanos, now: UtcNanos, max_age: Duration) -> Result<(), ReadError> {
+    if at > now {
+        return Err(ReadError::AheadOfClock);
+    }
+    let age = nanos(now)
+        .zip(nanos(at))
+        .and_then(|(now, at)| now.checked_sub(at))
+        .and_then(|age| u128::try_from(age).ok())
+        .ok_or(ReadError::Stale)?;
+    if age > max_age.as_nanos() {
+        return Err(ReadError::Stale);
+    }
+    Ok(())
+}
+
+/// Whole nanoseconds since the epoch.
+fn nanos(at: UtcNanos) -> Option<i128> {
+    i128::from(at.secs())
+        .checked_mul(1_000_000_000)?
+        .checked_add(i128::from(at.nanos()))
+}
+
+#[cfg(test)]
+mod tests {
+    use mandate_accounting::InstrumentId;
+    use mandate_num::{Price, Qty};
+
+    use super::{asset, latest_quote};
+
+    fn instrument(symbol: &str) -> Result<InstrumentId, String> {
+        InstrumentId::new(symbol).map_err(|e| format!("{e:?}"))
+    }
+
+    const EQUITY: &str = r#"{"attributes":[],"class":"us_equity","exchange":"NYSE","fractionable":false,"id":"11111111-2222-4333-8444-555555555555","status":"active","symbol":"KO","tradable":true"#;
+    const PAIR: &str = r#"{"class":"crypto","exchange":"CRYPTO","fractionable":true,"id":"276e2673-764b-4ab6-a611-caf665ca6340","min_order_size":"0.000018","min_trade_increment":"0.000000001","price_increment":"1","status":"active","symbol":"BTC/USD","tradable":true"#;
+
+    /// An equity record that does carry order constraints has them read, and a `null` one is
+    /// none (the E7-8 implementation's mutation gate: `optional` answering `None` regardless).
+    #[test]
+    fn an_equity_record_with_order_constraints_reads_them() -> Result<(), String> {
+        let ko = instrument("KO")?;
+        let with = format!(
+            r#"{EQUITY},"min_order_size":"1","min_trade_increment":"1","price_increment":"0.01"}}"#
+        );
+        let read = asset(&ko, with.as_bytes()).map_err(|e| e.to_string())?;
+        let one = Qty::parse("1").map_err(|e| e.to_string())?;
+        assert_eq!(read.min_order_size, Some(one));
+        assert_eq!(read.min_trade_increment, Some(one));
+        assert_eq!(
+            read.price_increment,
+            Some(Price::parse("0.01").map_err(|e| e.to_string())?)
+        );
+        let null = format!(r#"{EQUITY},"min_order_size":null}}"#);
+        let read = asset(&ko, null.as_bytes()).map_err(|e| e.to_string())?;
+        assert_eq!(read.min_order_size, None);
+        let bad = format!(r#"{EQUITY},"price_increment":"1e-2"}}"#);
+        assert_eq!(
+            asset(&ko, bad.as_bytes()).map_err(|e| e.code()),
+            Err("exponent_form"),
+            "a constraint an equity sends is read under the same rules as a pair's"
+        );
+        Ok(())
+    }
+
+    /// #288 review, minor 1: a size or price is the token's own digits, which an `f64` round trip
+    /// would not keep. `0.000000001` would come back `1e-09`, and `322390037.75749118` would come
+    /// back as `…4912` (DEC-168 item 3).
+    #[test]
+    fn a_quote_keeps_digits_a_float_would_lose() -> Result<(), String> {
+        let body = br#"{"quote":{"ap":322390037.75749118,"as":322390037.75749118,"bp":0.000000001,"bs":0.000000001,"t":"2026-09-25T19:59:59.826431742Z"},"symbol":"AAPL"}"#;
+        let quote = latest_quote(&instrument("AAPL")?, body).map_err(|e| e.to_string())?;
+        let exact = |text: &str| Qty::parse(text).map_err(|e| e.to_string());
+        assert_eq!(quote.bid_size, exact("0.000000001")?);
+        assert_eq!(quote.ask_size, exact("322390037.75749118")?);
+        assert_eq!(
+            quote.bid,
+            Price::parse("0.000000001").map_err(|e| e.to_string())?
+        );
+        assert_eq!(
+            quote.ask,
+            Price::parse("322390037.75749118").map_err(|e| e.to_string())?
+        );
+        Ok(())
+    }
+
+    /// A pair may omit `attributes`, or send it `null`: no pair is an IPO or a partnership
+    /// (DEC-168 item 6). An equity may not.
+    #[test]
+    fn a_pair_without_attributes_reads_and_an_equity_without_them_does_not() -> Result<(), String> {
+        let pair = instrument("BTC/USD")?;
+        for body in [
+            format!("{PAIR}}}"),
+            format!(r#"{PAIR},"attributes":null}}"#),
+        ] {
+            let read = asset(&pair, body.as_bytes()).map_err(|e| e.to_string())?;
+            assert_eq!((read.ipo, read.ptp_no_exception), (false, false), "{body}");
+        }
+        let without = EQUITY.replacen(r#""attributes":[],"#, "", 1);
+        assert_eq!(
+            asset(&instrument("KO")?, format!("{without}}}").as_bytes()).map_err(|e| e.code()),
+            Err("missing_field")
+        );
+        Ok(())
+    }
 }
