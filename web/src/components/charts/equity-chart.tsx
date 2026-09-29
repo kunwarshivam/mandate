@@ -138,7 +138,7 @@ function EquityHero({
             <span data-slot="hero-change" data-tone={changeTone} className={cn("inline-flex w-fit max-w-full flex-wrap items-baseline gap-x-2 rounded-full px-3 py-1 text-sm font-medium", PILL[changeTone])}>
               <SignedMoney value={changeText} instant={scrubbing} />
               {pct ? <span className="font-mono tabular">({pct})</span> : null}
-              <span className="tabular" data-slot="hero-when">
+              <span className="text-muted-foreground tabular" data-slot="hero-when">
                 {scrubbing ? formatTime(shown.time as UTCTimestamp) : words}
               </span>
             </span>

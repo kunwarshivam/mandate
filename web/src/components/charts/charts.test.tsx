@@ -285,6 +285,7 @@ describe("the hero chart scrubs", () => {
       for (const other of ["bg-gain-soft", "bg-loss-soft", "bg-muted"].filter((c) => c !== fill)) expect(pill).not.toHaveClass(other);
       expect(pill.querySelector("[data-direction]")).toHaveAttribute("data-direction", tone);
       expect(pill).toHaveTextContent(word);
+      expect(pill.querySelector("[data-slot=hero-when]")).toHaveClass("text-muted-foreground");
       expect(pill.querySelector("[data-placeholder]")).toBeNull();
       expect(pill.parentElement!.querySelector(":scope > [data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
     }
