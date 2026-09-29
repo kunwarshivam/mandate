@@ -25,9 +25,6 @@ const PUBLIC_FILES = new Set([
   "/robots.txt",
 ]);
 
-/** The landing page's screenshots (`public/site/`), which a signed-out visitor must load. */
-export const SITE_IMAGES = "/site";
-
 export function isPublicPath(pathname: string): boolean {
   return (
     pathname === WELCOME_PATH ||
@@ -35,7 +32,6 @@ export function isPublicPath(pathname: string): boolean {
     pathname === BETA_REQUEST_PATH ||
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/_next/") ||
-    pathname.startsWith(`${SITE_IMAGES}/`) ||
     PUBLIC_FILES.has(pathname)
   );
 }

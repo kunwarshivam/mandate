@@ -381,6 +381,10 @@ html:root[data-cvd="on"] {
         scroll-padding-top: calc(5rem + var(--status-row));
       }
     }
+    /* The landing draws no sticky header or dock (DEC-213). */
+    &:has([data-slot="landing"]) {
+      scroll-padding: 0;
+    }
     scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
     @media (min-width: 64rem) {
       scroll-padding-bottom: calc(var(--dock-clearance) + 1rem);

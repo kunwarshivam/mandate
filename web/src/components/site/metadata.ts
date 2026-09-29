@@ -5,7 +5,7 @@ import type { Metadata } from "next";
  * app's " · Owlhead" template. The description is for search results only; the share card keeps the
  * brand's no-tagline rule (web/PRODUCT.md) and shows the name and the existing image.
  */
-export const LANDING_DESCRIPTION = "An AI agent trades inside dollar limits you set. Every order is checked against your mandate first, and you can stop it at any time. Paper trading only.";
+export const LANDING_DESCRIPTION = "A trading agent for your own brokerage account, working inside rules you write. Now in private beta, starting on paper.";
 
 const SHARE_IMAGE = { url: "/og-image.png", width: 1200, height: 630, alt: "Owlhead" };
 

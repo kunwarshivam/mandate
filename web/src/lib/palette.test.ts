@@ -462,7 +462,9 @@ describe("colour usage in components", () => {
   it("keeps warning off every screen, including Kumo's warning and alert variants", () => {
     const warning = /\b(bg|text|border|ring|outline|fill|stroke|decoration)-(kumo-)?warning\b|\bkumo-(banner-)?warning\b|variant=["{]*["'](warning|alert)["']/;
     const measured = "lib/contrast-pairs.ts";
-    const users = files.filter((f) => warning.test(f.text) && !specimens.test(f.path) && f.path !== measured).map((f) => f.path);
+    // DEC-213: the signed-out landing shows no gain or loss, so its construction tape and edited record line can't be read as one.
+    const landing = /^components\/site\//;
+    const users = files.filter((f) => warning.test(f.text) && !specimens.test(f.path) && !landing.test(f.path) && f.path !== measured).map((f) => f.path);
     expect(users).toEqual([]);
   });
 
