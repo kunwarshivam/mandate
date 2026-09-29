@@ -220,7 +220,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   means the owner's choices (approve or skip, with the default stated), never platform-authored
   alternative trades ([mandate spec §6.4](../specs/mandate.md#64-approvals), FR-6.2).
   *Follow-up (DEC-165 item 3, #236):* the content's Trigger row still lacks "the rule as the owner
-  wrote it". It joins the content object once the M7 spec PR fixes §6.4's list, with a test that
+  wrote it". §6.4 now fixes it (DEC-173 item 2): `trigger.rule` is the owner's confirmed rule
+  `{id, when, then}` exactly as the mandate holds it, or null for `default` and
+  `admission_ceiling`. It joins the content object in a tests correction, with a test that
   scans owner-written text apart from the platform's own in
   `the_content_never_carries_advice_wording`, so an owner's rule named `target_weight` is shown as
   written and never read as platform advice.
@@ -264,7 +266,20 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   runtime's tests PR (3 of 4):** a test commits an owner exit whose step-up is stale at commit
   and asserts two things. First, the refusal is journaled. Second, the exit is still routed as
   a regular-session exit and reaches the executor, so no step-up outcome can remove an owner's
-  risk reduction. The mandate spec §6.1 wording goes with the M7 spec PR.
+  risk reduction. The mandate spec §6.1 wording is in ("Owner controls and step-up", DEC-173
+  item 5).
+  *Follow-up (M7 spec PR, DEC-173 item 1):* the MC-E cases (MC-E01 to MC-E31) are not yet in
+  `mandate.yaml`, because `mandate_harness.rs`'s
+  `the_fixture_holds_the_families_this_stream_expects` pins the fixture's total at 298 cases and
+  300 tests, and the spec guard keeps that `crates/` fix out of a spec PR. Two changes, in order:
+  first a tests correction that makes the harness count only the families it owns, or read §11's
+  stated count; then an MC-E spec PR that generates the cases from `reference/mandate/ref.py`'s
+  escalation model (already fuzzed and mutation-checked), with `cargo xtask refcases --write`, and
+  no `status.toml` row.
+  *Follow-up (M7 spec PR, DEC-173 item 11):* the `mandate-journal` catalogue (`src/catalogue.rs`,
+  `tests/catalogue.rs`) needs `ApprovalRevalidated` (agent, `man`), `ApprovalResponseSubmitted`
+  (ctl), and `OwnerCommandIssued` (ctl) from journal spec v0.5 before the runtime's tests PR can
+  journal them.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
