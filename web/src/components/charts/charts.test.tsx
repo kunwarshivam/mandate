@@ -235,6 +235,21 @@ describe("the hero chart scrubs", () => {
     expect(h.change.querySelector("[data-direction]")).toHaveTextContent(usdLabel(Math.abs(change)).replace("\u2212", ""));
   });
 
+  it("sets the hero figure in proportional lining figures, and the pill's figures tabular", () => {
+    for (const ui of [<AccountEquityChart key="account" />, <AgentEquityChart key="agent" agent={WS.agents[0]} />]) {
+      const { container, unmount } = renderWithRuntime(ui);
+      const h = hero(container);
+      expect(h.value).toHaveClass("text-display", "proportional-nums", "lining-nums");
+      expect(h.value).not.toHaveClass("tabular");
+      expect(h.value.querySelector(".tabular, .font-mono")).toBeNull();
+      const figures = [...h.change.querySelectorAll(".font-mono")];
+      expect(figures.length).toBeGreaterThan(0);
+      for (const f of figures) expect(f).toHaveClass("tabular");
+      expect(h.when).toHaveClass("tabular");
+      unmount();
+    }
+  });
+
   it("returns to now when the pointer leaves the line", () => {
     const { container } = renderWithRuntime(<AccountEquityChart />);
     const chart = onlyChart(container);

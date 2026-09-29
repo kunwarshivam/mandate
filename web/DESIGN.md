@@ -76,7 +76,7 @@ Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in t
 
 - **Serious, not a default.** The U.S. Web Design System's grotesque, drawn from Libre Franklin, so it comes from the Franklin Gothic line of newspapers and financial pages. It reads plain and sturdy where Inter, Geist and Mona Sans read as the generic product default (Impeccable's reflex list).
 - **Open when small, steady when large.** It stays even at 13 to 14 px in a dense price table and holds together at the hero size; the other candidates were either narrow small or loud large.
-- **Figures.** Tabular, lining figures (`tnum`; lining is the default) with a flagged 1, a straight 7 and a plain oval zero narrower than the O, so money lines up and never reads as a code. The tabular feature sets the digits only, so commas and points keep their own widths. The true minus sign (U+2212) is in the font.
+- **Figures.** Tabular, lining figures (`tnum`; lining is the default) everywhere but the display hero with a flagged 1, a straight 7 and a plain oval zero narrower than the O, so money lines up and never reads as a code. The tabular feature sets the digits only, so commas and points keep their own widths. The true minus sign (U+2212) is in the font.
 - **One family, full range.** Weights 100 to 900 in one file, so the scale is built from size and three weights, never from a second family. It covers Latin Extended-A (all but Ĳ, ŉ and ſ) and Vietnamese.
 - **Licence and hosting.** OFL, from npm, no font from a third-party host.
 
@@ -84,7 +84,7 @@ Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in t
 
 | Role | Class | Size / line height | Weight | Tracking | Use |
 |---|---|---|---|---|---|
-| Display | `text-display` | `clamp(2rem, 14cqi, 4.75rem)` / 0.95 | 600 | -0.05em | The equity figure over a hero chart: account equity, an agent's equity (see Charts) |
+| Display | `text-display` | `clamp(2rem, 14cqi, 4.75rem)` / 0.95 | 600 | -0.03em | The equity figure over a hero chart: account equity, an agent's equity (see Charts). Proportional lining figures |
 | Hero | `text-hero` | `clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem)` / 1.05 | 600 | -0.03em | One per screen where there is no equity figure: the approval's action |
 | H1 | `text-h1` | 1.75rem / 1.2 | 600 | -0.02em | A page title |
 | H2 | `text-h2` | 1.25rem / 1.3 | 600 | -0.01em | A section |
@@ -95,7 +95,7 @@ Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in t
 | Caption | `text-caption` | 0.8125rem / 1.4 | 400 | 0 | Ages, disclosures, secondary facts |
 | Label | `text-label`, `field-label` | 0.8125rem / 1.35 | 500 | 0 | Field labels and chips, muted, sentence case |
 
-Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Public Sans letters run narrower). The hero's -0.03em keeps the figures of `$28,478.36` close without the comma touching them; no role is tracked tighter than -0.04em, and `tokens.test.ts` fails on one that is. The root size is the browser's own, so the owner's setting carries.
+Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family), except the display hero figure: at 76px tabular digits leave visible gaps around a 1, so it is set in proportional lining figures (`proportional-nums lining-nums`). Its change pill sits on its own line, so the figure's width changing as it scrubs moves nothing else (`e2e/hero-figure.spec.ts`). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Public Sans letters run narrower). The display and hero sizes' -0.03em keeps the figures of `$28,478.36` close without the comma touching them; no role is tracked tighter than -0.04em, and `tokens.test.ts` fails on one that is. The root size is the browser's own, so the owner's setting carries.
 
 The brand is not set in this face: the wordmark is drawn as outlines (see Brand).
 
@@ -313,7 +313,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - Do give every gain and loss its sign (and, on a headline figure, the word), and put the performance disclosure beside every P&L: the symbol on screen, the full `[[DISCLOSURE-PERFORMANCE]]` on a record screen and in print (DEC-210).
 - Do keep Stop in the header on every screen, and keep touch targets at 44px or more on phones.
 - Do keep Stop quiet on a calm screen and let it turn loud only for a risk reason from `stopAttention`, in the same place and size.
-- Do use tabular figures wherever numbers line up or change, and give live values a fixed slot so nothing shifts.
+- Do use tabular figures wherever numbers line up or change, and give live values a fixed slot so nothing shifts. The display hero figure alone is proportional, on a line of its own.
 - Do check every screen in light and dark; a new colour is a token with a value in each theme.
 - Don't use crimson for anything but the kill switch, including errors and losses.
 - Don't use ultramarine outside the ultramarine tokens, as a block, or (in light mode) as text lighter than deep ultramarine.

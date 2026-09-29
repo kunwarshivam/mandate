@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { CHART_FONT } from "@/components/charts/options";
 import { composite, contrastRatio, parseOklch, rgbContrast, toHex, toRgb255 } from "./color";
 import { PALETTES, TOKEN_NAMES, type ThemeName, hatchInk } from "./palette";
-import { colorTokens, colorTokensFor, markPairs, textPairs, tokenValue } from "./tokens";
+import { colorTokens, colorTokensFor, markPairs, textPairs, tokenValue, typeScale } from "./tokens";
 
 const css = readFileSync(resolve(process.cwd(), "src/app/globals.css"), "utf8");
 
@@ -226,6 +226,15 @@ describe("figures with a plain zero", () => {
     for (const file of sources(resolve(process.cwd(), "src")).filter((f) => !/\/(design|palette)\//.test(f))) {
       expect(readFileSync(file, "utf8"), file).not.toMatch(/\bfont-(bold|extrabold|black)\b/);
     }
+  });
+
+  it("sets the display hero in proportional lining figures and every other figure role in tabular ones", () => {
+    const display = typeScale.find((t) => t.role === "display")!;
+    expect(display.className.split(" ")).toEqual(expect.arrayContaining(["proportional-nums", "lining-nums"]));
+    expect(display.className.split(" ")).not.toContain("tabular");
+    expect(display.spec).toMatch(/^Public Sans 600, .* -0\.03em, proportional lining figures/);
+    for (const role of ["hero", "figure", "number"]) expect(typeScale.find((t) => t.role === role)!.className.split(" "), role).toContain("tabular");
+    expect(theme["text-display--letter-spacing"]).toBe("-0.03em");
   });
 
   it("sets tabular figures on the figures class, and never asks for a slashed zero", () => {

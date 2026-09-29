@@ -135,7 +135,8 @@ function EquityHero({
         <h2 id={titleId} className="text-sm font-medium text-muted-foreground">
           {title}
         </h2>
-        <p className="text-display tabular" data-slot={valueSlot}>
+        {/* Proportional figures: tabular digits leave visible gaps at the display size, and the pill sits on its own line, so nothing moves with the width. */}
+        <p className="text-display proportional-nums lining-nums" data-slot={valueSlot}>
           {shown ? <HeroFigure value={usdLabel(shown.value)} instant={scrubbing} /> : "—"}
         </p>
         {points.length >= 2 && shown ? (

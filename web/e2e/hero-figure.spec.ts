@@ -2,9 +2,10 @@ import { type Locator, type Page, expect, test } from "@playwright/test";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * The hero figure: the balance in the display size with its cents at half size, muted and raised to
- * the digits' cap height, read as one value; the change on a soft pill toned by its sign, with the
- * disclosure beside it. Scrubbing the chart moves both, and nothing around them moves as they change.
+ * The hero figure: the balance in the display size, in proportional lining figures, with its cents at
+ * half size, muted and raised to the digits' cap height, read as one value; the change on a soft pill
+ * toned by its sign, with the disclosure beside it. Scrubbing the chart changes the figure's glyphs
+ * and the pill's, and nothing else moves: not the figure's box, the pill's place or the chart.
  */
 
 const HEROES = [
@@ -43,11 +44,14 @@ async function layout(page: Page, value: string) {
   return page.evaluate((value) => {
     const figure = document.querySelector(value)!;
     const section = figure.closest("section")!;
+    const box = figure.getBoundingClientRect();
+    const pill = document.querySelector("[data-slot=hero-change]")!.getBoundingClientRect();
+    const chart = section.querySelector("[data-slot=chart-canvas]")!.getBoundingClientRect();
     return {
-      figure: figure.getBoundingClientRect().height,
-      pill: document.querySelector("[data-slot=hero-change]")!.getBoundingClientRect().height,
+      figure: { top: box.top + window.scrollY, left: box.left, width: box.width, height: box.height },
+      pill: { top: pill.top + window.scrollY, left: pill.left, height: pill.height },
       line: document.querySelector("[data-slot=hero-change]")!.parentElement!.getBoundingClientRect().height,
-      chartTop: section.querySelector("[data-slot=chart-canvas]")!.getBoundingClientRect().top + window.scrollY,
+      chart: { top: chart.top + window.scrollY, left: chart.left, width: chart.width, height: chart.height },
     };
   }, value);
 }
@@ -74,9 +78,12 @@ for (const { name, path, value } of HEROES) {
     });
     expect(type.size).toBe(76);
     expect(type.weight).toBe("600");
-    expect(type.tracking).toBeCloseTo(-0.05, 3);
+    expect(type.tracking).toBeCloseTo(-0.03, 3);
     expect(type.leading).toBeCloseTo(0.95, 3);
-    expect(type.numerals).toContain("tabular-nums");
+    // Tabular digits leave visible gaps at 76px, so the hero alone is proportional.
+    expect(type.numerals).toContain("proportional-nums");
+    expect(type.numerals).toContain("lining-nums");
+    expect(type.numerals).not.toContain("tabular-nums");
     expect(type.centsSize).toBe(38);
     expect(type.centsText).toMatch(/^\.\d{2}$/);
     // Raised by the cents' own cap height, so their tops meet the digits' tops.
@@ -98,7 +105,7 @@ for (const { name, path, value } of HEROES) {
     await expect(figure).toMatchAriaSnapshot(`- paragraph: "${scrubbed}"`);
   });
 
-  test(`${name}: scrubbing moves the figure and the pill, and nothing around them moves`, async ({ page }) => {
+  test(`${name}: scrubbing changes only the glyphs of the figure and the pill, and nothing moves`, async ({ page }) => {
     for (const width of [1440, 390]) {
       await open(page, path, width);
       const figure = page.locator(value);
@@ -208,3 +215,23 @@ for (const width of [320, 360, 390]) {
     expect(pill).toBe(true);
   });
 }
+
+test("every figure but the hero keeps tabular digits: tables, key figures, rows, rails and the wire", async ({ page }) => {
+  for (const path of ["/", `/agents/${AGENT_IDS.swing}`, `/agents/${AGENT_IDS.swing}/orders`, "/positions"]) {
+    await open(page, path, 1440);
+    const read = await page.evaluate(() => {
+      const hero = document.querySelector("[data-slot=account-equity-value], [data-slot=agent-equity-value]");
+      const figures = [...document.querySelectorAll<HTMLElement>(".tabular, .font-mono, .text-figure")].filter((el) => !hero?.contains(el) && el.checkVisibility());
+      return {
+        count: figures.length,
+        inTables: figures.filter((el) => el.closest("table")).length,
+        proportional: figures.filter((el) => !getComputedStyle(el).fontVariantNumeric.includes("tabular-nums")).map((el) => el.outerHTML.slice(0, 120)),
+        hero: hero ? getComputedStyle(hero).fontVariantNumeric : null,
+      };
+    });
+    expect(read.count, path).toBeGreaterThan(5);
+    expect(read.proportional, path).toEqual([]);
+    if (path.endsWith("/orders") || path === "/positions") expect(read.inTables, path).toBeGreaterThan(0);
+    if (read.hero) expect(read.hero, path).toContain("proportional-nums");
+  }
+});

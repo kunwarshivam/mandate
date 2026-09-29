@@ -79,7 +79,7 @@ export function tokenValue(name: string, theme: ThemeName = "light"): string {
 }
 
 export const typeScale = [
-  { role: "display", className: "text-display tabular", sample: "$24,987.50", spec: "Mona Sans 600, 2 to 4.75rem with its container / 0.95, -0.05em, tabular figures, cents at half size, muted and raised. The equity figure over a hero chart" },
+  { role: "display", className: "text-display proportional-nums lining-nums", sample: "$24,987.50", spec: "Public Sans 600, 2 to 4.75rem with its container / 0.95, -0.03em, proportional lining figures, cents at half size, muted and raised. The equity figure over a hero chart" },
   { role: "hero", className: "text-hero tabular", sample: "Buy 40 XYZ", spec: "Public Sans 600, 2.5 to 3.5rem / 1.05, -0.03em, tabular figures. One per screen: the approval's action" },
   { role: "h1", className: "text-h1", sample: "Approval request", spec: "Public Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
   { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Public Sans 600, 1.25rem / 1.3, -0.01em. A section" },
