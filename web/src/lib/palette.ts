@@ -1,5 +1,5 @@
 /**
- * Owlhead's palette, Ink and Ultramarine (DEC-205, web/COLOR.md): OKLCH ramps on one lightness curve, and
+ * Owlhead's palette, Ink and Volt (DEC-214, superseding DEC-205's hue; web/COLOR.md): OKLCH ramps on one lightness curve, and
  * the semantic tokens of both themes mapped onto their steps. `globals.css` writes the same values,
  * and `tokens.test.ts` fails when the two drift. Components use only the semantic tokens.
  */
@@ -38,13 +38,14 @@ const PAPER_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 
 const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.01, 850: 0.01, 900: 0.01, 950: 0.008, 975: 0.008 };
 
 /**
- * Ultramarine is vivid from 400 to 700 and quiet at both ends. sRGB holds little blue chroma at high
- * lightness, so 50 to 400 take what the gamut allows; 800 to 975 fade fast, so the dark selection and
- * the mandate's field in dark mode are calm dark tints, not blue blocks.
+ * Volt is a yellow-green that sRGB can only make vivid when it is light: it peaks at 300, the neon
+ * of the highlight and of dark mode's marks, and darkens toward olive below 500, where it can carry
+ * a line or a label on paper. 800 to 975 fade fast, so the dark selection and the mandate's field
+ * in dark mode are calm dark tints, not green blocks.
  */
-const ULTRAMARINE_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.011, 200: 0.041, 300: 0.056, 400: 0.118, 500: 0.175, 600: 0.16, 700: 0.136, 800: 0.08, 850: 0.05, 900: 0.034, 950: 0.026, 975: 0.018 };
+const VOLT_CHROMA: Record<Step, number> = { 50: 0.012, 100: 0.05, 200: 0.19, 300: 0.2, 400: 0.17, 500: 0.14, 600: 0.118, 700: 0.1, 800: 0.075, 850: 0.06, 900: 0.045, 950: 0.035, 975: 0.025 };
 
-export type RampId = "paper" | "ink" | "ultramarine" | "green" | "red" | "amber" | "cvd-teal" | "cvd-rose" | "cvd-orange" | "crimson";
+export type RampId = "paper" | "ink" | "volt" | "green" | "red" | "amber" | "cvd-teal" | "cvd-rose" | "cvd-orange" | "crimson";
 
 export interface Ramp {
   id: RampId;
@@ -67,7 +68,7 @@ function build(hue: number, chroma: (step: Step) => number): Record<Step, string
 }
 
 export const NEUTRAL_HUE = 255;
-export const ULTRAMARINE_HUE = 266;
+export const VOLT_HUE = 120;
 export const STATUS_HUES = { green: 150, red: 12 } as const;
 export const CVD_HUES = { "cvd-teal": 205, "cvd-rose": 350, "cvd-orange": 50 } as const;
 
@@ -88,7 +89,7 @@ function ramp(id: RampId, name: string, hue: number, use: string, chroma: (step:
 export const RAMPS: Record<RampId, Ramp> = {
   paper: ramp("paper", "Paper", NEUTRAL_HUE, "Light neutrals: the page, cards and hairlines in light mode, and the type in dark mode", (s) => PAPER_CHROMA[s]),
   ink: ramp("ink", "Ink", NEUTRAL_HUE, "Dark neutrals: type, primary actions, the Stop control and the mark in light mode, and the surfaces in dark mode", (s) => INK_CHROMA[s]),
-  ultramarine: ramp("ultramarine", "Ultramarine", ULTRAMARINE_HUE, "The one accent: your mandate's field, rules, markers and labels, and the account's line", (s) => ULTRAMARINE_CHROMA[s]),
+  volt: ramp("volt", "Volt", VOLT_HUE, "The one accent: your mandate's field, rules, markers and labels, the account's line, and the highlight", (s) => VOLT_CHROMA[s]),
   green: ramp("green", "Green", STATUS_HUES.green, "Gain", statusChroma),
   red: ramp("red", "Red", STATUS_HUES.red, "Loss, as text and candles only", statusChroma),
   amber: ramp("amber", "Amber", 70, "Kumo's warning role; on no screen", (s) => HUMP[s] * 0.15),
@@ -121,6 +122,8 @@ export const TOKEN_NAMES = [
   "mandate-edge",
   "mandate-soft",
   "selection",
+  "highlight",
+  "highlight-foreground",
   "ink",
   "ink-foreground",
   "ink-line",
@@ -170,9 +173,10 @@ export function rampValue(ref: RampRef): string {
 
 /**
  * Light: paper surfaces and ink type. Ink is the primary action, the account's fill, the Stop
- * control and a stopped agent. Ultramarine is the mandate (a pale field under an ultramarine rule,
- * ultramarine markers, ultramarine-700 labels) and the account's chart line. `lapis` keeps its name
- * as the account's role.
+ * control and a stopped agent. Volt is the mandate (a pale volt field under deep volt rules
+ * and markers at 500, olive volt-700 labels) and the account's chart line. On paper, neon volt is
+ * too light for a line or a label, so it appears only as the highlight: a volt-300 fill that always
+ * carries ink type. `lapis` keeps its name as the account's role.
  */
 export const TOKEN_REFS: Record<TokenName, RampRef> = {
   background: "paper-100",
@@ -186,17 +190,19 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
   lapis: "ink-950",
   "lapis-foreground": "paper-50",
   "lapis-muted": "paper-200",
-  "lapis-soft": "ultramarine-100",
+  "lapis-soft": "volt-100",
   "lapis-strong": "ink-800",
-  "lapis-line": "ultramarine-500",
-  mandate: "ultramarine-100",
+  "lapis-line": "volt-500",
+  mandate: "volt-100",
   "mandate-foreground": "ink-950",
   "mandate-muted": "ink-800",
-  "mandate-strong": "ultramarine-700",
-  "mandate-marker": "ultramarine-500",
-  "mandate-edge": "ultramarine-500",
-  "mandate-soft": "ultramarine-100",
-  selection: "ultramarine-200",
+  "mandate-strong": "volt-700",
+  "mandate-marker": "volt-500",
+  "mandate-edge": "volt-500",
+  "mandate-soft": "volt-100",
+  selection: "volt-200",
+  highlight: "volt-300",
+  "highlight-foreground": "ink-950",
   ink: "ink-950",
   "ink-foreground": "paper-50",
   "ink-line": "ink-700",
@@ -219,8 +225,9 @@ export const TOKEN_REFS: Record<TokenName, RampRef> = {
 
 /**
  * Dark: ink surfaces and paper type. Primary actions, the Stop control and stopped states turn to a
- * paper fill with ink type. Ultramarine keeps its meanings, one step lighter for marks (400) and two
- * for labels (300). Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
+ * paper fill with ink type. Volt turns bright: volt-400 for the account's line, rules and markers
+ * (a step below neon, so a colour-blind candle never merges with them), volt-200 for labels, and the
+ * same volt-300 highlight under ink type. Crimson keeps its fill; its edge lightens so the kill switch still clears 3:1 on
  * the dark sheet while its label keeps 7:1 on the fill.
  */
 export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
@@ -235,17 +242,19 @@ export const TOKEN_REFS_DARK: Record<TokenName, RampRef> = {
   lapis: "paper-100",
   "lapis-foreground": "ink-950",
   "lapis-muted": "ink-850",
-  "lapis-soft": "ultramarine-850",
+  "lapis-soft": "volt-850",
   "lapis-strong": "paper-300",
-  "lapis-line": "ultramarine-400",
-  mandate: "ultramarine-850",
+  "lapis-line": "volt-400",
+  mandate: "volt-850",
   "mandate-foreground": "paper-100",
   "mandate-muted": "paper-300",
-  "mandate-strong": "ultramarine-300",
-  "mandate-marker": "ultramarine-400",
-  "mandate-edge": "ultramarine-400",
-  "mandate-soft": "ultramarine-900",
-  selection: "ultramarine-800",
+  "mandate-strong": "volt-200",
+  "mandate-marker": "volt-400",
+  "mandate-edge": "volt-400",
+  "mandate-soft": "volt-900",
+  selection: "volt-800",
+  highlight: "volt-300",
+  "highlight-foreground": "ink-950",
   ink: "paper-100",
   "ink-foreground": "ink-950",
   "ink-line": "paper-500",
@@ -272,8 +281,8 @@ function tokensOf(refs: Record<TokenName, RampRef>): Record<TokenName, TokenValu
 
 export const PALETTE: Palette = {
   theme: "light",
-  name: "Ink and Ultramarine",
-  summary: "Cool paper surfaces, ink type and actions, ultramarine for your mandate and the account's line: a pale ultramarine field, ultramarine rules and markers, deep ultramarine labels.",
+  name: "Ink and Volt",
+  summary: "Cool paper surfaces, ink type and actions, volt for your mandate and the account's line: a pale volt field, deep volt rules and markers, olive labels, and a neon volt highlight under ink type.",
   refs: TOKEN_REFS,
   tokens: tokensOf(TOKEN_REFS),
   hatch: { ref: "lapis", alpha: 0.3 },
@@ -282,8 +291,8 @@ export const PALETTE: Palette = {
 /** The paper hatch in the dark is the mid grey, so it still reads as paper on an ink card. */
 export const PALETTE_DARK: Palette = {
   theme: "dark",
-  name: "Ink and Ultramarine, dark",
-  summary: "Ink surfaces, paper type and paper primary actions; ultramarine for your mandate and the account's line, a step lighter.",
+  name: "Ink and Volt, dark",
+  summary: "Ink surfaces, paper type and paper primary actions; neon volt for your mandate's marks and the account's line.",
   refs: TOKEN_REFS_DARK,
   tokens: tokensOf(TOKEN_REFS_DARK),
   hatch: { ref: "ink-line", alpha: 0.4 },

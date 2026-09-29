@@ -14,7 +14,7 @@ import { PageHeader } from "@/components/kumo/page-header/page-header";
 import { Section, WorkspaceGate } from "./common";
 
 /**
- * Open requests sit on a pale ultramarine tint you can act on; resolved ones recede to muted type, with their
+ * Open requests sit on a pale volt tint you can act on; resolved ones recede to muted type, with their
  * status as a label. On a phone every request is one hairline row, the open ones marked by the tray.
  */
 function Row({ approval, now, label, index }: { approval: Approval; now: string; label: string; index: number }) {
