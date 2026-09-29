@@ -19,6 +19,22 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
+/** A colour painted over black, as 8-bit sRGB, optionally at a given opacity. */
+async function overBlack(page: Page, color: string, alpha = 1): Promise<number[]> {
+  return page.evaluate(
+    ({ color, alpha }) => {
+      const ctx = document.createElement("canvas").getContext("2d")!;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, 1, 1);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.fillRect(0, 0, 1, 1);
+      return [...ctx.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+    },
+    { color, alpha },
+  );
+}
+
 async function paint(locator: Locator) {
   return locator.evaluate((el) => {
     const style = getComputedStyle(el);
@@ -52,6 +68,9 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
     const glass = await tokenColor(page, "--glass");
     expect(glass).not.toBe(await tokenColor(page, "--card"));
     expect(await paint(header(page))).toEqual({ background: glass, filter: BLUR, image: "none" });
+    const painted = await overBlack(page, glass);
+    const card = await overBlack(page, await tokenColor(page, "--card"), 0.72);
+    painted.forEach((v, i) => expect(Math.abs(v - card[i]), "the glass is the card's own colour, at 72%").toBeLessThanOrEqual(1));
 
     await scrollBy(page, 330);
     expect((await header(page).boundingBox())?.y, "the header stays at the top").toBe(0);

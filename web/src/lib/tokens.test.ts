@@ -119,12 +119,12 @@ describe("colour tokens", () => {
 
 describe("the frame's glass", () => {
   const utility = css.slice(css.indexOf("@utility glass {"), css.indexOf("\n}\n", css.indexOf("@utility glass {")));
-  const mix = /^color-mix\(in oklch, var\(--card\) (\d+)%, transparent\)$/;
+  const mix = /^color-mix\(in oklab, var\(--card\) (\d+)%, transparent\)$/;
 
   it.each(THEMES)("frosts the frame in %s with the card, translucent", (theme) => {
     const glass = BLOCKS[theme].glass;
     expect(glass).toMatch(mix);
-    expect(declared["glass-edge"]).toBe("color-mix(in oklch, var(--foreground) 8%, transparent)");
+    expect(declared["glass-edge"]).toBe("color-mix(in oklab, var(--foreground) 8%, transparent)");
   });
 
   // The blur only averages what scrolls underneath, so a solid token under the glass is the worst case.

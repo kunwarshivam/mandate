@@ -59,10 +59,11 @@
   --backdrop: color-mix(in oklch, var(--ink) 40%, transparent);
   /*
    * The frame's frosted glass (the header and the phone tab bar). 72% card keeps muted text at 5.2:1
-   * even with solid ink scrolling underneath; at 60% it would fall to 3.8:1.
+   * even with solid ink scrolling underneath; at 60% it would fall to 3.8:1. Mixed in OKLab: mixed
+   * with transparent in OKLCH, Chromium drops the hue and the ink glass turns faintly pink.
    */
-  --glass: color-mix(in oklch, var(--card) 72%, transparent);
-  --glass-edge: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
+  --glass-edge: color-mix(in oklab, var(--foreground) 8%, transparent);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -157,7 +158,7 @@ html:root[data-mode="dark"] {
   --paper: var(--mandate);
   --backdrop: color-mix(in oklch, var(--background) 72%, transparent);
   /* Muted text keeps 5.1:1 even with solid paper scrolling underneath; at 60% it would fall to 3.35:1. */
-  --glass: color-mix(in oklch, var(--card) 72%, transparent);
+  --glass: color-mix(in oklab, var(--card) 72%, transparent);
 
   color-scheme: dark;
 }
