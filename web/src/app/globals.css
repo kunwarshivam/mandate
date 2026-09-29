@@ -92,6 +92,8 @@
   --dock-h: 3.75rem;
   --dock-gap: 1rem;
   --dock-clearance: calc(var(--dock-h) + var(--dock-gap) + env(safe-area-inset-bottom));
+  /* The status strip and the ticker tape share one height, so either replacing the other moves nothing. */
+  --status-row: 2.125rem;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
@@ -345,6 +347,11 @@ html:root[data-cvd="on"] {
     -webkit-tap-highlight-color: transparent;
     /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
     scroll-padding-top: 5rem;
+    @media (min-width: 40rem) {
+      &:has([data-slot="ticker"]) {
+        scroll-padding-top: calc(5rem + var(--status-row));
+      }
+    }
     scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
     @media (min-width: 64rem) {
       scroll-padding-bottom: calc(var(--dock-clearance) + 1rem);
@@ -500,6 +507,28 @@ html:root[data-cvd="on"] {
   }
 }
 
+/*
+ * The ticker tape: two copies of the row, each at least as wide as the tape, slide left by one copy
+ * and start over, so the loop has no seam. The pointer or focus on the tape holds it still.
+ */
+@keyframes ticker {
+  to {
+    translate: -50% 0;
+  }
+}
+[data-slot="ticker-tape"] {
+  container-type: inline-size;
+  & ul {
+    min-width: 100cqw;
+  }
+  & [data-slot="ticker-track"] {
+    animation: ticker calc(var(--ticker-items, 4) * 9s) linear infinite;
+  }
+  &:is(:hover, :focus-within) [data-slot="ticker-track"] {
+    animation-play-state: paused;
+  }
+}
+
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
@@ -540,6 +569,15 @@ html:root[data-cvd="on"] {
   }
   [data-slot="skeleton"] {
     animation: none !important;
+  }
+  [data-slot="ticker-tape"] {
+    overflow-x: auto;
+    & [data-slot="ticker-track"] {
+      animation: none;
+    }
+    & [data-copy] {
+      display: none;
+    }
   }
   .press:active:not(:disabled) {
     transform: none;

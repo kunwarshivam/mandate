@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { add, dec, div, mul, ratio, toDecimalString, toFixed } from "./decimal";
-import { MINUS, ago, clock, direction, directionWord, percent, price, quantity, remaining, signedUsd, usd } from "./format";
+import { MINUS, age, ago, clock, direction, directionWord, percent, price, quantity, remaining, signedPercent, signedUsd, usd } from "./format";
 
 describe("decimal", () => {
   it("adds without binary floating-point error", () => {
@@ -64,5 +64,29 @@ describe("format", () => {
     expect(remaining("2026-09-28T14:20:00-04:00", "2026-09-28T14:05:20-04:00")).toBe("14 min left");
     expect(remaining("2026-09-28T14:05:40-04:00", "2026-09-28T14:05:20-04:00")).toBe("less than 1 min left");
     expect(remaining("2026-09-28T14:05:00-04:00", "2026-09-28T14:05:20-04:00")).toBe("deadline passed");
+  });
+
+  it("states a bare age in steps of five seconds, and an age ago in the same words", () => {
+    const now = "2026-09-28T14:05:20-04:00";
+    const cases: Array<[string, string]> = [
+      ["2026-09-28T14:05:18-04:00", "under 5 s"],
+      ["2026-09-28T14:05:10-04:00", "10 s"],
+      ["2026-09-28T14:04:21-04:00", "55 s"],
+      ["2026-09-28T14:02:11-04:00", "3 min"],
+      ["2026-09-28T11:05:20-04:00", "3 h"],
+      ["2026-09-28T14:05:30-04:00", "under 5 s"],
+    ];
+    for (const [from, text] of cases) {
+      expect(age(from, now)).toBe(text);
+      expect(ago(from, now)).toBe(`${text} ago`);
+    }
+  });
+
+  it("signs a percentage change, with a true minus, and no sign on a change that rounds to zero", () => {
+    expect(signedPercent("0.0107", 2)).toBe("+1.07%");
+    expect(signedPercent("-0.0036", 2)).toBe(`${MINUS}0.36%`);
+    expect(signedPercent("0.00001", 2)).toBe("0%");
+    expect(signedPercent("-0.00001", 2)).toBe("0%");
+    expect(signedPercent("0")).toBe("0%");
   });
 });

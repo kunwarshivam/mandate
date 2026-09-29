@@ -137,6 +137,17 @@ describe("the frame's glass", () => {
     expect(worst(tokenValue("ink", theme)), "ink").toBeGreaterThanOrEqual(3);
   });
 
+  it.each(THEMES)("keeps the ticker's gains and losses at 4.5:1 over any token scrolling under its veiled glass, in %s", (theme) => {
+    const veil = Number(/bg-card\/(\d+)/.exec(readFileSync(resolve(process.cwd(), "src/components/shell/ticker.tsx"), "utf8"))![1]) / 100;
+    const alpha = 1 - (1 - Number(mix.exec(BLOCKS[theme].glass)![1]) / 100) * (1 - veil);
+    const card = tokenValue("card", theme);
+    const under = colorTokensFor(theme).map((t) => t.value);
+    for (const text of ["gain", "loss", "gain-cvd", "loss-cvd"]) {
+      const worst = Math.min(...under.map((u) => rgbContrast(toRgb255(tokenValue(text, theme)), composite(card, alpha, u))));
+      expect(worst, text).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
   it("blurs and saturates what is behind, with the WebKit prefix", () => {
     expect(utility).toContain("background-color: var(--glass);");
     expect(utility).toContain("border-color: var(--glass-edge);");

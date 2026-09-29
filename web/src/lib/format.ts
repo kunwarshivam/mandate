@@ -57,6 +57,13 @@ export function percent(value: string | Dec, places = 1): string {
   return `${fixed.startsWith("-") ? MINUS + fixed.slice(1) : fixed}%`;
 }
 
+/** "+1.07%" or "−0.36%"; a change that rounds to zero is "0%", with no sign. */
+export function signedPercent(value: string | Dec, places = 1): string {
+  const text = percent(value, places);
+  if (text === "0%" || text === `${MINUS}0%`) return "0%";
+  return direction(value) === "gain" ? `+${text}` : text;
+}
+
 /**
  * Wall-clock time as written in the fixture's own offset, "14:02:11". Read from the ISO string
  * itself so rendering never depends on the viewer's time zone setting.
@@ -87,12 +94,17 @@ export function zoneLabel(iso: string): string {
  * one; the absolute time written beside it stays exact.
  */
 export function ago(fromIso: string, nowIso: string): string {
+  return `${age(fromIso, nowIso)} ago`;
+}
+
+/** How old something is, "under 5 s", "15 s", "3 min" or "2 h": seconds in steps of five, so it ticks calmly. */
+export function age(fromIso: string, nowIso: string): string {
   const seconds = Math.max(0, Math.floor((Date.parse(nowIso) - Date.parse(fromIso)) / 1000));
-  if (seconds < 5) return "under 5 s ago";
-  if (seconds < 60) return `${seconds - (seconds % 5)} s ago`;
+  if (seconds < 5) return "under 5 s";
+  if (seconds < 60) return `${seconds - (seconds % 5)} s`;
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min ago`;
-  return `${Math.floor(minutes / 60)} h ago`;
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h`;
 }
 
 /** Remaining time until a deadline in whole minutes, neutral wording. */
