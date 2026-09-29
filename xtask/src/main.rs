@@ -1757,10 +1757,8 @@ const STUB_MARKERS: [&str; 5] = [
 ];
 
 /// The pending tests that fail on the answer a partly implemented crate gives rather than at a
-/// stub, named one by one so the exception cannot spread. `mandate-risk` decides an exit without
-/// E6-8's pacing, and AGENTS.md rule 13 forbids it to refuse an exit, so these two see an absent
-/// `pacing` instead of a stub's report; E6-6 retired the three its session rules and §5.3 rule 4
-/// decide.
+/// stub, named one by one so the exception cannot spread. E6-6 and E6-8 (DEC-163) retired the
+/// `mandate-risk` rows with the session rules, §5.3 rule 4 and the pacing that decided them.
 /// DEC-110's rule still holds for them: each must run and must fail. Each row goes when its story
 /// lands, and the gate names every row it applies (DEC-137).
 ///
@@ -1776,15 +1774,7 @@ const STUB_MARKERS: [&str; 5] = [
 /// since #196 (the protected lead has no bracket); they passed only on a stub's report from a case
 /// shrinking moved past, which [`failure_cause`] no longer reads (DEC-164; #196 review, round 1,
 /// finding 5; #199 review, round 1, finding 4).
-const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 12] = [
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "a_participation_cap_slices_and_never_denies",
-    ),
-    (
-        "crates/mandate-risk/tests/hand.rs",
-        "a_sliced_exit_reports_what_it_applied",
-    ),
+const BEHAVIOUR_ONLY_TESTS: [(&str, &str); 10] = [
     (
         "crates/mandate-executor/tests/hand.rs",
         "a_crypto_position_carries_one_stop_limit_for_the_whole_position",

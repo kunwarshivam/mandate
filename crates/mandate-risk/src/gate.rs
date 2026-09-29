@@ -10,14 +10,12 @@
 //! purpose passes a check that does not exist yet (`AGENTS.md` rule 13: the broker is the
 //! backstop), exactly as it will pass most of them once they do.
 
-use std::collections::BTreeSet;
-
 use mandate_num::Qty;
 
 use crate::{
     AccountState, AgentMode, AssetClass, Check, CheckOutcome, Computed, Decision, GateError,
-    GateInput, InstrumentRestriction, Origin, Pacing, ProposedKind, Purpose, ReasonCode, Session,
-    SessionAt, Side, Verdict, WorkingUniverse, account_rules, floor, limits, session,
+    GateInput, InstrumentRestriction, Origin, ProposedKind, Purpose, ReasonCode, Session,
+    SessionAt, Side, Verdict, WorkingUniverse, account_rules, conduct, floor, limits, session,
 };
 
 /// The eight checks, in §9.1's order.
@@ -35,26 +33,25 @@ const ORDER: [Check; 8] = [
 /// A check's decision when it does not pass.
 pub(crate) type Stop = (Verdict, ReasonCode);
 
-/// The story that completes a check, while any part of it is owed: check 5 (marks and the collar)
-/// and check 6's conduct controls are E6-8's, and check 2 still owes §3.2 item 7's "USD pairs
-/// only" for crypto (E6-10). Checks 1, 3, 4, 7 and 8 are whole.
+/// The story that completes a check, while any part of it is owed: check 2 still owes §3.2 item
+/// 7's "USD pairs only" for crypto (E6-10). Every other check is whole for a US equity.
 ///
 /// Check 2 takes the input because "USD pairs only" has no field to read: `InstrumentSnapshot`
 /// carries no quote currency and `AssetId` is a UUID, so nothing distinguishes BTC/USD from
-/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened the moment E6-8
-/// lands, so a crypto opening stays owed and is refused by the fail-closed rule until E6-10
-/// supplies the field (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues only
-/// for an opening.
+/// BTC/USDT. Calling check 2 whole for crypto would let a non-USD pair be opened, so a crypto
+/// opening stays owed and is refused by the fail-closed rule until E6-10 supplies the field
+/// (DEC-129 item 34). A crypto *exit* is unaffected: `first_owed` accrues only for an opening.
 fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
     match check {
         Check::UniverseAndLimits if input.instrument.asset_class != AssetClass::UsEquity => {
             Some("E6-10")
         }
-        Check::MarkAndCollar | Check::ConductControls => Some("E6-8"),
         Check::AccountAndMode
         | Check::UniverseAndLimits
         | Check::SessionAndHalt
         | Check::OrderConstraints
+        | Check::MarkAndCollar
+        | Check::ConductControls
         | Check::BuyingPowerAndExposure
         | Check::DayTradeBudget => None,
     }
@@ -62,10 +59,8 @@ fn owed(check: Check, input: &GateInput<'_>) -> Option<&'static str> {
 
 /// §9.1: the first failing check decides, and every check after it is listed as not reached. An
 /// owed check is listed as not reached too, for every purpose: the gate did not look, and the
-/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29). So
-/// `pacing: None` on an allowed reduction means nothing was paced *because checks 5 and 6 were
-/// not reached*, which `Decision::checks` records, not that the collar and the participation caps
-/// found nothing to do.
+/// journal must not say it passed. Only an opening is refused for it (DEC-129 item 29). An allowed
+/// order then carries the [`conduct::pacing`] checks 3 to 6 put on it, or `None` when nothing did.
 pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
     let held = input
         .agent
@@ -108,7 +103,7 @@ pub(crate) fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
         (None, None) => (Verdict::Allow, None),
     };
     let pacing = if verdict == Verdict::Allow {
-        market_exit_repricing(input, &at)
+        conduct::pacing(input, purpose, &at, market_orders_barred(input, &at))?
     } else {
         None
     };
@@ -141,7 +136,8 @@ fn run(
             Ok(session::rules(input, purpose, at).or_else(|| halt(input).filter(|_| opening)))
         }
         Check::OrderConstraints => order_constraints(input, opening),
-        Check::ConductControls if opening => Ok(limits::orders_per_day(input, computed)),
+        Check::MarkAndCollar if opening => conduct::mark_and_collar(input),
+        Check::ConductControls if opening => conduct::conduct_controls(input, at, computed),
         Check::BuyingPowerAndExposure if opening => match account_rules::buying_power(input)? {
             None => limits::gross_exposure(input, computed),
             stop => Ok(stop),
@@ -212,33 +208,22 @@ fn halt(input: &GateInput<'_>) -> Option<Stop> {
 }
 
 /// §5.1: a market order is allowed only in the regular session outside the auction windows with
-/// current status data, so it is barred under a halt, real or presumed (§4.4: a halted instrument
-/// or a dropped status feed), for a US equity outside the regular session (§9.4: "exits in
-/// extended hours as limit orders"), and in either auction window (§4.3: "exits in them use limit
-/// orders, never market orders"; DEC-159). The stale-quote arm of a presumed halt reads the mark's
-/// freshness, which is check 5's (E6-8).
+/// current status data, so it is barred under a halt, real or presumed (§4.4: a halted instrument,
+/// a dropped status feed, or no fresh quote), for a US equity outside the regular session (§9.4:
+/// "exits in extended hours as limit orders"), and in either auction window (§4.3: "exits in them
+/// use limit orders, never market orders"; DEC-159). An allowed market-order exit where market
+/// orders are barred is sent as a marketable limit, never as a market order, and never denied
+/// (§4.4, §5.6, DEC-129 items 28 and 31); only a reduction is allowed with a market kind, since
+/// check 4 denies every market opening. A crossed quote is no fresh quote here, never an error: a
+/// reduction is not refused for it.
 fn market_orders_barred(input: &GateInput<'_>, at: &SessionAt) -> bool {
     let i = input.instrument;
     i.halted
         || !i.status_feed_current
+        || conduct::usable_quote(input).ok().flatten().is_none()
         || at.opening_auction
         || at.close_window
         || (i.asset_class == AssetClass::UsEquity && at.session != Session::Regular)
-}
-
-/// §4.3, §4.4, §5.6 and §9.4 (DEC-129 items 28 and 31, DEC-159): an allowed market-order exit
-/// where market orders are barred is sent as a marketable limit at its proposed quantity and price, never as a market
-/// order, and never denied. Only a reduction is allowed with a market kind, since check 4 denies
-/// every market opening.
-fn market_exit_repricing(input: &GateInput<'_>, at: &SessionAt) -> Option<Pacing> {
-    (market_orders_barred(input, at) && input.proposed.kind == ProposedKind::Market).then(|| {
-        Pacing {
-            qty: input.proposed.qty,
-            limit_price: input.proposed.limit_price,
-            marketable_limit_required: true,
-            applied: BTreeSet::new(),
-        }
-    })
 }
 
 /// Check 4, §5.3's rules in list order. Rule 1 is unrepresentable (a proposal has no notional).
@@ -315,8 +300,11 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// failing checks report, the stricter of the two mode snapshots, `exits_only` and an inactive
 /// crypto account denying an opening, a protective leg above the position crossing zero, the
 /// partial gate failing closed, a value exactly at each limit passing, and the account's own 1×
-/// bound; for E6-9, every row of the halt and market-order table; and for E6-7, every row of the
-/// eligibility floor and where it sits in check 2.
+/// bound; for E6-9, every row of the halt and market-order table; for E6-7, every row of the
+/// eligibility floor and where it sits in check 2; and for E6-8, each conduct boundary a mutant or
+/// a planted bug crossed: a locked and a crossed quote, both collar ends, each participation cap
+/// alone, the order-to-fill maximum, the collar pricing only a discretionary exit, a slice only
+/// below the proposal and never of a risk exit, and the resting time's end.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -330,7 +318,8 @@ mod tests {
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
         ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass, GroupId,
-        InstrumentSnapshot, MarketSnapshot, ProposedKind, ProposedOrder, TimeInForce, WorkingOrder,
+        InstrumentSnapshot, MarketSnapshot, Pacing, ProposedKind, ProposedOrder, TimeInForce,
+        WorkingOrder,
     };
 
     /// Every input of one decision, owned, so a test changes only the field it is about.
@@ -344,6 +333,7 @@ mod tests {
         agent: AgentSnapshot,
         instrument: InstrumentSnapshot,
         market: MarketSnapshot,
+        conduct: ConductState,
         universe: WorkingUniverse,
         proposed: ProposedOrder,
     }
@@ -365,7 +355,7 @@ mod tests {
                 agent: &self.agent,
                 instrument: &self.instrument,
                 market: &self.market,
-                conduct: &ConductState::default(),
+                conduct: &self.conduct,
                 universe: &self.universe,
                 proposed: &self.proposed,
             }))
@@ -485,10 +475,14 @@ mod tests {
             status_feed_current: true,
         };
         let market = MarketSnapshot {
-            quote: None,
+            quote: Some(crate::SaneQuote {
+                bid: Price::parse("99.95")?,
+                ask: Price::parse("100.05")?,
+                at: UtcNanos::parse_rfc3339("2026-09-21T14:59:59Z")?,
+            }),
             last_trade: None,
-            trailing_5m_volume: None,
-            adv_20d: None,
+            trailing_5m_volume: Some(Qty::parse("100000")?),
+            adv_20d: Some(Qty::parse("1000000")?),
         };
         let proposed = ProposedOrder {
             instrument: a.clone(),
@@ -513,6 +507,7 @@ mod tests {
             agent,
             instrument,
             market,
+            conduct: ConductState::default(),
             universe: WorkingUniverse::Known {
                 instruments: [a].into(),
                 pinned: true,
@@ -530,8 +525,8 @@ mod tests {
     }
 
     /// The journal's check list carries §9.1's eight ids in §9.1's order, spelled out here rather
-    /// than read from the crate's own `ORDER`, which is the thing under test. A risk exit, because
-    /// it passes every check this PR has, where an opening is refused until the gate is whole.
+    /// than read from the crate's own `ORDER`, which is the thing under test. An equity risk exit
+    /// passes all eight; an owed check's `NotReached` is pinned by the crypto test below.
     #[test]
     fn the_checks_are_listed_in_section_9_1_order() -> Result<(), GateError> {
         let d = allowing()?.selling(Origin::RiskEngine)?.decide()?;
@@ -569,13 +564,12 @@ mod tests {
                 CheckOutcome::Passed(Check::UniverseAndLimits),
                 CheckOutcome::Passed(Check::SessionAndHalt),
                 CheckOutcome::Passed(Check::OrderConstraints),
-                CheckOutcome::NotReached(Check::MarkAndCollar),
-                CheckOutcome::NotReached(Check::ConductControls),
+                CheckOutcome::Passed(Check::MarkAndCollar),
+                CheckOutcome::Passed(Check::ConductControls),
                 CheckOutcome::Passed(Check::BuyingPowerAndExposure),
                 CheckOutcome::Passed(Check::DayTradeBudget),
             ],
-            "an owed check is journaled NotReached for a reduction too, never Passed: the gate did \
-             not look"
+            "every check is whole for a US equity, so a risk exit is journaled as passing all eight"
         );
         Ok(())
     }
@@ -656,14 +650,23 @@ mod tests {
         Ok(())
     }
 
-    /// DEC-129 item 29: an opening every implemented check allows is refused, naming the story
-    /// that completes the first check still owed (check 5's marks and collar, E6-8).
+    /// With every check whole for a US equity, an opening all eight pass is allowed exactly as
+    /// proposed: an opening is never paced (DEC-129 item 11). The fail-closed refusal of item 29
+    /// is left to a crypto opening, which check 2 still owes to E6-10.
     #[test]
-    fn an_opening_the_partial_gate_would_allow_is_refused() -> Result<(), GateError> {
-        let refused = allowing()?.decide();
+    fn an_equity_opening_every_check_passes_is_allowed_as_proposed() -> Result<(), GateError> {
+        let d = allowing()?.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason, d.pacing, d.checks.len()),
+            (Verdict::Allow, None, None, 8),
+            "no check is owed for a US equity, so the gate decides the opening itself"
+        );
         assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-8"))),
-            "a partial gate fails closed for adding risk, not open: {refused:?}"
+            d.checks
+                .iter()
+                .all(|c| matches!(c, CheckOutcome::Passed(_))),
+            "an allowed opening passed every check: {:?}",
+            d.checks
         );
         Ok(())
     }
@@ -721,9 +724,8 @@ mod tests {
 
     /// DEC-129 item 15: an order of exactly `max_order_usd` (10 × 100 = 1000), an instrument total
     /// of exactly the cap (500 held + 1000 = 1500), an agent gross of exactly its limit (500 + 500
-    /// elsewhere + 1000 = 2000) and an account gross of exactly its equity all pass every limit.
-    /// The opening is still refused, as item 29 requires while a check is owed, and a limit that
-    /// compared with `>=` would deny it instead.
+    /// elsewhere + 1000 = 2000) and an account gross of exactly its equity all pass every limit,
+    /// so the opening is allowed; a limit that compared with `>=` would deny it instead.
     #[test]
     fn a_value_exactly_at_every_limit_passes_it() -> Result<(), GateError> {
         let mut o = allowing()?;
@@ -735,10 +737,11 @@ mod tests {
             .insert(o.proposed.instrument.clone(), Qty::parse("5")?);
         o.account.market_values = o.agent.market_values.clone();
         o.account.equity = Usd::parse("2000")?;
-        let refused = o.decide();
-        assert!(
-            matches!(refused, Err(GateError::Unimplemented("evaluate", "E6-8"))),
-            "every comparison is `>`, so a value exactly at a limit passes it: {refused:?}"
+        let d = o.decide()?;
+        assert_eq!(
+            (d.verdict, d.reason),
+            (Verdict::Allow, None),
+            "every comparison is `>`, so a value exactly at a limit passes it: {d:?}"
         );
         Ok(())
     }
@@ -762,7 +765,7 @@ mod tests {
     /// Mandate §5.3's re-entry cooldown binds only an exit fill in the instrument's own group, and
     /// only strictly inside `reentry_cooldown_s`. An exit in an ungrouped other instrument 10 s ago
     /// denies nothing, and an exit in this instrument exactly 3600 s ago has run its course: both
-    /// openings pass the cooldown and are refused only because a later check is owed (item 29).
+    /// openings pass the cooldown and every later check, so both are allowed.
     #[test]
     fn the_cooldown_binds_only_its_group_and_only_strictly_inside_it() -> Result<(), GateError> {
         let now = UtcNanos::parse_rfc3339("2026-09-21T15:00:00Z")?;
@@ -777,11 +780,11 @@ mod tests {
             .agent
             .last_exit_fill_at
             .insert(mine, UtcNanos::from_parts(now.secs() - 3600, 0)?);
-        let (a, b) = (other_group.decide(), run_its_course.decide());
-        assert!(
-            matches!(a, Err(GateError::Unimplemented("evaluate", "E6-8")))
-                && matches!(b, Err(GateError::Unimplemented("evaluate", "E6-8"))),
-            "neither is a reentry_cooldown denial: another group's exit {a:?}, 3600 s after {b:?}"
+        let (a, b) = (other_group.decide()?, run_its_course.decide()?);
+        assert_eq!(
+            ((a.verdict, a.reason), (b.verdict, b.reason)),
+            ((Verdict::Allow, None), (Verdict::Allow, None)),
+            "neither is a reentry_cooldown denial: another group's exit, and 3600 s after"
         );
         Ok(())
     }
@@ -812,8 +815,9 @@ mod tests {
         Ok(())
     }
 
-    /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err(story)` for the
-    /// refusal of the next owed check (item 29), which is what "passes every limit" looks like.
+    /// One opening of 1 × 100 in `a` after `edit`: `Ok(code)` for a denial, `Err("allowed")` for an
+    /// allow, which is what "passes every limit" looks like, and `Err(story)` for the refusal of an
+    /// owed check (item 29).
     fn limit_row(
         edit: impl FnOnce(&mut Owned) -> Result<(), GateError>,
     ) -> Result<Result<ReasonCode, &'static str>, GateError> {
@@ -845,7 +849,7 @@ mod tests {
                 limit_row(held_elsewhere("1400"))?,
                 limit_row(held_elsewhere("1400.000000001"))?,
             ],
-            [Err("E6-8"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("allowed"), Ok(ReasonCode::GrossExposureLimit)],
             "1400 + 100 against min(2000, agent equity 1500)"
         );
         Ok(())
@@ -872,7 +876,7 @@ mod tests {
         held_here("100.000000001")(&mut over)?;
         assert_eq!(
             (limit_row(held_here("100"))?, over.decide()?.computed.cap,),
-            (Err("E6-8"), Some(Usd::parse("200")?)),
+            (Err("allowed"), Some(Usd::parse("200")?)),
             "100 + 100 is exactly the cap of 200; over it the denial reports cap 200"
         );
         assert_eq!(
@@ -911,7 +915,7 @@ mod tests {
                 limit_row(other_agent("900"))?,
                 limit_row(other_agent("900.000000001"))?,
             ],
-            [Err("E6-8"), Ok(ReasonCode::GrossExposureLimit)],
+            [Err("allowed"), Ok(ReasonCode::GrossExposureLimit)],
             "900 of another agent's + 100 against the account's 1000"
         );
         Ok(())
@@ -964,16 +968,19 @@ mod tests {
 
     /// The halt table's oracle, transcribed from the spec rather than from this module: the mode
     /// rule of `ref.py`'s `order_decision` (check 1), then `exits_only` denying an opening (§7.4),
-    /// then §4.4's halt for an opening at check 3, then §5.1's limit-only openings at check 4, then
-    /// the fail-closed refusal of DEC-129 item 29 for check 5 (E6-8); an exit is allowed, and re-priced as a marketable limit when it is a
-    /// market order under a halt or a dropped status feed (§4.4, §5.6, DEC-129 items 28 and 31).
-    /// Only the `Market` kind is a market order: a bracket, an IOC and a plain limit are limits.
+    /// then §4.4's halt for an opening at check 3, then §5.1's limit-only openings at check 4, and a
+    /// limit opening at 99.5 inside the collar is allowed as proposed. An exit is allowed, and
+    /// re-priced as a marketable limit when it is a market order under a halt or a dropped status
+    /// feed (§4.4, §5.6, DEC-129 items 28 and 31). A market-order discretionary exit is priced by
+    /// the collar whatever the feed, as a marketable limit at `collared`, the collar's aggressive
+    /// end on the cent grid (§9.6, DEC-163 item 5). Only the `Market` kind is a market order: a
+    /// bracket, an IOC and a plain limit are limits.
     fn halt_oracle(
         side: Side,
         origin: Origin,
         mode: AgentMode,
         (halted, feed_current): (bool, bool),
-        proposed: &crate::ProposedOrder,
+        (proposed, collared): (&crate::ProposedOrder, Price),
     ) -> HaltRow {
         let market = proposed.kind == ProposedKind::Market;
         let exit = side == Side::Sell;
@@ -1000,15 +1007,27 @@ mod tests {
             if market {
                 return deny(ReasonCode::MarketOrderNotAllowed, Check::OrderConstraints);
             }
-            return Err("E6-8");
+            return Ok((Verdict::Allow, None, None, None));
         }
-        let repriced = market && (halted || !feed_current);
-        let pacing = repriced.then(|| Pacing {
-            qty: proposed.qty,
-            limit_price: proposed.limit_price,
-            marketable_limit_required: true,
-            applied: BTreeSet::new(),
-        });
+        let discretionary = matches!(
+            origin,
+            Origin::OrderBuilder | Origin::GoalCompletion | Origin::RemovedInstrument
+        );
+        let pacing = if market && discretionary {
+            Some(Pacing {
+                qty: proposed.qty,
+                limit_price: collared,
+                marketable_limit_required: true,
+                applied: [crate::PacingControl::Collar].into(),
+            })
+        } else {
+            (market && (halted || !feed_current)).then(|| Pacing {
+                qty: proposed.qty,
+                limit_price: proposed.limit_price,
+                marketable_limit_required: true,
+                applied: BTreeSet::new(),
+            })
+        };
         Ok((Verdict::Allow, None, None, pacing))
     }
 
@@ -1017,9 +1036,9 @@ mod tests {
     /// only an opening and only at check 3; that a market opening is denied at check 4 whatever
     /// the feed, and a bracket or IOC opening never is; that a market exit
     /// under a real or presumed halt is allowed and re-priced at its own quantity and price, in
-    /// every mode that lets it through, `exits_only` included; that a limit, bracket or IOC exit
-    /// and a market exit with a current feed are not paced; and that a held exit carries no
-    /// pacing.
+    /// every mode that lets it through, `exits_only` included, unless it is discretionary, which
+    /// the collar prices; that a limit, bracket or IOC exit inside the collar and a market exit
+    /// with a current feed are not paced; and that a held exit carries no pacing.
     #[test]
     fn halts_and_market_orders_match_the_oracle_on_every_row() -> Result<(), GateError> {
         let origins = [
@@ -1068,8 +1087,14 @@ mod tests {
                         o.instrument.halted = halted;
                         o.instrument.status_feed_current = feed_current;
                         o.proposed.kind = kind.clone();
-                        let expected =
-                            halt_oracle(side, origin, mode, (halted, feed_current), &o.proposed);
+                        let bid_less_one_percent_up_to_the_cent = Price::parse("98.96")?;
+                        let expected = halt_oracle(
+                            side,
+                            origin,
+                            mode,
+                            (halted, feed_current),
+                            (&o.proposed, bid_less_one_percent_up_to_the_cent),
+                        );
                         let actual: HaltRow = match o.decide() {
                             Ok(d) => Ok((
                                 d.verdict,
@@ -1306,9 +1331,8 @@ mod tests {
     /// crypto exit is untouched (DEC-129 item 34).
     ///
     /// §3.2 item 7 admits USD pairs only and nothing in `InstrumentSnapshot` says what a pair is
-    /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open the moment
-    /// E6-8 lands. The refusal names E6-10 rather than E6-8, which is what distinguishes
-    /// this from the ordinary fail-closed refusal every opening gets today.
+    /// quoted in, so calling check 2 whole for crypto would let a stablecoin pair open. The same
+    /// opening in a US equity, for which every check is whole, is allowed.
     #[test]
     fn a_crypto_opening_is_owed_to_e6_10_while_a_crypto_exit_is_not() -> Result<(), GateError> {
         let mut o = allowing()?;
@@ -1324,12 +1348,10 @@ mod tests {
             "a crypto opening past the floor is owed E6-10's USD-pair check, not allowed"
         );
 
-        let equity = allowing()?;
-        assert!(
-            matches!(
-                equity.with_input(evaluate)?,
-                Err(GateError::Unimplemented("evaluate", story)) if story != "E6-10"
-            ),
+        let equity = allowing()?.decide()?;
+        assert_eq!(
+            (equity.verdict, equity.reason),
+            (Verdict::Allow, None),
             "a US equity is not owed E6-10: check 2 is whole for it"
         );
 
@@ -1763,7 +1785,7 @@ mod tests {
             [
                 Ok((Verdict::Deny, Some(ReasonCode::AddBlockedByProtectiveOrder))),
                 Ok((Verdict::Deny, Some(ReasonCode::AddBlockedByProtectiveOrder))),
-                Err("E6-8"),
+                Ok((Verdict::Allow, None)),
                 Err("E6-10"),
             ],
             "only a plain or IOC equity add is blocked by resting protection"
@@ -1840,12 +1862,12 @@ mod tests {
             ],
             [
                 item_27,
-                Err("E6-8"),
+                Ok((Verdict::Allow, None)),
                 item_27,
                 item_27,
                 item_27,
-                Err("E6-8"),
-                Err("E6-8"),
+                Ok((Verdict::Allow, None)),
+                Ok((Verdict::Allow, None)),
                 Ok((Verdict::Allow, None)),
                 Err("E6-10"),
             ],
@@ -1900,7 +1922,7 @@ mod tests {
                     with("1000", "99.99", "100", "0")(o)
                 })?,
             ],
-            [Err("E6-8"), short, short, short, short, Err("E6-10")],
+            [Err("allowed"), short, short, short, short, Err("E6-10")],
             "1 × 100 at exactly 100 passes, a fee of -5 cannot bring 100 within 99, the lower figure \
              binds, and crypto reads the non-marginable figure rather than the marginable one"
         );
@@ -1936,6 +1958,7 @@ mod tests {
             }
         };
         let budget = Ok((Verdict::Deny, Some(ReasonCode::LegacyPdtDayTradeBudget)));
+        let allowed = Ok((Verdict::Allow, None));
         assert_eq!(
             [
                 pdt(&|_| Ok(()))?,
@@ -1996,21 +2019,21 @@ mod tests {
                 })?,
             ],
             [
-                Err("E6-8"),
+                allowed,
                 budget,
                 budget,
                 budget,
-                Err("E6-8"),
+                allowed,
                 budget,
                 budget,
-                Err("E6-8"),
-                Err("E6-8"),
-                Err("E6-8"),
-                Err("E6-8"),
-                Err("E6-8"),
-                Err("E6-8"),
+                allowed,
+                allowed,
+                allowed,
+                allowed,
+                allowed,
+                allowed,
                 Err("E6-10"),
-                Ok((Verdict::Allow, None)),
+                allowed,
             ],
             "another agent's same-day opening elsewhere, an open same-day position and a sale of \
              this security earlier today each make required 2 (a sale of another does not); a \
@@ -2175,6 +2198,366 @@ mod tests {
             "a market exit after hours or in the closing ten minutes is re-priced, never denied, \
              whatever its purpose (DEC-159); a limit exit is sent as is; a market opening in the \
              window is auction_window"
+        );
+        Ok(())
+    }
+
+    /// The fixture with its quote replaced, stamped a second before `now`.
+    fn quoted(mut o: Owned, bid: &str, ask: &str) -> Result<Owned, GateError> {
+        o.market.quote = Some(crate::SaneQuote {
+            bid: Price::parse(bid)?,
+            ask: Price::parse(ask)?,
+            at: at("2026-09-21T14:59:59Z")?,
+        });
+        Ok(o)
+    }
+
+    /// §8.2's sanity rule: a locked quote (`bid = ask`) marks an opening, a crossed one refuses to
+    /// decide it (`quote_unsane`), and a crossed quote refuses no exit and prices none, since a
+    /// reduction may take any mark source (DEC-163 item 1).
+    #[test]
+    fn a_locked_quote_is_sane_and_a_crossed_one_refuses_only_an_opening() -> Result<(), GateError> {
+        let locked = quoted(allowing()?, "100", "100")?;
+        let crossed = quoted(allowing()?, "100.06", "100.05")?;
+        assert_eq!(
+            row(&locked)?,
+            Ok((Verdict::Allow, None)),
+            "a locked quote is sane"
+        );
+        assert!(
+            matches!(crossed.decide(), Err(GateError::QuoteUnsane)),
+            "a crossed quote refuses to decide an opening"
+        );
+        let mut discretionary = quoted(
+            allowing()?.selling(Origin::OrderBuilder)?,
+            "100.06",
+            "100.05",
+        )?;
+        discretionary.proposed.limit_price = Price::parse("50")?;
+        let risk = quoted(allowing()?.selling(Origin::RiskEngine)?, "100.06", "100.05")?;
+        let paced = |o: &Owned| -> Result<_, GateError> {
+            let d = o.decide()?;
+            Ok((d.verdict, d.pacing))
+        };
+        assert_eq!(
+            [paced(&discretionary)?, paced(&risk)?],
+            [(Verdict::Allow, None), (Verdict::Allow, None)],
+            "a crossed quote leaves an exit allowed and unpriced"
+        );
+        Ok(())
+    }
+
+    /// Check 5's collar for a buy opening is the closed interval `[ask × (1 − band), ask × (1 + x)]`
+    /// (DEC-163 item 2): both ends pass and a nano past either is `price_outside_collar`, with the
+    /// liquid tier at a median of 90M and the other tier at 40M, below the 50M threshold.
+    #[test]
+    fn the_collar_admits_both_ends_and_refuses_a_nano_past_either() -> Result<(), GateError> {
+        let buying = |limit: &str, median: &str| -> Result<Row, GateError> {
+            let mut o = allowing()?;
+            o.proposed.qty = Qty::parse("5")?;
+            o.proposed.limit_price = Price::parse(limit)?;
+            o.instrument.median_dollar_volume_20d = Some(Usd::parse(median)?);
+            row(&o)
+        };
+        let outside = Ok((Verdict::Deny, Some(ReasonCode::PriceOutsideCollar)));
+        assert_eq!(
+            [
+                buying("101.0505", "90000000")?,
+                buying("101.050500001", "90000000")?,
+                buying("80.04", "90000000")?,
+                buying("80.039999999", "90000000")?,
+                buying("102.051", "40000000")?,
+                buying("102.051000001", "40000000")?,
+            ],
+            [
+                Ok((Verdict::Allow, None)),
+                outside,
+                Ok((Verdict::Allow, None)),
+                outside,
+                Ok((Verdict::Allow, None)),
+                outside,
+            ],
+            "ask 100.05: liquid ceiling 101.0505, other ceiling 102.051, passive floor 80.04"
+        );
+        Ok(())
+    }
+
+    /// Check 6's participation caps, with an order cap of `0.05 × 100 = 5` and a daily cap of
+    /// `0.05 × 200 = 10`: an opening at either cap passes, one past either alone is
+    /// `conduct_limit_breached`, and a volume the executor could not supply fails closed
+    /// (DEC-163 item 4).
+    #[test]
+    fn each_participation_cap_binds_alone_and_a_missing_volume_fails_closed()
+    -> Result<(), GateError> {
+        let opening = |trailing: Option<&str>, adv: Option<&str>, today: &str| {
+            let mut o = allowing()?;
+            o.proposed.qty = Qty::parse("5")?;
+            o.market.trailing_5m_volume = trailing.map(Qty::parse).transpose()?;
+            o.market.adv_20d = adv.map(Qty::parse).transpose()?;
+            o.conduct
+                .participation_today
+                .insert(id("a")?, Qty::parse(today)?);
+            row(&o)
+        };
+        let breached = Ok((Verdict::Deny, Some(ReasonCode::ConductLimitBreached)));
+        assert_eq!(
+            [
+                opening(Some("100"), Some("200"), "5")?,
+                opening(Some("99"), Some("200"), "0")?,
+                opening(Some("100"), Some("200"), "5.000000001")?,
+                opening(None, Some("200"), "0")?,
+                opening(Some("100"), None, "0")?,
+            ],
+            [
+                Ok((Verdict::Allow, None)),
+                breached,
+                breached,
+                breached,
+                breached,
+            ],
+            "at both caps passes; past the order cap or the daily cap alone, or with a volume \
+             missing, is conduct_limit_breached"
+        );
+        Ok(())
+    }
+
+    /// §9.6's order-to-fill ratio with a maximum of 10 from 20 orders: 20 orders to 2 fills sits
+    /// at the maximum and passes, 21 is past it, 19 orders are not yet counted however few fills,
+    /// and no fills count as one.
+    #[test]
+    fn the_order_to_fill_ratio_binds_past_its_maximum_from_its_minimum() -> Result<(), GateError> {
+        let opening = |orders: u32, fills: u32| {
+            let mut o = allowing()?;
+            o.conduct
+                .orders_today_per_instrument
+                .insert(id("a")?, orders);
+            o.conduct.filled_today.insert(id("a")?, fills);
+            row(&o)
+        };
+        let breached = Ok((Verdict::Deny, Some(ReasonCode::ConductLimitBreached)));
+        assert_eq!(
+            [
+                opening(20, 2)?,
+                opening(21, 2)?,
+                opening(19, 0)?,
+                opening(20, 0)?,
+            ],
+            [
+                Ok((Verdict::Allow, None)),
+                breached,
+                Ok((Verdict::Allow, None)),
+                breached,
+            ],
+            "20:2 is at the maximum; 21:2 and 20:0 are past it; 19 orders are below the minimum"
+        );
+        Ok(())
+    }
+
+    /// The collar prices a discretionary sell of 10 into `[bid × (1 − x), bid × (1 + band)]`, bid
+    /// 99.95: a limit at either end is sent as proposed, one below the floor is raised to 98.96 (the
+    /// floor 98.9505 on the cent grid, inward), and one above the ceiling is lowered to 119.94.
+    /// A risk exit and an owner exit below the floor are not priced (`AGENTS.md` rule 13).
+    #[test]
+    fn the_collar_prices_a_discretionary_exit_to_its_nearer_end() -> Result<(), GateError> {
+        let selling = |origin: Origin, limit: &str| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(origin)?;
+            o.proposed.limit_price = Price::parse(limit)?;
+            let d = o.decide()?;
+            Ok((d.verdict, d.pacing))
+        };
+        let collared = |limit: &str| -> Result<_, GateError> {
+            Ok((
+                Verdict::Allow,
+                Some(Pacing {
+                    qty: Qty::parse("10")?,
+                    limit_price: Price::parse(limit)?,
+                    marketable_limit_required: false,
+                    applied: [crate::PacingControl::Collar].into(),
+                }),
+            ))
+        };
+        assert_eq!(
+            [
+                selling(Origin::OrderBuilder, "98.9505")?,
+                selling(Origin::OrderBuilder, "98.95")?,
+                selling(Origin::OrderBuilder, "119.94")?,
+                selling(Origin::OrderBuilder, "119.945")?,
+                selling(Origin::RiskEngine, "98.95")?,
+                selling(Origin::OwnerClose, "98.95")?,
+            ],
+            [
+                (Verdict::Allow, None),
+                collared("98.96")?,
+                (Verdict::Allow, None),
+                collared("119.94")?,
+                (Verdict::Allow, None),
+                (Verdict::Allow, None),
+            ],
+            "the collar prices only a discretionary exit, and only past its ends"
+        );
+        Ok(())
+    }
+
+    /// Check 5 for an opening: a `stale_mark` restriction on the instrument denies it `stale_mark`
+    /// even with a fresh quote, and so do no quote and a quote stamped after `now` (DEC-163 item
+    /// 1); a restriction on another instrument does not, and a restricted instrument's risk exit
+    /// and discretionary exit are allowed (§8.2 lets a reduction take any mark source).
+    #[test]
+    fn a_stale_mark_restriction_or_no_usable_quote_denies_only_an_opening() -> Result<(), GateError>
+    {
+        let restricted = |mut o: Owned, instrument: &str| -> Result<Owned, GateError> {
+            o.agent
+                .instrument_restrictions
+                .insert(id(instrument)?, [InstrumentRestriction::StaleMark].into());
+            Ok(o)
+        };
+        let mut unquoted = allowing()?;
+        unquoted.market.quote = None;
+        let mut ahead = allowing()?;
+        if let Some(quote) = ahead.market.quote.as_mut() {
+            quote.at = at("2026-09-21T15:00:00.000000001Z")?;
+        }
+        let stale = Ok((Verdict::Deny, Some(ReasonCode::StaleMark)));
+        assert_eq!(
+            [
+                row(&restricted(allowing()?, "a")?)?,
+                row(&unquoted)?,
+                row(&ahead)?,
+                row(&restricted(allowing()?, "b")?)?,
+                row(&restricted(allowing()?.selling(Origin::RiskEngine)?, "a")?)?,
+                row(&restricted(
+                    allowing()?.selling(Origin::OrderBuilder)?,
+                    "a"
+                )?)?,
+            ],
+            [
+                stale,
+                stale,
+                stale,
+                Ok((Verdict::Allow, None)),
+                Ok((Verdict::Allow, None)),
+                Ok((Verdict::Allow, None)),
+            ],
+            "a restriction, no quote or a quote from after now is stale_mark for an opening only"
+        );
+        Ok(())
+    }
+
+    /// An owner exit of 10 is sliced only by a cap below it: an order cap of exactly 10 changes
+    /// nothing, 9.95 slices a whole-share instrument to 9 and a fractionable one to 9.95, and a
+    /// daily cap with 9.5 left slices to 9, each naming the control that bound. A risk exit and a
+    /// protective order under the same 9.95 cap are sent whole (`AGENTS.md` rule 13).
+    #[test]
+    fn a_slice_binds_only_below_the_proposal_and_names_its_cap() -> Result<(), GateError> {
+        let unsliced = |origin: Origin| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(origin)?;
+            o.market.trailing_5m_volume = Some(Qty::parse("199")?);
+            o.market.adv_20d = Some(Qty::parse("1")?);
+            let d = o.decide()?;
+            Ok((d.verdict, d.pacing))
+        };
+        assert_eq!(
+            [
+                unsliced(Origin::RiskEngine)?,
+                unsliced(Origin::ProtectiveLeg)?
+            ],
+            [(Verdict::Allow, None), (Verdict::Allow, None)],
+            "no participation cap slices a risk exit or a protective order"
+        );
+        let owner = |trailing: &str, today: &str, fractionable: bool| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(Origin::OwnerClose)?;
+            o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
+            o.market.adv_20d = Some(Qty::parse("200")?);
+            o.instrument.fractionable = fractionable;
+            o.conduct
+                .participation_today
+                .insert(id("a")?, Qty::parse(today)?);
+            Ok(o.decide()?.pacing)
+        };
+        let sliced = |qty: &str, control| -> Result<_, GateError> {
+            Ok(Some(Pacing {
+                qty: Qty::parse(qty)?,
+                limit_price: Price::parse("100")?,
+                marketable_limit_required: false,
+                applied: [control].into(),
+            }))
+        };
+        assert_eq!(
+            [
+                owner("200", "0", false)?,
+                owner("199", "0", false)?,
+                owner("199", "0", true)?,
+                owner("200", "0.5", false)?,
+            ],
+            [
+                None,
+                sliced("9", crate::PacingControl::OrderSizeParticipation)?,
+                sliced("9.95", crate::PacingControl::OrderSizeParticipation)?,
+                sliced("9", crate::PacingControl::DailyParticipation)?,
+            ],
+            "a cap equal to the proposal slices nothing; one below it slices to its increment"
+        );
+        Ok(())
+    }
+
+    /// §9.6's minimum resting time of 2 s on a cancel at 15:00:00: an opening order resting since
+    /// 14:59:58 has served it; one resting a nano less is `min_resting_time`, unless it is
+    /// marketable or the cancel precedes a risk-reducing order (DEC-163 item 7); an exit order and
+    /// a protective one are never held to it, and each decision carries the canceled order's
+    /// purpose.
+    #[test]
+    fn a_cancel_is_denied_only_strictly_inside_the_resting_time() -> Result<(), GateError> {
+        let config = allowing()?.config;
+        let cancel = |order: &WorkingOrder, since: &str, marketable: bool, precedes: bool| {
+            let d = crate::evaluate_cancel(&crate::CancelInput {
+                now: at("2026-09-21T15:00:00Z")?,
+                config: &config,
+                order,
+                resting_since: at(since)?,
+                precedes_risk_reducing_order: precedes,
+                marketable,
+            })?;
+            Ok::<_, GateError>((d.verdict, d.reason, d.purpose, d.checks))
+        };
+        let opening = working(1, Side::Buy, false, true)?;
+        let exit = working(1, Side::Sell, false, false)?;
+        let protective = working(1, Side::Sell, true, false)?;
+        let recent = "2026-09-21T14:59:58.000000001Z";
+        let allowed = |purpose| {
+            (
+                Verdict::Allow,
+                None,
+                purpose,
+                vec![CheckOutcome::Passed(Check::ConductControls)],
+            )
+        };
+        assert_eq!(
+            [
+                cancel(&opening, "2026-09-21T14:59:58Z", false, false)?,
+                cancel(&opening, recent, false, false)?,
+                cancel(&opening, recent, true, false)?,
+                cancel(&opening, recent, false, true)?,
+                cancel(&exit, recent, false, false)?,
+                cancel(&protective, recent, false, false)?,
+            ],
+            [
+                allowed(Purpose::Open),
+                (
+                    Verdict::Deny,
+                    Some(ReasonCode::MinRestingTime),
+                    Purpose::Open,
+                    vec![CheckOutcome::Failed(
+                        Check::ConductControls,
+                        ReasonCode::MinRestingTime
+                    )],
+                ),
+                allowed(Purpose::Open),
+                allowed(Purpose::Open),
+                allowed(Purpose::DiscretionaryExit),
+                allowed(Purpose::Protective),
+            ],
+            "only a non-marketable opening order canceled strictly inside 2 s, not before a \
+             risk-reducing order, is denied"
         );
         Ok(())
     }

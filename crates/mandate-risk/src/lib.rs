@@ -44,7 +44,10 @@
 //! and 28). E6-7 adds check 2's eligibility floor (§3.2, items 1 to 7 in list order), which makes
 //! checks 1 and 2 whole. E6-6 adds [`session_at`] and check 3's session rules, the rest of check 4
 //! (§5.3 rules 2 and 4 to 8, and §5.1's limit-only openings), check 7's buying power with the fee
-//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole.
+//! reservation, and check 8's `legacy_pdt` budget, which makes checks 3, 4, 7 and 8 whole. E6-8
+//! adds check 5 (mark freshness and the collar), check 6's market-conduct controls, the pacing an
+//! allowed exit is sent with, [`evaluate_cancel`]'s minimum resting time and the [`surveillance`]
+//! report (§9.6, DEC-163), which leaves only check 2 for crypto owed, to E6-10.
 //! **Until every check exists the gate fails closed for adding risk** (DEC-129 item 29): an
 //! opening or increasing order the implemented checks would allow returns
 //! [`GateError::Unimplemented`] naming the story still owed, a denial or hold from an implemented
@@ -60,6 +63,7 @@ use mandate_time::{Date, UtcNanos};
 use thiserror::Error;
 
 mod account_rules;
+mod conduct;
 mod flatten;
 mod floor;
 mod gate;
@@ -67,6 +71,7 @@ mod limits;
 mod session;
 #[doc(hidden)]
 pub mod spec_types;
+mod surveillance;
 
 pub use mandate_accounting::{AccountType, AssetClass, Side};
 pub use spec_types::{
@@ -716,8 +721,7 @@ pub fn evaluate(input: &GateInput<'_>) -> Result<Decision, GateError> {
 /// # Errors
 /// Returns [`GateError`] when the input cannot be evaluated.
 pub fn evaluate_cancel(input: &CancelInput<'_>) -> Result<Decision, GateError> {
-    let _ = input;
-    Err(GateError::Unimplemented("evaluate_cancel", "E6-8"))
+    conduct::evaluate_cancel(input)
 }
 
 /// The purpose §9.1 assigns to a proposal, from its origin, side and the agent's position. A sell
@@ -885,7 +889,8 @@ pub enum SurveillanceBreach {
     Concentration,
 }
 
-/// The §9.6 daily surveillance report.
+/// The §9.6 daily surveillance report: the day's figures, each threshold crossed flagged, and no
+/// judgement.
 ///
 /// # Errors
 /// Returns [`GateError`] when a ratio cannot be computed exactly.
@@ -894,6 +899,5 @@ pub fn surveillance(
     config: &GateConfig,
     input: &SurveillanceInput,
 ) -> Result<SurveillanceReport, GateError> {
-    let _ = (day, config, input);
-    Err(GateError::Unimplemented("surveillance", "E6-8"))
+    surveillance::report(day, config, input)
 }
