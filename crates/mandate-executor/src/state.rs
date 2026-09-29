@@ -88,11 +88,9 @@ pub(crate) struct OrderDetail {
     pub(crate) submitted_seq: Option<Seq>,
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
-    /// When a cancel of the order was last asked: the start of rule 5's bounded wait (§5.3).
-    pub(crate) cancel_asked_at: Option<RiskClock>,
-    /// The cancel went unconfirmed past its bound, or the broker refused it, and the order was
-    /// queried; `answered` once any later record of it is folded, and only then. An exit then
-    /// never waits on it again (#174 ruling 5863046153).
+    /// An exit waited on the order past rule 5's bound, or the broker refused its cancel, and the
+    /// order was queried; `answered` once any later record of it is folded, and only then. An exit
+    /// then never waits on it again (#174 ruling 5863046153).
     pub(crate) cancel_overdue: bool,
     pub(crate) answered: bool,
 }
@@ -128,6 +126,9 @@ pub struct IntentRecord {
     /// is measured from at **every** `Intent → Submitting` transition (interpretation 11).
     pub received_at: RiskClock,
     pub outcome: IntentOutcome,
+    /// The risk-clock second of the latest `GateDecided` that allowed the intent: for an exit,
+    /// the start of its wait on its cancels, which rule 5's bound runs from (§5.3, DEC-160 (13)).
+    pub(crate) allowed_at: Option<RiskClock>,
 }
 
 /// How far an intent has got. `Abandoned` and `Denied` are terminal: a later handoff of the same

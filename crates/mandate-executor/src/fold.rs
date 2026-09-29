@@ -97,7 +97,7 @@ fn account_event(state: &mut ExecutorState, event: &FoldedEvent) -> Result<(), E
     state.risk_clock = Some(at);
     match kind {
         "IntentReceived" => intent_received(state, payload, at),
-        "GateDecided" => gate_decided(state, payload),
+        "GateDecided" => gate_decided(state, payload, at),
         "OrderSubmitted" => order_submitted(state, event),
         "OrderStateChanged" => {
             adoption(state, event)?;
@@ -300,16 +300,25 @@ fn intent_received(
             agent: AgentId(required_text(payload, "agent")?.to_owned()),
             received_at: at,
             outcome: IntentOutcome::Received,
+            allowed_at: None,
         },
     );
     state.bodies.insert(id, body);
     Ok(())
 }
 
-fn gate_decided(state: &mut ExecutorState, payload: &Value) -> Result<(), ExecutorError> {
+fn gate_decided(
+    state: &mut ExecutorState,
+    payload: &Value,
+    at: RiskClock,
+) -> Result<(), ExecutorError> {
     let id = intent_id(payload)?;
     match required_text(payload, "verdict")? {
-        "allow" => {}
+        "allow" => {
+            if let Some(record) = state.intents.get_mut(&id) {
+                record.allowed_at = Some(at);
+            }
+        }
         "deny" => {
             if let Some(record) = state.intents.get_mut(&id) {
                 record.outcome = IntentOutcome::Denied;
@@ -473,7 +482,6 @@ fn order_state_changed(
     order.state = next;
     if flag(payload, "cancel_requested") {
         order.cancel_unconfirmed = true;
-        detail.cancel_asked_at = Some(at);
     }
     if next.is_terminal() || flag(payload, "cancel_confirmed") {
         order.cancel_unconfirmed = false;

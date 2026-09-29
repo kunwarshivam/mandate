@@ -1,5 +1,7 @@
 //! The protective sequences and the exit price ladder (E7-4, trading-domain spec §5.4 to §5.6).
 
+use std::collections::BTreeSet;
+
 use mandate_accounting::{AssetClass, InstrumentId};
 use mandate_num::{Adverse, Fraction, Price, Qty, ShareIncrement, SignedQty};
 
@@ -87,9 +89,10 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 }
 
 /// An exit waits while a protective order in its sequence is not yet confirmed gone (§5.4), or
-/// while the agent's own opening in the instrument is (§5.3 rule 5) — but never on an opening
-/// whose cancel went overdue and whose query has been answered, and never twice on the same one:
-/// that wait is bounded ([`overdue_openings`]; rules 3 and 13, #174 ruling 5863046153).
+/// while the agent's own opening in the instrument is live, in any state the broker may hold it
+/// in (§5.3 rule 5) — but never on an opening whose cancel went overdue and whose query has been
+/// answered, and never twice on the same one: that wait is bounded ([`overdue_openings`]; rules 3
+/// and 13, #174 ruling 5863046153, DEC-160 (13)).
 pub(crate) fn awaits_cancel(
     state: &ExecutorState,
     agent: &AgentId,
@@ -102,48 +105,47 @@ pub(crate) fn awaits_cancel(
             || openings(state, Some(agent), Some(instrument), false).any(|id| !released(&id)))
 }
 
-/// Rule 5's bound, on a tick: an opening whose cancel has gone unconfirmed for
-/// `unknown_absent_window_s` while an exit waits on it is treated as an `Unknown` — marked
-/// overdue and queried by id (§5.7) — and once the query is answered the exit goes, whatever the
-/// answer: a terminal opening, or one still resting, whose self-cross is the broker's to refuse.
+/// Rule 5's bound, on a tick: once an exit has waited `unknown_absent_window_s` from the moment
+/// its gate allowed it, every opening of its agent in the instrument it still waits on, whatever
+/// its state, is treated as an `Unknown` — marked overdue and queried by id (§5.7) — and once the
+/// query is answered the exit goes ([`release_waiting`]), whatever the answer: a terminal
+/// opening, or one still resting, whose self-cross is the broker's to refuse (DEC-160 (7), (13)).
 pub(crate) fn overdue_openings(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let window = batch.ports.config.unknown_absent_window_s;
-    let due: Vec<ClientOrderId> = batch
-        .view
-        .orders
-        .values()
-        .filter(|order| order.purpose.adds_risk() && order.state == OrderState::PendingCancel)
-        .filter(|order| !waiting(&batch.view, &order.instrument).is_empty())
-        .filter(|order| {
-            batch
-                .view
-                .details
-                .get(&order.client_order_id)
-                .filter(|detail| !detail.cancel_overdue)
-                .and_then(|detail| detail.cancel_asked_at)
-                .is_some_and(|asked| now.saturating_sub(asked.secs()) >= window)
-        })
-        .map(|order| order.client_order_id.clone())
-        .collect();
+    let view = &batch.view;
+    let mut due = BTreeSet::new();
+    for exit in waiting_exits(view) {
+        if now.saturating_sub(exit.since.secs()) >= window {
+            due.extend(
+                openings(view, Some(&exit.agent), Some(&exit.instrument), false).filter(|id| {
+                    !view
+                        .details
+                        .get(id)
+                        .is_some_and(|detail| detail.cancel_overdue)
+                }),
+            );
+        }
+    }
     for id in due {
         overdue(batch, &id)?;
     }
     Ok(())
 }
 
-/// Marks a cancel overdue — unconfirmed past its bound, or refused by the broker — and queries
-/// the order, keeping its state: the query's answer decides it (§5.7).
+/// Marks a wait on an order overdue — past rule 5's bound, or its cancel refused by the broker —
+/// and queries the order: the query's answer decides it (§5.7). An order the broker has not yet
+/// acknowledged (`Submitting`) becomes `Unknown`, which is what a submission unanswered that long
+/// is (DEC-160 (13)); any other keeps its state.
 pub(crate) fn overdue(batch: &mut Batch<'_, '_>, id: &ClientOrderId) -> Result<(), ExecutorError> {
     let Some(state) = batch.view.orders.get(id).map(|order| order.state) else {
         return Ok(());
     };
-    transition(
-        batch,
-        id,
-        state,
-        vec![("cancel_overdue", Value::Bool(true))],
-    )?;
+    let to = match state {
+        OrderState::Submitting => OrderState::Unknown,
+        kept => kept,
+    };
+    transition(batch, id, to, vec![("cancel_overdue", Value::Bool(true))])?;
     batch.broker(BrokerRequest::GetOrderByClientId(id.clone()));
     Ok(())
 }
@@ -342,11 +344,12 @@ pub(crate) fn protection_cancelled(
     changed(batch, instrument, "cancelled", orders).map(|_| ())
 }
 
-/// After every step (§5.4): in an instrument where a sequence runs and no protective order rests
-/// any more, the waiting exits are re-gated and submitted; then, once the sequence's exit is
-/// terminal, denied or abandoned **and** no other exit there is working or waiting, the position
-/// is re-protected and the interval ends — so Σ resting sells never exceeds the position.
+/// After every step (§5.4): the waiting exits are re-evaluated ([`release_waiting`]); then, in an
+/// instrument where a sequence runs and no protective order rests any more, once the sequence's
+/// exit is terminal, denied or abandoned **and** no other exit there is working or waiting, the
+/// position is re-protected and the interval ends — so Σ resting sells never exceeds the position.
 pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    release_waiting(batch)?;
     let sequences: Vec<(InstrumentId, ExitSequence)> = batch
         .view
         .exiting
@@ -354,11 +357,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|(instrument, sequence)| (instrument.clone(), sequence.clone()))
         .collect();
     for (instrument, sequence) in sequences {
-        if rests(&batch.view, &instrument) {
-            continue;
-        }
-        release_waiting(batch, &instrument)?;
-        if sequence.passive {
+        if rests(&batch.view, &instrument) || sequence.passive {
             continue;
         }
         let exit = ClientOrderId::for_intent(&sequence.intent)?;
@@ -385,16 +384,58 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// Re-gates, on fresh state, every exit in `instrument` still waiting for its cancels; each is
-/// submitted only once nothing it waits on remains ([`awaits_cancel`]).
-pub(crate) fn release_waiting(
-    batch: &mut Batch<'_, '_>,
-    instrument: &InstrumentId,
-) -> Result<(), ExecutorError> {
-    for intent in waiting(&batch.view, instrument) {
-        gate_and_submit(batch, &intent)?;
+/// Rule 5 and §5.4, after every step — every tick and every order-state change: each exit waiting
+/// on its cancels asks the cancel of any opening of its agent in the instrument the broker has
+/// since accepted (a `Submitting` one is cancelled once it is accepted), and each exit nothing
+/// holds back any more ([`awaits_cancel`]) is re-gated on fresh state and submitted, whatever
+/// ended its wait: a confirmed cancel, a fill, an expiry, a reject, the broker reporting the
+/// opening gone by any path, or a query answered past the bound (#286 round 1, B1).
+pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
+    for exit in waiting_exits(&batch.view) {
+        cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
+        if !awaits_cancel(&batch.view, &exit.agent, &exit.instrument, exit.purpose) {
+            gate_and_submit(batch, &exit.intent)?;
+        }
     }
     Ok(())
+}
+
+/// One exit the gate allowed that has no order yet: it waits on its cancels.
+struct WaitingExit {
+    intent: IntentId,
+    agent: AgentId,
+    instrument: InstrumentId,
+    purpose: Purpose,
+    since: RiskClock,
+}
+
+/// The exits waiting on their cancels: received, allowed by the gate at `since` and not held
+/// since, with no order yet. A held exit has not started its wait (DEC-160 (8)), and an intent
+/// the gate has not yet decided is [`crate::intent::resume`]'s.
+fn waiting_exits(view: &ExecutorState) -> Vec<WaitingExit> {
+    view.intents
+        .values()
+        .filter(|record| record.outcome == IntentOutcome::Received)
+        .filter(|record| !view.held.contains(&record.intent_id))
+        .filter(|record| {
+            ClientOrderId::for_intent(&record.intent_id)
+                .is_ok_and(|id| !view.orders.contains_key(&id))
+        })
+        .filter_map(|record| match view.bodies.get(&record.intent_id) {
+            Some(IntentBody::Order {
+                instrument,
+                purpose,
+                ..
+            }) if exits(*purpose) => Some(WaitingExit {
+                intent: record.intent_id.clone(),
+                agent: record.agent.clone(),
+                instrument: instrument.clone(),
+                purpose: *purpose,
+                since: record.allowed_at?,
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// The received exits in `instrument` with no order yet: those waiting on their cancels.
@@ -1342,10 +1383,15 @@ mod probe_tests {
 
 #[cfg(test)]
 mod sequence_tests {
+    use std::collections::{BTreeMap, VecDeque};
+
     use mandate_accounting::{AssetClass, InstrumentId, Side};
     use mandate_canon::Value;
     use mandate_num::{Fraction, Price, Qty, ShareIncrement, SignedQty, Usd};
     use mandate_time::Date;
+    use proptest::prelude::{Just, ProptestConfig, Strategy, TestCaseError, any, prop};
+    use proptest::prop_oneof;
+    use proptest::test_runner::TestRunner;
 
     use super::rests;
     use crate::error::ExecutorError;
@@ -2638,10 +2684,11 @@ mod sequence_tests {
         Ok(executor)
     }
 
-    fn buy_reported(status: &str, filled: &str) -> Result<Input, ExecutorError> {
-        Ok(Input::Broker(Ok(BrokerOutcome::Order(BrokerOrder {
-            broker_order_id: "b-buy".to_owned(),
-            client_order_id: Some(BUY.to_owned()),
+    /// The broker's description of an opening buy of 5 at 150.
+    fn opening_order(id: &str, status: &str, filled: &str) -> Result<BrokerOrder, ExecutorError> {
+        Ok(BrokerOrder {
+            broker_order_id: format!("b-{id}"),
+            client_order_id: Some(id.to_owned()),
             instrument: aapl()?,
             side: Side::Buy,
             qty: Qty::parse("5")?,
@@ -2653,7 +2700,13 @@ mod sequence_tests {
             replaced_by_broker_order_id: None,
             legs: Vec::new(),
             created_on: None,
-        }))))
+        })
+    }
+
+    fn buy_reported(status: &str, filled: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::Broker(Ok(BrokerOutcome::Order(opening_order(
+            BUY, status, filled,
+        )?))))
     }
 
     fn queried(effects: &[Effect]) -> Vec<&str> {
@@ -2920,5 +2973,637 @@ mod sequence_tests {
             vec![Qty::parse("10")?]
         );
         Ok(())
+    }
+
+    /// The unprotected ten AAPL with `agent-a`'s opening buy of 5 submitted and not yet
+    /// acknowledged: `Submitting`.
+    fn held_with_a_submitted_buy(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(BUY)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
+    /// The broker's fill of `qty` of an opening buy at 150.
+    fn opening_filled(id: &str, qty: &str) -> Result<Input, ExecutorError> {
+        Ok(Input::BrokerUpdate(BrokerUpdate::Fill(BrokerFill {
+            fill_id: FillId(format!("f-{id}")),
+            client_order_id: Some(id.to_owned()),
+            instrument: aapl()?,
+            side: Side::Buy,
+            qty: Qty::parse(qty)?,
+            price: Price::parse("150")?,
+            fees: Usd::ZERO,
+            trade_date: Date::parse("2026-09-22")?,
+        })))
+    }
+
+    fn refused(id: &str, message: &str) -> Input {
+        Input::Broker(Ok(BrokerOutcome::Rejected(BrokerReject {
+            client_order_id: Some(id.to_owned()),
+            http_status: 422,
+            code: None,
+            message: message.to_owned(),
+        })))
+    }
+
+    fn verdicts(effects: &[Effect]) -> Vec<&str> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "GateDecided" => {
+                    draft.payload.get("verdict").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #286 round 1, B1, the reviewer's first path: an exit waits on its agent's opening the
+    /// broker has not yet acknowledged, with nothing to cancel yet, and asks its cancel in the
+    /// step the acknowledgment arrives; the confirmation then releases the exit.
+    #[test]
+    fn an_exit_cancels_a_submitting_opening_once_it_is_accepted() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held_with_a_submitted_buy(&ports)?;
+        let waiting = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        assert_eq!(verdicts(&waiting), vec!["allow"]);
+        assert!(
+            cancels(&waiting).is_empty() && submitted(&waiting) == 0,
+            "{:?}",
+            drafted(&waiting)
+        );
+        let accepted = executor.run(
+            Input::Broker(Ok(BrokerOutcome::Submitted(opening_order(
+                BUY, "new", "0",
+            )?))),
+            &ports,
+        )?;
+        assert_eq!(cancels(&accepted), vec![BUY], "cancelled once accepted");
+        assert_eq!(
+            submitted(&accepted),
+            0,
+            "and the exit waits for the confirmation"
+        );
+        let released = executor.run(cancel_accepted(BUY), &ports)?;
+        assert_eq!(submitted(&released), 1);
+        Ok(())
+    }
+
+    /// #286 round 1, B1, the first path at its bound: an opening never acknowledged is, at
+    /// `unknown_absent_window_s` from the exit's allow, an `Unknown`, marked overdue and queried
+    /// (§5.7). An answer that it rests gets it cancelled and the exit goes in the same step; an
+    /// answer that the broker never had it holds the exit on the `Unknown` in its instrument —
+    /// rule 13's hold — rather than sending it past an order that may yet appear.
+    #[test]
+    fn a_submitting_opening_never_acknowledged_is_queried_at_the_bound() -> Result<(), ExecutorError>
+    {
+        with_ports!(ports);
+        for rests_at_broker in [true, false] {
+            let mut executor = held_with_a_submitted_buy(&ports)?;
+            executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+            let early = executor.run(Input::Tick(RiskClock::from_secs(14)), &ports)?;
+            assert!(queried(&early).is_empty() && submitted(&early) == 0);
+            let due = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+            assert_eq!(queried(&due), vec![BUY]);
+            assert!(
+                due.iter().any(|effect| matches!(
+                    effect,
+                    Effect::Journal(draft)
+                        if draft.payload.get("cancel_overdue") == Some(&Value::Bool(true))
+                            && draft.payload.get("state").and_then(Value::as_str) == Some("unknown")
+                )),
+                "{:?}",
+                drafted(&due)
+            );
+            assert_eq!(submitted(&due), 0, "the exit waits for the answer");
+            let answer = if rests_at_broker {
+                buy_reported("new", "0")?
+            } else {
+                Input::Broker(Ok(BrokerOutcome::Absent {
+                    client_order_id: BUY.to_owned(),
+                }))
+            };
+            let answered = executor.run(answer, &ports)?;
+            let exit = IntentId(EventId(EXIT.to_owned()));
+            if rests_at_broker {
+                assert_eq!(cancels(&answered), vec![BUY]);
+                assert_eq!(
+                    submitted(&answered),
+                    1,
+                    "the exit goes past the resting buy"
+                );
+            } else {
+                assert_eq!(verdicts(&answered), vec!["hold"]);
+                assert_eq!(submitted(&answered), 0);
+                assert!(executor.state.held.contains(&exit), "held on the Unknown");
+            }
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, B1: a `Submitting` opening that ends by any path — the broker's reject,
+    /// expiry, cancel or fill, or the submission refused outright — releases the waiting exit in
+    /// that step.
+    #[test]
+    fn a_submitting_opening_gone_by_any_path_releases_the_exit_at_once() -> Result<(), ExecutorError>
+    {
+        with_ports!(ports);
+        for (status, filled) in [
+            ("rejected", "0"),
+            ("expired", "0"),
+            ("canceled", "0"),
+            ("filled", "5"),
+            ("refused", "0"),
+        ] {
+            let mut executor = held_with_a_submitted_buy(&ports)?;
+            executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+            let report = if status == "refused" {
+                refused(BUY, "insufficient qty")
+            } else {
+                buy_reported(status, filled)?
+            };
+            let gone = executor.run(report, &ports)?;
+            assert_eq!(submitted(&gone), 1, "{status}: {:?}", drafted(&gone));
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, B1, the reviewer's second path: the broker reports the opening whose cancel
+    /// is outstanding canceled, or filled, with no `CancelAccepted`; the exit goes in that step.
+    /// An expiry reported then is no edge out of `PendingCancel` in §5.7's table and is journaled
+    /// and ignored, so the bound ends that wait: the query's answer releases the exit.
+    #[test]
+    fn an_opening_reported_gone_without_a_confirmation_releases_the_exit()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        for (status, filled) in [("canceled", "0"), ("filled", "5"), ("expired", "0")] {
+            let mut executor = held_with_a_resting_buy(&ports)?;
+            let asked = executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+            assert_eq!(cancels(&asked), vec![BUY]);
+            let pushed = executor.run(
+                Input::BrokerUpdate(BrokerUpdate::Order(opening_order(BUY, status, filled)?)),
+                &ports,
+            )?;
+            if status == "expired" {
+                assert_eq!(submitted(&pushed), 0, "{:?}", drafted(&pushed));
+                let due = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+                assert_eq!(queried(&due), vec![BUY]);
+                let answered = executor.run(buy_reported(status, filled)?, &ports)?;
+                assert_eq!(submitted(&answered), 1, "{status}");
+            } else {
+                assert_eq!(submitted(&pushed), 1, "{status}: {:?}", drafted(&pushed));
+            }
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, B1, the reviewer's third path: the opening fills in full while its cancel is
+    /// outstanding, and the exit goes in that step; the broker's later refusal of the cancel, on
+    /// an order that has since filled, sends nothing again and queries nothing.
+    #[test]
+    fn an_opening_filled_while_its_cancel_is_outstanding_releases_the_exit()
+    -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held_with_a_resting_buy(&ports)?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        let fill = executor.run(opening_filled(BUY, "5")?, &ports)?;
+        assert_eq!(submitted(&fill), 1, "{:?}", drafted(&fill));
+        let late = executor.run(refused(BUY, "order is already filled"), &ports)?;
+        assert!(
+            submitted(&late) == 0 && queried(&late).is_empty(),
+            "{:?}",
+            drafted(&late)
+        );
+        Ok(())
+    }
+
+    /// #286 round 1, B1: a cancel refused while the broker has moved the opening out of
+    /// `PendingCancel` — back to resting, or part filled — is refused all the same: the opening is
+    /// queried at once and never marked rejected, and the answer releases the exit.
+    #[test]
+    fn a_cancel_refused_after_the_opening_moved_on_is_queried_at_once() -> Result<(), ExecutorError>
+    {
+        with_ports!(ports);
+        for (status, filled) in [("new", "0"), ("partially_filled", "2")] {
+            let mut executor = held_with_a_resting_buy(&ports)?;
+            executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+            executor.run(buy_reported(status, filled)?, &ports)?;
+            let refusal = executor.run(refused(BUY, "order is not cancelable"), &ports)?;
+            assert_eq!(queried(&refusal), vec![BUY], "{status}");
+            assert_ne!(
+                executor
+                    .state
+                    .orders
+                    .get(&ClientOrderId::parse(BUY)?)
+                    .map(|order| order.state),
+                Some(OrderState::Rejected),
+                "{status}"
+            );
+            assert_eq!(submitted(&refusal), 0, "{status}");
+            let answered = executor.run(buy_reported(status, filled)?, &ports)?;
+            assert_eq!(submitted(&answered), 1, "{status}");
+        }
+        Ok(())
+    }
+
+    /// One step of a random script: the clock moves, an exit of one share arrives, or the broker
+    /// speaks about one of the openings.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        Tick(i64),
+        Exit,
+        Report(usize),
+        Become(usize, &'static str),
+        Fill(usize),
+        Confirm(usize),
+        Refuse(usize),
+    }
+
+    /// `agent-a`'s openings as the script starts, each `(acknowledged, reached the broker)`, and
+    /// its steps.
+    #[derive(Clone, Debug)]
+    struct Script {
+        openings: Vec<(bool, bool)>,
+        steps: Vec<Step>,
+    }
+
+    fn steps() -> impl Strategy<Value = Step> {
+        let statuses = vec![
+            "partially_filled",
+            "filled",
+            "canceled",
+            "expired",
+            "rejected",
+        ];
+        prop_oneof![
+            4 => (1_i64..=6).prop_map(Step::Tick),
+            2 => Just(Step::Exit),
+            1 => (0_usize..2).prop_map(Step::Report),
+            1 => (0_usize..2, prop::sample::select(statuses))
+                .prop_map(|(which, status)| Step::Become(which, status)),
+            1 => (0_usize..2).prop_map(Step::Fill),
+            2 => (0_usize..2).prop_map(Step::Confirm),
+            1 => (0_usize..2).prop_map(Step::Refuse),
+        ]
+    }
+
+    fn scripts() -> impl Strategy<Value = Script> {
+        (
+            prop::collection::vec((any::<bool>(), any::<bool>()), 1..=2),
+            prop::collection::vec(steps(), 1..48),
+        )
+            .prop_map(|(openings, steps)| Script { openings, steps })
+    }
+
+    /// The broker's side of one opening: its status (`None` for a submission that never reached
+    /// it), the quantity it filled, and whether a cancel of it is outstanding.
+    struct Venue {
+        id: &'static str,
+        status: Option<&'static str>,
+        filled: u8,
+        asked: bool,
+    }
+
+    impl Venue {
+        fn live(&self) -> bool {
+            matches!(self.status, Some("new" | "partially_filled"))
+        }
+
+        fn answer(&self) -> Result<Input, ExecutorError> {
+            Ok(Input::Broker(Ok(match self.status {
+                Some(status) => {
+                    BrokerOutcome::Order(opening_order(self.id, status, &self.filled.to_string())?)
+                }
+                None => BrokerOutcome::Absent {
+                    client_order_id: self.id.to_owned(),
+                },
+            })))
+        }
+    }
+
+    /// One exit as the journal tells it: when its wait began — its latest `GateDecided` allowing
+    /// it, or its arrival — its latest verdict, and whether it has been submitted, denied or
+    /// abandoned.
+    struct Watched {
+        intent: String,
+        since: i64,
+        verdict: String,
+        done: bool,
+    }
+
+    /// One opening as the journal tells it: its state, whether a wait on it went overdue, and
+    /// whether any record of it followed.
+    struct Seen {
+        state: String,
+        overdue: bool,
+        answered: bool,
+    }
+
+    /// The oracle, derived from the drafts alone and independently of the fold.
+    struct Watch {
+        now: i64,
+        exits: BTreeMap<String, Watched>,
+        openings: BTreeMap<String, Seen>,
+    }
+
+    impl Watch {
+        fn saw(&mut self, draft: &EventDraft) -> Result<(), String> {
+            let field = |name: &str| draft.payload.get(name).and_then(Value::as_str);
+            match draft.event_type.as_str() {
+                "GateDecided" => {
+                    let verdict = field("verdict").unwrap_or_default();
+                    for exit in self.exits.values_mut() {
+                        if field("intent_id") == Some(exit.intent.as_str()) {
+                            verdict.clone_into(&mut exit.verdict);
+                            exit.since = if verdict == "allow" {
+                                self.now
+                            } else {
+                                exit.since
+                            };
+                            exit.done = exit.done || verdict == "deny";
+                        }
+                    }
+                }
+                "OrderAbandoned" => {
+                    for exit in self.exits.values_mut() {
+                        exit.done = exit.done || field("intent_id") == Some(exit.intent.as_str());
+                    }
+                }
+                "OrderSubmitted" => {
+                    let id = field("client_order_id").unwrap_or_default();
+                    if let Some(exit) = self.exits.get_mut(id) {
+                        let waited_on: Vec<&String> = self
+                            .openings
+                            .iter()
+                            .filter(|(_, seen)| {
+                                !seen.answered
+                                    && !matches!(
+                                        seen.state.as_str(),
+                                        "filled" | "canceled" | "rejected" | "expired" | "intent"
+                                    )
+                            })
+                            .map(|(id, _)| id)
+                            .collect();
+                        if !waited_on.is_empty() {
+                            return Err(format!("{id} went while {waited_on:?} were live"));
+                        }
+                        exit.done = true;
+                    }
+                    if let Some(seen) = self.openings.get_mut(id) {
+                        "submitting".clone_into(&mut seen.state);
+                    }
+                }
+                "OrderStateChanged" => {
+                    let id = field("client_order_id").unwrap_or_default();
+                    if let Some(seen) = self.openings.get_mut(id) {
+                        if draft.payload.get("cancel_overdue") == Some(&Value::Bool(true)) {
+                            seen.overdue = true;
+                        } else if seen.overdue {
+                            seen.answered = true;
+                        }
+                        field("state")
+                            .unwrap_or_default()
+                            .clone_into(&mut seen.state);
+                    }
+                }
+                _ => {}
+            }
+            Ok(())
+        }
+
+        /// No exit is neither submitted nor denied once its wait has lasted
+        /// `unknown_absent_window_s`, except one rule 13 holds.
+        fn bounded(&self, window: i64) -> Result<(), String> {
+            for (id, exit) in &self.exits {
+                if !exit.done
+                    && exit.verdict != "hold"
+                    && self.now.saturating_sub(exit.since) >= window
+                {
+                    return Err(format!(
+                        "{id} ({}) waited from {} to {}",
+                        exit.verdict, exit.since, self.now
+                    ));
+                }
+            }
+            Ok(())
+        }
+    }
+
+    /// Hands one input to the executor, and the broker answers every query of an opening at
+    /// once, until nothing more is asked.
+    fn deliver(
+        executor: &mut Executor,
+        ports: &Ports<'_>,
+        venues: &mut [Venue],
+        watch: &mut Watch,
+        input: Input,
+    ) -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let mut inputs = VecDeque::from([input]);
+        let mut budget = 64_u32;
+        while let Some(input) = inputs.pop_front() {
+            budget = budget
+                .checked_sub(1)
+                .ok_or("the broker's answers never settle")?;
+            for effect in executor.run(input, ports).map_err(failed)? {
+                match effect {
+                    Effect::Journal(draft) => watch.saw(&draft)?,
+                    Effect::Broker(BrokerRequest::Cancel { client_order_id }) => {
+                        for venue in venues
+                            .iter_mut()
+                            .filter(|venue| venue.id == client_order_id.as_str())
+                        {
+                            venue.asked = true;
+                        }
+                    }
+                    Effect::Broker(BrokerRequest::Submit(order)) => {
+                        for venue in venues
+                            .iter_mut()
+                            .filter(|venue| venue.id == order.client_order_id.as_str())
+                        {
+                            venue.status = venue.status.or(Some("new"));
+                        }
+                    }
+                    Effect::Broker(BrokerRequest::GetOrderByClientId(id)) => {
+                        for venue in venues.iter().filter(|venue| venue.id == id.as_str()) {
+                            inputs.push_back(venue.answer().map_err(failed)?);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn played(script: &Script) -> Result<(), String> {
+        let failed = |error: ExecutorError| format!("{error:?}");
+        let (config, fees) = (executor_config(), fees().map_err(failed)?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Everything,
+            instruments: &Everything,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = held(&ports).map_err(failed)?;
+        let mut venues = Vec::new();
+        let mut watch = Watch {
+            now: 0,
+            exits: BTreeMap::new(),
+            openings: BTreeMap::new(),
+        };
+        for (id, (acknowledged, reached)) in
+            ["md-buy-2", "md-buy-3"].into_iter().zip(&script.openings)
+        {
+            committed(
+                &mut executor,
+                "OrderSubmitted",
+                vec![
+                    ("client_order_id", text(id)),
+                    ("agent", text("agent-a")),
+                    ("instrument", text("AAPL")),
+                    ("side", text("buy")),
+                    ("qty", text("5")),
+                    ("limit", text("150")),
+                    ("purpose", text("open")),
+                ],
+            )
+            .map_err(failed)?;
+            let state = if *acknowledged {
+                "accepted"
+            } else {
+                "submitting"
+            };
+            if *acknowledged {
+                committed(
+                    &mut executor,
+                    "OrderStateChanged",
+                    vec![("client_order_id", text(id)), ("state", text(state))],
+                )
+                .map_err(failed)?;
+            }
+            venues.push(Venue {
+                id,
+                status: (*acknowledged || *reached).then_some("new"),
+                filled: 0,
+                asked: false,
+            });
+            watch.openings.insert(
+                id.to_owned(),
+                Seen {
+                    state: state.to_owned(),
+                    overdue: false,
+                    answered: false,
+                },
+            );
+        }
+        let mut exits = 0_u32;
+        for step in &script.steps {
+            let input = match *step {
+                Step::Tick(by) => {
+                    watch.now = watch.now.saturating_add(by);
+                    Some(Input::Tick(RiskClock::from_secs(watch.now)))
+                }
+                Step::Exit => {
+                    exits = exits.saturating_add(1);
+                    let intent = format!("01JABCDEFGHJKMNPQRSTVWX{exits:03}");
+                    watch.exits.insert(
+                        format!("md-{intent}"),
+                        Watched {
+                            intent: intent.clone(),
+                            since: watch.now,
+                            verdict: String::new(),
+                            done: false,
+                        },
+                    );
+                    Some(sell(&intent, "1", "139", Purpose::RiskExit).map_err(failed)?)
+                }
+                Step::Report(which) => venues
+                    .get(which)
+                    .map(Venue::answer)
+                    .transpose()
+                    .map_err(failed)?,
+                Step::Become(which, status) => match venues.get_mut(which) {
+                    Some(venue) if venue.live() => {
+                        venue.status = Some(status);
+                        venue.filled = match status {
+                            "filled" => 5,
+                            "partially_filled" => venue.filled.max(2),
+                            _ => venue.filled,
+                        };
+                        let order = opening_order(venue.id, status, &venue.filled.to_string());
+                        Some(Input::BrokerUpdate(BrokerUpdate::Order(
+                            order.map_err(failed)?,
+                        )))
+                    }
+                    _ => None,
+                },
+                Step::Fill(which) => match venues.get_mut(which) {
+                    Some(venue) if venue.live() => {
+                        let rest = 5_u8.saturating_sub(venue.filled);
+                        venue.status = Some("filled");
+                        venue.filled = 5;
+                        Some(opening_filled(venue.id, &rest.to_string()).map_err(failed)?)
+                    }
+                    _ => None,
+                },
+                Step::Confirm(which) => match venues.get_mut(which) {
+                    Some(venue) if venue.asked => {
+                        venue.asked = false;
+                        Some(if venue.live() {
+                            venue.status = Some("canceled");
+                            cancel_accepted(venue.id)
+                        } else {
+                            refused(venue.id, "order is not cancelable")
+                        })
+                    }
+                    _ => None,
+                },
+                Step::Refuse(which) => match venues.get_mut(which) {
+                    Some(venue) if venue.asked => {
+                        venue.asked = false;
+                        Some(refused(venue.id, "order is not cancelable"))
+                    }
+                    _ => None,
+                },
+            };
+            if let Some(input) = input {
+                deliver(&mut executor, &ports, &mut venues, &mut watch, input)?;
+            }
+            watch.bounded(config.unknown_absent_window_s)?;
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, B1: over random scripts of ticks, exits, acknowledgments, broker reports,
+    /// fills, and cancels confirmed or refused, against openings acknowledged or not and
+    /// submissions that reached the broker or not, no exit stays neither submitted nor denied
+    /// past `unknown_absent_window_s` plus one tick, except under rule 13's holds; and no exit is
+    /// submitted while an opening of its agent is live, unless the wait on it went overdue and was
+    /// answered. The oracle reads the journal's drafts, not the fold.
+    #[test]
+    fn no_exit_waits_past_the_bound_but_under_a_rule_13_hold() -> Result<(), String> {
+        let config = ProptestConfig {
+            failure_persistence: None,
+            ..ProptestConfig::default()
+        };
+        TestRunner::new(config)
+            .run(&scripts(), |script| {
+                played(&script).map_err(TestCaseError::fail)
+            })
+            .map_err(|error| error.to_string())
     }
 }
