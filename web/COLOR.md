@@ -56,7 +56,7 @@ The status family: gain is green; loss is red, as text and markers only, never c
 
 - WCAG 2.2 (W3C Recommendation, 2023): 4.5:1 for body text (1.4.3), 3:1 for large text and for UI and non-text marks (1.4.11), and colour is never the only cue (1.4.1).
 - APCA (Somers, `apca-w3` 0.1.9, the candidate method for WCAG 3), Bronze targets: Lc 75 for body text, Lc 60 for large text and UI text, Lc 45 for non-text marks. APCA is polarity-aware, which is what sets dark mode's steps: light text on a dark ground needs L 0.85 or more for Lc 75, and a mark needs about L 0.7 for Lc 45. That is why dark text sits at step 300 (L 0.88) and dark marks at step 400 (L 0.76).
-- The Stop control's label and the kill switch's label keep 7:1 in both themes (`STOP_CONTRAST`).
+- The Stop control's label, quiet (ink on the header) or loud (on ink), and the kill switch's label keep 7:1 in both themes (`STOP_CONTRAST`).
 - **APCA is dev only and never ships.** `apca-w3` is published under its "Limited W3 License" (unmodified use for WCAG contrast checks of web content, kept current; AGPL-3.0 for anything else), and its dependency `colorparsley` is AGPL-3.0. Both are dev dependencies used only by the contrast tests, through `src/test/apca.ts`. Lint bans importing either, or that helper, from app code; `palette.test.ts` fails if any app file imports them or if `apca-w3` becomes a dependency; and `npm run build` runs `scripts/no-apca.mjs`, which fails if `.next/static` or `.next/server` holds APCA's constants or colorparsley's colour table. `/design` and `/palette` show the WCAG 2.2 ratios only.
 
 ### 6. Colour-vision deficiency
@@ -171,7 +171,7 @@ A custom property resolves where it is declared and inherits as a value, so each
 |---|---|---|---|---|
 | `account` (the sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
 | `field` (the mandate) | `mandate`: gold-100, dark gold-850 | `mandate-foreground` / `mandate-strong` / `mandate-muted` | as the root | `mandate-edge` (gold) |
-| `ink` (the Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
+| `ink` (the loud Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
 
 ## Charts
 
@@ -188,7 +188,7 @@ Every fill stays one flat colour.
 
 ## Usage rules
 
-- **60/30/10.** Paper (ink in dark) fills the page, cards and quiet fields. Ink (paper in dark) is the type, primary actions, the account block in the navigation and the Stop control. Gold is the mandate's rule, rails, marks and labels, and the account's line and current-place markers.
+- **60/30/10.** Paper (ink in dark) fills the page, cards and quiet fields. Ink (paper in dark) is the type, primary actions, the account block in the navigation and the Stop control (an outline when quiet, a fill when loud, DEC-206). Gold is the mandate's rule, rails, marks and labels, and the account's line and current-place markers.
 - **One meaning per colour.** Crimson is the kill switch alone: the kill-switch choices in the Stop sheet and the switch on the kill-switch record screens. A test fails if any other product file uses it, and a render test fails if crimson paints anything else on any route in any scenario. Loss is text and markers only, never a fill and never crimson.
 - **No colour without words.** Gains and losses carry a sign and a word. Modes carry a label and an icon. A restriction carries a tag naming who imposed it. A chart level carries its name on the axis and in the legend.
 - **Never coloured:** system states (stale, unreachable, loading, errors), deadlines, Approve and Skip, provenance, and decoration.
@@ -211,7 +211,8 @@ Lowest margins:
 | Primary action label | 17.69:1 / −105.0 | 16.84:1 / 100.0 |
 | Text on the mandate field | 16.83:1 / 100.0 | 12.28:1 / −97.4 |
 | Mandate label on its field | 7.29:1 / 82.2 | 9.15:1 / −77.3 |
-| Stop control label on ink | 17.69:1 / −105.0 | 16.84:1 / 100.0 |
+| Stop control label on ink (loud) | 17.69:1 / −105.0 | 16.84:1 / 100.0 |
+| Stop control label and outline on the header (quiet) | 17.69:1 / 103.1 | 16.84:1 / −101.7 |
 | Kill switch label on crimson | 8.31:1 / −89.9 | 8.31:1 / −89.9 |
 | Kill switch edge on a card | 8.31:1 / 85.3 | 7.97:1 / −56.8 |
 | Gain / loss on a card | 7.19:1 / 83.1, 8.09:1 / 86.2 | 12.89:1 / −83.2, 12.31:1 / −80.1 |

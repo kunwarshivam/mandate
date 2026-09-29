@@ -14,7 +14,7 @@ Every value below is shipped. `src/lib/palette.ts` holds the colour ramps and bo
 
 Each screen has one hero number, a chart as its centrepiece, and generous space around both. Space separates things before a line does, and a line before a box. Boxes are few and each one means something: the pale gold field is your mandate, a pale gold card with an ink action is the account asking for you, a quiet well holds secondary facts. Type is one family in one tight scale, sentence case throughout. Motion answers the owner and then gets out of the way.
 
-**The Control Rule.** Stop is on every screen, an ink pill (off-white in dark mode) at the right of the header, one tap from anywhere, at every width from 320px, and never disabled by loading, stale data, errors or a page transition. Nothing else in the header is filled in ink.
+**The Control Rule.** Stop is on every screen at the right of the header, one tap from anywhere, at every width from 320px, and never disabled by loading, stale data, errors or a page transition. It is quiet until something needs you ([DEC-206](../docs/project/04-decision-log.md#decisions)): an ink outline on a calm screen, and the filled ink pill (off-white in dark mode) while there is a risk reason, in the same place and the same size. Nothing else in the header is filled in ink.
 
 **The No-Nudge Rule.** Approve and Skip are the same button: the same variant, size, weight and width, side by side in a fixed order, with nothing preselected and no autofocus. The default (skip) is stated in words beside a static deadline. Nothing counts down, pulses or changes colour as the deadline nears.
 
@@ -64,7 +64,7 @@ No gradients of any kind (fills, text, masks, fades or glows). CI greps `src/` f
 Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in the header, or the sidebar footer on phones. The choice is the only thing the browser stores, in the `owlhead-theme` cookie, so the server renders an explicit choice and a head script resolves System before first paint.
 
 - **Tokens alone.** `html:root[data-mode="dark"]` in `globals.css` re-points every token to the other end of the same ramps; components do not change. There is no `dark:` class anywhere in `src/` (a test fails on one). `<html>` also carries `.dark`, only because Kumo's own classes use the `dark` variant.
-- **Every meaning stays.** Ink surfaces with paper type; paper primary actions and Stop control with ink type; gold a step lighter for lines (gold-400) and text (gold-300); the mandate field a dark gold tint (gold-850); crimson still the only filled crimson, with a lighter edge (crimson-400) so the kill switch holds 3:1 against the sheet.
+- **Every meaning stays.** Ink surfaces with paper type; paper primary actions and the loud Stop control with ink type, and the quiet one a paper outline with paper type; gold a step lighter for lines (gold-400) and text (gold-300); the mandate field a dark gold tint (gold-850); crimson still the only filled crimson, with a lighter edge (crimson-400) so the kill switch holds 3:1 against the sheet.
 - **Flat.** Nothing floats on a shadow in dark mode: menus, sheets and dialogs sit on their hairline.
 - **Charts** redraw from the dark palette when the mode changes (`setChartMode`).
 - **The brand** is off-white on dark (`--logo`), and the browser's theme colour follows (off-white #FDFCFA, night #0B0D11).
@@ -132,7 +132,7 @@ Mobile first, from 360px. The phone has a top header (sidebar trigger, mark, pap
 | `--tab-bar` | The phone tab bar, plus the safe area | 4rem | 4rem |
 | `--seam` | The gap between swatches on `/palette` only | 0.5rem | 0.5rem |
 
-Touch targets are at least 44px on phones in both densities: Stop, sheet and dialog close buttons, large buttons, list rows (which are whole-row links) and Stop-sheet choices are `h-11`/`min-h-11` or taller; tabs are 64px.
+Touch targets are at least 44px on phones in both densities: Stop (44px at every width, its pill 36px from 64rem), sheet and dialog close buttons, large buttons, list rows (which are whole-row links) and Stop-sheet choices are `h-11`/`min-h-11` or taller; tabs are 64px.
 
 **Few boxes.** A list is rows on the page separated by 1px hairlines (`border-border/70`), with a well-coloured hover. A section heading has no rule under it; space sets it apart. A box appears only when it carries meaning: the mandate field (`rounded-2xl bg-mandate`), an approval or account notice (`rounded-2xl bg-lapis-soft`), a well for secondary facts or a recorded outcome (`rounded-2xl bg-background`). A box never sits inside another box of the same kind.
 
@@ -154,8 +154,13 @@ Controls and panels are flat. In light mode only what floats above the page cast
 
 ## Components
 
-- **Header.** Always rendered, never held back by loading: 64px, the card colour, a 70% hairline below. The sidebar trigger and the mark (below 64rem), the workspace switcher (fixtures), breadcrumbs, the ⌘K trigger (an icon below 64rem, a pill with a ⌘K hint above), the paper badge, the approvals count, Alerts, the theme menu, the user menu, and Stop. Stop is last, dominant, never shrinks, and is fully on screen at every width from 320px (`e2e/stop-visible.spec.ts`). As the header narrows, the other items give way first: below 80rem the breadcrumbs keep the last two crumbs, the workspace switcher becomes an icon, and Alerts and the user menu fold into a "More" menu; below 64rem search becomes an icon and the workspace switcher goes; below 48rem the breadcrumbs go; below 40rem the approvals count, the theme menu and "More" go. The sidebar sheet carries everything the header drops.
-- **Stop control.** An ink pill (paper in dark), 44px tall, with a filled octagon and "Stop". Opens the Stop sheet.
+- **Header.** Always rendered, never held back by loading: 64px, the card colour, a 70% hairline below. The sidebar trigger and the mark (below 64rem), the workspace switcher (fixtures), breadcrumbs, the ⌘K trigger (an icon below 64rem, a pill with a ⌘K hint above), the paper badge, the approvals count, Alerts, the theme menu, the user menu, and Stop. Stop is last, never shrinks, and is fully on screen at every width from 320px (`e2e/stop-visible.spec.ts`). As the header narrows, the other items give way first: below 80rem the breadcrumbs keep the last two crumbs, the workspace switcher becomes an icon, and Alerts and the user menu fold into a "More" menu; below 64rem search becomes an icon and the workspace switcher goes; below 48rem the breadcrumbs go; below 40rem the approvals count, the theme menu and "More" go. The sidebar sheet carries everything the header drops.
+- **Stop control.** A pill with a filled octagon and "Stop" that opens the Stop sheet, in two tones that share one box ([DEC-206](../docs/project/04-decision-log.md#decisions)):
+  - *Quiet*, the default: a 2px ink outline (paper in dark) on the header's own colour, with the octagon and label in ink. Hover is the well.
+  - *Loud*, while `stopAttention` (`src/lib/attention.ts`) gives a reason: the filled ink pill with paper type (paper with ink type in dark), the only filled thing in the header. The reasons are risk only: an open alert other than your own pause or stop (a degraded feed, or an agent restricted by its mandate, the account or market data, which covers exits only and a halt); an agent in exits only; an agent near a loss limit, meaning it has used 80% of the daily loss budget, of a drawdown rung's depth or of the capital the floor lets go (`NEAR_LIMIT_USED` in `src/lib/limits.ts`, reached levels included); an unreachable deployment; an order in flight, meaning the broker has not confirmed it (recorded, sending, a cancel or replace unanswered, or unknown; a resting order, partly filled or not, is confirmed). A request waiting for approval is not a reason. While the workspace loads, the last known tone holds, starting quiet.
+  - The hit area is 44px tall at every width. The pill is 44px below 64rem and 36px from 64rem, matching the header's other controls, with the label at `text-sm`.
+  - The accessible name is always "Stop". When loud, `aria-describedby` points at a hidden line such as "Needs attention: 1 alert, Agent 1 is near its daily loss limit". There is no badge, dot or count on the button.
+  - The tone changes colour only, over `--duration-hover`, and instantly under reduced motion. It never pulses, glows or animates to draw the eye. Under forced colours both tones keep their border. `e2e/stop-tone.spec.ts` measures both tones' boxes at 320, 390, 1024 and 1440px, their contrast in both themes, forced colours and reduced motion.
 - **Paper badge.** A pill outlined in the account's ink over the ink hatch: `PAPER · simulated funds`. Below 30rem "simulated funds" becomes screen-reader text so Stop never leaves the screen; the hatch and PAPER stay.
 - **Side navigation.** Kumo's Sidebar on the well colour with no border, collapsible to icons. Its header carries the brand (see Brand). Groups: Home, Approvals and Alerts without a label; Agents; Accounts; Audit; Workspace. On an agent's pages the sidebar slides to that agent's sections (Overview, Positions, Orders, Decisions, Approvals, Mandate, Prove, Activity) with a link back to all agents. The current page is a soft tint with strong text; the approvals count is an ink pill.
 - **Tab bar.** Phones only: the card colour, a hairline above, five tabs 64px tall. The current tab's icon fills and sits on a pale gold pill with a gold ring that slides between tabs (a 300ms spring with 10% bounce; instant under reduced motion); its label turns ink.
@@ -208,7 +213,7 @@ Emil Kowalski's rules: motion answers an action or shows what changed; it is qui
 | `--ease-drawer` | `cubic-bezier(0.32, 0.72, 0, 1)` | The Stop sheet |
 | `--ease-spring` | `linear()` spring, about 10% overshoot | The step-up dialog settling in; never a deadline or a figure |
 | `--duration-press` / `--duration-release` | 140ms / 80ms | Press to scale 0.97; the release is faster than the press |
-| `--duration-hover` | 160ms | Colour changes on hover and on a mode change |
+| `--duration-hover` | 160ms | Colour changes on hover, on a mode change, and when Stop turns loud or quiet |
 | `--duration-reveal` + `--stagger` | 240ms, 30ms apart (at most 8 steps) | A list settles in once: each row rises 6px and fades in (`reveal`) |
 | `--duration-number` | 240ms | A changed value rolls up and out; a stable screen-reader copy never animates |
 | `--duration-draw` | 700ms | The hero line draws in from the left on first load (`draw-in`) |
@@ -285,6 +290,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - Do draw every limit as a rail in dollars on the mandate field, with the point where it stops the agent marked and the headroom in words.
 - Do give every gain and loss its sign (and, on a headline figure, the word), and put `[[DISCLOSURE-PERFORMANCE]]` beside every P&L.
 - Do keep Stop in the header on every screen, and keep touch targets at 44px or more on phones.
+- Do keep Stop quiet on a calm screen and let it turn loud only for a risk reason from `stopAttention`, in the same place and size.
 - Do use tabular figures wherever numbers line up or change, and give live values a fixed slot so nothing shifts.
 - Do check every screen in light and dark; a new colour is a token with a value in each theme.
 - Don't use crimson for anything but the kill switch, including errors and losses.
@@ -296,6 +302,7 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - Don't gamify: no confetti, streaks, badges, celebratory motion, or a gain shown louder than a loss.
 - Don't show anything as approved or submitted until the runtime records it.
 - Don't use colour, motion or size to steer a decision, and never animate a deadline or a figure being decided on.
+- Don't pulse, glow, badge or resize Stop to draw the eye, don't make it loud for a request waiting for approval, and don't fill anything else in the header with ink.
 
 ## History
 
@@ -304,3 +311,4 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - **2026-09-28, Kumo and a dashboard shell.** shadcn/ui, Radix and lucide gave way to Kumo and Phosphor, with a collapsible sidebar, breadcrumbs, ⌘K and agent-scoped navigation.
 - **2026-09-28, a first palette and the logo** (DEC-202, DEC-203), both since superseded or amended by DEC-204.
 - **2026-09-28, the calm redesign in Ink and Gold (DEC-204).** The founder asked for a consumer-grade product at the level of Robinhood, Public or Wealthfront, without gamification. The signage structure and type were superseded: three families gave way to Mona Sans in one tight scale; square fields and 2px rules to soft corners, hairlines and space; the dashboard to one hero number over a scrubbable equity chart; one density to two. The palette became Ink and Gold with a dark theme, and the logo ink on light and off-white on dark. Every safety behaviour stayed.
+- **2026-09-29, a quiet Stop (DEC-206).** The founder found the always-filled 44px Stop pill too big and prominent for a calm screen. Stop became an ink outline, 36px on desktop, that fills in ink only while something needs the owner. It stays in the same place, the same size, never disabled and never hidden. This amends DEC-204 item 2 ("the header keeps Stop as its dominant control").
