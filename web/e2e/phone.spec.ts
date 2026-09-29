@@ -1,4 +1,5 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
+import { AGENT_IDS } from "../src/fixtures/workspace";
 import { SCREENS, SECTION_INDEX } from "../src/lib/screens";
 
 /**
@@ -187,6 +188,109 @@ for (const width of PHONES) {
     });
   });
 }
+
+const AGENT = `/agents/${AGENT_IDS.btc}`;
+const SWING = `/agents/${AGENT_IDS.swing}`;
+
+for (const width of PHONES) {
+  test.describe(`${width} px, an agent`, () => {
+    test("the name, its state and Stop this agent come first, then the equity and the headroom, with no tabs", async ({ page }) => {
+      await open(page, SWING, width);
+      const head = page.locator("[data-slot=page-header]");
+      await expect(head.getByRole("heading", { level: 1 })).toBeVisible();
+      await expect(head.locator("[data-slot=mode-badge]")).toBeVisible();
+      await expect(head.getByRole("button", { name: "Stop this agent…" })).toBeVisible();
+      await expect(head.getByRole("navigation", { name: "Agent sections" })).toBeHidden();
+      const headings = await page.locator("#main h2").locator("visible=true").evaluateAll((els) => els.map((el) => el.textContent?.trim()));
+      expect(headings).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);
+      await expect(page.locator("[data-slot=phone-waiting] li").first()).toContainText(/Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
+      await expect(page.locator("[data-layout=rail]")).toBeHidden();
+      await expect(page.getByRole("region", { name: "Key figures" })).toBeHidden();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+      expect(await smallTargets(page.locator("#main"))).toEqual([]);
+    });
+
+    test("the level legend waits behind Levels", async ({ page }) => {
+      await open(page, AGENT, width);
+      const hero = page.locator("[data-slot=agent-equity]");
+      await expect(hero.locator("[data-placeholder=performance]").first()).toBeVisible();
+      const toggle = hero.getByRole("button", { name: "Levels" });
+      await expect(toggle).toHaveAttribute("aria-expanded", "false");
+      await expect(hero.locator("[data-slot=level-legend]")).toBeHidden();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-expanded", "true");
+      await expect(hero.locator("[data-slot=level-legend]")).toBeVisible();
+      expect(await hero.locator("[data-slot=level-legend] li").count()).toBeGreaterThanOrEqual(5);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+
+    test("Headroom has a row per limit with a meter, in ink and the marker, and no gain or loss colour", async ({ page }) => {
+      await open(page, AGENT, width);
+      const rows = page.locator("[data-slot=headroom] [data-slot=headroom-row]");
+      expect(await rows.count()).toBeGreaterThanOrEqual(3);
+      for (const row of await rows.all()) {
+        await expect(row).toBeVisible();
+        const meter = row.locator("[data-slot=headroom-meter]");
+        await expect(meter).toBeVisible();
+        expect((await meter.boundingBox())!.height).toBeLessThanOrEqual(6);
+      }
+      const colours = await page.locator("[data-slot=headroom]").evaluate((el) => {
+        const probe = (v: string) => {
+          const s = document.createElement("span");
+          s.style.color = `var(${v})`;
+          document.body.append(s);
+          const c = getComputedStyle(s).color;
+          s.remove();
+          return c;
+        };
+        const banned = new Set(["--gain", "--loss", "--gain-cvd", "--loss-cvd", "--crimson"].map(probe));
+        return [...el.querySelectorAll("*")].flatMap((n) => {
+          const cs = getComputedStyle(n);
+          return [cs.color, cs.backgroundColor].filter((c) => banned.has(c));
+        });
+      });
+      expect(colours).toEqual([]);
+      await expect(page.locator("[data-slot=headroom]")).toContainText(/Daily loss limit\$[\d,]+\.\d{2} headroom/);
+    });
+
+    test("the section links at the foot open each section, and the list follows", async ({ page }) => {
+      await open(page, AGENT, width);
+      const links = page.getByRole("navigation", { name: "This agent" });
+      await expect(links).toBeVisible();
+      expect(await labels(links.getByRole("link"))).toEqual([
+        "Overview",
+        expect.stringMatching(/^Positions\d+$/),
+        expect.stringMatching(/^Orders\d+$/),
+        "Decisions",
+        "Approvals",
+        "Mandate",
+        "Prove",
+        "Activity",
+      ]);
+      expect(await smallTargets(links)).toEqual([]);
+      await links.getByRole("link", { name: /^Orders/ }).click();
+      await expect(page).toHaveURL(`${AGENT}/orders`);
+      await expect(page.getByRole("navigation", { name: "This agent" }).getByRole("link", { name: /^Orders/ })).toHaveAttribute("aria-current", "page");
+      await page.getByRole("navigation", { name: "This agent" }).getByRole("link", { name: "Mandate" }).click();
+      await expect(page).toHaveURL(`${AGENT}/mandate`);
+      await expect(page.locator("[data-slot=envelope]")).toBeVisible();
+      await expect(header(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    });
+  });
+}
+
+test("desktop agent keeps its tabs, its mandate card and the full overview, with the legend open", async ({ page }) => {
+  await open(page, AGENT, 1440, 900);
+  await expect(page.getByRole("navigation", { name: "Agent sections" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "This agent" })).toBeHidden();
+  await expect(page.locator("[data-slot=mandate-card]")).toBeVisible();
+  for (const name of ["Key figures", "Positions", "Working orders", "Recent decisions", "Activity"]) await expect(page.getByRole("region", { name, exact: true })).toBeVisible();
+  await expect(page.locator("[data-slot=level-legend]")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Levels" })).toBeHidden();
+  await expect(page.locator("[data-slot=headroom]")).toBeHidden();
+  await expect(page.locator("[data-slot=page-header] [data-slot=mode-badge]")).toBeHidden();
+});
 
 test("Home says all clear once the one request is answered", async ({ page }) => {
   await open(page, "/", 390);

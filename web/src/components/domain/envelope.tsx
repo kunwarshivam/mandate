@@ -9,7 +9,7 @@ import type { Agent } from "@/fixtures/types";
 import { type Dec, ONE, ratio, sub } from "@/lib/decimal";
 import { usd } from "@/lib/format";
 import { MODE_MEANING } from "@/lib/labels";
-import { type Level, type Rail, agentLimits, nextLevel } from "@/lib/limits";
+import { type AgentLimits, type Level, type Rail, agentLimits, nextLevel } from "@/lib/limits";
 import { agentHref } from "@/lib/screens";
 import { ModeBadge } from "./mode";
 import { Placeholder } from "./placeholders";
@@ -172,6 +172,109 @@ export function Envelope({ agent, className }: { agent: Agent; className?: strin
         </div>
       </div>
       <p className="text-caption text-mandate-muted">{CAVEAT}</p>
+    </section>
+  );
+}
+
+interface HeadroomRowData {
+  key: string;
+  label: string;
+  headroom: string;
+  limit: string;
+  share: number;
+  over: boolean;
+  atCap: string;
+}
+
+/**
+ * Room left under the daily loss limit is equity's distance to that level, the figure Home states, so
+ * a day's gain widens it; the other limits are the cap less what is used.
+ */
+function headroomRows(limits: AgentLimits): HeadroomRowData[] {
+  const daily = limits.levels.find((l) => l.kind === "daily");
+  return limits.rails.map((rail) => {
+    const left = rail.key === "daily" && daily ? sub(limits.equity, daily.at) : sub(rail.cap, rail.used);
+    return {
+      key: rail.key,
+      label: rail.key === "daily" ? "Daily loss limit" : rail.label,
+      headroom: usd(left > 0n ? left : 0n),
+      limit: rail.key === "daily" ? `${usd(rail.cap)} below the day's start` : usd(rail.cap),
+      share: Math.min(ratio(rail.used, rail.cap), 1),
+      over: rail.used > rail.cap,
+      atCap: rail.atCap,
+    };
+  });
+}
+
+function HeadroomMeter({ label, share }: { label: string; share: number }) {
+  return (
+    <div role="img" aria-label={label} data-slot="headroom-meter" className="relative h-1 rounded-full bg-muted">
+      <div
+        className="absolute inset-y-0 left-0 w-full origin-left rounded-full bg-foreground transition-transform duration-(--duration-hover) motion-reduce:transition-none"
+        style={{ transform: `scaleX(${share})` }}
+      />
+      <div className="absolute -inset-y-1 right-0 w-0.5 rounded-full bg-mandate-marker" aria-hidden />
+    </div>
+  );
+}
+
+/**
+ * An agent's limits on a phone, one hairline row each: the room left, the limit, and a thin meter in
+ * ink with the mandate's marker where the agent stops. Distances to limits, never results, so no gain
+ * or loss colour and no disclosure to repeat (DEC-207).
+ */
+export function Headroom({ agent, className }: { agent: Agent; className?: string }) {
+  const limits = agentLimits(agent);
+  const scaled = limits.sizeFactor < ONE;
+  const titleId = `headroom-${agent.agent_id}`;
+  const ordersLeft = Math.max(0, limits.ordersCap - limits.ordersToday);
+  return (
+    <section aria-labelledby={titleId} data-slot="headroom" className={cn("grid content-start gap-2", className)}>
+      <h2 id={titleId} className="text-h2">
+        Headroom
+      </h2>
+      {agent.mode !== "normal" ? <p className="text-sm text-muted-foreground">{MODE_MEANING[agent.mode]}</p> : null}
+      {agent.startup === "reconciling" ? (
+        <p role="status" data-slot="reconciling" className="flex items-center gap-2 text-sm font-medium">
+          <ArrowsClockwise className="size-4 shrink-0 motion-safe:animate-spin motion-safe:[animation-duration:2.4s]" aria-hidden />
+          Checking with the broker. Nothing is needed from you.
+        </p>
+      ) : null}
+      <ul className="grid">
+        {headroomRows(limits).map((row) => (
+          <li key={row.key} data-slot="headroom-row" data-over={row.over ? "" : undefined} className="grid gap-2 border-b border-border/70 py-3">
+            <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+              <span className="font-medium">{row.label}</span>
+              <span className="font-mono text-sm font-medium tabular">{row.headroom} headroom</span>
+            </p>
+            <HeadroomMeter label={`${row.label}: ${row.headroom} headroom under a limit of ${row.limit}`} share={row.share} />
+            <p className="text-caption text-muted-foreground">
+              {row.over ? <span className="font-semibold text-foreground">Over the limit. </span> : null}
+              Limit <span className="font-mono tabular">{row.limit}</span>. At the limit: {row.atCap.toLowerCase()}.
+            </p>
+          </li>
+        ))}
+        <li data-slot="headroom-row" className="grid gap-2 border-b border-border/70 py-3">
+          <p className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+            <span className="font-medium">Orders today</span>
+            <span className="font-mono text-sm font-medium tabular">{ordersLeft} left</span>
+          </p>
+          <HeadroomMeter label={`Orders today: ${limits.ordersToday} of ${limits.ordersCap}`} share={Math.min(limits.ordersToday / Math.max(limits.ordersCap, 1), 1)} />
+          <p className="text-caption text-muted-foreground">
+            Limit <span className="font-mono tabular">{limits.ordersCap}</span> a day. Largest order <span className="font-mono tabular">{usd(limits.orderCap)}</span>.
+            {scaled ? <span className="ml-1.5 rounded-full bg-ink px-2 font-sans text-label text-ink-foreground">Sizes scaled</span> : null}
+          </p>
+        </li>
+      </ul>
+      <PendingBreaches agent={agent} />
+      <p className="text-caption text-muted-foreground">{CAVEAT}</p>
+      <Link
+        href={agentHref(agent.agent_id, "mandate")}
+        className="-mx-2 inline-flex min-h-11 w-fit items-center gap-1 rounded-md px-2 text-sm font-semibold underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        View full mandate
+        <ArrowRight aria-hidden className="size-3.5" />
+      </Link>
     </section>
   );
 }

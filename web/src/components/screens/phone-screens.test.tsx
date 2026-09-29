@@ -1,13 +1,18 @@
-import { render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/shell/app-shell";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";
 import { agentLimits, headroomLine, nextLevel } from "@/lib/limits";
 import { usd } from "@/lib/format";
+import { MODE_MEANING } from "@/lib/labels";
+import { allOrders } from "@/lib/orders";
+import { agentHref } from "@/lib/screens";
 import { renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { shownOnDesktop, shownOnPhone } from "@/test/viewport";
+import { AgentDetailScreen, AgentSectionScreen } from "./agent-detail";
 import { DashboardScreen } from "./dashboard";
 
 /** The phone layouts (DEC-207), read from the breakpoint classes; `e2e/phone.spec.ts` checks the real layout. */
@@ -156,6 +161,150 @@ describe("Home on a phone", () => {
     const positions = within(main()).getByRole("region", { name: "Positions" });
     expect(shownOnPhone(positions)).toBe(false);
     expect(shownOnDesktop(positions)).toBe(true);
+  });
+});
+
+function agentPage(path: string, ui: ReactElement, scenario: Parameters<typeof renderWithRuntime>[1] = "normal") {
+  setPathname(path);
+  return renderWithRuntime(<AppShell>{ui}</AppShell>, scenario);
+}
+
+const SWING = buildWorkspace("normal").agents.find((a) => a.agent_id === AGENT_IDS.swing)!;
+const overview = (scenario?: Parameters<typeof renderWithRuntime>[1]) => agentPage(agentHref(AGENT_IDS.swing, "overview"), <AgentDetailScreen agentId={AGENT_IDS.swing} />, scenario);
+
+describe("an agent on a phone", () => {
+  const header = () => main().querySelector<HTMLElement>("[data-slot=page-header]")!;
+  const headroom = () => main().querySelector<HTMLElement>("[data-slot=headroom]")!;
+
+  it("opens with the name, its state and Stop this agent, then what waits, the equity, the headroom and the links", () => {
+    overview();
+    const title = within(header()).getByRole("heading", { level: 1 });
+    expect(title).toHaveTextContent(SWING.label);
+    const badge = header().querySelector<HTMLElement>("[data-slot=mode-badge]")!;
+    expect(title.parentElement!.contains(badge)).toBe(true);
+    expect(shownOnPhone(badge)).toBe(true);
+    expect(shownOnDesktop(badge)).toBe(false);
+    expect(badge.querySelector("svg")).not.toBeNull();
+    expect(onPhone(within(header()).getAllByRole("button", { name: "Stop this agent…" }))).toHaveLength(1);
+    const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent);
+    expect(order).toEqual(["Waiting for you", "Equity against your mandate", "Headroom", "This agent"]);
+  });
+
+  it("moves key figures, positions, orders, decisions, activity and the mandate card off the phone, and keeps them all on desktop", () => {
+    overview();
+    const moved = ["Key figures", "Positions", "Working orders", "Recent decisions", "Activity", "Your mandate"];
+    const regions = moved.map((name) => within(main()).getByRole("region", { name }));
+    for (const r of regions) {
+      expect(shownOnPhone(r)).toBe(false);
+      expect(shownOnDesktop(r)).toBe(true);
+    }
+    expect(onDesktop(main().querySelectorAll("h2")).map((h) => h.textContent)).toEqual(
+      expect.arrayContaining(["Equity against your mandate", "Your mandate", "Key figures", "Waiting for you", "Positions", "Working orders", "Recent decisions", "Activity"]),
+    );
+    for (const slot of ["headroom", "phone-waiting", "agent-links", "levels-toggle"]) expect(onDesktop(main().querySelectorAll(`[data-slot=${slot}]`))).toEqual([]);
+  });
+
+  it("keeps the route tabs on desktop only", () => {
+    overview();
+    const tabs = within(header()).getByRole("navigation", { name: "Agent sections" });
+    expect(shownOnPhone(tabs)).toBe(false);
+    expect(shownOnDesktop(tabs)).toBe(true);
+  });
+
+  it("lists a waiting request once, with the static time it is skipped at", () => {
+    overview();
+    const waiting = main().querySelector<HTMLElement>("[data-slot=phone-waiting]")!;
+    const rows = waiting.querySelectorAll("li");
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(r).toHaveTextContent(/^Buy .+ at a limit of \$[\d,.]+Skipped at \d\d:\d\d:\d\d [A-Z]+ if you do nothing$/);
+      expect(within(r).getByRole("link")).toHaveAttribute("href", expect.stringMatching(/^\/approvals\/apr_/));
+    }
+    const id = within(rows[0]).getByRole("link").getAttribute("href")!;
+    expect(onPhone(document.querySelectorAll(`a[href="${id}"]`))).toHaveLength(1);
+  });
+
+  it("keeps the hero's figure, disclosure and chart, and folds the level legend behind Levels", () => {
+    overview();
+    const hero = main().querySelector<HTMLElement>("[data-slot=agent-equity]")!;
+    expect(shownOnPhone(hero.querySelector("[data-slot=agent-equity-value]")!)).toBe(true);
+    expect(shownOnPhone(hero.querySelector("[data-placeholder=performance]")!)).toBe(true);
+    expect(shownOnPhone(hero.querySelector("[data-slot=chart-canvas]")!)).toBe(true);
+    const toggle = within(hero).getByRole("button", { name: "Levels" });
+    const legend = hero.querySelector<HTMLElement>("[data-slot=level-legend]")!;
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveAttribute("aria-controls", legend.parentElement!.id);
+    expect(toggle).toHaveClass("min-h-11", "lg:hidden");
+    expect(shownOnPhone(legend)).toBe(false);
+    expect(shownOnDesktop(legend)).toBe(true);
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(shownOnPhone(legend)).toBe(true);
+    fireEvent.click(toggle);
+    expect(shownOnPhone(legend)).toBe(false);
+  });
+
+  it("gives each limit a Headroom row: the room left, the limit, and a thin meter in ink with the marker, no gain or loss colour", () => {
+    overview();
+    const limits = agentLimits(SWING);
+    const rows = [...headroom().querySelectorAll<HTMLElement>("[data-slot=headroom-row]")];
+    expect(rows).toHaveLength(limits.rails.length + 1);
+    for (const row of rows) {
+      expect(row).toHaveTextContent(/(\$[\d,]+\.\d{2} headroom|\d+ left)/);
+      expect(row).toHaveTextContent(/Limit [$\d]/);
+      const meter = row.querySelector<HTMLElement>("[data-slot=headroom-meter]")!;
+      expect(meter).toHaveAttribute("role", "img");
+      expect(meter).toHaveAccessibleName(/\w/);
+      expect(meter.querySelector(".bg-foreground")).not.toBeNull();
+      expect(meter.querySelector(".bg-mandate-marker")).not.toBeNull();
+    }
+    expect(headroom().querySelector("[data-direction], [data-placeholder=performance]")).toBeNull();
+    expect(headroom().innerHTML).not.toMatch(/\b(text|bg|ring|border)-(gain|loss|crimson)/);
+    expect(headroom()).not.toHaveTextContent(/P&L|profit|gain|[+−]\$/i);
+    const daily = rows.find((r) => r.textContent?.startsWith("Daily loss limit"))!;
+    expect(daily).toHaveTextContent(`${headroomLine(SWING).split(" ")[0]} headroom`);
+    expect(within(headroom()).getByRole("link", { name: "View full mandate" })).toHaveAttribute("href", agentHref(AGENT_IDS.swing, "mandate"));
+  });
+
+  it("says when the broker is being checked, in the headroom, as the mandate card does", () => {
+    const agent = buildWorkspace("reconciliation").agents.find((a) => a.startup === "reconciling")!;
+    agentPage(agentHref(agent.agent_id, "overview"), <AgentDetailScreen agentId={agent.agent_id} />, "reconciliation");
+    expect(headroom().querySelector("[data-slot=reconciling]")).toHaveTextContent("Checking with the broker.");
+    expect(headroom()).toHaveTextContent(MODE_MEANING[agent.mode]);
+  });
+
+  it("replaces the tabs with a plain list of every section, counting positions and orders, the current one marked", () => {
+    overview();
+    const links = main().querySelector<HTMLElement>("[data-slot=agent-links]")!;
+    expect(shownOnPhone(links)).toBe(true);
+    expect(shownOnDesktop(links)).toBe(false);
+    const items = within(links).getAllByRole("link");
+    expect(items.map((a) => a.textContent)).toEqual([
+      "Overview",
+      `Positions${SWING.positions.length}`,
+      `Orders${allOrders(SWING).length}`,
+      "Decisions",
+      "Approvals",
+      "Mandate",
+      "Prove",
+      "Activity",
+    ]);
+    expect(items.map((a) => a.getAttribute("href"))).toEqual(
+      ["overview", "positions", "orders", "decisions", "approvals", "mandate", "prove", "activity"].map((k) => agentHref(AGENT_IDS.swing, k as Parameters<typeof agentHref>[1])),
+    );
+    expect(items.filter((a) => a.getAttribute("aria-current") === "page").map((a) => a.textContent)).toEqual(["Overview"]);
+    for (const a of items) expect(a).toHaveClass("min-h-12");
+  });
+
+  it.each([
+    ["positions", "Positions"],
+    ["mandate/versions", "Mandate"],
+  ] as const)("marks %s's section in the list at the foot of the screen", (key, label) => {
+    agentPage(agentHref(AGENT_IDS.swing, key), <AgentSectionScreen agentId={AGENT_IDS.swing} section={key} />);
+    const links = main().querySelector<HTMLElement>("[data-slot=agent-links]")!;
+    const current = within(links).getAllByRole("link").filter((a) => a.getAttribute("aria-current") === "page");
+    expect(current.map((a) => a.textContent?.replace(/\d+$/, ""))).toEqual([label]);
+    expect(main().lastElementChild?.lastElementChild).toBe(links);
   });
 });
 
