@@ -55,7 +55,6 @@ for (const width of [1024, 1280, 1440]) {
       const badge = page.getByRole("banner").locator("[data-slot=environment-badge]");
       await expect(badge).toBeInViewport({ ratio: 1 });
       await expect(badge.getByText("PAPER", { exact: true })).toBeVisible();
-      if (width >= 1280 && route !== "/") await expect(page.getByRole("banner").getByRole("navigation", { name: "breadcrumb" })).toBeVisible();
       if (width >= 1440) expect(Math.abs((found.bar.left + found.bar.right) / 2 - width / 2), "centred in the header").toBeLessThanOrEqual(1);
     });
   }
@@ -108,3 +107,48 @@ for (const width of [768, 1023]) {
     expect((await page.locator("header").boundingBox())!.height).toBe(65);
   });
 }
+
+const TRAILS: Array<[string, string, string[]]> = [
+  ["/", "Home", []],
+  [`/agents/${AGENT_IDS.btc}`, "Agent 1", ["Home", "Agents"]],
+  [agentHref(AGENT_IDS.swing, "positions"), "Positions", ["Agents", "Agent 2"]],
+  ["/audit/decisions", "Gate decisions", ["Home", "Audit"]],
+];
+
+for (const width of [1280, 1440]) {
+  for (const [route, current, earlier] of TRAILS) {
+    test(`${width} px, ${route}: the current page's crumb reads in full, and earlier crumbs fold into a menu`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(route);
+      await page.waitForLoadState("networkidle");
+      const banner = page.getByRole("banner");
+      const here = banner.locator("nav[aria-label=breadcrumb] [aria-current=page]").locator("visible=true");
+      await expect(here).toHaveText(current);
+      const clipped = await here.evaluate((el) => {
+        const text = el.querySelector("span:last-child") as HTMLElement;
+        const nav = el.closest("nav")!.getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        return { truncated: text.scrollWidth > text.clientWidth, outside: box.left < nav.left - 0.5 || box.right > nav.right + 0.5 };
+      });
+      expect(clipped).toEqual({ truncated: false, outside: false });
+      const found = await boxes(page);
+      const box = (await here.boundingBox())!;
+      expect(box.x + box.width <= found.bar.left || box.x >= found.bar.right, "clear of the command bar").toBe(true);
+      const fold = banner.getByRole("button", { name: "Earlier pages" });
+      if (earlier.length === 0) {
+        await expect(fold).toBeHidden();
+        return;
+      }
+      const shownLinks = banner.locator("nav[aria-label=breadcrumb] a").locator("visible=true");
+      if (await fold.isVisible()) {
+        await expect(shownLinks).toHaveCount(0);
+        await fold.click();
+        await expect(page.getByRole("menuitem")).toHaveText(earlier);
+        await page.keyboard.press("Escape");
+      } else {
+        await expect(shownLinks).toHaveText(earlier);
+      }
+    });
+  }
+}
+

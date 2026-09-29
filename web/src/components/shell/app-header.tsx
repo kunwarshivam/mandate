@@ -9,7 +9,7 @@ import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, Tray, UserCircle } fro
 import { canOpen, homeFor } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
-import { crumbsFor } from "@/lib/screens";
+import { type Crumb, crumbsFor } from "@/lib/screens";
 import { ApprovalsCount } from "./app-sidebar";
 import { Wordmark } from "./brand";
 import { CommandMenu } from "./command-menu";
@@ -26,8 +26,35 @@ const WORKSPACES = [
 const ICON_LINK =
   "press relative inline-flex size-11 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring";
 
-/** Below `xl` the trail keeps its last two crumbs: Kumo renders the full trail as the nav's last child. */
-const TWO_CRUMBS = "max-xl:[&>div:last-child>*:nth-child(-n+2)]:hidden";
+/**
+ * Where the trail is narrower than 20rem it keeps only the current page, which never truncates, and
+ * the earlier crumbs fold into a menu. Kumo renders the full trail as the nav's last child.
+ */
+const CURRENT_ONLY = "@max-[20rem]:[&>div:last-child>*:not(:last-child)]:hidden";
+
+function EarlierCrumbs({ crumbs }: { crumbs: Crumb[] }) {
+  return (
+    <div className="flex shrink-0 items-center @min-[20rem]:hidden">
+      <DropdownMenu>
+        <DropdownMenu.Trigger
+          render={<button type="button" />}
+          aria-label="Earlier pages"
+          className="press inline-flex h-10 min-w-8 items-center justify-center rounded-md px-1.5 text-sm text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+        >
+          …
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Content align="start">
+          {crumbs.map((c) => (
+            <DropdownMenu.LinkItem key={c.href} render={<Link href={c.href} />}>
+              {c.label}
+            </DropdownMenu.LinkItem>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu>
+      <Breadcrumbs.Separator />
+    </div>
+  );
+}
 
 function WorkspaceSwitcher() {
   const current = WORKSPACES.find((w) => w.current) ?? WORKSPACES[0];
@@ -108,9 +135,9 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * The header always renders, whatever is loading: the Stop control, the paper badge, and the way
  * home never wait for workspace data (brief §5, rule 13). Stop never shrinks and never leaves the
  * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
- * the trail truncates and then hides, the command bar narrows (it is centred where both sides fit,
- * `e2e/command-bar.spec.ts`) and becomes an icon below `lg`, the workspace switcher becomes an icon
- * (below 90rem), the trail keeps two crumbs (below `xl`), alerts and the account menu fold into "More"
+ * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
+ * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`) and becomes
+ * an icon below `lg`, the workspace switcher becomes an icon (below 90rem), alerts and the account menu fold into "More"
  * (below `xl`), the paper badge keeps its gloss for screen readers only (at `lg` below 100rem, and
  * below 30rem), and on phones the tab bar and the sidebar sheet carry the rest.
  */
@@ -141,8 +168,9 @@ export function AppHeader() {
           <div className="hidden lg:block">
             <WorkspaceSwitcher />
           </div>
-          <div className="@container hidden min-w-0 flex-1 md:flex">
-            <Breadcrumbs size="sm" className={`mr-0 min-w-0 @max-[8rem]:hidden [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${crumbs.length > 2 ? TWO_CRUMBS : ""}`}>
+          <div className="@container hidden min-w-0 flex-1 items-center md:flex [&>*]:@max-[10rem]:hidden">
+            {crumbs.length > 1 ? <EarlierCrumbs crumbs={crumbs.slice(0, -1)} /> : null}
+            <Breadcrumbs size="sm" className={`mr-0 min-w-0 [&_[aria-current=page]]:shrink-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${CURRENT_ONLY}`}>
               {crumbs.flatMap((c, i) => [
                 ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),
                 i === crumbs.length - 1 ? (

@@ -85,7 +85,7 @@ export function CommandMenu() {
         onClick={() => setOpen(true)}
         aria-keyshortcuts="Meta+K Control+K"
         data-slot="command-bar"
-        className="press hidden h-10 min-w-60 flex-[0_1_23.75rem] items-center gap-2.5 rounded-lg border border-border bg-muted pr-1.5 pl-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:flex min-[90rem]:flex-[0_1_28.75rem]"
+        className="press hidden h-10 min-w-60 flex-[0_1_23.75rem] items-center gap-2.5 rounded-lg border border-border bg-muted pr-1.5 pl-3 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring lg:flex min-[100rem]:flex-[0_1_28.75rem]"
       >
         <MagnifyingGlass className="size-4.5 shrink-0" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-left">Search agents, orders, or jump to…</span>
