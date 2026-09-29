@@ -6,6 +6,8 @@ export const LOGIN_PATH = "/login";
 export const WELCOME_PATH = "/welcome";
 export const CALLBACK_PATH = "/auth/callback";
 export const PASSKEY_PATH = "/auth/passkey";
+/** The private beta's request form posts here signed out (`@/lib/beta`). */
+export const BETA_REQUEST_PATH = "/api/beta";
 
 /** Files in `public/` a signed-out browser fetches: icons, the manifest, the share image and robots. */
 const PUBLIC_FILES = new Set([
@@ -30,6 +32,7 @@ export function isPublicPath(pathname: string): boolean {
   return (
     pathname === WELCOME_PATH ||
     pathname === LOGIN_PATH ||
+    pathname === BETA_REQUEST_PATH ||
     pathname.startsWith("/auth/") ||
     pathname.startsWith("/_next/") ||
     pathname.startsWith(`${SITE_IMAGES}/`) ||
