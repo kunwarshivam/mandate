@@ -328,7 +328,9 @@ mod tests {
         let mut doctorings = 0_usize;
         for case in family_a(&fixture)? {
             let id = id(&case)?;
-            let expect = case["expect"].as_object().ok_or("an expectation object")?;
+            let expect = crate::at(&case, "expect")?
+                .as_object()
+                .ok_or("an expectation object")?;
             for (member, value) in expect {
                 let pointer = format!("/expect/{member}");
                 let edited = doctored(&fixture, &id, &pointer, |v| *v = changed(value))?;
@@ -380,7 +382,9 @@ mod tests {
         let mut openings = 0_usize;
         for case in family_a(&fixture)? {
             let id = id(&case)?;
-            let action = case["action"].as_object().ok_or("an action object")?;
+            let action = crate::at(&case, "action")?
+                .as_object()
+                .ok_or("an action object")?;
             let reducing = action.len() == 1;
             if !reducing {
                 openings = openings.saturating_add(1);
@@ -425,7 +429,7 @@ mod tests {
         let mut compared = 0_usize;
         for case in family_a(&fixture)? {
             let id = id(&case)?;
-            let stated = &case["action"];
+            let stated = crate::at(&case, "action")?;
             if stated.as_object().is_some_and(|m| m.len() == 1) {
                 continue;
             }
