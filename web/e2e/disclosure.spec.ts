@@ -31,6 +31,8 @@ async function open(page: Page, path: string, width: number, height = 900, still
     const all = Array.from(document.querySelectorAll('main button[aria-label="Performance disclosure"]'));
     return all.length > 0 && all.every((t) => Object.keys(t).some((k) => k.startsWith("__reactProps")));
   });
+  // CSS animations run on real time, not the installed clock: a list's rise-in can still be settling its last pixel.
+  if (still) await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => undefined))));
 }
 
 /** Signed P&L figures in `main` with no disclosure symbol in their region. */
