@@ -1,0 +1,30 @@
+/*
+ * The page's three faces. Plain classes, so class merging never reads them as a font weight.
+ * DotGothic16 is a dot matrix bitmap face, with one weight and no italic. VT323 is a terminal's
+ * face. Pixelify Sans stands in for the system font a window's chrome was set in, and gives the
+ * page its bold.
+ */
+.body {
+  font-family: DotGothic16, "MS Gothic", "Courier New", monospace;
+}
+
+.mono {
+  font-family: VT323, "Courier New", monospace;
+}
+
+.pixel {
+  font-family: "Pixelify Sans Variable", "MS Sans Serif", Tahoma, sans-serif;
+}
+
+/* A <blink> for one word. It stays lit under reduced motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .blink {
+    animation: blink 1.2s steps(1, end) infinite;
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}

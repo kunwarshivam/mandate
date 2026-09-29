@@ -29,3 +29,6 @@ npm-debug.log*
 /test-results/
 /playwright-report/
 /blob-report/
+
+# private beta requests, when Supabase has no beta_requests table yet
+/.data/

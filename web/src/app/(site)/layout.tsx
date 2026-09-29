@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { OffLanding } from "@/components/site-frame/off-landing";
 import { SiteHeader } from "@/components/site-frame/site-header";
 import { signedInUser } from "@/lib/supabase/server";
 
@@ -10,7 +11,9 @@ export default async function SiteLayout({ children }: { children: ReactNode }) 
       <a href="#main" className="sr-only z-50 bg-card px-3 py-2 focus:not-sr-only focus:fixed focus:top-2 focus:left-2">
         Skip to content
       </a>
-      <SiteHeader signedIn={signedIn} />
+      <OffLanding>
+        <SiteHeader signedIn={signedIn} />
+      </OffLanding>
       {children}
     </div>
   );

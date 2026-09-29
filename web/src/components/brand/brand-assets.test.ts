@@ -198,7 +198,7 @@ describe("brand assets (npm run brand)", () => {
     for (const [, , p] of ink) expect(p[3]).toBe(255);
     const [bg, fg] = [rgb(OFF_WHITE), rgb(INK)];
     for (const [, , p] of ink) for (const c of [0, 1, 2]) expect(p[c]).toBeGreaterThanOrEqual(Math.min(bg[c], fg[c]));
-    expect(all.some(([, , p]) => p.join() === opaque(brandHex("Ultramarine")).join())).toBe(false);
+    expect(all.some(([, , p]) => p.join() === opaque(brandHex("Volt")).join())).toBe(false);
   });
 
   it("describes the installed app in site.webmanifest", async () => {

@@ -1,47 +1,27 @@
 import Link from "next/link";
-import { OwlheadWordmark } from "@/components/brand/Logo";
-import { Placeholder } from "@/components/domain/placeholders";
-import { COLUMN, TEXT_LINK } from "./parts";
+import { cn } from "@/lib/utils";
+import { LINK, RULE } from "./letter";
+import { Badges } from "./retro";
 
-/** The landing page's own footer. Privacy and terms stay placeholders until counsel writes the pages. */
+/** The homepage's footer: its badges, the plain terms the page is offered on, and the way back up. */
 export function SiteFooter() {
   return (
-    <footer className={COLUMN}>
-      <div className="grid gap-8 border-t border-border/70 pt-10 pb-12 sm:pt-12 sm:pb-16">
-        <div className="flex flex-wrap items-center justify-between gap-x-10 gap-y-6">
-          <OwlheadWordmark className="h-6 w-auto text-foreground" />
-          <nav aria-label="Site">
-            <ul className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
-              <li>
-                <a href="#how-it-works" className={TEXT_LINK}>
-                  How it works
-                </a>
-              </li>
-              <li>
-                <a href="#faq" className={TEXT_LINK}>
-                  Questions
-                </a>
-              </li>
-              <li>
-                <Link href="/login" className={TEXT_LINK}>
-                  Sign in
-                </Link>
-              </li>
-            </ul>
-          </nav>
-        </div>
-        <div className="grid gap-4 text-caption text-muted-foreground">
-          <p className="max-w-measure">
-            <Placeholder name="siteDisclaimer" />
-          </p>
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <p>© 2026 Owlhead</p>
-            <p className="flex flex-wrap gap-3">
-              <Placeholder name="privacy" />
-              <Placeholder name="terms" />
-            </p>
-          </div>
-        </div>
+    <footer className="px-4 pb-8 text-[0.9375rem] leading-[1.55] text-muted-foreground sm:px-8">
+      <hr className={cn(RULE, "mt-0 sm:mt-0")} />
+      <div className="grid justify-items-center gap-4 text-center">
+        <Badges className="justify-center" />
+        <p className="max-w-[36rem] text-pretty">Owlhead is in private beta. It is software, not investment advice. Trading involves risk, and you can lose money.</p>
+        <p>
+          © 2026 Owlhead.{" "}
+          <Link href="/login" className={LINK}>
+            Sign in
+          </Link>
+          {" | "}
+          <a href="#top" className={LINK}>
+            Back to top
+          </a>
+        </p>
+        <p className="text-sm">Best viewed in any browser, at any size.</p>
       </div>
     </footer>
   );

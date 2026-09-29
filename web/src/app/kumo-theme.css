@@ -1,5 +1,5 @@
 /*
- * Kumo in Owlhead's calm system, Ink and Ultramarine (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
+ * Kumo in Owlhead's calm system, Ink and Volt (web/DESIGN.md, "Kumo"; web/COLOR.md). Kumo defines
  * its roles inside `@layer base`; these rules are unlayered, so they win without `!important`.
  * Every role points at a semantic token from globals.css, never at a raw colour.
  *
@@ -7,7 +7,7 @@
  * crimson belongs to the kill switch alone, and a loss is never a fill. Its warning is amber, which
  * no screen uses (a test holds that line, because at text lightness amber sits 20 degrees from the
  * colour-blind orange loss and would read as a loss). Its info is the muted type; its success is the
- * gain green. Its orange badge is the mandate's ultramarine tint, and its purple, teal and blue
+ * gain green. Its orange badge is the mandate's volt tint, and its purple, teal and blue
  * collapse to the account; its red badge is ink, never red.
  */
 :root,
@@ -105,7 +105,7 @@ html:root[data-mode="dark"] {
   color: var(--lapis-foreground);
 }
 
-/* Your mandate: the pale ultramarine field, with deep ultramarine for its strong text and ultramarine for its lines. */
+/* Your mandate: the pale volt field, with deep volt for its strong text and volt for its lines. */
 [data-surface="field"] {
   --text-color-kumo-default: var(--mandate-foreground);
   --text-color-kumo-strong: var(--mandate-strong);

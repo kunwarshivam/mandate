@@ -100,15 +100,16 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
 - **Ink on light, off-white on dark** (DEC-204, amending DEC-203). In the app the mark, wordmark
   and lockup take the type colour: ink #14161A on the light theme, off-white on the dark one. The
   favicon, app icons and share image are the ink mark on an off-white tile, the same in every
-  browser theme. The brand is never ultramarine and never on a coloured block.
+  browser theme. The brand is never volt and never on a coloured block.
 - **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
   in the page metadata or the share card. The one exception is the landing page's `description`,
   for search results (DEC-212); its share card still carries the name and the image alone.
-- **Palette (DEC-205, replacing DEC-204's gold and warm paper).** Ink and Ultramarine, light and
-  dark: ink #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night
-  #0B0D11); ultramarine #547EEE as the one accent (lines, rails, marks; never body text, never a
-  block), deep ultramarine #2F4C9D for ultramarine as text, ultramarine tint #F3F7FF for the
-  mandate's field; crimson for the kill switch alone. About 60/30/10 paper, ink and ultramarine.
+- **Palette (DEC-214, replacing DEC-205's ultramarine).** Ink and Volt, light and dark: ink
+  #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night #0B0D11); volt
+  #7C9217 as the one accent (lines, rails, marks; never body text, never a block), deep volt
+  #4C5A09 for volt as text, volt tint #F2FCD7 for the mandate's field, and neon volt #C8E928 as
+  the highlight, always under ink type; crimson for the kill switch alone. About 60/30/10 paper,
+  ink and volt.
   The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
   UI palette (`COLOR.md`).
 - **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular

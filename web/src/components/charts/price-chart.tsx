@@ -16,7 +16,7 @@ function priceLabel(n: number): string {
   return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** The position's own levels: protection from the mandate as dashed lines with ultramarine labels, the average cost in the account's ultramarine. */
+/** The position's own levels: protection from the mandate as dashed lines with volt labels, the average cost in the account's volt. */
 export function positionLevels(position: Position): ChartLevel[] {
   const pr = position.protection;
   const levels: ChartLevel[] = [{ key: "avg-cost", label: "Average cost", price: Number(position.avg_cost), tone: "account", meaning: "What you paid per unit" }];

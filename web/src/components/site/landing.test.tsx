@@ -1,77 +1,88 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { PAIRS } from "@/lib/contrast-pairs";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { contrastRatio } from "@/lib/color";
 import { tokenValue } from "@/lib/tokens";
-import { HEADLINE, SUBHEAD } from "./hero";
-import { Landing } from "./landing";
+import { HEADLINE, Landing, QUESTIONS, SECTIONS, SUBHEAD } from "./landing";
+import { EDITED, TRACE } from "./record-trace";
 
 /**
- * The landing page (DEC-212): real headings and landmarks, calls to action that go to sign-in, and
- * copy that makes no claim the docs do not support. No performance, no promises, compliance text
- * only as named placeholders.
+ * The landing page (DEC-213): one homepage set as the web looked in the late 1990s. Real headings and
+ * landmarks behind the browser scenery, a guestbook that asks for a place in the private beta, and
+ * copy that makes no claim of performance and no promise.
  */
 
 function renderLanding() {
   return render(<Landing />);
 }
 
-/** Everything a visitor can read, including image descriptions. */
 function readable(container: HTMLElement): string {
-  const alts = [...container.querySelectorAll("img")].map((img) => img.getAttribute("alt") ?? "");
-  return [container.textContent ?? "", ...alts].join("\n");
+  return container.textContent ?? "";
 }
 
-/** Readable text with the placeholders taken out. */
-function copyOutsidePlaceholders(container: HTMLElement): string {
-  const clone = container.cloneNode(true) as HTMLElement;
-  for (const tag of clone.querySelectorAll("[data-placeholder]")) tag.remove();
-  return readable(clone);
-}
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("the landing page's structure", () => {
-  it("has one h1, the headline, and the subhead under it", () => {
-    renderLanding();
+  it("has one h1 named Owlhead, with the block letters hidden from assistive technology", () => {
+    const { container } = renderLanding();
     const h1s = screen.getAllByRole("heading", { level: 1 });
     expect(h1s).toHaveLength(1);
-    expect(h1s[0]).toHaveTextContent(HEADLINE);
-    expect(screen.getByText(SUBHEAD)).toBeInTheDocument();
+    expect(h1s[0]).toHaveAccessibleName(HEADLINE);
+    expect(h1s[0].querySelector("[aria-hidden]")?.textContent).toMatch(/_{4}/);
+    expect(container).toHaveTextContent(SUBHEAD);
   });
 
-  it.each(["How it works", "Why it's safe", "Who it's for", "Questions"])("has a section headed %s", (title) => {
+  it("numbers every section and labels it by its heading", () => {
     renderLanding();
-    const heading = screen.getByRole("heading", { level: 2, name: title });
-    expect(heading.closest("section")).toHaveAttribute("aria-labelledby", heading.id);
+    const titles = [...SECTIONS.map((s) => s.title), "Questions", "Ask for a place"];
+    titles.forEach((title, i) => {
+      const heading = screen.getByRole("heading", { level: 2, name: `${i + 1}. ${title}` });
+      expect(heading.closest("section")).toHaveAttribute("aria-labelledby", heading.id);
+    });
   });
 
-  it.each(["Set the mandate", "The agent trades inside it", "You stay in charge"])("shows the step %s, in order, as a list", (title) => {
+  it("lists every section in the contents, and each link lands on its heading", () => {
+    const { container } = renderLanding();
+    const contents = screen.getByRole("navigation", { name: "Contents" });
+    const links = within(contents).getAllByRole("link");
+    expect(links).toHaveLength(SECTIONS.length + 2);
+    for (const a of links) expect(container.querySelector(a.getAttribute("href")!)?.tagName).toBe("H2");
+  });
+
+  it("sends the browser's guide buttons to sections that exist", () => {
+    const { container } = renderLanding();
+    const guides = within(screen.getByRole("navigation", { name: "Guides" })).getAllByRole("link");
+    expect(guides.map((a) => a.textContent)).toEqual(["What's New?", "What's Cool?", "Handbook", "Questions"]);
+    for (const a of guides) expect(container.querySelector(a.getAttribute("href")!)).not.toBeNull();
+  });
+
+  it("hides the browser's scenery: menus, toolbar and status bar are not in the accessibility tree", () => {
+    const { container } = renderLanding();
+    const browser = container.querySelector("[data-slot=browser]")!;
+    for (const word of ["Bookmarks", "Reload", "Document: Done"]) {
+      const el = within(browser as HTMLElement).getByText((_, node) => node?.tagName === "SPAN" && node.textContent === word);
+      expect(el.closest("[aria-hidden=true]"), word).not.toBeNull();
+    }
+    expect(within(browser as HTMLElement).getByText("http://www.owlhead.ai/").closest("[aria-hidden=true]")).toBeNull();
+  });
+
+  it("answers every question as a term and its description", () => {
     renderLanding();
-    const steps = within(screen.getByRole("region", { name: "How it works" })).getAllByRole("listitem");
-    const titles = ["Set the mandate", "The agent trades inside it", "You stay in charge"];
-    expect(steps.map((li) => within(li).getByRole("heading", { level: 3 }).textContent)).toEqual(titles.map((t, i) => `${i + 1}${t}`));
-    expect(screen.getByRole("heading", { level: 3, name: new RegExp(title) })).toBeInTheDocument();
-  });
-
-  it.each(["Is this real money?", "Which brokers does it work with?", "Can the agent go past my limits?", "What happens if something breaks?", "Is this investment advice?"])(
-    "answers %s",
-    (q) => {
-      renderLanding();
+    for (const { q } of QUESTIONS) {
       const term = screen.getByText(q);
       expect(term.tagName).toBe("DT");
       expect(term.nextElementSibling?.tagName).toBe("DD");
-      expect(term.nextElementSibling?.textContent?.trim()).not.toBe("");
-    },
-  );
+    }
+  });
 
-  it("brings its own main landmark and footer, and a named site navigation", () => {
-    const { container } = renderLanding();
+  it("brings one main landmark and a footer", () => {
+    renderLanding();
     expect(screen.getAllByRole("main")).toHaveLength(1);
     expect(screen.getByRole("main")).toHaveAttribute("id", "main");
     expect(screen.getByRole("contentinfo")).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Site" })).toBeInTheDocument();
-    expect(container.querySelectorAll("header")).toHaveLength(0);
   });
 
   it("puts every heading level in order, with no level skipped", () => {
@@ -83,24 +94,88 @@ describe("the landing page's structure", () => {
   });
 });
 
-describe("calls to action", () => {
-  it("sends Get started and Sign in to /login", () => {
+describe("links", () => {
+  it("asks for a place from the top of the page, and signs in at /login", () => {
     renderLanding();
-    expect(screen.getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/login");
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getAllByRole("link", { name: "Ask for a place" })[0]).toHaveAttribute("href", "#beta");
+    for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   });
 
-  it("links How it works and Questions to sections that exist", () => {
-    const { container } = renderLanding();
-    const anchors = screen.getAllByRole("link").filter((a) => a.getAttribute("href")?.startsWith("#"));
-    expect(anchors.map((a) => a.getAttribute("href")).sort()).toEqual(["#faq", "#how-it-works", "#how-it-works"]);
-    for (const a of anchors) expect(container.querySelector(a.getAttribute("href")!)).not.toBeNull();
-  });
-
-  it("links nowhere else: no invented legal pages", () => {
+  it("links nowhere off the page but sign-in: no invented legal pages", () => {
     renderLanding();
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(hrefs.filter((h) => !h?.startsWith("#"))).toEqual(["/login", "/login"]);
+    expect(new Set(hrefs.filter((h) => !h?.startsWith("#")))).toEqual(new Set(["/login"]));
+  });
+});
+
+describe("the guestbook", () => {
+  function fill(email: string) {
+    fireEvent.change(screen.getByLabelText("Email address:"), { target: { value: email } });
+  }
+
+  it("posts the email and the chosen use to /api/beta, then says you're on the list", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderLanding();
+    fill("ada@example.com");
+    fireEvent.click(screen.getByLabelText("Managing money for others"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/beta", expect.objectContaining({ method: "POST" }));
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ email: "ada@example.com", role: "clients", website: "" });
+    expect(document.querySelector("[data-slot=beta-done]")).toHaveTextContent("You're on the list.");
+    expect(document.querySelector("[data-slot=beta-done]")).toHaveTextContent("ada@example.com");
+  });
+
+  it("asks you to check the email when the server says it's wrong", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "email" }), { status: 400 })));
+    renderLanding();
+    fill("ada@example");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+    });
+    expect(screen.getByLabelText("Email address:")).toHaveAttribute("aria-invalid", "true");
+    expect(document.getElementById("beta-problem")).toHaveTextContent("That email doesn't look right.");
+  });
+
+  it("says to try again when the request can't be saved or sent", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")));
+    renderLanding();
+    fill("ada@example.com");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+    });
+    expect(document.getElementById("beta-problem")).toHaveTextContent("We couldn't save that just now.");
+    expect(screen.getByRole("button", { name: "Request access" })).toBeEnabled();
+  });
+
+  it("carries a field people never see, for bots to fill", () => {
+    renderLanding();
+    const trap = document.getElementById("beta-website")!;
+    expect(trap).toHaveAttribute("tabindex", "-1");
+    expect(trap.closest("[aria-hidden=true]")).not.toBeNull();
+  });
+});
+
+describe("the record", () => {
+  it("shows one decision, every line with its hash, and a chain that matches", () => {
+    renderLanding();
+    const table = screen.getByRole("table");
+    expect(within(table).getAllByRole("row")).toHaveLength(TRACE.length + 1);
+    for (const e of TRACE) expect(within(table).getByText(e.hash)).toBeInTheDocument();
+    expect(screen.getByText(/all 8 lines match/)).toBeInTheDocument();
+  });
+
+  it("breaks the chain from an edited line down, and mends it on undo", () => {
+    renderLanding();
+    fireEvent.click(screen.getByRole("button", { name: `Edit line ${EDITED.index + 1}` }));
+    expect(screen.getByText(EDITED.text)).toBeInTheDocument();
+    expect(screen.getByText(/fails at line 3\. Lines 3 to 8 no longer match/)).toBeInTheDocument();
+    expect(screen.getAllByText("no match")).toHaveLength(TRACE.length - EDITED.index - 1);
+    fireEvent.click(screen.getByRole("button", { name: "Undo the edit" }));
+    expect(screen.queryByText(EDITED.text)).toBeNull();
+    expect(screen.getByText(/all 8 lines match/)).toBeInTheDocument();
   });
 });
 
@@ -122,7 +197,7 @@ describe("the copy", () => {
 
   it("makes no promise of money: no profit, guarantee, earning, or beating the market", () => {
     const { container } = renderLanding();
-    expect(readable(container)).not.toMatch(/profit|guarantee|\bearn|beat the market|risk[- ]free|revolutioni[sz]e/i);
+    expect(readable(container)).not.toMatch(/profit|guarantee|\bearn(s|ings?)? (money|returns|income)|make money|beat the market|risk[- ]free|revolutioni[sz]e/i);
   });
 
   it("has no testimonials and no quotes attributed to people", () => {
@@ -130,11 +205,18 @@ describe("the copy", () => {
     expect(container.querySelector("blockquote, q, cite")).toBeNull();
   });
 
-  it("says paper, and says live trading is not available", () => {
+  it("calls it a private beta on paper, with live trading waiting on legal sign-off", () => {
     const { container } = renderLanding();
     const text = readable(container);
-    expect(text).toContain("Paper trading only. Live trading isn't available.");
+    expect(text).toContain("Private beta");
+    expect(text).toContain("Paper trading on Alpaca, with simulated money");
+    expect(text).toContain("Live trading, once it has legal sign-off");
     expect(text).not.toMatch(/\bwaitlist\b|coming soon|launching/i);
+  });
+
+  it("says losses can pass a limit", () => {
+    const { container } = renderLanding();
+    expect(readable(container)).toContain("a loss can end up larger than the limit");
   });
 
   it("uses no em dash, en dash, or exclamation mark", () => {
@@ -143,67 +225,33 @@ describe("the copy", () => {
   });
 });
 
-describe("compliance text", () => {
-  it("appears only as named placeholders", () => {
+describe("the terms the page is offered on", () => {
+  it("are plain words, with no placeholder left anywhere", () => {
     const { container } = renderLanding();
-    const tags = [...container.querySelectorAll("[data-placeholder]")];
-    expect(tags.map((t) => t.getAttribute("data-placeholder")).sort()).toEqual(["notAdvice", "privacy", "siteDisclaimer", "terms"]);
-    expect(copyOutsidePlaceholders(container)).not.toContain("[[");
+    expect(readable(container)).not.toContain("[[");
+    expect(container.querySelector("[data-placeholder]")).toBeNull();
   });
 
-  it("answers the investment-advice question with the placeholder and nothing else", () => {
+  it("answer the investment-advice question with a no", () => {
     renderLanding();
-    const answer = screen.getByText("Is this investment advice?").nextElementSibling as HTMLElement;
-    expect(answer.textContent?.trim()).toBe("[[NOT-INVESTMENT-ADVICE]]");
+    expect(screen.getByText("Is this investment advice?").nextElementSibling?.textContent).toMatch(/^No\. Owlhead is software/);
   });
 
-  it("writes no disclaimer of its own", () => {
-    const { container } = renderLanding();
-    expect(copyOutsidePlaceholders(container)).not.toMatch(/not (financial|investment) advice|past results|consult (a|your)/i);
-  });
-
-  it("puts the disclaimer and the copyright in the footer", () => {
+  it("sit in the footer with the copyright", () => {
     renderLanding();
     const footer = screen.getByRole("contentinfo");
-    expect(footer.querySelector("[data-placeholder=siteDisclaimer]")).toHaveTextContent("[[SITE-DISCLAIMER]]");
+    expect(footer).toHaveTextContent("It is software, not investment advice. Trading involves risk, and you can lose money.");
     expect(footer).toHaveTextContent("© 2026 Owlhead");
   });
 });
 
-describe("the screenshots", () => {
-  it("each has a description, a size, and a dark version for a dark system", () => {
-    const { container } = renderLanding();
-    const pictures = [...container.querySelectorAll("picture[data-slot=screenshot]")];
-    expect(pictures.length).toBeGreaterThanOrEqual(7);
-    for (const picture of pictures) {
-      const img = picture.querySelector("img")!;
-      expect(img.getAttribute("alt")?.length).toBeGreaterThan(20);
-      expect(Number(img.getAttribute("width"))).toBeGreaterThan(0);
-      expect(Number(img.getAttribute("height"))).toBeGreaterThan(0);
-      const source = picture.querySelector("source")!;
-      expect(source).toHaveAttribute("media", "(prefers-color-scheme: dark)");
-      expect(source.getAttribute("srcset")).toContain("-dark.png");
-      expect(img.getAttribute("srcset")).toContain("-light.png");
-    }
-  });
-
-  it("loads the hero's screens first and every other screen lazily", () => {
-    const { container } = renderLanding();
-    for (const img of container.querySelectorAll("picture[data-slot=screenshot] img")) {
-      const hero = /hero-/.test(img.getAttribute("srcset") ?? "");
-      expect(img).toHaveAttribute("loading", hero ? "eager" : "lazy");
-      if (hero) expect(img).toHaveAttribute("fetchpriority", "high");
-    }
-  });
-});
-
 const SITE_DIR = __dirname;
+const SOURCES = readdirSync(SITE_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f));
 const BLEND = new RegExp(["grad", "ient|bg-(linear|radial|conic)-"].join(""), "i");
 
 describe("the design system", () => {
   it("draws no colour blends, in source or in the rendered classes and styles", () => {
-    const sources = readdirSync(SITE_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f));
-    for (const file of sources) expect(readFileSync(join(SITE_DIR, file), "utf8"), file).not.toMatch(BLEND);
+    for (const file of SOURCES) expect(readFileSync(join(SITE_DIR, file), "utf8"), file).not.toMatch(BLEND);
     const { container } = renderLanding();
     for (const el of container.querySelectorAll("*")) {
       expect(el.getAttribute("class") ?? "").not.toMatch(BLEND);
@@ -216,32 +264,29 @@ describe("the design system", () => {
     expect(container.innerHTML).not.toMatch(/\bfont-(bold|extrabold|black)\b/);
   });
 
-  it("uses no card fills: sections are hairlines and whitespace", () => {
-    const { container } = renderLanding();
-    expect(container.innerHTML).not.toMatch(/\bshadow-(sm|md|lg|xl|2xl)\b|(?<![\w:-])bg-(muted|background|lapis-soft|mandate)(?![\w-])/);
+  it("uses no raw colours: every colour is a token, so dark mode is the same page", () => {
+    for (const file of SOURCES) expect(readFileSync(join(SITE_DIR, file), "utf8"), file).not.toMatch(/oklch\(|rgba?\(|hsla?\(|#[0-9a-f]{3,8}\b/i);
   });
 
-  it("uses no raw colours", () => {
-    const sources = readdirSync(SITE_DIR).filter((f) => /\.(tsx?|css)$/.test(f) && !/\.test\./.test(f));
-    for (const file of sources) expect(readFileSync(join(SITE_DIR, file), "utf8"), file).not.toMatch(/oklch\(|rgba?\(|hsla?\(|#[0-9a-f]{3,8}\b/i);
+  it("keeps crimson for the kill switch", () => {
+    const { container } = renderLanding();
+    expect(container.innerHTML).not.toMatch(/crimson/);
   });
 });
 
-/** The colour pairs the landing page puts text on; each is one of the app's tested pairs. */
+/** The colour pairs the landing page sets text in. */
 const LANDING_PAIRS = [
-  { fg: "foreground", bg: "card", use: "Headings, the ledger, links" },
-  { fg: "muted-foreground", bg: "card", use: "The subhead, step and answer text, captions, placeholders" },
-  { fg: "mandate-strong", bg: "card", use: "Step numbers, and the focus ring" },
-  { fg: "primary-foreground", bg: "primary", use: "Get started" },
-  { fg: "primary-foreground", bg: "lapis-strong", use: "Get started, hovered" },
-  { fg: "foreground", bg: "background", use: "How it works, hovered" },
+  { fg: "foreground", bg: "card", use: "The page's text and headings" },
+  { fg: "muted-foreground", bg: "card", use: "The date line and the footer" },
+  { fg: "mandate-strong", bg: "card", use: "Links" },
+  { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
+  { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
+  { fg: "highlight-foreground", bg: "highlight", use: "Request access, the New tag, a hovered link and the volt badge" },
+  { fg: "card", bg: "foreground", use: "Title bars, the record's column heads and the ink badges" },
+  { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },
 ] as const;
 
 describe("contrast", () => {
-  it.each(LANDING_PAIRS.map((p) => [p.fg, p.bg] as const))("%s on %s is one of the app's tested text pairs", (fg, bg) => {
-    expect(PAIRS.some((p) => p.fg === fg && p.bg === bg && p.kind !== "mark")).toBe(true);
-  });
-
   it.each((["light", "dark"] as const).flatMap((theme) => LANDING_PAIRS.map((p) => [theme, p.fg, p.bg] as const)))("%s: %s on %s reaches WCAG AA (4.5:1)", (theme, fg, bg) => {
     expect(contrastRatio(tokenValue(fg, theme), tokenValue(bg, theme))).toBeGreaterThanOrEqual(4.5);
   });

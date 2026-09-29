@@ -162,27 +162,12 @@ describe("where the disclosure shows in full", () => {
   it.each([
     ["hypothetical", "[[LEGEND-HYPOTHETICAL]]"],
     ["retailAutoLive", "[[RETAIL-AUTO-LIVE]]"],
-    ["siteDisclaimer", "[[SITE-DISCLAIMER]]"],
-    ["notAdvice", "[[NOT-INVESTMENT-ADVICE]]"],
-    ["privacy", "[[PRIVACY-POLICY]]"],
-    ["terms", "[[TERMS-OF-SERVICE]]"],
   ] as const)("leaves the %s placeholder as a visible tag", (name, text) => {
     const { container } = render(<Placeholder name={name} />);
     expect(screen.queryByRole("button")).toBeNull();
     const tag = container.querySelector(`[data-placeholder=${name}]`);
     expect(tag).toHaveTextContent(text);
     expect(tag).toHaveClass("border-dashed");
-  });
-
-  it("shows the landing page's placeholders as tags even inside InlineDisclosures", () => {
-    const { container } = render(
-      <InlineDisclosures>
-        <Placeholder name="siteDisclaimer" />
-        <Placeholder name="notAdvice" />
-      </InlineDisclosures>,
-    );
-    expect(screen.queryByRole("button")).toBeNull();
-    expect(container.textContent).toBe("[[SITE-DISCLAIMER]][[NOT-INVESTMENT-ADVICE]]");
   });
 
   it("goes back to the inline tag everywhere with one line: a single constant in placeholders.tsx", () => {

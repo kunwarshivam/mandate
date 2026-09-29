@@ -6,10 +6,10 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Owlhead's calm system in Ink and Ultramarine (DEC-205, web/DESIGN.md, web/COLOR.md). Every colour
+ * Owlhead's calm system in Ink and Volt (DEC-205, web/DESIGN.md, web/COLOR.md). Every colour
  * is a ramp step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift.
- * Colour carries four meanings and nothing else: the mandate tokens (ultramarine) are your mandate,
- * lapis is the account (an ink fill, an ultramarine line), ink is a stopped agent and the Stop
+ * Colour carries four meanings and nothing else: the mandate tokens (volt) are your mandate,
+ * lapis is the account (an ink fill, a volt line), ink is a stopped agent and the Stop
  * control, crimson is the kill switch.
  */
 :root {
@@ -24,17 +24,19 @@
   --lapis: oklch(0.2 0.008 255);
   --lapis-foreground: oklch(0.992 0.003 255);
   --lapis-muted: oklch(0.91 0.006 255);
-  --lapis-soft: oklch(0.975 0.011 266);
+  --lapis-soft: oklch(0.975 0.05 120);
   --lapis-strong: oklch(0.38 0.01 255);
-  --lapis-line: oklch(0.62 0.175 266);
-  --mandate: oklch(0.975 0.011 266);
+  --lapis-line: oklch(0.62 0.14 120);
+  --mandate: oklch(0.975 0.05 120);
   --mandate-foreground: oklch(0.2 0.008 255);
   --mandate-muted: oklch(0.38 0.01 255);
-  --mandate-strong: oklch(0.44 0.136 266);
-  --mandate-marker: oklch(0.62 0.175 266);
-  --mandate-edge: oklch(0.62 0.175 266);
-  --mandate-soft: oklch(0.975 0.011 266);
-  --selection: oklch(0.91 0.041 266);
+  --mandate-strong: oklch(0.44 0.1 120);
+  --mandate-marker: oklch(0.62 0.14 120);
+  --mandate-edge: oklch(0.62 0.14 120);
+  --mandate-soft: oklch(0.975 0.05 120);
+  --selection: oklch(0.91 0.19 120);
+  --highlight: oklch(0.88 0.2 120);
+  --highlight-foreground: oklch(0.2 0.008 255);
   --ink: oklch(0.2 0.008 255);
   --ink-foreground: oklch(0.992 0.003 255);
   --ink-line: oklch(0.44 0.01 255);
@@ -123,7 +125,7 @@
 }
 
 /*
- * Dark: ink surfaces, paper type, ultramarine a step lighter for the account's line, the mandate's
+ * Dark: ink surfaces, paper type, volt a step lighter for the account's line, the mandate's
  * marks and labels. Primary actions and the Stop control turn to a paper fill with ink type; crimson keeps its
  * fill and lightens its edge. Still flat: no shadows, no glows.
  */
@@ -139,17 +141,19 @@ html:root[data-mode="dark"] {
   --lapis: oklch(0.975 0.004 255);
   --lapis-foreground: oklch(0.2 0.008 255);
   --lapis-muted: oklch(0.31 0.01 255);
-  --lapis-soft: oklch(0.31 0.05 266);
+  --lapis-soft: oklch(0.31 0.06 120);
   --lapis-strong: oklch(0.88 0.006 255);
-  --lapis-line: oklch(0.76 0.118 266);
-  --mandate: oklch(0.31 0.05 266);
+  --lapis-line: oklch(0.76 0.17 120);
+  --mandate: oklch(0.31 0.06 120);
   --mandate-foreground: oklch(0.975 0.004 255);
   --mandate-muted: oklch(0.88 0.006 255);
-  --mandate-strong: oklch(0.88 0.056 266);
-  --mandate-marker: oklch(0.76 0.118 266);
-  --mandate-edge: oklch(0.76 0.118 266);
-  --mandate-soft: oklch(0.24 0.034 266);
-  --selection: oklch(0.38 0.08 266);
+  --mandate-strong: oklch(0.91 0.19 120);
+  --mandate-marker: oklch(0.76 0.17 120);
+  --mandate-edge: oklch(0.76 0.17 120);
+  --mandate-soft: oklch(0.24 0.045 120);
+  --selection: oklch(0.38 0.075 120);
+  --highlight: oklch(0.88 0.2 120);
+  --highlight-foreground: oklch(0.2 0.008 255);
   --ink: oklch(0.975 0.004 255);
   --ink-foreground: oklch(0.2 0.008 255);
   --ink-line: oklch(0.62 0.007 255);
@@ -199,7 +203,7 @@ html:root[data-mode="dark"] {
 
 /*
  * Colour-blind friendly (web/COLOR.md): a gain turns teal, and a loss raspberry in light or orange in
- * dark, which stay apart from each other, from ultramarine and from crimson under deuteranopia,
+ * dark, which stay apart from each other, from volt and from crimson under deuteranopia,
  * protanopia and tritanopia. Charts read the same attribute, since a canvas cannot read CSS.
  */
 html:root[data-cvd="on"] {
@@ -263,6 +267,8 @@ html:root[data-cvd="on"] {
   --color-mandate-marker: var(--mandate-marker);
   --color-mandate-edge: var(--mandate-edge);
   --color-mandate-soft: var(--mandate-soft);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
   --color-ink: var(--ink);
   --color-ink-foreground: var(--ink-foreground);
   --color-ink-line: var(--ink-line);
@@ -374,6 +380,10 @@ html:root[data-cvd="on"] {
       &:has([data-slot="wire"]) {
         scroll-padding-top: calc(5rem + var(--status-row));
       }
+    }
+    /* The landing draws no sticky header or dock (DEC-213). */
+    &:has([data-slot="landing"]) {
+      scroll-padding: 0;
     }
     scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 1rem);
     @media (min-width: 64rem) {

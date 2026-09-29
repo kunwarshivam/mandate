@@ -194,6 +194,9 @@ describe("the frame's glass", () => {
   });
 });
 
+// DEC-213: the signed-out landing is a period piece and loads its own faces; the product stays in Public Sans.
+const LANDING_FONTS = ["@fontsource-variable/pixelify-sans", "@fontsource/dotgothic16", "@fontsource/vt323"];
+
 describe("figures with a plain zero", () => {
   const theme = block("@theme inline");
   const pkg = JSON.parse(readFileSync(resolve(process.cwd(), "package.json"), "utf8")) as { dependencies: Record<string, string> };
@@ -201,8 +204,17 @@ describe("figures with a plain zero", () => {
   it("sets the body, the figures class and the charts in one face, Public Sans, with no second family", () => {
     for (const stack of [theme["font-mono"], theme["font-sans"]]) expect(stack).toMatch(/^"Public Sans Variable", ui-sans-serif,/);
     expect(CHART_FONT).toMatch(/^'Public Sans Variable', ui-sans-serif,/);
-    expect(Object.keys(pkg.dependencies).filter((d) => d.startsWith("@fontsource"))).toEqual(["@fontsource-variable/public-sans"]);
+    expect(Object.keys(pkg.dependencies).filter((d) => d.startsWith("@fontsource") && !LANDING_FONTS.includes(d))).toEqual(["@fontsource-variable/public-sans"]);
     expect(css).not.toMatch(/@font-face/);
+  });
+
+  it("keeps the landing page's period faces on the landing page, out of the product", () => {
+    const landing = readFileSync(resolve(process.cwd(), "src/components/site/landing.tsx"), "utf8");
+    for (const font of LANDING_FONTS) {
+      expect(pkg.dependencies[font], font).toBeDefined();
+      expect(landing, font).toContain(`import "${font}`);
+    }
+    expect(readFileSync(resolve(process.cwd(), "src/app/layout.tsx"), "utf8")).not.toMatch(/dotgothic|vt323|pixelify/i);
   });
 
   it("ships the face self-hosted from the package, with no font from a third-party host", () => {

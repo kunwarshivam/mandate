@@ -12,21 +12,22 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
   expect(response?.request().redirectedFrom()).toBeNull();
   await expect(page).toHaveURL(`${baseURL}/`);
   await expect(page.locator("[data-slot=landing]")).toBeVisible();
-  await expect(page.getByRole("main").getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/login");
+  await expect(page.getByRole("link", { name: "Sign in" }).first()).toHaveAttribute("href", "/login");
   await expect(page.locator("[data-slot=stop-control]")).toHaveCount(0);
 });
 
-test("the landing page's screenshots load for a signed-out visitor", async ({ page, request }) => {
-  const image = await request.get("/site/hero-desktop-light.png", { maxRedirects: 0 });
-  expect(image.status()).toBe(200);
-  expect(image.headers()["content-type"]).toBe("image/png");
-  await page.goto("/", { waitUntil: "load" });
-  const images = page.locator("[data-slot=landing] img:visible");
-  expect(await images.count()).toBeGreaterThan(0);
-  for (const img of await images.all()) {
-    await img.scrollIntoViewIfNeeded();
-    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
-  }
+test("a signed-out visitor can ask for a place in the private beta", async ({ page }) => {
+  await page.route("**/api/beta", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
+  await page.goto("/");
+  await page.getByLabel("Email address:").fill("someone@example.com");
+  await page.getByRole("button", { name: "Request access" }).click();
+  await expect(page.locator("[data-slot=beta-done]")).toContainText("You're on the list.");
+});
+
+test("the private beta's request address is open to a signed-out visitor", async ({ request }) => {
+  const response = await request.post("/api/beta", { data: { email: "not an email" }, maxRedirects: 0 });
+  expect(response.status()).toBe(400);
+  expect(await response.json()).toEqual({ error: "email" });
 });
 
 for (const path of ["/agents", "/approvals", "/settings/profile", "/audit/decisions"]) {

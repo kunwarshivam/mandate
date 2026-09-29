@@ -6,7 +6,7 @@ import { apcaLc, passesApca } from "@/test/apca";
 import { MARKERS } from "../../scripts/no-apca.mjs";
 import { checkCvd, checkPalette, measure } from "./contrast";
 import { CVD_DISTINCT, CVD_VISIONS, HATCH_MAX, HATCH_MIN, KUMO_PAIRS, type KumoScope, PAIRS, STOP_CONTRAST } from "./contrast-pairs";
-import { LIGHTNESS, NEUTRAL_HUE, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName, ULTRAMARINE_HUE } from "./palette";
+import { LIGHTNESS, NEUTRAL_HUE, PALETTE, PALETTE_DARK, PALETTES, RAMPS, type RampId, STEPS, type Step, TOKEN_NAMES, type ThemeName, type TokenName, VOLT_HUE } from "./palette";
 
 const SRC = resolve(process.cwd(), "src");
 const css = readFileSync(join(SRC, "app/globals.css"), "utf8");
@@ -70,12 +70,14 @@ const SCOPES: Record<ThemeName, Record<KumoScope, Record<string, string>>> = { l
 const hueDistance = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
 const rampOf = (ref: string) => ref.slice(0, ref.lastIndexOf("-")) as RampId;
 const stepOf = (ref: string) => Number(ref.slice(ref.lastIndexOf("-") + 1)) as Step;
-const CHROMATIC: RampId[] = ["ultramarine", "green", "red", "amber", "cvd-teal", "cvd-rose", "cvd-orange", "crimson"];
+const CHROMATIC: RampId[] = ["volt", "green", "red", "amber", "cvd-teal", "cvd-rose", "cvd-orange", "crimson"];
 
-/** The only tokens that may carry ultramarine: the mandate's and the account's accent roles, and the text selection. */
-const ULTRAMARINE_TOKENS: TokenName[] = ["mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-soft", "lapis-line", "selection"];
-/** Ultramarine that is saturated enough to shout: lines, marks and labels, never a surface. */
-const SATURATED_ULTRAMARINE: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
+/** The only tokens that may carry volt: the mandate's and the account's accent roles, the text selection and the highlight. */
+const VOLT_TOKENS: TokenName[] = ["mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-soft", "lapis-line", "selection", "highlight"];
+/** Neon volt as a fill: the highlight in both themes and the selection in light, always under ink type. */
+const VIVID_FILLS: TokenName[] = ["highlight", "selection"];
+/** Volt that is saturated enough to shout: lines, marks and labels, never a surface. */
+const SATURATED_VOLT: TokenName[] = ["mandate-strong", "mandate-marker", "mandate-edge", "lapis-line"];
 
 describe("ramps", () => {
   it.each(Object.values(RAMPS).map((r) => [r.id, r] as const))("%s has thirteen in-gamut steps at one hue on the shared lightness curve", (_, ramp) => {
@@ -115,18 +117,19 @@ describe("ramps", () => {
     }
   });
 
-  it("keeps ultramarine an ultramarine: bluer than the cool neutrals, and short of violet", () => {
-    expect(RAMPS.ultramarine.hue).toBe(ULTRAMARINE_HUE);
-    expect(ULTRAMARINE_HUE).toBeGreaterThan(NEUTRAL_HUE);
-    expect(ULTRAMARINE_HUE).toBeGreaterThanOrEqual(260);
-    expect(ULTRAMARINE_HUE).toBeLessThanOrEqual(272);
+  it("keeps volt a volt: the yellow-green of #ccff00, and at least 30 degrees from the gain's green", () => {
+    expect(RAMPS.volt.hue).toBe(VOLT_HUE);
+    expect(VOLT_HUE).toBeGreaterThanOrEqual(115);
+    expect(VOLT_HUE).toBeLessThanOrEqual(125);
+    expect(hueDistance(VOLT_HUE, RAMPS.green.hue)).toBeGreaterThanOrEqual(30);
+    expect(hueDistance(VOLT_HUE, RAMPS.amber.hue)).toBeGreaterThanOrEqual(30);
   });
 
-  it("makes ultramarine vivid from 400 to 700 but quiet at 100, 850 and 900, where it is a field", () => {
-    const c = (s: Step) => parseOklch(RAMPS.ultramarine.steps[s]).c;
-    for (const s of [400, 500, 600, 700] as const) expect(c(s), `ultramarine-${s}`).toBeGreaterThanOrEqual(0.11);
-    for (const s of [500, 600] as const) expect(c(s), `ultramarine-${s}`).toBeLessThanOrEqual(0.18);
-    for (const s of [100, 850, 900] as const) expect(c(s), `ultramarine-${s}`).toBeLessThanOrEqual(0.05);
+  it("makes volt neon from 200 to 400, deep enough from 500 to 700 for a line or a label, and quiet at 100, 850 and 900, where it is a field", () => {
+    const c = (s: Step) => parseOklch(RAMPS.volt.steps[s]).c;
+    for (const s of [200, 300, 400] as const) expect(c(s), `volt-${s}`).toBeGreaterThanOrEqual(0.17);
+    for (const s of [500, 600, 700] as const) expect(c(s), `volt-${s}`).toBeGreaterThanOrEqual(0.1);
+    for (const s of [100, 850, 900] as const) expect(c(s), `volt-${s}`).toBeLessThanOrEqual(0.06);
   });
 
   it("matches gain and loss in lightness and chroma, differing only in hue", () => {
@@ -140,14 +143,14 @@ describe("ramps", () => {
   });
 
   /**
-   * The gain was Okabe-Ito blue (245) until the accent became ultramarine (266): 21 degrees apart,
-   * a blue gain and ultramarine text merge under red-green deficiency. Teal still reads as up (blues
-   * and greens do, for people with CVD) and stays clear of ultramarine, orange and raspberry.
+   * The gain was Okabe-Ito blue (245) until the accent became volt (266): 21 degrees apart,
+   * a blue gain and volt text merge under red-green deficiency. Teal still reads as up (blues
+   * and greens do, for people with CVD) and stays clear of volt, orange and raspberry.
    */
   it("keeps the colour-blind alternates at teal (between Okabe-Ito sky blue and bluish green), reddish purple and orange", () => {
     expect(RAMPS["cvd-teal"].hue).toBeGreaterThanOrEqual(200);
     expect(RAMPS["cvd-teal"].hue).toBeLessThanOrEqual(215);
-    expect(hueDistance(RAMPS["cvd-teal"].hue, ULTRAMARINE_HUE)).toBeGreaterThanOrEqual(50);
+    expect(hueDistance(RAMPS["cvd-teal"].hue, VOLT_HUE)).toBeGreaterThanOrEqual(50);
     expect(RAMPS["cvd-rose"].hue).toBeGreaterThanOrEqual(340);
     expect(RAMPS["cvd-rose"].hue).toBeLessThanOrEqual(355);
     expect(RAMPS["cvd-orange"].hue).toBeGreaterThanOrEqual(45);
@@ -155,7 +158,7 @@ describe("ramps", () => {
   });
 });
 
-describe.each(THEMES)("Ink and Ultramarine, %s", (theme) => {
+describe.each(THEMES)("Ink and Volt, %s", (theme) => {
   const palette = PALETTES[theme];
   const t = palette.tokens;
   const refs = palette.refs;
@@ -179,23 +182,23 @@ describe.each(THEMES)("Ink and Ultramarine, %s", (theme) => {
     expect(refs.primary).toBe(refs.foreground);
   });
 
-  it("gives ultramarine only to the ultramarine tokens", () => {
-    const accent = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "ultramarine");
-    expect(accent.filter((n) => !ULTRAMARINE_TOKENS.includes(n))).toEqual([]);
-    for (const n of ULTRAMARINE_TOKENS) expect(rampOf(refs[n]), n).toBe("ultramarine");
+  it("gives volt only to the volt tokens", () => {
+    const accent = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "volt");
+    expect(accent.filter((n) => !VOLT_TOKENS.includes(n))).toEqual([]);
+    for (const n of VOLT_TOKENS) expect(rampOf(refs[n]), n).toBe("volt");
   });
 
-  it("carries no second blue: outside the ultramarine tokens, nothing within 30 degrees of its hue is saturated", () => {
-    for (const n of TOKEN_NAMES.filter((n) => !ULTRAMARINE_TOKENS.includes(n))) {
+  it("carries no second volt: outside the volt tokens, nothing within 30 degrees of its hue is saturated", () => {
+    for (const n of TOKEN_NAMES.filter((n) => !VOLT_TOKENS.includes(n))) {
       const { c, h } = parseOklch(t[n].value);
-      expect(hueDistance(h, ULTRAMARINE_HUE) < 30 && c > 0.02, `${n} ${t[n].value}`).toBe(false);
+      expect(hueDistance(h, VOLT_HUE) < 30 && c > 0.02, `${n} ${t[n].value}`).toBe(false);
     }
   });
 
-  it("never paints saturated ultramarine as a surface: every ultramarine background is a quiet tint", () => {
+  it("never paints saturated volt as a surface: every volt background is a quiet tint, but for the vivid fills", () => {
     const backgrounds = new Set(PAIRS.map((p) => p.bg));
-    expect(SATURATED_ULTRAMARINE.filter((n) => backgrounds.has(n))).toEqual([]);
-    for (const n of ULTRAMARINE_TOKENS.filter((n) => !SATURATED_ULTRAMARINE.includes(n))) {
+    expect(SATURATED_VOLT.filter((n) => backgrounds.has(n))).toEqual([]);
+    for (const n of VOLT_TOKENS.filter((n) => !SATURATED_VOLT.includes(n) && !VIVID_FILLS.includes(n))) {
       const { l, c } = parseOklch(t[n].value);
       if (theme === "light") expect(l, n).toBeGreaterThanOrEqual(0.9);
       else expect(l, n).toBeLessThanOrEqual(0.4);
@@ -203,12 +206,21 @@ describe.each(THEMES)("Ink and Ultramarine, %s", (theme) => {
     }
   });
 
-  it("paints no Kumo surface, fill or tint in saturated ultramarine, in any scope", () => {
-    const saturated = new Set(SATURATED_ULTRAMARINE.map((n) => t[n].value));
+  it("paints no Kumo surface, fill or tint in saturated volt, in any scope", () => {
+    const saturated = new Set(SATURATED_VOLT.map((n) => t[n].value));
     const surfaces = /^color-kumo-(canvas|elevated|recessed|base|tint|overlay|control|fill|fill-hover|contrast|brand|brand-hover|badge-[a-z]+|banner-[a-z]+|[a-z]+-tint)$/;
     for (const [scope, values] of Object.entries(SCOPES[theme])) {
       for (const [role, value] of Object.entries(values)) if (surfaces.test(role)) expect(saturated.has(value), `${scope}: --${role}`).toBe(false);
     }
+  });
+
+  it("puts only ink type on neon volt: the highlight and the selection carry the ink foreground at 7:1 or more", () => {
+    for (const n of VIVID_FILLS) {
+      const onIt = PAIRS.filter((p) => p.bg === n);
+      expect(onIt.length, n).toBeGreaterThan(0);
+      for (const p of onIt) expect(rampOf(refs[p.fg]), `${p.fg} on ${n}`).toBe(theme === "light" || n === "highlight" ? "ink" : "paper");
+    }
+    expect(contrastRatio(t["highlight-foreground"].value, t.highlight.value)).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });
 
   it("gives crimson to the kill switch and to no other token", () => {
@@ -247,34 +259,35 @@ describe.each(THEMES)("Ink and Ultramarine, %s", (theme) => {
   });
 });
 
-describe("Ink and Ultramarine, the light theme's accent", () => {
+describe("Ink and Volt, the light theme's accent", () => {
   const refs = PALETTE.refs;
 
-  it("sets the mandate as an ultramarine-100 field under ultramarine-500 rules and markers, with ultramarine-700 labels", () => {
-    expect(refs.mandate).toBe("ultramarine-100");
-    expect(refs["mandate-edge"]).toBe("ultramarine-500");
-    expect(refs["mandate-marker"]).toBe("ultramarine-500");
-    expect(refs["mandate-strong"]).toBe("ultramarine-700");
-    expect(refs["lapis-line"]).toBe("ultramarine-500");
+  it("sets the mandate as a volt-100 field under volt-500 rules and markers, with volt-700 labels", () => {
+    expect(refs.mandate).toBe("volt-100");
+    expect(refs["mandate-edge"]).toBe("volt-500");
+    expect(refs["mandate-marker"]).toBe("volt-500");
+    expect(refs["mandate-strong"]).toBe("volt-700");
+    expect(refs["lapis-line"]).toBe("volt-500");
   });
 
-  it("never sets ultramarine text lighter than ultramarine-700", () => {
-    const accentText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "ultramarine");
+  it("never sets volt text lighter than volt-700", () => {
+    const accentText = PAIRS.filter((p) => p.kind !== "mark" && rampOf(refs[p.fg]) === "volt");
     expect(accentText.length).toBeGreaterThan(0);
     for (const p of accentText) expect(stepOf(refs[p.fg]), `${p.fg} on ${p.bg}`).toBeGreaterThanOrEqual(700);
-    for (const n of ULTRAMARINE_TOKENS.filter((n) => n.endsWith("-strong"))) expect(stepOf(refs[n]), n).toBeGreaterThanOrEqual(700);
+    for (const n of VOLT_TOKENS.filter((n) => n.endsWith("-strong"))) expect(stepOf(refs[n]), n).toBeGreaterThanOrEqual(700);
   });
 });
 
-describe("Ink and Ultramarine, the dark theme", () => {
+describe("Ink and Volt, the dark theme", () => {
   const refs = PALETTE_DARK.refs;
 
-  it("keeps ultramarine's meanings a step lighter: ultramarine-400 rules and markers, ultramarine-300 labels, an ultramarine-850 field", () => {
-    expect(refs.mandate).toBe("ultramarine-850");
-    expect(refs["mandate-edge"]).toBe("ultramarine-400");
-    expect(refs["mandate-marker"]).toBe("ultramarine-400");
-    expect(refs["lapis-line"]).toBe("ultramarine-400");
-    expect(refs["mandate-strong"]).toBe("ultramarine-300");
+  it("turns volt bright: volt-400 rules, markers and the account's line, volt-200 labels, a volt-850 field, neon volt-300 fills", () => {
+    expect(refs.mandate).toBe("volt-850");
+    expect(refs["mandate-edge"]).toBe("volt-400");
+    expect(refs["mandate-marker"]).toBe("volt-400");
+    expect(refs["lapis-line"]).toBe("volt-400");
+    expect(refs["mandate-strong"]).toBe("volt-200");
+    expect(refs.highlight).toBe(PALETTE.refs.highlight);
   });
 
   it("keeps the kill switch's crimson fill and lightens only its edge", () => {
@@ -332,7 +345,7 @@ describe("apca-w3 stays in the tests", () => {
   });
 });
 
-describe("Kumo in Ink and Ultramarine", () => {
+describe("Kumo in Ink and Volt", () => {
   const kumoRoles = [...new Set(Array.from(kumoTheme.matchAll(/--((?:text-)?color-kumo-[a-z0-9-]+):/g), (m) => m[1]))].filter((n) => !n.includes("neutral"));
 
   it("re-points every colour role Kumo defines, so none of Kumo's own colours shows", () => {
@@ -369,7 +382,7 @@ describe("Kumo in Ink and Ultramarine", () => {
     expect(contrastRatio(root["text-color-kumo-inverse"], root["color-kumo-brand"])).toBeGreaterThanOrEqual(STOP_CONTRAST);
   });
 
-  it.each(THEMES)("paints the account surface in the account fill, the field in the ultramarine tint under an ultramarine line, and ink in ink, in %s", (theme) => {
+  it.each(THEMES)("paints the account surface in the account fill, the field in the volt tint under a volt line, and ink in ink, in %s", (theme) => {
     const t = PALETTES[theme].tokens;
     expect(SCOPES[theme].account["color-kumo-base"]).toBe(t.lapis.value);
     expect(SCOPES[theme].field["color-kumo-base"]).toBe(t.mandate.value);
@@ -420,7 +433,7 @@ describe.each(THEMES)("colour-vision deficiency, %s", (theme) => {
     expect(def.byVision.deuteranopia).toBeLessThan(CVD_DISTINCT);
   });
 
-  it("keeps every colour-blind alternate apart from ultramarine and crimson where it is required", () => {
+  it("keeps every colour-blind alternate apart from volt and crimson where it is required", () => {
     const required = results.filter((c) => c.requiredHere && (c.a.endsWith("-cvd") || c.b.endsWith("-cvd")));
     const against = new Set(required.flatMap((c) => [c.a, c.b]));
     for (const n of ["crimson", "mandate-marker", "lapis-line", "mandate-strong"] as const) expect(against.has(n), n).toBe(true);
@@ -449,7 +462,9 @@ describe("colour usage in components", () => {
   it("keeps warning off every screen, including Kumo's warning and alert variants", () => {
     const warning = /\b(bg|text|border|ring|outline|fill|stroke|decoration)-(kumo-)?warning\b|\bkumo-(banner-)?warning\b|variant=["{]*["'](warning|alert)["']/;
     const measured = "lib/contrast-pairs.ts";
-    const users = files.filter((f) => warning.test(f.text) && !specimens.test(f.path) && f.path !== measured).map((f) => f.path);
+    // DEC-213: the signed-out landing shows no gain or loss, so its construction tape and edited record line can't be read as one.
+    const landing = /^components\/site\//;
+    const users = files.filter((f) => warning.test(f.text) && !specimens.test(f.path) && !landing.test(f.path) && f.path !== measured).map((f) => f.path);
     expect(users).toEqual([]);
   });
 
@@ -463,7 +478,7 @@ describe("colour usage in components", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("paints saturated ultramarine only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
+  it("paints saturated volt only as thin fills: the envelope's rails, posts and ticks, a legend swatch and the page header's rule", () => {
     const fill = /\bbg-(mandate-strong|mandate-marker|mandate-edge|lapis-line)\b/;
     const allowed = ["components/domain/envelope.tsx", "components/charts/chart-parts.tsx", "components/kumo/page-header/page-header.tsx"];
     expect(files.filter((f) => fill.test(f.text) && !specimens.test(f.path) && !allowed.includes(f.path)).map((f) => f.path)).toEqual([]);
