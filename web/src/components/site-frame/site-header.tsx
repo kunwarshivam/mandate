@@ -5,7 +5,7 @@ import { SiteAction } from "./site-action";
 /**
  * The public pages' header: the brand, which opens `/`, and one action at the right. It is on the
  * frame's glass like the app's header, and carries none of the app's controls: no Stop, no paper
- * badge, no dock and no wire, because nothing here acts on an account.
+ * badge and no dock, because nothing here acts on an account.
  */
 export function SiteHeader({ signedIn }: { signedIn: boolean }) {
   return (
