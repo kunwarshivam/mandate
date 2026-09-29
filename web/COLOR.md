@@ -6,8 +6,8 @@ The key values, as ramp steps:
 
 | Role | Light | Dark |
 |---|---|---|
-| The body, header and cards (`card`) | paper-50 #FDFCFA | ink-950 #14161A |
-| Wells and the sidebar (`background`) | paper-100 #F8F7F4 | ink-975 #0B0D11 |
+| The body and cards (`card`); the frame's glass is this at 72% | paper-50 #FDFCFA | ink-950 #14161A |
+| Wells and the phone sidebar sheet (`background`) | paper-100 #F8F7F4 | ink-975 #0B0D11 |
 | Type, primary action, Stop | ink-950 #14161A | paper-100 #F8F7F4 |
 | Gold line and marker | gold-500 #AB7D13 | gold-400 #D9A948 |
 | Gold text | gold-700 #6A4D08 | gold-300 #F9D28A |
@@ -169,7 +169,7 @@ A custom property resolves where it is declared and inherits as a value, so each
 
 | Scope | Base | Text (default / strong / subtle) | Tint | Lines |
 |---|---|---|---|---|
-| `account` (the sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
+| `account` (the phone sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
 | `field` (the mandate) | `mandate`: gold-100, dark gold-850 | `mandate-foreground` / `mandate-strong` / `mandate-muted` | as the root | `mandate-edge` (gold) |
 | `ink` (the Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
 
@@ -186,6 +186,20 @@ Lightweight Charts draws on a canvas, which cannot read CSS variables, so `src/c
 
 Every fill stays one flat colour.
 
+## The frame's glass
+
+The sticky header, the agent wire under it, the phone tab bar and the desktop dock are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours. The desktop dock swaps in denser values, `--dock-glass` (the card at 85%) and `--dock-edge` (the type colour at 15%), and marks the current section with `--dock-current`, the type colour at 14%, and hover with `--dock-hover` at 7%: tints of the type colour, never solid ink (Stop's) or gold (the mandate's).
+
+The blur only averages what scrolls underneath, so the worst case is a solid colour under the glass: ink (a primary action, the hero figure) in light mode, paper in dark. `tokens.test.ts` composites the glass over every token in each theme and requires 4.5:1 for body and muted text and 3:1 for the Stop pill against it:
+
+| Over the darkest (light) or lightest (dark) token | Light, 72% | Dark, 72% |
+|---|---|---|
+| Body text, and the Stop pill against the glass | 9.53:1 | 6.85:1 |
+| Muted text (breadcrumbs, icons) | 5.24:1 | 5.11:1 |
+| The same muted text at 60% | 3.81:1, fails | 3.35:1, fails |
+
+The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The agent wire is ink and muted text only, never a gain, loss or crimson colour, so the glass's own measure covers it.
+
 ## Usage rules
 
 - **60/30/10.** Paper (ink in dark) fills the page, cards and quiet fields. Ink (paper in dark) is the type, primary actions, the account block in the navigation and the Stop control. Gold is the mandate's rule, rails, marks and labels, and the account's line and current-place markers.
@@ -196,7 +210,7 @@ Every fill stays one flat colour.
 
 ## Contrast results
 
-61 semantic pairs (47 text pairs at body targets, 14 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 206 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body, the header and cards); every reading colour is measured on both.
+61 semantic pairs (47 text pairs at body targets, 14 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 206 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
 
 Lowest margins:
 

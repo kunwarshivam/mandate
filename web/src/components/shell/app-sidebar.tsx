@@ -1,9 +1,8 @@
 "use client";
 
-import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sidebar } from "@cloudflare/kumo/components/sidebar";
+import { Sidebar, useSidebar } from "@cloudflare/kumo/components/sidebar";
 import {
   ArrowLeft,
   Bell,
@@ -37,6 +36,7 @@ import {
   Broadcast,
   UserCircle,
   Users,
+  type Icon as IconType,
 } from "@phosphor-icons/react";
 import type { Agent } from "@/fixtures/types";
 import { homeFor } from "@/lib/access";
@@ -47,9 +47,7 @@ import { SidebarBrand } from "./brand";
 import { agentIdFrom } from "./stop-control";
 import { ThemeMenu } from "./theme-menu";
 
-type IconType = ComponentType<{ className?: string }>;
-
-const SCREEN_ICON: Record<string, IconType> = {
+export const SCREEN_ICON: Record<string, IconType> = {
   home: House,
   approvals: Tray,
   alerts: Bell,
@@ -221,21 +219,17 @@ function AgentView({ agent, pathname }: { agent: Agent; pathname: string }) {
 }
 
 /**
- * Kumo's Sidebar, quiet: the page's paper tone with no rule, so the content column carries the
- * weight. The header carries the Owlhead brand in ink (off-white in dark) and the account. Inside an agent, the sidebar slides to that agent's sections; loading agent data never
- * holds back the header or the Stop control.
+ * Kumo's Sidebar as the phone and tablet sheet, below 64rem: the page's paper tone with no rule.
+ * The header carries the Owlhead brand in ink (off-white in dark) and the account. Inside an agent,
+ * the sheet slides to that agent's sections; loading agent data never holds back the header or the
+ * Stop control. From 64rem up the dock carries the navigation, and Kumo's desktop rail never renders.
  *
- * On desktop it stays pinned while the page scrolls (`e2e/sticky-nav.spec.ts`). Kumo sizes its rail
- * `h-full` against a wrapper with no set height, so the rail is given the viewport's height and sticks;
- * the app header sits beside it in the content column, so it sticks at the top. Its items scroll on
- * their own. The same class also reaches Kumo's mobile sheet, hence `lg:`, the mobile breakpoint.
- *
- * Kumo picks the rail or the sheet in JS, and its server snapshot is "desktop": the server, and a phone
- * until hydration, get the rail. Below `lg` CSS keeps that rail (Kumo's non-mobile `aside`) out of the
- * layout, so a phone never lays out the desktop shell, and Stop stays on screen with or without JS
+ * Kumo picks the rail or the sheet in JS, and its server snapshot is "desktop", so the server renders
+ * no sidebar at all: a phone lays out the phone shell with or without JS, and Stop stays on screen
  * (`e2e/ssr-shell.spec.ts`). The sheet mounts after hydration, off-canvas until opened.
  */
 export function AppSidebar() {
+  const { isMobile } = useSidebar();
   const pathname = usePathname();
   const { ws, now } = useRuntime();
   const { role } = useRole();
@@ -244,14 +238,12 @@ export function AppSidebar() {
   const openApprovals = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
   const agentScoped = agentId !== null && can(role, "agents.view");
   const home = homeFor(role);
+  if (!isMobile) return null;
 
   return (
-    <Sidebar
-      aria-label="Main"
-      className="border-r-0 bg-background max-lg:not-data-mobile:hidden lg:sticky lg:top-0 lg:h-dvh lg:self-start"
-    >
+    <Sidebar aria-label="Main" className="border-r-0 bg-background">
       <Sidebar.Header data-slot="brand" className="h-auto flex-col items-stretch gap-0 bg-background px-0">
-        <div className="flex h-16 shrink-0 items-center px-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+        <div className="flex h-16 shrink-0 items-center px-4">
           <Link
             href={home.href}
             className="inline-flex min-h-11 items-center outline-none focus-visible:ring-3 focus-visible:ring-ring"
@@ -260,9 +252,9 @@ export function AppSidebar() {
             <SidebarBrand />
           </Link>
         </div>
-        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-4 pb-4 group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0">
+        <div data-slot="account" className="flex min-w-0 items-center gap-2.5 px-4 pb-4">
           <Buildings className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-          <div className="grid min-w-0 group-data-[state=collapsed]/sidebar:hidden">
+          <div className="grid min-w-0">
             <span className="field-label text-muted-foreground">Account</span>
             <span className="truncate text-sm font-medium">{ws.connection.broker}</span>
           </div>

@@ -107,7 +107,7 @@ export const motionTokens = [
 
 /** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--nav-width", calm: "14rem", dense: "14rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
+  { name: "--nav-width", calm: "14rem", dense: "14rem", use: "The phone and tablet navigation sheet, handed to Kumo's Sidebar" },
   { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
   { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
@@ -116,12 +116,14 @@ export const spacingTokens = [
   { name: "--block-gap", calm: "1rem", dense: "0.75rem", use: "Between a heading and its content" },
   { name: "--row-y", calm: "1rem", dense: "0.5rem", use: "Vertical padding of a list or table row" },
   { name: "--tab-bar", calm: "4rem", dense: "4rem", use: "The phone tab bar, plus the safe area" },
+  { name: "--dock-h / --dock-gap", calm: "3.75rem / 1rem", dense: "the same", use: "The desktop dock and the space below it; content and scroll padding clear both" },
+  { name: "--status-row", calm: "2.125rem", dense: "2.125rem", use: "The status strip and the agent wire under the header, one height so either can replace the other" },
 ];
 
 export const radiusTokens = [
   { name: "--radius-xs / sm", value: "0.25rem / 0.375rem", use: "Placeholder and fixture chips, keyboard hints, chart ticks" },
   { name: "--radius-lg / xl", value: "0.75rem / 1rem", use: "Menus, restriction notes, the Stop sheet's choices, an unknown order" },
   { name: "--radius-2xl", value: "1.25rem", use: "Panels: the mandate field, an approval card, a well, a hovered agent row" },
-  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs" },
+  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs, the desktop dock" },
   { name: "full", value: "9999px", use: "Buttons, chips, the Stop control, the paper badge, the range pill" },
 ];

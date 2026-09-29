@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHART_FONT } from "@/components/charts/options";
-import { contrastRatio, parseOklch, toHex } from "./color";
+import { composite, contrastRatio, parseOklch, rgbContrast, toHex, toRgb255 } from "./color";
 import { PALETTES, TOKEN_NAMES, type ThemeName, hatchInk } from "./palette";
 import { colorTokens, colorTokensFor, markPairs, textPairs, tokenValue } from "./tokens";
 
@@ -114,6 +114,83 @@ describe("colour tokens", () => {
     const theme = block("@theme inline");
     for (const k of ["shadow-2xs", "shadow-xs", "shadow-sm"]) expect(theme[k], k).toBe("0 0 #0000");
     for (const k of ["shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl"]) expect(theme[k], k).not.toMatch(/oklch\(|rgb|#[0-9a-f]{3,6}\b/i);
+  });
+});
+
+describe("the frame's glass", () => {
+  const utility = css.slice(css.indexOf("@utility glass {"), css.indexOf("\n}\n", css.indexOf("@utility glass {")));
+  const mix = /^color-mix\(in oklab, var\(--card\) (\d+)%, transparent\)$/;
+
+  it.each(THEMES)("frosts the frame in %s with the card, translucent", (theme) => {
+    const glass = BLOCKS[theme].glass;
+    expect(glass).toMatch(mix);
+    expect(declared["glass-edge"]).toBe("color-mix(in oklab, var(--foreground) 8%, transparent)");
+  });
+
+  // The blur only averages what scrolls underneath, so a solid token under the glass is the worst case.
+  it.each(THEMES)("keeps the header's text at 4.5:1 and Stop's pill at 3:1 over any token scrolling under it, in %s", (theme) => {
+    const alpha = Number(mix.exec(BLOCKS[theme].glass)![1]) / 100;
+    const card = tokenValue("card", theme);
+    const under = colorTokensFor(theme).map((t) => t.value);
+    const worst = (fg: string) => Math.min(...under.map((u) => rgbContrast(toRgb255(fg), composite(card, alpha, u))));
+    for (const text of ["foreground", "muted-foreground"]) expect(worst(tokenValue(text, theme)), text).toBeGreaterThanOrEqual(4.5);
+    expect(worst(tokenValue("ink", theme)), "ink").toBeGreaterThanOrEqual(3);
+  });
+
+  describe("the dock's denser glass", () => {
+    const pct = (name: string, of: string) => {
+      const m = new RegExp(`^color-mix\\(in oklab, var\\(--${of}\\) (\\d+)%, transparent\\)$`).exec(declared[name] ?? "");
+      if (!m) throw new Error(`--${name} is not a mix of --${of}`);
+      return Number(m[1]) / 100;
+    };
+    const glassAlpha = pct("dock-glass", "card");
+    const current = pct("dock-current", "foreground");
+    const hover = pct("dock-hover", "foreground");
+
+    it("is the card at 85% with the type colour at 15% for its edge, a 14% tint for the current pill and half that on hover", () => {
+      expect(glassAlpha).toBe(0.85);
+      expect(pct("dock-edge", "foreground")).toBe(0.15);
+      expect(current).toBe(0.14);
+      expect(hover).toBe(current / 2);
+      expect(declaredDark["dock-glass"], "one declaration serves both themes").toBeUndefined();
+    });
+
+    it.each(THEMES)("keeps every label at 4.5:1 and the pill visible over any token scrolling under the dock, in %s", (theme) => {
+      const card = tokenValue("card", theme);
+      const fg = tokenValue("foreground", theme);
+      const under = colorTokensFor(theme).map((t) => t.value);
+      const tint = (alpha: number, u: string) => {
+        const glass = composite(card, glassAlpha, u);
+        const ink = toRgb255(fg);
+        return ink.map((v, i) => Math.round(v * alpha + glass[i] * (1 - alpha))) as typeof glass;
+      };
+      for (const u of under) {
+        const glass = composite(card, glassAlpha, u);
+        expect(rgbContrast(toRgb255(tokenValue("muted-foreground", theme)), glass), `idle label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(toRgb255(fg), tint(hover, u)), `hovered label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(toRgb255(fg), tint(current, u)), `current label over ${u}`).toBeGreaterThanOrEqual(4.5);
+        expect(rgbContrast(tint(current, u), glass), `the pill against the glass over ${u}`).toBeGreaterThanOrEqual(1.3);
+      }
+      expect(rgbContrast(toRgb255(tokenValue("muted", theme)), toRgb255(card)), "muted alone would not show the pill").toBeLessThan(1.3);
+    });
+  });
+
+  it("blurs and saturates what is behind, with the WebKit prefix", () => {
+    expect(utility).toContain("background-color: var(--glass);");
+    expect(utility).toContain("border-color: var(--glass-edge);");
+    expect(utility).toContain("-webkit-backdrop-filter: blur(22px) saturate(1.8);");
+    expect(utility).toMatch(/\n\s+backdrop-filter: blur\(22px\) saturate\(1\.8\);/);
+  });
+
+  it.each([
+    ["no backdrop filter", "@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))"],
+    ["reduced transparency", "@media (prefers-reduced-transparency: reduce)"],
+    ["forced colours", "@media (forced-colors: active)"],
+  ])("falls back to the solid card under %s", (_what, condition) => {
+    const start = utility.indexOf(`${condition} {`);
+    expect(start, condition).toBeGreaterThan(0);
+    const body = utility.slice(start, utility.indexOf("}", start));
+    expect(body).toContain("background-color: var(--card);");
   });
 });
 

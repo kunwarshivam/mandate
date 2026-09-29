@@ -1,0 +1,164 @@
+import { fireEvent, screen, within } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
+import { canOpen } from "@/lib/access";
+import { ROLES, can } from "@/lib/roles";
+import { GROUP_LABEL, SCREENS, SECTION_INDEX } from "@/lib/screens";
+import { AGENT_IDS } from "@/fixtures/workspace";
+import { renderWithRuntime } from "@/test/harness";
+import { setPathname } from "@/test/navigation";
+import { asPhone } from "@/test/viewport";
+import { AppShell } from "./app-shell";
+import { DOCK_LINKS, isCurrent, menuFor, menuGroups } from "./dock";
+
+beforeEach(() => setPathname("/"));
+
+function dock() {
+  return screen.getByRole("navigation", { name: "Primary" });
+}
+
+async function openMenu(name: string) {
+  fireEvent.click(within(dock()).getByRole("button", { name }));
+  return screen.findByRole("menu");
+}
+
+describe("the desktop dock", () => {
+  it("labels every item under its icon: the everyday screens in order, then the Audit and More menus", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
+    const names = (els: HTMLElement[]) => els.map((el) => el.querySelector("[data-slot=dock-label]")?.textContent);
+    expect(within(dock()).getAllByRole("link").map((l) => l.getAttribute("href"))).toEqual(["/", "/approvals", "/alerts", "/agents", "/positions", "/connections"]);
+    expect(names(within(dock()).getAllByRole("link"))).toEqual(["Home", "Approvals", "Alerts", "Agents", "Positions", "Connections"]);
+    expect(names(within(dock()).getAllByRole("button"))).toEqual(["Audit", "More"]);
+    expect(within(dock()).getByRole("link", { name: /^Approvals\s*\d+\s*open$/ })).toBeInTheDocument();
+    expect(within(dock()).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+    for (const b of within(dock()).getAllByRole("button")) {
+      expect(b).toHaveAttribute("aria-haspopup", "menu");
+      expect(b).not.toHaveAttribute("aria-label");
+    }
+    for (const label of dock().querySelectorAll("[data-slot=dock-label]")) {
+      expect(label).toHaveClass("font-medium", "group-data-current:font-semibold");
+      expect(label.parentElement).toHaveClass("text-xs");
+    }
+  });
+
+  it("has no tooltips: the labels name every item, and no dock item has a shortcut to add", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    for (const item of [...within(dock()).getAllByRole("link"), ...within(dock()).getAllByRole("button")]) {
+      fireEvent.mouseEnter(item);
+      fireEvent.focus(item);
+      expect(item).not.toHaveAttribute("aria-describedby");
+      expect(item).not.toHaveAttribute("aria-keyshortcuts");
+    }
+    expect(document.querySelector(".kumo-tooltip-popup")).toBeNull();
+  });
+
+  it("reserves a divider between the everyday screens and the menus", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const divider = dock().querySelector("[data-slot=dock-divider]");
+    expect(divider).toHaveAttribute("aria-hidden");
+    expect(divider?.nextElementSibling).toHaveTextContent(/^Audit/);
+  });
+
+  it("marks the current screen, and only it, with aria-current and the pill", () => {
+    setPathname("/positions");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const current = within(dock()).getAllByRole("link").filter((l) => l.getAttribute("aria-current") === "page");
+    expect(current.map((l) => l.getAttribute("href"))).toEqual(["/positions"]);
+    expect(current[0]).toHaveAttribute("data-current");
+    expect(dock().querySelectorAll("[data-current]")).toHaveLength(1);
+    expect(current[0]).toHaveClass("data-current:bg-(--dock-current)", "hover:bg-(--dock-hover)");
+    expect(current[0].className).not.toMatch(/bg-(ink|primary|foreground|lapis|mandate)\b/);
+  });
+
+  it("keeps Agents current inside an agent, but not on New agent, which lives in More", () => {
+    setPathname(`/agents/${AGENT_IDS.btc}/orders`);
+    const { unmount } = renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(within(dock()).getByRole("link", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    unmount();
+    setPathname("/agents/new");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(within(dock()).queryByRole("link", { current: "page" })).toBeNull();
+    expect(within(dock()).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "true");
+  });
+
+  it("marks the Audit menu current on any audit screen, and the screen inside the menu", async () => {
+    setPathname("/audit/trace");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(within(dock()).getByRole("button", { name: "Audit" })).toHaveAttribute("aria-current", "true");
+    const menu = await openMenu("Audit");
+    expect(within(menu).getByRole("menuitem", { name: "Trace" })).toHaveAttribute("aria-current", "page");
+    expect(within(menu).getByRole("menuitem", { name: "Audit overview" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("heads More with the account, then the workspace screens", async () => {
+    setPathname("/settings/policies");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const menu = await openMenu("More");
+    expect(menu).toHaveTextContent(/^Account/);
+    expect(within(menu).getByRole("menuitem", { name: /Alpaca paper/ })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Policies" })).toHaveAttribute("aria-current", "page");
+    expect(within(menu).getByRole("menuitem", { name: "Workspace overview" })).toHaveAttribute("href", "/settings");
+  });
+
+  it("shows the open approvals count on Approvals", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
+    const count = within(dock()).getByRole("link", { name: /^Approvals/ }).querySelector("[data-slot=approvals-count]");
+    expect(count?.textContent).toMatch(/^\d+ open$/);
+  });
+
+  it("gives every item a visible focus ring", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    for (const item of [...within(dock()).getAllByRole("link"), ...within(dock()).getAllByRole("button")]) expect(item).toHaveClass("focus-visible:ring-3");
+  });
+
+  it("sits fixed at the bottom from lg only, and phones keep the tab bar", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const holder = dock().parentElement!;
+    expect(holder).toHaveClass("fixed", "hidden", "lg:block", "left-1/2", "-translate-x-1/2");
+    expect(holder.className).toMatch(/bottom-\[calc\(var\(--dock-gap\)/);
+    expect(document.querySelector("nav[aria-label=Main].grid")?.parentElement).toHaveClass("lg:hidden");
+  });
+
+  it("gives way to the phone sheet below lg, which keeps the account and the agent sections", () => {
+    const restore = asPhone();
+    try {
+      setPathname(`/agents/${AGENT_IDS.btc}`);
+      renderWithRuntime(<AppShell>{null}</AppShell>);
+      const sheet = document.querySelector<HTMLElement>("nav[data-mobile]");
+      expect(sheet).not.toBeNull();
+      expect(sheet?.querySelector("[data-slot=account]")).toHaveTextContent("Alpaca paper");
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("what the dock reaches", () => {
+  it.each(ROLES.map((r) => r.id))("as %s, reaches every screen the role may open, and only those", (role) => {
+    const docked = SCREENS.filter((s) => (DOCK_LINKS as readonly string[]).includes(s.key) && can(role, s.needs)).map((s) => s.href);
+    const menus = [...menuGroups("audit", role), ...menuGroups("more", role)].flatMap((g) => g.links.map((l) => l.href));
+    const reached = new Set([...docked, ...menus]);
+    expect(reached.size).toBe(docked.length + menus.length);
+    for (const s of SCREENS) expect(reached.has(s.href), s.href).toBe(can(role, s.needs));
+    for (const href of reached) expect(canOpen(role, href), href).toBe(true);
+    const audits = SCREENS.some((s) => s.group === "audit" && can(role, s.needs));
+    expect(reached.has(SECTION_INDEX.audit.href)).toBe(audits);
+  });
+
+  it("puts the audit screens in Audit and every other screen in More, under their group labels", () => {
+    for (const g of menuGroups("audit", "owner")) expect(g.label).toBe(GROUP_LABEL.audit);
+    expect(menuGroups("more", "owner").map((g) => g.label)).not.toContain(GROUP_LABEL.audit);
+    expect(menuFor("audit")).toBe("audit");
+    expect(menuFor("workspace")).toBe("more");
+  });
+
+  it("matches the current screen by path", () => {
+    expect(isCurrent("/", "/")).toBe(true);
+    expect(isCurrent("/agents", "/")).toBe(false);
+    expect(isCurrent("/audit/trace", "/audit")).toBe(false);
+    expect(isCurrent("/settings/billing", "/settings")).toBe(false);
+    expect(isCurrent("/agents/agt_1/mandate", "/agents")).toBe(true);
+    expect(isCurrent("/agents/new", "/agents")).toBe(false);
+    expect(isCurrent("/connections/con_1/stop-all", "/connections")).toBe(true);
+    expect(isCurrent("/positionsx", "/positions")).toBe(false);
+  });
+});

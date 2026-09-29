@@ -3,14 +3,14 @@ import { recordHref } from "../src/components/stop/commands";
 import { AGENT_IDS } from "../src/fixtures/workspace";
 
 /**
- * The header folds alerts and the account menu into "More" and the workspace switcher into an
+ * The header folds alerts and the account menu into "Alerts and account" and the workspace switcher into an
  * icon as it narrows (`e2e/stop-visible.spec.ts`). Each menu still opens, shows its items, and
  * throws nothing, at a width where it is shown.
  */
 
 const CASES = [
-  { width: 768, button: "More", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
-  { width: 1024, button: "More", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
+  { width: 768, button: "Alerts and account", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
+  { width: 1024, button: "Alerts and account", items: ["Alerts", "You, owner", "Profile", "Notifications"] },
   { width: 1280, button: "Your account", items: ["You, owner", "Profile", "Notifications"] },
   { width: 1024, button: "Workspace: Paper workspace", items: ["Workspaces (fixture)", "Paper workspace", "Second workspace"] },
   { width: 1280, button: "Workspace: Paper workspace", items: ["Workspaces (fixture)", "Paper workspace", "Second workspace"] },
@@ -25,7 +25,7 @@ for (const { width, button, items } of CASES) {
     await page.waitForLoadState("networkidle");
     const menu = page.getByRole("menu");
     await expect(async () => {
-      await page.getByRole("button", { name: button, exact: true }).click();
+      await page.getByRole("banner").getByRole("button", { name: button, exact: true }).click();
       await expect(menu).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 15_000 });
     for (const item of items) await expect(menu).toContainText(item);

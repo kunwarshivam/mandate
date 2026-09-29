@@ -116,6 +116,6 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
-- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The sidebar, the
-  breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
+- **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone
+  sidebar, the breadcrumbs, ⌘K, and the route-coverage test read it, so no link points at a missing page;
   screens not built yet say "Coming in the next slice" with what they will be for.

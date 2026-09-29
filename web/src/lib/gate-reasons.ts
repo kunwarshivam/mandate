@@ -13,9 +13,9 @@ export function gateRule(code: ReasonCode, mandate: Mandate): string {
     case "account_trading_blocked":
       return "Trading is blocked on the account at the broker.";
     case "agent_exits_only":
-      return "The agent is exits-only: no openings or increases.";
+      return "The agent is exits-only, so it opens and adds to nothing.";
     case "agent_paused":
-      return "The agent is paused: no new orders except protection.";
+      return "The agent is paused, so it sends no new orders except protection.";
     case "agent_stopped":
       return "The agent is stopped.";
     case "not_in_universe":

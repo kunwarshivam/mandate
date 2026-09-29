@@ -89,7 +89,7 @@ const DO = [
 ];
 
 const DONT = [
-  "Colour blends, glass, glows, or a shadow on anything that does not float.",
+  "Colour blends, glows, a shadow on anything that does not float, or glass anywhere but the header and the phone tab bar.",
   "Capitals-only labels, heavy rules, or bands of colour as signage.",
   "Confetti, streaks, badges for trading, or any cue that rewards activity.",
   "Crimson anywhere but the kill switch. Gold outside the gold tokens, as a large block, or, in light mode, as text lighter than dark gold.",

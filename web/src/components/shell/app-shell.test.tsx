@@ -11,6 +11,7 @@ import { SCENARIOS } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
+import { asPhone } from "@/test/viewport";
 import { AppShell } from "./app-shell";
 import { hiddenToTheRight } from "./status-strip";
 
@@ -74,27 +75,40 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the shell, with the founder's mark and lockup inside the named links", () => {
+  it("names the product Owlhead in the header, with the founder's mark below lg and the lockup from lg", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const home = screen.getAllByRole("link", { name: "Owlhead, dashboard" });
-    expect(home.length).toBeGreaterThan(0);
-    for (const link of home) expect(link.querySelector("[data-slot=owlhead-mark]")).toHaveAttribute("aria-hidden", "true");
-    const header = document.querySelector("[data-sidebar=header]");
-    expect(header).not.toBeNull();
-    const sidebarHome = home.find((link) => header?.contains(link));
-    expect(sidebarHome?.querySelector("[data-slot=owlhead-lockup]")).toHaveAttribute("aria-hidden", "true");
+    const [header] = screen.getAllByRole("banner");
+    const home = within(header).getByRole("link", { name: "Owlhead, dashboard" });
+    const mark = home.querySelector("[data-slot=owlhead-mark]");
+    const lockup = home.querySelector("[data-slot=owlhead-lockup]");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark).toHaveClass("lg:hidden");
+    expect(lockup).toHaveAttribute("aria-hidden", "true");
+    expect(lockup).toHaveClass("hidden", "lg:block");
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
-  it("sets the sidebar header on the page's own surface, with the brand in the logo colour and no account block", () => {
+  it("renders no sidebar on desktop, where the dock carries the navigation", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
-    expect(header).toHaveClass("bg-background");
-    expect(header?.closest("[data-surface]")).toBeNull();
-    expect(header?.querySelector("[data-surface]")).toBeNull();
-    for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
-      expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
-      expect(brand.closest("[data-surface]")).toBeNull();
+    expect(document.querySelector("[data-sidebar=header]")).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Primary" })).toHaveAttribute("data-slot", "dock");
+  });
+
+  it("sets the phone sheet's header on the page's own surface, with the brand in the logo colour and no account block", () => {
+    const restore = asPhone();
+    try {
+      renderWithRuntime(<AppShell>{null}</AppShell>);
+      const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
+      expect(header).toHaveClass("bg-background");
+      expect(header?.closest("[data-surface]")).toBeNull();
+      expect(header?.querySelector("[data-surface]")).toBeNull();
+      expect(header?.querySelector("[data-slot=owlhead-lockup]")).toHaveAttribute("aria-hidden", "true");
+      for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
+        expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
+        expect(brand.closest("[data-surface]")).toBeNull();
+      }
+    } finally {
+      restore();
     }
   });
 
@@ -103,7 +117,7 @@ describe("Owlhead", () => {
     try {
       renderWithRuntime(<AppShell>{null}</AppShell>);
       const triggers = screen.getAllByRole("button", { name: "Theme" });
-      expect(triggers.length).toBe(2);
+      expect(triggers.length).toBe(1);
       fireEvent.click(triggers[0]);
       const menu = await screen.findByRole("menu");
       expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Light", "Dark", "System"]);
@@ -122,8 +136,23 @@ describe("Owlhead", () => {
   });
 });
 
+describe("the frame", () => {
+  it("frosts the header, the agent wire, the phone tab bar and the desktop dock, and nothing else", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const [header] = screen.getAllByRole("banner");
+    const wire = document.querySelector<HTMLElement>("[data-slot=wire]");
+    const tabs = document.querySelector<HTMLElement>("nav[aria-label=Main].grid");
+    const dock = screen.getByRole("navigation", { name: "Primary" });
+    for (const frame of [header, wire, tabs, dock]) {
+      expect(frame).toHaveClass("glass");
+      expect(frame).not.toHaveClass("bg-card");
+    }
+    expect([...document.querySelectorAll(".glass")]).toEqual([header, wire, tabs, dock]);
+  });
+});
+
 describe("approvals badge", () => {
-  it("shows a count and nothing else, in the sidebar, the header, and the phone tab bar", () => {
+  it("shows a count and nothing else, in the dock, the header, and the phone tab bar", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const counts = document.querySelectorAll("[data-slot=approvals-count]");
     expect(counts.length).toBe(3);

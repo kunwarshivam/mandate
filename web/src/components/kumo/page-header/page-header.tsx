@@ -31,8 +31,9 @@ export interface PageHeaderProps {
   className?: string;
 }
 
-function isCurrent(pathname: string, href: string, tabs: readonly PageTab[]): boolean {
-  if (pathname === href) return true;
+/** One tab is current: the exact match, else the deepest tab the path sits under. */
+export function isCurrentTab(pathname: string, href: string, tabs: readonly PageTab[]): boolean {
+  if (tabs.some((t) => t.href === pathname)) return pathname === href;
   const deeper = tabs.filter((t) => pathname.startsWith(`${t.href}/`));
   const longest = deeper.sort((a, b) => b.href.length - a.href.length)[0];
   return longest?.href === href;
@@ -57,15 +58,15 @@ export function PageHeader({ title, description, environment, tabs, tabsLabel = 
         <nav aria-label={tabsLabel} className="-mx-(--page-x) overflow-x-auto px-(--page-x) [scrollbar-width:none] lg:mx-0 lg:px-0">
           <ul className="flex min-w-max gap-1 border-b border-border/70">
             {tabs.map((tab) => {
-              const current = isCurrent(pathname, tab.href, tabs);
+              const current = isCurrentTab(pathname, tab.href, tabs);
               return (
-                <li key={tab.href}>
+                <li key={tab.href} className="group/tab">
                   <Link
                     href={tab.href}
                     aria-current={current ? "page" : undefined}
                     className={cn(
-                      "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) first:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
-                      current && "font-medium text-foreground after:absolute after:inset-x-3 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis-line",
+                      "relative inline-flex h-11 items-center px-3 text-sm text-muted-foreground outline-none transition-colors duration-(--duration-hover) group-first/tab:pl-0 hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset",
+                      current && "font-medium text-foreground after:absolute after:inset-x-3 group-first/tab:after:left-0 after:-bottom-px after:h-0.5 after:rounded-full after:bg-lapis-line",
                     )}
                   >
                     {tab.label}

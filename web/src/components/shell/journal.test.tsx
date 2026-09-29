@@ -75,6 +75,19 @@ describe("command palette", () => {
     expect(screen.getByRole("dialog", { name: /Stop/ })).toBeInTheDocument();
   });
 
+  it.each([
+    ["the command bar", /^Jump to an agent or screen…/],
+    ["the compact trigger", "Go to…"],
+  ])("opens from %s, with the same commands as ⌘K", (_, name) => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const header = screen.getAllByRole("banner")[0];
+    expect(screen.queryByRole("option")).toBeNull();
+    fireEvent.click(within(header).getByRole("button", { name }));
+    const options = screen.getAllByRole("option");
+    expect(options[0]).toHaveTextContent("Stop…");
+    expect(screen.getByRole("combobox", { name: "Command" })).toBeInTheDocument();
+  });
+
   it("offers no Stop… to a viewer", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role: "viewer" });
     act(() => {

@@ -288,7 +288,7 @@ function Request({ approvalId }: { approvalId: string }) {
       {open ? (
         <section
           aria-label="Your response"
-          className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-6"
+          className="sticky bottom-[calc(var(--tab-bar)+1px+env(safe-area-inset-bottom))] z-10 -mx-(--page-x) grid gap-3 border-t border-border/70 bg-card px-(--page-x) pt-4 pb-4 lg:bottom-0 lg:mx-0 lg:px-0 lg:pb-[calc(var(--dock-clearance)+1.5rem)]"
         >
           <div className="grid gap-1">
             <p className="text-h3">If you do nothing, this action is skipped.</p>

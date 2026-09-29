@@ -200,7 +200,7 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
 
   test("the command palette", async ({ page }) => {
     await page.goto("/");
-    await openBy(page, page.getByRole("button", { name: /^Go to/ }), page.getByRole("dialog"));
+    await openBy(page, page.locator("[data-slot=command-bar]"), page.getByRole("dialog"));
     expect(await gradientsIn(page)).toEqual([]);
   });
 
@@ -308,7 +308,9 @@ test.describe("Kumo surfaces are flat (DEC-200)", () => {
   });
 
   test("Sidebar: no scroll mask on its content", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
+    await expect(page.locator("[data-sidebar][data-mobile]"), "the phone sheet, the only sidebar left").toBeAttached();
     const masked = page.locator('[data-sidebar] [class*="mask-image"], [class*="mask-image"]');
     expect(await masked.count()).toBeGreaterThan(0);
     for (const el of await masked.all()) expect(await computed(el, ["mask-image", "-webkit-mask-image"])).toEqual({ "mask-image": "none", "-webkit-mask-image": "none" });

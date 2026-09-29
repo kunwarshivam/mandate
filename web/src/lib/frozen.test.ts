@@ -1,6 +1,29 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useFrozen } from "./frozen";
+import { recordHref } from "@/components/stop/commands";
+import { AGENT_IDS, APPROVAL_IDS } from "@/fixtures/workspace";
+import { agentHref, positionHref } from "./screens";
+import { isRecordRoute, useFrozen } from "./frozen";
+
+describe("isRecordRoute", () => {
+  it("knows the record screens: an approval, the kill switch and release, stopping or closing a connection, closing a position", () => {
+    const position = positionHref(AGENT_IDS.swing, "asset_1");
+    for (const path of [
+      `/approvals/${APPROVAL_IDS.swingXyz}`,
+      recordHref("kill", AGENT_IDS.btc),
+      recordHref("release", AGENT_IDS.btc),
+      recordHref("stop_all", "con_1"),
+      recordHref("close_all", "con_1"),
+      `${position}/close`,
+    ])
+      expect(isRecordRoute(path), path).toBe(true);
+  });
+
+  it("leaves every live screen live", () => {
+    for (const path of ["/", "/approvals", "/agents", agentHref(AGENT_IDS.btc, "overview"), agentHref(AGENT_IDS.btc, "positions"), positionHref(AGENT_IDS.swing, "asset_1"), "/connections", "/audit/trace", "/approvals/apr_1/more"])
+      expect(isRecordRoute(path), path).toBe(false);
+  });
+});
 
 describe("useFrozen (brief §4.1)", () => {
   const setup = (live: { mode: string } | null, confirmed = false) =>

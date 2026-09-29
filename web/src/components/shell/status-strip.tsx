@@ -15,7 +15,8 @@ interface Item {
   text: ReactNode;
 }
 
-function items(ws: Workspace, now: string): Item[] {
+/** The four feeds, each saying when it was last true: the strip's items, and the wire's feed list. */
+export function healthItems(ws: Workspace, now: string): Item[] {
   const h = ws.health;
   if (ws.status === "loading") {
     return [{ key: "loading", state: "loading", text: "Connecting to your deployment…" }];
@@ -70,7 +71,7 @@ export function hiddenToTheRight(itemRights: readonly number[], visibleRight: nu
  * ones first. The cue overlays the strip, so it appearing or going moves nothing.
  */
 export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string; className?: string }) {
-  const list = items(ws, now);
+  const list = healthItems(ws, now);
   const degraded = list.filter((i) => i.state === "stale" || i.state === "down").length;
   const strip = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState(0);
@@ -101,7 +102,7 @@ export function StatusStrip({ ws, now, className }: { ws: Workspace; now: string
         data-degraded={degraded > 0 ? "" : undefined}
         tabIndex={0}
         className={cn(
-          "flex h-9 items-center gap-x-5 overflow-x-auto overflow-y-hidden text-caption whitespace-nowrap text-muted-foreground tabular outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:overflow-x-hidden",
+          "flex h-(--status-row) items-center gap-x-5 overflow-x-auto overflow-y-hidden text-caption whitespace-nowrap text-muted-foreground tabular outline-none [scrollbar-width:none] focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:overflow-x-hidden",
           className,
         )}
       >
