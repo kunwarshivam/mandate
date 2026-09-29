@@ -185,10 +185,10 @@ their OKLCH values and computed contrast, the type scale, the spacing in both de
   `npx @cloudflare/kumo add` land in `src/components/kumo/` (`kumo.json`). The app's own components
   are in `src/components/`. `web/DESIGN.md` ("Kumo") lists the token mapping and the parts of Kumo
   the app does not use.
-- **The frame** (DEC-208). The header and the phone tab bar are frosted glass, and nothing else
-  is but the two bars that join them on desktop: from 64rem a labelled floating dock replaces the
-  sidebar, and an agent wire of what the agents are doing runs under the header while every feed
-  answers (the status strip otherwise). The header carries a wide command bar and breadcrumbs
+- **The frame** (DEC-208, DEC-215). The header and the phone tab bar are frosted glass, and
+  nothing else is but the bar that joins them on desktop: from 64rem a labelled floating dock
+  replaces the sidebar. Nothing runs under the header while every feed answers; the status strip
+  shows there while a feed is stale or failing, and on record screens. The header carries a wide command bar and breadcrumbs
   that fold rather than truncate the current page. Stop's desktop pill and the command bar are
   both 40px; Stop's tap area stays 44px.
 - **Navigation.** `src/lib/screens.ts` lists every screen with its purpose. The dock, the phone's

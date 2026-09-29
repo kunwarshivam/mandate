@@ -114,10 +114,10 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   UI palette (`COLOR.md`).
 - **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular
   figures except the display hero figure (DEC-208); the wordmark stays the one serif, as outlines.
-- **The frame (DEC-208).** Glass on the frame only (the header and the phone tab bar, and on
-  desktop the dock and the agent wire that take their place), flat everywhere else, with no
-  gradient (DEC-200). The agent wire names what the agents are doing and never an amount won or
-  lost.
+- **The frame (DEC-208, DEC-215).** Glass on the frame only (the header and the phone tab bar,
+  and on desktop the dock that takes its place), flat everywhere else, with no gradient
+  (DEC-200). Nothing runs under the header while every feed answers; the status strip shows when
+  one does not, and on record screens.
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
