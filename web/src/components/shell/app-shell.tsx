@@ -1,13 +1,13 @@
 "use client";
 
-import { type ReactNode, useMemo } from "react";
+import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { canOpen } from "@/lib/access";
 import { isRecordRoute } from "@/lib/frozen";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allFeedsOk } from "@/lib/feeds";
-import { can, useRole } from "@/lib/roles";
-import { wireItems } from "@/lib/wire";
+import { useRole } from "@/lib/roles";
+import { cn } from "@/lib/utils";
 import { FixtureTag, InlineDisclosures } from "@/components/domain/placeholders";
 import { AccessDenied } from "./access-denied";
 import { AccountBanners } from "./account-banners";
@@ -15,7 +15,6 @@ import { AppHeader } from "./app-header";
 import { Dock } from "./dock";
 import { TabNav } from "./nav";
 import { StatusStrip } from "./status-strip";
-import { Wire } from "./wire";
 
 /** Audit and admin read like a console; everything an owner lives in stays calm (DEC-204). */
 export function densityFor(pathname: string): "calm" | "dense" {
@@ -23,23 +22,21 @@ export function densityFor(pathname: string): "calm" | "dense" {
 }
 
 /**
- * The frame. From `lg` up: the header, then the agent wire while every feed answers or the status
- * strip, and the dock. Below `lg` (DEC-207): the header, a feed banner only while a feed is stale or
- * down, and the tab bar; a record screen keeps the full strip, because a decision is read against
- * every feed's age, not against the absence of a warning.
+ * The frame: the header, then nothing while every feed answers (DEC-215). From `lg` up, the status
+ * strip while a feed is stale or down, and the dock; below `lg` (DEC-207), a one-line banner of the
+ * failing feeds, and the tab bar. A record screen keeps the full strip at every width, because a
+ * decision is read against every feed's age, not against the absence of a warning. With no strip,
+ * the "Fixture data" tag sits at the foot of the page.
  */
 export function AppShell({ children }: { children: ReactNode }) {
   const { ws, now } = useRuntime();
   const { role } = useRole();
   const pathname = usePathname();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
-  const seesAgents = can(role, "agents.view");
   const record = isRecordRoute(pathname);
   const fresh = allFeedsOk(ws);
-  // A record screen is frozen, and a stale or failing feed must be read in full: both keep the strip.
-  const wire = seesAgents && ws.agents.length > 0 && fresh && !record;
+  const strip = record || !fresh;
   const banner = !record && !fresh && ws.status !== "loading";
-  const items = useMemo(() => (wire ? wireItems(ws, now, role) : []), [wire, ws, now, role]);
 
   return (
     <div className="relative isolate flex min-h-svh w-full">
@@ -48,13 +45,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <div className="flex min-h-dvh min-w-0 flex-1 flex-col bg-card">
         <AppHeader />
-        {wire ? (
-          <Wire ws={ws} now={now} items={items} className="hidden lg:flex" />
-        ) : (
+        {strip ? (
           <div className={record ? undefined : "max-lg:hidden"}>
             <StatusStrip ws={ws} now={now} className="px-(--page-x)" />
           </div>
-        )}
+        ) : null}
         {banner ? (
           <div className="lg:hidden">
             <StatusStrip ws={ws} now={now} variant="banner" className="px-(--page-x)" />
@@ -65,13 +60,16 @@ export function AppShell({ children }: { children: ReactNode }) {
           id="main"
           tabIndex={-1}
           data-density={densityFor(pathname)}
-          className="mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-10 outline-none lg:pb-[calc(var(--dock-clearance)+2rem)]"
+          className={cn("mx-auto w-full max-w-(--content-max) flex-1 px-(--page-x) pt-(--page-top) pb-10 outline-none", strip && "lg:pb-[calc(var(--dock-clearance)+2rem)]")}
         >
           <InlineDisclosures inline={isRecordRoute(pathname)}>{canOpen(role, pathname) ? children : <AccessDenied role={role} />}</InlineDisclosures>
         </main>
         <div
-          data-slot="phone-footer"
-          className="mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)] lg:hidden"
+          data-slot="page-footer"
+          className={cn(
+            "mx-auto w-full max-w-(--content-max) px-(--page-x) pb-[calc(var(--tab-bar)+env(safe-area-inset-bottom)+2rem)]",
+            strip ? "lg:hidden" : "lg:pb-[calc(var(--dock-clearance)+2rem)]",
+          )}
         >
           {record ? null : <FixtureTag />}
         </div>
