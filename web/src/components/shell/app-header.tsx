@@ -120,7 +120,7 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
   const { role } = useRole();
   return (
     <DropdownMenu>
-      <DropdownMenu.Trigger render={<button type="button" />} aria-label="More" className={ICON_LINK}>
+      <DropdownMenu.Trigger render={<button type="button" />} aria-label="Alerts and account" className={ICON_LINK}>
         <DotsThreeVertical className="size-5" weight="bold" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="end">
@@ -137,7 +137,7 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
  * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
  * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`) and becomes
- * an icon below `lg`, the workspace switcher becomes an icon (below 90rem), alerts and the account menu fold into "More"
+ * an icon below `lg`, the workspace switcher becomes an icon (below 90rem), alerts and the account menu fold into "Alerts and account"
  * (below `xl`), the paper badge keeps its gloss for screen readers only (at `lg` below 100rem, and
  * below 30rem), and on phones the tab bar and the sidebar sheet carry the rest.
  */
