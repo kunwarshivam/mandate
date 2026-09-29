@@ -341,8 +341,10 @@ ES-04 keeps exact arithmetic in `mandate-num`, so the gate adds, under claim #12
 comparison of its own, and `Price::collar_bound(Fraction, Adverse)` (one rounding, at the 9 places a
 price holds, each bound rounded so the constraint gets **stricter** — a buy's ceiling truncates down
 and a sell's floor rounds up — so a bound never admits a price the exact comparison would refuse).
-`Qty::times_fraction` for the participation caps (truncated to the increment, like `Qty::portion`)
-arrives with E6-8's implementation PR. Nothing here rounds a limit in the order's favour.
+The participation caps need no new function: `Qty::portion(Fraction, ShareIncrement)` is already
+`truncate(fraction × self, increment)`, which is the cap this paragraph once called
+`Qty::times_fraction`, so E6-8's implementation PR adds nothing to `mandate-num` (DEC-163 item 9).
+Nothing here rounds a limit in the order's favour.
 
 ## The evaluation order
 

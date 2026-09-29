@@ -46,8 +46,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* `cargo xtask ci pending` accepts only the `Err` value printed after
   `called \`Result::unwrap()\` on an \`Err\` value:`, the `todo!`/`unimplemented!` panic line, or the
   `Err(..)` `Debug` inside a proptest failure, and a marker written into a test's own assertion
-  message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS` is retired as E6-6 and E6-8 land, or
-  replaced by a rule that reads the cause; and the planted cases of #172's reviews all fail the
+  message no longer satisfies it; `BEHAVIOUR_ONLY_TESTS`, which has had no `mandate-risk` row
+  since E6-8 (DEC-163), is retired as E7-4 lands, or replaced by a rule that reads the cause; and the planted cases of #172's reviews all fail the
   gate. Since DEC-164 a failing property is already read by proptest's report of its minimal
   failure alone, and `mandate-executor`'s three E7-4 properties that passed only on a stub report
   from a case shrinking moved past have their rows; E1-3 narrows that report, and every other
@@ -143,7 +143,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E6-8 (Must)** As an owner, I want market-conduct controls (one working order per side,
   minimum resting time, price collars, participation caps, order-to-fill limits, close-window
   rules, workspace self-trade prevention) and a daily surveillance report, so that agents cannot
-  produce manipulation-like patterns.
+  produce manipulation-like patterns. *Accepted when:* RC-22 and RC-25 pass.
 - **E6-9 (Must)** As an owner, I want account restrictions and trading halts checked before every
   order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
   RC-15 passes.
@@ -717,8 +717,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-7, unowned, blocking `tests/tracer.rs::outlier_close` (PB-15):** a market-data trust rule
   that refuses a close too far from its neighbours. The shell may not judge one, because that is
   price arithmetic (DEC-138 item 3, DEC-166 item 5). The test stays pending until an owner lands the
-  rule in `mandate-marketdata`, or until E6-8's mark-and-collar refuses the limit end to end
-  (the coordinator's ruling on #171).
+  rule in `mandate-marketdata`, or until E6-8's mark-and-collar, in the gate since DEC-163,
+  refuses the limit end to end (the coordinator's ruling on #171).
 - **E7-7, when streams F and H land:** a drift check for
   `crates/mandate-shell/tests/fixtures/tracer/generate.py`, like `reference/mandate/generate.py`'s,
   so the fixture's one share at 255.20, AUTO by `rule:routine`, stays recomputed from the rules
@@ -887,10 +887,31 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
-- Retag `mc_g13` in `crates/mandate-risk/tests/refcases.rs` from `pending E6-3` to `pending E6-8`, in
-  the next tests correction that touches the file. E6-3 has landed; the test now stops at E6-8's
-  fail-closed stub (DEC-129 item 29), and `ci pending` accepts any story's stub, so the stale tag
-  misnames what it waits on without failing the gate (#217 review, round 1, minor 2).
+- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
+  `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
+  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
+  arm that builds a `GateInput` from a case's account, positions, step quote and clock, calls
+  `mandate_risk::evaluate`, and compares verdict and reason code would move RC-25 whole and RC-15,
+  RC-16 and RC-09's gate steps with it. RC-22 needs more: `broker_order_update` (E7-2), the exit
+  sequence's `actions` (E7-4), and the `conduct_breach` step's switch to `exits_only` with an owner
+  alert, a mode transition the runtime owns (§5.9, §9.6's "breach → agent `exits_only`"); the pure
+  gate only denies the breaching opening `conduct_limit_breached`.
+- **`Ratio` to `Fraction` in `mandate-num`.** The surveillance report turns a concentration
+  `Ratio` into a `Fraction` by printing and re-parsing it (`surveillance.rs`'s `share_of_equity`),
+  because `mandate-num` has no exact conversion. The text round trip is exact, but a typed
+  `Fraction::try_from(Ratio)` with its own tests would retire it (DEC-163 item 8).
+- **A defer code for a slice of zero** (founder: the reason-code registry is compliance-visible
+  text). When the day's participation is used up, a discretionary or owner exit is allowed with
+  `Pacing::qty` 0 and the control named in `applied`, because §9.6 says "slice, never deny" and no
+  registered code says "wait for the next interval" (DEC-163 item 6). A registered defer code would
+  let the executor journal the wait as a verdict rather than as an empty order.
+- **A concentration threshold for the surveillance report** (founder). §9.6 lists concentration
+  among the report's checks but configures no threshold, so the report flags only a position worth
+  more than the agent's equity, or any position when equity is not positive (DEC-163 item 8).
+- **Name the cancel's reason explicitly** (coordinator). `CancelInput` tells an exit-sequence or
+  kill-switch cancel by `precedes_risk_reducing_order` alone, which the executor sets; §9.6 exempts
+  both, and a typed cause (exit sequence, kill switch, owner, agent) would let the journal say which
+  (DEC-163 item 7).
 - **E6-6 slice 2:** fold the `legacy_pdt` `DayTradeLedger` account-wide in `mandate-risk` from
   every agent's fills on the account (§9.2's window of today plus four prior trading days, shares
   held overnight sold first, each same-day open-then-close once, crypto never, fractional counted;
