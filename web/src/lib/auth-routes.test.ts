@@ -65,12 +65,12 @@ describe("safeNext keeps `next` on this site (no open redirect)", () => {
 });
 
 describe("public paths", () => {
-  it.each(["/welcome", "/login", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt"])(
+  it.each(["/welcome", "/login", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt", "/site/hero-desktop-light.png", "/site/step-gate-phone-dark.png"])(
     "%s is public",
     (path) => expect(isPublicPath(path)).toBe(true),
   );
 
-  it.each(["/", "/agents", "/approvals/apr_01", "/settings/profile", "/design", "/welcome/x", "/login/x", "/auth", "/loginx", "/og-image.png.html", "/agents/x.png"])("%s is not public", (path) => {
+  it.each(["/", "/agents", "/approvals/apr_01", "/settings/profile", "/design", "/welcome/x", "/login/x", "/auth", "/loginx", "/og-image.png.html", "/agents/x.png", "/site", "/sitex/a.png"])("%s is not public", (path) => {
     expect(isPublicPath(path)).toBe(false);
   });
 });
