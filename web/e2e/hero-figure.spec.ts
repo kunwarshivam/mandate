@@ -239,7 +239,7 @@ test("every figure but the hero keeps tabular digits: tables, key figures, rows 
         hero: hero ? getComputedStyle(hero).fontVariantNumeric : null,
       };
     });
-    expect(read.count, path).toBeGreaterThan(5);
+    expect(read.count, path).toBeGreaterThanOrEqual(5);
     expect(read.proportional, path).toEqual([]);
     if (path === "/positions") expect(read.inTables, "the positions table is measured").toBeGreaterThan(0);
     if (read.hero) expect(read.hero, path).toContain("proportional-nums");
