@@ -7,7 +7,7 @@ The key values, as ramp steps:
 | Role | Light | Dark |
 |---|---|---|
 | The body and cards (`card`); the frame's glass is this at 72% | paper-50 #FDFCFA | ink-950 #14161A |
-| Wells and the sidebar (`background`) | paper-100 #F8F7F4 | ink-975 #0B0D11 |
+| Wells and the phone sidebar sheet (`background`) | paper-100 #F8F7F4 | ink-975 #0B0D11 |
 | Type, primary action, Stop | ink-950 #14161A | paper-100 #F8F7F4 |
 | Gold line and marker | gold-500 #AB7D13 | gold-400 #D9A948 |
 | Gold text | gold-700 #6A4D08 | gold-300 #F9D28A |
@@ -169,7 +169,7 @@ A custom property resolves where it is declared and inherits as a value, so each
 
 | Scope | Base | Text (default / strong / subtle) | Tint | Lines |
 |---|---|---|---|---|
-| `account` (the sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
+| `account` (the phone sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
 | `field` (the mandate) | `mandate`: gold-100, dark gold-850 | `mandate-foreground` / `mandate-strong` / `mandate-muted` | as the root | `mandate-edge` (gold) |
 | `ink` (the Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
 
@@ -188,7 +188,7 @@ Every fill stays one flat colour.
 
 ## The frame's glass
 
-The sticky header and the phone tab bar are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours.
+The sticky header, the ticker tape under it, the phone tab bar and the desktop dock are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours.
 
 The blur only averages what scrolls underneath, so the worst case is a solid colour under the glass: ink (a primary action, the hero figure) in light mode, paper in dark. `tokens.test.ts` composites the glass over every token in each theme and requires 4.5:1 for body and muted text and 3:1 for the Stop pill against it:
 
@@ -198,7 +198,7 @@ The blur only averages what scrolls underneath, so the worst case is a solid col
 | Muted text (breadcrumbs, icons) | 5.24:1 | 5.11:1 |
 | The same muted text at 60% | 3.81:1, fails | 3.35:1, fails |
 
-The paper badge, the ⌘K pill and Stop keep their own solid fills, so their labels read as before.
+The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The ticker's gain and loss colours need more than muted text does, so the ticker lays a card veil at 40% inside its glass, about 83% card in all, and `tokens.test.ts` requires 4.5:1 for gain, loss and their colour-blind variants over every token under that veil, in each theme.
 
 ## Usage rules
 
