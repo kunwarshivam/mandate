@@ -205,6 +205,9 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-journal`, so that the tracer's journal records parse against the journal spec's vectors
   (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
   and the executor write has a registered schema, tested first against the journal spec's vectors.
+  *Blocked* ([DEC-174](04-decision-log.md#decisions)): journal spec v0.4 closes none of the eleven
+  agent-stream schemas the runtime writes and its vectors hold no agent-stream event, so the tests
+  PR waits for the journal spec change DEC-174 item 4 proposes.
 - **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
   to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
   (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
@@ -708,7 +711,8 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
 - **E7-7, once stream E registers agent-stream payload schemas:** move `mandate-shell`'s
   committed-draft ledger from `mandate_canon::parse` to `mandate_journal::Draft::parse`, the
   oracle the brief names, and run `verify_events` over the in-module keystone's streams. Today no
-  agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3).
+  agent-stream event parses there (DEC-157 item 7; #227 review, round 1, minor 3), and the
+  executor's account-stream drafts do not match the registered schemas either (DEC-174 item 5).
 - **E7-7, blocking the slice that lets the crossover drive an order:** bound the stored bars'
   staleness. Check the span's last day against the run's `setup.now` (the last completed session
   before it) and refuse coverage that ends earlier. Today `Bars::closes` reads no clock, so a
