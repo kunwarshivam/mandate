@@ -9,6 +9,7 @@ import { agentLimits } from "@/lib/limits";
 import { PALETTE, PALETTE_DARK } from "@/lib/palette";
 import { type MockChart, chartControl, chartIn, liveCharts, pointerTime } from "@/test/chart-mock";
 import { renderWithRuntime } from "@/test/harness";
+import { spoken } from "@/test/spoken";
 import { AccountEquityChart, AgentEquityChart, unmanagedEquity } from "./equity-chart";
 import { CHART_COLOR, CHART_TOKEN, type ChartLevel, LABEL_GAP, type Tone, areaOptions, baseOptions, candleOptions, crowdedLevels, lineOptions, priceLineFor, setChartMode, usdLabel } from "./options";
 import { ApprovalChart, PositionChart } from "./price-chart";
@@ -226,7 +227,8 @@ describe("the hero chart scrubs", () => {
     const point = data[Math.floor(data.length / 2)];
     hover(chart, point);
     const h = hero(container);
-    expect(h.value.textContent).toBe(usdLabel(point.value));
+    expect(spoken(h.value)).toBe(usdLabel(point.value));
+    expect(h.value.querySelector("[data-slot=cents]")).toHaveTextContent(usdLabel(point.value).slice(-3));
     expect(h.when).toHaveTextContent(/^Sep 28, \d{2}:\d{2} ET$/);
     expect(h.section).toHaveAttribute("data-scrubbing");
     const change = Math.round((point.value - data[0].value) * 100) / 100;
@@ -265,6 +267,32 @@ describe("the hero chart scrubs", () => {
     }
   });
 
+  it("sets the change on a soft pill toned by its sign, neutral at exactly zero, with the disclosure outside it on the same line", () => {
+    const { container } = renderWithRuntime(<AccountEquityChart />);
+    const chart = onlyChart(container);
+    const data = chart.series[0].data as Datum[];
+    const low = data.reduce((a, b) => (b.value < a.value ? b : a));
+    const high = data.reduce((a, b) => (b.value > a.value ? b : a));
+    for (const [point, tone, fill, ink, word] of [
+      [high, "gain", "bg-gain-soft", "text-gain", "gain"],
+      [low, "loss", "bg-loss-soft", "text-loss", "loss"],
+      [data[0], "flat", "bg-muted", "text-foreground", "no change"],
+    ] as const) {
+      hover(chart, point);
+      const pill = hero(container).change;
+      expect(pill).toHaveAttribute("data-tone", tone);
+      expect(pill.className.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "w-fit", "px-3", "py-1", "font-medium", fill, ink]));
+      for (const other of ["bg-gain-soft", "bg-loss-soft", "bg-muted"].filter((c) => c !== fill)) expect(pill).not.toHaveClass(other);
+      expect(pill.querySelector("[data-direction]")).toHaveAttribute("data-direction", tone);
+      expect(pill).toHaveTextContent(word);
+      expect(pill.querySelector("[data-slot=hero-when]")).toHaveClass("text-muted-foreground");
+      expect(pill.querySelector("[data-placeholder]")).toBeNull();
+      expect(pill.parentElement!.querySelector(":scope > [data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+    }
+    expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
+    expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
+  });
+
   it("follows a finger: the crosshair is pinned to the nearest point and let go on release", () => {
     const { container } = renderWithRuntime(<AgentEquityChart agent={SWING} />);
     const chart = onlyChart(container);
@@ -274,7 +302,7 @@ describe("the hero chart scrubs", () => {
     const canvas = container.querySelector<HTMLElement>("[data-slot=chart-canvas]")!;
     fireEvent.pointerDown(canvas, { pointerType: "touch", clientX: 40 });
     expect(chart.pinned).toEqual({ price: target.value, time: target.time });
-    expect(hero(container).value.textContent).toBe(usdLabel(target.value));
+    expect(spoken(hero(container).value)).toBe(usdLabel(target.value));
     fireEvent.pointerUp(canvas, { pointerType: "touch", clientX: 40 });
     expect(chart.pinned).toBeNull();
     expect(hero(container).value).toHaveTextContent(usdLabel(data.at(-1)!.value));

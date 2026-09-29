@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { Dec } from "@/lib/decimal";
@@ -11,11 +12,31 @@ import { direction, directionWord, signedUsd, usd } from "@/lib/format";
  * value once, not the two copies that overlap while it changes. `instant` is for a value that
  * follows the owner's finger (a scrubbed chart), which must never lag behind it.
  */
-export function AnimatedValue({ value, className, instant = false }: { value: string; className?: string; instant?: boolean }) {
+export function AnimatedValue({
+  value,
+  className,
+  instant = false,
+  format,
+}: {
+  value: string;
+  className?: string;
+  instant?: boolean;
+  /** Draws the visible copy in parts; the screen-reader copy stays the whole value. */
+  format?: (value: string) => ReactNode;
+}) {
   // MotionConfig's reducedMotion covers named transform keys only, not a raw `transform` string.
   const shift = useReducedMotion() ? 0 : 40;
+  const shown = format ? format(value) : value;
   if (instant) {
-    return (
+    // Some screen readers read each inline element on its own, so a value drawn in parts gets a whole copy.
+    return format ? (
+      <span data-instant="" className={cn("relative inline-grid", className)}>
+        <span className="sr-only">{value}</span>
+        <span aria-hidden className="[grid-area:1/1]">
+          {shown}
+        </span>
+      </span>
+    ) : (
       <span data-instant="" className={cn("inline-grid", className)}>
         {value}
       </span>
@@ -34,11 +55,33 @@ export function AnimatedValue({ value, className, instant = false }: { value: st
           transition={{ duration: 0.24, ease: [0.23, 1, 0.32, 1] }}
           className="[grid-area:1/1]"
         >
-          {value}
+          {shown}
         </motion.span>
       </AnimatePresence>
     </span>
   );
+}
+
+/** "$28,478" and ".36": the cents are drawn smaller, muted, and raised to the digits' cap height. */
+function withCents(value: string): ReactNode {
+  const dot = value.lastIndexOf(".");
+  if (dot < 0) return value;
+  return (
+    <>
+      {value.slice(0, dot)}
+      <span data-slot="cents" className="align-[1cap] text-[0.5em] leading-0 tracking-normal text-muted-foreground">
+        {value.slice(dot)}
+      </span>
+    </>
+  );
+}
+
+/**
+ * A screen's one hero figure (account or agent equity) in the display size, with its cents half
+ * size. It rolls like any figure, or follows a scrub at once with `instant`.
+ */
+export function HeroFigure({ value, instant = false }: { value: string; instant?: boolean }) {
+  return <AnimatedValue value={value} instant={instant} format={withCents} />;
 }
 
 export function Money({ value, places, className }: { value: string | Dec; places?: number; className?: string }) {
