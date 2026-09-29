@@ -10,6 +10,8 @@
 # `npm run build` is the production build, and its postbuild checks fail if it contains the scenario
 # switcher or takes a scenario. The suite then builds its own copy into `.next-e2e`, with the scenario
 # switch on (`web/scripts/e2e-build.mjs`), and runs in light and dark: about 9 minutes on two workers.
+# A second, short suite (`web/playwright.auth.config.ts`) builds with sign-in on against a stub Supabase
+# address, into `.next-auth-e2e`, and checks what a signed-out visitor meets (DEC-211).
 # Only the Chromium headless shell is installed, cached per Playwright version; on a cache hit
 # only its system libraries are installed.
 name: web
