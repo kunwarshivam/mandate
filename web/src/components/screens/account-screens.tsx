@@ -13,6 +13,8 @@ import { useRuntime } from "@/lib/mock-runtime";
 import { RESTRICTIONS } from "@/lib/restrictions";
 import { useCan } from "@/lib/roles";
 import { type Screen, decisionHref, screensIn } from "@/lib/screens";
+import { useSession } from "@/lib/session";
+import { PasskeysSection } from "@/components/auth/passkeys-section";
 import { ComingSoon } from "./coming-soon";
 import { Panel, Section, WorkspaceGate } from "./common";
 
@@ -122,8 +124,18 @@ function AllTimeline() {
 /** A screen from the registry: built ones render their content, the rest say what they will hold. */
 export function RegistryScreen({ screen }: { screen: Screen }) {
   const { ws } = useRuntime();
+  const session = useSession();
   const body = (() => {
     switch (screen.key) {
+      case "settings-profile":
+        return session ? (
+          <div className="grid gap-(--section-gap)">
+            <PasskeysSection />
+            <ComingSoon purpose="Your name and sign-in sessions." />
+          </div>
+        ) : (
+          <ComingSoon purpose={screen.purpose} />
+        );
       case "audit-decisions":
         return (
           <WorkspaceGate>

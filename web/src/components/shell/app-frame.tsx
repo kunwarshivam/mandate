@@ -7,6 +7,8 @@ import { RoleProvider } from "@/lib/roles";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { getColourBlind, getScenario } from "@/lib/get-workspace";
 import { scenarioSwitcherShown } from "@/lib/scenario";
+import { SessionProvider } from "@/lib/session";
+import { signedInUser } from "@/lib/supabase/server";
 
 /**
  * The app's frame over the fixture workspace: the shell with Stop, the dock and the wire. The `(app)`
@@ -17,14 +19,17 @@ export async function AppFrame({ children }: { children: ReactNode }) {
   const scenario = await getScenario();
   const workspace = buildWorkspace(scenario);
   const colourBlind = await getColourBlind();
+  const user = await signedInUser();
   return (
-    <RoleProvider>
-      <Providers key={scenario} workspace={workspace}>
-        <AppShell>
-          <ViewTransition>{children}</ViewTransition>
-        </AppShell>
-        {scenarioSwitcherShown ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
-      </Providers>
-    </RoleProvider>
+    <SessionProvider session={user}>
+      <RoleProvider>
+        <Providers key={scenario} workspace={workspace}>
+          <AppShell>
+            <ViewTransition>{children}</ViewTransition>
+          </AppShell>
+          {scenarioSwitcherShown ? <ScenarioSwitcher scenario={scenario} colourBlind={colourBlind} /> : null}
+        </Providers>
+      </RoleProvider>
+    </SessionProvider>
   );
 }

@@ -3,12 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Dialog } from "@cloudflare/kumo/primitives/dialog";
-import { Buildings, CaretRight, GearSix, House, MagnifyingGlass, type Icon as PhosphorIcon, Scroll, X } from "@phosphor-icons/react";
+import { Buildings, CaretRight, GearSix, House, MagnifyingGlass, type Icon as PhosphorIcon, Scroll, SignOut, UserCircle, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { homeFor } from "@/lib/access";
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
+import { signOut, useSession } from "@/lib/session";
 import { FixtureTag } from "@/components/domain/placeholders";
 import { WorkspaceSwitcher } from "./app-header";
 import { OPEN_COMMAND_EVENT } from "./command-menu";
@@ -115,6 +116,7 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
   const pathname = usePathname();
   const { role } = useRole();
   const { ws, now } = useRuntime();
+  const session = useSession();
   const groups = moreGroups(role);
   const close = () => onOpenChange(false);
   const search = () => {
@@ -150,6 +152,15 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
                   <span className="truncate text-sm font-medium">{ws.connection.broker}</span>
                 </span>
               </div>
+              {session ? (
+                <div data-slot="more-identity" className="flex min-h-11 min-w-0 items-center gap-3">
+                  <UserCircle className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="grid min-w-0">
+                    <span className="field-label text-muted-foreground">You, {role}</span>
+                    <span className="truncate text-sm font-medium">{session.email ?? "Signed in"}</span>
+                  </span>
+                </div>
+              ) : null}
               <WorkspaceSwitcher inSheet className="-mx-2.5 h-11 w-fit max-w-full" />
             </section>
 
@@ -174,6 +185,13 @@ export function MoreSheet({ open, onOpenChange }: { open: boolean; onOpenChange:
               <span className="text-sm font-medium">Theme</span>
               <ThemeMenu className="press inline-flex size-11 items-center justify-center rounded-full text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring" />
             </div>
+
+            {session ? (
+              <button type="button" onClick={() => void signOut()} data-slot="more-sign-out" className={cn(ROW, "mx-0 -mt-3 w-full")}>
+                <SignOut className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                <span className="min-w-0 flex-1">Sign out</span>
+              </button>
+            ) : null}
 
             <section aria-label="Feeds" data-slot="more-feeds" className="grid gap-2 border-t border-border/70 pt-3">
               <h3 className="field-label text-muted-foreground">Feeds</h3>

@@ -4,11 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Breadcrumbs } from "@cloudflare/kumo/components/breadcrumbs";
 import { DropdownMenu } from "@cloudflare/kumo/components/dropdown";
-import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, Tray, UserCircle } from "@phosphor-icons/react";
+import { Bell, Briefcase, CaretUpDown, DotsThreeVertical, SignOut, Tray, UserCircle } from "@phosphor-icons/react";
 import { canOpen, homeFor } from "@/lib/access";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { type Crumb, crumbsFor } from "@/lib/screens";
+import { signOut, useSession } from "@/lib/session";
 import { cn } from "@/lib/utils";
 import { Wordmark } from "./brand";
 import { CommandMenu } from "./command-menu";
@@ -104,20 +105,36 @@ export function WorkspaceSwitcher({ inSheet = false, className }: { inSheet?: bo
   );
 }
 
-/** Base UI's menu labels must sit inside a group. */
+/** Base UI's menu labels must sit inside a group. Sign out shows only while someone is signed in (DEC-211). */
 function AccountLinks({ role }: { role: Role }) {
+  const session = useSession();
   return (
-    <DropdownMenu.Group>
-      <DropdownMenu.Label>You, {role}</DropdownMenu.Label>
-      {can(role, "workspace.view") ? (
+    <>
+      <DropdownMenu.Group>
+        <DropdownMenu.Label data-slot="account-identity" className="max-w-72">
+          You, {role}
+          {session?.email ? <span className="block truncate font-normal text-muted-foreground">{session.email}</span> : null}
+        </DropdownMenu.Label>
+        {can(role, "workspace.view") ? (
+          <>
+            <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
+            <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
+          </>
+        ) : (
+          <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
+        )}
+      </DropdownMenu.Group>
+      {session ? (
         <>
-          <DropdownMenu.LinkItem render={<Link href="/settings/profile" />}>Profile</DropdownMenu.LinkItem>
-          <DropdownMenu.LinkItem render={<Link href="/settings/notifications" />}>Notifications</DropdownMenu.LinkItem>
+          <DropdownMenu.Separator />
+          <DropdownMenu.Group>
+            <DropdownMenu.Item icon={SignOut} onClick={() => void signOut()}>
+              Sign out
+            </DropdownMenu.Item>
+          </DropdownMenu.Group>
         </>
-      ) : (
-        <DropdownMenu.LinkItem render={<Link href="/audit" />}>Audit</DropdownMenu.LinkItem>
-      )}
-    </DropdownMenu.Group>
+      ) : null}
+    </>
   );
 }
 

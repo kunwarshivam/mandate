@@ -5,6 +5,7 @@ import { type Passkey, PasskeyContext, mockPasskey } from "@/components/stop/ste
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { type Role, RoleProvider } from "@/lib/roles";
+import { type Session, SessionProvider } from "@/lib/session";
 
 export const RECORD_AFTER_MS = 1600;
 
@@ -15,17 +16,19 @@ export const RECORD_AFTER_MS = 1600;
 export function renderWithRuntime(
   ui: ReactElement,
   scenario: Scenario = "normal",
-  { role = "owner", passkey = mockPasskey }: { role?: Role; passkey?: Passkey } = {},
+  { role = "owner", passkey = mockPasskey, session = null }: { role?: Role; passkey?: Passkey; session?: Session | null } = {},
 ) {
   const initial = buildWorkspace(scenario);
   const wrap = (inner: ReactElement) => (
-    <PasskeyContext.Provider value={passkey}>
-      <RoleProvider initial={role}>
-        <Providers workspace={initial} tick={false} recordAfterMs={RECORD_AFTER_MS}>
-          {inner}
-        </Providers>
-      </RoleProvider>
-    </PasskeyContext.Provider>
+    <SessionProvider session={session}>
+      <PasskeyContext.Provider value={passkey}>
+        <RoleProvider initial={role}>
+          <Providers workspace={initial} tick={false} recordAfterMs={RECORD_AFTER_MS}>
+            {inner}
+          </Providers>
+        </RoleProvider>
+      </PasskeyContext.Provider>
+    </SessionProvider>
   );
   const view = render(wrap(ui));
   return { ...view, rerender: (next: ReactElement) => view.rerender(wrap(next)) };
