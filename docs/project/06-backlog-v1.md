@@ -783,6 +783,14 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue and the query is
   answered, with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13)).
   Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
+- **E7-4 (stream K), from #286 round 1's mutation run, needs a ruling:** a passive exit opens no
+  unprotected interval, so once its OCO's cancel is confirmed, an exit the gate then holds (rule
+  13's `Unknown`, `paused` or `stopped`) or one still waiting on its agent's opening (rule 5, up
+  to `unknown_absent_window_s` and the query's answer) leaves the position with no protection and
+  nothing bounding or alerting it until the exit is placed as the new OCO. A denied or abandoned
+  one re-places the protection ([DEC-160](04-decision-log.md#decisions) (17)). Options: open the
+  interval, so `max_unprotected_s` bounds and alerts it, or re-place the recorded OCO while the
+  exit waits.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
