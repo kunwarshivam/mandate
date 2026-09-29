@@ -1474,8 +1474,8 @@ def approval_content(m, req, figures):
             "gross_usd_after": norm(min(D(r["max_gross_exposure_usd"]), E)), "bought_today_usd": None,
             "drawdown": norm(min(ladder)) if ladder else None, "daily_pnl_fraction": r["max_daily_loss"]}
     return {
-        "action": {k: req[k] for k in ("instrument", "asset_class", "side", "qty", "limit_price", "purpose")}
-                  | {"order_usd": norm(D(req["qty"]) * D(req["limit_price"]))},
+        "action": {k: req[k] for k in ("instrument", "asset_class", "side", "qty")} | {"limit": req["limit_price"]}
+                  | {"order_usd": norm(D(req["qty"]) * D(req["limit_price"])), "purpose": req["purpose"]},
         "trigger": {"mandate_version": req["mandate_version"], "decided_by": by,
                     "rule": None if rule is None else {"id": rule["id"], "when": rule["when"], "then": rule["then"]}},
         "evidence": {"combined_score": {"value": req["combined_score"], "label": SCORE_LABEL}, "outputs": req.get("outputs", [])},
