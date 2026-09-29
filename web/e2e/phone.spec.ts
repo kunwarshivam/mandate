@@ -41,6 +41,8 @@ async function smallTargets(root: Locator) {
     const small: string[] = [];
     for (const c of el.querySelectorAll<HTMLElement>("a[href], button, [role=button], input, select, summary")) {
       if (!c.checkVisibility()) continue;
+      // The disclosure symbol's target is a pseudo-element that grows to 44px only under a coarse pointer; disclosure.spec.ts measures it with touch.
+      if (c.dataset.slot === "disclosure-trigger") continue;
       // A stretched link's ::after fills its positioned row, which is the target a finger meets.
       const stretched = getComputedStyle(c, "::after").position === "absolute";
       const r = (stretched ? (c.offsetParent ?? c) : c).getBoundingClientRect();
