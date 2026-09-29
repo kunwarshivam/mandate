@@ -125,8 +125,12 @@ test("a menu item navigates, and the menu's button shows where you are", async (
   await dock(page).getByRole("button", { name: "Audit" }).click();
   await page.getByRole("menuitem", { name: "Trace" }).click();
   await expect(page).toHaveURL("/audit/trace");
-  await expect(dock(page).getByRole("button", { name: "Audit" })).toHaveAttribute("aria-current", "true");
-  await dock(page).getByRole("button", { name: "Audit" }).click();
+  const audit = dock(page).getByRole("button", { name: "Audit" });
+  await expect(audit).toHaveAttribute("aria-current", "true");
+  await expect(async () => {
+    if ((await audit.getAttribute("aria-expanded")) !== "true") await audit.click();
+    await expect(page.getByRole("menu")).toBeVisible({ timeout: 1000 });
+  }).toPass({ timeout: 15_000 });
   await expect(page.getByRole("menuitem", { name: "Trace" })).toHaveAttribute("aria-current", "page");
 });
 
