@@ -2358,7 +2358,33 @@ mod sequence_tests {
         let released = executor.run(Input::Tick(RiskClock::from_secs(1)), &ports)?;
         assert_eq!(actions(&released), vec!["unprotected_start"]);
         assert_eq!(cancels(&released), vec![OCO]);
+        assert_eq!(
+            journal_order(&released),
+            vec!["unprotected_start", OCO, "GateDecided"],
+            "DEC-160 (8): the released exit's sequence is journaled before its GateDecided, as on \
+             arrival (#286 round 1, minor 1)"
+        );
         Ok(())
+    }
+
+    /// The drafts that order an exit's start: each `ProtectionChanged` by its action, each cancel
+    /// asked by the order it names, and each `GateDecided`.
+    fn journal_order(effects: &[Effect]) -> Vec<&str> {
+        effects
+            .iter()
+            .filter_map(|effect| match effect {
+                Effect::Journal(draft) if draft.event_type == "GateDecided" => Some("GateDecided"),
+                Effect::Journal(draft) if draft.event_type == "ProtectionChanged" => {
+                    draft.payload.get("action").and_then(Value::as_str)
+                }
+                Effect::Journal(draft)
+                    if draft.payload.get("cancel_requested") == Some(&Value::Bool(true)) =>
+                {
+                    draft.payload.get("client_order_id").and_then(Value::as_str)
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// #267 round 1, B1 and DEC-160 (2): a stop-only placement with no shape to re-place — an

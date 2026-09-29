@@ -83,10 +83,22 @@ pub(crate) fn gate_and_submit(
         return abandon(batch, intent, "intent_too_old");
     }
     crypto_add(batch, intent)?;
+    begin_and_submit(batch, intent, true)
+}
+
+/// The gate before the sequence (DEC-160 (8)), on arrival and on release alike: the verdict is
+/// read without journaling it, an allowed exit's sequence starts, and only then is `GateDecided`
+/// journaled, so the protective cancels precede it on the journal; an allowed intent is then
+/// submitted. With `always` false a verdict that does not allow is not journaled.
+fn begin_and_submit(
+    batch: &mut Batch<'_, '_>,
+    intent: &IntentId,
+    always: bool,
+) -> Result<(), ExecutorError> {
     if decide(batch, intent)?.0.verdict_name() == ALLOW {
         begin_exit(batch, intent)?;
     }
-    if gate(batch, intent, true)? == ALLOW {
+    if gate(batch, intent, always)? == ALLOW {
         submit(batch, intent)?;
     }
     Ok(())
@@ -95,9 +107,6 @@ pub(crate) fn gate_and_submit(
 const ALLOW: &str = "allow";
 const HOLD: &str = "hold";
 
-/// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
-/// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
-/// journaled again: a held intent re-checked at a tick records only the moment it is released.
 /// The gate's verdict on `intent` against the current state, journaling nothing: only an exit
 /// the gate allows starts §5.4's sequence, so a held or denied one leaves protection resting.
 fn decide(
@@ -134,6 +143,9 @@ fn decide(
     Ok((decision, *purpose))
 }
 
+/// Runs the binding gate on an intent, journals the decision, and answers its verdict name:
+/// `allow`, `hold`, or `deny`. With `always` false, a decision that does not allow is not
+/// journaled again: a held intent re-checked at a tick records only the moment it is released.
 fn gate(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -365,22 +377,20 @@ pub(crate) fn resume(batch: &mut Batch<'_, '_>, stale_only: bool) -> Result<(), 
     Ok(())
 }
 
-/// A held intent is released at the first tick its hold has cleared — as its first submission, or
-/// as the resubmission of an order a confirmed absence returned to `Intent` — abandoned once it is
-/// too old, and otherwise left waiting without a journal entry per tick.
+/// A held intent is released at the first tick its hold has cleared — as its first submission,
+/// its sequence's cancels journaled before its `GateDecided` as on arrival (#286 round 1, minor
+/// 1), or as the resubmission of an order a confirmed absence returned to `Intent` — abandoned
+/// once it is too old, and otherwise left waiting without a journal entry per tick.
 pub(crate) fn release_held(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let held: Vec<IntentId> = batch.view.held.iter().cloned().collect();
     for intent in held {
+        let id = ClientOrderId::for_intent(&intent)?;
         if too_old(batch, &intent) {
             abandon(batch, &intent, "intent_too_old")?;
+        } else if !batch.view.orders.contains_key(&id) {
+            begin_and_submit(batch, &intent, false)?;
         } else if gate(batch, &intent, false)? == ALLOW {
-            let id = ClientOrderId::for_intent(&intent)?;
-            if batch.view.orders.contains_key(&id) {
-                send_again(batch, &id)?;
-            } else {
-                begin_exit(batch, &intent)?;
-                submit(batch, &intent)?;
-            }
+            send_again(batch, &id)?;
         }
     }
     Ok(())
