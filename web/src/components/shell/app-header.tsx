@@ -38,8 +38,8 @@ function WorkspaceSwitcher() {
         aria-label={`Workspace: ${current.label}`}
         className="press inline-flex h-10 max-w-48 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-sm font-medium outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring"
       >
-        <Briefcase className="size-5 shrink-0 xl:hidden" aria-hidden />
-        <span className="truncate max-xl:sr-only">{current.label}</span>
+        <Briefcase className="size-5 shrink-0 min-[90rem]:hidden" aria-hidden />
+        <span className="truncate max-[90rem]:sr-only">{current.label}</span>
         <CaretUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="start">
@@ -108,16 +108,18 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * The header always renders, whatever is loading: the Stop control, the paper badge, and the way
  * home never wait for workspace data (brief §5, rule 13). Stop never shrinks and never leaves the
  * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
- * the search becomes an icon (below `lg`), the trail keeps two crumbs and the workspace switcher
- * becomes an icon (below `xl`), alerts and the account menu fold into "More" (below `xl`), the paper
- * badge drops its gloss (below 30rem), and on phones the tab bar and the sidebar sheet carry the rest.
+ * the trail truncates and then hides, the command bar narrows (it is centred where both sides fit,
+ * `e2e/command-bar.spec.ts`) and becomes an icon below `lg`, the workspace switcher becomes an icon
+ * (below 90rem), the trail keeps two crumbs (below `xl`), alerts and the account menu fold into "More"
+ * (below `xl`), the paper badge keeps its gloss for screen readers only (at `lg` below 100rem, and
+ * below 30rem), and on phones the tab bar and the sidebar sheet carry the rest.
  */
 export function AppHeader() {
   const pathname = usePathname();
   const { ws, now } = useRuntime();
   const { role } = useRole();
   const open = ws.approvals.filter((a) => approvalAt(a, now).status === "delivered").length;
-  // Deep pages keep their last three crumbs; the page's tabs and the sidebar carry the rest of the way back.
+  // Deep pages keep their last three crumbs; the page's tabs and the dock carry the rest of the way back.
   const crumbs = crumbsFor(pathname, (id) => ws.agents.find((a) => a.agent_id === id)?.label)
     .filter((c) => canOpen(role, c.href))
     .slice(-3);
@@ -126,36 +128,38 @@ export function AppHeader() {
 
   return (
     <header className="glass sticky top-0 z-30 shrink-0 border-b">
-      <div className="flex h-16 items-center gap-1 overflow-hidden px-(--page-x) whitespace-nowrap sm:gap-2">
-        <Sidebar.Trigger className="lg:hidden" />
-        <Link
-          href={home.href}
-          className="inline-flex min-h-11 shrink-0 items-center px-1 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring lg:mr-2"
-          aria-label={`Owlhead, ${home.label}`}
-        >
-          <Wordmark />
-        </Link>
-        <div className="hidden lg:block">
-          <WorkspaceSwitcher />
+      <div className="flex h-16 items-center gap-1 overflow-hidden px-(--page-x) whitespace-nowrap sm:gap-2 lg:gap-4">
+        <div className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2 lg:min-w-auto lg:basis-0">
+          <Sidebar.Trigger className="lg:hidden" />
+          <Link
+            href={home.href}
+            className="inline-flex min-h-11 shrink-0 items-center px-1 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring lg:mr-2"
+            aria-label={`Owlhead, ${home.label}`}
+          >
+            <Wordmark />
+          </Link>
+          <div className="hidden lg:block">
+            <WorkspaceSwitcher />
+          </div>
+          <div className="@container hidden min-w-0 flex-1 md:flex">
+            <Breadcrumbs size="sm" className={`mr-0 min-w-0 @max-[8rem]:hidden [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${crumbs.length > 2 ? TWO_CRUMBS : ""}`}>
+              {crumbs.flatMap((c, i) => [
+                ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),
+                i === crumbs.length - 1 ? (
+                  <Breadcrumbs.Current key={c.href}>{c.label}</Breadcrumbs.Current>
+                ) : (
+                  <Breadcrumbs.Link key={c.href} href={c.href}>
+                    {c.label}
+                  </Breadcrumbs.Link>
+                ),
+              ])}
+            </Breadcrumbs>
+          </div>
         </div>
-        <div className="hidden min-w-0 flex-1 md:flex">
-          <Breadcrumbs size="sm" className={`mr-0 min-w-0 [&_a]:min-w-0 [&_a]:shrink-[4] [&_a>span]:truncate ${crumbs.length > 2 ? TWO_CRUMBS : ""}`}>
-            {crumbs.flatMap((c, i) => [
-              ...(i > 0 ? [<Breadcrumbs.Separator key={`sep-${c.href}`} />] : []),
-              i === crumbs.length - 1 ? (
-                <Breadcrumbs.Current key={c.href}>{c.label}</Breadcrumbs.Current>
-              ) : (
-                <Breadcrumbs.Link key={c.href} href={c.href}>
-                  {c.label}
-                </Breadcrumbs.Link>
-              ),
-            ])}
-          </Breadcrumbs>
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-0.5 sm:gap-1.5">
-          <CommandMenu />
+        <CommandMenu />
+        <div className="flex shrink-0 items-center gap-0.5 sm:gap-1.5 lg:flex-1 lg:basis-0 lg:justify-end">
           <ThemeMenu className={`${ICON_LINK} max-sm:hidden`} />
-          <EnvironmentBadge environment={ws.environment} />
+          <EnvironmentBadge environment={ws.environment} className="lg:max-[100rem]:[&>span+span]:sr-only" />
           {seesAgents ? (
             <>
               <Link href="/approvals" aria-label="Approvals" className={`${ICON_LINK} max-sm:hidden`}>

@@ -200,7 +200,7 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
 
   test("the command palette", async ({ page }) => {
     await page.goto("/");
-    await openBy(page, page.getByRole("button", { name: /^Go to/ }), page.getByRole("dialog"));
+    await openBy(page, page.locator("[data-slot=command-bar]"), page.getByRole("dialog"));
     expect(await gradientsIn(page)).toEqual([]);
   });
 
