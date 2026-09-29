@@ -198,11 +198,15 @@ pub(crate) fn cancel_openings(
 /// §5.4's marketable exit sequence, once the gate allows the exit (a held or denied exit leaves
 /// protection resting and opens no interval): every resting protective order, attributed or
 /// not (DEC-160 3d), is cancelled by id (again on each ask), and the interval's start records the
-/// sequence so a restart resumes it. A passive exit or an add is not this sequence; a crypto add
-/// answers slice 5's stub, and an exit meeting its agent's own resting opening there answers
-/// slice 3b's (§5.3 rule 5 cancels that opening first), never skipping rule 5. Both are reachable
-/// only where protection rests, so not before slice 2 (the pin); nothing else is denied here
-/// (rule 13).
+/// sequence so a restart resumes it; a passive exit starts the passive sequence instead. Any exit
+/// first cancels its agent's own resting openings in the instrument (§5.3 rule 5). An add is no
+/// sequence, and nothing is denied here (rule 13).
+///
+/// A passive exit where the resting protection has no take-profit — crypto's one stop-limit
+/// (DEC-36) — answers slice 5's stub before anything is cancelled, so the stop keeps resting: it
+/// never becomes an OCO in a crypto instrument (§5.4, simple orders only) and never leaves part
+/// of the position unprotected (#286 round 1, M1), like [`replace`] and [`crypto_add`]. It is
+/// reachable only where protection rests, so not before slice 2 (the pin).
 pub(crate) fn begin_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -217,9 +221,6 @@ pub(crate) fn begin_exit(
     else {
         return Ok(());
     };
-    if exits(purpose) {
-        cancel_openings(batch, Some(&agent), Some(&instrument))?;
-    }
     let fresh = batch
         .at()
         .secs()
@@ -234,12 +235,22 @@ pub(crate) fn begin_exit(
         .view
         .protection
         .get(&instrument)
-        .filter(|protection| !protection.resting.is_empty())
+        .filter(|protection| !protection.resting.is_empty() && exits(purpose))
         .cloned();
-    let Some(protection) = resting.filter(|_| exits(purpose)) else {
+    let kept = resting
+        .as_ref()
+        .and_then(|protection| protection.prices)
+        .filter(|_| bid.is_some_and(|bid| limit > bid));
+    if kept.is_some_and(|prices| prices.take_profit.is_none()) {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    }
+    if exits(purpose) {
+        cancel_openings(batch, Some(&agent), Some(&instrument))?;
+    }
+    let Some(protection) = resting else {
         return Ok(());
     };
-    let passive = bid.is_some_and(|bid| limit > bid) && protection.prices.is_some();
+    let passive = kept.is_some();
     if !batch.view.exiting.contains_key(&instrument) {
         let entry = match protection
             .resting
@@ -546,6 +557,9 @@ fn place(
 /// new GTC OCO for its own quantity, keeping the stop; the rest of the position keeps protection at
 /// the recorded prices, so nothing sells beyond the intent and the whole position keeps its stop
 /// (#174 ruling (c), 5862934909; rule 3). Answers whether the intent was this passive sequence's.
+/// A passive sequence on the journal with no take-profit, which [`begin_exit`] never starts,
+/// answers slice 5's stub rather than an OCO without one or a remainder left unprotected (#286
+/// round 1, M1).
 pub(crate) fn passive_exit(
     batch: &mut Batch<'_, '_>,
     intent: &IntentId,
@@ -562,6 +576,9 @@ pub(crate) fn passive_exit(
     else {
         return Ok(false);
     };
+    let Some(take_profit) = prices.take_profit else {
+        return Err(ExecutorError::Unimplemented { story: "E7-4" });
+    };
     let held = batch
         .view
         .positions
@@ -577,7 +594,7 @@ pub(crate) fn passive_exit(
     place(batch, &first, Some(intent), &sequence.agent, prices)?;
     let rest = held.abs().checked_sub(qty).unwrap_or(Qty::ZERO);
     let mut requests = vec![first];
-    if let (true, Some(take_profit)) = (rest > Qty::ZERO, prices.take_profit) {
+    if rest > Qty::ZERO {
         let id = ClientOrderId::for_protection(&sequence.entry, &batch.id_after(1))?;
         let legs = OcoLegs {
             take_profit,
@@ -2972,6 +2989,244 @@ mod sequence_tests {
                 .collect::<Vec<_>>(),
             vec![Qty::parse("10")?]
         );
+        Ok(())
+    }
+
+    /// The ten AAPL, as crypto under a 1% offset, protected by crypto's one GTC stop-limit at 140
+    /// (DEC-36): a stop-only placement, with no take-profit.
+    fn stop_only(ports: &Ports<'_>) -> Result<Executor, ExecutorError> {
+        let mut executor = held(ports)?;
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("10")),
+                ("order_type", text("stop_limit")),
+                ("tif", text("gtc")),
+                ("stop_price", text("140")),
+                ("limit", text("138.6")),
+                ("purpose", text("protective")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(OCO)), ("state", text("accepted"))],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("placed")),
+                ("orders", text(OCO)),
+                ("qty", text("10")),
+                ("stop", text("140")),
+            ],
+        )?;
+        Ok(executor)
+    }
+
+    /// #286 round 1, M1: a passive exit (a sell limit above a fresh sane bid) where the resting
+    /// protection is a stop-only placement answers slice 5's stub before anything is journaled or
+    /// cancelled — never an OCO in a crypto instrument, never a remainder left unprotected — and
+    /// the stop keeps resting. The same exit at or below the bid is marketable and runs its
+    /// sequence.
+    #[test]
+    fn a_passive_exit_over_a_stop_only_placement_answers_the_stub() -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Coin,
+            instruments: &Coin,
+            config: &config,
+            fees: &fees,
+        };
+        for (limit, passive) in [
+            ("160", true),
+            ("150.01", true),
+            ("150", false),
+            ("139", false),
+        ] {
+            let mut executor = stop_only(&ports)?;
+            executor.run(fresh_quote("150", true, 0)?, &ports)?;
+            let exit = executor.run(sell(EXIT, "4", limit, Purpose::DiscretionaryExit)?, &ports);
+            if passive {
+                assert!(stub(&exit), "{limit}: {exit:?}");
+                assert!(
+                    rests(&executor.state, &aapl()?),
+                    "{limit}: the stop still rests"
+                );
+                assert!(
+                    executor.state.exiting.is_empty(),
+                    "{limit}: no sequence began"
+                );
+                assert_eq!(
+                    executor
+                        .state
+                        .orders
+                        .get(&ClientOrderId::parse(OCO)?)
+                        .map(|order| (order.state, order.cancel_unconfirmed)),
+                    Some((OrderState::Accepted, false)),
+                    "{limit}: the stop was never asked to cancel"
+                );
+            } else {
+                let exit = exit?;
+                assert_eq!(actions(&exit), vec!["unprotected_start"], "{limit}");
+                assert_eq!(cancels(&exit), vec![OCO], "{limit}");
+            }
+        }
+        Ok(())
+    }
+
+    /// #286 round 1, M1, in [`passive_exit`](super::passive_exit): a passive sequence on the
+    /// journal whose recorded protection has no take-profit — which [`begin_exit`](super::begin_exit)
+    /// no longer starts — answers the stub at the confirmation, rather than an OCO without a
+    /// take-profit or a remainder left unprotected.
+    #[test]
+    fn a_journaled_passive_sequence_with_no_take_profit_answers_the_stub()
+    -> Result<(), ExecutorError> {
+        let (config, fees) = (executor_config(), fees()?);
+        let ports = Ports {
+            ids: &Ids,
+            mandates: &Coin,
+            instruments: &Coin,
+            config: &config,
+            fees: &fees,
+        };
+        let mut executor = stop_only(&ports)?;
+        committed(
+            &mut executor,
+            "IntentReceived",
+            vec![
+                ("intent_id", text(EXIT)),
+                ("agent", text("agent-a")),
+                ("kind", text("order")),
+                ("instrument", text("AAPL")),
+                ("side", text("sell")),
+                ("qty", text("4")),
+                ("limit", text("160")),
+                ("purpose", text("discretionary_exit")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "GateDecided",
+            vec![("intent_id", text(EXIT)), ("verdict", text("allow"))],
+        )?;
+        committed(
+            &mut executor,
+            "ProtectionChanged",
+            vec![
+                ("instrument", text("AAPL")),
+                ("action", text("passive_start")),
+                ("orders", text(OCO)),
+                ("intent_id", text(EXIT)),
+                ("entry", text("md-held-1")),
+                ("agent", text("agent-a")),
+                ("stop", text("140")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(OCO)),
+                ("state", text("pending_cancel")),
+                ("cancel_requested", Value::Bool(true)),
+            ],
+        )?;
+        assert!(
+            executor
+                .state
+                .exiting
+                .get(&aapl()?)
+                .is_some_and(|sequence| sequence.passive),
+            "the journal carries a passive sequence"
+        );
+        let confirmed = executor.run(cancel_accepted(OCO), &ports);
+        assert!(stub(&confirmed), "{confirmed:?}");
+        Ok(())
+    }
+
+    /// DEC-160 (8), (13): an exit's wait on its cancels starts at the `GateDecided` that allows
+    /// it, the latest one — an exit held on an `Unknown` and released later waits its full bound
+    /// on the opening it then cancels, rather than being overdue from its first allow and going
+    /// before rule 5's cancel is confirmed.
+    #[test]
+    fn a_wait_starts_at_the_allow_that_ends_a_hold() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = held_with_a_resting_buy(&ports)?;
+        let other = "md-other-1";
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(other)),
+                ("agent", text("agent-b")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("1")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(other)),
+                ("state", text("accepted")),
+            ],
+        )?;
+        executor.run(sell(EXIT, "5", "139", Purpose::RiskExit)?, &ports)?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![("client_order_id", text(other)), ("state", text("unknown"))],
+        )?;
+        let held = executor.run(cancel_accepted(BUY), &ports)?;
+        assert_eq!(verdicts(&held), vec!["hold"], "{:?}", drafted(&held));
+        let second = "md-buy-3";
+        committed(
+            &mut executor,
+            "OrderSubmitted",
+            vec![
+                ("client_order_id", text(second)),
+                ("agent", text("agent-a")),
+                ("instrument", text("AAPL")),
+                ("side", text("buy")),
+                ("qty", text("5")),
+                ("limit", text("150")),
+                ("purpose", text("open")),
+            ],
+        )?;
+        committed(
+            &mut executor,
+            "OrderStateChanged",
+            vec![
+                ("client_order_id", text(second)),
+                ("state", text("accepted")),
+            ],
+        )?;
+        executor.run(
+            Input::Broker(Ok(BrokerOutcome::Order(opening_order(
+                other, "canceled", "0",
+            )?))),
+            &ports,
+        )?;
+        let released = executor.run(Input::Tick(RiskClock::from_secs(40)), &ports)?;
+        assert_eq!(verdicts(&released), vec!["allow"]);
+        assert_eq!(cancels(&released), vec![second]);
+        assert!(queried(&released).is_empty() && submitted(&released) == 0);
+        let early = executor.run(Input::Tick(RiskClock::from_secs(54)), &ports)?;
+        assert!(queried(&early).is_empty() && submitted(&early) == 0);
+        let due = executor.run(Input::Tick(RiskClock::from_secs(55)), &ports)?;
+        assert_eq!(queried(&due), vec![second]);
         Ok(())
     }
 
