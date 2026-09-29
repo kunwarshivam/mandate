@@ -12,7 +12,8 @@ const LOUD = ["stale", "drawdown", "reconciliation", "unknown-order", "unreachab
 const WIDTHS = [320, 390, 1024, 1440];
 const DESKTOP = 1024;
 const MIN_TARGET = 44;
-const DESKTOP_PILL = 36;
+/** From 64rem the visible pill matches the command bar, the header's other 40px control. */
+const DESKTOP_PILL = 40;
 /** WCAG 2.2: non-text contrast for the outline, and the Stop label's own bar (`STOP_CONTRAST`). */
 const MARK_CONTRAST = 3;
 const LABEL_CONTRAST = 7;
@@ -173,10 +174,15 @@ test.describe("both tones share one box (no layout shift)", () => {
         if (width < DESKTOP) expect(f.pill.height, "phone pill").toBeGreaterThanOrEqual(MIN_TARGET);
         else expect(f.pill.height, "desktop pill").toBeCloseTo(DESKTOP_PILL, 0);
       }
+      if (width >= DESKTOP) {
+        const bar = await page.locator("[data-slot=command-bar]").boundingBox();
+        expect(bar!.height, "the command bar").toBeCloseTo(DESKTOP_PILL, 0);
+        expect(bar!.y + bar!.height / 2, "centred on the same line as Stop").toBeCloseTo(loud.pill.y + loud.pill.height / 2, 0);
+      }
     });
   }
 
-  test("on desktop the 44px hit area reaches past the 36px pill", async ({ page }) => {
+  test("on desktop the 44px hit area reaches past the 40px pill", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await load(page, "normal");
     const hits = await stopIn(page).evaluate((el) => {

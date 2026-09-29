@@ -84,11 +84,12 @@ describe("the Stop control is quiet until something needs you (DEC-206)", () => 
     }
   });
 
-  it("keeps a 44px hit area at every width and a 36px pill from lg up", () => {
+  it("keeps a 44px hit area at every width and a 40px pill from lg up, the command bar's height", () => {
     const stop = renderShell("normal");
     expect(stop).toHaveClass("h-11");
     expect([...stop.classList].some((c) => /^(lg|xl|md|sm):h-/.test(c))).toBe(false);
-    expect(pill(stop)).toHaveClass("h-11", "lg:h-9");
+    expect(pill(stop)).toHaveClass("h-11", "lg:h-10");
+    expect(document.querySelector("[data-slot=command-bar]")).toHaveClass("h-10");
   });
 
   it("stays enabled and quiet on the error screen", () => {

@@ -67,7 +67,7 @@ export function StopControl({ className }: { className?: string }) {
         <span
           data-slot="stop-pill"
           className={cn(
-            "inline-flex h-11 items-center gap-2 rounded-full border-2 border-ink pr-4.5 pl-3.5 font-semibold transition-colors duration-(--duration-hover) ease-(--ease-out) group-focus-visible:ring-3 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 motion-reduce:transition-none lg:h-9 lg:gap-1.5 lg:pr-4 lg:pl-3 lg:text-sm",
+            "inline-flex h-11 items-center gap-2 rounded-full border-2 border-ink pr-4.5 pl-3.5 font-semibold transition-colors duration-(--duration-hover) ease-(--ease-out) group-focus-visible:ring-3 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 motion-reduce:transition-none lg:h-10 lg:gap-1.5 lg:pr-4 lg:pl-3 lg:text-sm",
             loud ? "bg-ink text-ink-foreground group-hover:bg-ink/88" : "bg-card text-ink group-hover:bg-background",
           )}
         >
