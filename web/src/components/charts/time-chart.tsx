@@ -173,7 +173,7 @@ export function TimeChart({
           if (hero) scrubRef.current?.(scrubFor(param, api));
           else setReadout(readoutFor(param, api, valueFormat));
         });
-        // The canvas draws with whatever face is ready; redraw once Mona Sans loads.
+        // The canvas draws with whatever face is ready; redraw once Public Sans loads.
         void document.fonts?.load(`12px ${CHART_FONT}`, "0123456789").then(() => chart?.applyOptions({ layout: { fontFamily: CHART_FONT } }));
       } catch {
         chart?.remove();

@@ -72,17 +72,20 @@ Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in t
 
 ## Typography
 
-**Mona Sans**, one variable family for everything (`@fontsource-variable/mona-sans`, SIL OFL 1.1, self-hosted; the Latin file is about 40 KB). Why it:
+**Public Sans**, one variable family for everything ([DEC-209](../docs/project/04-decision-log.md#decisions); `@fontsource-variable/public-sans`, SIL OFL 1.1, self-hosted; the Latin file is about 26 KB and Latin Extended about 18 KB). Why it:
 
-- **Calm and current.** A grotesque with a humanist touch, drawn for product UI: it reads warm at 16px and crisp and confident at the hero size, closer to the consumer-finance apps the founder named than a neutral system face, without a display face's personality getting in the way of numbers.
-- **Figures.** Tabular figures (`tnum`) with a plain zero, so money lines up and never reads as a code. The true minus sign (U+2212) is in the font.
-- **One family, full range.** Weights 200 to 900 and a width axis in one file, so the scale is built from size and three weights, never from a second family.
+- **Serious, not a default.** The U.S. Web Design System's grotesque, drawn from Libre Franklin, so it comes from the Franklin Gothic line of newspapers and financial pages. It reads plain and sturdy where Inter, Geist and Mona Sans read as the generic product default (Impeccable's reflex list).
+- **Open when small, steady when large.** It stays even at 13 to 14 px in a dense price table and holds together at the hero size; the other candidates were either narrow small or loud large.
+- **Figures.** Tabular, lining figures (`tnum`; lining is the default) with a flagged 1, a straight 7 and a plain oval zero narrower than the O, so money lines up and never reads as a code. The tabular feature sets the digits only, so commas and points keep their own widths. The true minus sign (U+2212) is in the font.
+- **One family, full range.** Weights 100 to 900 in one file, so the scale is built from size and three weights, never from a second family. It covers Latin Extended-A (all but Ĳ, ŉ and ſ) and Vietnamese.
 - **Licence and hosting.** OFL, from npm, no font from a third-party host.
+
+**No figure face.** The hero number stays in Public Sans. A serif hero that echoed the P052 wordmark was tried (Literata, Brygada 1918 and Alegreya, with raised cents) and turned down: money would be set in two faces, since the key figures, rows and mandate rails stay sans; warm paper under a serif display is a look the product brief lists as an AI cliché; and it competes with the wordmark, which stays the product's one serif.
 
 | Role | Class | Size / line height | Weight | Tracking | Use |
 |---|---|---|---|---|---|
 | Display | `text-display` | `clamp(2rem, 14cqi, 4.75rem)` / 0.95 | 600 | -0.05em | The equity figure over a hero chart: account equity, an agent's equity (see Charts) |
-| Hero | `text-hero` | `clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem)` / 1.05 | 600 | -0.035em | One per screen where there is no equity figure: the approval's action |
+| Hero | `text-hero` | `clamp(2.5rem, 1.75rem + 2.75vw, 3.5rem)` / 1.05 | 600 | -0.03em | One per screen where there is no equity figure: the approval's action |
 | H1 | `text-h1` | 1.75rem / 1.2 | 600 | -0.02em | A page title |
 | H2 | `text-h2` | 1.25rem / 1.3 | 600 | -0.01em | A section |
 | H3 | `text-h3` | 1rem / 1.4 | 600 | 0 | A group or a row's name |
@@ -92,7 +95,7 @@ Light, Dark or System (follows `prefers-color-scheme`), from the theme menu in t
 | Caption | `text-caption` | 0.8125rem / 1.4 | 400 | 0 | Ages, disclosures, secondary facts |
 | Label | `text-label`, `field-label` | 0.8125rem / 1.35 | 500 | 0 | Field labels and chips, muted, sentence case |
 
-Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Mona Sans letters run narrower). The root size is the browser's own, so the owner's setting carries.
+Weights are 400, 500 and 600 and never bolder; `tokens.test.ts` fails on a heavier weight token or a `font-bold` class in the product (the design and palette references aside). Sentence case everywhere: there are no capitals-only labels or headings (the one exception is PAPER in the paper badge, a proper label for the environment). Headings balance their lines and paragraphs wrap pretty. Every figure uses tabular digits (`tabular`, and `font-mono` maps to the same face with tabular figures; there is no monospace family). Identifiers use tabular figures and `translate="no"`. Reading text is held under 80 characters a line with `max-w-measure` (58ch: `ch` is a zero's width, and Public Sans letters run narrower). The hero's -0.03em keeps the figures of `$28,478.36` close without the comma touching them; no role is tracked tighter than -0.04em, and `tokens.test.ts` fails on one that is. The root size is the browser's own, so the owner's setting carries.
 
 The brand is not set in this face: the wordmark is drawn as outlines (see Brand).
 
@@ -328,3 +331,4 @@ The components are Cloudflare's Kumo (`@cloudflare/kumo`, pinned exactly), on Ba
 - **2026-09-29, a labelled dock** (to be folded into the pending decision record for the dock). The founder asked for a more prominent desktop dock so people are not lost: every item gained its name under the icon, the current section a tinted pill, and the dock a denser glass and a firmer edge; the tooltips went, and "More screens" became "More".
 - **2026-09-29, hero-first number type** (decision record pending). From a mockup, the founder approved a larger equity figure with muted, raised half-size cents, and the day's change on a soft pill toned by its sign. The figure got its own display size, scaled by its container rather than the viewport so long values fit on phones; the approval's action keeps the hero size.
 - **2026-09-29, the phone is a remote control (DEC-207).** Squeezing the desktop onto a phone had made it crowded: two navigation systems, a status strip on every screen and one request shown three times on Home. The founder approved a simpler phone: three things in the header, four tabs with More for the rest, a banner only when a feed fails, Needs you first on Home with headroom instead of P&L on the agent rows, an agent page of state, equity and headroom with its sections as links, and one request per screen with its choices pinned. Tablet and desktop did not change.
+- **2026-09-29, Public Sans (DEC-209).** The founder called Inter "an AI smell tell" and asked for the face to be chosen with Impeccable. Mona Sans is on the same reflex list, so it gave way to Public Sans after Archivo, Golos Text and Public Sans were rendered in the built app; the hero's tracking went from -0.035em to -0.03em. A serif figure face for the hero, echoing the wordmark, was tried and turned down.

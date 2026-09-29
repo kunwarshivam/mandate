@@ -80,16 +80,16 @@ export function tokenValue(name: string, theme: ThemeName = "light"): string {
 
 export const typeScale = [
   { role: "display", className: "text-display tabular", sample: "$24,987.50", spec: "Mona Sans 600, 2 to 4.75rem with its container / 0.95, -0.05em, tabular figures, cents at half size, muted and raised. The equity figure over a hero chart" },
-  { role: "hero", className: "text-hero tabular", sample: "Buy 40 XYZ", spec: "Mona Sans 600, 2.5 to 3.5rem / 1.05, -0.035em, tabular figures. One per screen: the approval's action" },
-  { role: "h1", className: "text-h1", sample: "Approval request", spec: "Mona Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
-  { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Mona Sans 600, 1.25rem / 1.3, -0.01em. A section" },
-  { role: "h3", className: "text-h3", sample: "Working orders", spec: "Mona Sans 600, 1rem / 1.4. A group inside a section" },
-  { role: "figure", className: "text-figure tabular", sample: "$1,203.10", spec: "Mona Sans 500, 1.375rem / 1.2, tabular figures. Key figures beside the hero" },
-  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Mona Sans 400, 1rem / 1.5, sentence case" },
-  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Mona Sans 400, 0.875rem / 1.43" },
-  { role: "caption", className: "text-caption text-muted-foreground", sample: "as of 14:02:11, 3 min ago", spec: "Mona Sans 400, 0.8125rem / 1.4, muted" },
-  { role: "label", className: "field-label", sample: "Daily loss limit", spec: "Mona Sans 500, 0.8125rem / 1.35, muted, sentence case (no capitals-only labels)" },
-  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Mona Sans with tabular figures and its own plain zero" },
+  { role: "hero", className: "text-hero tabular", sample: "Buy 40 XYZ", spec: "Public Sans 600, 2.5 to 3.5rem / 1.05, -0.03em, tabular figures. One per screen: the approval's action" },
+  { role: "h1", className: "text-h1", sample: "Approval request", spec: "Public Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
+  { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Public Sans 600, 1.25rem / 1.3, -0.01em. A section" },
+  { role: "h3", className: "text-h3", sample: "Working orders", spec: "Public Sans 600, 1rem / 1.4. A group inside a section" },
+  { role: "figure", className: "text-figure tabular", sample: "$1,203.10", spec: "Public Sans 500, 1.375rem / 1.2, tabular figures. Key figures beside the hero" },
+  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Public Sans 400, 1rem / 1.5, sentence case" },
+  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Public Sans 400, 0.875rem / 1.43" },
+  { role: "caption", className: "text-caption text-muted-foreground", sample: "as of 14:02:11, 3 min ago", spec: "Public Sans 400, 0.8125rem / 1.4, muted" },
+  { role: "label", className: "field-label", sample: "Daily loss limit", spec: "Public Sans 500, 0.8125rem / 1.35, muted, sentence case (no capitals-only labels)" },
+  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Public Sans with tabular figures and its own plain zero" },
 ];
 
 export const motionTokens = [

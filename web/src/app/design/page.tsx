@@ -229,7 +229,7 @@ export default function DesignPage() {
 
       <Block
         title="Type"
-        lead="Mona Sans, one variable family for everything: a grotesque with a humanist touch that stays warm at 16 px and crisp at the hero size. Tabular figures and a plain zero (0 10 100), a true minus sign, sentence case throughout, and weight 600 at most."
+        lead="Public Sans, one variable family for everything: a sturdy grotesque in the Franklin Gothic line, open at 13 px in a price table and steady at the hero size. Tabular, lining figures with a flagged 1 and a plain zero (0 10 100), a true minus sign, sentence case throughout, and weight 600 at most."
       >
         <ul className="grid">
           {typeScale.map((t) => (
