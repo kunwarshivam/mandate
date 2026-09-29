@@ -183,6 +183,16 @@ html:root[data-mode="dark"] {
   --tw-shadow: 0 0 #0000;
 }
 
+/*
+ * Kumo's toasts sit 2rem above the bottom right corner, under the dock's layer, and the dock reaches
+ * that corner's column below 1440px. From 64rem they rise clear of the dock instead.
+ */
+@media (min-width: 64rem) {
+  [role="region"][aria-label="Notifications"] {
+    bottom: calc(var(--dock-clearance) + 1rem);
+  }
+}
+
 /* Scrims darken the page in both modes; an off-white ink scrim would light it up. */
 .dark [data-slot="sheet-backdrop"] {
   background-color: var(--backdrop);
