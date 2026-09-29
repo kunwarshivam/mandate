@@ -1,17 +1,44 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { type ReactNode, forwardRef } from "react";
+import NextLink from "next/link";
 import { MotionConfig } from "motion/react";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toasty } from "@cloudflare/kumo/components/toast";
+import { TooltipProvider } from "@cloudflare/kumo/components/tooltip";
+import { KumoLocaleProvider, LinkProvider, type LinkComponentProps } from "@cloudflare/kumo/utils";
+import { JournalToasts } from "@/components/shell/journal-toasts";
 import type { Workspace } from "@/fixtures/types";
 import { RuntimeProvider } from "@/lib/mock-runtime";
 
-export function Providers({ workspace, children }: { workspace: Workspace; children: ReactNode }) {
+const AppLink = forwardRef<HTMLAnchorElement, LinkComponentProps>(function AppLink({ href, to, ...rest }, ref) {
+  return <NextLink ref={ref} href={href ?? to ?? "#"} {...rest} />;
+});
+
+export function Providers({
+  workspace,
+  children,
+  recordAfterMs,
+  tick,
+}: {
+  workspace: Workspace;
+  children: ReactNode;
+  recordAfterMs?: number;
+  tick?: boolean;
+}) {
   return (
     <MotionConfig reducedMotion="user">
-      <TooltipProvider delayDuration={300}>
-        <RuntimeProvider initial={workspace}>{children}</RuntimeProvider>
-      </TooltipProvider>
+      <KumoLocaleProvider>
+        <LinkProvider component={AppLink}>
+          <TooltipProvider delay={300}>
+            <Toasty>
+              <RuntimeProvider initial={workspace} recordAfterMs={recordAfterMs} tick={tick}>
+                {children}
+                <JournalToasts />
+              </RuntimeProvider>
+            </Toasty>
+          </TooltipProvider>
+        </LinkProvider>
+      </KumoLocaleProvider>
     </MotionConfig>
   );
 }

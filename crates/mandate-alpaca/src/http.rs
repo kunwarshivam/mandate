@@ -26,6 +26,7 @@ use reqwest::Url;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use secrecy::{ExposeSecret, SecretString};
 
+use crate::data::{DATA_HOST, DataTransport, QuoteRequest};
 use crate::error::{CredentialsError, HttpSetupError, TransportError};
 
 /// The paper trading host. The only one compiled in.
@@ -398,8 +399,14 @@ fn is_dot_segment(segment: &str) -> bool {
 /// it was handed; this is what makes the text judged the text sent, so no normalisation, of a dot
 /// segment or of anything a later parser version decodes, can move a request to another endpoint.
 fn sent_as_built(path_and_query: &str) -> Result<Url, TransportError> {
-    let url = Url::parse(&format!("{PAPER_HOST}{path_and_query}"))
-        .map_err(|_| TransportError::Request)?;
+    sent_as_built_on(PAPER_HOST, path_and_query)
+}
+
+/// [`sent_as_built`] on either compiled-in host: the paper trading host or, for a
+/// [`QuoteRequest`], the data host.
+fn sent_as_built_on(host: &str, path_and_query: &str) -> Result<Url, TransportError> {
+    let url =
+        Url::parse(&format!("{host}{path_and_query}")).map_err(|_| TransportError::Request)?;
     let sent = match url.query() {
         Some(query) => format!("{}?{query}", url.path()),
         None => url.path().to_owned(),
@@ -454,14 +461,42 @@ impl TradingTransport for AlpacaPaperHttp {
             Method::Post => reqwest::Method::POST,
             Method::Delete => reqwest::Method::DELETE,
         };
+        self.dispatch(method, url, request.body.as_deref()).await
+    }
+}
+
+impl DataTransport for AlpacaPaperHttp {
+    /// The request is a latest-quote read by construction, so this only dials [`DATA_HOST`] with
+    /// the same paper credentials, the same way (DEC-168 item 2).
+    async fn send(&self, request: &QuoteRequest) -> Result<Response, TransportError> {
+        self.dispatch(reqwest::Method::GET, data_url(request)?, None)
+            .await
+    }
+}
+
+/// The URL a latest-quote read is dialled at: always on [`DATA_HOST`], and only if a parser sends
+/// it exactly as it was built.
+fn data_url(request: &QuoteRequest) -> Result<Url, TransportError> {
+    sent_as_built_on(DATA_HOST, request.path_and_query())
+}
+
+impl AlpacaPaperHttp {
+    /// The one place either host is dialled: the credentials as sensitive headers, a JSON body
+    /// when there is one, and a response that carries no header out.
+    async fn dispatch(
+        &self,
+        method: reqwest::Method,
+        url: Url,
+        body: Option<&str>,
+    ) -> Result<Response, TransportError> {
         let mut headers = HeaderMap::new();
         headers.insert(KEY_ID_HEADER, sensitive(&self.credentials.key_id)?);
         headers.insert(SECRET_HEADER, sensitive(&self.credentials.secret)?);
         let mut builder = self.client.request(method, url).headers(headers);
-        if let Some(body) = &request.body {
+        if let Some(body) = body {
             builder = builder
                 .header(reqwest::header::CONTENT_TYPE, "application/json")
-                .body(body.clone());
+                .body(body.to_owned());
         }
         let response = builder.send().await.map_err(classify)?;
         let status = response.status().as_u16();
@@ -493,8 +528,9 @@ mod tests {
     use mandate_accounting::InstrumentId;
 
     use super::{
-        AlpacaPaperHttp, Credentials, HttpRequest, Method, TradingTransport, TransportError,
-        is_dot_segment, position_path, sent_as_built,
+        AlpacaPaperHttp, Credentials, DATA_HOST, DataTransport, HttpRequest, Method, QuoteRequest,
+        TradingTransport, TransportError, data_url, is_dot_segment, position_path, sent_as_built,
+        sent_as_built_on,
     };
 
     /// A request as [`HttpRequest::close_position`] builds one: straight from an instrument id,
@@ -564,7 +600,7 @@ mod tests {
         ] {
             let request = built_directly(method, path);
             assert_eq!(
-                transport.send(&request).await.err(),
+                TradingTransport::send(&transport, &request).await.err(),
                 Some(TransportError::RefusedPath),
                 "{} {path} would be sent to another endpoint once parsed, so it is refused \
                  before anything leaves (DEC-133 item 18a)",
@@ -572,6 +608,56 @@ mod tests {
             );
         }
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_quote_read_a_parser_would_move_is_refused_and_never_sent() -> Result<(), String> {
+        let transport = transport()?;
+        for path in [
+            "/v2/stocks/%2e%2e/quotes/latest?feed=iex",
+            "/v2/stocks/AAPL/../../v2/account",
+        ] {
+            let request = QuoteRequest::for_tests(path);
+            assert_eq!(
+                DataTransport::send(&transport, &request).await.err(),
+                Some(TransportError::RefusedPath),
+                "{path} would be sent somewhere else once parsed, so it is refused before \
+                 anything leaves"
+            );
+        }
+        Ok(())
+    }
+
+    /// #288 review, minor 2: the data transport dials the data host, never the trading host.
+    #[test]
+    fn a_quote_read_is_dialled_at_the_data_host() -> Result<(), String> {
+        let aapl = InstrumentId::new("AAPL").map_err(|e| format!("{e:?}"))?;
+        let request = QuoteRequest::latest(&aapl).map_err(|e| e.to_string())?;
+        let url = data_url(&request).map_err(|e| e.to_string())?;
+        assert_eq!(url.host_str(), Some("data.alpaca.markets"));
+        assert_eq!(
+            url.as_str(),
+            "https://data.alpaca.markets/v2/stocks/AAPL/quotes/latest?feed=iex"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_quote_read_is_sent_to_the_data_host_as_built() {
+        for path in [
+            "/v2/stocks/AAPL/quotes/latest?feed=iex",
+            "/v1beta3/crypto/us/latest/quotes?symbols=BTC%2FUSD",
+        ] {
+            assert_eq!(
+                sent_as_built_on(DATA_HOST, path).map(|url| url.to_string()),
+                Ok(format!("https://data.alpaca.markets{path}")),
+                "{path} is sent to the data host byte for byte"
+            );
+        }
+        assert_eq!(
+            sent_as_built_on(DATA_HOST, "/v2/stocks/%2e/quotes").err(),
+            Some(TransportError::RefusedPath)
+        );
     }
 
     fn instrument(symbol: &str) -> Result<InstrumentId, String> {

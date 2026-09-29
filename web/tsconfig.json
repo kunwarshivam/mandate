@@ -28,6 +28,10 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
+    ".next-e2e/types/**/*.ts",
+    ".next-e2e/dev/types/**/*.ts",
+    ".next-auth-e2e/types/**/*.ts",
+    ".next-auth-e2e/dev/types/**/*.ts",
     "**/*.mts"
   ],
   "exclude": ["node_modules"]

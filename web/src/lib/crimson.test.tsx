@@ -9,12 +9,13 @@ import { SCENARIOS, buildWorkspace } from "@/fixtures/workspace";
 import { RECORD_AFTER_MS, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
-import { colorTokens, tokenValue } from "./tokens";
+import { colorTokensFor, tokenValue } from "./tokens";
 
-/** Crimson is the kill switch and nothing else (web/DESIGN.md): these are the kill-switch choices. */
-const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Stop all agents on this account|Close everything on this account)/;
+/** Crimson is the kill switch and nothing else (web/DESIGN.md): the sheet's kill-switch links and the record screens' switches. */
+const KILL_SWITCH = /^(Kill switch: (close|cancel) and stop|Activate the kill switch|Stop all agents on this account|Close everything on this account)/;
 
-const CRIMSON_VALUE = /oklch\(\s*0\.47[\s_]+0\.19[\s_]+27\b/;
+/** The kill switch's fill (both themes) and its dark-mode edge; in light mode the edge is the fill. */
+const CRIMSON_VALUE = /oklch\(\s*(0\.44[\s_]+0\.173|0\.76[\s_]+0\.138)[\s_]+27\b/;
 const CRIMSON_NAME = /-crimson\b/;
 
 const root = resolve(process.cwd(), "src");
@@ -36,7 +37,7 @@ function paintsCrimson(el: Element): boolean {
 function strays({ design = false } = {}): string[] {
   return Array.from(document.body.querySelectorAll("*"))
     .filter(paintsCrimson)
-    .filter((el) => !KILL_SWITCH.test(el.closest("button")?.textContent ?? ""))
+    .filter((el) => !KILL_SWITCH.test(el.closest("button, a")?.textContent ?? ""))
     .filter((el) => !(design && el.closest('[data-meaning="kill"]')))
     .map((el) => `<${el.tagName.toLowerCase()} class="${el.getAttribute("class")}"> ${(el.textContent ?? "").slice(0, 60)}`);
 }
@@ -48,7 +49,8 @@ function crimsonCount(): number {
 function openSheet() {
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
   const sheet = screen.getByRole("dialog");
-  for (const trigger of sheet.querySelectorAll("[data-state=closed][aria-controls]")) fireEvent.click(trigger);
+  for (const trigger of sheet.querySelectorAll("button[aria-expanded=false]")) fireEvent.click(trigger);
+  expect(sheet.querySelector("button[aria-expanded=false]")).toBeNull();
   return sheet;
 }
 
@@ -64,36 +66,51 @@ function contexts(scenario: (typeof SCENARIOS)[number]["id"]): string[] {
 beforeEach(() => setPathname("/"));
 
 describe("crimson in the source", () => {
-  it("is a class or variable only in globals.css, the Stop sheet, and the /design specimen", () => {
-    const allowed = ["app/globals.css", "components/stop/stop-sheet.tsx", "app/design/page.tsx"];
+  it("is a class or variable only in globals.css, the kill-switch button, and the /design specimen", () => {
+    const allowed = ["app/globals.css", "components/stop/kill-switch-button.tsx", "app/(app)/design/page.tsx"];
     const naming = sources(root)
       .filter((file) => CRIMSON_NAME.test(readFileSync(file, "utf8")))
       .map((file) => relative(root, file));
     expect(naming.sort()).toEqual([...allowed].sort());
   });
 
-  it("has its value written only in the token files", () => {
+  it("has its value written only in the stylesheet; palette.ts builds it from the crimson ramp", () => {
     const writing = sources(root)
       .filter((file) => CRIMSON_VALUE.test(readFileSync(file, "utf8")))
       .map((file) => relative(root, file));
-    expect(writing.sort()).toEqual(["app/globals.css", "lib/tokens.ts"]);
+    expect(writing).toEqual(["app/globals.css"]);
+    expect(tokenValue("crimson")).toMatch(CRIMSON_VALUE);
+    expect(tokenValue("crimson", "dark")).toMatch(CRIMSON_VALUE);
+    expect(tokenValue("crimson-edge", "dark")).toMatch(CRIMSON_VALUE);
   });
 
   it("is read only by the crimson utilities, never aliased by another variable", () => {
     const css = readFileSync(join(root, "app/globals.css"), "utf8");
     const readers = Array.from(css.matchAll(/--([a-z0-9-]+):\s*[^;]*var\(--crimson[a-z-]*\)/g), (m) => m[1]);
-    expect(readers.sort()).toEqual(["color-crimson", "color-crimson-foreground"]);
+    expect(readers.sort()).toEqual(["color-crimson", "color-crimson-edge", "color-crimson-foreground"]);
   });
 
   it("is no other token's value", () => {
-    for (const t of colorTokens.filter((c) => c.meaning !== "kill")) expect(t.value, t.name).not.toBe(tokenValue("crimson"));
+    for (const theme of ["light", "dark"] as const) {
+      const kill = new Set([tokenValue("crimson", theme), tokenValue("crimson-edge", theme)]);
+      for (const t of colorTokensFor(theme).filter((c) => c.meaning !== "kill")) expect(kill.has(t.value), `${theme} ${t.name}`).toBe(false);
+    }
   });
 
-  it("is used in the Stop sheet only by the two kill-switch tones", () => {
-    const sheet = readFileSync(join(root, "components/stop/stop-sheet.tsx"), "utf8");
-    const lines = sheet.split("\n").filter((line) => CRIMSON_NAME.test(line));
-    expect(lines.map((line) => line.trim().split(":")[0])).toEqual(["kill", '"kill-outline"']);
-  });
+  it.each(["components/stop/stop-sheet.tsx", "components/stop/record-screen.tsx"])(
+    "is used only by the kill-switch button's two appearances, and %s paints through that button",
+    (file) => {
+      const button = readFileSync(join(root, "components/stop/kill-switch-button.tsx"), "utf8");
+      const lines = button.split("\n").filter((line) => CRIMSON_NAME.test(line));
+      expect(lines).toHaveLength(1);
+      expect(lines[0].trim()).toMatch(/^appearance === "filled" \? "border-crimson-edge bg-crimson text-crimson-foreground[^"]*" : "border-crimson-edge bg-card [^"]*",$/);
+      const source = readFileSync(join(root, file), "utf8");
+      expect(source).not.toMatch(CRIMSON_NAME);
+      const titles = Array.from(source.matchAll(/<KillSwitchButton\b[^>]*\btitle="([^"]+)"/g), (m) => m[1]);
+      expect(titles.length).toBeGreaterThan(0);
+      for (const title of titles) expect(title).toMatch(KILL_SWITCH);
+    },
+  );
 });
 
 describe("crimson on screen", () => {
@@ -143,5 +160,20 @@ describe("crimson on screen", () => {
       expect(strays(), title).toEqual([]);
       view.unmount();
     }
+  });
+
+  it.each(ROUTES.filter(([path]) => /\/(kill-switch|release|stop-all|close-all)$/.test(path)))("on the record screen %s, the passkey check and the recorded result carry no crimson", (path, Page) => {
+    vi.useFakeTimers();
+    setPathname(path);
+    renderWithRuntime(<Page />);
+    const record = document.querySelector<HTMLElement>("[data-slot=record-screen]")!;
+    const action = record.querySelector<HTMLElement>("[data-slot=kill-switch], button[data-tone]")!;
+    fireEvent.click(action);
+    const stepUp = screen.getByRole("dialog", { name: "Confirm it is you" });
+    expect(Array.from(stepUp.querySelectorAll("*")).filter(paintsCrimson)).toEqual([]);
+    fireEvent.click(within(stepUp).getByRole("button", { name: "Use passkey" }));
+    act(() => vi.advanceTimersByTime(PASSKEY_ANSWER_MS + RECORD_AFTER_MS));
+    expect(within(record).getByRole("status").querySelector("[data-phase=recorded]")).not.toBeNull();
+    expect(strays()).toEqual([]);
   });
 });

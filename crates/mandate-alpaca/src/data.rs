@@ -19,10 +19,10 @@ use std::time::Duration;
 
 use mandate_accounting::InstrumentId;
 
-use crate::client::Pause;
+use crate::client::{Pause, reference_status};
 use crate::error::{ReadError, TransportError};
 use crate::http::{Response, is_pair_half, symbol_segment};
-use crate::read::LatestQuote;
+use crate::read::{self, LatestQuote, judge_age};
 
 /// The market-data host. With [`crate::PAPER_HOST`], one of the two hosts compiled in.
 pub const DATA_HOST: &str = "https://data.alpaca.markets";
@@ -70,6 +70,16 @@ impl QuoteRequest {
         &self.path_and_query
     }
 
+    /// A request on any path, for the transport's own refusal tests, which must hand it a path
+    /// [`Self::latest`] would never build.
+    #[cfg(test)]
+    pub(crate) fn for_tests(path_and_query: &str) -> Self {
+        Self {
+            instrument: InstrumentId::new("AAPL").unwrap_or_else(|_| unreachable!()),
+            path_and_query: path_and_query.to_owned(),
+        }
+    }
+
     /// The whole URL: the data host and this path, and nothing a caller chose.
     pub fn url(&self) -> String {
         format!("{DATA_HOST}{}", self.path_and_query)
@@ -111,7 +121,13 @@ impl<D: DataTransport, P: Pause> DataClient<D, P> {
         instrument: &InstrumentId,
         max_age: Duration,
     ) -> Result<LatestQuote, ReadError> {
-        let _ = (&self.transport, &self.pause, instrument, max_age);
-        Err(ReadError::Unimplemented { story: "E7-8" })
+        let response = self
+            .transport
+            .send(&QuoteRequest::latest(instrument)?)
+            .await?;
+        reference_status(response.status)?;
+        let quote = read::latest_quote(instrument, &response.body)?;
+        judge_age(quote.at, self.pause.now(), max_age)?;
+        Ok(quote)
     }
 }

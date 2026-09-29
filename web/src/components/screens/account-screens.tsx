@@ -1,0 +1,187 @@
+"use client";
+
+import Link from "next/link";
+import { ArrowRight } from "@phosphor-icons/react";
+import { PageHeader } from "@/components/kumo/page-header/page-header";
+import { SourceTag } from "@/components/domain/mode";
+import { GateDecisionRow } from "@/components/domain/gate-decision";
+import { Timeline } from "@/components/domain/timeline";
+import type { HealthState, TimelineEvent } from "@/fixtures/types";
+import { clock } from "@/lib/format";
+import { Age } from "@/components/domain/as-of";
+import { useRuntime } from "@/lib/mock-runtime";
+import { RESTRICTIONS } from "@/lib/restrictions";
+import { useCan } from "@/lib/roles";
+import { type Screen, decisionHref, screensIn } from "@/lib/screens";
+import { useSession } from "@/lib/session";
+import { PasskeysSection } from "@/components/auth/passkeys-section";
+import { ComingSoon } from "./coming-soon";
+import { Panel, Section, WorkspaceGate } from "./common";
+
+const HEALTH_LABEL = { market_data: "Market data", broker: "Broker", deployment: "Deployment", relay: "Push relay" } as const;
+
+const STATE_WORD: Record<HealthState, string> = { ok: "Current", stale: "Stale", down: "Down" };
+
+function Alerts() {
+  const { ws, now } = useRuntime();
+  const health = (Object.keys(HEALTH_LABEL) as Array<keyof typeof HEALTH_LABEL>).map((key) => ({ key, ...ws.health[key] }));
+  const conditions = ws.agents.flatMap((agent) => agent.restrictions.map((r) => ({ agent, r })));
+  return (
+    <div className="grid grid-cols-1 gap-(--section-gap)">
+      <Section title="Data and deployment">
+        <ul className="grid divide-y divide-border/70">
+          {health.map((h) => (
+            <li key={h.key} data-state={h.state} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3">
+              <span className="font-semibold">{HEALTH_LABEL[h.key]}</span>
+              <span className="text-sm">
+                {h.state === "ok" ? null : <span className="mr-2 rounded-sm border border-foreground px-1.5 text-label">{STATE_WORD[h.state]}</span>}
+                <span className="whitespace-nowrap text-muted-foreground">
+                  as of <span className="font-mono tabular">{clock(h.as_of)}</span>, <Age at={h.as_of} now={now} />
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </Section>
+      <Section title="Agent conditions">
+        {conditions.length === 0 ? (
+          <p className="text-muted-foreground">No agent is restricted.</p>
+        ) : (
+          <ul className="grid divide-y divide-border/70">
+            {conditions.map(({ agent, r }) => {
+              const text = RESTRICTIONS[r.code];
+              return (
+                <li key={`${agent.agent_id}-${r.code}-${r.symbol ?? ""}`}>
+                  <Link href={`/agents/${agent.agent_id}`} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
+                    <span className="flex flex-wrap items-center gap-2">
+                      <SourceTag source={text.source} />
+                      <span className="font-semibold">
+                        {agent.label}: {text.label}
+                        {r.symbol ? ` (${r.symbol})` : ""}
+                      </span>
+                      <ArrowRight className="ml-auto size-4 shrink-0" aria-hidden />
+                    </span>
+                    <span className="text-sm text-muted-foreground">
+                      Since <span className="font-mono tabular">{clock(r.since)}</span>. Blocks: {text.blocks}. Ends when: {text.endsWhen}.
+                    </span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </Section>
+    </div>
+  );
+}
+
+export function AlertsScreen() {
+  const { ws } = useRuntime();
+  return (
+    <div className="grid">
+      <PageHeader title="Alerts" environment={ws.environment} description="Conditions that change what agents may do, each with the time it was last true." />
+      <WorkspaceGate>
+        <Alerts />
+      </WorkspaceGate>
+    </div>
+  );
+}
+
+/** Auditors read decisions here but cannot open agent pages, so only roles that can see agents get links. */
+function Decisions() {
+  const { ws } = useRuntime();
+  const linked = useCan("agents.view");
+  if (ws.decisions.length === 0) return <p className="text-muted-foreground">No gate decisions yet.</p>;
+  return (
+    <Panel className="py-0.5 sm:py-0.5">
+      <ul>
+        {ws.decisions.map((d) => (
+          <GateDecisionRow
+            key={d.event_id}
+            decision={d}
+            agent={ws.agents.find((a) => a.agent_id === d.agent_id)}
+            showAgent
+            href={linked ? decisionHref(d.agent_id, d.event_id) : undefined}
+          />
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+function AllTimeline() {
+  const { ws } = useRuntime();
+  const events: TimelineEvent[] = ws.agents
+    .flatMap((a) => (ws.timeline[a.agent_id] ?? []).map((e) => ({ ...e, text: `${a.label}: ${e.text}` })))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  return (
+    <Panel>
+      <Timeline events={events} today={ws.now.slice(0, 10)} />
+    </Panel>
+  );
+}
+
+/** A screen from the registry: built ones render their content, the rest say what they will hold. */
+export function RegistryScreen({ screen }: { screen: Screen }) {
+  const { ws } = useRuntime();
+  const session = useSession();
+  const body = (() => {
+    switch (screen.key) {
+      case "settings-profile":
+        return session ? (
+          <div className="grid gap-(--section-gap)">
+            <PasskeysSection />
+            <ComingSoon purpose="Your name and sign-in sessions." />
+          </div>
+        ) : (
+          <ComingSoon purpose={screen.purpose} />
+        );
+      case "audit-decisions":
+        return (
+          <WorkspaceGate>
+            <Decisions />
+          </WorkspaceGate>
+        );
+      case "audit-timeline":
+        return (
+          <WorkspaceGate>
+            <AllTimeline />
+          </WorkspaceGate>
+        );
+      default:
+        return <ComingSoon purpose={screen.purpose} />;
+    }
+  })();
+  return (
+    <div className="grid">
+      <PageHeader title={screen.label} environment={ws.environment} description={screen.built ? screen.purpose : undefined} />
+      {body}
+    </div>
+  );
+}
+
+/** The Audit and Workspace index pages: each child screen with what it is for. */
+export function SectionIndexScreen({ title, purpose, prefix }: { title: string; purpose: string; prefix: string }) {
+  const { ws } = useRuntime();
+  return (
+    <div className="grid">
+      <PageHeader title={title} environment={ws.environment} description={purpose} />
+      <ul className="grid max-w-3xl divide-y divide-border/70">
+        {screensIn(prefix).map((s) => (
+          <li key={s.key}>
+            <Link href={s.href} className="press group -mx-3 grid gap-1 rounded-xl px-3 py-3.5 hover:bg-background">
+              <span className="flex items-center justify-between gap-3 font-semibold">
+                {s.label}
+                <span className="flex items-center gap-2 text-caption font-normal text-muted-foreground">
+                  {s.built ? null : "Next slice"}
+                  <ArrowRight className="size-4 shrink-0 text-foreground" aria-hidden />
+                </span>
+              </span>
+              <span className="text-sm text-muted-foreground">{s.purpose}</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

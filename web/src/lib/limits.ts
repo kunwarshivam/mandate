@@ -1,6 +1,6 @@
 import type { Agent, LadderRung } from "@/fixtures/types";
 import { type Dec, ONE, ZERO, add, dec, max, min, mul, sub } from "./decimal";
-import { percent } from "./format";
+import { percent, usd } from "./format";
 
 /**
  * An agent's limits in dollars, from mandate spec §5.2 to §5.7. Each is derived from the mandate
@@ -26,6 +26,12 @@ export interface Level {
   /** What the agent does when equity reaches this level. */
   action: string;
   reached: boolean;
+  /**
+   * The loss the limit allows, in dollars, from where it is measured down to the level: the day's
+   * loss budget, a rung's depth below the high-water mark, or the capital the floor lets go. Null for
+   * levels that are not loss limits.
+   */
+  allowance: Dec | null;
 }
 
 export interface AgentLimits {
@@ -82,14 +88,16 @@ export function agentLimits(agent: Agent): AgentLimits {
     { key: "daily", label: "Loss today", used: lossToday, cap: dailyBudget, atCap: dailyAction },
   ];
 
+  const floor = add(mul(C, sub(ONE, dec(mandate.capital.max_loss_from_allocation))), L);
   const levels: Level[] = [
     {
       key: "floor",
       kind: "floor",
       label: "Lifetime floor",
-      at: add(mul(C, sub(ONE, dec(mandate.capital.max_loss_from_allocation))), L),
+      at: floor,
       action: "Close positions and pause for good",
       reached: false,
+      allowance: sub(C, floor),
     },
     ...risk.drawdown_ladder.map((rung, i) => ({
       key: `rung-${i}`,
@@ -98,6 +106,7 @@ export function agentLimits(agent: Agent): AgentLimits {
       at: mul(H, sub(ONE, dec(rung.at))),
       action: rungAction(rung),
       reached: false,
+      allowance: mul(H, dec(rung.at)),
     })),
     {
       key: "daily",
@@ -106,8 +115,9 @@ export function agentLimits(agent: Agent): AgentLimits {
       at: sub(E0, dailyBudget),
       action: dailyAction,
       reached: false,
+      allowance: dailyBudget,
     },
-    { key: "hwm", kind: "high_water_mark", label: "High-water mark", at: H, action: "Drawdown is measured from here", reached: false },
+    { key: "hwm", kind: "high_water_mark", label: "High-water mark", at: H, action: "Drawdown is measured from here", reached: false, allowance: null },
   ];
   if (mandate.goal.type === "profit_stop") {
     levels.push({
@@ -117,6 +127,7 @@ export function agentLimits(agent: Agent): AgentLimits {
       at: mul(C, add(ONE, dec(mandate.goal.profit_level))),
       action: "The agent stops here",
       reached: false,
+      allowance: null,
     });
   }
   for (const level of levels) {
@@ -134,4 +145,72 @@ export function agentLimits(agent: Agent): AgentLimits {
     sizeFactor: dec(state.size_factor),
     drawdown: max(ZERO, sub(H, E)),
   };
+}
+
+export interface NextLevel {
+  level: Level;
+  /** How far equity is from the level, in dollars. */
+  distance: Dec;
+  side: "below" | "above";
+}
+
+/**
+ * The next level where the agent's behaviour changes: the closest one below equity not yet reached,
+ * or, with none left below, a profit stop above. The high-water mark changes nothing, so it is skipped.
+ */
+export function nextLevel(limits: AgentLimits): NextLevel | null {
+  const E = limits.equity;
+  const below = limits.levels.filter((l) => !l.reached && l.kind !== "high_water_mark" && l.kind !== "profit_stop" && l.at < E);
+  if (below.length > 0) {
+    const level = below.reduce((a, b) => (b.at > a.at ? b : a));
+    return { level, distance: headroomAbove(limits, level), side: "below" };
+  }
+  const stop = limits.levels.find((l) => l.kind === "profit_stop" && !l.reached);
+  return stop ? { level: stop, distance: sub(stop.at, E), side: "above" } : null;
+}
+
+/** How far equity sits above a level, in dollars, as the rails and the headroom rows show it. */
+export function headroomAbove(limits: AgentLimits, level: Level): Dec {
+  return sub(limits.equity, level.at);
+}
+
+/** A level named in running text: "daily loss limit", "drawdown 10% level", "lifetime floor". */
+export function levelNoun(level: Level): string {
+  switch (level.kind) {
+    case "floor":
+      return "lifetime floor";
+    case "rung":
+      return `${level.label.toLowerCase()} level`;
+    case "daily":
+      return "daily loss limit";
+    case "high_water_mark":
+      return "high-water mark";
+    case "profit_stop":
+      return "profit stop";
+    default: {
+      const unhandled: never = level.kind;
+      throw new Error(`unhandled level ${String(unhandled)}`);
+    }
+  }
+}
+
+/**
+ * An agent's headroom in one line, from the next level where its behaviour changes: "$274.45 above
+ * its daily loss limit". A distance to a limit, never a result, so it needs no disclosure.
+ */
+export function headroomLine(agent: Agent): string {
+  const next = nextLevel(agentLimits(agent));
+  if (!next) return "No limit level ahead";
+  return `${usd(next.distance)} ${next.side === "below" ? "above" : "below"} its ${levelNoun(next.level)}`;
+}
+
+/** An agent is near a loss limit once it has used this share of the limit's allowance (DEC-206). */
+export const NEAR_LIMIT_USED = dec("0.8");
+
+/**
+ * The loss limits an agent is near, deepest first: those whose headroom (equity above the level, as
+ * the rails show it) is no more than a fifth of the loss the limit allows, reached ones included.
+ */
+export function nearLossLimits(limits: AgentLimits): Level[] {
+  return limits.levels.filter((l) => l.allowance !== null && headroomAbove(limits, l) <= mul(sub(ONE, NEAR_LIMIT_USED), max(ZERO, l.allowance)));
 }

@@ -3,6 +3,8 @@
 
 # next.js
 /.next/
+/.next-e2e/
+/.next-auth-e2e/
 /out/
 next-env.d.ts
 *.tsbuildinfo
@@ -12,6 +14,7 @@ next-env.d.ts
 
 # env files
 .env*
+!.env.example
 
 # misc
 .DS_Store
@@ -21,3 +24,11 @@ npm-debug.log*
 # `next dev` writes these when it detects a coding agent; the repository's own rulebook is /AGENTS.md
 /AGENTS.md
 /CLAUDE.md
+
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+
+# private beta requests, when Supabase has no beta_requests table yet
+/.data/

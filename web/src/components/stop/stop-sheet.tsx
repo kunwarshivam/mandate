@@ -1,58 +1,79 @@
 "use client";
 
 import { type ReactNode, useRef, useState } from "react";
+import Link from "next/link";
+import { Collapsible } from "@cloudflare/kumo/primitives/collapsible";
+import { Dialog } from "@cloudflare/kumo/primitives/dialog";
+import { CaretDown, Octagon, WarningCircle, X } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { ChevronDown, CircleAlert, Unplug } from "lucide-react";
 import { ModeBadge, SourceTag } from "@/components/domain/mode";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import type { Agent } from "@/fixtures/types";
-import { clock, quantity } from "@/lib/format";
-import { type CommandKind, useRuntime } from "@/lib/mock-runtime";
-import { commandTitle, needsStepUp, recordedLine, stepUpLine } from "./commands";
+import { quantity } from "@/lib/format";
+import { useRuntime } from "@/lib/mock-runtime";
+import { useCan } from "@/lib/roles";
+import { CommandEntry, UnreachableAlert } from "./command-log";
+import { type SheetKind, needsStepUp, recordHref, stepUpLine } from "./commands";
+import { KillSwitchButton } from "./kill-switch-button";
 import { StepUpDialog } from "./step-up-dialog";
 
-type Tone = "ink" | "outline" | "kill" | "kill-outline";
+type Tone = "ink" | "outline";
 
-/** Pausing is ink, like a paused agent; the kill switch is the only crimson in the product. */
+/** Pausing is ink, like a paused agent. The kill switch is `KillSwitchButton`, the only crimson. */
 const TONE: Record<Tone, string> = {
   ink: "bg-ink text-ink-foreground hover:bg-ink/85",
-  outline: "border-2 border-foreground bg-card text-foreground hover:bg-muted",
-  kill: "bg-crimson text-crimson-foreground hover:bg-crimson/90",
-  "kill-outline": "border-2 border-crimson bg-card text-foreground hover:bg-muted",
+  outline: "border border-foreground/25 bg-card text-foreground hover:bg-background",
 };
 
-/** Every choice stays enabled in every state: loading, stale, unreachable, or mid-command. */
-function Choice({ tone, title, children, onClick }: { tone: Tone; title: string; children?: ReactNode; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      data-tone={tone}
-      onClick={onClick}
-      className={cn("press grid min-h-11 w-full gap-1 px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone])}
-    >
-      <span className="text-base font-bold">{title}</span>
-      {children ? <span className={cn("text-sm", tone === "ink" || tone === "kill" ? "" : "text-muted-foreground")}>{children}</span> : null}
+/**
+ * Every choice stays enabled in every state: loading, stale, unreachable, or mid-command. A choice
+ * with `href` opens its record screen, a page, and closes the sheet on the way (brief §4.1).
+ */
+function Choice({ tone, title, children, onClick, href }: { tone: Tone; title: string; children?: ReactNode; onClick: () => void; href?: string }) {
+  const className = cn("press grid min-h-11 w-full gap-1 rounded-xl px-4 py-3 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-offset-2", TONE[tone]);
+  const body = (
+    <>
+      <span className="text-base font-semibold">{title}</span>
+      {children ? <span className={cn("text-sm", tone === "ink" ? "" : "text-muted-foreground")}>{children}</span> : null}
+    </>
+  );
+  return href ? (
+    <Link href={href} data-tone={tone} onClick={onClick} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <button type="button" data-tone={tone} onClick={onClick} className={className}>
+      {body}
     </button>
   );
 }
 
 interface Pending {
-  kind: CommandKind;
+  kind: SheetKind;
   agent: Agent | null;
 }
 
-function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandKind, agent: Agent) => void }) {
+function AgentChoices({ agent, choose, leave, full }: { agent: Agent; choose: (kind: SheetKind, agent: Agent) => void; leave: () => void; full: boolean }) {
   if (agent.mode === "stopped") {
-    return <p className="bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
+    return <p className="rounded-xl bg-ink px-4 py-3 text-sm text-ink-foreground">Stopped. There is nothing more to stop for this agent.</p>;
+  }
+  if (!full) {
+    return agent.mode === "paused" ? (
+      <p className="rounded-xl bg-background px-4 py-3 text-sm">Paused. Your role can pause; an owner or operator can resume or stop it.</p>
+    ) : (
+      <div className="grid gap-2">
+        <Choice tone="ink" title={`Pause ${agent.label}`} onClick={() => choose("pause", agent)}>
+          No new orders. Resting protection stays. An owner or operator can resume it.
+        </Choice>
+      </div>
+    );
   }
   const holding = agent.positions.length > 0;
   const ownerPaused = agent.restrictions.some((r) => r.code === "owner_pause");
   const reconciling = agent.startup === "reconciling";
   const unknown = agent.orders.some((o) => o.state === "Unknown");
   return (
-    <div className="grid gap-(--seam)">
+    <div className="grid gap-2">
       {agent.mode === "paused" ? null : (
         <Choice tone="ink" title={`Pause ${agent.label}`} onClick={() => choose("pause", agent)}>
           No new orders. Resting protection stays. You can resume later.
@@ -64,28 +85,29 @@ function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandK
         </Choice>
       ) : null}
       {reconciling ? (
-        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+        <p className="grid gap-1.5 rounded-xl bg-lapis-soft px-4 py-3 text-sm" data-source="account">
           <SourceTag source="account" />
           Checking with the broker. It resumes on its own once the check confirms; nothing is needed from you.
         </p>
       ) : null}
       {unknown ? (
-        <p className="grid gap-1.5 bg-lapis-soft px-4 py-3 text-sm" data-source="account">
+        <p className="grid gap-1.5 rounded-xl bg-lapis-soft px-4 py-3 text-sm" data-source="account">
           <span className="flex items-center gap-2">
             <SourceTag source="account" />
-            <CircleAlert className="size-4 shrink-0" aria-hidden />
+            <WarningCircle className="size-4 shrink-0" aria-hidden />
           </span>
           An order has an unknown state. Exits in that instrument are held until the broker answers; the kill switch still works.
         </p>
       ) : null}
       {holding ? (
         <>
-          <Choice tone="kill" title="Kill switch: close and stop" onClick={() => choose("kill", agent)}>
-            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Needs your passkey.
-          </Choice>
-          <Choice tone="outline" title="Stop and release positions to me" onClick={() => choose("release", agent)}>
+          <KillSwitchButton title="Kill switch: close and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
+            Cancels only this agent&apos;s orders, sells only its positions, and ends it. Other agents and your own holdings are untouched. Opens the full list to confirm with
+            your passkey.
+          </KillSwitchButton>
+          <Choice tone="outline" title="Stop and release positions to me" href={recordHref("release", agent.agent_id)} onClick={leave}>
             Ends the agent and makes its positions yours, <strong className="font-semibold text-foreground">without protection</strong>: its protective orders are canceled and
-            nothing watches {agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(" and ")}. Needs your passkey.
+            nothing watches {agent.positions.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(" and ")}. Opens the full list to confirm with your passkey.
           </Choice>
         </>
       ) : (
@@ -93,9 +115,9 @@ function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandK
           <Choice tone="outline" title={`Stop ${agent.label}`} onClick={() => choose("stop", agent)}>
             Ends the agent for good. It holds nothing, so nothing is sold. Needs your passkey.
           </Choice>
-          <Choice tone="kill" title="Kill switch: cancel and stop" onClick={() => choose("kill", agent)}>
-            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Needs your passkey.
-          </Choice>
+          <KillSwitchButton title="Kill switch: cancel and stop" href={recordHref("kill", agent.agent_id)} onClick={leave}>
+            Cancels this agent&apos;s orders and ends it. It holds nothing to sell. Opens the full list to confirm with your passkey.
+          </KillSwitchButton>
         </>
       )}
     </div>
@@ -103,7 +125,8 @@ function AgentChoices({ agent, choose }: { agent: Agent; choose: (kind: CommandK
 }
 
 export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOpenChange: (open: boolean) => void; agentId: string | null }) {
-  const { ws, reachable, commands, send, now } = useRuntime();
+  const { ws, reachable, commands, send } = useRuntime();
+  const full = useCan("stop.full");
   const [pending, setPending] = useState<Pending | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [shownOpen, setShownOpen] = useState(open);
@@ -111,160 +134,161 @@ export function StopSheet({ open, onOpenChange, agentId }: { open: boolean; onOp
     setShownOpen(open);
     if (!open) setPending(null);
   }
-  const contentRef = useRef<HTMLDivElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
   const contextAgent = agentId ? ws.agents.find((a) => a.agent_id === agentId) ?? null : null;
   const own = ws.external_positions;
 
-  const dispatch = (kind: CommandKind, agent: Agent | null) => {
+  const focusOnMount = (node: HTMLDivElement | null) => {
+    popupRef.current = node;
+    node?.focus();
+  };
+
+  const dispatch = (kind: SheetKind, agent: Agent | null) => {
     setNotice(null);
     send(kind, agent?.agent_id ?? null);
   };
 
-  const choose = (kind: CommandKind, agent: Agent | null) => {
+  const choose = (kind: SheetKind, agent: Agent | null) => {
     if (needsStepUp(kind)) setPending({ kind, agent });
     else dispatch(kind, agent);
   };
 
+  const leave = () => onOpenChange(false);
+
   const labelFor = (id: string | null) => (id ? ws.agents.find((a) => a.agent_id === id)?.label ?? "The agent" : "Account");
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent
-        ref={contentRef}
-        tabIndex={-1}
-        onOpenAutoFocus={(e) => {
-          e.preventDefault();
-          contentRef.current?.focus();
-        }}
-        className="gap-0 overflow-y-auto overscroll-contain outline-none data-[side=right]:w-full data-[side=right]:sm:max-w-md"
-        closeClassName="text-ink-foreground hover:bg-ink-foreground/15 hover:text-ink-foreground"
-        data-slot="stop-sheet"
-      >
-        <SheetHeader className="gap-1.5 bg-ink px-4 pt-4 pb-4 pr-14 text-ink-foreground">
-          <SheetTitle className="text-display text-ink-foreground">Stop</SheetTitle>
-          <SheetDescription className="text-ink-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</SheetDescription>
-        </SheetHeader>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Portal>
+        <Dialog.Backdrop data-slot="sheet-backdrop" className="fixed inset-0 z-50 bg-ink/40" />
+        <Dialog.Popup
+          ref={focusOnMount}
+          initialFocus={popupRef}
+          data-slot="stop-sheet"
+          className="fixed inset-y-0 right-0 z-50 flex w-full flex-col overflow-y-auto overscroll-contain border-l border-border bg-card text-foreground shadow-2xl outline-none sm:max-w-md sm:rounded-l-3xl"
+        >
+          <div className="grid gap-2 border-b border-border/70 px-5 pt-6 pr-16 pb-5">
+            <Dialog.Title className="flex flex-wrap items-center gap-3 text-h1">
+              <Octagon aria-hidden weight="fill" className="size-6 text-ink" />
+              Stop
+              <EnvironmentBadge environment={ws.environment} />
+            </Dialog.Title>
+            <Dialog.Description className="text-muted-foreground">Pausing is the least drastic and comes first. Paper account; simulated funds.</Dialog.Description>
+            <Dialog.Close
+              aria-label="Close"
+              className="absolute top-4 right-4 grid size-11 place-items-center rounded-full text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring"
+            >
+              <X className="size-5" aria-hidden />
+            </Dialog.Close>
+          </div>
 
-        <div className="grid gap-(--section-gap) p-4">
-          {reachable ? null : (
-            <Alert className="gap-1.5 rounded-none border-0 border-t-4 border-foreground bg-muted px-4 py-3 text-foreground" data-slot="unreachable">
-              <Unplug aria-hidden />
-              <AlertTitle className="text-base font-bold">Cannot reach your deployment</AlertTitle>
-              <AlertDescription className="grid gap-2 text-foreground">
-                <p>
-                  It has not answered since {clock(ws.health.deployment.as_of)}. A request from here cannot be delivered, and the screen will say so rather than show it as done.
-                </p>
-                <p>
-                  To stop trading now, go to the broker directly: sign in to your Alpaca paper dashboard, cancel open orders, and close positions there. Protective orders already
-                  resting at the broker stay in place until you cancel them.
-                </p>
-              </AlertDescription>
-            </Alert>
-          )}
+          <div className="grid gap-8 px-5 pt-6 pb-8">
+            {reachable ? null : <UnreachableAlert />}
 
-          {ws.status === "loading" ? (
-            <p className="bg-muted px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
-          ) : null}
+            {ws.status === "loading" ? (
+              <p className="rounded-xl bg-background px-4 py-3 text-sm">Agent details are still loading. The choices for the whole account below work without them.</p>
+            ) : null}
 
-          {contextAgent ? (
-            <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
-              <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
-                This agent: {contextAgent.label}
-                <ModeBadge mode={contextAgent.mode} />
-              </h3>
-              <AgentChoices agent={contextAgent} choose={choose} />
-            </section>
-          ) : ws.agents.length > 0 ? (
-            <section className="grid" aria-labelledby="stop-one-agent">
-              <h3 id="stop-one-agent" className="border-b-2 border-foreground pb-1.5 text-heading">
-                One agent
-              </h3>
-              {ws.agents.map((agent) => (
-                <Collapsible key={agent.agent_id} className="border-b">
-                  <CollapsibleTrigger className="group flex min-h-14 w-full items-center justify-between gap-3 px-1 py-2.5 text-left outline-none hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring">
-                    <span className="grid">
-                      <span className="font-bold">{agent.label}</span>
-                      <span className="text-caption text-muted-foreground" translate="no">
-                        {agent.mandate.name}
+            {contextAgent ? (
+              <section className="grid gap-(--block-gap)" aria-labelledby="stop-this-agent">
+                <h3 id="stop-this-agent" className="flex items-center justify-between gap-2 text-h3">
+                  This agent: {contextAgent.label}
+                  <ModeBadge mode={contextAgent.mode} />
+                </h3>
+                <AgentChoices agent={contextAgent} choose={choose} leave={leave} full={full} />
+              </section>
+            ) : ws.agents.length > 0 ? (
+              <section className="grid" aria-labelledby="stop-one-agent">
+                <h3 id="stop-one-agent" className="pb-1 text-h3">
+                  One agent
+                </h3>
+                {ws.agents.map((agent) => (
+                  <Collapsible.Root key={agent.agent_id} className="border-b border-border/70 last:border-b-0">
+                    <Collapsible.Trigger className="group -mx-2 flex min-h-14 w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-left outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring">
+                      <span className="grid">
+                        <span className="font-medium">{agent.label}</span>
+                        <span className="text-caption text-muted-foreground" translate="no">
+                          {agent.mandate.name}
+                        </span>
                       </span>
+                      <span className="flex items-center gap-2">
+                        <ModeBadge mode={agent.mode} />
+                        <CaretDown className="size-4 text-muted-foreground transition-transform duration-200 ease-(--ease-in-out) group-data-[panel-open]:rotate-180" aria-hidden />
+                      </span>
+                    </Collapsible.Trigger>
+                    <Collapsible.Panel className="pb-3">
+                      <AgentChoices agent={agent} choose={choose} leave={leave} full={full} />
+                    </Collapsible.Panel>
+                  </Collapsible.Root>
+                ))}
+              </section>
+            ) : null}
+
+            <section className="grid gap-2" aria-labelledby="stop-account">
+              <h3 id="stop-account" className="flex items-baseline justify-between gap-2 text-h3">
+                Everything on this account
+              </h3>
+              <p className="mb-1 flex items-center gap-2 text-caption text-muted-foreground">
+                <span className="inline-flex h-6 items-center rounded-full bg-lapis-soft px-2.5 text-label text-lapis">Account</span>
+                {ws.connection.broker}
+              </p>
+              <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
+                No new orders from any agent. Resting protection stays. No passkey needed.
+              </Choice>
+              {full ? (
+                <>
+                  <KillSwitchButton title="Stop all agents on this account" href={recordHref("stop_all", ws.connection.connection_id)} onClick={leave}>
+                    Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Opens the full list to confirm with
+                    your passkey.
+                  </KillSwitchButton>
+                  <KillSwitchButton appearance="outline" title="Close everything on this account" href={recordHref("close_all", ws.connection.connection_id)} onClick={leave}>
+                    <span className="grid gap-1">
+                      <span>The broker&apos;s cancel-all and close-all. It:</span>
+                      <span className="grid list-disc gap-0.5 pl-4 [&>span]:list-item">
+                        <span>cancels every open order on the account, including ones Owlhead did not place;</span>
+                        <span>
+                          closes every position, including your own
+                          {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages;
+                        </span>
+                        <span>ends every agent.</span>
+                      </span>
+                      <span>Opens the full list to confirm with your passkey.</span>
                     </span>
-                    <span className="flex items-center gap-2">
-                      <ModeBadge mode={agent.mode} />
-                      <ChevronDown className="size-5 transition-transform duration-200 ease-(--ease-in-out) group-data-[state=open]:rotate-180" aria-hidden />
-                    </span>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pb-3">
-                    <AgentChoices agent={agent} choose={choose} />
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
+                  </KillSwitchButton>
+                </>
+              ) : (
+                <p className="px-1 text-sm text-muted-foreground">Stopping and closing are for an owner or operator.</p>
+              )}
             </section>
-          ) : null}
 
-          <section className="grid gap-(--seam)" aria-labelledby="stop-account">
-            <h3 id="stop-account" className="flex items-baseline justify-between gap-2 border-b-2 border-foreground pb-1.5 text-heading">
-              Everything on this account
-            </h3>
-            <p className="mb-1 flex items-center gap-2 text-caption text-muted-foreground">
-              <span className="bg-lapis px-1.5 label-caps text-lapis-foreground">Account</span>
-              {ws.connection.broker}
-            </p>
-            <Choice tone="ink" title="Pause all agents on this account" onClick={() => choose("pause_all", null)}>
-              No new orders from any agent. Resting protection stays. No passkey needed.
-            </Choice>
-            <Choice tone="kill" title="Stop all agents on this account" onClick={() => choose("stop_all", null)}>
-              Each agent&apos;s own kill switch: cancels its orders, sells its positions, and ends it. Your own holdings are untouched. Needs your passkey.
-            </Choice>
-            <Choice tone="kill-outline" title="Close everything on this account" onClick={() => choose("close_all", null)}>
-              <span className="grid gap-1">
-                <span>The broker&apos;s cancel-all and close-all. It:</span>
-                <span className="grid list-disc gap-0.5 pl-4 [&>span]:list-item">
-                  <span>cancels every open order on the account, including ones Owlhead did not place;</span>
-                  <span>
-                    closes every position, including your own
-                    {own.length > 0 ? ` ${own.map((p) => `${quantity(p.qty)} ${p.instrument.symbol}`).join(", ")}` : " holdings"} that no agent manages;
-                  </span>
-                  <span>ends every agent.</span>
-                </span>
-                <span>Needs your passkey.</span>
-              </span>
-            </Choice>
-          </section>
+            <section aria-label="What happened" className="grid gap-2">
+              <div role="status" aria-live="polite" className="grid gap-2">
+                {notice ? <p className="rounded-xl bg-background px-4 py-3 text-sm">{notice}</p> : null}
+                {commands.map((c) => (
+                  <CommandEntry key={c.id} command={c} label={labelFor(c.agentId)} />
+                ))}
+              </div>
+            </section>
+          </div>
 
-          <section aria-label="What happened" className="grid gap-2">
-            <div role="status" aria-live="polite" className="grid gap-2">
-              {notice ? <p className="bg-muted px-4 py-3 text-sm">{notice}</p> : null}
-              {commands.map((c) => (
-                <p key={c.id} data-phase={c.phase} className="reveal border-t-2 border-foreground bg-muted px-4 py-3 text-sm">
-                  <span className="font-bold">{commandTitle(c.kind, labelFor(c.agentId))}.</span>{" "}
-                  {c.phase === "sent" ? "Sent; waiting for the runtime to record it." : null}
-                  {c.phase === "recorded" ? `Recorded at ${clock(c.recordedAt ?? now)}. ${recordedLine(c.kind, labelFor(c.agentId))}` : null}
-                  {c.phase === "undelivered"
-                    ? "Not delivered: your deployment did not answer, so nothing changed from this request. Use the broker directly, as described above."
-                    : null}
-                </p>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <StepUpDialog
-          open={pending !== null}
-          action={pending ? stepUpLine(pending.kind, pending.agent?.label ?? "", pending.agent?.positions.length ?? 0) : ""}
-          onVerified={() => {
-            if (pending) dispatch(pending.kind, pending.agent);
-            setPending(null);
-          }}
-          onCancel={() => {
-            setPending(null);
-            setNotice("Passkey check canceled. Nothing was sent.");
-          }}
-          onFailed={() => {
-            setPending(null);
-            setNotice("Passkey check failed. Nothing was sent.");
-          }}
-        />
-      </SheetContent>
-    </Sheet>
+          <StepUpDialog
+            open={pending !== null}
+            action={pending ? stepUpLine(pending.kind, pending.agent?.label ?? "", pending.agent?.positions.length ?? 0) : ""}
+            onVerified={() => {
+              if (pending) dispatch(pending.kind, pending.agent);
+              setPending(null);
+            }}
+            onCancel={() => {
+              setPending(null);
+              setNotice("Passkey check canceled. Nothing was sent.");
+            }}
+            onFailed={() => {
+              setPending(null);
+              setNotice("Passkey check failed. Nothing was sent.");
+            }}
+          />
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
