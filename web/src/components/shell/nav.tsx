@@ -30,7 +30,7 @@ export function TabNav({ approvals }: { approvals: number }) {
   return (
     <nav
       aria-label="Main"
-      className="grid border-t border-border/70 bg-card pb-[env(safe-area-inset-bottom)]"
+      className="glass grid border-t pb-[env(safe-area-inset-bottom)]"
       style={{ gridTemplateColumns: `repeat(${tabs.length}, minmax(0, 1fr))` }}
     >
       {tabs.map(({ href, label, icon: Icon }) => {

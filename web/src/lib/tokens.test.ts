@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { CHART_FONT } from "@/components/charts/options";
-import { contrastRatio, parseOklch, toHex } from "./color";
+import { composite, contrastRatio, parseOklch, rgbContrast, toHex, toRgb255 } from "./color";
 import { PALETTES, TOKEN_NAMES, type ThemeName, hatchInk } from "./palette";
 import { colorTokens, colorTokensFor, markPairs, textPairs, tokenValue } from "./tokens";
 
@@ -114,6 +114,45 @@ describe("colour tokens", () => {
     const theme = block("@theme inline");
     for (const k of ["shadow-2xs", "shadow-xs", "shadow-sm"]) expect(theme[k], k).toBe("0 0 #0000");
     for (const k of ["shadow-md", "shadow-lg", "shadow-xl", "shadow-2xl"]) expect(theme[k], k).not.toMatch(/oklch\(|rgb|#[0-9a-f]{3,6}\b/i);
+  });
+});
+
+describe("the frame's glass", () => {
+  const utility = css.slice(css.indexOf("@utility glass {"), css.indexOf("\n}\n", css.indexOf("@utility glass {")));
+  const mix = /^color-mix\(in oklch, var\(--card\) (\d+)%, transparent\)$/;
+
+  it.each(THEMES)("frosts the frame in %s with the card, translucent", (theme) => {
+    const glass = BLOCKS[theme].glass;
+    expect(glass).toMatch(mix);
+    expect(declared["glass-edge"]).toBe("color-mix(in oklch, var(--foreground) 8%, transparent)");
+  });
+
+  // The blur only averages what scrolls underneath, so a solid token under the glass is the worst case.
+  it.each(THEMES)("keeps the header's text at 4.5:1 and Stop's pill at 3:1 over any token scrolling under it, in %s", (theme) => {
+    const alpha = Number(mix.exec(BLOCKS[theme].glass)![1]) / 100;
+    const card = tokenValue("card", theme);
+    const under = colorTokensFor(theme).map((t) => t.value);
+    const worst = (fg: string) => Math.min(...under.map((u) => rgbContrast(toRgb255(fg), composite(card, alpha, u))));
+    for (const text of ["foreground", "muted-foreground"]) expect(worst(tokenValue(text, theme)), text).toBeGreaterThanOrEqual(4.5);
+    expect(worst(tokenValue("ink", theme)), "ink").toBeGreaterThanOrEqual(3);
+  });
+
+  it("blurs and saturates what is behind, with the WebKit prefix", () => {
+    expect(utility).toContain("background-color: var(--glass);");
+    expect(utility).toContain("border-color: var(--glass-edge);");
+    expect(utility).toContain("-webkit-backdrop-filter: blur(22px) saturate(1.8);");
+    expect(utility).toMatch(/\n\s+backdrop-filter: blur\(22px\) saturate\(1\.8\);/);
+  });
+
+  it.each([
+    ["no backdrop filter", "@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)))"],
+    ["reduced transparency", "@media (prefers-reduced-transparency: reduce)"],
+    ["forced colours", "@media (forced-colors: active)"],
+  ])("falls back to the solid card under %s", (_what, condition) => {
+    const start = utility.indexOf(`${condition} {`);
+    expect(start, condition).toBeGreaterThan(0);
+    const body = utility.slice(start, utility.indexOf("}", start));
+    expect(body).toContain("background-color: var(--card);");
   });
 });
 

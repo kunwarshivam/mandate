@@ -57,6 +57,12 @@
   --paper: var(--card);
   --logo: var(--foreground);
   --backdrop: color-mix(in oklch, var(--ink) 40%, transparent);
+  /*
+   * The frame's frosted glass (the header and the phone tab bar). 72% card keeps muted text at 5.2:1
+   * even with solid ink scrolling underneath; at 60% it would fall to 3.8:1.
+   */
+  --glass: color-mix(in oklch, var(--card) 72%, transparent);
+  --glass-edge: color-mix(in oklch, var(--foreground) 8%, transparent);
 
   --card-foreground: var(--foreground);
   --popover: var(--card);
@@ -150,6 +156,8 @@ html:root[data-mode="dark"] {
   --hatch-ink: oklch(0.62 0.007 85 / 0.4);
   --paper: var(--mandate);
   --backdrop: color-mix(in oklch, var(--background) 72%, transparent);
+  /* Muted text keeps 5.1:1 even with solid paper scrolling underneath; at 60% it would fall to 3.35:1. */
+  --glass: color-mix(in oklch, var(--card) 72%, transparent);
 
   color-scheme: dark;
 }
@@ -459,6 +467,31 @@ html:root[data-cvd="on"] {
   transition: clip-path var(--duration-draw) var(--ease-out);
   @starting-style {
     clip-path: inset(0 100% 0 0);
+  }
+}
+
+/*
+ * Frosted glass, for the frame alone: the sticky header and the phone tab bar, with the page
+ * scrolling underneath. Everything else stays flat. Solid card where the browser cannot blur, where
+ * the owner asks for less transparency, and in forced colours.
+ */
+@utility glass {
+  background-color: var(--glass);
+  border-color: var(--glass-edge);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8);
+  backdrop-filter: blur(22px) saturate(1.8);
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    background-color: var(--card);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  @media (forced-colors: active) {
+    background-color: var(--card);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 }
 

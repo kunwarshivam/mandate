@@ -125,7 +125,7 @@ export function AppHeader() {
   const home = homeFor(role);
 
   return (
-    <header className="sticky top-0 z-30 shrink-0 border-b border-border/70 bg-card">
+    <header className="glass sticky top-0 z-30 shrink-0 border-b">
       <div className="flex h-16 items-center gap-1 overflow-hidden px-(--page-x) whitespace-nowrap sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
         <Link href={home.href} className="shrink-0 px-1 text-foreground lg:hidden" aria-label={`Owlhead, ${home.label}`}>

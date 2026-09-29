@@ -122,6 +122,19 @@ describe("Owlhead", () => {
   });
 });
 
+describe("the frame", () => {
+  it("frosts the header and the phone tab bar, and nothing else", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const [header] = screen.getAllByRole("banner");
+    const tabs = document.querySelector<HTMLElement>("nav[aria-label=Main].grid");
+    expect(header).toHaveClass("glass");
+    expect(header).not.toHaveClass("bg-card");
+    expect(tabs).toHaveClass("glass");
+    expect(tabs).not.toHaveClass("bg-card");
+    expect([...document.querySelectorAll(".glass")]).toEqual([header, tabs]);
+  });
+});
+
 describe("approvals badge", () => {
   it("shows a count and nothing else, in the sidebar, the header, and the phone tab bar", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
