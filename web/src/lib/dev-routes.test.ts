@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import PalettePage from "@/app/palette/page.dev";
+import PalettePage from "@/app/(app)/palette/page.dev";
 import { DEV_PAGE_EXTENSION, pageExtensions } from "./dev-routes";
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -18,7 +18,7 @@ describe("the /palette reference stays out of production", () => {
   });
 
   it("has no route file a production build would pick up", () => {
-    const files = readdirSync(web("src/app/palette"));
+    const files = readdirSync(web("src/app/(app)/palette"));
     expect(files).toContain("page.dev.tsx");
     const production = pageExtensions("production");
     const routeFile = /^(page|layout|route|template|default|loading|error|not-found)\.(.+)$/;
@@ -49,7 +49,7 @@ describe("the colour-blind friendly preference is dev only, and there is one pal
     expect(workspace).toMatch(/getColourBlind[^]*if \(!colourBlindEnabled\) return false;/);
     const layout = readFileSync(web("src/app/layout.tsx"), "utf8");
     expect(layout).toContain('data-cvd={colourBlind ? "on" : undefined}');
-    expect(layout).toMatch(/\{scenarioSwitcherShown \? <ScenarioSwitcher /);
+    expect(readFileSync(web("src/components/shell/app-frame.tsx"), "utf8")).toMatch(/\{scenarioSwitcherShown \? <ScenarioSwitcher /);
   });
 
   it("takes ?cvd only in development, and no ?palette at all", () => {
@@ -59,6 +59,8 @@ describe("the colour-blind friendly preference is dev only, and there is one pal
   });
 
   it("has no palette switch in the layout", () => {
-    expect(readFileSync(web("src/app/layout.tsx"), "utf8")).not.toMatch(/PaletteStyle|data-palette|DevPanel/);
+    for (const layout of ["src/app/layout.tsx", "src/components/shell/app-frame.tsx", "src/app/(site)/layout.tsx"]) {
+      expect(readFileSync(web(layout), "utf8"), layout).not.toMatch(/PaletteStyle|data-palette|DevPanel/);
+    }
   });
 });

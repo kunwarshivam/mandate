@@ -1,6 +1,6 @@
 import { fireEvent, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import * as approval from "@/app/approvals/[approvalId]/page";
+import * as approval from "@/app/(app)/approvals/[approvalId]/page";
 import { AppShell } from "@/components/shell/app-shell";
 import { StopControl } from "@/components/shell/stop-control";
 import { AGENT_IDS, APPROVAL_IDS } from "@/fixtures/workspace";

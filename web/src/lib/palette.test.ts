@@ -443,7 +443,7 @@ describe("colour-blind friendly", () => {
 
 describe("colour usage in components", () => {
   const files = sources(SRC).map((f) => ({ path: relative(SRC, f), text: readFileSync(f, "utf8") }));
-  const specimens = /^(app\/design|app\/palette|components\/palette)\//;
+  const specimens = /^(app\/\(app\)\/design|app\/\(app\)\/palette|components\/palette)\//;
   const all = [...files, { path: "app/globals.css", text: css }, { path: "app/kumo-theme.css", text: kumoCss }];
 
   it("keeps warning off every screen, including Kumo's warning and alert variants", () => {

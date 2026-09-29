@@ -10,6 +10,8 @@
 # `npm run build` is the production build, and its postbuild checks fail if it contains the scenario
 # switcher or takes a scenario. The suite then builds its own copy into `.next-e2e`, with the scenario
 # switch on (`web/scripts/e2e-build.mjs`), and runs in light and dark: about 9 minutes on two workers.
+# A second, short suite (`web/playwright.auth.config.ts`) builds with sign-in on against a stub Supabase
+# address, into `.next-auth-e2e`, and checks what a signed-out visitor meets (DEC-211).
 # Only the Chromium headless shell is installed, cached per Playwright version; on a cache hit
 # only its system libraries are installed.
 name: web
@@ -99,6 +101,9 @@ jobs:
       - name: Computed styles in Chromium (DEC-200)
         if: steps.playwright.outputs.version != ''
         run: npm run test:e2e
+      - name: Sign-in on, signed out (DEC-211)
+        if: steps.playwright.outputs.version != '' && hashFiles('web/playwright.auth.config.ts') != ''
+        run: npm run test:e2e:auth
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure() && steps.playwright.outputs.version != ''
         with:

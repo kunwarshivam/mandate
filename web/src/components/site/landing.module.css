@@ -1,0 +1,17 @@
+/*
+ * The page's one authored motion: on a wide screen the phone beside the hero rises 12 px and fades
+ * in once, after the desktop screen. Only where motion is welcome, and never on a phone, where the
+ * phone screen is the largest thing painted and must not wait.
+ */
+@media (min-width: 64rem) and (prefers-reduced-motion: no-preference) {
+  .rise {
+    transition-property: opacity, translate;
+    transition-duration: 480ms;
+    transition-timing-function: var(--ease-out);
+    transition-delay: 120ms;
+    @starting-style {
+      opacity: 0;
+      translate: 0 0.75rem;
+    }
+  }
+}

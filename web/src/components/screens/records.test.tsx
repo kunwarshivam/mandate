@@ -1,12 +1,12 @@
 import type { ReactNode } from "react";
 import { screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import * as agentSection from "@/app/agents/[agentId]/[...section]/page";
-import * as agentPage from "@/app/agents/[agentId]/page";
-import * as approvalPage from "@/app/approvals/[approvalId]/page";
-import * as auditScreen from "@/app/audit/[screen]/page";
-import * as dashboard from "@/app/page";
-import * as positions from "@/app/positions/page";
+import * as agentSection from "@/app/(app)/agents/[agentId]/[...section]/page";
+import * as agentPage from "@/app/(app)/agents/[agentId]/page";
+import * as approvalPage from "@/app/(app)/approvals/[approvalId]/page";
+import * as auditScreen from "@/app/(app)/audit/[screen]/page";
+import * as dashboard from "@/app/(app)/page";
+import * as positions from "@/app/(app)/positions/page";
 import { AppShell } from "@/components/shell/app-shell";
 import type { Scenario } from "@/fixtures/types";
 import { AGENT_IDS, APPROVAL_IDS, buildWorkspace } from "@/fixtures/workspace";

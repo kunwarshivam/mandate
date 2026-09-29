@@ -3,7 +3,8 @@
 The owner's web app for Owlhead, the product's public name at owlhead.ai (DEC-201; "Mandate" stays
 the codename for code and paths, and "mandate" the word for the owner's binding envelope): the shell with the always-present Stop control, the dashboard,
 agent detail, and approvals. This first slice runs entirely on recorded fixture data. It talks to
-no deployment, no broker, and no network service, and it cannot place an order.
+no deployment, no broker, and no network service other than Supabase Auth for sign-in, which is
+off unless it is configured (see Sign-in), and it cannot place an order.
 
 The screens follow the [product-experience brief](../docs/product/09-product-experience.md). The
 stack is DEC-200: Next.js 16 (App Router), React 19, TypeScript strict, Tailwind CSS v4, Cloudflare's
@@ -25,6 +26,7 @@ npm run build && npm start
 
 npx playwright install --with-deps --only-shell chromium   # once
 npm run test:e2e
+npm run test:e2e:auth   # sign-in on, against a stub Supabase
 ```
 
 The e2e suite (`e2e/`, Playwright, Chromium only, in light and dark) builds the app into `.next-e2e/`
@@ -55,6 +57,52 @@ It also turns on colour-blind friendly gains and losses (the `mandate-cvd` cooki
 `?cvd=0`, or Alt+Shift+C), and links to `/palette`, the palette reference, which exists only in
 development.
 
+### Sign-in (DEC-211)
+
+Sign-in is Supabase Auth: Google (OIDC) creates the account and signs in the first time, and a
+passkey signs in after that. It is on only when both Supabase variables are set and the build is not
+the e2e build (`authEnabled` in `src/lib/auth-config.ts`, read when the app is built). With it off,
+the app is exactly as it was: no sign-in, no redirects, and no request to Supabase; `/login` says
+sign-in is off.
+
+To run without sign-in, set neither variable (or leave `.env.local` out). To run with it, copy
+`.env.example` to `.env.local`, which git ignores, and fill it in:
+
+| Variable | What it is |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | The project's URL, from the dashboard's Connect dialog |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | The publishable key (`sb_publishable_…`, Project Settings > API Keys); never the secret key |
+| `NEXT_PUBLIC_OWLHEAD_EMAIL_SIGNIN` | `1` shows the email link on `/login`; leave it unset until the project has SMTP |
+
+Next reads `.env.local` for `npm run dev`, `npm run build` and `npm start`; the variables are
+inlined into the build, so rebuild after changing them. Open the app at `http://localhost:4317`
+rather than `127.0.0.1`: a passkey only works on a host that matches its relying-party ID.
+
+While sign-in is on, a signed-out visitor at `/` sees the welcome page (the address stays `/`), and
+anywhere else goes to `/login?next=` and the path. `/login` offers Google and a passkey;
+`/auth/callback` finishes a Google or email sign-in and goes on to `next`, by way of
+`/auth/passkey` ("Add a passkey", or "Not now") when the account has none. Signed in, the account
+menus and the More sheet show the address and Sign out, and Settings > Profile lists the passkeys.
+
+The Supabase dashboard needs:
+
+- **Authentication > URL Configuration.** Site URL `http://localhost:4317`. Redirect URLs
+  `http://localhost:4317/**` and `http://127.0.0.1:4317/**`, plus any other port you run on (for
+  example `http://localhost:4340/**`); at launch, `https://owlhead.ai/**`.
+- **Authentication > Sign In / Providers > Google.** Enabled, with the client ID and secret of a
+  Google Cloud OAuth client (type Web application) whose authorised redirect URI is
+  `https://wyyxngmblqqokcvraflx.supabase.co/auth/v1/callback`.
+- **Authentication > Passkeys.** Enable Passkey authentication; Relying Party Display Name
+  `Owlhead`, Relying Party ID `localhost`, Relying Party Origins `http://localhost:4317` (up to five,
+  so add `http://localhost:4340` for a second port). At launch the ID becomes `owlhead.ai`, and
+  changing it invalidates every passkey made under `localhost`.
+
+`npm run test:e2e:auth` (`playwright.auth.config.ts`, specs in `e2e-auth/`) builds with sign-in on
+against a stub Supabase address into `.next-auth-e2e/`, starts it on port 4318
+(`OWLHEAD_AUTH_E2E_PORT` changes it) and never reuses a running server. It checks what a signed-out
+visitor meets, answering the browser's calls to Supabase itself. It cannot sign in: the server would
+verify the session against the project's keys, which a browser stub cannot answer.
+
 ## The mock-data rule
 
 - Every figure comes from typed fixtures in `src/fixtures/`, which mirror
@@ -68,7 +116,8 @@ development.
   are held in memory and shown as recorded only after a delay, so the screens never display an
   optimistic result.
 - Nothing about approvals, positions, or mandates is written to `localStorage`,
-  `sessionStorage`, or a cache. The app stores nothing in the browser.
+  `sessionStorage`, or a cache. The app stores nothing in the browser, apart from Supabase's
+  session cookies while sign-in is on.
 - Charts draw seeded, deterministic fixture bars and equity (`src/fixtures/market.ts`), consistent
   with the fixture's fills, positions and equity. They are TradingView Lightweight Charts
   (Apache-2.0); the credit is in `web/NOTICE`, under the dashboard's account chart and on `/design`.
