@@ -4,6 +4,7 @@
 # next.js
 /.next/
 /.next-e2e/
+/.next-auth-e2e/
 /out/
 next-env.d.ts
 *.tsbuildinfo

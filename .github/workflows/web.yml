@@ -99,6 +99,9 @@ jobs:
       - name: Computed styles in Chromium (DEC-200)
         if: steps.playwright.outputs.version != ''
         run: npm run test:e2e
+      - name: Sign-in on, signed out (DEC-211)
+        if: steps.playwright.outputs.version != '' && hashFiles('web/playwright.auth.config.ts') != ''
+        run: npm run test:e2e:auth
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure() && steps.playwright.outputs.version != ''
         with:

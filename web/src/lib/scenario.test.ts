@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScenarioSwitcher as SwitcherOff } from "@/components/dev/scenario-switcher.off";
 import { proxy } from "@/proxy";
 import nextConfig from "../../next.config";
-import { E2E_FLAG, distDir, isE2eBuild } from "../../scripts/e2e-build.mjs";
+import { AUTH_E2E_FLAG, E2E_FLAG, distDir, isE2eBuild } from "../../scripts/e2e-build.mjs";
 import { SWITCHER_MARKER } from "../../scripts/no-scenarios.mjs";
 import { SCENARIO_SWITCHER_MODULE, SCENARIO_SWITCHER_OFF, devOnlyAliases } from "./dev-routes";
 import { SCENARIO_COOKIE, scenarioSwitcherShown, scenariosEnabled, scenariosOn } from "./scenario";
@@ -48,6 +48,10 @@ describe("the fixture scenario switch is on in next dev and the e2e build only",
     expect(distDir()).toBe(".next-e2e");
     vi.stubEnv(E2E_FLAG, "0");
     expect(distDir()).toBe(".next");
+    vi.stubEnv(AUTH_E2E_FLAG, "1");
+    expect(distDir()).toBe(".next-auth-e2e");
+    vi.stubEnv(E2E_FLAG, "1");
+    expect(distDir()).toBe(".next-e2e");
   });
 
   it("sets the flag only for the Playwright suite's own build", () => {
