@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
  * pages render without Supabase and the sign-in page says it is off.
  */
 
-const APP_CONTROLS = ["[data-slot=stop-control]", "[data-slot=dock]", "[data-slot=wire]", "[data-slot=environment-badge]"];
+const APP_CONTROLS = ["[data-slot=stop-control]", "[data-slot=dock]", "[data-slot=wire]"];
 
 for (const width of [390, 1440]) {
   test.describe(`at ${width}px`, () => {
@@ -20,6 +20,8 @@ for (const width of [390, 1440]) {
         await expect(header.getByRole("link", { name: "Owlhead" })).toHaveAttribute("href", "/");
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
         for (const selector of APP_CONTROLS) await expect(page.locator(selector), selector).toHaveCount(0);
+        // The landing hero shows the paper badge as content; the frame itself never carries one.
+        await expect(header.locator("[data-slot=environment-badge]")).toHaveCount(0);
         await expect(page.getByRole("button", { name: "Stop" })).toHaveCount(0);
         await expect(page.getByRole("navigation", { name: "Main" })).toHaveCount(0);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

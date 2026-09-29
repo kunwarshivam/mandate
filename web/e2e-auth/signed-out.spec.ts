@@ -11,8 +11,8 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
   expect(response?.status()).toBe(200);
   expect(response?.request().redirectedFrom()).toBeNull();
   await expect(page).toHaveURL(`${baseURL}/`);
-  await expect(page.locator("[data-slot=welcome]")).toBeVisible();
-  await expect(page.getByRole("main").getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+  await expect(page.locator("[data-slot=landing]")).toBeVisible();
+  await expect(page.getByRole("main").getByRole("link", { name: "Get started" })).toHaveAttribute("href", "/login");
   await expect(page.locator("[data-slot=stop-control]")).toHaveCount(0);
 });
 
