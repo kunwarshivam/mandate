@@ -169,11 +169,13 @@ the crate is pending.
 - **Reference cases:** the 16 `mandate::MC-A` cases and the 28 `mandate::MC-B` builder cases other
   than `MC-B17` and `MC-B30` to `MC-B32`, in `fixtures/refcases/mandate.json`. Family A also runs in
   the shared harness, through `crates/mandate-refcases/src/mandate/autonomy.rs` on the parsed
-  mandate's own `autonomy` block, and is marked passing (DEC-162). Family B moves in a later
+  mandate's own `autonomy` block (DEC-162); its `status.toml` rows move in a status-only PR, since
+  the spec guard keeps that file apart from code (ES-22). Family B moves in a later
   harness-and-status PR, once stream G's gate (E6-8) supplies the `gate_dry_run` verdict each of
   those cases states.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; family A in the shared harness with
-  `cargo nextest run -p mandate-refcases mandate::MC-A mandate::autonomy`.
+  `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A mandate::autonomy` (the
+  flag runs cases `status.toml` does not yet list as passing).
 
 ## Agent runtime and kill switches
 
