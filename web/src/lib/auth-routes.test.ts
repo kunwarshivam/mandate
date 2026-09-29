@@ -65,7 +65,7 @@ describe("safeNext keeps `next` on this site (no open redirect)", () => {
 });
 
 describe("public paths", () => {
-  it.each(["/welcome", "/login", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt", "/site/hero-desktop-light.png", "/site/step-gate-phone-dark.png"])(
+  it.each(["/welcome", "/login", "/api/beta", "/auth/callback", "/auth/passkey", "/_next/static/chunks/a.js", "/favicon.ico", "/favicon.svg", "/favicon-32.png", "/apple-touch-icon.png", "/pwa-192.png", "/pwa-maskable-512.png", "/og-image.png", "/site.webmanifest", "/robots.txt"])(
     "%s is public",
     (path) => expect(isPublicPath(path)).toBe(true),
   );

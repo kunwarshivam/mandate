@@ -46,19 +46,21 @@ describe("lint bans", () => {
 });
 
 describe("banned parts", () => {
-  const banned: Array<[string, RegExp]> = [
+  // DEC-213: the signed-out landing's blinking "New" is a period news tag beside the beta notice, not a badge on a strategy or a trade.
+  const SITE = /src\/components\/site\//;
+  const banned: Array<[string, RegExp, RegExp?]> = [
     ["Cloudflare branding", /CloudflareLogo|PoweredByCloudflare/],
     ["clipboard copy", /navigator\.clipboard|Clipboard|CopyButton|ClipboardText/],
     ["meters for goals or limits", /components\/meter|<Meter\b/],
     ["browser storage", /localStorage|sessionStorage|indexedDB/],
     ["typed confirmation", /type (the )?(name|word) to confirm/i],
-    ["recommendation badges", />\s*(Recommended|New)\s*</],
+    ["recommendation badges", />\s*(Recommended|New)\s*</, SITE],
     ["select all", /select all/i],
     ["a recents list", /["'>]\s*Recents?\s*["'<]|recentItems|useRecent/],
   ];
 
-  it.each(banned)("uses no %s", (_what, pattern) => {
-    const hits = SOURCES.filter((f) => pattern.test(readFileSync(f, "utf8"))).map((f) => relative(WEB, f));
+  it.each(banned)("uses no %s", (_what, pattern, exempt) => {
+    const hits = SOURCES.filter((f) => !exempt?.test(relative(WEB, f)) && pattern.test(readFileSync(f, "utf8"))).map((f) => relative(WEB, f));
     expect(hits).toEqual([]);
   });
 

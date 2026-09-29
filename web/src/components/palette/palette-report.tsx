@@ -36,7 +36,7 @@ const VISION_LABEL: Record<Vision, string> = { normal: "Normal", deuteranopia: "
 const SCOPE_LABEL: Record<KumoScope, string> = {
   root: "The page",
   account: "The account fill: ink in light, paper in dark",
-  field: "The mandate's ultramarine tint",
+  field: "The mandate's volt tint",
   ink: "Ink, the Stop control",
 };
 
@@ -233,7 +233,7 @@ export function PaletteReport({ colourBlind }: { colourBlind: boolean }) {
         </nav>
       </header>
 
-      <Block title="In use" lead="The account on its ink fill, the mandate on a pale ultramarine tint under an ultramarine rule, results in the status family, and figures with a plain zero. Drawn in the current theme.">
+      <Block title="In use" lead="The account on its ink fill, the mandate on a pale volt tint under a volt rule, results in the status family, and figures with a plain zero. Drawn in the current theme.">
         <Preview />
       </Block>
 

@@ -10,8 +10,8 @@ const DO = [
 ];
 
 const DONT = [
-  "Set it on a colour: no mark on ultramarine, the kill switch's red, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
-  "Recolour it: no ultramarine mark, no second colour, no colour fade, shadow, or outline.",
+  "Set it on a colour: no mark on volt, the kill switch's red, an account fill or any other block. The page is its only ground; the app icons and the share image are always ink on off-white.",
+  "Recolour it: no volt mark, no second colour, no colour fade, shadow, or outline.",
   "Stretch, rotate, crop, or redraw it, or rebuild the wordmark in live type or another face.",
   "Use the founder's shaded original in product UI: the UI is flat colour (DEC-200).",
   "Go below 16 px for the mark or 96 px wide for the lockup, or set it on a busy field.",

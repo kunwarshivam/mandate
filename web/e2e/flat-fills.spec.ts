@@ -86,14 +86,14 @@ async function tokenColor(page: Page, token: string): Promise<string> {
   }, token);
 }
 
-/** Saturated ultramarine: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
-const SATURATED_ULTRAMARINE = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
-const MARK_ULTRAMARINE = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
+/** Saturated volt: the mandate's rules, markers and labels and the account's line. Never a block, and in light mode never text. */
+const SATURATED_VOLT = ["--mandate-strong", "--mandate-marker", "--mandate-edge", "--lapis-line"];
+const MARK_VOLT = ["--mandate-marker", "--mandate-edge", "--lapis-line"];
 /** A rail is 8 px tall and a post, tick or bar a few px wide: anything thicker on both sides is a block. */
-const ULTRAMARINE_MAX_THICKNESS = 8;
+const VOLT_MAX_THICKNESS = 8;
 
-/** Elements painted in saturated ultramarine thicker than a line, and text set in ultramarine's mark colours. */
-async function ultramarineMisuse(page: Page): Promise<string[]> {
+/** Elements painted in saturated volt thicker than a line, and text set in volt's mark colours. */
+async function voltMisuse(page: Page): Promise<string[]> {
   return page.evaluate(
     ({ fills, marks, max }) => {
       const resolve = (token: string) => {
@@ -114,14 +114,14 @@ async function ultramarineMisuse(page: Page): Promise<string[]> {
           if (pseudo && (style.content === "none" || style.content === "normal")) continue;
           if (!fill.has(style.backgroundColor)) continue;
           const box = pseudo ? { width: parseFloat(style.width), height: parseFloat(style.height) } : el.getBoundingClientRect();
-          if (Math.min(box.width, box.height) > max) hits.push(`${label(el)}${pseudo ?? ""} is a ${Math.round(box.width)}x${Math.round(box.height)} ultramarine block`);
+          if (Math.min(box.width, box.height) > max) hits.push(`${label(el)}${pseudo ?? ""} is a ${Math.round(box.width)}x${Math.round(box.height)} volt block`);
         }
         const text = [...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent?.trim());
-        if (text && mark.has(getComputedStyle(el).color)) hits.push(`${label(el)} sets text in an ultramarine mark colour: ${el.textContent?.slice(0, 40)}`);
+        if (text && mark.has(getComputedStyle(el).color)) hits.push(`${label(el)} sets text in a volt mark colour: ${el.textContent?.slice(0, 40)}`);
       }
       return hits;
     },
-    { fills: SATURATED_ULTRAMARINE, marks: MARK_ULTRAMARINE, max: ULTRAMARINE_MAX_THICKNESS },
+    { fills: SATURATED_VOLT, marks: MARK_VOLT, max: VOLT_MAX_THICKNESS },
   );
 }
 
@@ -154,12 +154,12 @@ test.describe("no gradient paints on any route (DEC-200)", () => {
   });
 });
 
-test.describe("ultramarine is a line, never a block, and never text lighter than deep ultramarine (DEC-205)", () => {
+test.describe("volt is a line, never a block, and never text lighter than deep volt (DEC-205)", () => {
   for (const path of ROUTES) {
     test(`desktop ${path}`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState("networkidle");
-      expect(await ultramarineMisuse(page)).toEqual([]);
+      expect(await voltMisuse(page)).toEqual([]);
     });
   }
 
@@ -169,7 +169,7 @@ test.describe("ultramarine is a line, never a block, and never text lighter than
       test(`phone ${path}`, async ({ page }) => {
         await page.goto(path);
         await page.waitForLoadState("networkidle");
-        expect(await ultramarineMisuse(page)).toEqual([]);
+        expect(await voltMisuse(page)).toEqual([]);
       });
     }
   });
