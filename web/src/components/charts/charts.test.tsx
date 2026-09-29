@@ -287,7 +287,8 @@ describe("the hero chart scrubs", () => {
       expect(pill).toHaveTextContent(word);
       expect(pill.querySelector("[data-slot=hero-when]")).toHaveClass("text-muted-foreground");
       expect(pill.querySelector("[data-placeholder]")).toBeNull();
-      expect(pill.parentElement!.querySelector(":scope > [data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+      const disclosure = pill.parentElement!.querySelector<HTMLElement>(":scope > [data-slot=disclosure]");
+      expect(within(disclosure!).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
     }
     expect(spoken(hero(container).value)).toBe(usdLabel(data[0].value));
     expect(hero(container).change).toHaveTextContent(/^\$0\.00no change\(0\.00%\)Sep 28, \d{2}:\d{2} ET$/);
