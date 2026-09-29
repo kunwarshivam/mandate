@@ -6,7 +6,7 @@ import { agentHref } from "../src/lib/screens";
  * The desktop dock stays put: however far a long page scrolls, it floats centred at the bottom of the
  * viewport with every item on screen, the current page's item among them, and the page's last line
  * ends above it. The header stays at the top with Stop wholly on screen. Below the 1024 px breakpoint
- * the tab bar and the slide-out sheet carry the nav instead.
+ * the tab bar and its More sheet carry the nav instead.
  */
 
 const WIDTHS = [1024, 1280, 1920];
@@ -61,7 +61,7 @@ test.describe("The desktop dock stays pinned while a long page scrolls", () => {
       expect(header?.y, "the header stays at the top").toBe(0);
       expect(found.box.top, "the dock stays clear of the header").toBeGreaterThan(header!.y + header!.height);
       await expect(page.getByRole("button", { name: "Stop", exact: true }), "Stop").toBeInViewport({ ratio: 1 });
-      await expect(page.locator("aside[data-sidebar=sidebar]"), "no sidebar rail").toHaveCount(0);
+      await expect(page.locator("[data-sidebar]"), "no sidebar").toHaveCount(0);
     });
   }
 });

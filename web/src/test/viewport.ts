@@ -1,4 +1,4 @@
-/** Kumo's Sidebar reads this query to choose the phone sheet over the desktop layout (the dock). */
+/** The query a component would read to lay out for a phone or tablet in JS; the shell must not need it. */
 const BELOW_LG = "(max-width: 1023px)";
 
 /** Report a phone or tablet to `matchMedia` until the returned function restores it. */
@@ -8,4 +8,19 @@ export function asPhone(): () => void {
   return () => {
     window.matchMedia = original;
   };
+}
+
+/** Classes that hide an element on a phone (under 40rem), whatever it shows from a wider breakpoint. */
+const HIDES_ON_PHONE = /(^|\s)(hidden|sr-only|max-sm:hidden|max-md:hidden|max-lg:hidden|max-xl:hidden|max-\[\d+rem\]:hidden)(\s|$)/;
+
+/**
+ * Whether an element shows on a phone, read from its and its ancestors' classes: jsdom applies no
+ * media queries, so the shell's breakpoint classes are the only evidence. The e2e suite checks the
+ * real layout.
+ */
+export function shownOnPhone(el: Element): boolean {
+  for (let node: Element | null = el; node && node !== document.body; node = node.parentElement) {
+    if (node.hasAttribute("hidden") || HIDES_ON_PHONE.test(node.getAttribute("class") ?? "")) return false;
+  }
+  return true;
 }

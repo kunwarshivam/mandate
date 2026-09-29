@@ -206,13 +206,10 @@ test.describe("no gradient paints in any overlay (DEC-200)", () => {
 
   test.describe("phone", () => {
     test.use({ viewport: { width: 390, height: 844 } });
-    test("the sidebar sheet", async ({ page }) => {
+    test("the More sheet", async ({ page }) => {
       await page.goto(agentHref(AGENT_IDS.btc, "overview"));
       await page.waitForLoadState("networkidle");
-      const sidebar = page.getByRole("navigation", { name: "Main" }).filter({ hasText: "Account" });
-      await expect(sidebar).toBeHidden();
-      await page.getByRole("button", { name: /^(Expand|Collapse) sidebar$/ }).first().click();
-      await expect(sidebar).toBeVisible();
+      await openBy(page, page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }), page.getByRole("dialog", { name: "More" }));
       expect(await gradientsIn(page)).toEqual([]);
     });
   });
@@ -307,13 +304,16 @@ test.describe("Kumo surfaces are flat (DEC-200)", () => {
     expect(await gradientsIn(page, "[data-specimen=tabs]")).toEqual([]);
   });
 
-  test("Sidebar: no scroll mask on its content", async ({ page }) => {
+  test("phone frame and More sheet: no scroll mask anywhere", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto("/");
-    await expect(page.locator("[data-sidebar][data-mobile]"), "the phone sheet, the only sidebar left").toBeAttached();
-    const masked = page.locator('[data-sidebar] [class*="mask-image"], [class*="mask-image"]');
-    expect(await masked.count()).toBeGreaterThan(0);
-    for (const el of await masked.all()) expect(await computed(el, ["mask-image", "-webkit-mask-image"])).toEqual({ "mask-image": "none", "-webkit-mask-image": "none" });
+    await page.waitForLoadState("networkidle");
+    await expect(page.locator("[data-sidebar]"), "no sidebar on a phone (DEC-207)").toHaveCount(0);
+    await page.getByRole("navigation", { name: "Main" }).getByRole("button", { name: "More" }).click();
+    await expect(page.getByRole("dialog", { name: "More" })).toBeVisible();
+    for (const el of await page.locator("[data-slot=more-sheet], [data-slot=more-sheet] *, nav[aria-label=Main]").all()) {
+      expect(await computed(el, ["mask-image", "-webkit-mask-image"])).toEqual({ "mask-image": "none", "-webkit-mask-image": "none" });
+    }
   });
 
   test("skeletons: a flat fill, with no shimmer and no animation", async ({ page }) => {

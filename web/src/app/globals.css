@@ -78,7 +78,6 @@
   --radius: 0.5rem;
 
   /* Layout (web/DESIGN.md, Space). Calm is the default density; audit and admin opt into dense. */
-  --nav-width: 14rem;
   --content-max: 68rem;
   --page-x: 1.25rem;
   --page-top: 1.5rem;
@@ -352,7 +351,7 @@ html:root[data-cvd="on"] {
     -webkit-tap-highlight-color: transparent;
     /* Keep a focused or anchored element clear of the sticky header, the tab bar or dock, and the pinned response. */
     scroll-padding-top: 5rem;
-    @media (min-width: 40rem) {
+    @media (min-width: 64rem) {
       &:has([data-slot="wire"]) {
         scroll-padding-top: calc(5rem + var(--status-row));
       }
@@ -401,7 +400,7 @@ html:root[data-cvd="on"] {
   }
 }
 
-/* Base UI marks the entering and leaving frames; the Stop sheet and step-up dialog time them. */
+/* Base UI marks the entering and leaving frames; the Stop sheet, More sheet and step-up dialog time them. */
 [data-slot="stop-sheet"] {
   transition: transform var(--duration-sheet) var(--ease-drawer);
 }
@@ -410,6 +409,17 @@ html:root[data-cvd="on"] {
   transform: translateX(100%);
 }
 [data-slot="stop-sheet"][data-ending-style] {
+  transition-duration: var(--duration-sheet-exit);
+  transition-timing-function: var(--ease-out);
+}
+[data-slot="more-sheet"] {
+  transition: transform var(--duration-sheet) var(--ease-drawer);
+}
+[data-slot="more-sheet"][data-starting-style],
+[data-slot="more-sheet"][data-ending-style] {
+  transform: translateY(100%);
+}
+[data-slot="more-sheet"][data-ending-style] {
   transition-duration: var(--duration-sheet-exit);
   transition-timing-function: var(--ease-out);
 }
@@ -568,6 +578,7 @@ html:root[data-cvd="on"] {
     scroll-behavior: auto !important;
   }
   [data-slot="stop-sheet"],
+  [data-slot="more-sheet"],
   [data-slot="step-up-dialog"],
   [data-slot="sheet-backdrop"] {
     transition: none !important;

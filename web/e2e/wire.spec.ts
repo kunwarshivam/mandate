@@ -129,7 +129,7 @@ test("drifts left, and holds still under the pointer and under focus", async ({ 
 
 test("stands still for reduced motion, and scrolls by hand instead", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await open(page, "/", 720, 800);
+  await open(page, "/", 1024, 800);
   expect(await track(page).evaluate((el) => el.getAnimations().length)).toBe(0);
   await expect(tape(page).locator("[data-copy]")).toBeHidden();
   const scroll = await tape(page).evaluate((el) => {
@@ -223,8 +223,11 @@ test("tabbing through a long page, no focused control sits under the header or t
   expect(covered).toEqual([]);
 });
 
-test("phones keep the status strip", async ({ page }) => {
-  await open(page, "/", 390, 844);
-  await expect(wire(page)).toBeHidden();
-  await expect(page.locator("[data-slot=status-strip]")).toBeVisible();
-});
+for (const width of [390, 800, 1023]) {
+  test(`below lg (${width} px), neither the wire nor the strip while every feed answers`, async ({ page }) => {
+    await open(page, "/", width, 844);
+    await expect(wire(page)).toBeHidden();
+    await expect(page.locator("[data-slot=status-strip]")).toBeHidden();
+    await expect(page.locator("[data-slot=feed-banner]")).toHaveCount(0);
+  });
+}

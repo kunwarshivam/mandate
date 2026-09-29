@@ -50,11 +50,17 @@ describe("the agent wire", () => {
     expect(rows[1].textContent).toBe(rows[0].textContent);
   });
 
-  it("sits under the header as part of the frame, from sm, at the status strip's height; phones keep the strip", () => {
+  it("sits under the header as part of the frame, from lg, at the status strip's height; phones get neither while every feed answers", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    expect(wire()).toHaveClass("glass", "sticky", "top-[calc(4rem+1px)]", "hidden", "sm:flex", "h-(--status-row)");
+    expect(wire()).toHaveClass("glass", "sticky", "top-[calc(4rem+1px)]", "hidden", "lg:flex", "h-(--status-row)");
+    expect(document.querySelector("[data-slot=status-strip]")).toBeNull();
+    expect(document.querySelector("[data-slot=feed-banner]")).toBeNull();
+  });
+
+  it("gives way to the status strip, at the wire's height, while a feed is stale", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
+    expect(wire()).toBeNull();
     expect(strip()).toHaveClass("h-(--status-row)");
-    expect(strip().parentElement?.parentElement).toHaveClass("sm:hidden");
   });
 
   it("says how fresh the screen is by its oldest feed, and lists the four feeds", async () => {
@@ -81,10 +87,10 @@ describe("the agent wire", () => {
     expect(within(wire()!).getByRole("button", { name: /^Live/ })).toBeInTheDocument();
   });
 
-  it.each(["stale", "unreachable", "loading", "empty"] as const)("gives way to the full status strip in the %s scenario", (scenario) => {
+  it.each(["stale", "unreachable", "loading", "empty"] as const)("gives way to the full status strip from lg in the %s scenario", (scenario) => {
     renderWithRuntime(<AppShell>{null}</AppShell>, scenario);
     expect(wire()).toBeNull();
-    expect(strip().parentElement?.parentElement).not.toHaveClass("sm:hidden");
+    expect(strip().parentElement?.parentElement?.className).toBe("max-lg:hidden");
   });
 
   it.each([
@@ -92,11 +98,13 @@ describe("the agent wire", () => {
     ["the kill switch", recordHref("kill", AGENT_IDS.btc)],
     ["stop all", recordHref("stop_all", buildWorkspace("normal").connection.connection_id)],
     ["closing a position", `${positionHref(AGENT_IDS.swing, "asset_1")}/close`],
-  ])("stays off %s, a frozen record, which shows the status strip", (_name, path) => {
+  ])("stays off %s, a frozen record, which shows the full status strip at every width", (_name, path) => {
     setPathname(path);
     renderWithRuntime(<AppShell>{null}</AppShell>);
     expect(wire()).toBeNull();
     expect(strip()).toBeInTheDocument();
+    for (let el: HTMLElement | null = strip(); el && el.tagName !== "BODY"; el = el.parentElement) expect(el.className).not.toMatch(/(^|\s)(max-lg:)?hidden(\s|$)/);
+    expect(document.querySelector("[data-slot=feed-banner]")).toBeNull();
   });
 
   it("stays off for a role that cannot see agents", () => {

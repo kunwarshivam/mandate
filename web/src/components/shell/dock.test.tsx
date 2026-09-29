@@ -93,18 +93,19 @@ describe("the desktop dock", () => {
     expect(document.querySelector("nav[aria-label=Main].grid")?.parentElement).toHaveClass("lg:hidden");
   });
 
-  it("gives way to the phone sheet below lg, which keeps the account and the agent sections", () => {
+  it("gives way to the tab bar below lg, with no sidebar sheet; More keeps the account", () => {
     const restore = asPhone();
     try {
       setPathname(`/agents/${AGENT_IDS.btc}`);
       renderWithRuntime(<AppShell>{null}</AppShell>);
-      const sheet = document.querySelector<HTMLElement>("nav[data-mobile]");
-      expect(sheet).not.toBeNull();
-      expect(sheet?.querySelector("[data-slot=account]")).toHaveTextContent("Alpaca paper");
+      expect(document.querySelector("nav[data-mobile], [data-sidebar]")).toBeNull();
+      fireEvent.click(within(screen.getByRole("navigation", { name: "Main" })).getByRole("button", { name: "More" }));
+      expect(within(screen.getByRole("dialog", { name: "More" })).getByRole("region", { name: "Account and workspace" })).toHaveTextContent("Alpaca paper");
     } finally {
       restore();
     }
   });
+
 });
 
 describe("what the dock reaches", () => {

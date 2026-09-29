@@ -9,7 +9,7 @@ import { Buildings, DotsThree, GearSix, House, type Icon as PhosphorIcon, Scroll
 import { useRuntime } from "@/lib/mock-runtime";
 import { type Role, can, useRole } from "@/lib/roles";
 import { GROUP_LABEL, SCREENS, SECTION_INDEX, type Screen, type ScreenGroup } from "@/lib/screens";
-import { SCREEN_ICON } from "./app-sidebar";
+import { SCREEN_ICON } from "./screen-icons";
 
 /** The screens that sit on the dock itself, in order; every other screen is one menu away. */
 export const DOCK_LINKS = ["home", "approvals", "alerts", "agents", "positions", "connections"] as const;
