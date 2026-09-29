@@ -144,7 +144,7 @@ export function LoginPanel({ next, failed, enabled, emailEnabled, auth, navigate
                   setSent(false);
                   setEmail("");
                 }}
-                className="w-fit text-sm font-semibold text-primary underline decoration-lapis/30 underline-offset-4 hover:decoration-current"
+                className="w-fit text-sm font-semibold text-lapis underline decoration-lapis/30 underline-offset-4 hover:decoration-current"
               >
                 Use a different address
               </button>
