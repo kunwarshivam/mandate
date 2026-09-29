@@ -67,7 +67,7 @@ beforeEach(() => setPathname("/"));
 
 describe("crimson in the source", () => {
   it("is a class or variable only in globals.css, the kill-switch button, and the /design specimen", () => {
-    const allowed = ["app/globals.css", "components/stop/kill-switch-button.tsx", "app/design/page.tsx"];
+    const allowed = ["app/globals.css", "components/stop/kill-switch-button.tsx", "app/(app)/design/page.tsx"];
     const naming = sources(root)
       .filter((file) => CRIMSON_NAME.test(readFileSync(file, "utf8")))
       .map((file) => relative(root, file));

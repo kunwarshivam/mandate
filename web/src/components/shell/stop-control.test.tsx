@@ -1,7 +1,7 @@
 import { cleanup, renderHook, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
-import ErrorScreen from "@/app/error";
-import * as dashboard from "@/app/page";
+import ErrorScreen from "@/app/(app)/error";
+import * as dashboard from "@/app/(app)/page";
 import type { Scenario } from "@/fixtures/types";
 import { buildWorkspace } from "@/fixtures/workspace";
 import { isDisabled, renderWithRuntime } from "@/test/harness";

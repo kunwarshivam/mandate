@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ScenarioSwitcher as SwitcherOff } from "@/components/dev/scenario-switcher.off";
 import { proxy } from "@/proxy";
 import nextConfig from "../../next.config";
-import { E2E_FLAG, distDir, isE2eBuild } from "../../scripts/e2e-build.mjs";
+import { AUTH_E2E_FLAG, E2E_FLAG, distDir, isE2eBuild } from "../../scripts/e2e-build.mjs";
 import { SWITCHER_MARKER } from "../../scripts/no-scenarios.mjs";
 import { SCENARIO_SWITCHER_MODULE, SCENARIO_SWITCHER_OFF, devOnlyAliases } from "./dev-routes";
 import { SCENARIO_COOKIE, scenarioSwitcherShown, scenariosEnabled, scenariosOn } from "./scenario";
@@ -31,8 +31,8 @@ describe("the fixture scenario switch is on in next dev and the e2e build only",
     expect(scenarioSwitcherShown).toBe(false);
   });
 
-  it("ignores ?scenario= and sets no scenario cookie when it is off", () => {
-    const response = proxy(new NextRequest("http://127.0.0.1:4317/agents?scenario=stale"));
+  it("ignores ?scenario= and sets no scenario cookie when it is off", async () => {
+    const response = await proxy(new NextRequest("http://127.0.0.1:4317/agents?scenario=stale"));
     expect(response.status).toBe(200);
     expect(response.headers.get("location")).toBeNull();
     expect(response.headers.getSetCookie().join("; ")).not.toContain(SCENARIO_COOKIE);
@@ -48,6 +48,10 @@ describe("the fixture scenario switch is on in next dev and the e2e build only",
     expect(distDir()).toBe(".next-e2e");
     vi.stubEnv(E2E_FLAG, "0");
     expect(distDir()).toBe(".next");
+    vi.stubEnv(AUTH_E2E_FLAG, "1");
+    expect(distDir()).toBe(".next-auth-e2e");
+    vi.stubEnv(E2E_FLAG, "1");
+    expect(distDir()).toBe(".next-e2e");
   });
 
   it("sets the flag only for the Playwright suite's own build", () => {
@@ -64,7 +68,7 @@ describe("a production build does not contain the scenario switcher", () => {
     expect(devOnlyAliases("production")).toEqual({ [SCENARIO_SWITCHER_MODULE]: SCENARIO_SWITCHER_OFF });
     expect(devOnlyAliases("development")).toEqual({});
     expect(read("next.config.ts")).toContain("turbopack: { resolveAlias: devOnlyAliases(process.env.NODE_ENV) },");
-    expect(read("src/app/layout.tsx")).toContain(`from "${SCENARIO_SWITCHER_MODULE}";`);
+    expect(read("src/components/shell/app-frame.tsx")).toContain(`from "${SCENARIO_SWITCHER_MODULE}";`);
     expect(existsSync(join(WEB, SCENARIO_SWITCHER_OFF))).toBe(true);
     expect(SwitcherOff()).toBeNull();
     expect(read(SCENARIO_SWITCHER_OFF)).not.toContain("use client");

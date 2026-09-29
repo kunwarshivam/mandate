@@ -11,12 +11,16 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "brand": "node scripts/brand-assets.mjs"
+    "test:e2e:auth": "playwright test -c playwright.auth.config.ts",
+    "brand": "node scripts/brand-assets.mjs",
+    "site-shots": "node scripts/site-shots.mjs"
   },
   "dependencies": {
     "@cloudflare/kumo": "2.14.0",
     "@fontsource-variable/public-sans": "^5.3.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@supabase/ssr": "0.12.7",
+    "@supabase/supabase-js": "2.117.2",
     "cn": "^0.4.0",
     "lightweight-charts": "5.2.1",
     "motion": "^13.4.4",
