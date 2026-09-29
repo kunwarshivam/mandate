@@ -87,6 +87,11 @@ pub fn status(mandate: &ValidatedMandate, inputs: &GoalInputs) -> Result<GoalSta
                     what: "goal_spent_usd, a sum of buy fills, which is never negative",
                 });
             }
+            if inputs.qty_increment.is_zero() {
+                return Err(SpecError::InvalidInput {
+                    what: "qty_increment, which must be above zero",
+                });
+            }
             if matches!(ended, Ok(true)) {
                 return Ok(done_if(Some(GoalReason::EndDate), *on_complete));
             }
@@ -127,11 +132,6 @@ fn end_date_passed(goal: &Goal, now: UtcNanos) -> Result<bool, SpecError> {
 /// Whether what remains of `target_qty` is below one increment, or worth less than the minimum order
 /// at the ask. A position at or past the target leaves nothing, which is below any increment.
 fn quantity_exhausted(target_qty: &SchemaDec, inputs: &GoalInputs) -> Result<bool, SpecError> {
-    if inputs.qty_increment.is_zero() {
-        return Err(SpecError::InvalidInput {
-            what: "qty_increment, which must be above zero",
-        });
-    }
     let target = Qty::parse(target_qty.as_str()).map_err(out_of_range("/goal/target_qty"))?;
     let remaining = match target.checked_sub(inputs.position_qty) {
         Ok(remaining) => remaining,
@@ -347,6 +347,30 @@ mod tests {
             Err(SpecError::InvalidInput { what }) if what.contains("goal_spent_usd")
         ));
         assert!(status(&goal, &at("2026-09-21T15:00:00.000000000Z", "0.1", "0")?).is_ok());
+        Ok(())
+    }
+
+    /// The two inputs a caller can get wrong are checked before the end date is read, so past its date
+    /// a zero increment is refused just as a negative spend is, rather than one erroring and the other
+    /// finishing the goal (#279 review round 2, nit 1).
+    #[test]
+    fn a_bad_input_is_refused_past_the_end_date_as_before_it() -> Checked {
+        let goal = accumulator("2026-12-31")?;
+        for now in [
+            "2026-09-21T15:00:00.000000000Z",
+            "2027-01-01T05:00:00.000000000Z",
+        ] {
+            let mut zero = at(now, "0.1", "5000")?;
+            zero.qty_increment = Qty::ZERO;
+            assert!(
+                matches!(status(&goal, &zero), Err(SpecError::InvalidInput { what }) if what.contains("qty_increment")),
+                "a zero increment at {now}"
+            );
+            assert!(
+                matches!(status(&goal, &at(now, "0.1", "-0.01")?), Err(SpecError::InvalidInput { what }) if what.contains("goal_spent_usd")),
+                "a negative spend at {now}"
+            );
+        }
         Ok(())
     }
 
