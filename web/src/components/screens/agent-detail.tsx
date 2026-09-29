@@ -1,17 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowRight } from "@phosphor-icons/react";
+import { ArrowRight, CaretRight, Tray } from "@phosphor-icons/react";
 import { Deadline } from "@/components/approvals/deadline";
 import { AgentEquityChart } from "@/components/charts/equity-chart";
 import { AsOf } from "@/components/domain/as-of";
-import { Envelope, MandateCard } from "@/components/domain/envelope";
+import { Envelope, Headroom, MandateCard } from "@/components/domain/envelope";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { Money, SignedMoney } from "@/components/domain/money";
 import { Placeholder } from "@/components/domain/placeholders";
 import { OrdersTable, PositionsTable } from "@/components/domain/positions";
 import { Timeline } from "@/components/domain/timeline";
-import { price, quantity } from "@/lib/format";
+import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import type { Agent } from "@/fixtures/types";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { allOrders } from "@/lib/orders";
@@ -41,21 +41,56 @@ function AgentDetail({ agentId }: { agentId: string }) {
   const markAt = agent.positions[0]?.mark_as_of;
 
   /*
-   * One story in the wide column, and only the mandate at a glance beside it. On a phone or tablet the
-   * card follows the chart; on a desktop it spans both rows of the story and stays in view.
+   * One story in the wide column, and only the mandate at a glance beside it, spanning both rows of the
+   * story and staying in view. A phone keeps what needs you, the equity and the headroom; the rest is a
+   * section link away (DEC-207).
    */
   return (
     <AgentFrame agent={agent}>
-      <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-x-14">
+      {open.length > 0 ? (
+        <section aria-labelledby="phone-waiting-title" data-slot="phone-waiting" className="grid gap-2 lg:hidden">
+          <h2 id="phone-waiting-title" className="text-h2">
+            Waiting for you
+          </h2>
+          <ul className="grid">
+            {open.map((a) => (
+              <li key={a.approval_id} className="border-b border-border/70 last:border-b-0">
+                <Link
+                  href={`/approvals/${a.approval_id}`}
+                  className="press -mx-2 grid min-h-11 grid-cols-[1.25rem_minmax(0,1fr)_1rem] items-start gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+                >
+                  <Tray aria-hidden weight="fill" className="mt-0.5 size-5 text-lapis" />
+                  <span className="grid gap-0.5">
+                    <span className="font-medium text-pretty">
+                      Buy <span className="font-mono tabular">{quantity(a.bound.qty)}</span> {a.bound.symbol} at a limit of <span className="font-mono tabular">{price(a.bound.limit)}</span>
+                    </span>
+                    <span data-slot="deadline" className="text-sm text-muted-foreground">
+                      Skipped at{" "}
+                      <time dateTime={a.deadline} className="font-mono tabular">
+                        {clock(a.deadline)} {zoneLabel(a.deadline)}
+                      </time>{" "}
+                      if you do nothing
+                    </span>
+                  </span>
+                  <CaretRight aria-hidden className="mt-1 size-4 text-muted-foreground" />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      <div className="grid grid-cols-1 gap-(--section-gap) max-lg:gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:gap-x-14">
         <div data-layout="main" className="reveal grid min-w-0 content-start gap-6 lg:col-start-1 lg:row-start-1">
           <AgentEquityChart agent={agent} />
         </div>
 
-        <SideRail className="lg:col-start-2 lg:row-span-2 lg:row-start-1">
+        <Headroom agent={agent} className="lg:hidden" />
+
+        <SideRail className="max-lg:hidden lg:col-start-2 lg:row-span-2 lg:row-start-1">
           <MandateCard agent={agent} />
         </SideRail>
 
-        <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap) lg:col-start-1 lg:row-start-2">
+        <div data-layout="main" className="grid min-w-0 grid-cols-1 content-start gap-(--section-gap) max-lg:hidden lg:col-start-1 lg:row-start-2">
           <section aria-labelledby="figures-title" data-slot="key-figures" className="grid gap-4">
             <h2 id="figures-title" className="text-h2">
               Key figures
@@ -247,7 +282,15 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       return (
         <div className="grid grid-cols-1 gap-(--section-gap)">
           <Envelope agent={agent} />
-          <Section title="Mandate details" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>
+          <Section
+            title="Mandate details"
+            action={
+              <span className="flex items-center gap-4">
+                <SectionLink href={agentHref(agent.agent_id, "mandate/edit")}>Edit</SectionLink>
+                <SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>
+              </span>
+            }
+          >
             <MandateSummary agent={agent} />
           </Section>
         </div>

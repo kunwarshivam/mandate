@@ -7,10 +7,12 @@ import * as audit from "@/app/audit/page";
 import * as design from "@/app/design/page";
 import * as dashboard from "@/app/page";
 import * as settings from "@/app/settings/page";
-import { SCENARIOS } from "@/fixtures/workspace";
+import { AGENT_IDS, APPROVAL_IDS, SCENARIOS } from "@/fixtures/workspace";
+import { can } from "@/lib/roles";
 import { RECORD_AFTER_MS, isDisabled, renderWithRuntime } from "@/test/harness";
 import { setPathname } from "@/test/navigation";
 import { ROUTES } from "@/test/routes";
+import { asPhone, shownOnPhone } from "@/test/viewport";
 import { AppShell } from "./app-shell";
 import { hiddenToTheRight } from "./status-strip";
 
@@ -74,24 +76,27 @@ describe("status strip", () => {
 });
 
 describe("Owlhead", () => {
-  it("names the product Owlhead in the shell, with the founder's mark and lockup inside the named links", () => {
+  it("names the product Owlhead in the header, with the founder's mark below lg and the lockup from lg", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const home = screen.getAllByRole("link", { name: "Owlhead, dashboard" });
-    expect(home.length).toBeGreaterThan(0);
-    for (const link of home) expect(link.querySelector("[data-slot=owlhead-mark]")).toHaveAttribute("aria-hidden", "true");
-    const header = document.querySelector("[data-sidebar=header]");
-    expect(header).not.toBeNull();
-    const sidebarHome = home.find((link) => header?.contains(link));
-    expect(sidebarHome?.querySelector("[data-slot=owlhead-lockup]")).toHaveAttribute("aria-hidden", "true");
+    const [header] = screen.getAllByRole("banner");
+    const home = within(header).getByRole("link", { name: "Owlhead, dashboard" });
+    const mark = home.querySelector("[data-slot=owlhead-mark]");
+    const lockup = home.querySelector("[data-slot=owlhead-lockup]");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark).toHaveClass("lg:hidden");
+    expect(lockup).toHaveAttribute("aria-hidden", "true");
+    expect(lockup).toHaveClass("hidden", "lg:block");
     expect(document.body.textContent).not.toMatch(/\bMandate\b/);
   });
 
-  it("sets the sidebar header on the page's own surface, with the brand in the logo colour and no account block", () => {
+  it("renders no sidebar on desktop, where the dock carries the navigation", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>);
-    const header = document.querySelector<HTMLElement>("[data-sidebar=header]");
-    expect(header).toHaveClass("bg-background");
-    expect(header?.closest("[data-surface]")).toBeNull();
-    expect(header?.querySelector("[data-surface]")).toBeNull();
+    expect(document.querySelector("[data-sidebar=header]")).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Primary" })).toHaveAttribute("data-slot", "dock");
+  });
+
+  it("sets the brand in the logo colour, never on a block of colour", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
     for (const brand of document.querySelectorAll<HTMLElement>("[data-slot=owlhead-mark], [data-slot=owlhead-lockup]")) {
       expect(brand.closest<HTMLElement>("[style]")?.style.color).toBe("var(--logo)");
       expect(brand.closest("[data-surface]")).toBeNull();
@@ -103,7 +108,7 @@ describe("Owlhead", () => {
     try {
       renderWithRuntime(<AppShell>{null}</AppShell>);
       const triggers = screen.getAllByRole("button", { name: "Theme" });
-      expect(triggers.length).toBe(2);
+      expect(triggers.length).toBe(1);
       fireEvent.click(triggers[0]);
       const menu = await screen.findByRole("menu");
       expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Light", "Dark", "System"]);
@@ -122,8 +127,122 @@ describe("Owlhead", () => {
   });
 });
 
+const CONTROLS = "a[href], button, [role=button], input, select, textarea";
+
+function phoneControls(root: Element) {
+  return [...root.querySelectorAll(CONTROLS)].filter(shownOnPhone);
+}
+
+describe("the phone frame (DEC-207)", () => {
+  it.each(["owner", "approver", "viewer", "auditor"] as const)("as %s, holds three things in the header: the mark, the paper badge and Stop", (role) => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "normal", { role });
+    const [header] = screen.getAllByRole("banner");
+    const things = [...header.querySelectorAll(`${CONTROLS}, [data-slot=environment-badge]`)].filter(shownOnPhone);
+    const stops = can(role, "stop.open");
+    expect(things.map((c) => c.getAttribute("aria-label") ?? c.textContent)).toEqual([
+      expect.stringMatching(/^Owlhead, /),
+      expect.stringMatching(/^PAPER/),
+      ...(stops ? ["Stop"] : []),
+    ]);
+    expect(within(header).queryByRole("button", { name: "Go to…" })).toBeNull();
+    expect(within(header).queryByRole("button", { name: /sidebar/i })).toBeNull();
+  });
+
+  it("offers four tabs: Home, Approvals with its count, Agents and More", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
+    const tabs = screen.getByRole("navigation", { name: "Main" });
+    expect(tabs.parentElement).toHaveClass("lg:hidden");
+    const items = phoneControls(tabs);
+    expect(items.map((i) => i.textContent?.replace(/\d+ open/, "").trim())).toEqual(["Home", "Approvals", "Agents", "More"]);
+    expect(items.map((i) => i.getAttribute("href"))).toEqual(["/", "/approvals", "/agents", null]);
+    expect(items[1].querySelector("[data-slot=approvals-count]")?.textContent).toMatch(/^\d+ open$/);
+    expect(items[3]).toHaveAttribute("aria-haspopup", "dialog");
+    expect(items[3]).toHaveAttribute("aria-expanded", "false");
+    for (const item of items) expect(item).toHaveClass("h-(--tab-bar)");
+    expect(tabs).toHaveClass("pb-[env(safe-area-inset-bottom)]");
+  });
+
+  it("keeps one navigation: no sidebar sheet or menu button, even when the browser reports a phone", () => {
+    const restore = asPhone();
+    try {
+      setPathname(`/agents/${AGENT_IDS.btc}`);
+      renderWithRuntime(<AppShell>{null}</AppShell>);
+      expect(document.querySelector("[data-sidebar]")).toBeNull();
+      expect(document.querySelector("nav[data-mobile]")).toBeNull();
+      expect(screen.queryByRole("button", { name: /^(Expand|Collapse|Open|Toggle) (sidebar|menu)$/i })).toBeNull();
+      expect(screen.getAllByRole("navigation").filter(shownOnPhone).map((n) => n.getAttribute("aria-label"))).toEqual(["Main"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("marks More as current on a screen that lives under it", () => {
+    setPathname("/positions");
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const tabs = screen.getByRole("navigation", { name: "Main" });
+    expect(within(tabs).getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
+    for (const link of within(tabs).getAllByRole("link")) expect(link).not.toHaveAttribute("aria-current");
+  });
+
+  it("shows no strip and no banner on a phone while every feed answers", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    expect(document.querySelector("[data-slot=feed-banner]")).toBeNull();
+    const strip = document.querySelector("[data-slot=status-strip]");
+    if (strip) expect(shownOnPhone(strip)).toBe(false);
+  });
+
+  it.each([
+    ["stale", ["Market data stale: as of 14:02:11, 3 min ago", "Push relay down"]],
+    ["unreachable", ["Deployment unreachable since 13:58:02; agent data hidden"]],
+  ] as const)("shows a one-line banner of only the failing feeds when %s, in the strip's words and height", (scenario, lines) => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, scenario);
+    const banner = screen.getByRole("region", { name: "Feed warning" });
+    expect(banner).toHaveAttribute("data-slot", "feed-banner");
+    expect(banner).toHaveClass("h-(--status-row)", "whitespace-nowrap");
+    expect(shownOnPhone(banner)).toBe(true);
+    expect(banner.parentElement?.parentElement).toHaveClass("lg:hidden");
+    for (const line of lines) expect(banner).toHaveTextContent(line);
+    expect(banner).not.toHaveTextContent(/as of \d\d:\d\d:\d\d$|Broker as of|Push relay as of/);
+    expect(shownOnPhone(screen.getByRole("region", { name: "System status" }))).toBe(false);
+  });
+
+  it("shows no banner while the deployment is still connecting", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>, "loading");
+    expect(document.querySelector("[data-slot=feed-banner]")).toBeNull();
+  });
+
+  it("keeps the full strip on a phone on a record screen, whatever the feeds say", () => {
+    setPathname(`/approvals/${APPROVAL_IDS.swingXyz}`);
+    renderWithRuntime(<AppShell>{null}</AppShell>, "stale");
+    expect(shownOnPhone(screen.getByRole("region", { name: "System status" }))).toBe(true);
+    expect(document.querySelector("[data-slot=feed-banner]")).toBeNull();
+  });
+
+  it("labels fixture data at the foot of a phone screen, where the strip used to", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const foot = document.querySelector("[data-slot=phone-footer]")!;
+    expect(foot).toHaveClass("lg:hidden");
+    expect(within(foot as HTMLElement).getByText("Fixture data")).toBeInTheDocument();
+  });
+});
+
+describe("the frame", () => {
+  it("frosts the header, the agent wire, the phone tab bar and the desktop dock, and nothing else", () => {
+    renderWithRuntime(<AppShell>{null}</AppShell>);
+    const [header] = screen.getAllByRole("banner");
+    const wire = document.querySelector<HTMLElement>("[data-slot=wire]");
+    const tabs = document.querySelector<HTMLElement>("nav[aria-label=Main].grid");
+    const dock = screen.getByRole("navigation", { name: "Primary" });
+    for (const frame of [header, wire, tabs, dock]) {
+      expect(frame).toHaveClass("glass");
+      expect(frame).not.toHaveClass("bg-card");
+    }
+    expect([...document.querySelectorAll(".glass")]).toEqual([header, wire, tabs, dock]);
+  });
+});
+
 describe("approvals badge", () => {
-  it("shows a count and nothing else, in the sidebar, the header, and the phone tab bar", () => {
+  it("shows a count and nothing else, in the dock, the header, and the phone tab bar", () => {
     renderWithRuntime(<AppShell>{null}</AppShell>, "approvals");
     const counts = document.querySelectorAll("[data-slot=approvals-count]");
     expect(counts.length).toBe(3);

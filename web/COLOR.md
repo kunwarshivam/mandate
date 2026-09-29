@@ -1,17 +1,20 @@
-# Owlhead colour: Ink and Gold
+# Owlhead colour: Ink and Ultramarine
 
-Owlhead's palette is Ink and Gold, in a light and a dark theme ([DEC-204](../docs/project/04-decision-log.md#decisions), the founder, 2026-09-28; it supersedes DEC-202). Paper surfaces and ink type carry the product. Gold is the one accent: your mandate, and the account's line. Crimson is the kill switch and nothing else. In dark mode the roles swap ends of the same ramps: ink surfaces, paper type, and gold a step lighter.
+Owlhead's palette is Ink and Ultramarine, in a light and a dark theme ([DEC-205](../docs/project/04-decision-log.md#decisions), the founder, 2026-09-29; it replaces DEC-204's gold accent and warm paper, and the rest of [DEC-204](../docs/project/04-decision-log.md#decisions) stands). Cool paper surfaces and ink type carry the product. Ultramarine is the one accent: your mandate, and the account's line. Crimson is the kill switch and nothing else. In dark mode the roles swap ends of the same ramps: ink surfaces, paper type, and ultramarine a step lighter.
 
 The key values, as ramp steps:
 
 | Role | Light | Dark |
 |---|---|---|
-| The body, header and cards (`card`) | paper-50 #FDFCFA | ink-950 #14161A |
-| Wells and the sidebar (`background`) | paper-100 #F8F7F4 | ink-975 #0B0D11 |
-| Type, primary action, Stop | ink-950 #14161A | paper-100 #F8F7F4 |
-| Gold line and marker | gold-500 #AB7D13 | gold-400 #D9A948 |
-| Gold text | gold-700 #6A4D08 | gold-300 #F9D28A |
-| Gold field (the mandate) | gold-100 #FFF6E6 | gold-850 #3C2E14 |
+| The body and cards (`card`); the frame's glass is this at 72% | paper-50 #FBFDFE | ink-950 #14161A |
+| Wells (`background`) | paper-100 #F5F7F9 | ink-975 #0B0D11 |
+| Type, primary action, Stop | ink-950 #14161A | paper-100 #F5F7F9 |
+| Secondary type (`muted-foreground`) | ink-800 #3F4348 | paper-300 #D5D8DB |
+| Ultramarine line and marker | ultramarine-500 #547EEE | ultramarine-400 #8EAFFC |
+| Ultramarine text and the focus ring (`mandate-strong`) | ultramarine-700 #2F4C9D | ultramarine-300 #C6D7FE |
+| Ultramarine field (the mandate) | ultramarine-100 #F3F7FF | ultramarine-850 #242F4A |
+| Selected text | ultramarine-200 #D5E1FE | ultramarine-800 #2E406D |
+| Colour-blind gain | cvd-teal-700 #0B5E65 | cvd-teal-300 #72EDFA |
 | Kill switch fill / edge | crimson-700 #9C0C12 / the same | crimson-700 #9C0C12 / crimson-400 #FD8C81 |
 
 The files:
@@ -25,22 +28,22 @@ The files:
 
 ### 1. No hue pushes
 
-Red and other warm, saturated hues raise arousal and urgency. Mehta and Zhu (2009, *Science* 323) found that red primes avoidance and vigilance; Bagchi and Cheema (2013, *Journal of Consumer Research* 39(5)) found that red backgrounds make people bid and haggle more aggressively. We do not want the screen to push an owner toward an aggressive decision. So most of the screen is near-neutral: paper and ink. The one accent, gold, is deep and low in chroma in light mode. Warm, saturated colour is kept for the one control that must interrupt: the kill switch.
+Red and other warm, saturated hues raise arousal and urgency. Mehta and Zhu (2009, *Science* 323) found that red primes avoidance and vigilance (and blue approach and calm); Bagchi and Cheema (2013, *Journal of Consumer Research* 39(5)) found that red backgrounds make people bid and haggle more aggressively. We do not want the screen to push an owner toward an aggressive decision. So most of the screen is near-neutral: cool paper and ink. The one accent, ultramarine, is a cool hue, deep as text and a quiet tint as a field. Warm, saturated colour is kept for the one control that must interrupt: the kill switch.
 
 ### 2. Proportion: 60/30/10
 
-About 60% of the screen is paper (ink in dark mode), about 30% is type and ink actions, and about 10% is gold. Saturation pulls the eye, so it is spent only where attention is needed. "Your mandate" is on every agent all the time, so it has to be restrained rather than loud: a pale gold field under a gold rule, with gold markers and dark gold labels.
+About 60% of the screen is paper (ink in dark mode), about 30% is type and ink actions, and about 10% is ultramarine. Saturation pulls the eye, so it is spent only where attention is needed. "Your mandate" is on every agent all the time, so it has to be restrained rather than loud: a pale ultramarine field under an ultramarine rule, with ultramarine markers and deep ultramarine labels.
 
 ### 3. One meaning per colour
 
 | Colour | Means | Never used for |
 |---|---|---|
-| Gold (`mandate-*`) | Your mandate: the envelope, limits, rails, the "Your mandate" tag, a mandate level's axis label | Anything the account or the platform imposed |
-| Gold line (`lapis-line`) and ink fill (`lapis`) | The account: its equity line, primary actions, links, the current tab and range | Your mandate |
+| Ultramarine (`mandate-*`) | Your mandate: the envelope, limits, rails, the "Your mandate" tag, a mandate level's axis label | Anything the account or the platform imposed |
+| Ultramarine line (`lapis-line`) and ink fill (`lapis`) | The account: its equity line, primary actions, links, the current tab and range | Your mandate |
 | Ink | A paused or stopped agent, and the Stop control | Decoration |
 | Crimson | The kill switch, and nothing else | Errors, losses, warnings |
 
-The account's token is still called `lapis`, so class names stay stable. Its fill is ink in light mode and paper in dark. Its line is gold, the same hue as the mandate but never beside a mandate mark without a name: on a chart the account is a solid gold line and a mandate level is a dashed grey line with a gold label.
+The account's token is still called `lapis`, so class names stay stable. Its fill is ink in light mode and paper in dark. Its line is ultramarine, the same hue as the mandate but never beside a mandate mark without a name: on a chart the account is a solid ultramarine line and a mandate level is a dashed grey line with an ultramarine label.
 
 The status family: gain is green; loss is red, as text and markers only, never crimson (at least 15 degrees of hue away) and never a fill; warning is amber, on no screen; info is the muted type. What never gets colour: system states (stale, unreachable, loading), deadlines, the Approve and Skip buttons, and anything decorative.
 
@@ -48,7 +51,7 @@ The status family: gain is green; loss is red, as text and markers only, never c
 
 - **OKLCH** (Ottosson 2020, "A perceptual color space for image processing"; CSS Color 4). Equal steps in L look like equal steps in lightness, so a ramp is predictable and contrast can be designed rather than found.
 - **Thirteen steps per hue (50 to 975)** at constant hue, on one lightness curve shared by every ramp. Chroma rises to a hump mid-ramp and is clamped to 97% of the sRGB gamut. Light mode reads from the top of each ramp and dark mode from the bottom; steps 850 and 975 exist for dark mode's borders and wells.
-- **Neutrals** are two ramps: paper, warm (hue 85), and ink, cool (hue 255), both at C 0.003 to 0.01. Nothing is pure black, white or grey.
+- **Neutrals** are two ramps at the same cool hue (255): paper, the cool white of the light page, and ink, both at C 0.003 to 0.01. Nothing is pure black, white or grey.
 - **Gain and loss** share L and C at every step and differ only in hue, so neither is louder than the other.
 - **Semantic tokens** map to ramp steps in each theme, and components use only the semantic tokens. A test fails on any raw colour value in `src/components/`.
 
@@ -56,25 +59,27 @@ The status family: gain is green; loss is red, as text and markers only, never c
 
 - WCAG 2.2 (W3C Recommendation, 2023): 4.5:1 for body text (1.4.3), 3:1 for large text and for UI and non-text marks (1.4.11), and colour is never the only cue (1.4.1).
 - APCA (Somers, `apca-w3` 0.1.9, the candidate method for WCAG 3), Bronze targets: Lc 75 for body text, Lc 60 for large text and UI text, Lc 45 for non-text marks. APCA is polarity-aware, which is what sets dark mode's steps: light text on a dark ground needs L 0.85 or more for Lc 75, and a mark needs about L 0.7 for Lc 45. That is why dark text sits at step 300 (L 0.88) and dark marks at step 400 (L 0.76).
-- The Stop control's label and the kill switch's label keep 7:1 in both themes (`STOP_CONTRAST`).
+- The Stop control's label, quiet (ink on the header) or loud (on ink), and the kill switch's label keep 7:1 in both themes (`STOP_CONTRAST`).
 - **APCA is dev only and never ships.** `apca-w3` is published under its "Limited W3 License" (unmodified use for WCAG contrast checks of web content, kept current; AGPL-3.0 for anything else), and its dependency `colorparsley` is AGPL-3.0. Both are dev dependencies used only by the contrast tests, through `src/test/apca.ts`. Lint bans importing either, or that helper, from app code; `palette.test.ts` fails if any app file imports them or if `apca-w3` becomes a dependency; and `npm run build` runs `scripts/no-apca.mjs`, which fails if `.next/static` or `.next/server` holds APCA's constants or colorparsley's colour table. `/design` and `/palette` show the WCAG 2.2 ratios only.
 
 ### 6. Colour-vision deficiency
 
-About 1 in 12 men of northern European descent has a red-green deficiency. Bloomberg estimates that at least 20,000 Terminal users have one, and it ships alternate schemes for deuteranopia and protanomaly (`PDFU COLORS`). Its research found that users with CVD keep the semantic associations: blues and greens read as up, and reds, oranges and yellows read as down ("Designing the Terminal for color accessibility", Bloomberg UX, 2021).
+About 1 in 12 men of northern European descent has a red-green deficiency. Bloomberg estimates that at least 20,000 Terminal users have one, and it ships alternate schemes for deuteranopia and protanomaly (`PDFU COLORS`). Its research found that users with CVD keep the semantic associations: blues and greens read as up, and reds, oranges and yellows read as down ("Designing the Terminal for color accessibility", Bloomberg UX, 2021). Tritanopia, the blue-yellow deficiency, is rare, but a blue accent is exactly where it bites, so it is simulated too.
 
 - Gain and loss always carry a sign and a word ("+$123.45 gain", "−$67.89 loss").
-- **Colour-blind friendly** remaps gain and loss to alternates after Okabe and Ito's Color Universal Design palette. A gain is blue (hue 245) in both themes. A loss is raspberry (hue 350, near Okabe-Ito's reddish purple) in light mode and orange (hue 50) in dark mode. Each alternate has to stay apart from gold and from crimson as well as from the other:
+- **Colour-blind friendly** remaps gain and loss to alternates after Okabe and Ito's Color Universal Design palette. A gain is teal (hue 205, between Okabe-Ito's sky blue and bluish green) in both themes. A loss is raspberry (hue 350, near Okabe-Ito's reddish purple) in light mode and orange (hue 50) in dark mode. Each alternate has to stay apart from ultramarine and from crimson as well as from the other:
+  - The gain was blue (hue 245) under gold. Ultramarine sits 21 degrees away, and a blue gain merged with ultramarine text under red-green deficiency (ΔE 0.04), so the gain moved to teal, 61 degrees from the accent.
+  - A teal gain and a raspberry loss at the same depth merge for deuteranopes, so the light loss is one step darker (cvd-rose-850).
   - In light mode a dark orange loss merges with crimson for deuteranopes, so the light loss is raspberry.
-  - In dark mode a pale raspberry merges with the pale blue gain, so the dark loss is orange.
+  - In dark mode a pale raspberry merges with the pale teal gain, so the dark loss is orange.
   The switch is `html[data-cvd="on"]` in `globals.css`; chart candles read the same attribute, since a canvas cannot read CSS.
-- Verified by simulation: Machado, Oliveira and Fernandes (2009), *IEEE TVCG* 15(6), at full severity for deuteranopia and protanopia, measuring OKLab ΔE. Two things that must never be confused need ΔE ≥ 0.1 under each simulated vision, where about 0.02 is a just-noticeable difference.
+- Verified by simulation: Machado, Oliveira and Fernandes (2009), *IEEE TVCG* 15(6), at full severity for deuteranopia, protanopia and tritanopia, measuring OKLab ΔE. Two things that must never be confused need ΔE ≥ 0.1 under each simulated vision, where about 0.02 is a just-noticeable difference. The accent's marks, gain, loss and crimson stay apart under all three.
 
 ### 7. What to avoid
 
 - Neon, purple and violet (tested), glows, blends between colours, and pure black, white or grey (tested).
-- A second yellow or gold: outside the gold tokens no token is warm (hue 60 to 110) above C 0.02, apart from the warning amber that no screen uses (tested).
-- A gold block (see Gold usage rules).
+- A second blue: outside the ultramarine tokens no token within 30 degrees of ultramarine's hue is above C 0.02 (tested). Ink and paper share hue 255 but stay below C 0.01.
+- An ultramarine block (see Ultramarine usage rules).
 
 ## Ramps
 
@@ -84,21 +89,21 @@ Every ramp uses the same lightness curve and holds its hue constant:
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | L | 0.992 | 0.975 | 0.91 | 0.88 | 0.76 | 0.62 | 0.52 | 0.44 | 0.38 | 0.31 | 0.24 | 0.2 | 0.16 |
 
-Chroma follows a hump (0.1, 0.25, 0.45, 0.7, 0.9, 1, 1, 0.92, 0.82, 0.62, 0.42, 0.3, 0.2 of the peak), clamped to 97% of the sRGB gamut at each step. Paper, ink and gold have their own chroma tables: gold fades faster than the hump at the dark end, so the dark mandate field is a quiet tint rather than a brown block.
+Chroma follows a hump (0.1, 0.25, 0.45, 0.7, 0.9, 1, 1, 0.92, 0.82, 0.62, 0.42, 0.3, 0.2 of the peak), clamped to 97% of the sRGB gamut at each step. Paper, ink and ultramarine have their own chroma tables. sRGB holds little blue at high lightness, so ultramarine's 50 to 400 take what the gamut allows; it is vivid from 400 to 700 (C 0.118 to 0.175, short of neon), and fades fast from 800, so the dark selection and the dark mandate field are calm tints rather than blue blocks.
 
 | Ramp (hue) | 50 | 100 | 200 | 300 | 400 | 500 | 600 | 700 | 800 | 850 | 900 | 950 | 975 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Paper (85), C | 0.003 | 0.004 | 0.006 | 0.006 | 0.006 | 0.007 | 0.007 | 0.008 | 0.008 | 0.008 | 0.008 | 0.008 | 0.008 |
-| Paper hex | #fdfcfa | #f8f7f4 | #e3e1dd | #d9d7d3 | #b3b1ad | #888681 | #6b6964 | #54524e | #44423e | #32302c | #211f1b | #181612 | #0f0d09 |
+| Paper (255), C | 0.003 | 0.004 | 0.006 | 0.006 | 0.006 | 0.007 | 0.007 | 0.008 | 0.008 | 0.008 | 0.008 | 0.008 | 0.008 |
+| Paper hex | #fbfdfe | #f5f7f9 | #dfe1e5 | #d5d8db | #aeb1b5 | #83868a | #66696d | #505357 | #404347 | #2e3134 | #1d1f23 | #14161a | #0b0d11 |
 | Ink (255), C | 0.003 | 0.004 | 0.006 | 0.007 | 0.008 | 0.009 | 0.01 | 0.01 | 0.01 | 0.01 | 0.01 | 0.008 | 0.008 |
 | Ink hex | #fbfdfe | #f5f7f9 | #dfe1e5 | #d4d8dc | #aeb1b6 | #83868c | #65696f | #4f5358 | #3f4348 | #2d3135 | #1c2024 | #14161a | #0b0d11 |
-| Gold (82), C | 0.007 | 0.023 | 0.065 | 0.1 | 0.126 | 0.123 | 0.103 | 0.087 | 0.075 | 0.045 | 0.03 | 0.022 | 0.015 |
-| Gold hex | #fffcf7 | #fff6e6 | #f7deb1 | #f9d28a | #d9a948 | #ab7d13 | #86620d | #6a4d08 | #563e05 | #3c2e14 | #261e0e | #1b150a | #100d06 |
+| Ultramarine (266), C | 0.003 | 0.011 | 0.041 | 0.056 | 0.118 | 0.175 | 0.16 | 0.136 | 0.08 | 0.05 | 0.034 | 0.026 | 0.018 |
+| Ultramarine hex | #fbfcfe | #f3f7ff | #d5e1fe | #c6d7fe | #8eaffc | #547eee | #3d61c4 | #2f4c9d | #2e406d | #242f4a | #181f30 | #101622 | #0a0d15 |
 | Green and red, C | 0.003 | 0.011 | 0.045 | 0.062 | 0.135 | 0.15 | 0.138 | 0.117 | 0.101 | 0.082 | 0.063 | 0.045 | 0.03 |
 | Green (150) hex | #fbfdfb | #f2f9f3 | #cdead2 | #bbe4c2 | #6cc982 | #2e9e52 | #0f7e3a | #09642d | #065123 | #043b18 | #02270e | #051c0a | #041107 |
 | Red (12) hex | #fefcfc | #fef4f5 | #fed6d9 | #fec7cd | #fa8b9a | #d05a6e | #a94053 | #863141 | #6d2734 | #521b25 | #371017 | #270c11 | #18080a |
 | Amber (70) hex | #fffcf9 | #fff5eb | #fedbb3 | #fece97 | #e7a045 | #b77610 | #905c0b | #724807 | #5d3a05 | #452902 | #2e1a01 | #221201 | #150b01 |
-| Colour-blind blue (245) hex | #fbfdfe | #f0f8ff | #c9e5fe | #b7ddfe | #65b9fc | #138dda | #0e6eac | #085789 | #064670 | #033353 | #022139 | #01182a | #020e1a |
+| Colour-blind teal (205) hex | #f7feff | #e5fcfe | #a8f0f8 | #72edfa | #21c7d7 | #1697a3 | #0d7780 | #0b5e65 | #074c52 | #03383d | #022428 | #011a1d | #011013 |
 | Colour-blind raspberry (350) hex | #fffbfd | #fef3f8 | #fed4e6 | #fec4de | #f489be | #ca5794 | #a83876 | #89255e | #711a4c | #521537 | #350f24 | #250c19 | #17070f |
 | Colour-blind orange (50) hex | #fffcfa | #fff4ef | #fed8c4 | #fdcbb0 | #f99357 | #ce6312 | #a34d0a | #823c07 | #6a2f04 | #4f2202 | #351501 | #270e02 | #180902 |
 | Crimson (27), C | 0.003 | 0.011 | 0.045 | 0.061 | 0.138 | 0.2 | 0.2 | 0.173 | 0.15 | 0.122 | 0.084 | 0.06 | 0.04 |
@@ -110,43 +115,43 @@ Every token names a ramp step in each theme.
 
 | Token | Light | Dark |
 |---|---|---|
-| `--background` | paper-100 #f8f7f4 | ink-975 #0b0d11 |
-| `--card` | paper-50 #fdfcfa | ink-950 #14161a |
-| `--muted` (quiet fields, the chart grid) | paper-200 #e3e1dd | ink-900 #1c2024 |
-| `--border` | paper-200 #e3e1dd | ink-850 #2d3135 |
-| `--foreground`, `--mandate-foreground` | ink-950 #14161a | paper-100 #f8f7f4 |
-| `--muted-foreground`, `--mandate-muted`, `--info` | ink-800 #3f4348 | paper-300 #d9d7d3 |
-| `--primary`, `--lapis`, `--ink` (the account fill, primary actions, Stop) | ink-950 #14161a | paper-100 #f8f7f4 |
-| `--primary-foreground`, `--lapis-foreground`, `--ink-foreground` | paper-50 #fdfcfa | ink-950 #14161a |
-| `--lapis-muted` (secondary text on the fill) | paper-200 #e3e1dd | ink-850 #2d3135 |
-| `--lapis-strong` (pressed, and a tint inside the fill) | ink-800 #3f4348 | paper-300 #d9d7d3 |
-| `--lapis-soft` (the current tab and range, an approval card, an account notice) | gold-100 #fff6e6 | gold-850 #3c2e14 |
-| `--lapis-line` (the account's line, the current tab's bar) | gold-500 #ab7d13 | gold-400 #d9a948 |
-| `--mandate` (the field) | gold-100 #fff6e6 | gold-850 #3c2e14 |
-| `--mandate-soft` (a mandate notice) | gold-100 #fff6e6 | gold-900 #261e0e |
-| `--mandate-strong` (headings, labels, the tag, the limit post, a level's axis label, the focus ring) | gold-700 #6a4d08 | gold-300 #f9d28a |
-| `--mandate-marker` (rail fill, level marks) / `--mandate-edge` (the rule) | gold-500 #ab7d13 | gold-400 #d9a948 |
-| `--selection` | gold-200 #f7deb1 | gold-800 #563e05 |
-| `--ink-line` (a line inside ink, the paper hatch in dark) | ink-700 #4f5358 | paper-500 #888681 |
-| `--crimson` / `--crimson-foreground` | crimson-700 #9c0c12 / paper-50 #fdfcfa | the same |
+| `--background` | paper-100 #f5f7f9 | ink-975 #0b0d11 |
+| `--card` | paper-50 #fbfdfe | ink-950 #14161a |
+| `--muted` (quiet fields, the chart grid) | paper-200 #dfe1e5 | ink-900 #1c2024 |
+| `--border` | paper-200 #dfe1e5 | ink-850 #2d3135 |
+| `--foreground`, `--mandate-foreground` | ink-950 #14161a | paper-100 #f5f7f9 |
+| `--muted-foreground`, `--mandate-muted`, `--info` | ink-800 #3f4348 | paper-300 #d5d8db |
+| `--primary`, `--lapis`, `--ink` (the account fill, primary actions, Stop) | ink-950 #14161a | paper-100 #f5f7f9 |
+| `--primary-foreground`, `--lapis-foreground`, `--ink-foreground` | paper-50 #fbfdfe | ink-950 #14161a |
+| `--lapis-muted` (secondary text on the fill) | paper-200 #dfe1e5 | ink-850 #2d3135 |
+| `--lapis-strong` (pressed, and a tint inside the fill) | ink-800 #3f4348 | paper-300 #d5d8db |
+| `--lapis-soft` (the current tab and range, an approval card, an account notice) | ultramarine-100 #f3f7ff | ultramarine-850 #242f4a |
+| `--lapis-line` (the account's line, the current tab's bar) | ultramarine-500 #547eee | ultramarine-400 #8eaffc |
+| `--mandate` (the field) | ultramarine-100 #f3f7ff | ultramarine-850 #242f4a |
+| `--mandate-soft` (a mandate notice) | ultramarine-100 #f3f7ff | ultramarine-900 #181f30 |
+| `--mandate-strong` (headings, labels, the tag, the limit post, a level's axis label, the focus ring) | ultramarine-700 #2f4c9d | ultramarine-300 #c6d7fe |
+| `--mandate-marker` (rail fill, level marks) / `--mandate-edge` (the rule) | ultramarine-500 #547eee | ultramarine-400 #8eaffc |
+| `--selection` | ultramarine-200 #d5e1fe | ultramarine-800 #2e406d |
+| `--ink-line` (a line inside ink, the paper hatch in dark) | ink-700 #4f5358 | paper-500 #83868a |
+| `--crimson` / `--crimson-foreground` | crimson-700 #9c0c12 / paper-50 #fbfdfe | the same |
 | `--crimson-edge` (the kill switch's 2px border) | crimson-700 #9c0c12 | crimson-400 #fd8c81 |
 | `--gain` / `--loss` | green-700 #09642d / red-700 #863141 | green-300 #bbe4c2 / red-300 #fec7cd |
 | `--warning` (on no screen) | amber-700 #724807 | amber-300 #fece97 |
 | `--gain-soft` / `--loss-soft` / `--warning-soft` | the 100 steps | the 900 steps |
 | `--info-soft` | paper-100 | ink-900 |
-| `--gain-cvd` / `--gain-cvd-soft` | cvd-blue-700 #085789 / cvd-blue-100 | cvd-blue-300 #b7ddfe / cvd-blue-900 |
-| `--loss-cvd` / `--loss-cvd-soft` | cvd-rose-800 #711a4c / cvd-rose-100 | cvd-orange-300 #fdcbb0 / cvd-orange-900 |
-| `--hatch-ink` | ink-950 at 0.3: 1.96:1 against a card | paper-500 at 0.4: 1.82:1 against a card |
+| `--gain-cvd` / `--gain-cvd-soft` | cvd-teal-700 #0b5e65 / cvd-teal-100 | cvd-teal-300 #72edfa / cvd-teal-900 |
+| `--loss-cvd` / `--loss-cvd-soft` | cvd-rose-850 #521537 / cvd-rose-100 | cvd-orange-300 #fdcbb0 / cvd-orange-900 |
+| `--hatch-ink` | ink-950 at 0.3 | paper-500 at 0.4 |
 | `--logo` | the foreground: ink | the foreground: off-white |
 
-## Gold usage rules
+## Ultramarine usage rules
 
-Gold is allowed only through the gold tokens, and the tests hold each rule:
+Ultramarine is allowed only through the ultramarine tokens, and the tests hold each rule:
 
-- **Only the gold tokens are gold.** `mandate`, `mandate-soft`, `mandate-strong`, `mandate-marker`, `mandate-edge`, `lapis-soft`, `lapis-line` and `selection` are the only tokens on the gold ramp, in either theme. Outside them no token is a warm hue above C 0.02, apart from the warning amber that no screen uses (`palette.test.ts`).
-- **Never gold text below gold-700 in light mode.** Every text pair whose colour is gold uses gold-700 or darker (`mandate-strong`), and the browser check finds no text set in a gold mark colour (`gold-500`) on any route. In dark mode gold text is gold-300, which reads on the dark ground.
-- **Never a large block.** Saturated gold (`mandate-strong`, `mandate-marker`, `mandate-edge`, `lapis-line`) is never a background in a measured pair, never a Kumo surface, fill or tint in any scope, and is painted as a fill only by the envelope's rails, posts and ticks, the chart legend's swatch and the page header's current-tab bar. In the browser, `e2e/flat-fills.spec.ts` fails on any element or pseudo-element on any route, at desktop and phone widths and in both themes, painted in saturated gold and thicker than 8px on both sides. Every gold surface is a tint: L 0.9 or more with C at most 0.08 in light mode, and L 0.4 or less in dark.
-- **Gold means the mandate or the account's line.** The account's gold is a line, a bar, or the pale pill of the current tab and range. On a chart, a mandate level is never gold: it is a dashed grey line whose axis label is gold.
+- **Only the ultramarine tokens are ultramarine.** `mandate`, `mandate-soft`, `mandate-strong`, `mandate-marker`, `mandate-edge`, `lapis-soft`, `lapis-line` and `selection` are the only tokens on the ultramarine ramp, in either theme. Outside them no token within 30 degrees of its hue is above C 0.02 (`palette.test.ts`).
+- **Never ultramarine text below ultramarine-700 in light mode.** Every text pair whose colour is ultramarine uses ultramarine-700 or darker (`mandate-strong`), and the browser check finds no text set in an ultramarine mark colour (`ultramarine-500`) on any route. In dark mode ultramarine text is ultramarine-300, which reads on the dark ground.
+- **Never a large block.** Saturated ultramarine (`mandate-strong`, `mandate-marker`, `mandate-edge`, `lapis-line`) is never a background in a measured pair, never a Kumo surface, fill or tint in any scope, and is painted as a fill only by the envelope's rails, posts and ticks, the chart legend's swatch and the page header's current-tab bar. In the browser, `e2e/flat-fills.spec.ts` fails on any element or pseudo-element on any route, at desktop and phone widths and in both themes, painted in saturated ultramarine and thicker than 8px on both sides. Every ultramarine surface is a tint: L 0.9 or more with C at most 0.08 in light mode, and L 0.4 or less with C at most 0.08 in dark.
+- **Ultramarine means the mandate or the account's line.** The account's ultramarine is a line, a bar, or the pale pill of the current tab and range. On a chart, a mandate level is never ultramarine: it is a dashed grey line whose axis label is ultramarine.
 
 ## Kumo
 
@@ -157,7 +162,7 @@ Kumo components read their own roles (`--color-kumo-*`, `--text-color-kumo-*`), 
 | Brand, link / brand hover | `lapis` / `lapis-strong` |
 | Focus | `ring`, which is `mandate-strong` |
 | Danger | `ink`. Crimson is not a Kumo colour; only `KillSwitchButton` draws it |
-| Warning, warning tint, warning banner | `warning`, `warning-soft`. No component may use them (tested): at text lightness amber and dark gold are neighbours |
+| Warning, warning tint, warning banner | `warning`, `warning-soft`. No component may use them (tested): at text lightness amber sits 20 degrees from the colour-blind orange loss and would read as a loss |
 | Info, info tint, info banner | `info`, `info-soft` |
 | Success, success tint | `gain`, `gain-soft` |
 | Canvas, base, control, overlay / recessed / tint, fill | `card` / `background` / `muted` |
@@ -169,26 +174,40 @@ A custom property resolves where it is declared and inherits as a value, so each
 
 | Scope | Base | Text (default / strong / subtle) | Tint | Lines |
 |---|---|---|---|---|
-| `account` (the sidebar's account block) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (gold) |
-| `field` (the mandate) | `mandate`: gold-100, dark gold-850 | `mandate-foreground` / `mandate-strong` / `mandate-muted` | as the root | `mandate-edge` (gold) |
-| `ink` (the Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
+| `account` (content on the account's ink) | `lapis`: ink-950, dark paper-100 | `lapis-foreground` / the same / `lapis-muted` | `lapis-strong` | `lapis-line` (ultramarine) |
+| `field` (the mandate) | `mandate`: ultramarine-100, dark ultramarine-850 | `mandate-foreground` / `mandate-strong` / `mandate-muted` | as the root | `mandate-edge` (ultramarine) |
+| `ink` (the loud Stop control) | `ink`: ink-950, dark paper-100 | `ink-foreground` / the same / `lapis-muted` | as the root | `ink-line` |
 
 ## Charts
 
 Lightweight Charts draws on a canvas, which cannot read CSS variables, so `src/components/charts/options.ts` converts both themes' tokens to hex once, from a table that names each token (`CHART_TOKEN`). A chart calls `setChartMode` before it draws and redraws when the mode changes, and a test fails if a chart colour and its token drift in either theme.
 
-- The account is a solid 2px gold line (`lapis-line`) over a flat fill.
-- A mandate level is a dashed grey line (`muted-foreground`) with a pale gold axis label in dark gold type.
-- An account level (the average cost) is a solid gold line with an ink label.
+- The account is a solid 2px ultramarine line (`lapis-line`) over a flat fill.
+- A mandate level is a dashed grey line (`muted-foreground`) with a pale ultramarine axis label in deep ultramarine type.
+- An account level (the average cost) is a solid ultramarine line with an ink label.
 - A proposal is a dashed ink line.
 - The grid is `muted`.
 - Candles are gain and loss, or the colour-blind alternates when `<html data-cvd="on">`.
 
 Every fill stays one flat colour.
 
+## The frame's glass
+
+The sticky header, the agent wire under it, the phone tab bar and the desktop dock are frosted glass ([DEC-208](../docs/project/04-decision-log.md#decisions)); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours. The desktop dock swaps in denser values, `--dock-glass` (the card at 85%) and `--dock-edge` (the type colour at 15%), and marks the current section with `--dock-current`, the type colour at 14%, and hover with `--dock-hover` at 7%: tints of the type colour, never solid ink (Stop's) or ultramarine (the mandate's).
+
+The blur only averages what scrolls underneath, so the worst case is a solid colour under the glass: ink (a primary action, the hero figure) in light mode, paper in dark. `tokens.test.ts` composites the glass over every token in each theme and requires 4.5:1 for body and muted text and 3:1 for the Stop pill against it:
+
+| Over the darkest (light) or lightest (dark) token | Light, 72% | Dark, 72% |
+|---|---|---|
+| Body text, and the Stop pill against the glass | 9.51:1 | 6.75:1 |
+| Muted text (breadcrumbs, icons) | 5.23:1 | 5.07:1 |
+| The same muted text at 60% | 3.84:1, fails | 3.37:1, fails |
+
+The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The agent wire is ink and muted text only, never a gain, loss or crimson colour, so the glass's own measure covers it.
+
 ## Usage rules
 
-- **60/30/10.** Paper (ink in dark) fills the page, cards and quiet fields. Ink (paper in dark) is the type, primary actions, the account block in the navigation and the Stop control. Gold is the mandate's rule, rails, marks and labels, and the account's line and current-place markers.
+- **60/30/10.** Paper (ink in dark) fills the page, cards and quiet fields. Ink (paper in dark) is the type, primary actions, the account block in the navigation and the Stop control (an outline when quiet, a fill when loud, DEC-206). Ultramarine is the mandate's rule, rails, marks and labels, and the account's line and current-place markers.
 - **One meaning per colour.** Crimson is the kill switch alone: the kill-switch choices in the Stop sheet and the switch on the kill-switch record screens. A test fails if any other product file uses it, and a render test fails if crimson paints anything else on any route in any scenario. Loss is text and markers only, never a fill and never crimson.
 - **No colour without words.** Gains and losses carry a sign and a word. Modes carry a label and an icon. A restriction carries a tag naming who imposed it. A chart level carries its name on the axis and in the legend.
 - **Never coloured:** system states (stale, unreachable, loading, errors), deadlines, Approve and Skip, provenance, and decoration.
@@ -196,58 +215,64 @@ Every fill stays one flat colour.
 
 ## Contrast results
 
-61 semantic pairs (47 text pairs at body targets, 14 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 206 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells and the sidebar) and "a card field" is `card` (the body, the header and cards); every reading colour is measured on both.
+71 semantic pairs (53 text pairs at body targets, 18 non-text marks) and 42 Kumo role pairs across the four scopes, measured in each theme: 226 checks. All pass WCAG 2.2 AA and APCA Bronze (APCA measured in the tests). In the pair names, "the page" is `background` (wells) and "a card field" is `card` (the body and cards; the frame's glass is measured separately, above); every reading colour is measured on both.
 
 Lowest margins:
 
-- **Light.** Secondary text on a quiet field (`muted-foreground` on `muted`): 7.66:1, Lc 75.6. A gain on the page: 6.84:1, Lc 80.1. The gold line and the mandate rule against the page: 3.43:1, Lc 59.6. The gold marks must not get lighter than gold-500.
-- **Dark.** Secondary text on the account's pressed fill: 9.16:1, Lc 76.1. Dark gold text on the dark field: 9.15:1, Lc −77.3. The gold marker on the dark field: 6.09:1, Lc −54.7. The kill switch's edge on the dark sheet: 7.97:1, Lc −56.8.
+- **Light.** Secondary text on a quiet field (`muted-foreground` on `muted`): 7.66:1, Lc 75.4. A gain on the page: 6.85:1, Lc 80.0. The ultramarine line and the mandate rule against the page: 3.49:1, Lc 59.8. The ultramarine marks must not get lighter than ultramarine-500.
+- **Dark.** Secondary text on the account's pressed fill: 9.17:1, Lc 76.4. Ultramarine text on the dark field: 9.19:1, Lc −77.1. The ultramarine marker on the dark field: 6.10:1, Lc −54.6. The kill switch's edge on the dark sheet: 7.97:1, Lc −56.8.
+
+The focus ring is `mandate-strong`: at least 7.42:1 against the page, cards and the tinted fields in light and 9.19:1 in dark; on a quiet field (`muted`) it is 6.11:1 and 11.43:1. The same colour is the post that ends a phone headroom meter, on its `muted` track, where the ink fill measures 13.86:1 and 15.30:1.
 
 | Pair | Light WCAG / Lc | Dark WCAG / Lc |
 |---|---|---|
-| Body text on the page | 16.84:1 / 100.0 | 18.06:1 / −102.3 |
-| Body text on a card | 17.69:1 / 103.1 | 16.84:1 / −101.7 |
-| Secondary text on a card | 9.78:1 / 91.4 | 12.61:1 / −81.5 |
-| Primary action label | 17.69:1 / −105.0 | 16.84:1 / 100.0 |
-| Text on the mandate field | 16.83:1 / 100.0 | 12.28:1 / −97.4 |
-| Mandate label on its field | 7.29:1 / 82.2 | 9.15:1 / −77.3 |
-| Stop control label on ink | 17.69:1 / −105.0 | 16.84:1 / 100.0 |
-| Kill switch label on crimson | 8.31:1 / −89.9 | 8.31:1 / −89.9 |
-| Kill switch edge on a card | 8.31:1 / 85.3 | 7.97:1 / −56.8 |
-| Gain / loss on a card | 7.19:1 / 83.1, 8.09:1 / 86.2 | 12.89:1 / −83.2, 12.31:1 / −80.1 |
-| Colour-blind gain / loss on a card | 7.54:1 / 84.4, 10.50:1 / 92.1 | 12.69:1 / −82.3, 12.40:1 / −80.4 |
-| Gold line on a card | 3.61:1 / 62.6 | 8.34:1 / −59.0 |
-| Mandate rule against the page | 3.43:1 / 59.6 | 8.95:1 / −59.6 |
+| Body text on the page | 16.84:1 / 99.9 | 18.06:1 / −102.2 |
+| Body text on a card | 17.69:1 / 103.4 | 16.84:1 / −101.5 |
+| Secondary text on a card | 9.78:1 / 91.7 | 12.61:1 / −81.8 |
+| Primary action label | 17.69:1 / −105.4 | 16.84:1 / 99.9 |
+| Text on the mandate field | 16.84:1 / 99.9 | 12.30:1 / −97.3 |
+| Mandate label on its field | 7.42:1 / 82.3 | 9.19:1 / −77.1 |
+| Mandate label (and focus ring) on a card | 7.80:1 / 85.8 | 12.58:1 / −81.3 |
+| Stop control label on ink (loud) | 17.69:1 / −105.4 | 16.84:1 / 99.9 |
+| Stop control label and outline on the header (quiet) | 17.69:1 / 103.4 | 16.84:1 / −101.5 |
+| Kill switch label on crimson | 8.31:1 / −90.3 | 8.31:1 / −90.3 |
+| Kill switch edge on a card | 8.31:1 / 85.7 | 7.97:1 / −56.8 |
+| Gain / loss on a card | 7.19:1 / 83.5, 8.09:1 / 86.6 | 12.89:1 / −83.2, 12.31:1 / −80.1 |
+| Colour-blind gain / loss on a card | 7.35:1 / 84.2, 13.47:1 / 98.3 | 13.09:1 / −84.3, 12.40:1 / −80.4 |
+| Ultramarine line on a card | 3.66:1 / 63.4 | 8.35:1 / −58.8 |
+| Mandate rule against the page | 3.49:1 / 59.8 | 8.95:1 / −59.4 |
 
 The WCAG table, with a sample of every pair in each theme, is on `/palette`; the APCA values above come from the tests.
 
 ## Colour-vision results
 
-OKLab ΔE under simulated deuteranopia (d) and protanopia (p); a required check needs 0.1 under both.
+OKLab ΔE under simulated deuteranopia (d), protanopia (p) and tritanopia (t); a required check needs 0.1 under each vision it names, all three unless the table says otherwise.
 
-| Check | Light: required, d / p | Dark: required, d / p |
+| Check | Light: required, d / p / t | Dark: required, d / p / t |
 |---|---|---|
-| Gain versus loss, colour-blind friendly | yes, 0.103 / 0.146 | yes, 0.114 / 0.104 |
-| Gain versus loss, default | information, 0.019 / 0.107 | information, 0.011 / 0.055 |
-| Colour-blind gain versus the kill switch | yes, 0.194 / 0.191 | yes, 0.446 / 0.563 |
-| Colour-blind loss versus the kill switch | yes, 0.125 / 0.109 | yes, 0.431 / 0.509 |
-| Colour-blind gain versus the mandate's gold marks | yes, 0.299 / 0.242 | yes, 0.212 / 0.242 |
-| Colour-blind loss versus the mandate's gold marks | yes, 0.279 / 0.315 | yes, 0.135 / 0.147 |
-| Colour-blind gain versus the account's gold line | yes, 0.299 / 0.242 | yes, 0.212 / 0.242 |
-| Colour-blind loss versus the account's gold line | yes, 0.279 / 0.315 | yes, 0.135 / 0.147 |
-| Colour-blind gain versus gold text | yes, 0.189 / 0.179 | yes, 0.159 / 0.153 |
-| Colour-blind loss versus gold text | yes, 0.117 / 0.164 | information, 0.046 / 0.054 |
-| Mode: running versus paused or stopped | yes, 0.712 / 0.708 | yes, 0.736 / 0.732 |
-| Mode: exits-only ring on a card | yes, 0.793 / 0.789 | yes, 0.777 / 0.774 |
-| Pause (ink) versus kill switch (crimson) | yes, 0.275 / 0.159 | yes, 0.529 / 0.633 |
-| Account line versus a mandate level's line | yes, 0.282 / 0.246 | yes, 0.163 / 0.190 |
-| Account marker versus mandate marks | yes, 0.449 / 0.411 | yes, 0.240 / 0.272 |
-| Account fill versus mandate field | yes, 0.779 / 0.770 | yes, 0.664 / 0.676 |
-| Mandate field edge versus the page | yes, 0.368 / 0.402 | yes, 0.628 / 0.589 |
+| Gain versus loss, colour-blind friendly | yes, 0.127 / 0.198 / 0.226 | yes, 0.111 / 0.102 / 0.220 |
+| Gain versus loss, default | information, 0.019 / 0.107 / 0.223 | information, 0.011 / 0.055 / 0.117 |
+| Colour-blind gain versus the kill switch | yes, 0.127 / 0.146 / 0.267 | yes, 0.443 / 0.584 / 0.531 |
+| Colour-blind loss versus the kill switch | yes, 0.174 / 0.122 / 0.186 | yes, 0.431 / 0.509 / 0.419 |
+| Colour-blind gain versus the mandate's ultramarine marks | yes, 0.223 / 0.232 / 0.178 | yes, 0.142 / 0.165 / 0.142 |
+| Colour-blind loss versus the mandate's ultramarine marks | yes, 0.337 / 0.397 / 0.374 | yes, 0.222 / 0.175 / 0.195 |
+| Colour-blind gain versus the account's ultramarine line | yes, 0.223 / 0.232 / 0.178 | yes, 0.142 / 0.165 / 0.142 |
+| Colour-blind loss versus the account's ultramarine line | yes, 0.337 / 0.397 / 0.374 | yes, 0.222 / 0.175 / 0.195 |
+| Colour-blind gain versus ultramarine text | yes under d and p, 0.112 / 0.115; information under t, 0.027 | information, 0.004 / 0.040 / 0.111 |
+| Colour-blind loss versus ultramarine text | yes, 0.178 / 0.213 / 0.222 | yes, 0.114 / 0.105 / 0.110 |
+| Mode: running versus paused or stopped | yes, 0.710 / 0.709 / 0.710 | yes, 0.735 / 0.732 / 0.734 |
+| Mode: exits-only ring on a card | yes, 0.794 / 0.792 / 0.793 | yes, 0.776 / 0.775 / 0.776 |
+| Pause (ink) versus kill switch (crimson) | yes, 0.275 / 0.159 / 0.335 | yes, 0.528 / 0.634 / 0.542 |
+| Account line versus a mandate level's line | yes, 0.282 / 0.306 / 0.261 | yes, 0.175 / 0.150 / 0.151 |
+| Account marker versus mandate marks | yes, 0.438 / 0.470 / 0.435 | yes, 0.255 / 0.226 / 0.236 |
+| Account fill versus mandate field | yes, 0.775 / 0.776 / 0.775 | yes, 0.673 / 0.662 / 0.670 |
+| Mandate field edge versus the page | yes, 0.417 / 0.373 / 0.368 | yes, 0.601 / 0.626 / 0.601 |
 
-Every required check passes in both themes. Default green and red at matched lightness merge under deuteranopia, which is why every result carries a sign and a word, and why the colour-blind friendly remap exists. One pair is information only, in dark mode: the orange colour-blind loss against gold text (0.046 / 0.054). In dark mode every readable colour is pale, and pale orange and pale gold meet under red-green deficiency; a raspberry loss would merge with the blue gain instead, which matters more. Gold text is always a labelled word ("Your mandate", a level's name) in a fixed place, and a loss always carries its minus sign.
+Every required check passes in both themes, and the accent's marks, gain, loss and crimson stay apart under all three visions. Default green and red at matched lightness merge under deuteranopia, which is why every result carries a sign and a word, and why the colour-blind friendly remap exists. One pair is information only where blue and teal meet: the colour-blind gain against ultramarine text, under tritanopia in light mode and under every vision in dark mode, where every readable colour is pale and pale teal and pale ultramarine meet under red-green deficiency. A gain hue that stayed apart from ultramarine text there would move toward yellow and merge with the orange loss instead, which matters more. Ultramarine text is always a labelled word ("Your mandate", a level's name) in a fixed place, and a gain always carries its plus sign. The loss against ultramarine text, information only under gold, is now required in both themes.
 
 ## History
 
 - **2026-09-28, the first palette chosen (DEC-202).** Three palettes were compared side by side in a dev panel, and the founder chose a blue brand with a warm metallic accent for the mandate. It shipped as the only palette, with this document's method: OKLCH ramps on one lightness curve, WCAG and APCA in the tests, and simulated colour vision.
 - **2026-09-28, Ink and Gold (DEC-204).** With the consumer-grade redesign the founder previewed Ink and Gold, in light and dark, and approved it. The blue brand gave way to ink; the accent became gold; neutrals split into warm paper and cool ink; the ramps grew to thirteen steps so dark mode could reach APCA; the kill switch gained its dark-mode edge; and the colour-blind alternates were chosen per theme so they stay apart from gold and crimson. The method and the tests were kept and extended to both themes.
+- **2026-09-29, Ink and Ultramarine (DEC-205).** The founder compared seven accents in a live preview (gold, iris, ultramarine, petrol, jade, plum and graphite), with page colours, and chose ultramarine on a cool-white page. The accent ramp moved to hue 266 with its own chroma table, and paper moved to hue 255, the same as ink. The colour-blind gain moved from blue to teal and the light-mode loss one step darker, so both stay apart from the new accent; tritanopia joined the simulated visions; and the reason warning stays off every screen became the orange loss rather than the gold. Everything else in DEC-204 stands.
+- **2026-09-29, the frame's glass and the phone meter ([DEC-208](../docs/project/04-decision-log.md#decisions), [DEC-207](../docs/project/04-decision-log.md#decisions)).** The header, the wire, the phone tab bar and the dock became glass: two derived tokens, the card at 72% (85% for the dock) and the type colour at 8% (15%) for the edge, measured over every token in each theme with the combined palette. The dock marks the current section with a tint of the type colour, never ink or ultramarine. The phone's headroom meter joined the pairs: its ink fill on the muted track, and its post in deep ultramarine, since the ultramarine marker measured 2.87:1 on the light track.

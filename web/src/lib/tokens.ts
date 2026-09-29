@@ -1,5 +1,5 @@
 /**
- * The colour tokens in Ink and Gold (DEC-204), one entry per CSS custom property in `globals.css`
+ * The colour tokens in Ink and Ultramarine (DEC-205), one entry per CSS custom property in `globals.css`
  * (the test `tokens.test.ts` keeps the two in step, in both themes). Values come from `palette.ts`;
  * this file adds what each token means. The design page and the contrast checks read it.
  */
@@ -17,7 +17,7 @@ export interface ColorToken {
 }
 
 export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> = {
-  background: { meaning: "surface", role: "Wells, the sidebar, hover and pressed rows: paper in light, the deepest ink in dark" },
+  background: { meaning: "surface", role: "Wells, hover and pressed rows: paper in light, the deepest ink in dark" },
   card: { meaning: "surface", role: "The page and every reading surface: sheets, dialogs, charts. Off-white in light, ink in dark" },
   muted: { meaning: "surface", role: "Quiet fills: skeletons, the range pill track, chart grid" },
   border: { meaning: "surface", role: "Hairlines between rows" },
@@ -28,13 +28,13 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   lapis: { meaning: "account", role: "The account as a fill: the approvals count, its marker on the equity ladder, the paper hatch. Ink in light, paper in dark" },
   "lapis-foreground": { meaning: "account", role: "Text on the account fill" },
   "lapis-muted": { meaning: "account", role: "Secondary text on the account fill and on ink; a hovered account pill" },
-  "lapis-soft": { meaning: "account", role: "The account's pale gold: the current tab and range pill, an approval card, an account notice" },
+  "lapis-soft": { meaning: "account", role: "The account's pale ultramarine: the current tab and range pill, an approval card, an account notice" },
   "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
   "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
-  mandate: { meaning: "mandate", role: "Your mandate: the pale gold field the envelope, limits and rails sit on" },
+  mandate: { meaning: "mandate", role: "Your mandate: the pale ultramarine field the envelope, limits and rails sit on" },
   "mandate-foreground": { meaning: "mandate", role: "Text on the mandate field" },
   "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate field" },
-  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: gold-700 in light, never lighter" },
+  "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: ultramarine-700 in light, never lighter" },
   "mandate-marker": { meaning: "mandate", role: "Rail fill and level marks on the envelope and the equity ladder" },
   "mandate-edge": { meaning: "mandate", role: "Lines inside the mandate field: Kumo's line and hairline roles there" },
   "mandate-soft": { meaning: "mandate", role: "A mandate notice: a limit acted (drawdown, daily loss, floor, goal)" },
@@ -53,7 +53,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   "loss-soft": { meaning: "status", role: "Loss tint" },
   "warning-soft": { meaning: "status", role: "Warning tint" },
   "info-soft": { meaning: "status", role: "Info tint" },
-  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on: blue in both themes" },
+  "gain-cvd": { meaning: "result", role: "A gain when colour-blind friendly is on: teal in both themes" },
   "loss-cvd": { meaning: "result", role: "A loss when colour-blind friendly is on: raspberry in light, orange in dark" },
   "gain-cvd-soft": { meaning: "status", role: "Success tint when colour-blind friendly is on" },
   "loss-cvd-soft": { meaning: "status", role: "Loss tint when colour-blind friendly is on" },
@@ -79,16 +79,17 @@ export function tokenValue(name: string, theme: ThemeName = "light"): string {
 }
 
 export const typeScale = [
-  { role: "hero", className: "text-hero tabular", sample: "$24,987.50", spec: "Mona Sans 600, 2.5 to 3.5rem / 1.05, -0.035em, tabular figures. One per screen" },
-  { role: "h1", className: "text-h1", sample: "Approval request", spec: "Mona Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
-  { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Mona Sans 600, 1.25rem / 1.3, -0.01em. A section" },
-  { role: "h3", className: "text-h3", sample: "Working orders", spec: "Mona Sans 600, 1rem / 1.4. A group inside a section" },
-  { role: "figure", className: "text-figure tabular", sample: "$1,203.10", spec: "Mona Sans 500, 1.375rem / 1.2, tabular figures. Key figures beside the hero" },
-  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Mona Sans 400, 1rem / 1.5, sentence case" },
-  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Mona Sans 400, 0.875rem / 1.43" },
-  { role: "caption", className: "text-caption text-muted-foreground", sample: "as of 14:02:11, 3 min ago", spec: "Mona Sans 400, 0.8125rem / 1.4, muted" },
-  { role: "label", className: "field-label", sample: "Daily loss limit", spec: "Mona Sans 500, 0.8125rem / 1.35, muted, sentence case (no capitals-only labels)" },
-  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Mona Sans with tabular figures and its own plain zero" },
+  { role: "display", className: "text-display proportional-nums lining-nums", sample: "$24,987.50", spec: "Public Sans 600, 2 to 4.75rem with its container / 0.95, -0.03em, proportional lining figures, cents at half size, muted and raised. The equity figure over a hero chart" },
+  { role: "hero", className: "text-hero tabular", sample: "Buy 40 XYZ", spec: "Public Sans 600, 2.5 to 3.5rem / 1.05, -0.03em, tabular figures. One per screen: the approval's action" },
+  { role: "h1", className: "text-h1", sample: "Approval request", spec: "Public Sans 600, 1.75rem / 1.2, -0.02em. The page title" },
+  { role: "h2", className: "text-h2", sample: "Your mandate", spec: "Public Sans 600, 1.25rem / 1.3, -0.01em. A section" },
+  { role: "h3", className: "text-h3", sample: "Working orders", spec: "Public Sans 600, 1rem / 1.4. A group inside a section" },
+  { role: "figure", className: "text-figure tabular", sample: "$1,203.10", spec: "Public Sans 500, 1.375rem / 1.2, tabular figures. Key figures beside the hero" },
+  { role: "body", className: "text-base", sample: "If you do nothing, this action is skipped.", spec: "Public Sans 400, 1rem / 1.5, sentence case" },
+  { role: "small", className: "text-sm", sample: "Resting protection stays in place.", spec: "Public Sans 400, 0.875rem / 1.43" },
+  { role: "caption", className: "text-caption text-muted-foreground", sample: "as of 14:02:11, 3 min ago", spec: "Public Sans 400, 0.8125rem / 1.4, muted" },
+  { role: "label", className: "field-label", sample: "Daily loss limit", spec: "Public Sans 500, 0.8125rem / 1.35, muted, sentence case (no capitals-only labels)" },
+  { role: "number", className: "font-mono tabular", sample: "0.015 BTC/USD @ $56,700.00", spec: "Public Sans with tabular figures and its own plain zero" },
 ];
 
 export const motionTokens = [
@@ -101,13 +102,12 @@ export const motionTokens = [
   { name: "--duration-reveal", value: "240 ms, 30 ms stagger", use: "A list settles in once: rise 6 px and fade" },
   { name: "--duration-number", value: "240 ms", use: "A figure that changes rolls to its new value; deadlines never move" },
   { name: "--duration-draw", value: "700 ms", use: "The equity line draws in from the left on first load" },
-  { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet" },
+  { name: "--duration-sheet", value: "320 ms in, 200 ms out", use: "Stop sheet and the phone's More sheet" },
   { name: "--duration-dialog", value: "240 ms in, 150 ms out", use: "Step-up dialog" },
 ];
 
 /** The two densities (DEC-204): calm for the screens an owner lives in, dense for audit and admin. */
 export const spacingTokens = [
-  { name: "--nav-width", calm: "14rem", dense: "14rem", use: "Desktop side navigation, handed to Kumo's Sidebar" },
   { name: "--content-max", calm: "68rem", dense: "90rem", use: "Widest content column" },
   { name: "--container-measure", calm: "58ch", dense: "58ch", use: "Reading measure (max-w-measure): under 80 characters a line" },
   { name: "--page-x", calm: "1.25rem / 1.75rem / 2.5rem", dense: "the same", use: "Page padding at phone / tablet / desktop" },
@@ -116,12 +116,14 @@ export const spacingTokens = [
   { name: "--block-gap", calm: "1rem", dense: "0.75rem", use: "Between a heading and its content" },
   { name: "--row-y", calm: "1rem", dense: "0.5rem", use: "Vertical padding of a list or table row" },
   { name: "--tab-bar", calm: "4rem", dense: "4rem", use: "The phone tab bar, plus the safe area" },
+  { name: "--dock-h / --dock-gap", calm: "4rem / 1rem", dense: "the same", use: "The desktop dock and the space below it; content, scroll padding and toasts clear both (`--dock-clearance`)" },
+  { name: "--status-row", calm: "2.125rem", dense: "2.125rem", use: "The status strip and the agent wire under the header, one height so either can replace the other" },
 ];
 
 export const radiusTokens = [
   { name: "--radius-xs / sm", value: "0.25rem / 0.375rem", use: "Placeholder and fixture chips, keyboard hints, chart ticks" },
   { name: "--radius-lg / xl", value: "0.75rem / 1rem", use: "Menus, restriction notes, the Stop sheet's choices, an unknown order" },
   { name: "--radius-2xl", value: "1.25rem", use: "Panels: the mandate field, an approval card, a well, a hovered agent row" },
-  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs" },
+  { name: "--radius-3xl", value: "1.5rem", use: "Sheets and dialogs, the desktop dock" },
   { name: "full", value: "9999px", use: "Buttons, chips, the Stop control, the paper badge, the range pill" },
 ];

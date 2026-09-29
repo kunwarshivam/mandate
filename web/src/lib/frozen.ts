@@ -1,5 +1,16 @@
 import { useState } from "react";
 
+const RECORD_ROUTE = /^\/(approvals\/[^/]+|agents\/[^/]+\/(kill-switch|release|positions\/[^/]+\/close)|connections\/[^/]+\/(stop-all|close-all))\/?$/;
+
+/**
+ * The record screens: an approval request, a kill switch and its release, stopping or closing a
+ * connection, and closing a position. What the owner reads there is fixed (`useFrozen`), so the
+ * frame beside it shows the status strip, never the moving agent wire.
+ */
+export function isRecordRoute(pathname: string): boolean {
+  return RECORD_ROUTE.test(pathname);
+}
+
 /**
  * A record screen's content, fixed at its first render (brief §4.1): what the owner confirms does
  * not change underneath them, and the stored artifact is built from the same value. Until they

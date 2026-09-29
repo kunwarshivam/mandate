@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { ViewTransition } from "react";
-import "@fontsource-variable/mona-sans";
+import "@fontsource-variable/public-sans";
 import "./globals.css";
 import { ScenarioSwitcher } from "@/components/dev/scenario-switcher";
 import { Providers } from "@/components/providers";

@@ -100,15 +100,22 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
 - **Ink on light, off-white on dark** (DEC-204, amending DEC-203). In the app the mark, wordmark
   and lockup take the type colour: ink #14161A on the light theme, off-white on the dark one. The
   favicon, app icons and share image are the ink mark on an off-white tile, the same in every
-  browser theme. The brand is never gold and never on a coloured block.
+  browser theme. The brand is never ultramarine and never on a coloured block.
 - **No tagline** (the founder, 2026-09-28). No line under or beside the name, and no `description`
   in the page metadata or the share card.
-- **Palette (DEC-204).** Ink and Gold, light and dark: ink #14161A type on paper #FDFCFA in light
-  mode and the reverse in dark (night #0B0D11); gold #AB7D13 as the one accent (lines, rails,
-  marks; never body text, never a block), dark gold #6A4D08 for gold as text, gold tint #FFF6E6
-  for the mandate's field; crimson for the kill switch alone. About 60/30/10 paper, ink and gold.
+- **Palette (DEC-205, replacing DEC-204's gold and warm paper).** Ink and Ultramarine, light and
+  dark: ink #14161A type on cool paper #FBFDFE in light mode and the reverse in dark (night
+  #0B0D11); ultramarine #547EEE as the one accent (lines, rails, marks; never body text, never a
+  block), deep ultramarine #2F4C9D for ultramarine as text, ultramarine tint #F3F7FF for the
+  mandate's field; crimson for the kill switch alone. About 60/30/10 paper, ink and ultramarine.
   The brand assets take these values from `src/lib/brand-palette.ts`, which derives them from the
   UI palette (`COLOR.md`).
+- **Type (DEC-209).** Public Sans, one self-hosted variable family for everything, tabular
+  figures except the display hero figure (DEC-208); the wordmark stays the one serif, as outlines.
+- **The frame (DEC-208).** Glass on the frame only (the header and the phone tab bar, and on
+  desktop the dock and the agent wire that take their place), flat everywhere else, with no
+  gradient (DEC-200). The agent wire names what the agents are doing and never an amount won or
+  lost.
 - **Founder's visual constraints (2026-09-28, binding).** No gradients of any kind, including
   gradient text, masks, fades, and glows. No generic AI aesthetics ("I don't want AI slop
   design"). Colour must stand out ("stand out in terms of colour palette"); neat and clean; micro
@@ -135,13 +142,15 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
   agents on one Alpaca paper connection, approvals, gate decisions, and scenarios (normal, empty,
   loading, stale, paused, drawdown, reconciliation, unknown order, unreachable, approvals).
 - No customers, testimonials, track record, or performance figures exist. Nothing may imply them:
-  P&L is shown only as paper, simulated, next to `[[DISCLOSURE-PERFORMANCE]]`.
+  P&L is shown only as paper, simulated, beside `[[DISCLOSURE-PERFORMANCE]]` (behind an info
+  symbol on screen, inline in print and on record screens, DEC-210).
 - No drafted compliance wording exists; placeholders stand in for it.
 
 ## Product Principles
 
-1. **Stopping is never harder than starting.** The way to reduce risk is the most visible thing on
-   every screen.
+1. **Stopping is never harder than starting.** The way to reduce risk is on every screen, one tap
+   away and never disabled, and it becomes the most visible thing on the screen when something
+   needs you (DEC-206).
 2. **Limits are the product.** The owner's envelope, in dollars, is what the screen is about; the
    agent's activity is read against it.
 3. **Truth over reassurance.** Show age, uncertainty, and unknowns plainly; never decorate a state
@@ -151,7 +160,7 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
 
 ## Accessibility & Inclusion
 
-WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in the one light theme
-(`src/lib/tokens.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
+WCAG 2.2 AA: body text at least 4.5:1 and large text and marks 3:1 in both the light and the dark theme
+(`src/lib/palette.test.ts` checks the shipped pairs); colour never carries meaning alone; every control reachable by keyboard
 with a visible focus ring; layouts hold at 360 px wide; motion respects `prefers-reduced-motion`
 (fewer, gentler animations, keeping opacity and colour changes that aid comprehension).

@@ -122,7 +122,8 @@ export type Vision = "normal" | "deuteranopia" | "protanopia" | "tritanopia";
 
 /**
  * Machado, Oliveira and Fernandes (2009), severity 1.0, applied to linear-light sRGB. Deuteranopia
- * and protanopia are the red-green deficiencies (about 1 in 12 men of northern European descent).
+ * and protanopia are the red-green deficiencies (about 1 in 12 men of northern European descent);
+ * tritanopia is the rare blue-yellow one.
  */
 const CVD_MATRIX: Record<Exclude<Vision, "normal">, [Rgb, Rgb, Rgb]> = {
   protanopia: [
