@@ -16,6 +16,19 @@ test("/ shows the welcome page and keeps the address /", async ({ page, baseURL 
   await expect(page.locator("[data-slot=stop-control]")).toHaveCount(0);
 });
 
+test("the landing page's screenshots load for a signed-out visitor", async ({ page, request }) => {
+  const image = await request.get("/site/hero-desktop-light.png", { maxRedirects: 0 });
+  expect(image.status()).toBe(200);
+  expect(image.headers()["content-type"]).toBe("image/png");
+  await page.goto("/", { waitUntil: "load" });
+  const images = page.locator("[data-slot=landing] img:visible");
+  expect(await images.count()).toBeGreaterThan(0);
+  for (const img of await images.all()) {
+    await img.scrollIntoViewIfNeeded();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+  }
+});
+
 for (const path of ["/agents", "/approvals", "/settings/profile", "/audit/decisions"]) {
   test(`${path} sends a signed-out visitor to sign in, and back there after`, async ({ page }) => {
     await page.goto(path);
