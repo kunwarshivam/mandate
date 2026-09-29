@@ -1,8 +1,8 @@
 import { type Locator, type Page, expect, test } from "@playwright/test";
 
 /**
- * The frame is frosted glass: the header, and the tab bar on phones, sit over the page as it
- * scrolls and blur what passes underneath. Nothing else is glass. Where the owner asks for less
+ * The frame is frosted glass: the header, the tab bar on phones and the dock on desktops sit over
+ * the page as it scrolls and blur what passes underneath. Nothing else is glass. Where the owner asks for less
  * transparency, or in forced colours, the frame is the solid card.
  */
 
@@ -59,15 +59,16 @@ async function scrollBy(page: Page, y: number) {
 
 const header = (page: Page) => page.getByRole("banner");
 const tabBar = (page: Page) => page.locator("nav[aria-label=Main].grid");
+const dock = (page: Page) => page.getByRole("navigation", { name: "Primary" });
 
 test.describe("the frame is frosted glass over the scrolling page", () => {
-  test("desktop, 1440 x 900: the header", async ({ page }) => {
+  test("desktop, 1440 x 900: the header and the dock", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto("/");
     await page.waitForLoadState("networkidle");
     const glass = await tokenColor(page, "--glass");
     expect(glass).not.toBe(await tokenColor(page, "--card"));
-    expect(await paint(header(page))).toEqual({ background: glass, filter: BLUR, image: "none" });
+    for (const frame of [header(page), dock(page)]) expect(await paint(frame)).toEqual({ background: glass, filter: BLUR, image: "none" });
     const painted = await overBlack(page, glass);
     const card = await overBlack(page, await tokenColor(page, "--card"), 0.72);
     painted.forEach((v, i) => expect(Math.abs(v - card[i]), "the glass is the card's own colour, at 72%").toBeLessThanOrEqual(1));
@@ -75,6 +76,7 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
     await scrollBy(page, 330);
     expect((await header(page).boundingBox())?.y, "the header stays at the top").toBe(0);
     expect(await contentUnder(header(page)), "the page passes under the header").toBe(true);
+    expect(await contentUnder(dock(page)), "the page passes under the dock").toBe(true);
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeInViewport({ ratio: 1 });
   });
 
@@ -94,19 +96,36 @@ test.describe("the frame is frosted glass over the scrolling page", () => {
     await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeInViewport({ ratio: 1 });
   });
 
-  test("nothing but the frame is glass", async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto("/");
-    await page.waitForLoadState("networkidle");
-    const frosted = await page.evaluate(() =>
-      [...document.querySelectorAll("*")].filter((el) => getComputedStyle(el).backdropFilter !== "none").map((el) => el.tagName.toLowerCase()),
-    );
-    expect(frosted).toEqual(["header", "nav"]);
-  });
+  for (const [width, height, frame] of [
+    [390, 844, ["header", "nav Main"]],
+    [1440, 900, ["header", "nav Primary"]],
+  ] as const) {
+    test(`${width} px: nothing but the frame is glass`, async ({ page }) => {
+      await page.setViewportSize({ width, height });
+      await page.goto("/");
+      await page.waitForLoadState("networkidle");
+      const frosted = await page.evaluate(() =>
+        [...document.querySelectorAll("*")]
+          .filter((el) => el.checkVisibility() && getComputedStyle(el).backdropFilter !== "none")
+          .map((el) => [el.tagName.toLowerCase(), el.getAttribute("aria-label")].filter(Boolean).join(" ")),
+      );
+      expect(frosted).toEqual(frame);
+    });
+  }
 });
 
 test.describe("the frame is the solid card where transparency is unwanted", () => {
   test.use({ viewport: { width: 390, height: 844 } });
+
+  test("desktop, forced colours: the dock too", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ forcedColors: "active" });
+    await page.goto("/");
+    await page.waitForLoadState("networkidle");
+    const { background, filter } = await paint(dock(page));
+    expect(filter).toBe("none");
+    expect(background, "an opaque system colour").toMatch(/^rgb\(\d+, \d+, \d+\)$/);
+  });
 
   test("prefers-reduced-transparency", async ({ page }, testInfo) => {
     const cdp = await page.context().newCDPSession(page);

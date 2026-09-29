@@ -247,7 +247,15 @@ function SectionBody({ agent, section }: { agent: Agent; section: AgentSectionKe
       return (
         <div className="grid grid-cols-1 gap-(--section-gap)">
           <Envelope agent={agent} />
-          <Section title="Mandate details" action={<SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>}>
+          <Section
+            title="Mandate details"
+            action={
+              <span className="flex items-center gap-4">
+                <SectionLink href={agentHref(agent.agent_id, "mandate/edit")}>Edit</SectionLink>
+                <SectionLink href={agentHref(agent.agent_id, "mandate/versions")}>Versions</SectionLink>
+              </span>
+            }
+          >
             <MandateSummary agent={agent} />
           </Section>
         </div>

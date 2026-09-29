@@ -128,7 +128,11 @@ export function AppHeader() {
     <header className="glass sticky top-0 z-30 shrink-0 border-b">
       <div className="flex h-16 items-center gap-1 overflow-hidden px-(--page-x) whitespace-nowrap sm:gap-2">
         <Sidebar.Trigger className="lg:hidden" />
-        <Link href={home.href} className="shrink-0 px-1 text-foreground lg:hidden" aria-label={`Owlhead, ${home.label}`}>
+        <Link
+          href={home.href}
+          className="inline-flex min-h-11 shrink-0 items-center px-1 text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring lg:mr-2"
+          aria-label={`Owlhead, ${home.label}`}
+        >
           <Wordmark />
         </Link>
         <div className="hidden lg:block">

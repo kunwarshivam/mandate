@@ -9,7 +9,8 @@ import { agentHref } from "../src/lib/screens";
  * and its server snapshot is "desktop", so until the client bundle runs a phone would get the rail in
  * flow, a squeezed content column, and Stop pushed off-screen. With JavaScript off, and with it on
  * but the bundle held back, a phone gets the phone shell: no rail, the full-width content column, the
- * tab bar, Stop in the header wholly on screen, and nothing wider than the viewport.
+ * tab bar, Stop in the header wholly on screen, and nothing wider than the viewport. A desktop gets
+ * the desktop shell from the same markup: the dock at the bottom, no rail, and the full-width column.
  */
 
 const PHONES = [320, 360, 390, 430];
@@ -51,6 +52,7 @@ async function measureShell(page: Page) {
     const sheet = document.querySelector('[data-sidebar="sidebar"][data-mobile]');
     const tabBar = Array.from(document.querySelectorAll("nav")).find((n) => n.getAttribute("aria-label") === "Main" && !n.hasAttribute("data-mobile")) ?? null;
     const strip = document.querySelector<HTMLElement>('[data-slot="status-strip"]');
+    const dock = document.querySelector<HTMLElement>('nav[data-slot="dock"]');
     return {
       innerWidth: window.innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
@@ -63,6 +65,8 @@ async function measureShell(page: Page) {
       sheet: box(sheet),
       content: box(document.getElementById("main")?.parentElement ?? null),
       tabBar: tabBar && getComputedStyle(tabBar.parentElement!).display !== "none" ? box(tabBar) : null,
+      dock: dock && getComputedStyle(dock.parentElement!).display !== "none" ? { box: box(dock), position: getComputedStyle(dock.parentElement!).position } : null,
+      main: box(document.getElementById("main")),
       strip: strip ? { box: box(strip), scrollWidth: strip.scrollWidth, clientWidth: strip.clientWidth, overflowX: getComputedStyle(strip).overflowX } : null,
     };
   });
@@ -93,6 +97,7 @@ function expectPhoneShell(found: Shell, width: number, state: string) {
   if (found.sheet) expect(found.sheet.right, `${state}: the closed sheet sits off-canvas`).toBeLessThanOrEqual(0);
   expect(found.content?.left, `${state}: the content column starts at the left edge`).toBe(0);
   expect(found.content?.width, `${state}: the content column takes the full width`).toBe(width);
+  expect(found.dock, `${state}: no dock`).toBeNull();
   expect(found.tabBar, `${state}: the tab bar shows`).not.toBeNull();
   expect(found.tabBar!.bottom, `${state}: the tab bar sits at the bottom`).toBeLessThanOrEqual(HEIGHT);
   expect(found.tabBar!.width, `${state}: the tab bar spans the viewport`).toBe(width);
@@ -103,13 +108,14 @@ function expectPhoneShell(found: Shell, width: number, state: string) {
 
 function expectDesktopShell(found: Shell, width: number, state: string) {
   expectStopOnScreen(found, width, state);
-  expect(found.rail, `${state}: the desktop rail renders`).not.toBeNull();
-  expect(found.rail!.display, `${state}: the desktop rail shows`).not.toBe("none");
-  expect(found.rail!.position, `${state}: the desktop rail is pinned`).toBe("sticky");
-  expect(found.rail!.box!.left, `${state}: the desktop rail's left edge`).toBe(0);
-  expect(found.rail!.box!.width, `${state}: the desktop rail's width`).toBeGreaterThan(0);
-  expect(found.rail!.box!.height, `${state}: the desktop rail fills the viewport's height`).toBe(HEIGHT);
-  expect(found.content!.left, `${state}: the content column starts after the rail`).toBe(found.rail!.box!.right);
+  expect(found.rail, `${state}: no desktop rail`).toBeNull();
+  expect(found.content!.left, `${state}: the content column starts at the left edge`).toBe(0);
+  expect(found.content!.width, `${state}: the content column takes the full width`).toBe(width);
+  expect(Math.abs((found.main!.left + found.main!.right) / 2 - width / 2), `${state}: the page is centred in it`).toBeLessThanOrEqual(1);
+  expect(found.dock, `${state}: the dock shows`).not.toBeNull();
+  expect(found.dock!.position, `${state}: the dock is fixed`).toBe("fixed");
+  expect(found.dock!.box!.bottom, `${state}: the dock floats above the bottom edge`).toBeLessThan(HEIGHT);
+  expect(Math.abs((found.dock!.box!.left + found.dock!.box!.right) / 2 - width / 2), `${state}: the dock is centred`).toBeLessThanOrEqual(1);
   expect(found.tabBar, `${state}: no tab bar`).toBeNull();
 }
 
@@ -130,7 +136,7 @@ test.describe("With JavaScript off, phones get the phone shell (brief §5, rule 
   }
 });
 
-test.describe("With JavaScript off, desktops get the pinned rail", () => {
+test.describe("With JavaScript off, desktops get the dock", () => {
   for (const width of DESKTOPS) {
     test.describe(`${width} px`, () => {
       test.use({ javaScriptEnabled: false, viewport: { width, height: HEIGHT } });
