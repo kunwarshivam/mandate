@@ -342,6 +342,14 @@ implementation PR turns the pending tests green without editing them (DEC-77).
   `a_run_from_before_the_restart_does_not_release_an_opening`, and
   `the_hold_lifts_on_an_account_and_a_run_in_either_order`. Run: `cargo nextest run -p
   mandate-executor --lib reconcile::tests`.
+- **Rule 5's bounded wait:** an exit waits on its agent's opening in the instrument, in any state,
+  for at most `unknown_absent_window_s` from the `GateDecided` that allowed it, and every waiting
+  exit is re-evaluated after every step (`protection::overdue_openings`,
+  `protection::release_waiting`; [DEC-160](../../../docs/project/04-decision-log.md) (7), (13)). Its
+  cases are in-module in `crates/mandate-executor/src/protection.rs` (`sequence_tests`): the
+  reviewer's three paths, and `no_exit_waits_past_the_bound_but_under_a_rule_13_hold`, a property
+  over random scripts against an oracle read from the drafts. Run: `cargo nextest run -p
+  mandate-executor --lib protection::sequence_tests`.
 - **Reference cases:** none move in the tests PR. The harness steps and keys this stream owns are
   `broker_order_update` and `orders` (E7-2), `reconciliation` and `broker_position_update` (E7-3), and
   `corporate_action_prepare`, `actions`, `protective_sell_qty` and `initial.open_orders` (E7-4); they

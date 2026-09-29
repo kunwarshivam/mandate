@@ -777,6 +777,12 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   catches it; (b) pin the fault fixture's exact recovered cash rather than §11's ±15.40 band;
   (c) make the fault fixture's `equity` and `buying_power` consistent with its cash before any
   slice reads buying power from it.
+- **E7-4 slices 5 and 6's tests correction (stream K), from #286 round 1 (minor 2):**
+  `properties::no_order_is_submitted_while_an_unconfirmed_cancel_is_outstanding` counts a cancel as
+  outstanding until the order is terminal, abandoned or its protection cancelled, so it would fail on
+  rule 5's ruled carve-out: an exit that goes once its opening's cancel is overdue and the query is
+  answered, with the opening still resting ([DEC-160](04-decision-log.md#decisions) (7), (13)).
+  Carve that case out through a DEC-77 tests correction before slice 5 or 6 lets the property run.
 - **`mandate-executor` fees (stream K), from #259 round 1:** (1) a typed `Environment` in place of
   the stream's environment text, so `paper_only_fee_config` refuses a live stream by its type
   (rung 1) rather than by a string comparison; (2) `mandate_accounting::Config` carries the
