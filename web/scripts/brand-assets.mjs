@@ -17,7 +17,7 @@ export const PUBLIC_DIR = path.join(WEB, "public");
 
 /** Ink and off-white from the palette (src/lib/brand-palette.ts); the icons are ink on off-white in every mode. */
 export const INK = "#14161A";
-export const OFF_WHITE = "#FDFCFA";
+export const OFF_WHITE = "#FBFDFE";
 
 const FAVICON_PNG_SIZES = [16, 32, 48];
 const TILE = 1000;
