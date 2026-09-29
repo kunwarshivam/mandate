@@ -73,6 +73,7 @@ describe("D1 dashboard", () => {
     for (const card of cards) {
       expect(card).toHaveTextContent("Paper P&L, simulated");
       expect(card.querySelector("[data-placeholder=performance]")).toHaveTextContent("[[DISCLOSURE-PERFORMANCE]]");
+      expect(within(card).getByRole("button", { name: "Performance disclosure" })).toHaveAccessibleDescription("[[DISCLOSURE-PERFORMANCE]]");
     }
   });
 

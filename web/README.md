@@ -75,8 +75,11 @@ development.
 - Compliance text appears only as the placeholders `[[DISCLOSURE-PERFORMANCE]]`,
   `[[LEGEND-HYPOTHETICAL]]`, and `[[RETAIL-AUTO-LIVE]]`. Every P&L figure (a signed gain or loss,
   or a dollar figure labelled realized, unrealized, P&L, gain or loss) has
-  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item; `src/app/disclosure.test.tsx`
-  renders every route in every scenario and fails otherwise.
+  `[[DISCLOSURE-PERFORMANCE]]` in the same section, card or list item: behind an info symbol that
+  opens it on hover, click, tap or Enter, and inline on record screens and in print (DEC-210);
+  `src/app/disclosure.test.tsx` renders every route in every scenario and fails otherwise. Counsel
+  must confirm the symbol before launch; `PERFORMANCE_INLINE` in
+  `src/components/domain/placeholders.tsx` puts the text back inline everywhere.
 
 ## Design system
 

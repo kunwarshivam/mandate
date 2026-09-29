@@ -13,7 +13,7 @@ import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
 import { ModeBadge, ModeBanner, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
-import { FixtureTag, Placeholder } from "@/components/domain/placeholders";
+import { FixtureTag, InlineDisclosures, Placeholder } from "@/components/domain/placeholders";
 import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { StopControl } from "@/components/shell/stop-control";
@@ -390,6 +390,9 @@ export default function DesignPage() {
             <div className="flex flex-wrap items-center gap-2">
               <FixtureTag />
               <Placeholder name="performance" />
+              <InlineDisclosures>
+                <Placeholder name="performance" />
+              </InlineDisclosures>
               <Placeholder name="hypothetical" />
               <Placeholder name="retailAutoLive" />
             </div>
