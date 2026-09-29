@@ -19,6 +19,7 @@ use mandate_canon::Digest;
 use mandate_canon::Value;
 use mandate_domain::{AgentMode, AssetClass, AssetId, Environment, MarketSession, Side};
 use mandate_num::{Price, Qty, Usd};
+use mandate_spec::change;
 use mandate_spec::document::{ConnectionId, ModelId, Pointer, Provenance, ProvenanceMap, Source};
 use mandate_spec::goal::{self, GoalInputs, GoalStatus};
 use mandate_spec::policy::{self, LevelName, PolicyKey, PolicyLevel, PolicyValue};
@@ -836,12 +837,55 @@ fn policy_level(level: &Json) -> Result<PolicyLevel, String> {
 }
 
 /// `kind: change` — the classification, the changed paths, both version hashes, and step-up (§9.2).
+///
+/// All five members are compared, the paths as an ordered list. `step_up_required` is absent from
+/// exactly one kind of case, an invalid change, which §9.2 refuses rather than classifies; there the
+/// harness requires the classification to say `invalid` and step-up to be `false`, so a case cannot
+/// pass by leaving the member out (DEC-172 item 4).
 fn change_case(fixture: &Json, case: &Json) -> Result<(), String> {
-    let _ = (
-        base_value(fixture, str_at(case, "base")?)?,
-        patched(fixture, case)?,
-    );
-    Err(not_implemented("`mandate_spec::change::classify`"))
+    let old = Mandate::parse(&base_value(fixture, str_at(case, "base")?)?)
+        .map_err(|e| format!("the base does not parse: {}", e.code()))?;
+    let new = Mandate::parse(&patched(fixture, case)?)
+        .map_err(|e| format!("the patched mandate does not parse: {}", e.code()))?;
+    let result = spec(
+        change::classify(&old, &new),
+        "mandate_spec::change::classify",
+    )?;
+    let expect = at_of(case, "expect")?;
+    let expected_class = str_at(expect, "classification")?;
+    expect_eq("classification", result.class.as_str(), expected_class)?;
+    let expected_paths = list_at(expect, "changed_paths")?
+        .iter()
+        .map(|p| text_of(p, "a changed path"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let paths: Vec<String> = result
+        .changed_paths
+        .iter()
+        .map(|p| p.as_str().to_owned())
+        .collect();
+    expect_eq("changed_paths", paths, expected_paths)?;
+    for (member, mandate) in [("old_version", &old), ("new_version", &new)] {
+        let version = mandate
+            .version()
+            .map_err(|e| format!("`{member}`: {}", e.code()))?;
+        expect_eq(
+            member,
+            format!("sha256:{}", version.digest()),
+            str_at(expect, member)?.to_owned(),
+        )?;
+    }
+    let expected_step_up = match expect.get("step_up_required") {
+        Some(flag) => flag.as_bool().ok_or("`step_up_required` is not a flag")?,
+        None if expected_class == "invalid" => false,
+        None => {
+            return Err("`step_up_required` is missing from a case that is not invalid".to_owned());
+        }
+    };
+    expect_eq(
+        "step_up_required",
+        result.step_up_required,
+        expected_step_up,
+    )
 }
 
 /// `kind: risk_state` — the fold of §5.2's inputs, each step's snapshot, its journal in order, and the
