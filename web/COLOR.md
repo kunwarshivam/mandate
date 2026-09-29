@@ -188,7 +188,7 @@ Every fill stays one flat colour.
 
 ## The frame's glass
 
-The sticky header, the ticker tape under it, the phone tab bar and the desktop dock are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours.
+The sticky header, the agent wire under it, the phone tab bar and the desktop dock are frosted glass (the founder, 2026-09-29; decision record pending); every other surface stays flat. Two derived tokens, not ramp steps, carry it: `--glass`, the card mixed with transparency at 72% in both themes (in OKLab: in OKLCH, Chromium drops the hue when mixing with transparent, and the ink glass turns faintly pink), and `--glass-edge`, the type colour at 8%, for the hairline. The `glass` utility paints them over a backdrop filter of `blur(22px) saturate(1.8)`, and falls back to the solid card where the browser cannot blur, under `prefers-reduced-transparency: reduce`, and in forced colours.
 
 The blur only averages what scrolls underneath, so the worst case is a solid colour under the glass: ink (a primary action, the hero figure) in light mode, paper in dark. `tokens.test.ts` composites the glass over every token in each theme and requires 4.5:1 for body and muted text and 3:1 for the Stop pill against it:
 
@@ -198,7 +198,7 @@ The blur only averages what scrolls underneath, so the worst case is a solid col
 | Muted text (breadcrumbs, icons) | 5.24:1 | 5.11:1 |
 | The same muted text at 60% | 3.81:1, fails | 3.35:1, fails |
 
-The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The ticker's gain and loss colours need more than muted text does, so the ticker lays a card veil at 40% inside its glass, about 83% card in all, and `tokens.test.ts` requires 4.5:1 for gain, loss and their colour-blind variants over every token under that veil, in each theme.
+The paper badge, the command bar (the muted fill) and Stop keep their own solid fills, so their labels read as before. The agent wire is ink and muted text only, never a gain, loss or crimson colour, so the glass's own measure covers it.
 
 ## Usage rules
 
