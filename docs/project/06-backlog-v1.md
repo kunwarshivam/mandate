@@ -295,7 +295,7 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   field activates unconfirmed ([DEC-97](04-decision-log.md#decisions)).
 - **E10-2 (Must)** As an operator, I want to edit the mandate as a form or YAML, kept in sync.
 - **E10-3 (Must)** As an operator, I want mandates versioned with viewable diffs, and changes that
-  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C35 pass.
+  increase risk to require step-up. *Accepted when:* the version vector and MC-C01 to MC-C48 pass.
 - **E10-4 (Must)** As an operator, I want going live to require a backtest, a paper run, and
   step-up approval.
 - **E10-5 (Should)** As a new user, I want templates for common mandates.
