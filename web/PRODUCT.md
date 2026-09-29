@@ -140,8 +140,9 @@ Phosphor icons, Motion, Vitest. No third-party analytics, session replay, or tel
 
 ## Product Principles
 
-1. **Stopping is never harder than starting.** The way to reduce risk is the most visible thing on
-   every screen.
+1. **Stopping is never harder than starting.** The way to reduce risk is on every screen, one tap
+   away and never disabled, and it becomes the most visible thing on the screen when something
+   needs you (DEC-206).
 2. **Limits are the product.** The owner's envelope, in dollars, is what the screen is about; the
    agent's activity is read against it.
 3. **Truth over reassurance.** Show age, uncertainty, and unknowns plainly; never decorate a state
