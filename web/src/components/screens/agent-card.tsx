@@ -49,10 +49,10 @@ export function AgentCard({
       aria-labelledby={`agent-${agent.agent_id}`}
       data-mode={agent.mode}
       data-slot="agent-band"
-      className="group reveal relative -mx-3 grid grid-cols-[2.5rem_minmax(0,1fr)] gap-x-3 gap-y-2.5 rounded-2xl px-3 py-4 transition-[background-color,scale] duration-(--duration-hover) ease-(--ease-out) hover:bg-background has-[a:active]:scale-[0.99] sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-x-4"
+      className="group reveal relative -mx-3 grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 gap-y-2.5 rounded-2xl px-3 py-4 transition-[background-color,scale] duration-(--duration-hover) ease-(--ease-out) hover:bg-background has-[a:active]:scale-[0.99] sm:grid-cols-[3rem_minmax(0,1fr)] sm:gap-x-4"
       style={{ "--i": index } as CSSProperties}
     >
-      <AgentOwl agent={agent} className="row-span-3 size-10 sm:size-12" />
+      <AgentOwl agent={agent} className="row-span-3 size-8 sm:size-12" />
       <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_auto] items-center gap-x-4 sm:grid-cols-[minmax(0,1fr)_12rem_10rem_1rem] sm:gap-x-6">
         <div className="grid min-w-0 gap-1">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">

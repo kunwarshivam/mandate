@@ -9,16 +9,17 @@ import type { ChartLevel } from "@/components/charts/options";
 import { Sparkline } from "@/components/charts/sparkline";
 import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
-import { OwlStudio } from "@/components/design/owl-studio";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
 import { ModeBadge, ModeBanner, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
 import { Money, SignedMoney } from "@/components/domain/money";
+import { AgentOwl, Owl } from "@/components/domain/owl";
 import { FixtureTag, InlineDisclosures, Placeholder } from "@/components/domain/placeholders";
 import { ProvenanceBadge } from "@/components/domain/provenance-badge";
 import { EnvironmentBadge } from "@/components/shell/environment-badge";
 import { StopControl } from "@/components/shell/stop-control";
 import type { AgentMode, Provenance } from "@/fixtures/types";
+import { AGENT_IDS } from "@/fixtures/workspace";
 import { contrastRatio, toHex } from "@/lib/color";
 import { dec } from "@/lib/decimal";
 import { MODE_MEANING } from "@/lib/labels";
@@ -29,6 +30,8 @@ export const metadata: Metadata = { title: "Design system" };
 
 const PROVENANCES: Provenance[] = ["user_stated", "user_entered", "template_structure", "platform_proposed", "platform_default"];
 const MODES: AgentMode[] = ["normal", "exits_only", "paused", "stopped"];
+/** The fixture's agents, then sample IDs, to show how faces vary. */
+const OWL_SEEDS = [...Object.values(AGENT_IDS), "agt_01JB3KD7XC2M9QW4E6R8T0Y1ZN", "agt_01JB3KF3VB5N8PL2K4J6H9G0QM", "agt_01JB3KH9ZT1W3E5R7Y2U4I6O8P"];
 const SOURCES: Array<[RestrictionSource, string]> = [
   ["mandate", "A limit in your mandate acted: drawdown, daily loss, the lifetime floor, a goal."],
   ["account", "The account needs a look: reconciliation, an unknown order, activity at the broker."],
@@ -170,9 +173,25 @@ export default function DesignPage() {
 
       <Block
         title="Agent owls"
-        lead="Five directions for the agents' owls, to choose one (DEC-217). Each is drawn from the agent's ID and shows its mode and nothing else. Feathers take the series hues, never green or red, so an owl never reads as a gain or a loss. Move the pointer: open eyes follow it."
+        lead="Each agent is a 16 × 16 pixel owl drawn from its ID (DEC-217): its ears, markings and feathers are its own, and its eyes show its mode and nothing else. Feathers take the series hues, never green or red, so an owl never reads as a gain or a loss. Move the pointer: open eyes follow it a pixel at a time."
       >
-        <OwlStudio />
+        <div data-slot="owl-specimen" className="grid gap-6">
+          <ul aria-label="One owl per agent" className="flex flex-wrap items-end gap-5">
+            {OWL_SEEDS.map((id) => (
+              <li key={id}>
+                <Owl seed={id} mood="awake" className="size-16" />
+              </li>
+            ))}
+          </ul>
+          <ul aria-label="The owl in each mode" className="flex flex-wrap gap-x-6 gap-y-4">
+            {MODES.map((mode) => (
+              <li key={mode} className="grid justify-items-center gap-2">
+                <AgentOwl agent={{ agent_id: AGENT_IDS.swing, mode }} className="size-12" />
+                <ModeBadge mode={mode} />
+              </li>
+            ))}
+          </ul>
+        </div>
       </Block>
 
       <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number. Most of a screen is none of them.">

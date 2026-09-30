@@ -137,7 +137,7 @@ function NeedsYou({ ws, open, className }: { ws: Workspace; open: Approval[]; cl
       </h2>
       {count === 0 ? (
         <p data-slot="all-clear" className="flex min-h-11 items-center gap-3 text-sm text-muted-foreground">
-          <Owl seed="owlhead" mood="awake" className="size-9" />
+          <Owl seed="owlhead" mood="awake" className="size-8" />
           All clear. Nothing needs you.
         </p>
       ) : (
@@ -184,9 +184,9 @@ function PhoneAgentRow({ agent }: { agent: Agent }) {
     <li data-slot="phone-agent" className="border-b border-border/70 last:border-b-0">
       <Link
         href={`/agents/${agent.agent_id}`}
-        className="press -mx-2 grid min-h-11 grid-cols-[2.25rem_minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
+        className="press -mx-2 grid min-h-11 grid-cols-[2rem_minmax(0,1fr)_1rem] items-center gap-x-3 rounded-xl px-2 py-3 outline-none hover:bg-background focus-visible:ring-3 focus-visible:ring-ring focus-visible:ring-inset"
       >
-        <AgentOwl agent={agent} className="size-9" />
+        <AgentOwl agent={agent} className="size-8" />
         <span className="grid min-w-0 gap-1">
           <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
             <span className="font-semibold">{agent.label}</span>
