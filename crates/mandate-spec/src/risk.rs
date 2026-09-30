@@ -10,9 +10,11 @@
 //! the interval between inputs by the state at the interval's **start** (§5.2), and for an equity the
 //! clocks that matter run in regular-session time, which the caller's calendar supplies.
 
+mod fold;
 mod limits;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 
 use mandate_domain::{AgentMode, AssetClass, AssetId, MarketSession, Side};
 use mandate_num::{NumError, Price, Qty, Ratio, Rounding, Usd, UsdExact};
@@ -90,6 +92,11 @@ impl Restriction {
     }
 
     /// The mode this restriction asks for (§5.4, §5.5, §5.7, §5.9, §3.1).
+    ///
+    /// `daily_loss` is `exits_only` here, the mode its `exits_only` action asks for. A
+    /// `flatten_and_pause` daily loss pauses the agent until the owner acknowledges it once flat
+    /// (§5.4), so the risk state takes that restriction's mode from the mandate's `daily_loss_action`
+    /// rather than from this.
     pub fn mode(self) -> AgentMode {
         match self {
             Self::DailyLoss | Self::DrawdownExitsOnly | Self::HardBreach | Self::GoalComplete => {
@@ -479,34 +486,77 @@ pub trait SessionClock {
 }
 
 /// The agent's risk state (§5).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RiskState {
+///
+/// It borrows the [`SessionClock`] it opened with, and every step counts an equity's lift delays and
+/// staleness on it (DEC-167 item 5). The clock is not state: two states that folded the same inputs
+/// are equal whichever clock each holds.
+///
+/// Slice R2 folds marks, fills, and clock ticks. The risk day, a held instrument's mark going stale,
+/// universe changes, and a `profit_stop` goal (slice R3), and acknowledgments, allocation changes,
+/// floor loosening, goal completion, and retirement (slice R4) are [`SpecError::Unimplemented`].
+#[derive(Clone)]
+pub struct RiskState<'c> {
+    clock: &'c dyn SessionClock,
+    fold: fold::Fold,
     snapshot: Snapshot,
 }
 
-impl RiskState {
+impl<'c> RiskState<'c> {
     /// Opens the state at `opening.at` with E = H = E0 = C = the allocation and mode `normal` (§5.2).
+    ///
+    /// # Errors
+    /// `invalid_input` for a negative inherited loss, which would lower the floor (§5.7), and for an
+    /// instant between two whole seconds, which the risk clock never reads (§5.2).
     pub fn open(
         mandate: &ValidatedMandate,
         opening: &Opening,
-        clock: &dyn SessionClock,
+        clock: &'c dyn SessionClock,
     ) -> Result<Self, SpecError> {
-        let _ = (mandate, opening, clock);
-        Err(SpecError::Unimplemented)
+        let fold = fold::Fold::open(mandate, opening)?;
+        Ok(Self {
+            clock,
+            snapshot: fold.snapshot()?,
+            fold,
+        })
     }
 
     /// Applies one input in the §5.2 order: settle time, apply the input, update E then H, the ladder
     /// rungs in ascending `at`, the daily loss, the lifetime floor, then the effective mode. The
     /// journal follows that order.
     ///
-    /// A step at or before the previous step's time is [`SpecError::ClockWentBackwards`].
+    /// A step at the previous step's instant is folded with no time passing.
+    ///
+    /// # Errors
+    /// A step before the previous step's time is [`SpecError::ClockWentBackwards`]. A step between two
+    /// whole seconds of the risk clock (§5.2) and a sale of more than the agent holds are
+    /// `invalid_input`. A step that fails leaves the state as it was.
     pub fn step(&mut self, step: &Step) -> Result<Outcome, SpecError> {
-        let _ = step;
-        Err(SpecError::Unimplemented)
+        let mut next = self.fold.clone();
+        let outcome = next.step(self.clock, step)?;
+        self.fold = next;
+        self.snapshot = outcome.snapshot.clone();
+        Ok(outcome)
     }
 
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot
+    }
+}
+
+impl PartialEq for RiskState<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.fold == other.fold
+    }
+}
+
+impl Eq for RiskState<'_> {}
+
+impl fmt::Debug for RiskState<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RiskState")
+            .field("fold", &self.fold)
+            .field("snapshot", &self.snapshot)
+            .finish_non_exhaustive()
     }
 }
 

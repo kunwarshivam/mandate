@@ -1032,19 +1032,30 @@ From E6-4's slice L (stream H; the coordinator's ruling on #279, round 1, minor 
 From E6-4's slice R1 (stream H2; #289's review round 2 approved it, and the freeze rule defers
 these to R2, where the fold starts reading `Limits::conditions`):
 
-- **Pin the shape of the map `conditions` returns (R2's tests correction).** The suite checks only
-  the readings that hold, so two plants pass every test: `LimitKey::ProfitStop` inserted as
-  `(false, false)`, which falsifies `risk::conditions`' doc, and a rung's entry omitted when neither
-  reading holds. Assert that the keys are exactly the three rungs, `MaxDailyLoss` and
-  `LifetimeFloor`, and that `below_lift`'s keys are the three rung indices.
-- **Say which rungs `below_lift` may lift (R2).** §5.5 gives the hysteresis lift to `scale_sizes`
-  rungs only; a latched `exits_only` or `flatten_and_pause` rung lifts only on owner
-  acknowledgment (§5.8). Lifting one because the drawdown receded would add risk without approval.
-  Say so in `Readings::below_lift`'s doc, and have R2's fold test it.
-- **Nits from the same review.** (1) A negative high-water mark would put the hard level below the
-  soft one; the fold never produces one, but state that `H` is the peak of a positive equity, or
-  make it a type. (2) `.gitignore`'s `*.proptest-regressions` does not match the
-  `proptest-regressions/` directory proptest writes; ignore the directory. (3) `floor`, `at_least`
-  and `at_most` in `risk/limits.rs` are `pub(super)` but used only in that file; make them private
-  unless R2 uses them. (4) Say why `Limits` keeps `max_loss_from_allocation` as an unparsed
-  `SchemaDec` (§5.7's loosening check compares it).
+- **Ignore the directory proptest writes (#289 round 2, nit 2).** `.gitignore`'s
+  `*.proptest-regressions` does not match the `proptest-regressions/` directory proptest writes
+  beside a crate's `src/` (a failing in-module property leaves
+  `crates/mandate-spec/proptest-regressions/risk/fold/tests.txt`); ignore the directory. R2 stays
+  inside `crates/mandate-spec`, so it did not change `.gitignore`.
+
+From E6-4's slice R2 (stream H2; DEC-167 item 6):
+
+- **`ref.py` counts a fill as a sane quote (reference fix).** `RiskState.step` sets
+  `quote = kind in ("mark", "fill") …`, so a fill re-reads the last mark as a second quote and can arm,
+  latch, or clear a hard breach. §5.6 says "sane quote", and a fill quotes nothing: E moves by the
+  fill's price against the mark, not to a new mark. One flash print followed by any fill would latch
+  a limit on one print, which DEC-63 rules out. The crate follows the spec (DEC-167 item 6), and no
+  reference case changes either way. Drop `"fill"` from the tuple and regenerate with
+  `reference/mandate/generate.py`, which must leave `fixtures/refcases/mandate.json` unchanged.
+- **The three `ref.py` readings the #124 handover left for R3 and R4.** (1) R3: a daily hard breach
+  pending at the rollover is popped into the rollover record and never read again, so `hard_breach`
+  can stay applied with nothing to clear it; keep it pending under the new day and record the reading
+  as a DEC-167 item. (2) R3: the renewal's `acked` is always false, since only a `flatten_and_pause`
+  daily is acknowledged; write it as false. (3) R4: settling time before an allocation change only
+  when `at > self.t` is equivalent to settling always; settle always. Handover items 4 (one cash sum)
+  and 5 (the post-loop lift reset) are R2's and are in `risk/fold.rs`.
+- **No MC-R case passes until R3 (R3's status PR).** Every equity case builds on `two_stock_swing`,
+  whose goal is `profit_stop` (R3), and every crypto case opens with `risk_day_started` (R3). With
+  the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
+  R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
