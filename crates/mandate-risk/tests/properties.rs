@@ -568,7 +568,9 @@ proptest! {
         );
     }
 
-    /// §9.6: only an **opposite**-side fill starts the sixty-second interval.
+    /// §9.6: only an **opposite**-side fill starts the sixty-second interval, and "within 60
+    /// seconds after" includes its last instant, so a fill exactly 60 s ago still blocks (DEC-163
+    /// item 3).
     #[test]
     #[ignore = "pending E6-8"]
     fn only_an_opposite_side_fill_starts_the_interval(
@@ -588,7 +590,7 @@ proptest! {
         let d = evaluate(&s.input()).expect("the gate decides");
         let blocked = d.reason == Some(ReasonCode::OppositeFillInterval);
         prop_assert_eq!(
-            blocked, opposite && elapsed < 60,
+            blocked, opposite && elapsed <= 60,
             "a buy after a sell fill within 60 s is blocked; a buy after a buy fill is not"
         );
     }
