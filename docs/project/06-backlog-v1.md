@@ -1000,6 +1000,21 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the breaching opening
   `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
   gate's `not_in_working_universe` (DEC-199 Q1).
+- Tighten the trading-domain gate driver (#333 review, minors 1 and 2 and nit 2), in one tests
+  correction of `crates/mandate-refcases/src/trading_domain/gate.rs` and DEC-199:
+  - pin, or better, show taking effect, the values DEC-199 item 6 fills: `median_dollar_volume_20d`
+    (the collar tier), `min_order_size`, and the two participation volumes. Today changing any of
+    them leaves every test green, although none of the three changes is looser than the spec;
+  - refuse a second `propose_order` step in the same case until E7-4 and E7-5 land. DEC-199 item 3
+    decides each proposal alone, against an account with no working, unknown or related resting
+    orders, and nothing fails if a case adds a second proposal;
+  - add `agent_mode` to `check()`'s allowed keys, so that an `agent_mode` expectation on an event
+    outside `MODE_OWNERS` fails naming its owning story rather than as `expect: unknown key`.
+- The case-file side of DEC-199 Q1 to Q3, in one reference-case change for the founder:
+  - RC-16 says `not_in_working_universe`, the registered code mandate spec §5.3 defines;
+  - the header says the eligibility floor is checked against the limit price when no
+    `prior_close` is given (or a case below $5 states its own);
+  - RC-25 carries `owner_confirmed_bid` as the displayed bid's price rather than `true`.
 - **trading-domain §9.6: state that the opposite-fill interval includes its last instant**
   (DEC-163 item 3; DEC-176 clarification). §9.6's "within 60 seconds after" an opposite-side fill
   is read inclusively, so an opening exactly 60 s after the fill is denied; the spec text should
