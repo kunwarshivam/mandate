@@ -1358,16 +1358,15 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{gate, gate_error, instant, market_session, test_default_gate_config};
     use crate::{Json, mandate, read_fixture};
 
     const PLANTED: &str = "zz_planted";
 
     /// The cases that pass against the merged `mandate-builder` and `mandate-risk`.
-    const PASSING: [&str; 23] = [
+    const PASSING: [&str; 25] = [
         "MC-B01", "MC-B02", "MC-B03", "MC-B04", "MC-B05", "MC-B06", "MC-B07", "MC-B08", "MC-B09",
         "MC-B10", "MC-B11", "MC-B12", "MC-B13", "MC-B14", "MC-B15", "MC-B16", "MC-B18", "MC-B19",
-        "MC-B20", "MC-B21", "MC-B24", "MC-B25", "MC-B29",
+        "MC-B20", "MC-B21", "MC-B22", "MC-B23", "MC-B24", "MC-B25", "MC-B29",
     ];
 
     /// The cases that cannot pass yet, each with what its failure must say.
@@ -1380,59 +1379,6 @@ mod tests {
         ("MC-B27", &["mandate_risk::evaluate", "pending E6-10"]),
         ("MC-B28", &["mandate_risk::evaluate", "pending E6-10"]),
     ];
-
-    /// The cases whose clock DEC-250 item 12 moves onto their labels, judged by the fixture's own
-    /// consistency: each passes when its `session` and `in_close_window` agree with the calendar at
-    /// its `now`, and otherwise fails naming the conflict as its needles say. MC-B31 carries the
-    /// same `after_hours` label but is not here: a `trim_to_target` case stops at
-    /// `trim_proposals` before its labels are compared, so it is owed to E6-4 either way.
-    const CLOCKED: [(&str, &[&str]); 2] = [
-        (
-            "MC-B22",
-            &[
-                "`session`",
-                "states `after_hours`",
-                "the calendar says `regular`",
-            ],
-        ),
-        (
-            "MC-B23",
-            &[
-                "`in_close_window`",
-                "states true",
-                "the calendar says false",
-            ],
-        ),
-    ];
-
-    /// Whether case `id`'s `session` and `in_close_window`, defaulting to `regular` and false as
-    /// the case-file header says, agree with `mandate_risk::session_at` at its `now` under the gate
-    /// configuration the harness runs. The labels are compared here rather than by the harness's
-    /// own comparison, so a harness that stops comparing them cannot also change what is expected.
-    fn labels_agree_with_calendar(fixture: &Json, id: &str) -> Result<bool, String> {
-        let case = family_b(fixture)?
-            .into_iter()
-            .find(|c| c["id"] == id)
-            .ok_or_else(|| format!("no case {id}"))?;
-        let input = crate::at(&case, "input")?;
-        let class = match crate::str_at(input, "asset_class")? {
-            "us_equity" => gate::AssetClass::UsEquity,
-            "crypto" => gate::AssetClass::Crypto,
-            other => return Err(format!("{id}: asset class `{other}`")),
-        };
-        let now = instant(crate::at(input, "now")?, "now")?;
-        let clock = gate::session_at(now, &test_default_gate_config()?, class)
-            .map_err(|e| gate_error("session_at", &e))?;
-        let session = input
-            .get("session")
-            .map_or(Some("regular"), Json::as_str)
-            .ok_or_else(|| format!("{id}: `session` is not text"))?;
-        let close_window = input
-            .get("in_close_window")
-            .map_or(Some(false), Json::as_bool)
-            .ok_or_else(|| format!("{id}: `in_close_window` is not a flag"))?;
-        Ok(session == market_session(clock.session).as_str() && close_window == clock.close_window)
-    }
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -1722,34 +1668,18 @@ mod tests {
             let result = run(fixture.clone(), &id);
             if PASSING.contains(&id.as_str()) {
                 result.map_err(|e| format!("{id}: {e}"))?;
-            } else if let Some((_, needles)) = CLOCKED.iter().find(|(clocked, _)| *clocked == id) {
-                if labels_agree_with_calendar(&fixture, &id)? {
-                    result.map_err(|e| format!("{id}, its labels agreeing with its clock: {e}"))?;
-                } else {
-                    for needle in *needles {
-                        fails_naming(
-                            result.clone(),
-                            needle,
-                            &format!("{id}, its labels contradicting its clock"),
-                        )?;
-                    }
-                }
             } else {
                 let (_, needles) = OWED
                     .iter()
                     .find(|(owed, _)| *owed == id)
-                    .ok_or_else(|| format!("{id} is neither passing, clocked nor owed"))?;
+                    .ok_or_else(|| format!("{id} is neither passing nor owed"))?;
                 for needle in *needles {
                     fails_naming(result.clone(), needle, &id)?;
                 }
             }
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq(
-            "cases listed",
-            PASSING.len() + CLOCKED.len() + OWED.len(),
-            seen,
-        )
+        crate::expect_eq("cases listed", PASSING.len() + OWED.len(), seen)
     }
 
     /// Every expected member, and every member of a dry run and an outcome, is compared and none is
@@ -1790,7 +1720,7 @@ mod tests {
                 )?;
             }
         }
-        crate::expect_eq("doctorings, counted from the fixture", doctorings, 698)
+        crate::expect_eq("doctorings, counted from the fixture", doctorings, 768)
     }
 
     /// A hold reaches neither the gate nor approval, so a hold that states either fails naming it,
@@ -1886,9 +1816,9 @@ mod tests {
             }
         }
         crate::expect_eq(
-            "plants: four objects per case, forty-four outputs and two working orders",
+            "plants: four objects per case, forty-eight outputs and two working orders",
             plants,
-            23 * 4 + 44 + 2,
+            25 * 4 + 48 + 2,
         )
     }
 
@@ -1999,7 +1929,7 @@ mod tests {
                 }
             }
         }
-        crate::expect_eq("inputs refused, counted from the fixture", refused, 899)
+        crate::expect_eq("inputs refused, counted from the fixture", refused, 981)
     }
 
     /// The builder and the gate see one account: the gate state's equity, the instrument's market
@@ -2184,42 +2114,19 @@ mod tests {
         Ok(())
     }
 
-    /// MC-B22 and MC-B23 fail only because their labels contradict their clock: moved to an
-    /// instant where the calendar agrees with the label, each passes as stated, and each
-    /// enum-valued expectation swapped for a sibling fails at its comparison. MC-B23 is the only
-    /// case that states a sell's `order_type` and MC-B22 the only deferred one, so this is where
-    /// those two comparisons are proved.
+    /// MC-B22, after hours, and MC-B23, in the close window, pass as the fixture states them, and
+    /// each enum-valued expectation swapped for a sibling fails at its comparison. MC-B23 is the
+    /// only case that states a sell's `order_type` and MC-B22 the only deferred one, so these two
+    /// comparisons are proved here by name as well as by [`PASSING`]'s sweep. A label that
+    /// contradicts `now` failing the case is proved by
+    /// `the_builder_and_the_gate_see_one_scene`'s MC-B01, given `after_hours` and a close window
+    /// at a regular-session instant (DEC-250 item 3).
     #[test]
-    fn the_two_session_cases_pass_once_now_agrees_with_their_labels() -> Result<(), String> {
+    fn the_two_session_cases_pass_as_stated_and_compare_every_sibling() -> Result<(), String> {
         let fixture = fixture()?;
-        for (id, now, as_of, expires_at) in [
-            (
-                "MC-B22",
-                "2026-09-22T21:00:00.000000000Z",
-                "2026-09-22T20:59:00.000000000Z",
-                "2026-09-22T22:00:00.000000000Z",
-            ),
-            (
-                "MC-B23",
-                "2026-09-22T19:55:00.000000000Z",
-                "2026-09-22T19:54:00.000000000Z",
-                "2026-09-22T21:00:00.000000000Z",
-            ),
-        ] {
-            let moved = doctored(&fixture, id, "/input", |input| {
-                set(input, "/now", json!(now));
-                let outputs = input
-                    .pointer_mut("/outputs")
-                    .and_then(Json::as_array_mut)
-                    .into_iter()
-                    .flatten();
-                for output in outputs {
-                    set(output, "/as_of", json!(as_of));
-                    set(output, "/expires_at", json!(expires_at));
-                }
-            })?;
-            run(moved.clone(), id).map_err(|e| format!("{id} at {now}: {e}"))?;
-            every_sibling_fails_its_comparison(&moved, id)?;
+        for id in ["MC-B22", "MC-B23"] {
+            run(fixture.clone(), id).map_err(|e| format!("{id}: {e}"))?;
+            every_sibling_fails_its_comparison(&fixture, id)?;
         }
         Ok(())
     }
