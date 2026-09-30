@@ -169,6 +169,64 @@ export const BOLT: Sprite = [
   "................",
 ];
 
+export const MINE: Sprite = [
+  "................",
+  ".......kk.......",
+  "..k....kk....k..",
+  "...k.kkkkkk.k...",
+  "....kkkkkkkk....",
+  "...kkwwkkkkkkk..",
+  "...kkwwkkkkkkk..",
+  ".kkkkkkkkkkkkkkk",
+  ".kkkkkkkkkkkkkkk",
+  "...kkkkkkkkkkk..",
+  "...kkkkkkkkkkk..",
+  "....kkkkkkkkk...",
+  "...k.kkkkkkk.k..",
+  "..k....kk....k..",
+  ".......kk.......",
+  "................",
+];
+
+const BASKET: Sprite = [
+  "..kkkkkkkkkkkk..",
+  "..kwgwgwgwgwgk..",
+  "..kkkkkkkkkkkk..",
+  "...kwgwgwgwgk...",
+  "...kwgwgwgwgk...",
+  "...kwgtttwwgk...",
+  "...kwtwgwtwgk...",
+  "...kwgwttwwgk...",
+  "...kwgwgwgwgk...",
+  "...kwgwgwgwgk...",
+  "....kwgwgwgk....",
+  "....kkkkkkkk....",
+  "................",
+];
+
+export const BIN: Sprite = ["................", "....ww..w.ww....", "...wwkwwkwwkw...", ...BASKET];
+
+export const BIN_EMPTY: Sprite = ["................", "................", "................", ...BASKET];
+
+export const FILM: Sprite = [
+  "................",
+  ".kkkkkkkkkkkkkk.",
+  ".kwkkwkkwkkwkwk.",
+  ".kkkkkkkkkkkkkk.",
+  ".kssssssssssssk.",
+  ".ksssswwssssssk.",
+  ".ksssswwwsssssk.",
+  ".ksssswwwwssssk.",
+  ".ksssswwwsssssk.",
+  ".ksssswwssssssk.",
+  ".kttttttttttttk.",
+  ".kkkkkkkkkkkkkk.",
+  ".kwkkwkkwkkwkwk.",
+  ".kkkkkkkkkkkkkk.",
+  "................",
+  "................",
+];
+
 /** One run of same-coloured pixels per rect, so a sprite is a few dozen rects. */
 function runs(sprite: Sprite) {
   const out: { x: number; y: number; w: number; fill: string }[] = [];
