@@ -362,7 +362,6 @@ fn every_goal_case_passes_and_fails_on_each_edited_expectation() {
 /// dropping shows none is optional: the arm reads `step_up_required` as absent only where the case
 /// itself says `invalid`, so leaving it out elsewhere cannot pass.
 #[test]
-#[ignore = "pending E10-3"]
 fn every_change_case_passes_and_fails_on_each_edited_expectation() {
     let fixture = fixture();
     let ids = ids_of(&fixture, "change");
