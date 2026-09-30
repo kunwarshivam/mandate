@@ -614,11 +614,6 @@ html:root[data-cvd="on"] {
   animation-timing-function: var(--ease-out);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    scroll-behavior: auto !important;
-  }
-  [data-slot="stop-sheet"],
 /* The owls (DEC-217): a blink on each owl's own rhythm, breathing while asleep, a tilt toward the
    owner's hover. Stopped owls and still owls do none of it. */
 [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
@@ -663,10 +658,10 @@ html:root[data-cvd="on"] {
   100% { opacity: 0; transform: translate(4px, -10px); }
 }
 
-  [data-slot="more-sheet"],
-  [data-slot="step-up-dialog"],
-  [data-slot="sheet-backdrop"] {
-    transition: none !important;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+  }
   [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
     animation: none !important;
     transition: none !important;
@@ -675,6 +670,11 @@ html:root[data-cvd="on"] {
   [data-slot="owl"] .owl-z:not(.owl-z-late) {
     opacity: 1;
   }
+  [data-slot="stop-sheet"],
+  [data-slot="more-sheet"],
+  [data-slot="step-up-dialog"],
+  [data-slot="sheet-backdrop"] {
+    transition: none !important;
   }
   [data-slot="skeleton"] {
     animation: none !important;
