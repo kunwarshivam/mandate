@@ -766,9 +766,8 @@ fuzzed and seeded bugs caught before code:
   `exits_only`, risk-reducing to add; MI-31 and V-044.
 - `autonomy.review_by` (DEC-188): a §7 platform default of 90 days, at most 180; past it every `auto`
   and delegation reads as `ask`; MI-32.
-- The delegation and client members of `DecisionMade` (`decided_by`, `delegation_id`,
-  `requested_by`, the client's id) and the shape chosen on `ApprovalResponded` join journal spec
-  §9.1's closed schemas, with generated vectors (DEC-177), before E8-8 or E6-12 writes them.
+- The delegation shape chosen on `ApprovalResponded` joins journal spec §9.1 when the approval
+  events close (M7); `DecisionMade`'s delegation and client members are closed (DEC-252).
 - The per-client ask budget (DEC-195, DEC-251): at most 10 client-requested asks per client per
   risk day, which the owner may lower, suppressed as `client_budget` after §6.4's per-agent `budget`; MI-33.
 - The delegation total (DEC-196): the sum of `max_total_usd` over a version's delegations is at most
