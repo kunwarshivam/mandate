@@ -1157,24 +1157,24 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
     stays.
 - Tighten the family-B harness (#331 review, minors 4 and 5 and the nits), in one tests correction
-  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250:
-  - `an_unreadable_input_is_refused_naming_it` says every scalar the harness reads is parsed, but
-    its sweep leaves out the `gate_state.positions_mv` values, `gate_state.last_exit_fill_at`,
-    `gate_state.working_universe`, and the working orders' own `instrument` and `max_cost`. Extend
-    the sweep to them, or narrow the doc to what it covers (minor 4);
-  - the gate's `fee_reservation` is hardcoded `Usd::ZERO`, while a non-zero crypto
-    `fee_rate_cash` is accepted (DEC-250 item 6 refuses only an equity fee rate). Refuse a non-zero
-    cash fee rate, or derive the reservation from it, before any crypto B case states one
-    (minor 5);
-  - `crates/mandate-builder/tests/refcases.rs`'s module doc still says the harness hands `decide`
-    the case's own verdict until stream G's gate lands; the shared harness now composes propose,
-    gate and `decide`, so the doc is stale (nit);
-  - `test_default_gate_config` and `gate_mandate` are a third copy of the gate helpers, beside
-    `risk_gate.rs` and `trading_domain/gate.rs`. Share them, and when they are shared, add
+  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250. *Done (E6-2, the
+  `cursor/family-b-tightening-138b` PR; DEC-250 items 16 to 18), all but the shared gate helpers,
+  which stay open:*
+  - *done:* `an_unreadable_input_is_refused_naming_it` now also sweeps the `gate_state.positions_mv`
+    map and its values, `gate_state.last_exit_fill_at` (whole, and a planted entry, since no case
+    states one), `gate_state.working_universe` and its entries, and each working order's
+    `instrument` and `max_cost`, in the gate state and restated (minor 4);
+  - *done:* a cash fee rate above zero is refused for crypto as for equities, since the gate's
+    `fee_reservation` is `Usd::ZERO`; a stated 0 is read and passes (minor 5, DEC-250 item 17);
+  - *done:* `crates/mandate-builder/tests/refcases.rs`'s module doc says this crate's harness hands
+    `decide` the case's verdict because it does not depend on `mandate-risk`, and points at the
+    shared harness's propose, gate and `decide` composition (nit);
+  - **open:** `test_default_gate_config` and `gate_mandate` are a third copy of the gate helpers,
+    beside `risk_gate.rs` and `trading_domain/gate.rs`. Share them, and when they are shared, add
     DEC-178 item 12's check against `configs.test_default.gate` to the family-B arm (nit);
-  - `INPUT_KEYS` declares `fee_rate_cash`, `drawdown`, `daily_pnl_fraction` and
-    `bought_today_usd`, which no B case states, so no test shows any of them read. Drop them until a
-    case states one, or add a doctoring that does (nit).
+  - *done:* `INPUT_KEYS` keeps `fee_rate_cash`, which `a_cash_fee_rate_above_zero_is_refused` shows
+    read, and drops `drawdown`, `daily_pnl_fraction` and `bought_today_usd`, which no base's
+    autonomy rule reads, until a case states one (nit, DEC-250 item 16).
 - **Family B's three contradicting clocks, as a reference-case PR under DEC-176** (DEC-250 item 12,
   #331 review). MC-B22 (`session: after_hours`), MC-B23 (`in_close_window: true`) and MC-B31
   (`session: after_hours`) all put `now` at 2026-09-22T14:00Z, the regular session, so the harness
@@ -1186,11 +1186,12 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
-- Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
-  `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
-  returns `None` for a vocabulary. Replace them with an assertion that every stated enum-valued
-  expectation has a sibling arm (`on_timeout` and `action` excepted, as the review showed), so a
-  case that gains or loses an enum expectation needs no count edit.
+- Derive the family-B sibling counts (#331 round-2 review, nit). *Done (E6-2, the
+  `cursor/family-b-tightening-138b` PR; DEC-250 item 18):* the hand-written `siblings == 87` and
+  `siblings == 11` are replaced by an assertion that every enum-valued expectation a swept case
+  states (a word, a null, or a non-empty list of words in some family-B case) has a `sibling` arm,
+  `on_timeout` and `action` excepted, so a case that gains or loses an enum expectation needs no
+  count edit.
 - **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
   the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
   `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
