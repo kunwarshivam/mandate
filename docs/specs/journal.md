@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | v0.4 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
+| **Status** | v0.5 (v0.2 founder sign-off 2026-09-25, [DEC-71](../project/04-decision-log.md#decisions); v0.3 amendment [DEC-81](../project/04-decision-log.md#decisions); v0.4 adds the research-agent events of [DEC-97](../project/04-decision-log.md#decisions) and [DEC-111](../project/04-decision-log.md#decisions); v0.5 the approval-escalation events of [DEC-173](../project/04-decision-log.md#decisions)); changes need a decision-log entry (safety-critical) |
 | **Implements** | PRD 6.7 (FR-7.1 to FR-7.7), FR-5.6, FR-5.7; backlog E5; milestone M4 |
 | **Depends on** | [Trading domain spec §12–§13](trading-domain.md#12-journal-events) |
 | **Test vectors** | [reference-cases/journal.yaml](reference-cases/journal.yaml) (version 3) |
@@ -12,6 +12,15 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 
 ## Change history
 
+- **v0.5 ([DEC-173](../project/04-decision-log.md#decisions), with [DEC-155](../project/04-decision-log.md#decisions),
+  [DEC-156](../project/04-decision-log.md#decisions), and [DEC-158](../project/04-decision-log.md#decisions)):**
+  approval escalation v0 ([mandate spec §6.1, §6.4](mandate.md#64-approvals)). The workspace
+  control stream gains `ApprovalResponseSubmitted` and `OwnerCommandIssued`, and `OwnerAcknowledged`
+  carries step-up evidence; owner input is journaled there first and copied by the agent runtime
+  with causation (§2). The agent stream's approval rows are split: `ApprovalRequested` carries the
+  content object and its hash, `ApprovalResponded` the admission result with the quorum it
+  applied, and the new `ApprovalRevalidated` the re-validation result; `DecisionMade` gains
+  `ask_suppressed`. Test vectors are unchanged (version 3).
 - **v0.4 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-111](../project/04-decision-log.md#decisions)):**
   `ThesisProposed` and `ThesisRevised` join the agent stream and `UniverseChanged` the account
   stream, where it is a risk input carrying `risk_clock` ([mandate spec §2.3, §8.4 to
@@ -52,7 +61,7 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
 |---|---|---|---|
 | Account | `acct:{workspace_id}:{account_ref}` | The account's executor (trading spec §7.1); the risk gate is a pure library it calls | Intents received, gate decisions, orders, fills, fees, cash, settlement, corporate actions, reconciliation, account state, restrictions, protection changes, copies of gating facts from other streams |
 | Agent | `agent:{workspace_id}:{agent_id}` | The agent's runtime | Observations, model invocations, signal-model outputs, decisions, intents proposed, approvals, agent mode changes |
-| Workspace control | `ctl:{workspace_id}` | Workspace control services | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments and alerts, surveillance reports, anchors, verification, records lifecycle, access and export |
+| Workspace control | `ctl:{workspace_id}` | Workspace control services (in Phase 1, the founder's CLI) | Mandates, deployments, connections, disclosures, policy and configuration registration, owner acknowledgments, approval responses, owner commands, and alerts, surveillance reports, anchors, verification, records lifecycle, access and export |
 | Scheduler | `clock:{workspace_id}` | The workspace scheduler | `ClockAdvanced`, `TradingDayStarted`, clock measurements |
 
 - **Identifier grammar:** every `{…}` segment matches `[A-Za-z0-9_-]+`. `account_ref` is an opaque
@@ -76,7 +85,12 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   account stream as `OwnerAcknowledged`, with `causation_id` pointing to the original. A mode change that **originates** on the account stream (account restrictions,
   mandate risk limits) is journaled there first as `AgentModeApplied`, and the agent runtime
   copies it into the agent stream as `AgentModeChanged`; the `causation_id` always points to the
-  originating event. A user's kill switch is a **command**
+  originating event. **Owner input is journaled on the control stream first**: an answer to an
+  approval as `ApprovalResponseSubmitted`, and a pause, resume, Stop, owner exit, or kill switch as
+  `OwnerCommandIssued` ([mandate spec §6.1](mandate.md#61-purposes)). The agent runtime copies each
+  event addressed to its agent at most once, with `causation_id` pointing to it (`ApprovalResponded`,
+  `AgentModeChanged`, `OwnerExitRequested`, `KillSwitchActivated`); the control stream's `event_id`
+  is the idempotency key. A user's kill switch is therefore a **command**
   to the stream owners, which journal `KillSwitchActivated` in their own streams.
 - A stream begins with `StreamOpened` (seq 1), which records the stream type, subject, and
   environment.
@@ -308,9 +322,13 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
 | `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks |
-| `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification |
-| `IntentProposed` | man | intent fields (its `event_id` is the intent ID) |
-| `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut`, `ApprovalCanceled` | man | content shown (artifact), bound quantity, limit price, and mandate version, cancel reason, channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result |
+| `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification; `ask_suppressed` (`budget`, `skipped_today`, `recent_timeout`) when an `ask` was classified but not asked ([mandate spec §6.4](mandate.md#64-approvals)) |
+| `IntentProposed` | man | intent fields (its `event_id` is the intent ID); after a grant, `causation_id` is the `ApprovalRevalidated` |
+| `ApprovalRequested` | man | approval (its `event_id`), instrument, asset class, side, quantity, limit price, purpose, mandate version, `decided_by`, `approvers_required`, `independent_required`, `reference_mark` (`{price, seq}` or null), deadline, `timeout_s`, `on_timeout: skip`, the content object inline (large parts by artifact reference), `content_hash` |
+| `ApprovalDelivered` | man | approval, channel, delivery status (`delivered`, `suppressed_quiet_hours`, `failed`), message ID |
+| `ApprovalResponded` | man | approval, verdict (`approved`, `skipped`; a legacy `denied` reads as `skipped`), responder (opaque) and role, result (`admitted`, `counted`, `refused`; a legacy `recorded` or `refused` reads as terminal), reason, effective time, step-up evidence (assertion ID, authentication time, method), separation-of-duties result, and for a grant that reaches check 7 the approver count and independence it applied (the stricter of the bound values and the policy overlay, [mandate spec §6.4](mandate.md#64-approvals)); `causation_id` is the `ApprovalResponseSubmitted`, copied at most once |
+| `ApprovalRevalidated` | man | approval, result (`act`, `skip`), reason, and every value compared: bound and current mandate version, mode, instrument restriction, `decided_by` then and now, dry-run verdict and reason, `m_req`, `m_now`, `band_bp` |
+| `ApprovalTimedOut`, `ApprovalCanceled` | man | approval, `on_timeout: skip`; approval, cancel reason (`version_applied`, `mode_tightened`, `owner_pause`, `owner_stop`, `kill_switch`; a legacy `rebound` is a cancellation for either of the first two) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |
 | `OwnerExitRequested` | man | instrument or scope, bid shown and confirmed, user (opaque), step-up evidence |
 
@@ -323,7 +341,9 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `PolicyChanged`, `WorkspaceProfileAssigned` | — | level, diff, author (opaque), step-up evidence, affected agents; profile, basis, assigning user |
 | `ConnectionEstablished`, `ConnectionRevoked` | — | broker, scopes granted, permission-check result |
 | `DisclosureAccepted` | — | document and version hash, user (opaque), step-up evidence |
-| `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method |
+| `OwnerAlertSent`, `OwnerAcknowledged` | — | subject event, channel, delivery status; user (opaque), authentication method, step-up evidence (assertion ID, authentication time, method) |
+| `ApprovalResponseSubmitted` | — | The owner's answer to an approval ([mandate spec §6.4](mandate.md#64-approvals)): agent, approval, verdict (`approved`, `skipped`), content hash, `submitted_at`, step-up evidence (assertion ID, authentication time, method) or null, responder (opaque) and role |
+| `OwnerCommandIssued` | — | The owner's command ([mandate spec §6.1](mandate.md#61-purposes)): agent or kill-switch scope, command (`pause`, `resume`, `stop`, `kill_switch`, `owner_exit`), the release choice and warning shown for a Stop with release, the bid, bid size, and floor confirmed for an owner exit, `submitted_at`, step-up evidence or null, user (opaque) |
 | `ConfigSnapshotRegistered` | — | configuration kind (fee, calendar, instrument snapshot, rule set, mandate), content hash |
 | `SurveillanceReportGenerated`, `BacktestRunRecorded` | rule | period, report (artifact), breaches; data snapshot, code build, configuration, results, paper/live/backtest marker |
 | `PlatformOperatorAction` | — | action (stop, global kill switch, acceptable-use action, `model_withdrawn` with model and reason, `research_thesis_halt` with the instrument and optionally the research agent's pinned content hash, [DEC-100](../project/04-decision-log.md#decisions)), operator (opaque), approval |
