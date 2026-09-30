@@ -187,12 +187,19 @@ html:root[data-mode="dark"] {
 }
 
 /*
- * Kumo's toasts sit 2rem above the bottom right corner, under the dock's layer, and the dock reaches
- * that corner's column below 1440px. From 64rem they rise clear of the dock instead.
+ * Kumo's toasts sit 2rem above the bottom edge, under the tab bar's and the dock's layer, and both
+ * reach that corner. They rise clear of the tab bar on a phone, and of the dock from 64rem.
  */
-@media (min-width: 64rem) {
-  [role="region"][aria-label="Notifications"] {
+[role="region"][aria-label="Notifications"] {
+  bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 0.75rem);
+  @media (min-width: 64rem) {
     bottom: calc(var(--dock-clearance) + 1rem);
+  }
+}
+/* A pinned response bar holds the same news, so a toast clears it rather than covering it. */
+html:has([data-slot="response-bar"]) [role="region"][aria-label="Notifications"] {
+  @media (max-width: 63.999rem) {
+    bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + var(--response-bar, 0px) + 0.75rem);
   }
 }
 
@@ -384,7 +391,7 @@ html:root[data-cvd="on"] {
     @media (min-width: 64rem) {
       scroll-padding-bottom: calc(var(--dock-clearance) + 1rem);
     }
-    &:has([data-slot="approval-choices"]) {
+    &:has([data-slot="response-bar"]) {
       scroll-padding-bottom: calc(var(--tab-bar) + env(safe-area-inset-bottom) + 8rem);
       @media (min-width: 64rem) {
         scroll-padding-bottom: calc(var(--dock-clearance) + 8rem);
