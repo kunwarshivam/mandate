@@ -412,7 +412,9 @@ impl Scene {
                 .collect::<Result<_, _>>()?;
             for (member, group) in groups {
                 let name = text(group, "instrument_groups")?;
-                let rank = names.iter().position(|n| *n == name).unwrap_or_default();
+                let rank = names.iter().position(|n| *n == name).ok_or_else(|| {
+                    format!("`state.instrument_groups`: the group `{name}` has no rank")
+                })?;
                 let rank = u64::try_from(rank).map_err(|e| e.to_string())?;
                 instrument_groups.insert(asset(member)?, GroupId(rank));
             }
