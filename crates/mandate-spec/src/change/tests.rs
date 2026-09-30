@@ -1,7 +1,7 @@
-//! The `not_in` reading of §9.2's single-comparison shapes (DEC-172 item 9), which no `tests/change.rs`
-//! test and no MC-C case reaches: the MI-11 property generates `in` lists only, so a `not_in` rule
-//! whose direction were ignored would read every change as increasing and pass all of them. Also the
-//! refusal of a diverged mandate (DEC-172 item 12), which `tests/` cannot build.
+//! The `not_in` reading of §9.2's single-comparison shapes (DEC-172 item 9), which no MC-C case
+//! reaches, pinned by name beside the code rather than left to a property's draw: a `not_in` rule
+//! whose direction were ignored would read every change as increasing. Also the refusal of a
+//! diverged mandate (DEC-172 item 12), which `tests/` cannot build.
 
 use core::fmt::Debug;
 
