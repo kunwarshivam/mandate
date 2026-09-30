@@ -193,6 +193,27 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `exits_only` with an owner alert, risk-reducing orders continue, the day's report is journaled and
   routed per workspace, the owner's acknowledgment is journaled, and RC-22's `conduct_breach` step
   passes.
+- **E6-12 (Must, before E10-8)** As an owner, I want an order my connected agent asked for always to
+  reach me, and asks capped per day, so that a prompt-injected or looping agent can neither trade
+  unasked nor wear me down ([ADR-0003](../adr/0003-earned-autonomy.md) part 10, [DEC-185](04-decision-log.md#decisions), [DEC-195](04-decision-log.md#decisions)). The client ceiling is
+  mandate spec §6.2 step 5a and MI-30 ([#328](https://github.com/kunwarshivam/mandate/pull/328)); the
+  ask budget waits on its spec change (MI-33). Safety-critical (autonomy policy), DEC-77 sequence.
+  *Accepted when:* `requested_by` is set from the authenticated channel and journaled in
+  `DecisionMade`; a client-requested opening is `ask` under every `auto` rule, `auto` default, live
+  delegation, and `auto` admission, and a `deny` still denies; owner and agent requests decide as
+  before; past the daily ask budget (20 per agent, 10 per client by default) further asks are skipped
+  and journaled with their reason, never notified; risk-limit alerts are never capped.
+- **E6-13 (Should)** As an owner, I want tripwires I set in advance to end my delegations or hold new
+  openings when their condition is met, so that trust does not outlive the conditions I gave it
+  under ([DEC-187](04-decision-log.md#decisions)). Waits on the mandate spec change for `autonomy.tripwires` (MI-31, V-044).
+  Actions are `end_delegations` or `exits_only`, never `paused` (rule 13). *Accepted when:* a fired
+  tripwire acts at its next evaluation, journals the event, alerts with opaque text, and lifts only
+  by the owner's acknowledgment with step-up; adding or tightening one applies at once.
+- **E6-14 (Should)** As an owner, I want every `auto` and every delegation to fall back to `ask` once
+  my mandate passes its review date unconfirmed, so that an abandoned account stops acting alone
+  ([DEC-188](04-decision-log.md#decisions)). Waits on the spec change for `autonomy.review_by` (MI-32). *Accepted when:*
+  past the date, autonomous paths decide `ask`, positions and exits are untouched, and re-confirming
+  (a neutral version with step-up) restores them.
 
 ### E7 Alpaca connector and recovery
 
@@ -315,6 +336,17 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Accepted when:* captured relay and provider payloads contain no instrument, size, price, or thesis.
 - **E8-6 (Should)** As a fund, I want two approvers above a threshold.
 - **E8-7 (Should)** As an approver, I want SMS and phone escalation.
+- **E8-8 (Should)** As an owner, I want to answer an ask with "let it do this for a while", within
+  caps I set in dollars, orders, and days, so that the agent stops asking me about what I have
+  already said yes to ([ADR-0003](../adr/0003-earned-autonomy.md) parts 2 and 3, [DEC-181](04-decision-log.md#decisions)). The spec is
+  mandate §6.4 and §6.5 ([#328](https://github.com/kunwarshivam/mandate/pull/328)); the MC-U
+  reference cases come first, in their own tests-first change. Safety-critical (autonomy policy and
+  the approval flow). *Accepted when:* the MC-U cases pass; a delegation lifts only the `ask` it
+  names, within its caps and window, and never while suspended (MI-26 to MI-28); choosing a shape
+  approves this action exactly as "Approve just this" would and creates a version confirmed with
+  the same step-up, which applies at the next safe point; the sum of a version's delegation caps
+  stays within the allocation ([DEC-196](04-decision-log.md#decisions), V-045); no scope is offered for an admission, a
+  two-approver ask, a live environment, or a client session.
 
 ### E9 Identity, tenancy, and policy
 
@@ -360,6 +392,30 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   authenticates with its own scoped, revocable token and no broker credential crosses MCP; every
   client call is journaled with the client's identity; and the owner can revoke the client at any
   time.
+  *Amended by [DEC-183](04-decision-log.md#decisions) (founder, 2026-09-30):* packaged as the Owlhead plugin for OpenAI
+  Dots, Meta Muse, and Grok Bot (E10-8), and every client-requested opening meets the client ceiling
+  (E6-12).
+- **E10-7 (Must)** As a new owner, I want to answer three questions (how much money, what goal, how
+  much I can stand to lose) and get a complete mandate drafted for me to confirm on one card, so
+  that I do not have to write a mandate to start ([ADR-0003](../adr/0003-earned-autonomy.md) part 1, [DEC-182](04-decision-log.md#decisions)). Builds on E10-1's
+  compiler; within mandate spec §7. *Accepted when:* the three answers become `user_stated` fields
+  (`capital.allocation_usd`, `goal`, `capital.max_loss_from_allocation`) with their quoted spans;
+  every other drafted field is `platform_proposed` and inactive until confirmed (MI-12, V-020); no
+  `auto`, delegation, pinned instrument, environment, or connection is ever proposed (V-022,
+  V-038); what the goal types cannot express is flagged not enforced; the card shows the unasked
+  dollars ([DEC-189](04-decision-log.md#decisions)); and it binds the version hash on confirmation.
+- **E10-8 (Should, after E10-6 and E6-12)** As an owner who lives in OpenAI Dots, Meta Muse, or Grok
+  Bot, I want Owlhead as a plugin there, so that my everyday agent can work with my money through
+  Owlhead's gate ([DEC-183](04-decision-log.md#decisions)). Listed publicly as Owlhead, linking
+  owlhead.ai (DEC-171). *Accepted when:* E10-6's acceptance holds for each host; the listing and its
+  consent screen name the scopes in words; confirmations and approvals happen only in Owlhead's own
+  app or CLI; each host's plugin terms are recorded in the competitive landscape.
+- **E10-9 (Should, with E10-8)** As a connected agent, I want to ask "would this be allowed?" before
+  asking the owner, so that I do not flood them with asks the gate would deny ([DEC-190](04-decision-log.md#decisions)).
+  *Accepted when:* the dry-run tool returns the decision and the gate's reason code with the client
+  ceiling applied, places nothing, creates no approval, counts against the client's rate limit, and
+  is journaled. **Also ([DEC-191](04-decision-log.md#decisions)):** a hold-new-openings tool that sets
+  `exits_only` and nothing else; lifting it is the owner's alone, with step-up.
 
 ### E11 Web app: dashboard and controls
 
@@ -368,6 +424,28 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
 - **E11-2 (Must)** As an operator, I want pause, resume, stop, and kill switches in the UI.
 - **E11-3 (Must)** As an operator, I want alerts for risk rungs, reconciliation mismatches,
   stale data, and paused agents.
+- **E11-4 (Should)** As an owner, I want a plan view that says what my agent is watching, what it
+  would do next under which rule, whether that would run on its own or ask me, and what would stop
+  it ([DEC-184](04-decision-log.md#decisions)). A read of the mandate and the runtime's state; changes nothing.
+- **E11-5 (Should)** As an owner, I want one daily brief of what ran, what was skipped, what my
+  delegations let through, which guardrails fired, and what changed, so that only urgent things
+  interrupt me ([DEC-184](04-decision-log.md#decisions); PX-16). The notification says only that the brief is ready
+  (rule 6).
+- **E11-6 (Should)** As an owner, I want to talk to my agent in a chat thread, where a message
+  becomes an owner request (builder, gate, and autonomy rules) or a proposed mandate version
+  (confirmed with step-up), never an order by itself ([DEC-184](04-decision-log.md#decisions), [DEC-192](04-decision-log.md#decisions)).
+  *Accepted when:* a model reply never renders as an action control; action cards are built by
+  deterministic code; "why" answers come from the journal (E12-5).
+- **E11-7 (Should)** As an owner, I want to see the unasked dollars (what can trade without asking
+  right now) on the card, the dial, and the brief, and to switch on away mode in one action, so
+  that I can size my agent's autonomy and turn it down when I cannot answer ([DEC-189](04-decision-log.md#decisions),
+  [DEC-194](04-decision-log.md#decisions)). *Accepted when:* the figure matches the reference model; away mode writes a
+  risk-reducing version that applies at once, and at its end date asks me to restore rather than
+  restoring itself.
+- **E11-8 (Should, after E10-3)** As an owner, I want to see what would have changed over the last
+  30 days before I confirm a version that adds autonomy, so that I widen it on evidence
+  ([DEC-186](04-decision-log.md#decisions)). Counts only, replayed from the journal; no profit, loss, or outcome; wording
+  waits for compliance question 39.
 
 ### E12 Audit explorer
 
@@ -378,6 +456,14 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   and near-breach on my account, derived from the journal and its anchors, so that I can see the
   mandate held ([strategy options §8](../product/10-strategy-options.md#defensible-differentiators),
   DEC-145). Publishing it beyond the owner needs counsel's answer and the founder (DEC-79).
+  *Extended by [DEC-193](04-decision-log.md#decisions) (founder, 2026-09-30):* the record is checked against the hash
+  chain and lists the versions in force, the actions under each by purpose and autonomy source,
+  every delegation used, and every guardrail that fired, with no performance figure; its text waits
+  for compliance question 40.
+- **E12-5 (Should)** As an owner, I want "why did it do that?" answered from the journal, not from a
+  model's memory ([DEC-192](04-decision-log.md#decisions)). *Accepted when:* each answer links the `DecisionMade`, thesis,
+  rule or delegation, and gate result it cites; a model may phrase it but adds no fact; a missing
+  fact reads "not recorded"; wording waits for compliance question 41.
 
 ### E13 Hybrid deployment
 
@@ -610,6 +696,20 @@ From the final review of mandate spec v0.3:
 - Harness default for `first_trade_in_instrument` (position quantity) versus the spec (no prior fill).
 - Show the hard-trigger multiple and the 90-day carry window on the confirmation screen.
 - Add fuzz coverage for multiple agents, trims, and owner exits.
+
+From [ADR-0003](../adr/0003-earned-autonomy.md)'s guardrails (DEC-185 to DEC-197), spec changes that tighten, each with its invariant
+fuzzed and seeded bugs caught before code:
+
+- `autonomy.tripwires` (DEC-187): conditions over recorded outcomes, actions `end_delegations` or
+  `exits_only`, risk-reducing to add; MI-31 and V-044.
+- `autonomy.review_by` (DEC-188): a §7 platform default of 90 days, at most 180; past it every `auto`
+  and delegation reads as `ask`; MI-32.
+- The ask budget (DEC-195): per-agent and per-client daily caps on asks, beyond which asks are
+  skipped; MI-33.
+- The delegation total (DEC-196): the sum of `max_total_usd` over a version's delegations is at most
+  `capital.allocation_usd`; V-045.
+- The unasked-dollars figure (DEC-189): its formula in mandate spec §4.2 beside the confirmation
+  screen's worst-case figures, with a reference-model function the web figure is tested against.
 
 From the independent reviews of stream J's implementation (`mandate-research`, #158 and #159):
 
