@@ -616,8 +616,22 @@ html:root[data-cvd="on"] {
 
 /* The owls (DEC-217): a blink on each owl's own rhythm, breathing while asleep, a tilt toward the
    owner's hover. Stopped owls and still owls do none of it. */
+[data-slot="owl"] {
+  --owl-eye: var(--card);
+  --owl-pupil: var(--foreground);
+}
+html:root[data-mode="dark"] [data-slot="owl"] {
+  --owl-eye: var(--foreground);
+  --owl-pupil: var(--card);
+}
 [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
   transform-box: fill-box;
+}
+:is([data-slot="owl"][data-working], [data-working] > [data-slot="owl"]) .owl-body {
+  animation: owl-bob 0.7s ease-in-out infinite alternate;
+}
+:is([data-slot="owl"][data-working], [data-working] > [data-slot="owl"]) .owl-scan {
+  animation: owl-scan 2.4s ease-in-out infinite;
 }
 [data-slot="owl"] .owl-blink {
   transform-origin: center;
@@ -652,6 +666,15 @@ html:root[data-cvd="on"] {
   from { transform: scale(1); }
   to { transform: scale(1.035, 1.025); }
 }
+@keyframes owl-bob {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1.5px); }
+}
+@keyframes owl-scan {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3.5px); }
+  75% { transform: translateX(3.5px); }
+}
 @keyframes owl-z {
   0% { opacity: 0; transform: translate(0, 0); }
   25% { opacity: 1; }
@@ -662,7 +685,7 @@ html:root[data-cvd="on"] {
   *, *::before, *::after {
     scroll-behavior: auto !important;
   }
-  [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z) {
+  [data-slot="owl"] :is(.owl-blink, .owl-body, .owl-z, .owl-scan) {
     animation: none !important;
     transition: none !important;
     rotate: none !important;

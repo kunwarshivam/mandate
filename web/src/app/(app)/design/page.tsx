@@ -9,6 +9,7 @@ import type { ChartLevel } from "@/components/charts/options";
 import { Sparkline } from "@/components/charts/sparkline";
 import { KumoSurfaces } from "@/components/design/kumo-surfaces";
 import { MotionSamples } from "@/components/design/motion-samples";
+import { OwlStudio } from "@/components/design/owl-studio";
 import { AsOf } from "@/components/domain/as-of";
 import { LimitRail } from "@/components/domain/envelope";
 import { ModeBadge, ModeBanner, SOURCE_FIELD, SourceTag } from "@/components/domain/mode";
@@ -165,6 +166,13 @@ export default function DesignPage() {
 
       <Block title="Brand" lead="The founder's Owlhead mark as a flat silhouette and the lowercase wordmark in outlines (DEC-203), ink on light and off-white on dark (DEC-204).">
         <BrandSpecimen />
+      </Block>
+
+      <Block
+        title="Agent owls"
+        lead="Five directions for the agents' owls, to choose one (DEC-217). Each is drawn from the agent's ID and shows its mode and nothing else. Feathers take the series hues, never green or red, so an owl never reads as a gain or a loss. Move the pointer: open eyes follow it."
+      >
+        <OwlStudio />
       </Block>
 
       <Block title="Four colours, four meanings" lead="Flat colour only (DEC-200). Each colour means one thing everywhere, so the owner knows what binds an agent before reading a number. Most of a screen is none of them.">

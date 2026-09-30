@@ -1,7 +1,7 @@
 "use client";
 
-import { type CSSProperties, useEffect, useRef } from "react";
-import { AnimatePresence, motion, useReducedMotion, useSpring } from "motion/react";
+import { type CSSProperties, type RefObject, useEffect, useRef } from "react";
+import { AnimatePresence, type MotionValue, motion, useReducedMotion, useSpring } from "motion/react";
 import type { Agent, AgentMode } from "@/fixtures/types";
 import { cn } from "@/lib/utils";
 
@@ -115,6 +115,49 @@ function watchPointer(watcher: (x: number, y: number) => void): () => void {
   };
 }
 
+/**
+ * Pupils that follow the pointer on a spring, `reach` viewBox units at most, and settle at `rest`
+ * when the pointer leaves or the eyes are shut. Reduced motion only gates the pointer here; the
+ * stylesheet stops the rest, so the server's markup, which cannot know the preference, still
+ * matches the client's.
+ */
+export function useGaze(ref: RefObject<SVGSVGElement | null>, { rest, reach, looking }: { rest: number; reach: number; looking: boolean }): [MotionValue<number>, MotionValue<number>] {
+  const reduced = useReducedMotion() ?? false;
+  const tracking = looking && !reduced;
+  const gazeX = useSpring(rest, SPRING);
+  const gazeY = useSpring(0, SPRING);
+
+  useEffect(() => {
+    if (!tracking) {
+      gazeX.jump(rest);
+      gazeY.jump(0);
+      return;
+    }
+    const stop = watchPointer((x, y) => {
+      const box = ref.current?.getBoundingClientRect();
+      if (!box || box.width === 0) return;
+      const dx = x - (box.left + box.width / 2);
+      const dy = y - (box.top + box.height / 2);
+      const distance = Math.hypot(dx, dy);
+      if (distance < 1) return;
+      const pull = Math.min(distance / FAR, 1) * reach;
+      gazeX.set((dx / distance) * pull);
+      gazeY.set((dy / distance) * pull);
+    });
+    const settle = () => {
+      gazeX.set(rest);
+      gazeY.set(0);
+    };
+    document.documentElement.addEventListener("pointerleave", settle);
+    return () => {
+      stop();
+      document.documentElement.removeEventListener("pointerleave", settle);
+    };
+  }, [tracking, rest, reach, ref, gazeX, gazeY]);
+
+  return [gazeX, gazeY];
+}
+
 function Eye({ cx, cy, r, iris, mood }: { cx: number; cy: number; r: number; iris: string; mood: OwlMood }) {
   switch (mood) {
     case "awake":
@@ -144,7 +187,7 @@ function Eye({ cx, cy, r, iris, mood }: { cx: number; cy: number; r: number; iri
 }
 
 /** Open eyes look about; closed ones stay put. */
-function looks(mood: OwlMood): boolean {
+export function looks(mood: OwlMood): boolean {
   switch (mood) {
     case "awake":
     case "focused":
@@ -177,41 +220,7 @@ export function Owl({
   const r = shape.disc;
   const [lx, rx, cy] = [32 - r * 0.86, 32 + r * 0.86, 35];
   const ref = useRef<SVGSVGElement>(null);
-  // Reduced motion only gates the pointer here; the stylesheet stops the rest, so the server's
-  // markup, which cannot know the preference, still matches the client's.
-  const reduced = useReducedMotion() ?? false;
-  const tracking = !still && !reduced && looks(mood);
-  const gazeX = useSpring(shape.gaze, SPRING);
-  const gazeY = useSpring(0, SPRING);
-
-  useEffect(() => {
-    if (!tracking) {
-      gazeX.jump(shape.gaze);
-      gazeY.jump(0);
-      return;
-    }
-    const reach = r * REACH;
-    const stop = watchPointer((x, y) => {
-      const box = ref.current?.getBoundingClientRect();
-      if (!box || box.width === 0) return;
-      const dx = x - (box.left + box.width / 2);
-      const dy = y - (box.top + box.height / 2);
-      const distance = Math.hypot(dx, dy);
-      if (distance < 1) return;
-      const pull = Math.min(distance / FAR, 1) * reach;
-      gazeX.set((dx / distance) * pull);
-      gazeY.set((dy / distance) * pull);
-    });
-    const rest = () => {
-      gazeX.set(shape.gaze);
-      gazeY.set(0);
-    };
-    document.documentElement.addEventListener("pointerleave", rest);
-    return () => {
-      stop();
-      document.documentElement.removeEventListener("pointerleave", rest);
-    };
-  }, [tracking, r, shape.gaze, gazeX, gazeY]);
+  const [gazeX, gazeY] = useGaze(ref, { rest: shape.gaze, reach: r * REACH, looking: !still && looks(mood) });
 
   const eyes = (
     <AnimatePresence initial={false} mode="popLayout">
