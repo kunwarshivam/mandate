@@ -1467,6 +1467,7 @@ version = "0.0.0"
 dependencies = [
  "libtest-mimic",
  "mandate-accounting",
+ "mandate-builder",
  "mandate-canon",
  "mandate-domain",
  "mandate-journal",

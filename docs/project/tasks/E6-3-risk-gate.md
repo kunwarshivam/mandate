@@ -341,8 +341,10 @@ ES-04 keeps exact arithmetic in `mandate-num`, so the gate adds, under claim #12
 comparison of its own, and `Price::collar_bound(Fraction, Adverse)` (one rounding, at the 9 places a
 price holds, each bound rounded so the constraint gets **stricter** — a buy's ceiling truncates down
 and a sell's floor rounds up — so a bound never admits a price the exact comparison would refuse).
-`Qty::times_fraction` for the participation caps (truncated to the increment, like `Qty::portion`)
-arrives with E6-8's implementation PR. Nothing here rounds a limit in the order's favour.
+The participation caps need no new function: `Qty::portion(Fraction, ShareIncrement)` is already
+`truncate(fraction × self, increment)`, which is the cap this paragraph once called
+`Qty::times_fraction`, so E6-8's implementation PR adds nothing to `mandate-num` (DEC-163 item 9).
+Nothing here rounds a limit in the order's favour.
 
 ## The evaluation order
 
@@ -512,7 +514,7 @@ folds from the account stream:
 | Order size vs trailing 5-minute volume (≤ 5%) | `MarketSnapshot::trailing_5m_volume` | Supplied, never derived here |
 | Daily participation vs 20-day ADV (≤ 5%) | `ConductState::participation_today` and `MarketSnapshot::adv_20d` | Exact `Qty` comparison |
 | Order-to-fill ratio (≤ 10 after ≥ 20 orders) | `ConductState::orders_today_per_instrument`, `filled_today` | `orders ÷ max(fills, 1)`, compared without dividing: `orders > 10 × max(fills, 1)` |
-| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last < 60 s` |
+| No opening order within 60 s after an opposite-side fill | `ConductState::last_opposite_fill_at` | `now − last ≤ 60 s` (the interval includes its last instant, DEC-163 item 3) |
 | Close window (last 10 minutes of the regular session) | the `SessionAt` the gate derives from `now` | `now ≥ session_end − close_window_minutes`, with the early-close calendar giving `session_end` |
 | Self-trade prevention across related accounts | `AccountSnapshot::related_account_resting` | Set membership; the executor supplies the group |
 
@@ -599,10 +601,10 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | trading §9.2 `intraday_margin` denies no 1× long-only opening | `RC-09::alpaca_intraday_margin`, `hand::a_reported_deficit_is_an_account_state_not_a_denial` |
 | trading §9.3 1× gross exposure including the proposed order; no short sales | `MC-G04`, `MC-G06`, `hand::a_sell_above_the_position_is_would_cross_zero` |
 | trading §9.5 buying power is the lower of model and broker, with the fee reservation, subtracted once | `RC-08` step 3, `RC-18` step 3, `RC-18::generic_cash_account`, `properties::buying_power_is_the_lower_of_the_two`, `hand::a_reservation_includes_the_rounded_fee` |
-| trading §9.6 the collar binds aggressive prices only, within the passive band, by tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid` |
-| trading §9.6 the opposite-fill interval | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval` |
+| trading §9.6 the collar binds aggressive prices only, within the passive band, by tier; an unknown median takes the narrower tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid`, and in-module `gate::tests::an_unknown_median_volume_takes_the_narrower_collar` (DEC-163 item 2) |
+| trading §9.6 the opposite-fill interval, its last instant included | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval`, and in-module `gate::tests::the_opposite_fill_interval_includes_its_last_instant` (DEC-163 item 3) |
 | trading §9.6 minimum resting time on a cancel, exempt before a risk-reducing order | `hand::a_cancel_inside_the_resting_window_is_denied`, `hand::a_cancel_before_a_risk_reducing_order_is_exempt` |
-| trading §9.6 participation caps slice a discretionary exit rather than denying it | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied` |
+| trading §9.6 participation caps slice a discretionary exit rather than denying it; a zero cap slices nothing and no slice is below `min_order_size` | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied`, and in-module `gate::tests::a_zero_cap_slices_no_exit_of_any_kind`, `gate::tests::a_cap_below_the_minimum_slices_at_the_minimum` and `gate::tests::an_allowed_exit_is_never_below_its_minimum_or_zero` (DEC-163 item 4) |
 | trading §9.6 order-to-fill after 20 orders, compared without dividing | `hand::the_order_to_fill_ratio_needs_twenty_orders`, `properties::the_ratio_is_compared_without_dividing` |
 | trading §9.6 self-trade prevention across related accounts | `hand::an_opposite_side_rest_in_a_related_account_blocks_an_opening` |
 | trading §9.6 the daily surveillance report states figures and makes no judgement | `hand::the_surveillance_report_matches_a_hand_computed_day`, `properties::the_report_flags_every_threshold_it_crosses` |
