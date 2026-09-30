@@ -22,6 +22,7 @@ mod common;
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
+use std::ops::Range;
 
 use common::{AUTHOR, DEADLINE, OWNER, SECOND, T0, ctx, grant, hash, request, step_up, user};
 use mandate_approval::{
@@ -54,6 +55,12 @@ fn fail<E: std::fmt::Debug>(what: &str) -> impl FnOnce(E) -> TestCaseError + '_ 
 }
 
 const WINDOW: i64 = 300;
+
+/// An evidence age offset: authenticated exactly `WINDOW` seconds before the basis in one draw
+/// of five, so the inclusive 300 s edge is drawn on every seed, and otherwise from `range`.
+fn at_the_window_edge_or(range: Range<i64>) -> impl Strategy<Value = i64> {
+    prop_oneof![1 => Just(-WINDOW), 4 => range]
+}
 
 /// The brief's step-up rule, written out: evidence counts if present, authenticated no more than
 /// 300 s before `basis` and not after it, unused, and `CliConfirm` on a paper stream. The first
@@ -123,7 +130,7 @@ fn admit_case() -> impl Strategy<Value = AdmitCase> {
         ),
         (
             prop::bool::weighted(0.8),
-            prop::option::weighted(0.9, (-350i64..20, 0u8..3)),
+            prop::option::weighted(0.9, (at_the_window_edge_or(-350..20), 0u8..3)),
             prop::bool::weighted(0.1),
             prop::collection::vec(0u8..6, 0..2),
         ),
@@ -551,7 +558,7 @@ fn revalidation_acts_only_when_every_check_passes_and_never_widens() {
 }
 
 fn evidence_shape() -> impl Strategy<Value = (Option<StepUp>, bool, Vec<u8>)> {
-    let evidence = prop::option::weighted(0.8, (-400i64..60, 0u8..3))
+    let evidence = prop::option::weighted(0.8, (at_the_window_edge_or(-400..60), 0u8..3))
         .prop_map(|e| e.map(|(age, n)| step_up(&format!("assertion-{n}"), T0 + age)));
     (
         evidence,
