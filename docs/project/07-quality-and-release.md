@@ -20,9 +20,10 @@ flowchart LR
     ci -->|fail| impl
     ci -->|pass| review["Review agent<br/>bugs, security, AGENTS.md"]
     review -->|changes needed| impl
-    review -->|clean| founder{"Founder review<br/>(always for safety-critical paths)"}
-    founder -->|changes needed| impl
-    founder -->|approve| merge["Merge to main"]
+    review -->|clean| approve["Coordinator approves the reviewed head<br/>(DEC-79, DEC-175)"]
+    approve --> merge["Merge to main"]
+    merge --> founder{"Founder review<br/>after the fact"}
+    founder -->|revert or change| impl
 ```
 
 1. **One story per change.** Each change implements one backlog story and cites the HLD section
@@ -31,8 +32,10 @@ flowchart LR
    reconciliation, and authentication, the founder writes or verifies the reference test cases
    before an agent writes the implementation.
 3. **Independent review.** A separate agent run reviews every change before the founder sees it.
-4. **Founder approval.** Nothing merges without founder approval; safety-critical paths get
-   line-by-line founder review.
+4. **Approval of the reviewed head.** A change merges once CI is green and the independent review
+   passed, on the head that review saw (DEC-79, DEC-175); safety-critical paths also need zero
+   missed mutants and an adversarial review. The founder reviews after the fact and can revert;
+   the decisions DEC-79 reserves still wait for the founder.
 5. **No live secrets for agents.** Agents use paper and demo credentials and fixtures only.
 6. **Decisions go through the log.** An agent that needs to deviate from an accepted decision
    stops and proposes a decision-log entry instead.
@@ -41,7 +44,7 @@ Full agent rules: [`AGENTS.md`](../../AGENTS.md).
 
 ## Definition of Done (story)
 
-- Review agent pass and founder approval; merged; CI green.
+- Review agent pass on the merged head; merged; CI green.
 - Unit tests for new logic; property-based tests for accounting and risk logic.
 - Journal events emitted for every new state change.
 - Documentation updated (user-facing and runbooks where relevant).

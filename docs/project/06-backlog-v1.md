@@ -52,6 +52,12 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   failure alone, and `mandate-executor`'s three E7-4 properties that passed only on a stub report
   from a case shrinking moved past have their rows; E1-3 narrows that report, and every other
   test's output, to the cause.
+- **E1-4 (Should)** As an engineer, I want `shellcheck` over `.github/scripts/` and `actionlint`
+  over `.github/workflows/` in `cargo xtask ci lint`, installed at pinned versions by `install.sh`
+  and CI, so that a shell or workflow mistake in the merge path (DEC-175) fails a check rather
+  than waiting for a reviewer (the #316 reviews).
+  *Accepted when:* both run in `ci lint`, pinned in `.github/workflows/ci.yml` and `install.sh`,
+  and a planted `SC2086` or an unknown workflow key fails the job.
 
 ### E2 Market data
 
