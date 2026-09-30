@@ -1187,6 +1187,23 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
+- Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
+  `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
+  returns `None` for a vocabulary. Replace them with an assertion that every stated enum-valued
+  expectation has a sibling arm (`on_timeout` and `action` excepted, as the review showed), so a
+  case that gains or loses an enum expectation needs no count edit.
+- **Settle what `safety_critical = true` means for a `tool`-layer crate** (#331 round-2 review, for
+  the founder's after-the-fact look). `xtask/layers.toml` marks `mandate-refcases`
+  `safety_critical = true`, and CODEOWNERS lists it, but two checks read it as not safety-critical:
+  - `cargo xtask ci mutants` skips it, because `mutated_crates` requires a `Product` layer;
+  - DEC-250 item 15 applied ES-13's 800-line limit for crates outside the safety-critical list,
+    not the 400 the flag implies.
+
+  Neither changed #331's outcome, but a harness change could land with no mutation gate while its
+  entry claims otherwise. The conservative reading is that the flag governs: `ci mutants` also
+  mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
+  with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
+  Record the reading in a decision-log row in the same change as the xtask edit.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
