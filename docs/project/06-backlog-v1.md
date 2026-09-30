@@ -1526,6 +1526,23 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   `ref.py`", whose attribution is wrong (`ref.py` discards `stale_mark` on a flat book); strike the
   clause now that 7(e) supersedes it. Item 7(a)'s "only the latch can come earlier" should say
   earlier than what: a wait restarted at the rollover.
+- **The families G and F harness after its tightening** (#348 review, nits), one tests change to
+  `crates/mandate-refcases/src/mandate/risk_gate.rs`: (1) compare `pacing` after the verdict and
+  reason, so a case whose verdict is wrong fails naming the verdict rather than a pacing the wrong
+  verdict brought; (2) name `compare_computed`'s `c` parameter for what it holds (the gate's
+  figures); (3) extend the group-id test to a case with two groups, so the rank of a name among
+  several is pinned, not only the one group's id; (4) shorten the done row's verbatim "The row as it
+  was" copy to a pointer at #317's re-review.
+- **The trading-domain gate driver after its tightening** (#349 review, nits), one tests change to
+  `crates/mandate-refcases/src/trading_domain.rs` and its gate tests, plus DEC-199's wording:
+  (1) `pending()` counts the second `propose_order` before a backtest case is dispatched, so say in
+  `SUBMISSION_STORIES`'s doc that the refusal applies to every case kind; (2) a case whose earlier
+  proposals are all denied is refused too, though a denial leaves no working order, so either admit
+  it or record why the refusal stays uniform; (3) DEC-199 item 6 says the gate harness shows "four"
+  members deciding at their edge where it lists three (the median, the trailing volume, and the
+  minimum order; the ADV is shown only as at least 1,000,000); (4) rename the `num` closure in
+  `the_listing_and_market_are_dec_199_item_6s`, which shadows the crate's `num`; (5) shorten the
+  done row's verbatim "The row as it was" copy to a pointer at its review.
 
 From E6-4's slice R3 (stream H2; DEC-167 item 7):
 
