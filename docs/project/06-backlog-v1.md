@@ -180,10 +180,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   RC-15 passes.
 - **E6-10 (Must)** As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain
   §3.2 item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written
-  for. Needs a quote-currency input: `InstrumentSnapshot` carries none and `AssetId` is a UUID, so
-  today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
-  check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
-  non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
+  for. `AssetId` is a UUID, so the quote currency is its own input,
+  `InstrumentSnapshot::quote_currency`, where only a stated USD admits (DEC-254). Until the
+  implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
+  fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
+  USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
@@ -944,6 +945,23 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   outside the registry, beside `instrument_not_in_universe` and `broker`, so ES-09's stable reason
   codes do not yet cover what the partial gate journals ([DEC-129](04-decision-log.md#decisions)
   items 23 and 27, ADR-0001 ES-09; #206 review).
+- **Before E6-10's implementation merges:** register `crypto_pair_not_usd` in the trading-domain
+  `reason_codes` registry and name it in §3.2 item 7, or record why `not_in_working_universe`
+  stands. Mandate spec §5.3 defines that code as "the instrument is in the working universe", which
+  a BTC/USDT pair the research agent admitted is, so the journaled denial would say something false
+  about it. Registering a code adds no risk and closes a gap, so DEC-176 lets an agent do it in its
+  own spec PR; the tests' `PAIR_CODE` constant flips with it ([DEC-254](04-decision-log.md#decisions)
+  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2).
+- **The broker symbol's quote currency is read exactly** (E6-10; #342 review, minor 3). The gate's
+  USD-pair rule rests on the §3.1 loader mapping a pair to `QuoteCurrency`, and E7-8's
+  `TradingClient::asset` criterion does not name it. The loader matches `USD` exactly and
+  case-sensitively, with tests that `usd`, `USDT`, `USDC`, a padded code, and an absent symbol all
+  land on `Other` or `None` (DEC-254 item 1).
+- **E6-10's tests nits** (#342 review): `usd_pairs.rs`'s property sets `quote_currency` twice for a
+  crypto draw; DEC-254 item 3's alternatives omit DEC-129 item 27's "assert the verdict, leave the
+  code unasserted" option; and `cargo xtask ci pending` accepts any `Unimplemented` report rather
+  than the story its `#[ignore]` label names, which is how `hand::crypto_never_counts` sat labelled
+  E6-6 while failing at E6-10's stub. Compare the stub's story with the label if it recurs.
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce

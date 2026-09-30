@@ -1115,6 +1115,7 @@ fn listing(
         ptp_no_exception: false,
         etp: gate::EtpClass::Plain,
         etp_classified_at: Some(stated.now),
+        quote_currency: equity.then_some(gate::QuoteCurrency::Usd),
         prior_close: Some(stated.bid),
         median_dollar_volume_20d: Some(liquid),
         median_dollar_volume_30d: Some(liquid),
