@@ -872,8 +872,9 @@ A new module, `crates/mandate-refcases/src/mandate.rs`, following `trading_domai
     blocks; §4.2's "each must be acknowledged" is the confirmation flow's job (E10-1's surface),
     which reads the report. A property test asserts the two sets never intersect.
 14. **The risk state's inputs carry their own time and session.** `Step { at, session, input }`, and
-    a step at or before the previous step's time is `clock_went_backwards`. Durations are integer
-    seconds; equity staleness and the `scale_lift_after_s` timer count regular-session seconds for
+    a step before the previous step's time is `clock_went_backwards`. A step at the same instant folds
+    with no time passing, as seven R cases' first steps need, and an instant between two whole
+    seconds is `invalid_input` (DEC-167 item 6). Durations are integer seconds; equity staleness and the `scale_lift_after_s` timer count regular-session seconds for
     equities (from `mandate-time`'s NYSE calendar) and all seconds for crypto (§5.2, §5.5). Nothing
     reads a clock (ES-21).
 15. **One journal event per thing that changed, in the fixture's exact shape.** `AgentModeApplied`
