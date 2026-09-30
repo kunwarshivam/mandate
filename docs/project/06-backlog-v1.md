@@ -245,9 +245,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-journal`, so that the tracer's journal records parse against the journal spec's vectors
   (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
   and the executor write has a registered schema, tested first against the journal spec's vectors.
-  *Blocked* ([DEC-174](04-decision-log.md#decisions)): journal spec v0.4 closes none of the eleven
-  agent-stream schemas the runtime writes and its vectors hold no agent-stream event, so the tests
-  PR waits for the journal spec change DEC-174 item 4 proposes.
+  *Unblocked in half* ([DEC-177](04-decision-log.md#decisions)): journal spec v0.4 closed none of the
+  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.5 §9.1 closes the agent
+  stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
+  `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, with
+  vectors in `journal.yaml`'s `agent_stream` section, so their tests can be written first now. The
+  approval events wait for M7's spec change (claim
+  [#213](https://github.com/kunwarshivam/mandate/issues/213)).
 - **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
   to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
   (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
@@ -1237,3 +1241,112 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
   R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
   mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+
+From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
+DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
+risk (rule 3):
+
+- **Stream I: the runtime writes §9.1's payloads.** In `mandate-runtime`'s `step.rs`, `payload.rs`
+  and `state.rs`: `instrument_id` and `limit_price`, with `type` and `tif`, on `DecisionMade` and
+  `IntentProposed`; `null` rather than empty strings (`reason_code` on an allow, the unconfirmed
+  `OwnerExitRequested`); timestamps rather than risk-clock seconds (`ObservationRecorded.as_of`,
+  `ModelOutputRecorded.as_of` and `expires_at`); `data_ref` and `content_hash` as stored artifacts
+  rather than inline data; `DecisionMade`'s convictions, outputs used, model weights, and clips
+  applied; `step_up` as `{assertion_id, authenticated_at, method}`; and the agent stream's
+  `StreamOpened` at seq 1, which nothing writes today. From round 1 of the review (DEC-177 items 9,
+  11, 12, and 13): `user` and `step_up_status` on every `OwnerExitRequested`, including the owner kill
+  switch's, with `step_up` only when valid; `exit_origin` on every `DecisionMade`, with the
+  convictions and score `null`, and the evaluation's lists empty, on a decision no §8.3 evaluation
+  produced (a goal completion, a removed instrument, a risk exit); `ask_suppressed` when a
+  classified `ask` is not asked (DEC-156 item 5); and `lifecycle` as `normal`, `paused`, or
+  `stopped`, never `exits_only`.
+- **Stream L: the shell's envelope carries the required `config_refs` and the `artifact_refs`**
+  (DEC-174 item 5). `mandate-shell` writes `config_refs: {}` and `artifact_refs: []` on every draft,
+  so every event that requires `mandate_version` or `model_version` is `missing_config_ref`, and every
+  event with a `ref` member is `artifact_refs`.
+- **Stream K: the executor's account-stream drafts match the registered schemas and vectors**
+  (DEC-174 item 5): `risk_clock` as a timestamp string (`batch.rs` writes an integer), and only on
+  the risk inputs §2 lists; `IntentReceived` as `agent_id`, `instrument_id`, `limit_price`, `type`,
+  and `tif` rather than `agent`, `kind`, `instrument`, and `limit`; `OrderSubmitted` writing `null`
+  for its empty members rather than omitting them (§4.2).
+- **E7-9's tests PR: the harness reads `agent_stream`, then the vectors become version 4.**
+  `mandate-refcases`' journal module reproduces the section's chain and artifacts, refuses each
+  invalid draft with its reason and path (a change may `delete` a member), accepts each valid draft
+  and valid batch, refuses each invalid batch at its `draft_index`, and fails each
+  `range_verification` case with its code at its seq; `mandate-journal` gains a boolean type, the
+  schema choice by stream type for `StreamOpened` and `KillSwitchActivated`, and the §9.1 rules.
+  `journal::version` pins 3 and is passing, so the bump is a code PR that accepts 4, then a one-line
+  spec change (ES-22).
+- **`mandate-journal` and the verifier check the agent stream's cross-event facts** (DEC-177 item
+  14). `append` refuses a batch whose `IntentProposed` differs in an action member from the
+  `DecisionMade` it names in the same batch (§9.1 rule 10), and §11's `intent_action_mismatch` and
+  `mode_event_mismatch` run in `mandate journal verify` and the scheduled verification, against the
+  vectors' `invalid_batches` and `range_verification`.
+- **The model registry stores each pinned model's content object as an artifact.**
+  `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
+  §11 check 6 fails `artifact_missing` unless the object is in the artifact store.
+- **Mandate spec §8.2: say what happens to an output outside its ranges** (conviction in [−1, 1],
+  confidence in [0, 1]): ignored with an `ignored` reason, or refused. §9.1 records the values as
+  given and does not rule.
+- **The account stream's `KillSwitchActivated` and `AgentModeApplied` schemas** are not closed by
+  §9.1; they close with the executor's account-stream schemas.
+
+Minor and nit findings from round 1 of the independent review of the journal spec v0.5 change
+([DEC-177](04-decision-log.md#decisions); held back by the freeze rule, one row each):
+
+- **A copied `AgentModeChanged` names its `AgentModeApplied`.** When the agent runtime copies a
+  mode change the executor originated, the copy's `causation_id` names the originating
+  `AgentModeApplied` (§2); add the rule to §9.1 and a vector for it.
+- **Bound the model-supplied free text.** `ModelOutputRecorded.model_id`, `model_version`,
+  `direction`, and `invalidation` are any non-empty text: bound their length or check them against
+  the model registry and the directions v1 allows, and scan them for personal data as §6.4
+  requires.
+- **`KillSwitchActivated` records the initiator's step-up**, or names its `OwnerExitRequested`
+  (for example as `causation_id`), so the switch's own record shows what authorized it.
+- **`journal.yaml`'s header notes the DEC-176 exception.** Its line "Changing these vectors requires
+  founder approval" predates DEC-176, under which agents accept changes that only tighten or
+  reconcile.
+- **Tidy the journal generator.** Add `from __future__ import annotations` to
+  `reference/journal/generate.py`, whose forward reference in `T` fails on Python before 3.14, and
+  run ruff over `reference/`.
+- **Correct `mandate-refcases`' journal module doc.** `crates/mandate-refcases/src/journal.rs` says
+  the vectors are version 2; they are version 3.
+
+Minor findings from round 2 of the same review (#320 round 2;
+[DEC-177](04-decision-log.md#decisions) item 19; held back by the freeze rule, one row each):
+
+- **Test both directions of §9.1's biconditionals (#320 round 2).** Rules 1, 3, 4, 5, and 13 each
+  have an invalid draft for one direction only (for example a sell labelled `open`, but no buy
+  labelled an exit), so a validator checking only that direction passes. Add a draft for the other
+  direction of each, and split each rule's mutant into one per direction, each caught only by its
+  own draft.
+- **Vectors for the untested envelope members (#320 round 2).** No draft tests that `artifact_refs`
+  is exact (sorted, de-duplicated, and no ref the payload does not hold), that `pii_refs` is
+  ordered, or that `actor.build` is required for a `system` or `agent` actor. Add an invalid draft
+  and a mutant for each.
+- **Assert §9.1's report order (#320 round 2).** "The first violation, in this order" is never
+  tested: every invalid draft breaks one rule. Add drafts that each break two rules of different
+  ranks (for example an extra member and a rule-4 breach, or rules 4 and 5 together) and expect the
+  earlier one, with a mutant that reverses the order.
+- **Trace mandate spec §5.10's `OwnerExitRequested` row to §9.1 (#320 round 2).** Its field list
+  ("instrument or scope, bid shown and confirmed, user (opaque), step-up evidence") lacks
+  `step_up_status`, which §9.1 requires on every owner exit (DEC-177 item 11). Add it there, and
+  check the §10 row the same way.
+- **Correct §9.1's citation for a removed instrument (#320 round 2).** `exit_origin`'s row cites
+  mandate spec "(§2.2, §2.3)" for a removed instrument, where mandate spec §6.1 cites §2.3 and §5.9
+  cites §2.3 and §8.6. Cite the sections the mandate spec gives.
+- **Reconcile #320 and #321 when the second merges (#320 round 2; DEC-177 item 20).** Both call
+  themselves journal spec v0.5. Whichever merges second:
+  (a) resolves the textual conflicts in the Status line and the v0.5 change-history bullet and
+  renumbers itself to v0.6, in the §9.1 heading, the `journal.yaml` header, and `generate.py`'s
+  `spec` string, then runs `reference/journal/generate.py --write` and `cargo xtask refcases --write`;
+  (b) adds `ApprovalRevalidated` to §9.1 as a third allowed cause of `IntentProposed` (rule 10), and
+  records a decision on whether `intent_action_mismatch` compares an approved intent against the
+  approval's bound fields;
+  (c) states a §9.1 causation rule for #321's §2 copy rule ("`causation_id` pointing to the owner
+  command"), which the chain's `OwnerExitRequested` events (seqs 6, 9, 12) and `KillSwitchActivated`
+  (seq 13) break with `causation_id: null`, and regenerates the vectors to meet it;
+  (d) keeps one definition of `ask_suppressed`, which both add, and drops #320's hedge "once M7's
+  change lands" in `DecisionMade`'s table;
+  (e) re-checks each §9.1 citation of mandate spec §6.1 against the merged text, since §9.1 cites
+  §6.1 for a rule only #321 states.
