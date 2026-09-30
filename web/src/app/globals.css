@@ -19,7 +19,7 @@
   --border: oklch(0.91 0.006 255);
   --foreground: oklch(0.175 0.006 255);
   --muted-foreground: oklch(0.38 0.009 255);
-  --primary: oklch(0.48 0.172 258);
+  --primary: oklch(0.38 0.136 258);
   --primary-foreground: oklch(0.992 0.003 255);
   --lapis: oklch(0.175 0.006 255);
   --lapis-foreground: oklch(0.992 0.003 255);
@@ -181,7 +181,7 @@ html:root[data-mode="dark"] {
   --series-4: oklch(0.88 0.069 232);
   --series-3: oklch(0.78 0.117 192);
   --series-2: oklch(0.88 0.149 90);
-  --series-1: oklch(0.78 0.109 258);
+  --series-1: oklch(0.91 0.042 258);
   --hatch-ink: oklch(0.62 0.007 255 / 0.4);
   --paper: var(--mandate);
   --backdrop: color-mix(in oklch, var(--background) 72%, transparent);

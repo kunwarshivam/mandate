@@ -395,7 +395,7 @@ test("Home says all clear once the one request is answered", async ({ page }) =>
   await expect(clear).toHaveText("All clear. Nothing needs you.");
 });
 
-test("desktop Home keeps its rail, its agent bands with P&L and disclosure, and positions", async ({ page }) => {
+test("desktop Home keeps its rail, its agent bands with P&L and disclosure, and assets", async ({ page }) => {
   await open(page, "/", 1440, 900);
   await expect(page.locator("[data-slot=needs-you]")).toBeHidden();
   await expect(page.locator("[data-slot=waiting]")).toBeVisible();
@@ -408,9 +408,9 @@ test("desktop Home keeps its rail, its agent bands with P&L and disclosure, and 
     await expect(band.locator("[data-direction]").first()).toBeVisible();
   }
   await expect(page.locator("[data-slot=phone-agent]").first()).toBeHidden();
-  await expect(page.getByRole("region", { name: "Positions" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Assets" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Recent activity" }).locator("ol > li").locator("visible=true")).toHaveCount(6);
-  expect((await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(260);
+  expect((await page.locator("[data-slot=account-equity] [data-slot=chart-canvas]").boundingBox())!.height).toBe(340);
 });
 
 test("the banner says the deployment is unreachable", async ({ page }) => {

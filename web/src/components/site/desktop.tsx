@@ -281,13 +281,15 @@ function Window({ id, win, layer, front, dispatch, children }: { id: AppId; win:
         className={cn("select-none", !win.max && "sm:cursor-grab sm:touch-none sm:active:cursor-grabbing")}
         controls={
           <span className="flex shrink-0 gap-0.5">
-            <button type="button" aria-label={`Minimize ${title}`} onClick={() => dispatch({ type: "minimize", id })} className={cn(WINDOW_BUTTON, PRESS)}>
+            {/* Pointer affordances like the icons: out of the tab cycle, so the window's content
+                comes first in the keyboard order (`e2e/landing.spec.ts`). */}
+            <button type="button" tabIndex={-1} aria-label={`Minimize ${title}`} onClick={() => dispatch({ type: "minimize", id })} className={cn(WINDOW_BUTTON, PRESS)}>
               <Glyph name="minimize" />
             </button>
-            <button type="button" aria-label={`${win.max ? "Restore" : "Maximize"} ${title}`} onClick={() => dispatch({ type: "maximize", id })} className={cn(WINDOW_BUTTON, PRESS, "max-sm:hidden")}>
+            <button type="button" tabIndex={-1} aria-label={`${win.max ? "Restore" : "Maximize"} ${title}`} onClick={() => dispatch({ type: "maximize", id })} className={cn(WINDOW_BUTTON, PRESS, "max-sm:hidden")}>
               <Glyph name={win.max ? "restore" : "maximize"} />
             </button>
-            <button type="button" aria-label={`Close ${title}`} onClick={() => dispatch({ type: "close", id })} className={cn(WINDOW_BUTTON, PRESS, "ms-0.5")}>
+            <button type="button" tabIndex={-1} aria-label={`Close ${title}`} onClick={() => dispatch({ type: "close", id })} className={cn(WINDOW_BUTTON, PRESS, "ms-0.5")}>
               <Glyph name="close" />
             </button>
           </span>
@@ -326,15 +328,15 @@ function arrowKeys(e: KeyboardEvent<HTMLElement>) {
   items[(at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
 }
 
-function ShortcutItem({ s, onOpen, role, className, children }: { s: Shortcut; onOpen: (s: Shortcut) => void; role?: "menuitem"; className?: string; children: ReactNode }) {
+function ShortcutItem({ s, onOpen, role, className, tabIndex, children }: { s: Shortcut; onOpen: (s: Shortcut) => void; role?: "menuitem"; className?: string; tabIndex?: number; children: ReactNode }) {
   if ("href" in s)
     return (
-      <Link href={s.href} role={role} className={className}>
+      <Link href={s.href} role={role} tabIndex={tabIndex} className={className}>
         {children}
       </Link>
     );
   return (
-    <button type="button" role={role} onClick={() => onOpen(s)} className={className}>
+    <button type="button" role={role} tabIndex={tabIndex} onClick={() => onOpen(s)} className={className}>
       {children}
     </button>
   );
@@ -428,7 +430,10 @@ export function Desktop({ home }: { home: ReactNode }) {
       const on = selected === s.id;
       return (
         <li key={s.id} className="grid justify-items-center">
-          <ShortcutItem s={s} onOpen={launch} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
+          {/* Desktop icons are pointer affordances, out of the tab cycle as on the real desktop: the
+              keyboard reaches the apps through the Start menu, and the page's content comes first
+              (`e2e/landing.spec.ts`: skip link, then the guide links). */}
+          <ShortcutItem s={s} onOpen={launch} tabIndex={-1} className="group grid w-24 cursor-pointer content-start justify-items-center gap-1 p-1 outline-none">
             <span className={cn("grid size-8 place-items-center", on && "opacity-80")}>{iconFor(s)}</span>
             <span
               className={cn(
