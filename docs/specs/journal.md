@@ -475,8 +475,12 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is
 this event's `event_id` (§2), and `agent_id`, which is the stream's. The executor's `IntentReceived`
-copies the members and adds those two. Its `causation_id` is the `DecisionMade` whose action members
-it repeats exactly, or for an owner's exit of one instrument the `OwnerExitRequested` (rule 10).
+copies the members and adds those two. Its `causation_id` is one of three events (rule 10): the
+`DecisionMade` whose action members it repeats exactly; for an owner's exit of one instrument, the
+`OwnerExitRequested`; or after an approval's grant, the `ApprovalRevalidated` with result `act` that
+precedes it in the same batch (§9, [mandate spec §6.4](mandate.md#64-approvals)). Re-validation
+never re-prices, re-sizes, or changes the order, so an approved intent repeats exactly the action
+members bound in its approval's `ApprovalRequested` content object.
 
 | Member | Type | Meaning |
 |---|---|---|
@@ -612,7 +616,10 @@ anchored hash), `anchor_root_mismatch`, `tsa_token_invalid`, `segment_manifest_m
 `segment_gap`, and on an agent stream ([§9.1](#91-agent-stream-payload-schemas-dec-177)):
 
 - `intent_action_mismatch` — an `IntentProposed` whose `causation_id` names a `DecisionMade` has
-  that decision's action members (rule 10), reported at the `IntentProposed`;
+  that decision's action members (rule 10), and one whose `causation_id` names an
+  `ApprovalRevalidated` has the action members bound in that approval's `ApprovalRequested`,
+  reported at the `IntentProposed`. The second clause is checked, with vectors, once §9.1 closes
+  the approval events' schemas; until then no range fails on it;
 - `mode_event_mismatch` — a `KillSwitchActivated` whose `mode_event` is non-null names an earlier
   `AgentModeChanged` on this stream with reason `kill_switch`, reported at the
   `KillSwitchActivated`.

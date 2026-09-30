@@ -272,8 +272,8 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, with
   vectors in `journal.yaml`'s `agent_stream` section, so their tests can be written first now. The
-  approval events wait for M7's spec change (claim
-  [#213](https://github.com/kunwarshivam/mandate/issues/213)).
+  approval events, which journal spec v0.5 added (M7, claim
+  [#213](https://github.com/kunwarshivam/mandate/issues/213)), are not closed yet (DEC-177 item 23).
 - **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
   to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
   (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
@@ -1394,6 +1394,15 @@ risk (rule 3):
   given and does not rule.
 - **The account stream's `KillSwitchActivated` and `AgentModeApplied` schemas** are not closed by
   §9.1; they close with the executor's account-stream schemas.
+- **Close the approval events' schemas in §9.1, with vectors** (DEC-177 item 23). `ApprovalRequested`,
+  `ApprovalDelivered`, `ApprovalResponded`, `ApprovalRevalidated`, `ApprovalTimedOut`, and
+  `ApprovalCanceled` (journal spec v0.5, mandate spec §6.4) are listed in §9 but not closed. The
+  change that closes them also adds the chain events an approved order needs (`DecisionMade` with
+  `autonomy: ask`, `ApprovalRequested`, `ApprovalResponded` naming an `ApprovalResponseSubmitted`,
+  `ApprovalRevalidated` with result `act`, and its `IntentProposed` in the same batch); a
+  `range_verification` case in which the approved intent differs from the bound content object in
+  one action member, failing §11's `intent_action_mismatch` second clause; a mutant that skips that
+  clause; and rule 7's check that no `ApprovalRequested` names a decision with `ask_suppressed`.
 
 Minor and nit findings from round 1 of the independent review of the journal spec v0.5 change
 ([DEC-177](04-decision-log.md#decisions); held back by the freeze rule, one row each):
