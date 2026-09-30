@@ -1298,8 +1298,21 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   step's switch to `exits_only` with an owner alert, a mode transition the runtime owns (§5.9,
   §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the breaching opening
   `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
-  gate's `not_in_working_universe` (DEC-199 Q1).
-- Tighten the trading-domain gate driver (#333 review, minors 1 and 2 and nit 2), in one tests
+  gate's `not_in_working_universe` (DEC-199 Q1). All three state more than one proposal, so each
+  also waits for E7-4 and E7-5 (DEC-199 item 3).
+- Done in the trading-domain gate driver tightening ([#349](https://github.com/kunwarshivam/mandate/pull/349);
+  `the_listing_and_market_are_dec_199_item_6s`,
+  `the_filled_median_is_the_liquid_collar_tier_to_the_cent`,
+  `the_filled_trailing_volume_is_the_order_size_cap_to_the_share`,
+  `the_filled_minimum_order_is_one_share_to_the_last_place`,
+  `a_second_proposal_in_one_case_waits_for_e7_4_and_e7_5`,
+  `an_agent_mode_where_nothing_moves_it_names_the_account_ledger`; DEC-199 items 3, 6 and 12):
+  every listing and market value is pinned, and the median, the trailing volume and the minimum
+  order are shown deciding at their edge, the ADV as at least 1,000,000 (its own value cannot bind
+  before the order cap); a case with a second proposal fails naming E7-4 and E7-5; and an
+  `agent_mode` after an event `MODE_OWNERS` does not list fails naming E7-5 (`MODE_HOLDER`). The
+  row as it was:
+  Tighten the trading-domain gate driver (#333 review, minors 1 and 2 and nit 2), in one tests
   correction of `crates/mandate-refcases/src/trading_domain/gate.rs` and DEC-199:
   - pin, or better, show taking effect, the values DEC-199 item 6 fills: `median_dollar_volume_20d`
     (the collar tier), `min_order_size`, and the two participation volumes. Today changing any of
