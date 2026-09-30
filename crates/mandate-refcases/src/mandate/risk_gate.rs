@@ -26,9 +26,9 @@ use mandate_num::{Fraction, Price, Qty, Ratio, Usd};
 use mandate_risk::spec_types::{GoalState, RiskLimits, Rung, RungAction, ScaleAction};
 use mandate_risk::{
     AccountSnapshot, AccountState, AccountType, AgentId, AgentMode, AgentPosition, AgentSnapshot,
-    AssetClass, AssetId, Check, CheckOutcome, ClientOrderId, ConductState, DayTradeLedger,
-    DayTradeRegime, Decision, DeferredSell, EtpClass, Exchange, FlattenInitiator, FlattenInput,
-    FlattenPricing, FlattenSell, GateConfig, GateError, GateInput, GatePass, GroupId,
+    AssetClass, AssetId, Check, CheckOutcome, ClientOrderId, Computed, ConductState,
+    DayTradeLedger, DayTradeRegime, Decision, DeferredSell, EtpClass, Exchange, FlattenInitiator,
+    FlattenInput, FlattenPricing, FlattenSell, GateConfig, GateError, GateInput, GatePass, GroupId,
     InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind, ProposedOrder, Purpose,
     QuoteCurrency, ReasonCode, RiskSnapshot, SaneQuote, Session, Side, TimeInForce,
     ValidatedMandate, Verdict, WorkingOrder, WorkingUniverse, agent_flatten, evaluate,
@@ -123,6 +123,7 @@ const FULL_GATE_ONLY: &[FullGateOnly] = &[FullGateOnly {
 
 /// `kind: gate` — one proposed order through `mandate_risk::evaluate`: the verdict, the reason, the
 /// purpose the gate assigns, the one failing check, and every `computed` figure the case states.
+/// No case states a pacing, so the gate must put none on any of them (DEC-178 item 14).
 pub(super) fn gate_case(fixture: &Json, case: &Json) -> Result<(), String> {
     let id = str_at(case, "id")?;
     let validated = validated_mandate(fixture, case)?;
@@ -162,34 +163,61 @@ pub(super) fn gate_case(fixture: &Json, case: &Json) -> Result<(), String> {
         purpose,
         account_equity,
     )?;
-    let decision = evaluate(&scene.input()).map_err(|e| gate_error("evaluate", &e))?;
+    let Decision {
+        verdict,
+        reason,
+        purpose: assigned,
+        pacing,
+        checks,
+        computed: figures,
+    } = evaluate(&scene.input()).map_err(|e| gate_error("evaluate", &e))?;
 
-    expect_eq("purpose", decision.purpose, purpose)?;
+    expect_eq("purpose", assigned, purpose)?;
+    expect_eq("pacing", pacing, None)?;
     if let Some(listed) = FULL_GATE_ONLY.iter().find(|entry| entry.case == id) {
-        return full_gate_only(listed, &decision, (want_verdict, want_reason), computed);
+        return full_gate_only(
+            listed,
+            (verdict, reason),
+            &checks,
+            &figures,
+            (want_verdict, want_reason),
+            computed,
+        );
     }
-    expect_eq("verdict", decision.verdict, want_verdict)?;
-    expect_eq("reason", decision.reason, want_reason)?;
-    let failed = failed_checks(&decision);
+    expect_eq("verdict", verdict, want_verdict)?;
+    expect_eq("reason", reason, want_reason)?;
+    compare_checks(&checks, want_reason)?;
+    match computed {
+        Some(stated) => compare_computed(stated, &figures, &[]),
+        None => Ok(()),
+    }
+}
+
+/// A denial reports exactly one failing check, carrying the case's reason; an allow reports
+/// [`EVERY_CHECK_PASSED`] exactly.
+fn compare_checks(checks: &[CheckOutcome], want_reason: Option<ReasonCode>) -> Result<(), String> {
     match want_reason {
-        Some(reason) => ensure(
-            failed.len() == 1 && failed.iter().all(|(_, code)| *code == reason),
-            || format!("the one failing check must be `{reason}`, got {failed:?}"),
-        )?,
+        Some(reason) => {
+            let failed = failed_checks(checks);
+            ensure(
+                failed.len() == 1 && failed.iter().all(|(_, code)| *code == reason),
+                || format!("the one failing check must be `{reason}`, got {failed:?}"),
+            )
+        }
         None => expect_eq(
             "an allowed order's checks",
-            decision.checks.as_slice(),
+            checks,
             EVERY_CHECK_PASSED.as_slice(),
-        )?,
-    }
-    match computed {
-        Some(stated) => compare_computed(stated, &decision, &[]),
-        None => Ok(()),
+        ),
     }
 }
 
 /// Trading-domain §9.1's eight checks in its order, each passed: what an allowed US-equity order
 /// must report, so an allow cannot come from a check the gate skipped or listed as not reached.
+///
+/// Only an allowed opening (MC-G13) gives this pin something to hold: for an exit the gate lists
+/// checks 2 and 5 to 8 as passed without running them, since they apply to openings only, so on
+/// an allowed exit the pin can fail only at checks 1, 3, and 4, or on the list's length and order.
 const EVERY_CHECK_PASSED: [CheckOutcome; 8] = [
     CheckOutcome::Passed(Check::AccountAndMode),
     CheckOutcome::Passed(Check::UniverseAndLimits),
@@ -204,11 +232,13 @@ const EVERY_CHECK_PASSED: [CheckOutcome; 8] = [
 /// The [`FULL_GATE_ONLY`] assertions for one listed case.
 fn full_gate_only(
     listed: &FullGateOnly,
-    decision: &Decision,
+    decided: (Verdict, Option<ReasonCode>),
+    checks: &[CheckOutcome],
+    figures: &Computed,
     wanted: (Verdict, Option<ReasonCode>),
     computed: Option<&Json>,
 ) -> Result<(), String> {
-    ensure((decision.verdict, decision.reason) != wanted, || {
+    ensure(decided != wanted, || {
         format!(
             "{}: the full gate now gives the case's own verdict, so its FULL_GATE_ONLY entry has \
              expired; delete it",
@@ -224,12 +254,12 @@ fn full_gate_only(
     ensure(wanted.1 == listed.stated.1, || pinned("reason"))?;
     expect_eq(
         "the full gate's verdict and reason",
-        (decision.verdict, decision.reason),
+        decided,
         (Verdict::Deny, Some(listed.reason)),
     )?;
     expect_eq(
         "checks 1 and 2, where the case's own limits sit",
-        decision.checks.get(..2),
+        checks.get(..2),
         Some(
             &[
                 CheckOutcome::Passed(Check::AccountAndMode),
@@ -239,7 +269,7 @@ fn full_gate_only(
     )?;
     expect_eq(
         "the failing checks",
-        failed_checks(decision),
+        failed_checks(checks),
         vec![(listed.check, listed.reason)],
     )?;
     let stated = computed.ok_or_else(|| pinned("computed"))?;
@@ -248,12 +278,11 @@ fn full_gate_only(
             pinned(&format!("computed.{key}"))
         })?;
     }
-    compare_computed(stated, decision, listed.unreached)
+    compare_computed(stated, figures, listed.unreached)
 }
 
-fn failed_checks(decision: &Decision) -> Vec<(Check, ReasonCode)> {
-    decision
-        .checks
+fn failed_checks(checks: &[CheckOutcome]) -> Vec<(Check, ReasonCode)> {
+    checks
         .iter()
         .filter_map(|outcome| match outcome {
             CheckOutcome::Failed(check, reason) => Some((*check, *reason)),
@@ -265,16 +294,11 @@ fn failed_checks(decision: &Decision) -> Vec<(Check, ReasonCode)> {
 /// Every figure the case states, compared by value with the one the gate reports; a figure the gate
 /// did not report fails, and one in `unreached` must state its pinned value and be absent from the
 /// report rather than compared with it.
-fn compare_computed(
-    stated: &Json,
-    decision: &Decision,
-    unreached: &[(&str, &str)],
-) -> Result<(), String> {
+fn compare_computed(stated: &Json, c: &Computed, unreached: &[(&str, &str)]) -> Result<(), String> {
     let members = stated
         .as_object()
         .ok_or("`computed` is not an object")?
         .iter();
-    let c = &decision.computed;
     for (key, want) in members {
         let what = format!("computed.{key}");
         if let Some((_, pinned)) = unreached.iter().find(|(name, _)| name == key) {
@@ -406,17 +430,17 @@ impl Scene {
             let groups = groups
                 .as_object()
                 .ok_or("`state.instrument_groups` is not an object")?;
-            let names: BTreeSet<String> = groups
-                .values()
-                .map(|g| text(g, "instrument_groups"))
-                .collect::<Result<_, _>>()?;
+            let mut members_by_name: BTreeMap<String, Vec<AssetId>> = BTreeMap::new();
             for (member, group) in groups {
-                let name = text(group, "instrument_groups")?;
-                let rank = names.iter().position(|n| *n == name).ok_or_else(|| {
-                    format!("`state.instrument_groups`: the group `{name}` has no rank")
-                })?;
-                let rank = u64::try_from(rank).map_err(|e| e.to_string())?;
-                instrument_groups.insert(asset(member)?, GroupId(rank));
+                members_by_name
+                    .entry(text(group, "instrument_groups")?)
+                    .or_default()
+                    .push(asset(member)?);
+            }
+            for (rank, members) in (0_u64..).zip(members_by_name.into_values()) {
+                for member in members {
+                    instrument_groups.insert(member, GroupId(rank));
+                }
             }
         }
 
@@ -578,7 +602,9 @@ fn listed_equity(
 
 /// `configs.test_default` of the trading-domain reference cases, with the five settings it does not
 /// carry (the crypto liquidity floor, the minimum resting time, the two participation caps, and the
-/// ETP classification age) at the values `mandate-risk`'s own `test_default_config` uses.
+/// ETP classification age) at the values `mandate-risk`'s own `test_default_config` uses, typed
+/// again here: that function lives in `mandate-risk`'s integration tests, which no other crate can
+/// call.
 fn test_default_gate_config() -> Result<GateConfig, String> {
     let usd = |text: &str| num(Usd::parse(text), "the gate configuration");
     let fraction = |text: &str| num(Fraction::parse(text), "the gate configuration");
@@ -1016,7 +1042,7 @@ fn gate_error(what: &str, e: &GateError) -> String {
 }
 
 /// The hand-copied gate configuration against the fixture it copies, so a regenerated fixture cannot
-/// leave it stale.
+/// leave it stale, and the allow pin against every check list the gate could report instead.
 #[cfg(test)]
 mod tests {
     use std::path::Path;
@@ -1024,10 +1050,108 @@ mod tests {
 
     use mandate_canon::DecStr;
     use mandate_num::{Fraction, Usd};
-    use mandate_risk::GateConfig;
+    use mandate_risk::{Check, CheckOutcome, GateConfig, ReasonCode};
 
     use super::super::num;
+    use super::{EVERY_CHECK_PASSED, compare_checks};
     use crate::{Json, at, expect_eq, read_fixture, str_at, u64_at};
+
+    /// Trading-domain §9.1's order, typed again rather than read from [`EVERY_CHECK_PASSED`].
+    const SPEC_ORDER: [Check; 8] = [
+        Check::AccountAndMode,
+        Check::UniverseAndLimits,
+        Check::SessionAndHalt,
+        Check::OrderConstraints,
+        Check::MarkAndCollar,
+        Check::ConductControls,
+        Check::BuyingPowerAndExposure,
+        Check::DayTradeBudget,
+    ];
+
+    /// No fixture edit reaches the allow pin, since an allowed US-equity order has no check to leave
+    /// unpassed, so the gate's report is edited instead. The spec's eight checks, each passed, pass;
+    /// each check in turn listed as not reached or as failed, the list cut short, one check listed
+    /// twice, and two neighbours swapped each fail, naming the list.
+    #[test]
+    fn an_allow_fails_unless_it_reports_every_check_passed_in_order() -> Result<(), String> {
+        let every = SPEC_ORDER.map(CheckOutcome::Passed);
+        expect_eq("the pinned list", &every, &EVERY_CHECK_PASSED)?;
+        compare_checks(&every, None)?;
+
+        let mut edited: Vec<Vec<CheckOutcome>> = Vec::new();
+        for edited_check in SPEC_ORDER {
+            for unpassed in [
+                CheckOutcome::NotReached(edited_check),
+                CheckOutcome::Failed(edited_check, ReasonCode::ConcentrationLimit),
+            ] {
+                edited.push(
+                    SPEC_ORDER
+                        .into_iter()
+                        .map(|check| {
+                            if check == edited_check {
+                                unpassed.clone()
+                            } else {
+                                CheckOutcome::Passed(check)
+                            }
+                        })
+                        .collect(),
+                );
+            }
+        }
+        edited.push(every.iter().take(7).cloned().collect());
+        let mut twice = every.to_vec();
+        twice.push(CheckOutcome::Passed(Check::DayTradeBudget));
+        edited.push(twice);
+        let mut swapped = every.to_vec();
+        swapped.swap(4, 5);
+        edited.push(swapped);
+
+        for list in &edited {
+            let failure = compare_checks(list, None)
+                .err()
+                .ok_or_else(|| format!("an allow reporting {list:?} must fail"))?;
+            assert!(
+                failure.starts_with("an allowed order's checks: "),
+                "the failure must name the list, got: {failure}"
+            );
+        }
+        expect_eq("edited lists", edited.len(), 8 * 2 + 3)
+    }
+
+    /// A denial passes only when exactly one check failed, carrying the case's reason: two checks
+    /// failing with that reason, one failing with another reason, and none failing each fail,
+    /// naming the failing checks.
+    #[test]
+    fn a_denial_fails_unless_exactly_one_check_failed_with_its_reason() -> Result<(), String> {
+        let reason = ReasonCode::WorkingOrderLimit;
+        let other = ReasonCode::ConcentrationLimit;
+        compare_checks(
+            &[
+                CheckOutcome::Passed(Check::AccountAndMode),
+                CheckOutcome::Failed(Check::OrderConstraints, reason),
+                CheckOutcome::NotReached(Check::MarkAndCollar),
+            ],
+            Some(reason),
+        )?;
+
+        for list in [
+            vec![
+                CheckOutcome::Failed(Check::OrderConstraints, reason),
+                CheckOutcome::Failed(Check::MarkAndCollar, reason),
+            ],
+            vec![CheckOutcome::Failed(Check::OrderConstraints, other)],
+            vec![CheckOutcome::Passed(Check::OrderConstraints)],
+        ] {
+            let failure = compare_checks(&list, Some(reason))
+                .err()
+                .ok_or_else(|| format!("a denial reporting {list:?} must fail"))?;
+            assert!(
+                failure.starts_with("the one failing check must be "),
+                "the failure must name the failing checks, got: {failure}"
+            );
+        }
+        Ok(())
+    }
 
     /// The members of `configs.test_default.gate` that `GateConfig` does not carry, because another
     /// crate reads them: the data profile, the exit ladder and its step, the stop-limit offset, the
@@ -1082,7 +1206,10 @@ mod tests {
     }
 
     /// Every `GateConfig` field is compared: the twelve the fixture states by value with the
-    /// fixture's, and the five it does not state with `mandate-risk`'s `test_default_config` values.
+    /// fixture's, and the five it does not state with `mandate-risk`'s `test_default_config` values
+    /// typed a second time, since that function is test-only in `mandate-risk` and this crate cannot
+    /// call it. The second copy catches an edit to the harness's first; a change to `mandate-risk`'s
+    /// own values it cannot see.
     /// `GateConfig` is taken apart whole, so a field the crate adds does not compile here until it is
     /// compared, and the fixture's members must be exactly the ones read and the ones named in
     /// [`NOT_GATE_CONFIG`], so a member the fixture grows, one of the five included, fails here until
