@@ -1112,15 +1112,17 @@ fn a_reported_deficit_is_an_account_state_not_a_denial() {
     );
 }
 
-/// Crypto never counts toward a day-trade budget (§9.2).
+/// Crypto never counts toward a day-trade budget (§9.2). E6-6 made check 8 whole; the crypto
+/// opening this needs waits for check 2's USD pairs (E6-10, DEC-254 item 7).
 #[test]
-#[ignore = "pending E6-6"]
+#[ignore = "pending E6-10"]
 fn crypto_never_counts() {
     let mut s = Scenario::allowing();
     s.account.regime = mandate_risk::DayTradeRegime::LegacyPdt;
     s.account.prior_close_equity = usd("10000");
     s.instrument.asset_class = AssetClass::Crypto;
     s.instrument.exchange = None;
+    s.instrument.quote_currency = Some(mandate_risk::QuoteCurrency::Usd);
     s.instrument.median_dollar_volume_30d = Some(usd("90000000"));
     s.agent.day_trades = mandate_risk::DayTradeLedger {
         window_count: 3,

@@ -1,7 +1,8 @@
-//! The spine's own edges, which the family-R suite reaches only through whole walks: the lift
-//! delay's boundary and restart, which rungs a receding drawdown may lift, the risk clock's
-//! direction and unit, staleness while R3 is not folded, the clocks crypto and equities count on,
-//! the floor's carry, fills, the daily trigger's two actions, and every input left to R3 and R4.
+//! The fold's own edges, which the family-R suite reaches only through whole walks: the lift
+//! delay's boundary, restart, and clock, which rungs a receding drawdown may lift, the risk clock's
+//! direction and unit, staleness, the clocks crypto and equities count on, the floor's carry,
+//! fills, the daily trigger's two actions, a breach carried over the rollover, the renewal, the
+//! hard wait across midnight, the profit stop, and every input left to R4.
 //!
 //! A book of 100 shares opened at 100 on an allocation of 10,000, so E = 100 × the bid and the
 //! base mandate's levels fall at round bids: rung 0 (2%, `scale_sizes` 0.5) at 98 with its lift
@@ -18,8 +19,9 @@ use proptest::prelude::*;
 use crate::document::LadderAction;
 use crate::risk::limits::tests::base;
 use crate::risk::{
-    Input, KillScope, Latch, LimitKey, Opening, Outcome, RemovalReason, Restriction, RiskEvent,
-    RiskState, SessionClock, Step, StopReason, TriggerReason, UniverseChange,
+    GoalReason, Input, InstrumentRestriction, KillScope, Latch, LiftReason, LimitKey, Opening,
+    Outcome, RemovalReason, Restriction, RestrictionReason, RiskEvent, RiskState, SessionClock,
+    Step, StopReason, ThenAction, TriggerReason, UniverseChange,
 };
 use crate::validate::ValidatedMandate;
 use crate::validate::tests::{context, mandate};
@@ -48,6 +50,18 @@ struct Shut;
 impl SessionClock for Shut {
     fn seconds_between(&self, _: UtcNanos, _: UtcNanos) -> Result<u64, SpecError> {
         Ok(0)
+    }
+}
+
+/// A calendar that over-reports: ten session seconds for every second that passed.
+struct Tenfold;
+
+impl SessionClock for Tenfold {
+    fn seconds_between(&self, from: UtcNanos, to: UtcNanos) -> Result<u64, SpecError> {
+        Every
+            .seconds_between(from, to)?
+            .checked_mul(10)
+            .ok_or(SpecError::ClockWentBackwards)
     }
 }
 
@@ -161,6 +175,30 @@ fn fill(offset_s: i64, side: Side, quantity: &str, fill_price: &str) -> Result<S
     })
 }
 
+fn new_day(offset_s: i64) -> Result<Step, String> {
+    Ok(Step {
+        at: at(offset_s)?,
+        session: MarketSession::Overnight,
+        input: Input::RiskDayStarted,
+    })
+}
+
+fn instrument() -> Result<AssetId, String> {
+    AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002").map_err(|e| e.to_string())
+}
+
+fn universe(offset_s: i64, change: UniverseChange, reason: RemovalReason) -> Result<Step, String> {
+    Ok(Step {
+        at: at(offset_s)?,
+        session: MarketSession::Regular,
+        input: Input::UniverseChanged {
+            instrument: instrument()?,
+            change,
+            reason,
+        },
+    })
+}
+
 fn open<'c>(
     mandate: &ValidatedMandate,
     opening: &Opening,
@@ -205,6 +243,33 @@ fn scale_lifted(index: u8) -> RiskEvent {
 
 fn moved(from: AgentMode, to: AgentMode) -> RiskEvent {
     RiskEvent::AgentModeApplied { from, to }
+}
+
+fn stale(active: bool) -> RiskEvent {
+    RiskEvent::InstrumentRestrictionChanged {
+        restriction: InstrumentRestriction::StaleMark,
+        reason: if active {
+            RestrictionReason::NoSaneMark
+        } else {
+            RestrictionReason::SaneMark
+        },
+        active,
+    }
+}
+
+fn day_started(equity: &str) -> Result<RiskEvent, String> {
+    Ok(RiskEvent::RiskDayStarted {
+        day_start_equity: usd(equity)?,
+    })
+}
+
+/// The base with a 1% daily loss, so the daily line falls at a bid of 99 and its 1.25x hard level
+/// at 98.75, both above rung 0.
+fn daily(action: &str) -> Result<ValidatedMandate, String> {
+    patched(&[
+        ("/risk/max_daily_loss", "\"0.01\""),
+        ("/risk/daily_loss_action", &format!("\"{action}\"")),
+    ])
 }
 
 fn active(state: &RiskState<'_>) -> BTreeMap<u8, u64> {
@@ -363,55 +428,98 @@ fn the_risk_clock_is_monotone_and_whole_second_and_a_refused_step_changes_nothin
     Ok(())
 }
 
-/// Staleness is R3's: a held instrument whose mark reaches `mark_max_age_s` of session time, or
-/// whose counted mark fails its checks, is `unimplemented` rather than a step with no
-/// `stale_mark`. A sane mark resets the age and a fill does not, an equity's extended-hours mark is
-/// not counted, and a book that was flat for the interval has nothing to go stale.
+/// Staleness (§5.2): a held instrument's mark ages by the session seconds between inputs and is
+/// `stale_mark` at exactly `mark_max_age_s`, as is a held instrument whose counted mark fails its
+/// checks. A counted sane mark clears it and resets the age, a fill does neither, an equity's
+/// extended-hours mark is not counted, a sale that leaves the book flat clears it, and a flat book
+/// never goes stale. Each change is one event, and the agent's mode never moves (§5.9).
 #[test]
-fn a_held_instrument_going_stale_is_not_folded_yet_and_a_flat_book_never_goes_stale()
+fn a_held_instrument_goes_stale_on_its_age_or_a_failed_mark_and_a_flat_book_never_does()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let held = opening(AssetClass::UsEquity, "100", "0", 120)?;
-    let unimplemented = |state: &mut RiskState<'_>, step: Step| -> Result<(), String> {
-        let before = state.clone();
-        assert_eq!(
-            state.step(&step).map(|_| ()).map_err(|e| e.code()),
-            Err("unimplemented"),
-            "{step:?}"
-        );
-        assert_eq!(*state, before, "{step:?} changed nothing");
-        Ok(())
-    };
     let mut state = open(&mandate, &held, &Every)?;
-    one(&mut state, tick(119))?;
-    unimplemented(&mut state, tick(120)?)?;
-    one(&mut state, mark(120, "100"))?;
-    one(&mut state, fill(200, Side::Buy, "1", "100"))?;
-    unimplemented(&mut state, tick(240)?)?;
-    unimplemented(&mut state, fill(240, Side::Sell, "101", "100")?)?;
-    one(&mut state, tick(239))?;
-    unimplemented(
+    let journals: Vec<Vec<RiskEvent>> = walk(
         &mut state,
-        quote(239, "100", MarketSession::Regular, false)?,
-    )?;
-    one(
-        &mut state,
-        quote(239, "100", MarketSession::AfterHours, false),
-    )?;
+        &[
+            tick(119)?,
+            tick(120)?,
+            mark(120, "100")?,
+            fill(200, Side::Buy, "1", "100")?,
+            tick(240)?,
+            quote(241, "100", MarketSession::AfterHours, true)?,
+            mark(242, "100")?,
+            quote(243, "100", MarketSession::Regular, false)?,
+            quote(244, "100", MarketSession::AfterHours, false)?,
+            fill(245, Side::Sell, "101", "100")?,
+            tick(100_000)?,
+            quote(100_001, "100", MarketSession::Regular, false)?,
+        ],
+    )?
+    .into_iter()
+    .map(|outcome| {
+        assert_eq!(outcome.snapshot.agent_mode, AgentMode::Normal);
+        assert!(outcome.snapshot.restrictions.is_empty());
+        outcome.journal
+    })
+    .collect();
+    let none = Vec::new;
+    assert_eq!(
+        journals,
+        [
+            none(),
+            vec![stale(true)],
+            vec![stale(false)],
+            none(),
+            vec![stale(true)],
+            none(),
+            vec![stale(false)],
+            vec![stale(true)],
+            none(),
+            vec![stale(false)],
+            none(),
+            none(),
+        ],
+        "119 s is fresh and 120 s is stale; the fill at 200 s did not reset the age, the after-hours \
+         marks count for nothing, and the sale to flat clears it"
+    );
 
     let mut shut = open(&mandate, &held, &Shut)?;
-    one(&mut shut, tick(100_000))?;
+    assert!(
+        one(&mut shut, tick(100_000))?.journal.is_empty(),
+        "no session second passed"
+    );
 
-    let flat = opening(AssetClass::UsEquity, "0", "0", 120)?;
-    let mut state = open(&mandate, &flat, &Every)?;
-    one(&mut state, tick(100_000))?;
-    one(
-        &mut state,
-        quote(100_001, "100", MarketSession::Regular, false),
+    let mut both = open(&mandate, &held, &Every)?;
+    let removed = one(
+        &mut both,
+        universe(120, UniverseChange::Removed, RemovalReason::ThesisExpired),
     )?;
-    one(&mut state, fill(100_002, Side::Buy, "10", "100"))?;
-    one(&mut state, tick(100_121))?;
-    unimplemented(&mut state, tick(100_122)?)?;
+    assert_eq!(
+        removed.journal,
+        [
+            RiskEvent::UniverseChanged {
+                instrument: instrument()?,
+                change: UniverseChange::Removed,
+                reason: RemovalReason::ThesisExpired,
+            },
+            RiskEvent::InstrumentRestrictionChanged {
+                restriction: InstrumentRestriction::RemovedInstrument,
+                reason: RestrictionReason::Removal(RemovalReason::ThesisExpired),
+                active: true,
+            },
+            stale(true),
+        ],
+        "a universe change that lands as the mark ages out is two events, and only the removal \
+         carries the universe change's reason"
+    );
+    assert_eq!(
+        removed.snapshot.instrument_restrictions,
+        BTreeSet::from([
+            InstrumentRestriction::StaleMark,
+            InstrumentRestriction::RemovedInstrument
+        ])
+    );
     Ok(())
 }
 
@@ -670,25 +778,16 @@ fn action_of(action: &str) -> Result<LadderAction, String> {
     }
 }
 
-/// What R3 and R4 fold is `unimplemented`, never a silent answer, and leaves the state as it was: the
-/// risk day, a universe change, acknowledgments, allocation changes, floor loosening, retirement,
-/// goal completion, and a `profit_stop` goal at opening.
+/// What R4 folds is `unimplemented`, never a silent answer, and leaves the state as it was:
+/// acknowledgments, allocation changes, floor loosening, retirement, and goal completion.
 #[test]
-fn every_input_left_to_later_slices_is_unimplemented_and_changes_nothing() -> Result<(), String> {
+fn every_input_left_to_r4_is_unimplemented_and_changes_nothing() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let mut state = open(&mandate, &equity()?, &Every)?;
     one(&mut state, mark(1, "98"))?;
     let before = state.clone();
-    let instrument =
-        AssetId::parse("7b4a1c2e-2222-4a2b-9c3d-000000000002").map_err(|e| e.to_string())?;
     let loosened = SchemaDec::parse("0.2", DecGrammar::OpenFraction).map_err(|e| e.to_string())?;
     for input in [
-        Input::RiskDayStarted,
-        Input::UniverseChanged {
-            instrument,
-            change: UniverseChange::Removed,
-            reason: RemovalReason::ThesisExpired,
-        },
         Input::OwnerAcknowledged {
             restriction: Latch::DrawdownLadder,
         },
@@ -717,16 +816,338 @@ fn every_input_left_to_later_slices_is_unimplemented_and_changes_nothing() -> Re
         );
         assert_eq!(state, before, "{step:?} changed nothing");
     }
-    let profit_stop = patched(&[(
-        "/goal",
-        "{\"type\": \"profit_stop\", \"profit_level\": \"0.1\", \"end_date\": null}",
-    )])?;
+    Ok(())
+}
+
+/// A breach still confirming at the rollover keeps confirming against the previous day's E₀ and is
+/// not the new day's `pending` (§5.4). It is decided within `breach_confirm_s`, so one still
+/// undecided at the next rollover is `invalid_input`, and the refused step changes nothing. One the
+/// condition left for the whole window is dropped, and the next rollover folds.
+#[test]
+fn a_carried_breach_undecided_at_the_next_rollover_is_refused_and_a_dropped_one_is_forgotten()
+-> Result<(), String> {
+    let mandate = daily("exits_only")?;
+    let key = LimitKey::MaxDailyLoss;
+    let mut state = open(&mandate, &equity()?, &Every)?;
     assert_eq!(
-        RiskState::open(&profit_stop, &equity()?, &Every)
-            .map(|_| ())
-            .map_err(|e| e.code()),
-        Err("unimplemented")
+        one(&mut state, mark(1, "99"))?.pending,
+        BTreeSet::from([key])
     );
+    let rolled = one(&mut state, new_day(30))?;
+    assert_eq!(rolled.journal, [day_started("9900")?]);
+    assert!(rolled.pending.is_empty());
+    let before = state.clone();
+    assert_eq!(
+        state.step(&new_day(40)?).map(|_| ()).map_err(|e| e.code()),
+        Err("invalid_input"),
+        "39 s of the 60 s window, still undecided"
+    );
+    assert_eq!(state, before, "the refused rollover changed nothing");
+    let resolved = one(&mut state, tick(61))?;
+    assert_eq!(
+        resolved.journal,
+        [
+            triggered(
+                key,
+                LadderAction::ExitsOnly,
+                Some(TriggerReason::ResolvedAtRollover)
+            ),
+            moved(AgentMode::Normal, AgentMode::ExitsOnly),
+        ],
+        "29 s before the rollover and 31 s after it, all against the day the breach began in"
+    );
+    assert_eq!(resolved.snapshot.latched, BTreeSet::from([key]));
+
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    let steps = [
+        mark(1, "99")?,
+        new_day(30)?,
+        mark(31, "100")?,
+        tick(91)?,
+        new_day(100)?,
+        tick(200)?,
+    ];
+    for outcome in walk(&mut state, &steps)?.iter().skip(1) {
+        assert!(outcome.pending.is_empty());
+        assert!(outcome.snapshot.restrictions.is_empty());
+        assert!(
+            outcome
+                .journal
+                .iter()
+                .all(|event| matches!(event, RiskEvent::RiskDayStarted { .. })),
+            "{:?}",
+            outcome.journal
+        );
+    }
+    Ok(())
+}
+
+/// A latched daily loss that has seen a new risk day is renewed by a breach of the new day's line,
+/// here at its 1.25x level on one sane quote, while a sane quote past only the line starts confirming
+/// (§5.4). A renewal only extends the latch: it adds no
+/// restriction, fires no second kill switch, and moves no mode. Before the new day nothing renews,
+/// and a `flatten_and_pause` daily loss never lifts without the owner's acknowledgment, which is
+/// R4's.
+#[test]
+fn a_new_day_breach_renews_on_one_hard_quote_and_a_daily_flatten_waits_for_the_owner()
+-> Result<(), String> {
+    let mandate = daily("flatten_and_pause")?;
+    let key = LimitKey::MaxDailyLoss;
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    let outcomes = walk(
+        &mut state,
+        &[
+            mark(1, "98.75")?,
+            mark(11, "98.75")?,
+            mark(12, "97.5")?,
+            new_day(13)?,
+            mark(14, "96.5")?,
+            mark(15, "96.25")?,
+            new_day(86_400)?,
+            tick(100_000)?,
+        ],
+    )?;
+    let journals: Vec<&[RiskEvent]> = outcomes.iter().map(|o| o.journal.as_slice()).collect();
+    let flatten = LadderAction::FlattenAndPause;
+    assert_eq!(
+        journals.get(1).copied(),
+        Some(
+            [
+                triggered(key, flatten, Some(TriggerReason::HardTrigger)),
+                RiskEvent::KillSwitchActivated {
+                    scope: KillScope::Agent,
+                    initiator: key,
+                },
+                moved(AgentMode::ExitsOnly, AgentMode::Paused),
+            ]
+            .as_slice()
+        )
+    );
+    assert_eq!(
+        journals.get(2).copied(),
+        Some(
+            [triggered(
+                LimitKey::DrawdownRung(0),
+                LadderAction::ScaleSizes,
+                None
+            )]
+            .as_slice()
+        ),
+        "a 1.25% fall on the day the limit latched renews nothing"
+    );
+    let soft = outcomes.get(4).ok_or("no soft breach")?;
+    assert!(
+        soft.journal.is_empty(),
+        "9650 is 1.03% under the new day's 9750, past the line but not the hard level: a sane quote \
+         there only starts confirming, {:?}",
+        soft.journal
+    );
+    assert_eq!(soft.pending, BTreeSet::from([key]));
+    assert_eq!(
+        journals.get(5).copied(),
+        Some([triggered(key, flatten, Some(TriggerReason::NewDayBreach))].as_slice()),
+        "9625 is 1.28% under the new day's 9750: past the hard level on the first sane quote"
+    );
+    let last = outcomes.last().ok_or("no outcome")?;
+    assert!(
+        last.journal.is_empty(),
+        "a new day and far more than daily_breach_min_s later, no lift"
+    );
+    assert_eq!(
+        last.snapshot.restrictions,
+        BTreeSet::from([Restriction::DailyLoss])
+    );
+    assert_eq!(last.snapshot.agent_mode, AgentMode::Paused);
+    Ok(())
+}
+
+/// A daily hard wait armed before midnight carries on under the new day, measured against the new
+/// E₀ (DEC-167 item 7): a second sane quote at the new day's 1.25x level at least the hard wait
+/// later latches, one below it clears `hard_breach` while the carried breach keeps confirming, and
+/// a carried breach that latches ends the wait with no lift event.
+#[test]
+fn a_daily_hard_wait_carries_over_the_rollover_and_ends_with_either_day_s_latch()
+-> Result<(), String> {
+    let mandate = daily("exits_only")?;
+    let key = LimitKey::MaxDailyLoss;
+    let armed = [mark(1, "98.75")?, new_day(5)?];
+    let hard_breach = BTreeSet::from([Restriction::HardBreach]);
+
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    let rolled = walk(&mut state, &armed)?;
+    assert_eq!(
+        rolled.last().map(|o| o.snapshot.restrictions.clone()),
+        Some(hard_breach)
+    );
+    let latched = one(&mut state, mark(11, "97.5"))?;
+    assert_eq!(
+        latched.journal,
+        [
+            triggered(LimitKey::DrawdownRung(0), LadderAction::ScaleSizes, None),
+            triggered(
+                key,
+                LadderAction::ExitsOnly,
+                Some(TriggerReason::HardTrigger)
+            ),
+        ],
+        "9750 is past the new day's hard level, 10 s after the quote that armed the wait"
+    );
+    assert_eq!(
+        latched.snapshot.restrictions,
+        BTreeSet::from([Restriction::DailyLoss])
+    );
+    assert!(
+        one(&mut state, tick(100))?.journal.is_empty(),
+        "the latch dropped the carried breach"
+    );
+
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    walk(&mut state, &armed)?;
+    let cleared = one(&mut state, mark(11, "98.75"))?;
+    assert_eq!(
+        cleared.journal,
+        [
+            RiskEvent::RiskLimitLifted {
+                limit: key,
+                action: None,
+                reason: Some(LiftReason::HardBreachCleared),
+            },
+            moved(AgentMode::ExitsOnly, AgentMode::Normal),
+        ],
+        "no loss at all against the new day's 9875"
+    );
+    let resolved = one(&mut state, tick(61))?;
+    assert_eq!(
+        resolved.journal,
+        [
+            triggered(
+                key,
+                LadderAction::ExitsOnly,
+                Some(TriggerReason::ResolvedAtRollover)
+            ),
+            moved(AgentMode::Normal, AgentMode::ExitsOnly),
+        ]
+    );
+
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    walk(&mut state, &armed)?;
+    let carried = one(&mut state, tick(61))?;
+    assert_eq!(
+        carried.journal,
+        [triggered(
+            key,
+            LadderAction::ExitsOnly,
+            Some(TriggerReason::ResolvedAtRollover)
+        )],
+        "the carried breach latches, ending the wait quietly, and the mode stays exits_only"
+    );
+    assert_eq!(
+        carried.snapshot.restrictions,
+        BTreeSet::from([Restriction::DailyLoss])
+    );
+    Ok(())
+}
+
+/// The day's own latch drops a breach carried over the rollover, so it never latches a second time
+/// and the next rollover has nothing undecided to refuse (§5.4).
+#[test]
+fn the_day_s_own_latch_drops_a_carried_breach() -> Result<(), String> {
+    let mandate = daily("exits_only")?;
+    let key = LimitKey::MaxDailyLoss;
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    let outcomes = walk(
+        &mut state,
+        &[
+            mark(1, "99")?,
+            new_day(30)?,
+            mark(31, "97.5")?,
+            mark(41, "97.5")?,
+            tick(61)?,
+            new_day(100)?,
+        ],
+    )?;
+    let journals: Vec<&[RiskEvent]> = outcomes.iter().map(|o| o.journal.as_slice()).collect();
+    assert_eq!(
+        journals.get(3).copied(),
+        Some(
+            [triggered(
+                key,
+                LadderAction::ExitsOnly,
+                Some(TriggerReason::HardTrigger)
+            )]
+            .as_slice()
+        ),
+        "the day's second sane quote past its hard level, 10 s after the first"
+    );
+    assert_eq!(journals.get(4).copied(), Some([].as_slice()));
+    assert_eq!(
+        journals.get(5).copied(),
+        Some([day_started("9750")?].as_slice())
+    );
+    Ok(())
+}
+
+/// The lift delay credits no more session seconds than wall seconds passed, so a calendar that
+/// over-reports tenfold lifts a rung after the full 600 s, not 60. Active time takes the clock's
+/// count, which only brings a trim sooner.
+#[test]
+fn an_over_reporting_clock_never_lifts_a_rung_early() -> Result<(), String> {
+    let mandate = ladder_only(&[])?;
+    let mut state = open(&mandate, &equity()?, &Tenfold)?;
+    walk(&mut state, &[mark(1, "98")?, mark(2, "99.5")?])?;
+    assert_eq!(active(&state), BTreeMap::from([(0, 10)]));
+    assert!(
+        one(&mut state, tick(601))?.journal.is_empty(),
+        "599 wall seconds below the lift level, which the clock calls 5990"
+    );
+    assert_eq!(one(&mut state, tick(602))?.journal, [scale_lifted(0)]);
+    Ok(())
+}
+
+/// A `profit_stop` confirms on E − C ≥ `profit_level` × C, on the level itself and not a cent below
+/// it, completes once, and is not read for any other goal (§3.1, §5.6).
+#[test]
+fn a_profit_stop_completes_once_on_its_level_and_only_for_its_goal() -> Result<(), String> {
+    let mandate = patched(&[
+        (
+            "/goal",
+            "{\"type\": \"profit_stop\", \"profit_level\": \"0.1\", \"end_date\": null}",
+        ),
+        ("/risk/breach_confirm_s", "0"),
+        ("/risk/max_daily_loss", "\"0.5\""),
+    ])?;
+    let mut state = open(&mandate, &equity()?, &Every)?;
+    let below = one(&mut state, mark(1, "109.9999"))?;
+    assert!(below.journal.is_empty() && below.pending.is_empty());
+    let done = one(&mut state, mark(2, "110"))?;
+    assert_eq!(
+        done.journal,
+        [
+            RiskEvent::GoalCompleted {
+                reason: Some(GoalReason::ProfitStopReached),
+                then: Some(ThenAction::DiscretionaryExitAllThenRetire),
+                on_complete: None,
+            },
+            moved(AgentMode::Normal, AgentMode::ExitsOnly),
+        ]
+    );
+    assert_eq!(
+        done.snapshot.restrictions,
+        BTreeSet::from([Restriction::GoalComplete])
+    );
+    let after = walk(&mut state, &[mark(3, "90")?, mark(4, "120")?])?;
+    assert!(
+        after.iter().all(|outcome| outcome
+            .journal
+            .iter()
+            .all(|event| !matches!(event, RiskEvent::GoalCompleted { .. }))
+            && !outcome.pending.contains(&LimitKey::ProfitStop)),
+        "a completed goal completes once: {after:?}"
+    );
+
+    let mut continuous = open(&ladder_only(&[])?, &equity()?, &Every)?;
+    let rich = one(&mut continuous, mark(1, "200"))?;
+    assert!(rich.journal.is_empty() && rich.pending.is_empty());
     Ok(())
 }
 

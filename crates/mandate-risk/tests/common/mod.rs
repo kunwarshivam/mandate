@@ -14,7 +14,7 @@ use mandate_risk::{
     AccountSnapshot, AccountState, AccountType, AgentId, AgentMode, AgentSnapshot, AssetClass,
     AssetId, ClientOrderId, ConductState, DayTradeLedger, DayTradeRegime, EtpClass, Exchange,
     GateConfig, GateInput, GatePass, InstrumentSnapshot, MarketSnapshot, Origin, ProposedKind,
-    ProposedOrder, RiskSnapshot, Side, TimeInForce, ValidatedMandate, WorkingOrder,
+    ProposedOrder, QuoteCurrency, RiskSnapshot, Side, TimeInForce, ValidatedMandate, WorkingOrder,
     WorkingUniverse,
 };
 use mandate_time::{Date, UtcNanos};
@@ -200,6 +200,7 @@ pub fn equity_instrument(id: &str) -> InstrumentSnapshot {
         ptp_no_exception: false,
         etp: EtpClass::Plain,
         etp_classified_at: Some(at("2026-09-21T00:00:00Z")),
+        quote_currency: Some(QuoteCurrency::Usd),
         prior_close: Some(price("100")),
         median_dollar_volume_20d: Some(usd("90000000")),
         median_dollar_volume_30d: None,

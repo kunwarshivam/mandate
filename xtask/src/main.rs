@@ -996,10 +996,11 @@ fn backticked_paths(text: &str) -> impl Iterator<Item = &str> {
     })
 }
 
-/// Mutation testing on the diff of safety-critical library crates (ADR-0001 ES-11, ES-12). Every
-/// mutant in changed source must be caught; approved exclusions live in `.cargo/mutants.toml`. A
-/// crate whose tests are still pending runs the gate as well (DEC-137 amends DEC-83): there a
-/// missed mutant in a stub body is named and skipped, and every other one still fails. The diff
+/// Mutation testing on the diff of safety-critical crates, `tool` crates included (ADR-0001 ES-11,
+/// ES-12, DEC-253). Every mutant in changed source must be caught; approved exclusions live in
+/// `.cargo/mutants.toml`. A crate whose tests are still pending runs the gate as well (DEC-137
+/// amends DEC-83): there a missed mutant in a stub body is named and skipped, and every other one
+/// still fails. The diff
 /// is the change's net effect on its base, main's tip on a `pull_request` run (`choose_base`): a
 /// line main already has was mutated when it landed there, so an edit main made independently is
 /// not mutated again.
@@ -1019,7 +1020,7 @@ fn mutants(root: &Path, base: Option<&str>) -> Result<()> {
         .filter(|f| f.ends_with(".rs") && crates.iter().any(|c| f.starts_with(&c.src_dir())))
         .collect();
     if touched.is_empty() {
-        eprintln!("    mutants: no safety-critical library source changed");
+        eprintln!("    mutants: no safety-critical crate's source changed");
         return Ok(());
     }
     let mut args = vec!["diff".to_owned(), format!("{base}...HEAD"), "--".to_owned()];
@@ -1238,8 +1239,8 @@ fn mutants_outcome(
     }
 }
 
-/// A safety-critical product crate the mutation gate covers, and whether its tests still carry
-/// pending markers, which is what exempts a stub body of its own.
+/// A safety-critical crate the mutation gate covers, and whether its tests still carry pending
+/// markers, which is what exempts a stub body of its own.
 struct MutatedCrate {
     package: String,
     dir: String,
@@ -1252,8 +1253,10 @@ impl MutatedCrate {
     }
 }
 
-/// Every safety-critical product crate. The reference-case harness (a tool crate) is excluded: its
-/// checks are proven by bugs seeded in the code it tests, not by mutating it. A crate with
+/// Every crate `xtask/layers.toml` marks `safety_critical = true`, whatever its layer: the
+/// reference-case harness, a `tool` crate, is mutated too (DEC-253), since a harness line no test
+/// can fail is a case that passes while checking nothing. Bugs seeded in the code it tests still
+/// prove what its checks catch; mutating it proves each of its lines can fail. A crate with
 /// `#[ignore = "pending <story>"]` tests is no longer excluded (DEC-137 amends DEC-83): a tests PR
 /// carries stubs no live test runs, so only its stub bodies are exempt, and everything else it adds
 /// is gated in the PR that adds it rather than one PR later (ADR-0001 ES-15).
@@ -1266,7 +1269,7 @@ fn mutated_crates(root: &Path) -> Result<Vec<MutatedCrate>> {
         let Some(own) = policy.crates.get(&pkg.name) else {
             continue;
         };
-        if own.safety_critical && matches!(layer_of(own, &pkg.name)?, Layer::Product(_)) {
+        if own.safety_critical {
             let dir = pkg
                 .manifest_path
                 .parent()
@@ -2535,7 +2538,7 @@ mod tests {
         backticked_paths, base_ref_in, ci, classify, contains_dec_id, contains_word, failure_cause,
         first_panic_line, generated_pending_markers, has_pending_tests, is_pending_marker,
         is_stub_function, listed_mutant_counts, live_test_counts, mutant_verdicts, mutants,
-        mutants_outcome, names_a_stub, output_in, pending_problems, pending_tests,
+        mutants_outcome, mutated_crates, names_a_stub, output_in, pending_problems, pending_tests,
         plain_comment_lines, repo_root, spec_guard_problems, test_binary, test_outcomes,
         unjudged_mutants, verdicts,
     };
@@ -3446,6 +3449,70 @@ mod tests {
         assert!(
             mutants(&fx.0, None).is_ok(),
             "with no base there is no diff to judge, so the job has nothing to do"
+        );
+        Ok(())
+    }
+
+    /// `safety_critical = true` governs the gate whatever the crate's layer (DEC-253): a
+    /// safety-critical `tool` crate, as `mandate-refcases` is, is mutated on the diff beside the
+    /// product crates, and a crate without the flag is not, in either layer.
+    #[test]
+    fn the_gate_mutates_every_safety_critical_crate_tool_layer_included() -> Result<()> {
+        let dir = env::temp_dir().join(format!("mandate-xtask-flagged-{}", std::process::id()));
+        if dir.exists() {
+            fs::remove_dir_all(&dir)?;
+        }
+        let fx = Fixture(dir);
+        let crates = [
+            ("core", "0", true),
+            ("plain", "0", false),
+            ("harness", "\"tool\"", true),
+            ("helper", "\"tool\"", false),
+        ];
+        let members: Vec<String> = crates
+            .iter()
+            .map(|(name, _, _)| format!("\"crates/{name}\""))
+            .collect();
+        fx.write(
+            "Cargo.toml",
+            &format!(
+                "[workspace]\nmembers = [{}]\nresolver = \"3\"\n",
+                members.join(", ")
+            ),
+        )?;
+        let mut layers = String::from("impure_crates = []\n");
+        for (name, layer, safety_critical) in crates {
+            layers.push_str(&format!(
+                "[crates.{name}]\nlayer = {layer}\nsafety_critical = {safety_critical}\npure = false\n"
+            ));
+            fx.write(
+                &format!("crates/{name}/Cargo.toml"),
+                &format!("[package]\nname = \"{name}\"\nversion = \"0.0.0\"\nedition = \"2024\"\n"),
+            )?;
+            fx.write(&format!("crates/{name}/src/lib.rs"), "")?;
+        }
+        fx.write("xtask/layers.toml", &layers)?;
+        fx.write(".gitignore", "/target\n")?;
+        fs::copy(
+            repo_root()?.join("rust-toolchain.toml"),
+            fx.0.join("rust-toolchain.toml"),
+        )?;
+        output_in(&fx.0, "cargo", &["generate-lockfile", "--offline"])?;
+        output_in(&fx.0, "git", &["init", "-q"])?;
+
+        let mut mutated: Vec<(String, String)> = mutated_crates(&fx.0)?
+            .into_iter()
+            .map(|krate| (krate.package.clone(), krate.src_dir()))
+            .collect();
+        mutated.sort();
+        assert_eq!(
+            mutated,
+            [
+                ("core".to_owned(), "crates/core/src/".to_owned()),
+                ("harness".to_owned(), "crates/harness/src/".to_owned()),
+            ],
+            "the flag decides: the safety-critical tool crate is mutated beside the product crate, \
+             and neither unflagged crate is"
         );
         Ok(())
     }

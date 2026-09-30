@@ -177,8 +177,8 @@ the crate is pending.
   four `trim_to_target` cases fail at `mandate_risk::trim_proposals` (E6-4), the three crypto buys
   at the gate's owed check 2 (E6-10), and `MC-B22` and `MC-B23` on a `session` or
   `in_close_window` label their `now` contradicts (DEC-250's open question). Its in-module tests
-  doctor the fixture to prove every member is read and the two session cases pass once their clock
-  agrees.
+  doctor the fixture to prove every member is read, a cash fee rate the gate would not reserve is
+  refused, and the two session cases pass once their clock agrees.
 - **Run:** `cargo nextest run -p mandate-builder -p mandate-num`; families A and B in the shared
   harness with `cargo nextest run -p mandate-refcases --run-ignored all mandate::MC-A
   mandate::autonomy mandate::MC-B mandate::order_builder` (the flag runs cases `status.toml` does
@@ -379,8 +379,8 @@ E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the res
 check 7's buying power and check 8's `legacy_pdt` budget, and E6-8 check 5's mark and collar,
 check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
 (DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
-crypto opening is `GateError::Unimplemented` until E6-10 completes check 2, while a reducing purpose
-passes a check still owed.
+crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by reading
+`InstrumentSnapshot::quote_currency` (DEC-254), while a reducing purpose passes a check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -389,7 +389,7 @@ passes a check still owed.
   §5.1 to §5.6 (the v1 order policy, the constraints before submission, the kill switch,
   exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
   (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
-  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
+  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-10.
 - **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
@@ -418,7 +418,11 @@ passes a check still owed.
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
   in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
-  property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
+  property), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
+  a non-USD or unstated pair denied at check 2, a USD pair passing, check 2 whole for crypto, an
+  exit in any pair and a US equity never judged by the rule, and a property whose oracle is
+  `opening ∧ crypto ∧ quote ≠ USD`; pending E6-10 except the exit, equity and check-1 cases),
+  `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
   oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
   `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
   brief.
@@ -539,8 +543,10 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   `ValidatedMandate`), `crates/mandate-spec/src/policy.rs` (the hierarchy and its runtime overlay),
   `crates/mandate-spec/src/risk.rs` (the risk-state types, breach confirmation, risk days),
   `crates/mandate-spec/src/risk/limits.rs` (the §5.2 and §5.6 comparisons),
-  `crates/mandate-spec/src/risk/fold.rs` (the fold's spine over marks, fills, and clock ticks, slice
-  R2; the rest of §5 is `unimplemented` until R3 and R4, DEC-167 items 5 and 6),
+  `crates/mandate-spec/src/risk/fold.rs` (the fold over marks, fills, clock ticks, universe changes,
+  staleness, and a `profit_stop` goal, slices R2 and R3; the rest of §5 is `unimplemented` until R4,
+  DEC-167 items 5 to 7), `crates/mandate-spec/src/risk/fold/daily.rs` (the daily loss over risk
+  days: the rollover, a breach carried over it, the renewal, and the lift),
   `crates/mandate-spec/src/goal.rs`, `crates/mandate-spec/src/change.rs` (the version and §9.2
   classification), `crates/mandate-spec/src/condition.rs` (the §6.3 language, owned here and nowhere
   else), `crates/mandate-spec/src/context.rs` (`ValidationContext::from_journal`, the fold over
@@ -571,11 +577,13 @@ The crates exist; the rules above `SchemaDec` are stubs until their implementati
   and MI-11 against a first-match evaluator of the test's own; DEC-172),
   `crates/mandate-spec/src/change/tests.rs` (the `not_in` shapes no other test reaches, DEC-172
   item 13); `crates/mandate-spec/src/risk/limits.rs`'s tests (the comparisons against an integer
-  oracle, and the exact set of limits they read); `crates/mandate-spec/src/risk/fold/tests.rs` (the
-  spine's edges: the lift delay's boundary and restart, severe rungs that a receding drawdown does not
-  lift, the whole-second monotone risk clock, staleness left to R3, the crypto and equity clocks, the
-  floor's carry, fills, the daily action, every input left to R3 and R4, and a lift property whose
-  oracle is a run rule);
+  oracle, the exact set of limits they read, and the profit stop's level);
+  `crates/mandate-spec/src/risk/fold/tests.rs` (the fold's edges: the lift delay's boundary,
+  restart, and a clock that over-reports, severe rungs that a receding drawdown does not lift, the
+  whole-second monotone risk clock, staleness, the crypto and equity clocks, the floor's carry,
+  fills, the daily action, a breach carried over the rollover, the renewal, the daily hard wait
+  across midnight, the profit stop, every input left to R4, and a lift property whose oracle is a
+  run rule);
   `crates/mandate-domain/tests/domain.rs` (live). Planted bugs per test: the task brief and the E10-3
   tests and implementation PRs.
 - **Reference cases:** `fixtures/refcases/mandate.json` families S, V, P, C, R, T, and L (202 cases),
@@ -698,7 +706,9 @@ proves each pending test fails on them (DEC-110).
   harnessed by stream F, N by stream J, A and B by stream H, and G and F by stream G; a case whose
   own story is pending fails naming it).
 - **Run:** `cargo nextest run -p mandate-refcases`; pending cases with
-  `cargo test -p mandate-refcases -- --include-ignored`.
+  `cargo test -p mandate-refcases -- --include-ignored`; the mutation gate on a harness change,
+  `MANDATE_BASE_REF=$(git merge-base HEAD origin/main) cargo xtask ci mutants` (DEC-253: the
+  crate is `safety_critical = true`, so the gate covers it although it is a `tool` crate).
 
 ## Reference-case fixtures and the mandate reference implementation
 
@@ -853,7 +863,8 @@ proves each pending test fails on them (DEC-110).
   `unjudged_mutants`, which fail a mutated package with no live test to judge its mutants before the
   run, since `cargo mutants` would report every one of them caught, DEC-139; the job takes its
   repository as a parameter, so `Fixture::gated` drives the whole of it and neither it nor the
-  pre-flight can be deleted without a test failing),
+  pre-flight can be deleted without a test failing; `mutated_crates`, which gates every
+  `safety_critical = true` crate whatever its layer, DEC-253),
   `xtask/layers.toml` (crate layers and safety-critical policy), `.cargo/mutants.toml` (approved
   equivalent mutants).
 - **CI:** `.github/workflows/ci.yml` (`fast`, `full`), `.github/workflows/nightly.yml`.
