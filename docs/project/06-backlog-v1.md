@@ -955,19 +955,18 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
-- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163).
-  `crates/mandate-refcases/src/trading_domain.rs` has no gate driver: `propose_order` steps and the
-  `decision` expectation are pending on E6-3, and the crate does not depend on `mandate-risk`. An
-  arm that builds a `GateInput` from a case, calls `mandate_risk::evaluate`, and compares verdict
-  and reason code is the first step, and it does not run RC-25 by itself: RC-25's steps carry no
-  `quote`, `trailing_5m_volume` or `adv_20d`, so its openings would be denied `stale_mark` at check 5
-  or `conduct_limit_breached` at check 6, and they name a `purpose` where the gate assigns one from
-  an `Origin`. The arm must also state, with its own tests, the market data a case omits and the
-  origin each purpose maps to; only then does RC-25 run, and RC-15, RC-16 and RC-09's gate steps
-  with it. RC-22 needs more: `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and
-  the `conduct_breach` step's switch to `exits_only` with an owner alert, a mode transition the
-  runtime owns (§5.9, §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the
-  breaching opening `conduct_limit_breached`.
+- **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
+  the gate driver since E6-9, DEC-180). `crates/mandate-refcases/src/trading_domain/gate.rs` now
+  decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
+  (a quote at the limit price, volumes that pass check 6) and the origin each purpose maps to, each
+  with its own tests. RC-25 still waits for the instrument fields `prior_close` and
+  `median_dollar_volume_20d` (E6-7's rows in the harness) and for `owner_confirmed_bid`, which the
+  header writes as `true` and the gate takes as a price (DEC-180 Q3). RC-22 needs more:
+  `broker_order_update` (E7-2), the exit sequence's `actions` (E7-4), and the `conduct_breach`
+  step's switch to `exits_only` with an owner alert, a mode transition the runtime owns (§5.9,
+  §9.6's "breach → agent `exits_only`", E6-11); the pure gate only denies the breaching opening
+  `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
+  gate's `not_in_working_universe` (DEC-180 Q1).
 - **trading-domain §9.6: state that the opposite-fill interval includes its last instant**
   (DEC-163 item 3; DEC-176 clarification). §9.6's "within 60 seconds after" an opposite-side fill
   is read inclusively, so an opening exactly 60 s after the fill is denied; the spec text should
