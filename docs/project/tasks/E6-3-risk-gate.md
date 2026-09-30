@@ -8,7 +8,7 @@ PR, and reference cases.
 
 ## Story
 
-- **Stories:** E6-3, E6-4, E6-6, E6-7, E6-8, E6-9
+- **Stories:** E6-3, E6-4, E6-6, E6-7, E6-8, E6-9, E6-10
   ([backlog](../06-backlog-v1.md#e6-agent-runtime-and-risk)).
 - **Acceptance criteria (verbatim):**
   - **E6-3** "As an owner, I want an independent risk gate enforcing all limits so that no agent
@@ -33,6 +33,11 @@ PR, and reference cases.
   - **E6-9** "As an owner, I want account restrictions and trading halts checked before every
     order, so that agents stop adding risk when the broker restricts the account. *Accepted when:*
     RC-15 passes."
+  - **E6-10** "As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain §3.2
+    item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written for.
+    *Accepted when:* a crypto opening in a non-USD pair is denied, a USD pair passes the floor, and
+    check 2 is whole for crypto." Its readings are DEC-254, and its tests are
+    `crates/mandate-risk/tests/usd_pairs.rs`.
 - **PRD / HLD / spec anchors:** trading-domain spec §9 (the gate: §9.1 evaluation order and reason
   codes, §9.2 day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5 buying power,
   §9.6 market-conduct controls, §9.7 order-rate limits, §9.8 wash sales), §3.1 and §3.2 (instrument
@@ -135,6 +140,10 @@ Each is one PR on the coordinator's signal, and each ends with the status PR mov
    report — RC-22, RC-25.
 6. **E6-4** the ladder and the daily loss as the order path consumes them: the size factor, the
    `trim_to_target` proposals, and the mode effects. No new reference cases (they are stream F's).
+7. **E6-10** check 2's "USD pairs only" for crypto (§3.2 item 7), read from
+   `InstrumentSnapshot::quote_currency` (DEC-254), which makes check 2 whole for crypto and leaves
+   no check owed. No reference case moves in `mandate-risk`; MC-B26 to MC-B28 and the
+   trading-domain harness's crypto proposals need the harness to read the pair (DEC-254 item 7).
 
 ## Data shapes
 
@@ -589,6 +598,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | mandate §5.5 `trim_to_target` sells down to factor × cap, rounded up, regular session only, never while Holding | `hand::a_trim_rounds_up_to_the_increment`, `hand::a_trim_waits_for_the_regular_session`, `hand::no_trim_while_holding`, `properties::a_trim_never_sells_below_the_target` |
 | mandate §5.9 the effective mode is the strictest restriction, and openings stop at `exits_only` | `RC-22` last step, `properties::a_stricter_mode_is_never_more_permissive` |
 | trading §3.2 the eligibility floor, items 1 to 7 in list order | `RC-16` steps 1 to 7, `hand::the_floor_reports_the_first_failing_item` |
+| trading §3.2 item 7 a crypto opening needs a USD pair: another or an unstated quote currency is denied at check 2, after items 1 and 3 and before the 30-day volume; an exit in any pair and a US equity are never judged by it (DEC-254) | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::a_crypto_opening_in_a_usd_pair_passes_the_floor`, `usd_pairs::check_2_is_whole_for_crypto`, `usd_pairs::a_crypto_exit_in_any_pair_is_never_denied_by_the_pair_rule`, `usd_pairs::a_us_equity_is_not_judged_by_its_quote_currency`, `usd_pairs::an_inactive_crypto_account_is_reported_before_the_pair`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
 | trading §3.2 item 6 an unclassified or stale ETP fails closed | `hand::an_unclassified_etp_is_complex`, `hand::a_stale_classification_denies_an_etp_opening`, `properties::etp_fails_closed`, `RC-16::leveraged_etps_enabled` |
 | trading §3.2 the floor never applies to a risk-reducing order in a held instrument | `RC-16` step 8, `fuzz::no_allowed_sequence_ever_exceeds_a_drawn_mandates_limits`, `hand::the_floor_never_blocks_an_exit_in_a_held_instrument`, and in-module `gate::tests::no_floor_breach_denies_an_exit_from_any_origin` (every sell origin, all ten, against every universe and floor breach) |
 | trading §4.3 sessions: regular-session openings, extended-hours exits as limit orders, nothing overnight | `hand::an_opening_outside_the_regular_session_is_denied`, `hand::an_extended_hours_opening_needs_a_limit`, `RC-25` |
@@ -976,6 +986,14 @@ missing test, and the tests PR does not merge with one.
 | 46 | The `kind: gate` harness reassigns the case's `purpose` from side and position, turning `MC-G15` into a denial | `MC-G15`, `harness::a_gate_case_purpose_is_passed_through` |
 | 47 | An owner's ordinary close is treated as a kill switch, so `paused` lets it through | `hand::a_paused_agent_holds_an_owner_close_but_not_an_owner_kill_switch`, `properties::a_hold_follows_the_mode_rule_exactly` |
 | 48 | A flatten prices every sell `market_or_ladder`, ignoring the session | `MC-F02`, `MC-F03` (both crypto sells), `hand::a_flatten_prices_by_session_alone` |
+| 49 | E6-10: an unstated quote currency (`None`) is admitted as USD | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 50 | E6-10: only an unstated quote currency is denied, so a stablecoin pair (`Other`) opens | the same two |
+| 51 | E6-10: the pair rule judges a US equity | `usd_pairs::a_us_equity_is_not_judged_by_its_quote_currency`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 52 | E6-10: the pair rule runs after item 7's 30-day volume, so an illiquid non-USD pair reports `below_liquidity_floor` | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2` |
+| 53 | E6-10: the pair rule runs before item 3, so an `ipo` non-USD pair reports the pair | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2` |
+| 54 | E6-10: the pair rule reports another registered code (`ineligible_exchange`) | `usd_pairs::a_crypto_opening_in_a_pair_not_quoted_in_usd_is_denied_at_check_2`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd` |
+| 55 | E6-10: the pair rule is placed at check 1 for every purpose, so it denies a crypto exit | `usd_pairs::a_crypto_exit_in_any_pair_is_never_denied_by_the_pair_rule`, `usd_pairs::an_inactive_crypto_account_is_reported_before_the_pair`, `usd_pairs::check_2_is_whole_for_crypto`, and the two above |
+| 56 | E6-10: check 2 is left owed for crypto after the rule exists | `usd_pairs::a_crypto_opening_in_a_usd_pair_passes_the_floor`, `usd_pairs::check_2_is_whole_for_crypto`, `usd_pairs::the_pair_rule_denies_exactly_a_crypto_opening_not_quoted_in_usd`, `hand::crypto_never_counts` |
 
 ## Not done
 
