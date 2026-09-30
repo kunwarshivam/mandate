@@ -379,8 +379,8 @@ E6-7 check 2's eligibility floor, E6-6 `session_at`, check 3's sessions, the res
 check 7's buying power and check 8's `legacy_pdt` budget, and E6-8 check 5's mark and collar,
 check 6's conduct controls, the pacing of an allowed exit, `evaluate_cancel` and `surveillance`
 (DEC-163). Until every check exists the gate fails closed for adding risk (DEC-129 item 29): a
-crypto opening is `GateError::Unimplemented` until E6-10 completes check 2, while a reducing purpose
-passes a check still owed.
+crypto opening is `GateError::Unimplemented` until E6-10 completes check 2 by reading
+`InstrumentSnapshot::quote_currency` (DEC-254), while a reducing purpose passes a check still owed.
 
 - **Spec:** `docs/specs/trading-domain.md` §9 (§9.1 the evaluation order and reason codes,
   §9.2 the day-trading regime, §9.3 leverage and short sales, §9.4 sessions, §9.5
@@ -389,7 +389,7 @@ passes a check still owed.
   §5.1 to §5.6 (the v1 order policy, the constraints before submission, the kill switch,
   exit pricing), §7.2 to §7.4 (buying power, account restrictions, agent modes), §8.2
   (risk marks); `docs/specs/mandate.md` §1.1 (MI-1 to MI-20), §2.3 (the working universe),
-  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-9.
+  §5.3, §5.5, §5.9; backlog E6-3, E6-4, E6-6 to E6-10.
 - **Code:** `mandate-risk`: `crates/mandate-risk/src/lib.rs` (the gate's inputs, the eight §9.1
   checks as `Check`, the four verdicts, `ReasonCode` with the registered spelling of each, `Origin`
   and the `Purpose` it maps to, `GateError`, and the signatures of `evaluate`, `evaluate_cancel`,
@@ -418,7 +418,11 @@ passes a check still owed.
   check that every reason code the gate can emit is registered in the founder-owned case file),
   `crates/mandate-risk/tests/properties.rs` (one property per invariant and per "never" or "always"
   in §9, including MI-1 scoped to its own words, the mode rule, MI-8, and a shadow-ledger sequence
-  property), `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
+  property), `crates/mandate-risk/tests/usd_pairs.rs` (§3.2 item 7's USD pairs for crypto, E6-10:
+  a non-USD or unstated pair denied at check 2, a USD pair passing, check 2 whole for crypto, an
+  exit in any pair and a US equity never judged by the rule, and a property whose oracle is
+  `opening ∧ crypto ∧ quote ≠ USD`; pending E6-10 except the exit, equity and check-1 cases),
+  `crates/mandate-risk/tests/common/mod.rs` (the fixtures and the independent `i128`
   oracle, which never calls the crate's arithmetic), and the in-module tests in `gate.rs` and
   `surveillance.rs` for the boundaries the files above cannot pin. Planted bugs per test: the task
   brief.
