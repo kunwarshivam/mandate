@@ -12,16 +12,20 @@
 
 mod common;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use common::{ASSET_A, arr, b, base, edit, i, obj, s, with, with_all};
 use mandate_canon::Value;
+use mandate_domain::Environment;
+use mandate_num::Usd;
 use mandate_spec::Mandate;
 use mandate_spec::change::{
     ChangeClass, Classification, PIN_SWITCH_PATHS, changed_paths, classify, classify_autonomy,
     pinning_switch,
 };
-use mandate_spec::document::{Autonomy, Pointer};
+use mandate_spec::document::{Autonomy, Pointer, ProvenanceMap};
+use mandate_spec::validate::{ValidationContext, Violation, validate};
+use mandate_time::Date;
 use proptest::prelude::*;
 use proptest::test_runner::TestRunner;
 
@@ -35,6 +39,29 @@ fn parse(document: &Value) -> Mandate {
 
 fn classified(old: &Value, new: &Value) -> Classification {
     classify(&parse(old), &parse(new)).expect("two parsed mandates classify")
+}
+
+/// The V-codes `validate` reports for a document, against an otherwise permissive paper context.
+fn violations(document: &Value) -> BTreeSet<Violation> {
+    let context = ValidationContext {
+        account_equity_usd: Usd::parse("25000").expect("a dollar amount"),
+        other_allocations_usd: Usd::ZERO,
+        validation_date: Date::parse("2026-09-24").expect("a date"),
+        registry: None,
+        provenance: ProvenanceMap::default(),
+        workspace_users: 1,
+        approver_users: 1,
+        disclosures_accepted: BTreeSet::new(),
+        instrument_groups: BTreeMap::new(),
+        claimed_by_other_agents: BTreeSet::new(),
+        connection_environment: Some(Environment::Paper),
+        connection_loss_carry_usd: Usd::ZERO,
+        eligibility_failures: BTreeSet::new(),
+        previous_version: None,
+    };
+    validate(&parse(document), &context)
+        .expect("the document is evaluable")
+        .violations
 }
 
 /// The class, the changed paths as text, and whether step-up is required.
@@ -831,10 +858,13 @@ fn pinning_a_research_mandate_is_one_reducing_change() {
 /// classified path by path (DEC-121: "any other combination of those fields follows the per-path
 /// rules"). Four of them are increasing that way: pinning a mandate that had no admitting model
 /// (MC-C48), raising `max_instruments`, keeping the research envelope, and changing a sixth path. The
-/// fifth, keeping a model admitting, leaves `signal_models` unchanged, so no increasing path is left:
-/// its pinned row is reducing because the old version had an admitting model, and the rest are
-/// removals. It is still not the switch, which is what the first assertion pins. Unpinning is
-/// increasing on its own row whatever the old version's models were.
+/// fifth, keeping a model admitting, is a document V-037 rejects (a pinned universe with a model
+/// that admits), so no valid version reaches it; its reducing verdict is the per-path mechanics on
+/// an invalid document, not a change an owner could make. It leaves `signal_models` unchanged, so
+/// no increasing path is left: its pinned row is reducing because the old version had an admitting
+/// model, and the rest are removals. It is still not the switch, which is what the first assertion
+/// pins, and the last assertions pin that it is invalid while the switch's own pinned version is
+/// not. Unpinning is increasing on its own row whatever the old version's models were.
 #[test]
 fn pinning_is_the_switch_only_as_a_whole() {
     let no_agent = edit(
@@ -933,6 +963,14 @@ fn pinning_is_the_switch_only_as_a_whole() {
         verdict(&kept_admitting, &unpinned),
         (RiskIncreasing, vec!["/universe/pinned".to_owned()], true),
         "unpinning is increasing even from a version whose model could admit"
+    );
+    assert!(
+        violations(&kept_admitting).contains(&Violation::V037),
+        "a pinned universe with a model still admitting is invalid (V-037)"
+    );
+    assert!(
+        !violations(&pinned(&research())).contains(&Violation::V037),
+        "the switch's own pinned version clears every admitting flag, so V-037 holds"
     );
 }
 
@@ -1682,13 +1720,16 @@ fn an_allocation_only_change_is_classified_by_its_direction_alone() {
     }
 }
 
-/// A rule in the MI-11 property's own terms, evaluated by [`decide`] and never by the crate.
+/// A rule in the MI-11 property's own terms, evaluated by [`decide`] and never by the crate: one
+/// comparison with each of §6.3's operator kinds, `gt`, `lt`, `in`, `not_in`, `eq`, and `ne`.
 #[derive(Debug, Clone, PartialEq)]
 enum When {
     OrderAbove(u32),
     ScoreBelow(u32),
     PurposeIn(Vec<&'static str>),
+    PurposeNotIn(Vec<&'static str>),
     SessionIs(&'static str),
+    SessionIsNot(&'static str),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1734,7 +1775,15 @@ fn to_document(rules: &Rules) -> Value {
                     arr(p.iter().map(|x| s(x)).collect()),
                     then,
                 ),
+                When::PurposeNotIn(p) => rule(
+                    &id,
+                    "purpose",
+                    "not_in",
+                    arr(p.iter().map(|x| s(x)).collect()),
+                    then,
+                ),
                 When::SessionIs(x) => rule(&id, "session", "eq", s(x), then),
+                When::SessionIsNot(x) => rule(&id, "session", "ne", s(x), then),
             }
         })
         .collect();
@@ -1766,7 +1815,9 @@ fn decide(rules: &Rules, a: Action) -> u8 {
             When::OrderAbove(n) => a.order > *n,
             When::ScoreBelow(n) => a.score < *n,
             When::PurposeIn(p) => p.contains(&a.purpose),
+            When::PurposeNotIn(p) => !p.contains(&a.purpose),
             When::SessionIs(x) => a.session == *x,
+            When::SessionIsNot(x) => a.session != *x,
         })
         .map_or(rules.default, |r| r.then)
 }
@@ -1806,7 +1857,9 @@ fn when_strategy() -> impl Strategy<Value = When> {
         (1u32..20).prop_map(|n| When::OrderAbove(n * 100)),
         (1u32..99).prop_map(When::ScoreBelow),
         prop::sample::subsequence(PURPOSES.to_vec(), 1..=3).prop_map(When::PurposeIn),
+        prop::sample::subsequence(PURPOSES.to_vec(), 1..=3).prop_map(When::PurposeNotIn),
         prop::sample::select(SESSIONS.to_vec()).prop_map(When::SessionIs),
+        prop::sample::select(SESSIONS.to_vec()).prop_map(When::SessionIsNot),
     ]
 }
 
@@ -1831,6 +1884,11 @@ fn rules_strategy() -> impl Strategy<Value = Rules> {
 
 /// A change to a rule set, and whether §9.2 lists it as a reducing shape. The shapes are decided here
 /// from the spec's wording and the rule set's own values, never by asking the crate.
+///
+/// Op 4 moves one value of a kept rule's single comparison: an `auto` rule's so it matches less
+/// often (a higher `gt`, a lower `lt`, a shorter `in` list, a longer `not_in` list), and an `ask` or
+/// `deny` rule's so it matches more often (the reverse), which is reducing when no later rule or the
+/// default is stricter. An `eq` or `ne` value has no direction, so moving it is never a listed shape.
 fn changed(old: &Rules, op: u8, k: usize, pick: u32) -> (Rules, bool) {
     let mut new = old.clone();
     let n = old.rules.len();
@@ -1915,7 +1973,24 @@ fn changed(old: &Rules, op: u8, k: usize, pick: u32) -> (Rules, bool) {
                         p.pop();
                     }
                 }
-                When::SessionIs(_) => return (new, false),
+                When::PurposeNotIn(p) => {
+                    if !widen {
+                        if let Some(extra) = PURPOSES.iter().find(|x| !p.contains(x)) {
+                            p.push(extra);
+                            p.sort_unstable();
+                        }
+                    } else if p.len() > 1 {
+                        p.pop();
+                    }
+                }
+                When::SessionIs(x) | When::SessionIsNot(x) => {
+                    *x = if *x == SESSIONS[0] {
+                        SESSIONS[1]
+                    } else {
+                        SESSIONS[0]
+                    };
+                    return (new, false);
+                }
             }
             let reducing = new != *old && (auto || !stricter_after);
             (new, reducing)
@@ -1967,9 +2042,18 @@ fn changed(old: &Rules, op: u8, k: usize, pick: u32) -> (Rules, bool) {
 /// checked by evaluating every distinguishable action under both rule sets with the property's own
 /// evaluator. And each of §9.2's reducing shapes, applied once, is classified reducing — without that
 /// half a classifier that called everything increasing would pass.
+///
+/// 4096 cases rather than [`runner`]'s 256: a single-comparison move (op 4) on one given operator
+/// kind is about one draw in two hundred, and a `not_in` rule read like an `in` one must be caught
+/// under every seed, not most.
 #[test]
 fn a_reducing_or_neutral_autonomy_change_never_loosens_a_decision() {
-    let mut runner = runner();
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: 4096,
+        max_shrink_iters: 256,
+        failure_persistence: None,
+        ..ProptestConfig::default()
+    });
     let draw = (
         rules_strategy(),
         0u8..10,
@@ -2064,6 +2148,28 @@ fn the_mi11_oracle_is_first_match_then_default() {
         decide(&rules, a(100, "regular", "increase")),
         1,
         "the default"
+    );
+    let negated = Rules {
+        rules: vec![
+            R {
+                id: 0,
+                when: When::SessionIsNot("crypto"),
+                then: 2,
+            },
+            R {
+                id: 1,
+                when: When::PurposeNotIn(vec!["increase", "open"]),
+                then: 0,
+            },
+        ],
+        default: 1,
+    };
+    assert_eq!(decide(&negated, a(100, "regular", "open")), 2, "ne");
+    assert_eq!(decide(&negated, a(100, "crypto", "risk_exit")), 0, "not_in");
+    assert_eq!(
+        decide(&negated, a(100, "crypto", "open")),
+        1,
+        "neither holds"
     );
     assert_eq!(hundredths(65), "0.65");
     assert_eq!(hundredths(70), "0.7");
