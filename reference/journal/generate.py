@@ -242,6 +242,10 @@ IGNORED = one_of(
 )
 EXIT_ORIGIN = one_of("signal", "goal_completion", "removed_instrument")
 ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
+REQUESTED_BY = one_of("agent", "owner", "client")
+BUILTIN_LABEL = "builtin_risk_reducing"
+DELEGATION_PREFIX = "delegation:"
+DECIDED_BY = re.compile(r"^(builtin_risk_reducing|default|admission_ceiling|client_ceiling|(rule|delegation):[A-Za-z0-9_-]+)$")
 STEP_UP = rec(("assertion_id", STR), ("authenticated_at", TS), ("method", STR))
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -286,6 +290,10 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("reason_code", opt(ID)),
         ("autonomy", opt(one_of("auto", "ask", "deny"))),
         ("ask_suppressed", opt(ASK_SUPPRESSED)),
+        ("decided_by", opt(STR)),
+        ("delegation_id", opt(ID)),
+        ("requested_by", REQUESTED_BY),
+        ("client_id", opt(ID)),
     ),
     ("agent", "IntentProposed"): rec(
         ("instrument_id", STR),
@@ -481,10 +489,22 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         allow = p["dry_run"] == "allow"
         rule(4, (p["reason_code"] is None) == allow, "schema", "payload.reason_code")
         rule(5, (p["autonomy"] is not None) == allow, "schema", "payload.autonomy")
+        by, classified = p["decided_by"], p["autonomy"] is not None
+        labelled = (by is not None) == classified and (not classified or (by == BUILTIN_LABEL) != adds_risk)
+        rule("5.decided_by", labelled, "schema", "payload.decided_by")
+        rule("5.decided_by_label", by is None or bool(DECIDED_BY.match(by)), "non_canonical", "payload.decided_by")
         rule(6, p["dry_run"] != "defer" or p["purpose"] == "discretionary_exit", "schema", "payload.dry_run")
         rule(7, p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING, "schema", "payload.autonomy")
         asked = p["autonomy"] == "ask"
         rule("7.ask_suppressed", p["ask_suppressed"] is None or asked, "schema", "payload.ask_suppressed")
+        lifted = by[len(DELEGATION_PREFIX) :] if by is not None and by.startswith(DELEGATION_PREFIX) else None
+        delegated = p["delegation_id"] == lifted and (lifted is None or p["autonomy"] == "auto")
+        rule("7.delegation", delegated, "schema", "payload.delegation_id")
+        client = p["requested_by"] == "client"
+        rule("7.client_id", (p["client_id"] is not None) == client, "schema", "payload.client_id")
+        rule("7.client_ceiling", not (client and adds_risk and p["autonomy"] == "auto"), "schema", "payload.autonomy")
+        ceiling_label = by != "client_ceiling" or (client and asked)
+        rule("7.client_ceiling_label", ceiling_label, "schema", "payload.decided_by")
         discretionary = p["purpose"] == "discretionary_exit"
         rule("8.exit_origin", (p["exit_origin"] is not None) == discretionary, "schema", "payload.exit_origin")
         evaluated = adds_risk or p["exit_origin"] == "signal"
@@ -692,7 +712,8 @@ DERIVATION = {
         "Illustrative mandate and account values the DecisionMade vector is recomputed from "
         "(mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no "
         "fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). "
-        "The gate dry run and the autonomy result are inputs. Gross exposure is the held position's "
+        "The gate dry run, the autonomy result and its decided_by label, and who requested the order "
+        "are inputs. Gross exposure is the held position's "
         "quantity x mark. After the session closes the profit_stop goal is reached, whose completion "
         "is a discretionary exit of every position (mandate spec §3.1), deferred until the session "
         "(trading spec §9.6) with nothing proposed (mandate spec §6.2). Outside the session an exit is a "
@@ -735,6 +756,8 @@ DERIVATION = {
     "tif": "day",
     "dry_run": "allow",
     "autonomy": "auto",
+    "decided_by": "default",
+    "requested_by": "agent",
 }
 
 
@@ -864,6 +887,10 @@ def chain_bodies() -> list[dict]:
                 "reason_code": None,
                 "autonomy": "auto",
                 "ask_suppressed": None,
+                "decided_by": "default",
+                "delegation_id": None,
+                "requested_by": "agent",
+                "client_id": None,
             },
         ),
         event(
@@ -930,6 +957,10 @@ def chain_bodies() -> list[dict]:
                 "reason_code": "discretionary_exit_regular_session_only",
                 "autonomy": None,
                 "ask_suppressed": None,
+                "decided_by": None,
+                "delegation_id": None,
+                "requested_by": "agent",
+                "client_id": None,
             },
         ),
         event(
@@ -1234,6 +1265,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.type", "market"),
                 change("payload.purpose", "discretionary_exit"),
                 change("payload.exit_origin", "signal"),
+                change("payload.decided_by", "builtin_risk_reducing"),
             ],
             "schema",
             "payload.limit_price",
@@ -1270,6 +1302,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.dry_run", "defer"),
                 change("payload.reason_code", "session_not_allowed"),
                 change("payload.autonomy", None),
+                change("payload.decided_by", None),
             ],
             "schema",
             "payload.dry_run",
@@ -1283,6 +1316,7 @@ def invalid_drafts() -> list[dict]:
                 change("payload.purpose", "discretionary_exit"),
                 change("payload.exit_origin", "signal"),
                 change("payload.autonomy", "ask"),
+                change("payload.decided_by", "builtin_risk_reducing"),
             ],
             "schema",
             "payload.autonomy",
@@ -1302,6 +1336,150 @@ def invalid_drafts() -> list[dict]:
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "quiet_hours")],
             "non_canonical",
             "payload.ask_suppressed",
+        ),
+        invalid(
+            "decision_denied_keeps_decided_by",
+            "§9.1 rule 5",
+            "decision",
+            [
+                change("payload.dry_run", "deny"),
+                change("payload.reason_code", "insufficient_buying_power"),
+                change("payload.autonomy", None),
+            ],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_classified_without_decided_by",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", None)],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_open_labelled_builtin",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", "builtin_risk_reducing")],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_exit_labelled_by_default",
+            "§9.1 rule 5",
+            "decision",
+            [
+                change("payload.side", "sell"),
+                change("payload.purpose", "discretionary_exit"),
+                change("payload.exit_origin", "signal"),
+            ],
+            "schema",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_decided_by_unknown_label",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.decided_by", "platform_suggestion")],
+            "non_canonical",
+            "payload.decided_by",
+        ),
+        invalid(
+            "decision_delegation_id_under_default",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.delegation_id", "d1")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_label_without_id",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_names_another_id",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d2")],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_delegation_on_an_ask",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d1"),
+            ],
+            "schema",
+            "payload.delegation_id",
+        ),
+        invalid(
+            "decision_requested_by_unknown",
+            "§9.1 DecisionMade",
+            "decision",
+            [change("payload.requested_by", "platform")],
+            "non_canonical",
+            "payload.requested_by",
+        ),
+        invalid(
+            "decision_client_request_without_client_id",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "client_ceiling"),
+            ],
+            "schema",
+            "payload.client_id",
+        ),
+        invalid(
+            "decision_client_id_on_agent_request",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.client_id", "client_dots")],
+            "schema",
+            "payload.client_id",
+        ),
+        invalid(
+            "decision_client_opening_auto",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+            ],
+            "schema",
+            "payload.autonomy",
+        ),
+        invalid(
+            "decision_client_opening_auto_by_delegation",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.decided_by", "delegation:d1"),
+                change("payload.delegation_id", "d1"),
+            ],
+            "schema",
+            "payload.autonomy",
+        ),
+        invalid(
+            "decision_client_ceiling_on_agent_request",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.decided_by", "client_ceiling")],
+            "schema",
+            "payload.decided_by",
         ),
         invalid(
             "decision_discretionary_exit_without_origin",
@@ -1355,7 +1533,11 @@ def invalid_drafts() -> list[dict]:
             "decision_risk_exit_with_convictions",
             "§9.1 rule 8",
             "decision",
-            [change("payload.side", "sell"), change("payload.purpose", "risk_exit")],
+            [
+                change("payload.side", "sell"),
+                change("payload.purpose", "risk_exit"),
+                change("payload.decided_by", "builtin_risk_reducing"),
+            ],
             "schema",
             "payload.exit_conviction",
         ),
@@ -1526,6 +1708,75 @@ def valid_drafts() -> list[dict]:
             "§9.1 rule 7",
             "decision",
             [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "budget")],
+        ),
+        valid(
+            "decision_lifted_by_delegation",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.decided_by", "delegation:d1"), change("payload.delegation_id", "d1")],
+        ),
+        valid(
+            "decision_asked_by_admission_ceiling",
+            "§9.1 rule 5",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.decided_by", "admission_ceiling")],
+        ),
+        valid(
+            "decision_owner_request_auto",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.requested_by", "owner")],
+        ),
+        valid(
+            "decision_client_request_asked",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "client_ceiling"),
+            ],
+        ),
+        valid(
+            "decision_client_request_asked_by_rule",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "ask"),
+                change("payload.decided_by", "rule:large_orders"),
+            ],
+        ),
+        valid(
+            "decision_client_request_denied",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.autonomy", "deny"),
+                change("payload.decided_by", "rule:large_orders"),
+            ],
+        ),
+        valid(
+            "decision_client_risk_exit_auto",
+            "§9.1 rule 7",
+            "decision",
+            [
+                change("payload.requested_by", "client"),
+                change("payload.client_id", "client_dots"),
+                change("payload.side", "sell"),
+                change("payload.purpose", "risk_exit"),
+                change("payload.exit_conviction", None),
+                change("payload.buy_conviction", None),
+                change("payload.combined_score", None),
+                change("payload.outputs_used", []),
+                change("payload.model_weights", []),
+                change("payload.clips_applied", []),
+                change("payload.decided_by", "builtin_risk_reducing"),
+            ],
         ),
         valid(
             "decision_removed_instrument_exit_without_numbers",
@@ -1761,6 +2012,10 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
         "reason_code": None,
         "autonomy": d["autonomy"],
         "ask_suppressed": None,
+        "decided_by": d["decided_by"],
+        "delegation_id": None,
+        "requested_by": d["requested_by"],
+        "client_id": None,
     }
 
 
@@ -1962,7 +2217,13 @@ VALIDATOR_MUTANTS = (
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(1, 15)),
+    "rule.5.decided_by",
+    "rule.5.decided_by_label",
     "rule.7.ask_suppressed",
+    "rule.7.delegation",
+    "rule.7.client_id",
+    "rule.7.client_ceiling",
+    "rule.7.client_ceiling_label",
     "rule.8.exit_origin",
     "rule.12.step_up",
     "rule.15.agent",
@@ -2015,6 +2276,8 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
             lambda s: decision(s).update(buy_conviction=decision(s)["exit_conviction"]),
         ),
         ("combined score from conviction", lambda s: decision(s).update(combined_score="0.8536")),
+        ("decision labelled by a rule it was not decided by", lambda s: decision(s).update(decided_by="rule:large_orders")),
+        ("decision recorded as the owner's request", lambda s: decision(s).update(requested_by="owner")),
         (
             "every bound listed as a clip",
             lambda s: decision(s).update(clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]),

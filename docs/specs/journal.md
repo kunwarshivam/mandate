@@ -20,9 +20,11 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   `DecisionMade` also records `requested_by`, and the client's id for a client-requested order, and the
   content object's `trigger` carries both
   ([DEC-185](../project/04-decision-log.md#decisions)).
-  No new event type; test vectors are unchanged. §9.1's closed `DecisionMade` schema does not list
-  these members yet: they join it, with generated vectors, in their own change before E8-8 or E6-12
-  writes them, and until then no writer emits them.
+  No new event type. §9.1's closed `DecisionMade` schema lists them as `decided_by`,
+  `delegation_id`, `requested_by`, and `client_id`, with rule 5 and rule 7 clauses that tie them
+  to `autonomy` and refuse a client-requested opening recorded as `auto`
+  ([DEC-252](../project/04-decision-log.md#decisions)); the generated `agent_stream` vectors cover
+  every clause and the test vectors stay version 3.
 - **v0.5 ([DEC-177](../project/04-decision-log.md#decisions)):** §9.1 closes the payload schemas of
   the agent stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
   `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, and rules on
@@ -470,6 +472,10 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `reason_code` | `id?` | The gate's reason code (trading spec §9.1): rule 4 |
 | `autonomy` | `auto` \| `ask` \| `deny`, or `null` | The §6.2 classification, reached only after an `allow`: rules 5 and 7 |
 | `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked ([DEC-156](../project/04-decision-log.md#decisions) item 5; mandate spec §6.4 once M7's change lands), in this precedence: the agent's 10 requests in the risk day are spent; the owner skipped this instrument earlier in the risk day and no version has applied since; an approval for it timed out less than `timeout_s` ago. `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
+| `decided_by` | `text?` | What decided `autonomy` (mandate spec §6.2), one label of: `builtin_risk_reducing` (step 3), `rule:<id>` or `default` (step 4), `delegation:<id>` (step 4a), `admission_ceiling` (step 5), `client_ceiling` (step 5a), with `<id>` an `id`; the same labels as the approval content's `decided_by` ([mandate spec §6.4](mandate.md#64-approvals)). `null` exactly when `autonomy` is: rule 5 |
+| `delegation_id` | `id?` | The delegation that lifted an `ask` to `auto` (mandate spec §6.5, [DEC-181](../project/04-decision-log.md#decisions)); delegation usage is counted from these events. Non-null exactly when `decided_by` is `delegation:` and this id: rule 7 |
+| `requested_by` | `agent` \| `owner` \| `client` | Who asked for the order (mandate spec §6.2 step 5a, [DEC-185](../project/04-decision-log.md#decisions)): the order builder, the owner through the web app or CLI, or an owner-connected client, set from the authenticated channel and never from the request's content |
+| `client_id` | `id?` | The connected client that asked, by the id it was connected under ([DEC-141](../project/04-decision-log.md#decisions)); non-null exactly when `requested_by` is `client`: rule 7 |
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is
 this event's `event_id` (§2), and `agent_id`, which is the stream's. The executor's `IntentReceived`
@@ -533,13 +539,23 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    `payload.type`.
 4. `DecisionMade`: `reason_code` is `null` exactly when `dry_run` is `allow` — `payload.reason_code`.
 5. `DecisionMade`: `autonomy` is non-null exactly when `dry_run` is `allow`; no classification runs
-   after a `deny` or `defer` (mandate spec §6.2) — `payload.autonomy`.
+   after a `deny` or `defer` (mandate spec §6.2) — `payload.autonomy`; `decided_by` is non-null
+   exactly when `autonomy` is, and is then `builtin_risk_reducing` exactly when `purpose` is neither
+   `open` nor `increase` — `payload.decided_by`; and a non-null `decided_by` is one of the member's
+   labels — `non_canonical` at `payload.decided_by`.
 6. `DecisionMade`: `defer` only for `discretionary_exit` — `payload.dry_run`.
 7. `DecisionMade`: a non-null `autonomy` is `auto` unless `purpose` is `open` or `increase` (built-in
    AUTO, §6.2 step 3) — `payload.autonomy`; and `ask_suppressed` is non-null only when `autonomy` is
    `ask` — `payload.ask_suppressed`. So a suppression only ever skips an opening or an increase,
    never an exit. That no `ApprovalRequested` names a suppressed decision is checked with the
-   approval events (M7).
+   approval events (M7). Then: `delegation_id` is non-null exactly when `decided_by` is
+   `delegation:` followed by it, and then `autonomy` is `auto` (mandate spec §6.2 step 4a, MI-26) —
+   `payload.delegation_id`; `client_id` is non-null exactly when `requested_by` is `client` —
+   `payload.client_id`; a decision `requested_by` `client` with purpose `open` or `increase` is
+   never `auto`, whatever decided it (the client ceiling, mandate spec §6.2 step 5a, MI-30) —
+   `payload.autonomy`; and `decided_by` is `client_ceiling` only when `requested_by` is `client` and
+   `autonomy` is `ask` — `payload.decided_by`. So the record itself refuses a connected client's
+   opening that ran unasked.
 8. `DecisionMade`: `exit_origin` is non-null exactly when `purpose` is `discretionary_exit` —
    `payload.exit_origin`. A decision was produced by a §8.3 evaluation exactly when `purpose` is
    `open` or `increase` or `exit_origin` is `signal`; `exit_conviction`, `buy_conviction`, and
