@@ -303,8 +303,9 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// bound; for E6-9, every row of the halt and market-order table; for E6-7, every row of the
 /// eligibility floor and where it sits in check 2; and for E6-8, each conduct boundary a mutant or
 /// a planted bug crossed: a locked and a crossed quote, both collar ends, each participation cap
-/// alone, the order-to-fill maximum, the collar pricing only a discretionary exit, a slice only
-/// below the proposal and never of a risk exit, and the resting time's end.
+/// alone, the order-to-fill maximum, the opposite-fill interval's last instant, the collar pricing
+/// only a discretionary exit, a slice only below the proposal and never of a risk exit, and the
+/// resting time's end.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
@@ -318,8 +319,8 @@ mod tests {
     use crate::{
         AccountSnapshot, AccountType, AgentId, AgentSnapshot, AssetClass, AssetId, ClientOrderId,
         ConductState, DayTradeLedger, DayTradeRegime, EtpClass, GateConfig, GatePass, GroupId,
-        InstrumentSnapshot, MarketSnapshot, Pacing, ProposedKind, ProposedOrder, TimeInForce,
-        WorkingOrder,
+        InstrumentSnapshot, MarketSnapshot, Pacing, ProposedKind, ProposedOrder, RestingSide,
+        TimeInForce, WorkingOrder,
     };
 
     /// Every input of one decision, owned, so a test changes only the field it is about.
@@ -2317,6 +2318,39 @@ mod tests {
             ],
             "at both caps passes; past the order cap or the daily cap alone, or with a volume \
              missing, is conduct_limit_breached"
+        );
+        Ok(())
+    }
+
+    /// §9.6's opposite-fill interval of 60 s, its last instant included (DEC-163 item 3): a buy
+    /// opening at 15:00:00 after a sell fill at 14:59:00 exactly, or a nanosecond later, is
+    /// `opposite_fill_interval`; after one a nanosecond before 14:59:00 it is allowed, and a buy
+    /// fill at 14:59:00 starts no interval for a buy.
+    #[test]
+    fn the_opposite_fill_interval_includes_its_last_instant() -> Result<(), GateError> {
+        let after_fill = |side: RestingSide, fill: &str| -> Result<Row, GateError> {
+            let mut o = allowing()?;
+            o.conduct
+                .last_opposite_fill_at
+                .insert((id("a")?, side), at(fill)?);
+            row(&o)
+        };
+        let inside = Ok((Verdict::Deny, Some(ReasonCode::OppositeFillInterval)));
+        assert_eq!(
+            [
+                after_fill(RestingSide::Sell, "2026-09-21T14:59:00Z")?,
+                after_fill(RestingSide::Sell, "2026-09-21T14:59:00.000000001Z")?,
+                after_fill(RestingSide::Sell, "2026-09-21T14:58:59.999999999Z")?,
+                after_fill(RestingSide::Buy, "2026-09-21T14:59:00Z")?,
+            ],
+            [
+                inside,
+                inside,
+                Ok((Verdict::Allow, None)),
+                Ok((Verdict::Allow, None))
+            ],
+            "a sell fill exactly 60 s or less before the buy blocks it; 60 s and a nanosecond does \
+             not; a buy fill never does"
         );
         Ok(())
     }

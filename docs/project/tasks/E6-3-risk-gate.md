@@ -602,7 +602,7 @@ are `crates/mandate-risk/tests/properties.rs` unless another file is named; `han
 | trading §9.3 1× gross exposure including the proposed order; no short sales | `MC-G04`, `MC-G06`, `hand::a_sell_above_the_position_is_would_cross_zero` |
 | trading §9.5 buying power is the lower of model and broker, with the fee reservation, subtracted once | `RC-08` step 3, `RC-18` step 3, `RC-18::generic_cash_account`, `properties::buying_power_is_the_lower_of_the_two`, `hand::a_reservation_includes_the_rounded_fee` |
 | trading §9.6 the collar binds aggressive prices only, within the passive band, by tier | `RC-22` steps 1 and 2, `hand::a_passive_price_inside_the_band_is_allowed`, `hand::a_median_dollar_volume_exactly_at_the_threshold_is_liquid` |
-| trading §9.6 the opposite-fill interval | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval` |
+| trading §9.6 the opposite-fill interval, its last instant included | `RC-22` steps 5 and 6, `properties::only_an_opposite_side_fill_starts_the_interval`, and in-module `gate::tests::the_opposite_fill_interval_includes_its_last_instant` (DEC-163 item 3) |
 | trading §9.6 minimum resting time on a cancel, exempt before a risk-reducing order | `hand::a_cancel_inside_the_resting_window_is_denied`, `hand::a_cancel_before_a_risk_reducing_order_is_exempt` |
 | trading §9.6 participation caps slice a discretionary exit rather than denying it | `properties::a_participation_cap_slices_and_never_denies`, `hand::a_sliced_exit_reports_what_it_applied` |
 | trading §9.6 order-to-fill after 20 orders, compared without dividing | `hand::the_order_to_fill_ratio_needs_twenty_orders`, `properties::the_ratio_is_compared_without_dividing` |

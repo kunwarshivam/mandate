@@ -181,15 +181,16 @@ fn opposite(side: Side) -> RestingSide {
     }
 }
 
-/// §9.6: no opening within `opposite_fill_interval_s` after a fill on the other side in the same
-/// instrument, strictly inside the interval: a fill exactly 60 s before `now` has run its course.
+/// §9.6: no opening "within" `opposite_fill_interval_s` after a fill on the other side in the same
+/// instrument, the interval's last instant included: a fill exactly 60 s before `now` still blocks,
+/// and one a nanosecond earlier does not (DEC-163 item 3).
 fn inside_opposite_fill_interval(input: &GateInput<'_>) -> Result<bool, GateError> {
     let key = (
         input.proposed.instrument.clone(),
         opposite(input.proposed.side),
     );
     match input.conduct.last_opposite_fill_at.get(&key) {
-        Some(last) => Ok(input.now < after(*last, input.config.opposite_fill_interval_s)?),
+        Some(last) => Ok(input.now <= after(*last, input.config.opposite_fill_interval_s)?),
         None => Ok(false),
     }
 }
