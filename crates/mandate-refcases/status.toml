@@ -244,6 +244,38 @@
 'MC-P21' = { status = "passing", story = "E10-1" }
 'MC-P22' = { status = "passing", story = "E10-1" }
 
+# Family F (stream G, E6-3; DEC-77 item 3, DEC-178).
+'MC-F01' = { status = "passing", story = "E6-3" }
+'MC-F02' = { status = "passing", story = "E6-3" }
+'MC-F03' = { status = "passing", story = "E6-3" }
+'MC-F04' = { status = "passing", story = "E6-3" }
+
+# Family G (stream G, E6-3; DEC-77 item 3, DEC-178). MC-G02 passes under DEC-150's FULL_GATE_ONLY
+# entry. MC-G13, an allowed reopen, reaches checks 5 and 6, which pass since E6-8 (#311).
+'MC-G01' = { status = "passing", story = "E6-3" }
+'MC-G02' = { status = "passing", story = "E6-3" }
+'MC-G03' = { status = "passing", story = "E6-3" }
+'MC-G04' = { status = "passing", story = "E6-3" }
+'MC-G05' = { status = "passing", story = "E6-3" }
+'MC-G06' = { status = "passing", story = "E6-3" }
+'MC-G07' = { status = "passing", story = "E6-3" }
+'MC-G08' = { status = "passing", story = "E6-3" }
+'MC-G09' = { status = "passing", story = "E6-3" }
+'MC-G10' = { status = "passing", story = "E6-3" }
+'MC-G11' = { status = "passing", story = "E6-3" }
+'MC-G12' = { status = "passing", story = "E6-3" }
+'MC-G13' = { status = "passing", story = "E6-3" }
+'MC-G14' = { status = "passing", story = "E6-3" }
+'MC-G15' = { status = "passing", story = "E6-3" }
+'MC-G16' = { status = "passing", story = "E6-3" }
+
+# Family L (stream F, E6-4; DEC-77 item 3, DEC-178).
+'MC-L01' = { status = "passing", story = "E6-4" }
+'MC-L02' = { status = "passing", story = "E6-4" }
+'MC-L03' = { status = "passing", story = "E6-4" }
+'MC-L04' = { status = "passing", story = "E6-4" }
+'MC-L05' = { status = "passing", story = "E6-4" }
+
 # Family C (stream F, E10-3; DEC-77 item 3, DEC-172).
 'MC-C01' = { status = "passing", story = "E10-3" }
 'MC-C02' = { status = "passing", story = "E10-3" }

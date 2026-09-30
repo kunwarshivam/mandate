@@ -1,12 +1,19 @@
-//! The `not_in` reading of §9.2's single-comparison shapes (DEC-172 item 9), which no `tests/change.rs`
-//! test and no MC-C case reaches: the MI-11 property generates `in` lists only, so a `not_in` rule
-//! whose direction were ignored would read every change as increasing and pass all of them.
+//! The `not_in` reading of §9.2's single-comparison shapes (DEC-172 item 9), which no MC-C case
+//! reaches, pinned by name beside the code rather than left to a property's draw: a `not_in` rule
+//! whose direction were ignored would read every change as increasing. Also the refusal of a
+//! diverged mandate (DEC-172 item 12), which `tests/` cannot build.
+
+use core::fmt::Debug;
 
 use mandate_domain::AutonomyDecision::{self, Ask, Auto, Deny};
 
-use super::{ChangeClass, Often, classify_autonomy, how_often};
+use super::{
+    ChangeClass, Often, changed_paths, classify, classify_autonomy, how_often, pinning_switch,
+};
 use crate::condition::{Condition, ConditionField, ConditionValue, Operator};
 use crate::document::{Approval, ApproverRef, Autonomy, OnTimeout, Rule, RuleId};
+use crate::validate::tests::mandate;
+use crate::{ParseError, SpecError};
 
 type Checked = Result<(), String>;
 
@@ -84,5 +91,57 @@ fn a_not_in_rule_is_reducing_only_in_the_direction_its_then_allows() -> Checked 
             "{then:?}"
         );
     }
+    Ok(())
+}
+
+/// [`ChangeClass`]'s [`Ord`] is its severity, which `join` takes the maximum of.
+#[test]
+fn the_class_order_is_the_severity_order() {
+    let mut classes = [
+        ChangeClass::Invalid,
+        ChangeClass::RiskReducing,
+        ChangeClass::Neutral,
+        ChangeClass::RiskIncreasing,
+    ];
+    classes.sort();
+    assert_eq!(
+        classes,
+        [
+            ChangeClass::Neutral,
+            ChangeClass::RiskReducing,
+            ChangeClass::RiskIncreasing,
+            ChangeClass::Invalid
+        ]
+    );
+}
+
+fn diverged<T: Debug>(what: &str, result: Result<T, SpecError>) -> Checked {
+    match result {
+        Err(SpecError::Parse(ParseError::Diverged)) => Ok(()),
+        other => Err(format!("{what}: expected diverged, got {other:?}")),
+    }
+}
+
+/// A mandate whose public fields no longer match the document it was parsed from is refused by all
+/// three entry points, on either side of the change, rather than classified from fields the version
+/// would not hash (DEC-172 item 12). The same pair undiverged classifies, so the refusal is the
+/// divergence and not the fields.
+#[test]
+fn a_diverged_mandate_is_refused_by_every_entry_point() -> Checked {
+    let parsed = mandate(&[])?;
+    let mut changed = parsed.clone();
+    changed.risk.max_orders_per_day = 1;
+    for (old, new) in [(&parsed, &changed), (&changed, &parsed)] {
+        diverged("classify", classify(old, new))?;
+        diverged("changed_paths", changed_paths(old, new))?;
+        diverged("pinning_switch", pinning_switch(old, new, &[]))?;
+    }
+    let same = classify(&parsed, &parsed).map_err(|e| e.to_string())?;
+    assert_eq!(same.class, ChangeClass::Neutral);
+    assert_eq!(
+        changed_paths(&parsed, &parsed).map_err(|e| e.to_string())?,
+        []
+    );
+    assert!(!pinning_switch(&parsed, &parsed, &[]).map_err(|e| e.to_string())?);
     Ok(())
 }
