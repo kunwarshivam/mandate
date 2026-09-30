@@ -90,16 +90,23 @@ pub(crate) fn rests(state: &ExecutorState, instrument: &InstrumentId) -> bool {
 
 /// An exit waits while a protective order in its sequence is not yet confirmed gone (§5.4), or
 /// while the agent's own opening in the instrument is live, in any state the broker may hold it
-/// in (§5.3 rule 5) — but never on an opening whose cancel went overdue and whose query has been
-/// answered, and never twice on the same one: that wait is bounded ([`overdue_openings`]; rules 3
-/// and 13, #174 ruling 5863046153, DEC-160 (13)).
+/// in (§5.3 rule 5) — but never on an opening whose cancel went overdue, answered or not, and never
+/// twice on the same submission of it: that wait is bounded ([`overdue_openings`]; rules 3 and 13,
+/// #174 ruling 5863046153, DEC-160 (13), (18)). A broker that never answers the query, or 404s an
+/// opening it acknowledged, ends no wait; an opening it may still hold (`Unknown`) holds the exit
+/// at the gate (`unknown_order_in_flight`), which is rule 13's hold, not this wait.
 pub(crate) fn awaits_cancel(
     state: &ExecutorState,
     agent: &AgentId,
     instrument: &InstrumentId,
     purpose: Purpose,
 ) -> bool {
-    let released = |id: &ClientOrderId| state.details.get(id).is_some_and(|detail| detail.answered);
+    let released = |id: &ClientOrderId| {
+        state
+            .details
+            .get(id)
+            .is_some_and(|detail| detail.cancel_overdue)
+    };
     exits(purpose)
         && (state.exiting.contains_key(instrument) && rests(state, instrument)
             || openings(state, Some(agent), Some(instrument), false).any(|id| !released(&id)))
@@ -107,9 +114,10 @@ pub(crate) fn awaits_cancel(
 
 /// Rule 5's bound, on a tick: once an exit has waited `unknown_absent_window_s` from the moment
 /// its gate allowed it, every opening of its agent in the instrument it still waits on, whatever
-/// its state, is treated as an `Unknown` — marked overdue and queried by id (§5.7) — and once the
-/// query is answered the exit goes ([`release_waiting`]), whatever the answer: a terminal
-/// opening, or one still resting, whose self-cross is the broker's to refuse (DEC-160 (7), (13)).
+/// its state, is treated as an `Unknown` — marked overdue and queried by id (§5.7) — and the exit
+/// goes to the gate at once ([`release_waiting`]), without waiting for the answer: an opening
+/// the broker may still hold as `Unknown` holds it there until the query or reconciliation decides
+/// it, and one still resting is a self-cross the broker's to refuse (DEC-160 (7), (13), (18)).
 pub(crate) fn overdue_openings(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let window = batch.ports.config.unknown_absent_window_s;
@@ -402,7 +410,7 @@ pub(crate) fn settle(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
 /// since accepted (a `Submitting` one is cancelled once it is accepted), and each exit nothing
 /// holds back any more ([`awaits_cancel`]) is re-gated on fresh state and submitted, whatever
 /// ended its wait: a confirmed cancel, a fill, an expiry, a reject, the broker reporting the
-/// opening gone by any path, or a query answered past the bound (#286 round 1, B1).
+/// opening gone by any path, or the bound marking it overdue (#286 round 1, B1; DEC-160 (18)).
 pub(crate) fn release_waiting(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     for exit in waiting_exits(&batch.view) {
         cancel_openings(batch, Some(&exit.agent), Some(&exit.instrument))?;
@@ -2798,9 +2806,10 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// Ruling 5863046153: a cancel never confirmed ends the wait at its bound
+    /// Ruling 5863046153, DEC-160 (18): a cancel never confirmed ends the wait at its bound
     /// (`unknown_absent_window_s`, 15 s here) — the buy is queried as an `Unknown` would be, and
-    /// once answered, still resting, the exit goes; a later exit never waits on that buy again.
+    /// the exit goes at once, without waiting for an answer that may never come; a later exit
+    /// never waits on that buy again.
     #[test]
     fn a_cancel_never_confirmed_ends_the_wait_at_its_bound() -> Result<(), ExecutorError> {
         with_ports!(ports);
@@ -2817,20 +2826,14 @@ mod sequence_tests {
             )),
             "the overdue cancel is journaled"
         );
-        assert_eq!(submitted(&due), 0, "and the exit waits for the answer");
-        let answered = executor.run(buy_reported("new", "0")?, &ports)?;
-        assert_eq!(
-            submitted(&answered),
-            1,
-            "still resting: the exit goes anyway"
-        );
+        assert_eq!(submitted(&due), 1, "the exit goes with the query");
         let again = executor.run(sell(SECOND, "5", "139", Purpose::RiskExit)?, &ports)?;
         assert_eq!(submitted(&again), 1, "never a second wait on the same buy");
         Ok(())
     }
 
-    /// Ruling 5863046153: a cancel the broker refuses because the buy filled is overdue at once;
-    /// the buy is queried, and the answer — filled — releases the exit.
+    /// Ruling 5863046153, DEC-160 (18): a cancel the broker refuses because the buy filled is
+    /// overdue at once; the buy is queried and the exit goes with the query.
     #[test]
     fn a_cancel_refused_because_the_buy_filled_ends_the_wait() -> Result<(), ExecutorError> {
         with_ports!(ports);
@@ -2846,9 +2849,9 @@ mod sequence_tests {
             &ports,
         )?;
         assert_eq!(queried(&refused), vec![BUY]);
-        assert_eq!(submitted(&refused), 0);
+        assert_eq!(submitted(&refused), 1);
         let answered = executor.run(buy_reported("filled", "5")?, &ports)?;
-        assert_eq!(submitted(&answered), 1);
+        assert_eq!(submitted(&answered), 0, "the answer re-sends nothing");
         Ok(())
     }
 
@@ -3402,9 +3405,11 @@ mod sequence_tests {
 
     /// #286 round 1, B1, the first path at its bound: an opening never acknowledged is, at
     /// `unknown_absent_window_s` from the exit's allow, an `Unknown`, marked overdue and queried
-    /// (§5.7). An answer that it rests gets it cancelled and the exit goes in the same step; an
-    /// answer that the broker never had it holds the exit on the `Unknown` in its instrument —
-    /// rule 13's hold — rather than sending it past an order that may yet appear.
+    /// (§5.7), and the exit's wait ends in that step: the gate holds it on the `Unknown` in its
+    /// instrument — rule 13's hold — rather than sending it past an order that may yet appear
+    /// (DEC-160 (18)). After an answer that it rests, the next tick releases the hold, cancels it
+    /// and sends the exit; after an answer that the broker never had it, the hold stays for §5.7's
+    /// lookups to end.
     #[test]
     fn a_submitting_opening_never_acknowledged_is_queried_at_the_bound() -> Result<(), ExecutorError>
     {
@@ -3426,7 +3431,10 @@ mod sequence_tests {
                 "{:?}",
                 drafted(&due)
             );
-            assert_eq!(submitted(&due), 0, "the exit waits for the answer");
+            let exit = IntentId(EventId(EXIT.to_owned()));
+            assert_eq!(verdicts(&due), vec!["hold"], "{:?}", drafted(&due));
+            assert_eq!(submitted(&due), 0);
+            assert!(executor.state.held.contains(&exit), "held on the Unknown");
             let answer = if rests_at_broker {
                 buy_reported("new", "0")?
             } else {
@@ -3434,19 +3442,17 @@ mod sequence_tests {
                     client_order_id: BUY.to_owned(),
                 }))
             };
-            let answered = executor.run(answer, &ports)?;
-            let exit = IntentId(EventId(EXIT.to_owned()));
+            executor.run(answer, &ports)?;
+            let next = executor.run(Input::Tick(RiskClock::from_secs(16)), &ports)?;
             if rests_at_broker {
-                assert_eq!(cancels(&answered), vec![BUY]);
-                assert_eq!(
-                    submitted(&answered),
-                    1,
-                    "the exit goes past the resting buy"
-                );
+                assert_eq!(cancels(&next), vec![BUY], "{:?}", drafted(&next));
+                assert_eq!(submitted(&next), 1, "the exit goes past the resting buy");
             } else {
-                assert_eq!(verdicts(&answered), vec!["hold"]);
-                assert_eq!(submitted(&answered), 0);
-                assert!(executor.state.held.contains(&exit), "held on the Unknown");
+                assert_eq!(submitted(&next), 0);
+                assert!(
+                    executor.state.held.contains(&exit),
+                    "still held on the Unknown"
+                );
             }
         }
         Ok(())
@@ -3482,7 +3488,8 @@ mod sequence_tests {
     /// #286 round 1, B1, the reviewer's second path: the broker reports the opening whose cancel
     /// is outstanding canceled, or filled, with no `CancelAccepted`; the exit goes in that step.
     /// An expiry reported then is no edge out of `PendingCancel` in §5.7's table and is journaled
-    /// and ignored, so the bound ends that wait: the query's answer releases the exit.
+    /// and ignored, so the bound ends that wait: the exit goes with the query, and the answer
+    /// re-sends nothing (DEC-160 (18)).
     #[test]
     fn an_opening_reported_gone_without_a_confirmation_releases_the_exit()
     -> Result<(), ExecutorError> {
@@ -3499,8 +3506,9 @@ mod sequence_tests {
                 assert_eq!(submitted(&pushed), 0, "{:?}", drafted(&pushed));
                 let due = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
                 assert_eq!(queried(&due), vec![BUY]);
+                assert_eq!(submitted(&due), 1, "{status}");
                 let answered = executor.run(buy_reported(status, filled)?, &ports)?;
-                assert_eq!(submitted(&answered), 1, "{status}");
+                assert_eq!(submitted(&answered), 0, "{status}");
             } else {
                 assert_eq!(submitted(&pushed), 1, "{status}: {:?}", drafted(&pushed));
             }
@@ -3530,7 +3538,7 @@ mod sequence_tests {
 
     /// #286 round 1, B1: a cancel refused while the broker has moved the opening out of
     /// `PendingCancel` — back to resting, or part filled — is refused all the same: the opening is
-    /// queried at once and never marked rejected, and the answer releases the exit.
+    /// queried at once and never marked rejected, and the exit goes with the query (DEC-160 (18)).
     #[test]
     fn a_cancel_refused_after_the_opening_moved_on_is_queried_at_once() -> Result<(), ExecutorError>
     {
@@ -3550,15 +3558,16 @@ mod sequence_tests {
                 Some(OrderState::Rejected),
                 "{status}"
             );
-            assert_eq!(submitted(&refusal), 0, "{status}");
+            assert_eq!(submitted(&refusal), 1, "{status}");
             let answered = executor.run(buy_reported(status, filled)?, &ports)?;
-            assert_eq!(submitted(&answered), 1, "{status}");
+            assert_eq!(submitted(&answered), 0, "{status}");
         }
         Ok(())
     }
 
-    /// One step of a random script: the clock moves, an exit of one share arrives, or the broker
-    /// speaks about one of the openings.
+    /// One step of a random script: the clock moves, an exit of one share arrives, the broker
+    /// speaks about one of the openings, loses one it had acknowledged (every later query of it
+    /// 404s), or starts or stops dropping the answers to queries of one.
     #[derive(Clone, Copy, Debug)]
     enum Step {
         Tick(i64),
@@ -3568,6 +3577,8 @@ mod sequence_tests {
         Fill(usize),
         Confirm(usize),
         Refuse(usize),
+        Forget(usize),
+        Mute(usize),
     }
 
     /// `agent-a`'s openings as the script starts, each `(acknowledged, reached the broker)`, and
@@ -3595,6 +3606,8 @@ mod sequence_tests {
             1 => (0_usize..2).prop_map(Step::Fill),
             2 => (0_usize..2).prop_map(Step::Confirm),
             1 => (0_usize..2).prop_map(Step::Refuse),
+            1 => (0_usize..2).prop_map(Step::Forget),
+            1 => (0_usize..2).prop_map(Step::Mute),
         ]
     }
 
@@ -3607,12 +3620,14 @@ mod sequence_tests {
     }
 
     /// The broker's side of one opening: its status (`None` for a submission that never reached
-    /// it), the quantity it filled, and whether a cancel of it is outstanding.
+    /// it, or one it has since lost), the quantity it filled, whether a cancel of it is
+    /// outstanding, and whether the answers to queries of it are dropped.
     struct Venue {
         id: &'static str,
         status: Option<&'static str>,
         filled: u8,
         asked: bool,
+        mute: bool,
     }
 
     impl Venue {
@@ -3633,21 +3648,30 @@ mod sequence_tests {
     }
 
     /// One exit as the journal tells it: when its wait began — its latest `GateDecided` allowing
-    /// it, or its arrival — its latest verdict, and whether it has been submitted, denied or
-    /// abandoned.
+    /// it, or its arrival — its latest verdict and reason, and whether it has been submitted,
+    /// denied or abandoned.
     struct Watched {
         intent: String,
         since: i64,
         verdict: String,
+        reason: String,
         done: bool,
     }
 
-    /// One opening as the journal tells it: its state, whether a wait on it went overdue, and
-    /// whether any record of it followed.
+    /// The gate's reasons for holding an exit, which alone `AGENTS.md` rule 13 lets hold one: an
+    /// `Unknown` order in its instrument, the agent `paused` or `stopped`, or the broker (the
+    /// code a blocked account holds an exit with, gate.rs `account_failure`).
+    const RULE_13_HOLDS: [&str; 4] = [
+        "unknown_order_in_flight",
+        "agent_paused",
+        "agent_stopped",
+        "broker",
+    ];
+
+    /// One opening as the journal tells it: its state, and whether a wait on it went overdue.
     struct Seen {
         state: String,
         overdue: bool,
-        answered: bool,
     }
 
     /// The oracle, derived from the drafts alone and independently of the fold.
@@ -3666,6 +3690,9 @@ mod sequence_tests {
                     for exit in self.exits.values_mut() {
                         if field("intent_id") == Some(exit.intent.as_str()) {
                             verdict.clone_into(&mut exit.verdict);
+                            field("reason_code")
+                                .unwrap_or_default()
+                                .clone_into(&mut exit.reason);
                             exit.since = if verdict == "allow" {
                                 self.now
                             } else {
@@ -3687,7 +3714,7 @@ mod sequence_tests {
                             .openings
                             .iter()
                             .filter(|(_, seen)| {
-                                !seen.answered
+                                !seen.overdue
                                     && !matches!(
                                         seen.state.as_str(),
                                         "filled" | "canceled" | "rejected" | "expired" | "intent"
@@ -3707,11 +3734,8 @@ mod sequence_tests {
                 "OrderStateChanged" => {
                     let id = field("client_order_id").unwrap_or_default();
                     if let Some(seen) = self.openings.get_mut(id) {
-                        if draft.payload.get("cancel_overdue") == Some(&Value::Bool(true)) {
-                            seen.overdue = true;
-                        } else if seen.overdue {
-                            seen.answered = true;
-                        }
+                        seen.overdue = seen.overdue
+                            || draft.payload.get("cancel_overdue") == Some(&Value::Bool(true));
                         field("state")
                             .unwrap_or_default()
                             .clone_into(&mut seen.state);
@@ -3723,16 +3747,15 @@ mod sequence_tests {
         }
 
         /// No exit is neither submitted nor denied once its wait has lasted
-        /// `unknown_absent_window_s`, except one rule 13 holds.
+        /// `unknown_absent_window_s`, except one the gate holds for a reason rule 13 names.
         fn bounded(&self, window: i64) -> Result<(), String> {
             for (id, exit) in &self.exits {
-                if !exit.done
-                    && exit.verdict != "hold"
-                    && self.now.saturating_sub(exit.since) >= window
-                {
+                let exempt =
+                    exit.verdict == "hold" && RULE_13_HOLDS.contains(&exit.reason.as_str());
+                if !exit.done && !exempt && self.now.saturating_sub(exit.since) >= window {
                     return Err(format!(
-                        "{id} ({}) waited from {} to {}",
-                        exit.verdict, exit.since, self.now
+                        "{id} ({} {}) waited from {} to {}",
+                        exit.verdict, exit.reason, exit.since, self.now
                     ));
                 }
             }
@@ -3741,7 +3764,7 @@ mod sequence_tests {
     }
 
     /// Hands one input to the executor, and the broker answers every query of an opening at
-    /// once, until nothing more is asked.
+    /// once, unless it drops that opening's answers, until nothing more is asked.
     fn deliver(
         executor: &mut Executor,
         ports: &Ports<'_>,
@@ -3776,7 +3799,10 @@ mod sequence_tests {
                         }
                     }
                     Effect::Broker(BrokerRequest::GetOrderByClientId(id)) => {
-                        for venue in venues.iter().filter(|venue| venue.id == id.as_str()) {
+                        for venue in venues
+                            .iter()
+                            .filter(|venue| venue.id == id.as_str() && !venue.mute)
+                        {
                             inputs.push_back(venue.answer().map_err(failed)?);
                         }
                     }
@@ -3839,13 +3865,13 @@ mod sequence_tests {
                 status: (*acknowledged || *reached).then_some("new"),
                 filled: 0,
                 asked: false,
+                mute: false,
             });
             watch.openings.insert(
                 id.to_owned(),
                 Seen {
                     state: state.to_owned(),
                     overdue: false,
-                    answered: false,
                 },
             );
         }
@@ -3865,6 +3891,7 @@ mod sequence_tests {
                             intent: intent.clone(),
                             since: watch.now,
                             verdict: String::new(),
+                            reason: String::new(),
                             done: false,
                         },
                     );
@@ -3918,6 +3945,18 @@ mod sequence_tests {
                     }
                     _ => None,
                 },
+                Step::Forget(which) => {
+                    if let Some(venue) = venues.get_mut(which) {
+                        venue.status = None;
+                    }
+                    None
+                }
+                Step::Mute(which) => {
+                    if let Some(venue) = venues.get_mut(which) {
+                        venue.mute = !venue.mute;
+                    }
+                    None
+                }
             };
             if let Some(input) = input {
                 deliver(&mut executor, &ports, &mut venues, &mut watch, input)?;
@@ -3927,12 +3966,13 @@ mod sequence_tests {
         Ok(())
     }
 
-    /// #286 round 1, B1: over random scripts of ticks, exits, acknowledgments, broker reports,
-    /// fills, and cancels confirmed or refused, against openings acknowledged or not and
+    /// #286 round 1, B1, and round 2, B1′: over random scripts of ticks, exits, acknowledgments,
+    /// broker reports, fills, cancels confirmed or refused, openings the broker loses after
+    /// acknowledging them, and query answers dropped, against openings acknowledged or not and
     /// submissions that reached the broker or not, no exit stays neither submitted nor denied
-    /// past `unknown_absent_window_s` plus one tick, except under rule 13's holds; and no exit is
-    /// submitted while an opening of its agent is live, unless the wait on it went overdue and was
-    /// answered. The oracle reads the journal's drafts, not the fold.
+    /// past `unknown_absent_window_s` plus one tick, except one the gate holds for a reason rule
+    /// 13 names; and no exit is submitted while an opening of its agent is live, unless the wait
+    /// on it went overdue. The oracle reads the journal's drafts, not the fold.
     #[test]
     fn no_exit_waits_past_the_bound_but_under_a_rule_13_hold() -> Result<(), String> {
         let config = ProptestConfig {

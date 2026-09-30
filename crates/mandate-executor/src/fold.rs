@@ -463,8 +463,6 @@ fn order_state_changed(
     let detail = state.details.entry(id.clone()).or_default();
     if flag(payload, "cancel_overdue") {
         detail.cancel_overdue = true;
-    } else if detail.cancel_overdue {
-        detail.answered = true;
     }
     if flag(payload, "ignored") {
         return Ok(());

@@ -89,10 +89,11 @@ pub(crate) struct OrderDetail {
     pub(crate) unknown_since: Option<RiskClock>,
     pub(crate) last_absence: Option<RiskClock>,
     /// An exit waited on the order past rule 5's bound, or the broker refused its cancel, and the
-    /// order was queried; `answered` once any later record of it is folded, and only then. An exit
-    /// then never waits on it again (#174 ruling 5863046153).
+    /// order was queried. From then on no exit waits on this submission attempt again, answered
+    /// or not: whatever the query finds is the gate's to hold (`unknown_order_in_flight`) and the
+    /// broker's to refuse. A resubmission after a confirmed absence is a new attempt, with a new
+    /// detail, which an exit waits on afresh (#174 ruling 5863046153, DEC-160 (18), (22)).
     pub(crate) cancel_overdue: bool,
-    pub(crate) answered: bool,
 }
 
 /// An adoption on the journal (`OrderStateChanged` with `adopted`) whose `CompensatingEvent` has
