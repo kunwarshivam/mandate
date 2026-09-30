@@ -146,6 +146,7 @@
   "below_price_floor",
   "below_liquidity_floor",
   "leveraged_etp_not_enabled",
+  "crypto_pair_not_usd",
   "concentration_limit",
   "max_order_size",
   "reentry_cooldown",

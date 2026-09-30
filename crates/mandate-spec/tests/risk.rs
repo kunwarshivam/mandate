@@ -852,7 +852,6 @@ fn a_hard_breach_latches_only_on_a_second_quote_at_the_hard_wait() -> Result<(),
 /// (`daily_breach_min_s` is 0 here) and the mode still does not move, because the drawdown rung holds it.
 /// One mode event in the whole walk is the assertion.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_strictest_restriction_holds_the_mode_and_only_a_change_is_journalled() -> Result<(), String>
 {
     let mandate = swing(&[
@@ -1026,7 +1025,6 @@ fn reported_ratios_round_half_to_even_at_twelve_places() -> Result<(), String> {
 /// E₀ to 9800, against which the day's loss is **zero** — so the latch 40 s later can only have been
 /// measured against the previous day's E₀, which is the whole of the rule.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_breach_pending_at_the_rollover_is_measured_against_the_day_it_began_in() -> Result<(), String>
 {
     let mandate = swing(&[])?;
@@ -1092,7 +1090,6 @@ fn a_breach_pending_at_the_rollover_is_measured_against_the_day_it_began_in() ->
 /// after it puts E back at 10000 — above the previous day's line as well as the new one. The carried
 /// confirmation therefore never reaches its window and is dropped, and no later tick can revive it.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_flash_breach_before_midnight_is_discarded_after_the_rollover() -> Result<(), String> {
     let mandate = swing(&[])?;
     let clock = RegularSessionClock::new();
@@ -1155,7 +1152,6 @@ fn a_flash_breach_before_midnight_is_discarded_after_the_rollover() -> Result<()
 /// The breach lands at 23:30 New York, so the rollover half an hour later is not enough: the 3600 s
 /// minimum is still 1800 s away. A tick one second short of it lifts nothing and the tick on it does.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_daily_lift_waits_for_the_minimum_as_well_as_the_new_day() -> Result<(), String> {
     let mandate = swing(&[("/risk/breach_confirm_s", Some(common::i(0)))])?;
     let clock = RegularSessionClock::new();
@@ -1210,7 +1206,6 @@ fn the_daily_lift_waits_for_the_minimum_as_well_as_the_new_day() -> Result<(), S
 /// 2% line, so the latch is renewed with `new_day_breach`. Five and a half hours later the minimum has
 /// long passed and the limit is still held, because the renewal reset the wait for a new risk day.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_confirmed_new_day_breach_renews_the_latch() -> Result<(), String> {
     let mandate = swing(&[("/risk/breach_confirm_s", Some(common::i(0)))])?;
     let clock = RegularSessionClock::new();
@@ -1957,7 +1952,6 @@ fn an_applied_allocation_change_scales_the_marks_upward_and_arms_nothing() -> Re
 /// between the 15:59:30 mark and the 08:00 pre-market print only 30 s of regular session pass, which is why
 /// nothing is stale despite sixteen hours of wall clock.
 #[test]
-#[ignore = "pending E6-4"]
 fn extended_hours_marks_are_ignored_and_staleness_counts_regular_session_seconds()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
@@ -2047,7 +2041,6 @@ fn extended_hours_marks_are_ignored_and_staleness_counts_regular_session_seconds
 /// A removed instrument is restricted in that instrument only, and re-admission clears it with the reason
 /// that re-admitted it (§5.9, §2.3, MI-1).
 #[test]
-#[ignore = "pending E6-4"]
 fn a_removed_instrument_is_restricted_alone_and_re_admission_clears_it() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -2113,7 +2106,6 @@ fn a_removed_instrument_is_restricted_alone_and_re_admission_clears_it() -> Resu
 /// far shorter than the 60 s window, then thirty more: the goal completes at 14:02:10 with the one outcome
 /// §3.1 gives a `profit_stop`, and nothing about it is a `RiskLimitTriggered`.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_profit_stop_confirms_by_time_in_breach_and_is_not_a_limit() -> Result<(), String> {
     let mandate = swing(&[
         (
@@ -2302,7 +2294,6 @@ fn the_journal_follows_the_evaluation_order() -> Result<(), String> {
 /// where an equity has no session at all: a bid there would be ignored and 120 s of it would count as
 /// zero. For crypto the bid moves E, and the 120 s both confirm the daily loss and age the mark out.
 #[test]
-#[ignore = "pending E6-4"]
 fn crypto_counts_every_second_for_equity_for_confirmation_and_for_staleness() -> Result<(), String>
 {
     let mandate = accumulator(&[])?;
@@ -2868,7 +2859,6 @@ proptest! {
     /// A mark that is not a regular-session sane quote never moves an equity's E, so it can never latch a
     /// limit; the most it does is restrict its own instrument (§5.2, MI-1).
     #[test]
-    #[ignore = "pending E6-4"]
     fn a_mark_outside_the_regular_session_or_off_its_checks_never_latches_a_limit(
         marks in prop::collection::vec((1_i64..400, any::<bool>(), 30_u64..300), 1..10)
     ) {
@@ -3369,7 +3359,6 @@ proptest! {
     /// One `InstrumentRestrictionChanged` per restriction that changed, never one standing for another
     /// (§5.9, §5.10).
     #[test]
-    #[ignore = "pending E6-4"]
     fn one_instrument_event_per_changed_restriction(
         changes in prop::collection::vec((any::<bool>(), 30_u64..300), 1..10)
     ) {

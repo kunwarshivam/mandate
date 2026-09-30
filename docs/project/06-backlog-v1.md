@@ -967,7 +967,9 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   a BTC/USDT pair the research agent admitted is, so the journaled denial would say something false
   about it. Registering a code adds no risk and closes a gap, so DEC-176 lets an agent do it in its
   own spec PR; the tests' `PAIR_CODE` constant flips with it ([DEC-254](04-decision-log.md#decisions)
-  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2).
+  item 3; DEC-129 items 25 and 27; #342 review, minors 1 and 2). *Done (#352,
+  [DEC-255](04-decision-log.md#decisions)):* the code is registered and §3.2 item 7 names it; the
+  gate's emission and the `PAIR_CODE` flip stay with E6-10's implementation.
 - **The broker symbol's quote currency is read exactly** (E6-10; #342 review, minor 3). The gate's
   USD-pair rule rests on the §3.1 loader mapping a pair to `QuoteCurrency`, and E7-8's
   `TradingClient::asset` criterion does not name it. The loader matches `USD` exactly and
@@ -1289,6 +1291,27 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
   with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
   Record the reading in a decision-log row in the same change as the xtask edit.
+  *Done (DEC-253):* the flag governs. `mutated_crates` reads `safety_critical` alone, pinned by
+  `the_gate_mutates_every_safety_critical_crate_tool_layer_included`; ADR-0001's ES-11 and ES-13
+  say so, and ES-13 records `risk_gate.rs` and `order_builder.rs` as exceptions, not split.
+- `parse_status` returning an empty map survives every test (DEC-253's proof run: `cargo xtask ci
+  mutants` on a diff touching it missed `replace parse_status -> Result<BTreeMap<String,
+  CaseStatus>, String> with Ok(BTreeMap::new())`). `tests/refcases.rs` treats a case the map does
+  not name as pending and ignores it, so a harness that read no status would run no case and pass,
+  and ES-11's "a passing case never regresses" would hold vacuously. Add a live test in
+  `crates/mandate-refcases/src/lib.rs` that parses a two-suite sample and asserts the whole map,
+  and one that reading the committed `status.toml` yields at least one passing case. Until then
+  the mutation gate fails any change whose diff touches `parse_status`.
+- Family B's harness arm has 13 mutants no live test catches (DEC-253's timing run of the gate over
+  DEC-250's diff of `crates/mandate-refcases/src/mandate/order_builder.rs`: 79 mutants, 40 caught,
+  26 unviable, 13 missed). `scaling_rung` (five: every return value, its `==`, its `&&`) is reached
+  only by the trim cases, which fail pending E6-4, so no live test runs it; `judge`'s
+  `nothing_proposed` guard can be `true`; `Inputs::read`'s `has_prior_fill` default can lose its `!`
+  (DEC-250 item 13: no base rule reads the flag); `listing`'s
+  `qty_increment < 1` (fractionable) can be `==`, `>` or `<=`; and `builder_error` can return any
+  string or flip its `==`. One tests correction of the arm adds doctored-case tests in
+  `crates/mandate-refcases/tests/`, as `mandate_gate_harness.rs` does for families G and F, so each
+  survivor is caught; until then the gate fails any change whose diff touches those lines.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
@@ -1451,41 +1474,34 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   a limit on one print, which DEC-63 rules out. The crate follows the spec (DEC-167 item 6), and no
   reference case changes either way. Drop `"fill"` from the tuple and regenerate with
   `reference/mandate/generate.py`, which must leave `fixtures/refcases/mandate.json` unchanged.
-- **The three `ref.py` readings the #124 handover left for R3 and R4.** (1) R3: a daily hard breach
-  pending at the rollover is popped into the rollover record and never read again, so `hard_breach`
-  can stay applied with nothing to clear it; keep it pending under the new day and record the reading
-  as a DEC-167 item. (2) R3: the renewal's `acked` is always false, since only a `flatten_and_pause`
-  daily is acknowledged; write it as false. (3) R4: settling time before an allocation change only
-  when `at > self.t` is equivalent to settling always; settle always. Handover items 4 (one cash sum)
-  and 5 (the post-loop lift reset) are R2's and are in `risk/fold.rs`.
-- **No MC-R case passes until R3 (R3's status PR).** Every equity case builds on `two_stock_swing`,
-  whose goal is `profit_stop` (R3), and every crypto case opens with `risk_day_started` (R3). With
-  the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
-  R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
-  mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+- **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
+  only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
+  R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
+  reset) are R2's and are in `risk/fold.rs`.
+- **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
+  MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
+
+From E6-4's slice R3 (stream H2; DEC-167 item 7):
+
+- **`ref.py` drops a daily hard wait at the rollover (reference fix).** `RiskState.step` pops
+  `hard_first["max_daily_loss"]` into the rollover record and never reads it again, so `hard_breach`
+  can stay applied with nothing to clear it. The crate keeps the wait under the new day (DEC-167
+  item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
+  leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
+  reading into the fold leaves the same fifteen MC-R cases passing).
 
 Minor findings from the independent review of slice R2 ([#324](https://github.com/kunwarshivam/mandate/pull/324);
-held back by the freeze rule; R3's builder is asked to take 1, 2, 4, and 6 where they fit its code):
+held back by the freeze rule; R3 took minors 1, 2, and 4, DEC-167 item 7 (i) and (j), and minor 6,
+`SpecError::Unimplemented`'s doc):
 
-- **Say that a caller fails closed on a refused step** (#324, minor 1). `RiskState::step`'s
-  `# Errors` block lists the refusals and that the state is unchanged, but not what the caller does:
-  treat any `Err` as a refusal to decide (stop stepping the agent, admit no new risk, keep exits
-  open, escalate), never skip the input as though it had not happened. `E6-3-risk-gate.md` states
-  the same rule for `GateError`.
-- **Clamp session seconds by wall seconds** (#324, minor 2). The fold credits the caller's
-  `SessionClock` seconds to the lift delay unclamped, so a clock that over-reports lifts a
-  `scale_sizes` rung early. `session_s.min(wall_s)` only tightens, and is an identity for crypto.
 - **The `strictest` oracle reads the daily-loss mode by hand** (#324, minor 3; a tests correction).
   `tests/risk.rs`'s `strictest` maps `DailyLoss` to `exits_only`, while the fold reads
-  `daily_loss_action`. No walk triggers the daily loss today; R3's renewal walks could, so take the
-  action from the mandate before they do.
-- **Make a refused fold step inert by type** (#324, minor 4). `Fold` writes `self.at` and the mark
-  age before the staleness guard can refuse, and only `RiskState::step`'s clone keeps a refusal
-  inert. `Fold::step(&self) -> Result<(Self, Outcome)>` would hold it at rung 1.
+  `daily_loss_action`. Its property still walks `ladder_only`, whose daily action is the base's
+  `exits_only`, and R3's renewal walks are in-module tests that do not use it; take the action from
+  the mandate before a walk over a `flatten_and_pause` daily loss does.
 - **A `Qty::checked_sub` failure is always reported as a short sale** (#324, minor 5). True while a
   negative result is its only failure; name the error by its kind if `Qty` gains another.
-- **`SpecError::Unimplemented`'s doc is stale** (#324, minor 6). It says the implementation PR
-  removes the variant; DEC-167 item 5 makes it the answer for what R3 and R4 still own.
 - **Wrap `M5-F-mandate-spec.md`'s long line** (#324, minor 7), the R2 row that runs past the file's
   wrap width.
 
