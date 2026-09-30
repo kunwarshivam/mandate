@@ -399,13 +399,16 @@ fn each_purpose_reaches_the_gate_as_its_proposer() {
         ),
         Ok(())
     );
-    assert_eq!(
-        scene(
-            json!([proposal(TEN_AM, sell_aapl("discretionary_exit"), allow())]),
-            |_| {}
-        ),
-        Ok(())
-    );
+    for purpose in ["discretionary_exit", "owner_exit"] {
+        assert_eq!(
+            scene(
+                json!([proposal(TEN_AM, sell_aapl(purpose), allow())]),
+                |_| {}
+            ),
+            Ok(()),
+            "{purpose} in the regular session"
+        );
+    }
 }
 
 #[test]
