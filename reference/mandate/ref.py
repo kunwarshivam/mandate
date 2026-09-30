@@ -1004,6 +1004,8 @@ def autonomy(m, a, st=None):
         res = {"decision": "auto", "by": f"delegation:{lifted_by}", "delegation_id": lifted_by, "lifted": res["by"]}
     if a.get("new_instrument", False) and STRICT[au["admission"]] > STRICT[res["decision"]]:
         res = {"decision": au["admission"], "by": "admission_ceiling"}
+    if a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]:
+        res = {"decision": "ask", "by": "client_ceiling"}
     if res["decision"] == "ask":
         t = au["approval"]["two_approver_above_usd"]
         res["approvers_required"] = 2 if t is not None and D(a["order_usd"]) > D(t) else 1

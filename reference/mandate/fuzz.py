@@ -733,6 +733,33 @@ def fuzz_delegations(n):
             check(all(T(dl["starts_at"]) <= tt < T(dl["expires_at"]) for tt, _ in mine),
                   "MI-27 a delegation lifts only inside [starts_at, expires_at)", ctx)
 
+def fuzz_client_ceiling(n):
+    """MI-30: an order an owner-connected client requested is never auto, whatever the rules, default, or delegations
+    say; a deny still denies, and an order the owner or the agent requested is decided exactly as before."""
+    for _ in range(n):
+        m = rand_delegated_mandate(any_source=rng.random() < 0.3)
+        if m is None:
+            continue
+        m["autonomy"]["default"] = rng.choice(["auto", "ask", "deny"])
+        if rng.random() < 0.3:
+            m["autonomy"]["admission"] = "auto"
+        plain = copy.deepcopy(m)
+        plain["autonomy"]["delegations"] = []
+        for _ in range(20):
+            t = DELEG_NOW + timedelta(seconds=rng.randint(-86400, 35 * 86400))
+            st = rand_state(t, {}, trouble_p=0.2)
+            a = rand_autonomy_action()
+            base_decision = autonomy(m, a, st)["decision"]
+            without_delegations = autonomy(plain, a, st)["decision"]
+            client = autonomy(m, dict(a, requested_by="client"), st)
+            expected = "deny" if without_delegations == "deny" else "ask"
+            ctx = (m["autonomy"], a, st, base_decision, client)
+            check(client["decision"] != "auto", "MI-30 a client-requested order is never auto", ctx)
+            check(client["decision"] == expected,
+                  "MI-30 a client-requested order is ask, or deny when the rules deny, with no delegation lifting it", ctx)
+            check(autonomy(m, dict(a, requested_by="owner"), st)["decision"] == base_decision,
+                  "MI-30 the client ceiling leaves owner and agent requests unchanged", ctx)
+
 def mutate_delegations(ds):
     """One random change to a delegation list; returns what kind of change it was."""
     k = rng.random()
@@ -829,6 +856,7 @@ if __name__ == "__main__":
     fuzz_delegations(600)
     fuzz_delegation_changes(600)
     fuzz_delegation_rules(400)
+    fuzz_client_ceiling(400)
     from collections import Counter
     print("failures:", len(FAIL), Counter(f[0] for f in FAIL))
     for name, ctx in FAIL[:3]:

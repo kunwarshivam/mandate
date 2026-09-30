@@ -16,6 +16,8 @@ of truth for agent and account state (event-sourced), the audit trail, and the i
   source of its autonomy decision and, when a delegation lifted it, the `delegation_id` that
   delegation usage is counted from ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003));
   `ApprovalRequested` records the delegation shapes offered and `ApprovalResponded` the shape chosen.
+  `DecisionMade` also records `requested_by`, and the client's id for a client-requested order
+  ([DEC-185](../project/04-decision-log.md#decisions)).
   No new event type; test vectors are unchanged. The payload schemas for these fields follow once the
   agent stream's payload schemas are closed.
 - **v0.4 ([DEC-97](../project/04-decision-log.md#decisions), [DEC-111](../project/04-decision-log.md#decisions)):**
@@ -314,7 +316,7 @@ Payload schemas live in code with JSON Schema exported to `schemas/events/`. **R
 | `ModelInvocationRecorded` | mod | purpose (compiler, fast model, research), provider, model and version, parameters, seed, prompt and retrieved context (artifact), response (artifact), provider request ID |
 | `ModelOutputRecorded` | man | signal model id, version, content hash, instrument, as_of, expires_at, direction, conviction, confidence, horizon, thesis (artifact) and, for the research agent, its thesis and lineage ids; `ignored` reason if not used |
 | `ThesisProposed`, `ThesisRevised` | man, mod | The research agent's output and its admission decision ([mandate spec §8.4, §8.5](mandate.md#84-the-research-agent-dec-97-adr-0002)): research agent id, version, and content hash; thesis id, lineage id, revision, and for `ThesisRevised` the `predecessor_thesis_id` and what the revision changed; instrument, asset class, direction, horizon, evidence and cited sources, corroboration kind, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); `admitted` and the refusal reason from the ordered §8.5 checks |
-| `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, or the admission ceiling), `delegation_id` when a delegation lifted it ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)) |
+| `DecisionMade` | man | proposed action, combined conviction and combined score, outputs used, model weights, clips applied, gate dry-run result, autonomy classification and its source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling), `delegation_id` when a delegation lifted it, and `requested_by` (`agent`, `owner`, or `client`) with the client's id when a connected client asked (mandate §6.2 step 5a, DEC-185) ([mandate spec §6.5](mandate.md#65-delegations-dec-181-adr-0003)) |
 | `IntentProposed` | man | intent fields (its `event_id` is the intent ID) |
 | `ApprovalRequested`, `ApprovalDelivered`, `ApprovalResponded`, `ApprovalTimedOut`, `ApprovalCanceled` | man | content shown (artifact), bound quantity, limit price, and mandate version, cancel reason, channel and message ID, delivery status, responder (opaque) and role, step-up evidence (assertion ID, authentication time, method), separation-of-duties result; the delegation shapes offered (`ApprovalRequested`) and the shape chosen with, if any, the new mandate version and delegation id (`ApprovalResponded`) |
 | `AgentModeChanged`, `KillSwitchActivated` | — | from, to, reason; scope and initiator |

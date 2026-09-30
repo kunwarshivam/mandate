@@ -76,11 +76,21 @@ MUTANTS = {
     "V-041 accepts a span past 30 days": ('not 0 < span <= DELEGATION_MAX_SPAN_S', 'not 0 < span'),
     "V-042 is never raised": ('            errs.add("V-042")', '            pass'),
     "V-043 ignores the second approver": ('(two is None or D(d["max_order_usd"]) <= D(two))', 'True'),
+    "the client ceiling is skipped": ('a.get("requested_by", "agent") == "client" and ', 'False and '),
+    "the client ceiling turns a deny into an ask": (
+        'a.get("requested_by", "agent") == "client" and STRICT[res["decision"]] < STRICT["ask"]',
+        'a.get("requested_by", "agent") == "client"'),
+    "a delegation lifts a client request": (
+        '    lifted_by = delegation_lift(m, a, res, st)',
+        '    lifted_by = delegation_lift(m, a, res, st)\n'
+        '    if lifted_by is not None and a.get("requested_by") == "client":\n'
+        '        return {"decision": "auto", "by": f"delegation:{lifted_by}", "delegation_id": lifted_by}'),
+    "the client ceiling reaches owner requests": ('a.get("requested_by", "agent") == "client"', 'a.get("requested_by", "agent") != "agent"'),
 }
 PROBE = ("import sys; sys.argv=['x','1']; exec(open('fuzz.py').read().split('if __name__')[0]); "
          "fuzz_ladder_precision(200); fuzz_risk(400); fuzz_gate(200); fuzz_gate_universe(200); fuzz_admission(300); fuzz_expiry(400); "
          "fuzz_lineage(300); fuzz_pinning(400); fuzz_autonomy(1500); "
-         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); "
+         "fuzz_delegations(400); fuzz_delegation_changes(400); fuzz_delegation_rules(300); fuzz_client_ceiling(300); "
          "print(len(FAIL))")
 
 def main():

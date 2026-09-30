@@ -20,6 +20,10 @@ builder, versioning, change classification, and the records kept.
 
 ## Change history
 
+- **v0.6, amended ([DEC-185](../project/04-decision-log.md#decisions)):** the client ceiling: an
+  order an owner-connected client requested is never `auto` (§6.2 step 5a, MI-30), the approval card
+  names the client (§6.4), and `DecisionMade` records `requested_by` (§10). It only tightens, so no
+  existing reference case changes.
 - **v0.6, amended ([DEC-181](../project/04-decision-log.md#decisions), [ADR-0003](../adr/0003-earned-autonomy.md)):**
   `autonomy.delegations` lets the owner turn an `ask` into `auto` inside the envelope, bounded in
   value, count, and time and suspended by any sign of trouble (§6.2 step 4a, §6.5); V-018 and V-022
@@ -104,6 +108,7 @@ changes, acknowledgments, and version changes (AGENTS.md, "Getting it right the 
 | MI-27 | A delegation is bounded: over any sequence of decisions, the orders decided `auto` under it are each at most its `max_order_usd`, number at most its `max_orders`, total at most its `max_total_usd`, and were all decided in [`starts_at`, `expires_at`) (checked against an independent accumulator over the decision log) |
 | MI-28 | While the agent's effective mode is not `normal`, a drawdown rung is active, a limit is accumulating breach time or latched, or a kill switch in the agent's scope is engaged, every decision is what it would be with no delegations |
 | MI-29 | A version classified risk-reducing or neutral never lets a delegation lift a decision the previous version's delegations would not have lifted, given the same usage (the delegation half of MI-11) |
+| MI-30 | An `open` or `increase` order an owner-connected client requested (`requested_by: client`, DEC-141) is never `auto`: it is `ask`, or `deny` when the rules deny, whatever the rules, the default, a delegation, or the admission setting say. Orders the owner or the agent requested are decided exactly as without this rule ([DEC-185](../project/04-decision-log.md#decisions)) |
 
 ## 2. Lifecycle
 
@@ -616,6 +621,14 @@ exit, typed by its origin. A sell above the position is rejected (no short sales
    admission is never automatic unless the owner entered and confirmed `auto` for admissions
    (V-022, W-006); and because the ceiling only tightens, a `deny` rule still denies (DEC-05). The
    ceiling applies after step 4a, so no delegation makes an admission automatic.
+   - **5a. Client ceiling** ([DEC-185](../project/04-decision-log.md#decisions)). If the order was
+     requested by an owner-connected client (`requested_by: client`), the decision becomes the
+     stricter of the result so far and `ask` (MI-30). A connected agent reads untrusted content (web
+     pages, posts, messages), so an order it asks for always reaches the human, even under `auto`
+     rules, an `auto` default, or a live delegation. `requested_by` is `agent` (the order builder's
+     own proposal), `owner` (the owner through the web app or CLI), or `client` (through the MCP
+     server of E10-6). The platform sets it from the authenticated channel, never from the request's
+     content, and the order builder carries it from the request to the order it proposes.
 6. `auto` → submit (the gate runs again at submission). `deny` → skip. `ask` → approval (§6.4).
 
 ### 6.3 Condition language
@@ -654,6 +667,8 @@ example, `thesis_confidence lt 0.6 → ask`).
     mandate version, and the rule that triggered it;
   - the combined score, labeled "combined model score, not a probability of profit";
   - the deadline, and "If you do nothing, this action is skipped".
+  - For a client-requested order (§6.2 step 5a), the client that asked, by the name the owner gave
+    it when connecting it, and "Requested by your connected agent".
   - Model outputs sit behind "View model output", labeled by author. A user-selected model is
     labeled "Output of software you selected"; the research agent's thesis is labeled
     platform-authored.
@@ -1096,7 +1111,7 @@ delegation changes against random actions, times, usage, and suspension states.
 | `MandateVersionApplied`, `HighWaterMarkReset`, `PositionReleased`, `UniverseChanged` | account | §5.10 |
 | `ThesisProposed`, `ThesisRevised` | agent | Research agent id, version, and content hash; thesis id, lineage id, revision, and (for a revision) the predecessor and what it changed; instrument, direction, horizon, evidence and sources, corroboration, invalidation, conviction, confidence; the source-allowlist version; prompt and response (artifacts); the admission decision and its reason (§8.5) |
 | `OwnerExitRequested`, `ApprovalRequested` … `ApprovalCanceled` | agent | §5.10; content shown (artifact), bound quantity and price, approvers, step-up evidence; for `ApprovalRequested`, the delegation shapes offered (§6.4); for `ApprovalResponded`, the shape chosen and, if one, the new mandate version and delegation id |
-| `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, or the admission ceiling) and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
+| `DecisionMade` | agent | Journal spec §9; its autonomy classification names the source (`rule:<id>`, `default`, built-in, the admission ceiling, or the client ceiling) and `requested_by` and, when §6.2 step 4a lifted the decision, `delegation_id`. Delegation usage (§6.5) is counted from these events |
 
 A mandate version and its records are retained at least 6 years after the later of its
 supersession and the closing (or release) of every position opened under it (trading spec §13).
