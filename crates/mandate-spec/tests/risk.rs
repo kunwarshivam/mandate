@@ -449,7 +449,6 @@ fn two_scale_rungs() -> Value {
 /// (0.08) needs 840 (96.6); neither reaches its 1.25× hard level (787.5 and 1050) at those bids, so both
 /// arrive by plain confirmation with `breach_confirm_s` of 0.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_boundary()
 -> Result<(), String> {
     let mandate = ladder_only(&[])?;
@@ -559,7 +558,6 @@ fn the_ladder_scales_and_the_hysteresis_band_lifts_only_on_the_far_side_of_its_b
 /// H = 10500, so rung 0 (0.02) arms at H − E ≥ 210 (a bid of 102.9) and rung 1 (0.04) at 420 (100.8).
 /// 0.75 × 0.5 = 0.375 is recomputed by hand: no test may ask the crate what the product is.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_size_factor_is_the_product_of_the_active_rungs() -> Result<(), String> {
     let mandate = ladder_only(&[("/risk/drawdown_ladder", Some(two_scale_rungs()))])?;
     let clock = RegularSessionClock::new();
@@ -608,7 +606,6 @@ fn the_size_factor_is_the_product_of_the_active_rungs() -> Result<(), String> {
 /// rung triggers at 14:03:10 and not before. An implementation that reset on the first quiet interval
 /// would still be at 20 s there.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_short_recovery_does_not_restart_confirmation() -> Result<(), String> {
     let mandate = swing(&[
         ("/risk/max_daily_loss", Some(s("0.5"))),
@@ -663,7 +660,6 @@ fn a_short_recovery_does_not_restart_confirmation() -> Result<(), String> {
 /// window — so breach time is 0. Re-entering at 14:04:00 therefore triggers at 14:05:00 and not at
 /// 14:04:30, which is where the 30 s already banked would have carried it.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_recovery_longer_than_the_window_restarts_confirmation() -> Result<(), String> {
     let mandate = swing(&[
         ("/risk/max_daily_loss", Some(s("0.5"))),
@@ -715,7 +711,6 @@ fn a_recovery_longer_than_the_window_restarts_confirmation() -> Result<(), Strin
 /// levels, so the restriction clears and the mode returns to normal — while breach time keeps its one
 /// second, which is why both rungs are still pending.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_single_flash_print_latches_nothing_and_a_sane_quote_clears_the_hard_breach()
 -> Result<(), String> {
     let mandate = swing(&[
@@ -797,7 +792,6 @@ fn a_single_flash_print_latches_nothing_and_a_sane_quote_clears_the_hard_breach(
 /// step journals nothing at all; the quote at exactly 10 s latches both rungs with `hard_trigger`,
 /// flattens, and pauses.
 #[test]
-#[ignore = "pending E6-4"]
 fn a_hard_breach_latches_only_on_a_second_quote_at_the_hard_wait() -> Result<(), String> {
     let mandate = swing(&[
         ("/risk/max_daily_loss", Some(s("0.5"))),
@@ -993,7 +987,6 @@ fn a_weaker_restriction_applied_later_never_relaxes_the_mode() -> Result<(), Str
 /// 0.0380952380952…, whose 13th place is a 2: half-even gives 0.038095238095 while rounding up would give
 /// …096. The pair therefore separates half-even from both neighbours.
 #[test]
-#[ignore = "pending E6-4"]
 fn reported_ratios_round_half_to_even_at_twelve_places() -> Result<(), String> {
     let mandate = one_change("/risk/max_daily_loss", s("0.5"))?;
     let clock = RegularSessionClock::new();
@@ -2267,7 +2260,6 @@ fn a_disarmed_ladder_stops_the_rungs_and_the_daily_loss_while_the_floor_stays_ar
 ///
 /// One bid of 90 crosses every rung and the floor at once, which is the only way to see the order.
 #[test]
-#[ignore = "pending E6-4"]
 fn the_journal_follows_the_evaluation_order() -> Result<(), String> {
     let mandate = ladder_only(&[])?;
     let clock = RegularSessionClock::new();
@@ -2626,7 +2618,6 @@ proptest! {
     /// Equity, the high-water mark, and every reported ratio match an accumulator that shares no code with
     /// the crate, and MI-5 holds at every step: H is never below E, and the drawdown is in [0, 1).
     #[test]
-    #[ignore = "pending E6-4"]
     fn the_reported_figures_match_an_independent_accumulator(bids in bid_walk()) {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
@@ -2714,7 +2705,6 @@ proptest! {
     ///
     /// The oracle keeps its own mode, moved only by the journal's mode events, and its own severity map.
     #[test]
-    #[ignore = "pending E6-4"]
     fn the_mode_is_the_strictest_restriction_and_events_appear_exactly_on_a_change(
         bids in bid_walk()
     ) {
@@ -2766,7 +2756,6 @@ proptest! {
     /// The latched set and the high-water mark are exactly what the journal says they are (oracle 1), and a
     /// latch never lifts without an acknowledgment, a new risk day, or a loosening version (MI-3).
     #[test]
-    #[ignore = "pending E6-4"]
     fn the_journal_accounts_for_every_latch_and_for_the_high_water_mark(bids in bid_walk()) {
         let mandate = ok(ladder_only(&[]))?;
         let scale_rungs: BTreeSet<u8> = mandate
@@ -2831,7 +2820,6 @@ proptest! {
     /// The size factor is the product of the active rungs' factors, is never above one, and is never zero
     /// (§5.5). The oracle multiplies the ladder's own factor texts in `i128`.
     #[test]
-    #[ignore = "pending E6-4"]
     fn the_size_factor_is_the_product_of_the_active_rungs_and_never_exceeds_one(
         bids in bid_walk()
     ) {
@@ -2958,7 +2946,6 @@ proptest! {
     /// not silent and the premise does not apply to them, so those cases are discarded rather than
     /// asserted — which is why the assertion is on the final snapshot and not on the journals.
     #[test]
-    #[ignore = "pending E6-4"]
     fn dropping_a_tick_that_emitted_nothing_changes_no_later_result(bids in bid_walk()) {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
@@ -3000,7 +2987,6 @@ proptest! {
 
     /// The same mandate and the same inputs give the same outputs (MI-8, ES-21).
     #[test]
-    #[ignore = "pending E6-4"]
     fn identical_inputs_give_identical_states_and_events(bids in bid_walk()) {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
@@ -3256,7 +3242,6 @@ proptest! {
     /// min(`breach_confirm_s`, 10) s, so neither can have completed: whatever the print said, nothing may be
     /// latched and no kill switch may have fired.
     #[test]
-    #[ignore = "pending E6-4"]
     fn one_bad_print_never_latches_a_limit(wild in 1_i64..96, gap_s in 1_i64..10) {
         let mandate = ok(swing(&[("/risk/max_daily_loss", Some(s("0.5")))]))?;
         let clock = RegularSessionClock::new();
@@ -3330,7 +3315,6 @@ proptest! {
     /// Every step's journal is in §5.2's evaluation order: the rungs in ascending `at`, then the daily loss,
     /// then the lifetime floor, each flatten's kill switch beside its own trigger, and the mode last.
     #[test]
-    #[ignore = "pending E6-4"]
     fn emitted_events_are_in_the_spec_order(bids in bid_walk()) {
         let mandate = ok(ladder_only(&[]))?;
         let clock = RegularSessionClock::new();
