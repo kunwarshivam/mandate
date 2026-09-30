@@ -2,8 +2,10 @@
 
 These paths are protected (ES-22). A change needs a DEC and ships without code. Agents accept the
 DEC themselves unless it weakens an approved safety invariant, which is reserved for the founder
-(DEC-79). A change that only tightens a rule or makes spec and code agree is the agent's to accept
-(DEC-176): do not leave it Proposed waiting for the founder.
+(DEC-79). DEC-176 says which such changes not to leave Proposed for the founder: one that tightens
+a rule, or that resolves a gap between spec and code, or between two specs, by the reading that
+adds no risk, provided it weakens no safety invariant and no `AGENTS.md` non-negotiable. Making
+the spec agree with more permissive code is weakening, and stays the founder's.
 
 1. Separate decisions from defects. List the design choices before drafting and record each per
    `SKILL.md` ("Decide, record, continue"). After an external review, fix only blockers and majors
