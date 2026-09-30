@@ -29,7 +29,8 @@
 //! (`size_factor` 1, and 0 for the drawdown, both P&L fractions, the day's buys, the cost basis and
 //! the goal spend). Every base pins its universe, so no order can be an admission: `new_instrument`
 //! is false and `thesis_confidence` 0 (§6.3, "0 when no thesis applies"), and a base that does not
-//! pin is refused rather than guessed about.
+//! pin is refused rather than guessed about. The gate is handed no fee reservation, so a cash fee
+//! rate above zero is refused, and so is an equity asset fee rate.
 //!
 //! **Every key is read (DEC-85).** The case, its `input`, `quote`, `gate_state`, every output and
 //! working order, `expect`, `gate_dry_run` and `autonomy` are each swept against the members read
@@ -536,6 +537,7 @@ impl Order {
     /// The builder is the origin of every order it proposes; the gate assigns the purpose from that,
     /// the side and the position (§6.1, DEC-129 item 19). A marketable exit goes as a plain limit and
     /// the gate's pacing says it must be marketable, since the proposal has no marketable kind.
+    /// The fee reservation is zero because [`Inputs::read`] refuses a cash fee rate above zero.
     fn proposed(&self, instrument: gate::AssetId, id: gate::ClientOrderId) -> gate::ProposedOrder {
         gate::ProposedOrder {
             instrument,
@@ -655,9 +657,14 @@ impl Inputs {
         let fee_rate_cash = fee("fee_rate_cash")?;
         let fee_rate_asset = fee("fee_rate_asset")?;
         let no_fee = num(FeeRate::parse("0"), "a zero fee rate")?;
+        ensure(fee_rate_cash == no_fee, || {
+            "`fee_rate_cash` above zero: the gate is handed no fee reservation, which holds only \
+             for a fee paid in the asset (trading-domain §7.2), so a cash fee would reach the \
+             buying-power check unreserved (§9.5, DEC-250 item 6)"
+                .to_owned()
+        })?;
         ensure(
-            asset_class == AssetClass::Crypto
-                || (fee_rate_cash == no_fee && fee_rate_asset == no_fee),
+            asset_class == AssetClass::Crypto || fee_rate_asset == no_fee,
             || {
                 "an equity fee rate: the fixture states no fee schedule to reserve an equity \
                  buy's fees from (§9.5)"
@@ -1969,7 +1976,7 @@ mod tests {
             (
                 "MC-B01",
                 "/input",
-                Box::new(insert("fee_rate_cash", json!("0.001"))),
+                Box::new(insert("fee_rate_asset", json!("0.001"))),
                 "equity fee rate",
             ),
             (
@@ -1995,6 +2002,41 @@ mod tests {
                 named,
                 &format!("{id}: {pointer} for {named}"),
             )?;
+        }
+        Ok(())
+    }
+
+    /// The gate is handed no fee reservation, so a cash fee rate above zero is refused, for a crypto
+    /// case as for an equity one; a stated zero, the header's default, is read and passes, and an
+    /// unreadable one fails naming it.
+    #[test]
+    fn a_cash_fee_rate_above_zero_is_refused() -> Result<(), String> {
+        let fixture = fixture()?;
+        for id in ["MC-B01", "MC-B29"] {
+            let charged = doctored(
+                &fixture,
+                id,
+                "/input",
+                insert("fee_rate_cash", json!("0.001")),
+            )?;
+            fails_naming(
+                run(charged, id),
+                "`fee_rate_cash` above zero",
+                &format!("{id}: a cash fee rate"),
+            )?;
+            let unreadable = doctored(
+                &fixture,
+                id,
+                "/input",
+                insert("fee_rate_cash", json!(PLANTED)),
+            )?;
+            fails_naming(
+                run(unreadable, id),
+                "fee_rate_cash",
+                &format!("{id}: an unreadable cash fee rate"),
+            )?;
+            let free = doctored(&fixture, id, "/input", insert("fee_rate_cash", json!("0")))?;
+            run(free, id).map_err(|e| format!("{id} with a stated zero cash fee rate: {e}"))?;
         }
         Ok(())
     }
