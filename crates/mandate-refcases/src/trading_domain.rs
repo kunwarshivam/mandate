@@ -87,6 +87,17 @@ const MODE_OWNERS: &[(&str, &str)] = &[
     ("conduct_breach", "E6-11"),
 ];
 
+/// Who holds the agents' mode after an event [`MODE_OWNERS`] does not list, where nothing moves it:
+/// the account ledger, which owns the agents in this harness (`initial.agents`, `deploy_agent`, and
+/// a proposal's `agent`), so an `agent_mode` expectation there is its to compare.
+const MODE_HOLDER: &str = "E7-5";
+
+/// What a proposal's submission needs before a second proposal in the same case can be decided
+/// against its effects (DEC-199 item 3): the working order, its reservation, and its conduct
+/// figures, which `actions` (E7-4) and the account ledger (E7-5) own. Until then each proposal is
+/// decided alone, so a case with two is refused rather than run as if the first left no trace.
+const SUBMISSION_STORIES: &str = "E7-4 and E7-5";
+
 /// `propose_order` members that later stories' arms read: another agent (the account ledger),
 /// brackets and the exit ladder's pricing and status inputs (the exit sequences), and an owner's
 /// confirmed bid (the owner-exit pacing, RC-25's arm).
@@ -314,6 +325,17 @@ fn pending(case: &Json) -> BTreeSet<String> {
         }
     }
     let steps = case.get("steps").and_then(Json::as_array);
+    let proposals = steps
+        .into_iter()
+        .flatten()
+        .filter(|step| step.get("event").and_then(Json::as_str) == Some("propose_order"))
+        .count();
+    if proposals > 1 {
+        note(
+            "a second `propose_order` step in one case".to_owned(),
+            SUBMISSION_STORIES,
+        );
+    }
     for step in steps.into_iter().flatten() {
         let event = step.get("event").and_then(Json::as_str).unwrap_or("");
         if let Some(story) = owner(PENDING_EVENTS, event) {
@@ -1049,11 +1071,17 @@ fn check(
             "receivables",
             "income",
             "buying_power",
+            "agent_mode",
         ],
     )?;
     for (key, expected) in expect {
         match key.as_str() {
             "decision" => gate.check_decision(decision, expected)?,
+            "agent_mode" => {
+                return Err(format!(
+                    "expectation `agent_mode` not interpreted until {MODE_HOLDER}"
+                ));
+            }
             "positions" => {
                 let listed = expected.as_object().ok_or("`positions` is not an object")?;
                 for (name, e) in listed {
