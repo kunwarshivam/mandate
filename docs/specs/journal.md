@@ -355,9 +355,9 @@ This subsection closes the payload schemas of the agent stream's `StreamOpened`,
 column of §9, and the required `config_refs` stay as §9 lists them. Each schema is `schema_version` 1:
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
 section holds at least one chain event per schema, an invalid draft for every rule below, and valid
-drafts for the cases a rule might be misread to refuse. The other
-agent-stream events are not closed yet: the approval events close with the escalation spec change
-(M7), `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
+drafts for the cases a rule might be misread to refuse. The other agent-stream events are not
+closed yet: the approval events close with the escalation spec change (M7),
+`ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
 
 **Types.**
 
@@ -377,9 +377,11 @@ agent-stream events are not closed yet: the approval events close with the escal
 A member not listed, or a listed member absent, is `schema` at that member; an absent member is
 never read as `null` (§4.2), even where `null` would be valid. The first violation is
 reported, in this order: unlisted members (in key order), then the listed members in the order given,
-then the numbered consistency rules (only on a payload whose members are all well typed), then
-`artifact_refs` and `pii_refs` (§3), then the subject rules 14 and 15 (`stream_mismatch`). Paths are
-dotted from the envelope (`payload.step_up.authenticated_at`).
+then the numbered consistency rules in number order, each rule's clauses in the order given (only on
+a payload whose members are all well typed), then `artifact_refs` and `pii_refs` (§3), then the
+subject rules 14 and 15 (`stream_mismatch`). Rule 10's second clause spans a batch, so it is checked
+only once every draft in the batch passes these checks, and is reported at the first `IntentProposed`
+in the batch that breaks it. Paths are dotted from the envelope (`payload.step_up.authenticated_at`).
 
 **`StreamOpened`** on the agent stream. The schema of `StreamOpened` and of `KillSwitchActivated` is
 chosen by the stream type of `stream_id`; the account stream's are unchanged.
