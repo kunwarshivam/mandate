@@ -2376,6 +2376,48 @@
      "code": "mode_event_mismatch",
      "seq": 13
     }
+   },
+   {
+    "name": "kill_switch_names_an_owner_pause",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 11,
+      "path": "payload.to",
+      "value": "paused"
+     },
+     {
+      "seq": 11,
+      "path": "payload.reason",
+      "value": "owner_pause"
+     },
+     {
+      "seq": 11,
+      "path": "payload.lifecycle",
+      "value": "paused"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
+   },
+   {
+    "name": "kill_switch_names_no_event_on_the_full_chain",
+    "clause": "§11 mode_event_mismatch",
+    "from_seq": 1,
+    "changes": [
+     {
+      "seq": 13,
+      "path": "payload.mode_event",
+      "value": "01J8ZNB0A000000000000000Z9"
+     }
+    ],
+    "expect": {
+     "code": "mode_event_mismatch",
+     "seq": 13
+    }
    }
   ]
  }

@@ -620,18 +620,15 @@ def verify_range(entries: list[dict], from_seq: int, skip: frozenset[str] = froz
             cause = seen.get(body["causation_id"])
             if cause is not None and cause["event_type"] == "DecisionMade" and action_of(cause["payload"]) != action_of(p):
                 out.append((body["seq"], "intent_action_mismatch"))
-        if (
-            body["event_type"] == "KillSwitchActivated"
-            and p["mode_event"] is not None
-            and "verify.mode_event_mismatch" not in skip
-        ):
+        if body["event_type"] == "KillSwitchActivated" and p["mode_event"] is not None:
             named = seen.get(p["mode_event"])
-            unresolved = named is None and from_seq == 1
-            wrong = named is not None and (named["event_type"], named["payload"].get("reason")) != (
-                "AgentModeChanged",
-                "kill_switch",
-            )
-            if unresolved or wrong:
+            is_mode = named is not None and named["event_type"] == "AgentModeChanged"
+            clauses = {
+                "verify.mode_event_mismatch.unresolved": named is None and from_seq == 1,
+                "verify.mode_event_mismatch.event_type": named is not None and not is_mode,
+                "verify.mode_event_mismatch.reason": is_mode and named["payload"]["reason"] != "kill_switch",
+            }
+            if any(broken and clause not in skip for clause, broken in clauses.items()):
                 out.append((body["seq"], "mode_event_mismatch"))
         seen[body["event_id"]] = body
     return out
@@ -664,6 +661,8 @@ CHAIN = (
 )
 SEQ = {name: seq for seq, (name, _) in enumerate(CHAIN, start=1)}
 ID = dict(CHAIN)
+ABSENT_EVENT_ID = "01J8ZNB0A000000000000000Z9"
+assert is_ulid(ABSENT_EVENT_ID) and ABSENT_EVENT_ID not in ID.values(), "names no event of the chain"
 
 QUOTE_SNAPSHOT = {
     "kind": "quote_snapshot",
@@ -1564,36 +1563,54 @@ def batches() -> tuple[list[dict], list[dict]]:
     return accepted, rejected
 
 
-def range_case(name, clause, base, path, value, code):
+def range_case(name, clause, changes, code, at):
     return {
         "name": name,
         "clause": clause,
         "from_seq": 1,
-        "changes": [{"seq": SEQ[base], "path": path, "value": value}],
-        "expect": {"code": code, "seq": SEQ[base]},
+        "changes": [{"seq": SEQ[base], "path": path, "value": value} for base, path, value in changes],
+        "expect": {"code": code, "seq": SEQ[at]},
     }
 
 
 def range_verification() -> list[dict]:
     """§11's per-range checks across agent-stream events. Each case applies its changes to the
     chain's bodies, re-chains from the genesis hash, and verifies from `from_seq`: every per-event
-    check passes and the range check fails once, at the listed seq, with the listed code."""
+    check passes and the range check fails once, at the listed seq, with the listed code. Each
+    `mode_event_mismatch` case breaks one of its three clauses: the named event is an
+    `AgentModeChanged`, its reason is `kill_switch`, and on a full-chain run it exists."""
     return [
         range_case(
             "intent_repeats_another_action",
             "§11 intent_action_mismatch",
-            "intent",
-            "payload.qty",
-            "11",
+            [("intent", "payload.qty", "11")],
             "intent_action_mismatch",
+            "intent",
         ),
         range_case(
             "kill_switch_names_the_owner_command",
             "§11 mode_event_mismatch",
-            "kill_switch",
-            "payload.mode_event",
-            ID["owner_kill_switch"],
+            [("kill_switch", "payload.mode_event", ID["owner_kill_switch"])],
             "mode_event_mismatch",
+            "kill_switch",
+        ),
+        range_case(
+            "kill_switch_names_an_owner_pause",
+            "§11 mode_event_mismatch",
+            [
+                ("kill_switch_mode", "payload.to", "paused"),
+                ("kill_switch_mode", "payload.reason", "owner_pause"),
+                ("kill_switch_mode", "payload.lifecycle", "paused"),
+            ],
+            "mode_event_mismatch",
+            "kill_switch",
+        ),
+        range_case(
+            "kill_switch_names_no_event_on_the_full_chain",
+            "§11 mode_event_mismatch",
+            [("kill_switch", "payload.mode_event", ABSENT_EVENT_ID)],
+            "mode_event_mismatch",
+            "kill_switch",
         ),
     ]
 
@@ -1888,9 +1905,13 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         problems.append(f"the chain fails §11's range checks: {verify_range(chain, 1)}")
     for case in section["range_verification"]:
         want = [(case["expect"]["seq"], case["expect"]["code"])]
-        got = verify_range(tampered_chain(chain, case), case["from_seq"])
+        tampered = tampered_chain(chain, case)
+        got = verify_range(tampered, case["from_seq"])
         if got != want:
             problems.append(f"range case {case['name']}: expected {want}, got {got}")
+        for entry in tampered:
+            if violations(draft_of(entry["body"])):
+                problems.append(f"range case {case['name']}: seq {entry['seq']} is not a valid draft")
     for entry in chain:
         got = violations(draft_of(entry["body"]))
         if got:
@@ -1916,7 +1937,9 @@ VALIDATOR_MUTANTS = (
     "regress.rule_8_numbers_on_every_exit_but_risk",
     "rule.10.batch",
     "verify.intent_action_mismatch",
-    "verify.mode_event_mismatch",
+    "verify.mode_event_mismatch.event_type",
+    "verify.mode_event_mismatch.reason",
+    "verify.mode_event_mismatch.unresolved",
 )
 
 
