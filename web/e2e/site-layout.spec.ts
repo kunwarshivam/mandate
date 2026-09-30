@@ -39,9 +39,13 @@ for (const width of [390, 1440]) {
 
     test("the welcome page leads to sign in, from its header and its footer", async ({ page }) => {
       await page.goto("/welcome");
-      const links = page.getByRole("link", { name: "Sign in" });
-      await expect(links).toHaveCount(2);
-      for (const link of await links.all()) await expect(link).toHaveAttribute("href", "/login");
+      // The retro desktop's Start menu carries a third Sign in among its scenery, and the page's
+      // own header and footer sit inside the desktop window's region landmark, so they are scoped
+      // structurally: the hero's action row and the footer element.
+      const header = page.locator("[data-slot=hero-actions]").getByRole("link", { name: "Sign in" });
+      const footer = page.locator("footer").getByRole("link", { name: "Sign in" });
+      await expect(header).toHaveAttribute("href", "/login");
+      await expect(footer).toHaveAttribute("href", "/login");
     });
 
     test("the sign-in page has no link to itself, and says sign-in is off in this build", async ({ page }) => {

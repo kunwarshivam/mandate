@@ -257,7 +257,9 @@ The single registry for identifiers minted in unmerged work
 next integer after the highest here or in the rows above, whichever is larger; a block reserved
 ahead of the sequence (DEC-200 to DEC-249, for the web UI) is skipped, not counted, so the other
 numbers run on below it and jump past it. A released reservation keeps its row and its number is
-never reused.
+never reused. DEC-153 was skipped in the sequence: no surviving row, commit, or claim names what
+it reserved, so the number is retired rather than reused (recorded 2026-09-30 during the docs
+sync; the gap was found by counting).
 
 | Identifier | Coordinator | Claim | Purpose | State |
 |---|---|---|---|---|

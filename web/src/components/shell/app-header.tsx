@@ -71,8 +71,9 @@ export function ApprovalsCount({ n, className }: { n: number; className?: string
 }
 
 /**
- * The header's switcher from `lg`, an icon below 90rem, and at the head of the phone's More sheet,
- * where it always reads in full.
+ * The header's switcher from `lg`, an icon below 100rem (the band where the paper badge also runs
+ * compact, so the trail keeps its room), and at the head of the phone's More sheet, where it
+ * always reads in full.
  */
 export function WorkspaceSwitcher({ inSheet = false, className }: { inSheet?: boolean; className?: string }) {
   const current = WORKSPACES.find((w) => w.current) ?? WORKSPACES[0];
@@ -86,8 +87,8 @@ export function WorkspaceSwitcher({ inSheet = false, className }: { inSheet?: bo
           className,
         )}
       >
-        <Briefcase className={cn("size-5 shrink-0", inSheet ? "text-muted-foreground" : "min-[90rem]:hidden")} aria-hidden />
-        <span className={cn("truncate", !inSheet && "max-[90rem]:sr-only")}>{current.label}</span>
+        <Briefcase className={cn("size-5 shrink-0", inSheet ? "text-muted-foreground" : "min-[100rem]:hidden")} aria-hidden />
+        <span className={cn("truncate", !inSheet && "max-[100rem]:sr-only")}>{current.label}</span>
         <CaretUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
       </DropdownMenu.Trigger>
       <DropdownMenu.Content align="start">
@@ -174,7 +175,7 @@ function MoreMenu({ seesAgents }: { seesAgents: boolean }) {
  * screen (`e2e/stop-visible.spec.ts`); as the header narrows, lower-priority items give way first:
  * the trail folds its earlier crumbs into a menu and then hides, never truncating the current page,
  * the command bar narrows (it is centred where both sides fit, `e2e/command-bar.spec.ts`), the
- * workspace switcher becomes an icon (below 90rem), alerts and the account menu fold into "Alerts
+ * workspace switcher becomes an icon (below 100rem), alerts and the account menu fold into "Alerts
  * and account" (below `xl`), and the paper badge keeps its gloss for screen readers only (at `lg`
  * below 100rem, and below 30rem). Below `lg` the header holds three things, the mark, the paper
  * badge and Stop (DEC-207); the tab bar and its More sheet carry the rest.

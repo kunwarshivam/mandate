@@ -44,8 +44,7 @@ test("its shape: a 64 px rounded glass bar of labelled items at least 64 px wide
       }),
     };
   });
-  expect(found.radius).toBeGreaterThanOrEqual(20);
-  expect(found.radius).toBeLessThanOrEqual(24);
+  expect(found.radius).toBe(10);
   expect(found.padding).toBe(6);
   expect(found.height, "the dock's height matches --dock-h").toBe(64);
   expect(found.items).toHaveLength(8);

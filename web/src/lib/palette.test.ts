@@ -286,13 +286,13 @@ describe.each(THEMES)("Azure and Sun, %s", (theme) => {
 describe("Azure and Sun, the light theme's accent", () => {
   const refs = PALETTE.refs;
 
-  it("sets the mandate as an azure-200 field under azure-600 rules and markers, with azure-800 labels, and links in azure-600", () => {
+  it("sets the mandate as an azure-200 field under azure-600 rules and markers, with azure-800 labels and the primary action and links in the same deep azure-800, off the rules", () => {
     expect(refs.mandate).toBe("azure-200");
     expect(refs["mandate-edge"]).toBe("azure-600");
     expect(refs["mandate-marker"]).toBe("azure-600");
     expect(refs["mandate-strong"]).toBe("azure-800");
     expect(refs["lapis-line"]).toBe("azure-600");
-    expect(refs.primary).toBe("azure-600");
+    expect(refs.primary).toBe("azure-800");
   });
 
   it("never sets azure text lighter than azure-600", () => {
