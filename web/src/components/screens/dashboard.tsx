@@ -7,20 +7,18 @@ import { Deadline } from "@/components/approvals/deadline";
 import { AccountEquityChart } from "@/components/charts/equity-chart";
 import { GateDecisionRow } from "@/components/domain/gate-decision";
 import { ModeBadge } from "@/components/domain/mode";
-import { SignedMoney } from "@/components/domain/money";
 import { AgentOwl, Owl } from "@/components/domain/owl";
-import { Placeholder } from "@/components/domain/placeholders";
-import { STRETCHED_LINK } from "@/components/domain/positions";
 import type { Agent, Approval, Workspace } from "@/fixtures/types";
 import { findAgent } from "@/fixtures/workspace";
 import { alertLines } from "@/lib/attention";
-import { clock, price, quantity, usd, zoneLabel } from "@/lib/format";
+import { clock, price, quantity, zoneLabel } from "@/lib/format";
 import { headroomLine } from "@/lib/limits";
 import { approvalAt, useRuntime } from "@/lib/mock-runtime";
 import { useCan } from "@/lib/roles";
-import { decisionHref, positionHref } from "@/lib/screens";
+import { decisionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { AgentCard } from "./agent-card";
+import { AssetsSection } from "./assets-section";
 import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 
 /** The rail beside the account chart shows this many requests; the rest are one link away. */
@@ -211,7 +209,6 @@ function Dashboard() {
     .filter((a) => a.status === "delivered")
     .sort((a, b) => Date.parse(a.deadline) - Date.parse(b.deadline));
   const marketStale = ws.health.market_data.state !== "ok";
-  const positions = ws.agents.flatMap((a) => a.positions.map((p) => ({ agent: a, p })));
 
   return (
     <div className="grid grid-cols-1 gap-(--section-gap)">
@@ -241,6 +238,8 @@ function Dashboard() {
           ))}
         </ul>
       </Section>
+
+      <AssetsSection ws={ws} className="max-lg:hidden" />
 
       <div className="grid grid-cols-1 gap-(--section-gap) lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:gap-x-16">
         <Section
@@ -276,47 +275,6 @@ function Dashboard() {
           ) : null}
         </Section>
 
-        <Section title="Positions" action={<SectionLink href="/positions">All positions</SectionLink>} className="max-lg:hidden">
-          {positions.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No agent holds a position.</p>
-          ) : (
-            <table className="w-full text-sm">
-              <caption className="sr-only">Positions across agents</caption>
-              <thead className="sr-only">
-                <tr>
-                  <th scope="col">Holding</th>
-                  <th scope="col">Value and unrealized P&amp;L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {positions.map(({ agent, p }) => (
-                  <tr key={`${agent.agent_id}-${p.instrument.asset_id}`} className="group relative border-b border-border/70 last:border-b-0">
-                    <th scope="row" className="py-3 text-left font-normal">
-                      <Link href={positionHref(agent.agent_id, p.instrument.asset_id)} className={cn("font-medium underline-offset-4 group-hover:underline", STRETCHED_LINK)}>
-                        <span className="font-mono tabular">{quantity(p.qty)}</span> {p.instrument.symbol}
-                      </Link>
-                      <span className="block text-caption text-muted-foreground">{agent.label}</span>
-                    </th>
-                    <td className="py-3 text-right align-top">
-                      <span className="block font-mono tabular">{usd(p.market_value)}</span>
-                      <SignedMoney value={p.unrealized_pnl} showWord={false} className="text-caption" />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {positions.length > 0 ? (
-            <p className="flex flex-wrap items-center gap-2 text-caption text-muted-foreground">
-              Unrealized paper P&amp;L, simulated. <Placeholder name="performance" />
-            </p>
-          ) : null}
-          {ws.external_positions.length > 0 ? (
-            <p className="text-caption text-muted-foreground">
-              Also on the account, not managed by any agent: {ws.external_positions.map((e) => `${quantity(e.qty)} ${e.instrument.symbol}`).join(", ")}.
-            </p>
-          ) : null}
-        </Section>
       </div>
     </div>
   );

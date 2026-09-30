@@ -38,12 +38,12 @@ beforeEach(() => setPathname("/"));
 describe("Home on a phone", () => {
   const needsYou = () => main().querySelector<HTMLElement>("[data-slot=needs-you]")!;
 
-  it("opens with Needs you, then the account, the agents and recent activity, and no positions", () => {
+  it("opens with Needs you, then the account, the agents and recent activity, and no assets or news", () => {
     home();
     const order = onPhone(main().querySelectorAll("h2")).map((h) => h.textContent?.replace(/\d+ items?$/, "").trim());
     expect(order).toEqual(["Needs you", "Account equity", "Agents", "Recent activity"]);
     expect(onDesktop(main().querySelectorAll("h2")).map((h) => h.textContent?.replace(/\d+ requests?$/, "").trim())).toEqual(
-      expect.arrayContaining(["Account equity", "Waiting for you", "Agents", "Recent activity", "Positions"]),
+      expect.arrayContaining(["Account equity", "Waiting for you", "Agents", "Assets", "Recent activity", "News"]),
     );
     expect(shownOnDesktop(needsYou())).toBe(false);
   });
@@ -158,11 +158,11 @@ describe("Home on a phone", () => {
     expect(shownOnDesktop(all[0])).toBe(false);
   });
 
-  it("leaves positions off a phone's Home", () => {
+  it("leaves assets off a phone's Home", () => {
     home();
-    const positions = within(main()).getByRole("region", { name: "Positions" });
-    expect(shownOnPhone(positions)).toBe(false);
-    expect(shownOnDesktop(positions)).toBe(true);
+    const assets = within(main()).getByRole("region", { name: "Assets" });
+    expect(shownOnPhone(assets)).toBe(false);
+    expect(shownOnDesktop(assets)).toBe(true);
   });
 });
 

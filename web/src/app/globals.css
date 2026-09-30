@@ -322,6 +322,11 @@ html:root[data-cvd="on"] {
   --color-loss-soft: var(--loss-soft);
   --color-warning-soft: var(--warning-soft);
   --color-info-soft: var(--info-soft);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-series-5: var(--series-5);
 
   --font-sans: "Public Sans Variable", ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sans);
