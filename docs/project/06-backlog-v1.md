@@ -1187,6 +1187,21 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
+  *Done (DEC-250's 2026-09-30 amendment):* `generate.py` moves the three clocks and keeps each
+  output's offsets from `now`, no expectation changes, and `check_cases.py` now fails any builder
+  case whose `session` or `in_close_window` contradicts its `now`. MC-B22 and MC-B23 pass, and their
+  status rows are a separate status-only PR. MC-B31 still fails at `mandate_risk::trim_proposals`
+  (pending E6-4). The founder question above stays Proposed.
+- **Tests correction for family B's moved clocks** (DEC-250's 2026-09-30 amendment; crate code, so
+  not in the reference-case PR, ES-22). `crates/mandate-refcases/src/mandate/order_builder.rs`:
+  - move MC-B22 and MC-B23 from `OWED` to `PASSING` (25 and 7). Until this lands,
+    `every_builder_case_passes_or_fails_at_its_owner` fails with `MC-B22: the case still passed`;
+  - `the_two_session_cases_pass_once_now_agrees_with_their_labels` is redundant: it re-sets MC-B22's
+    clock to the values the case already holds, and changes only MC-B23's `expires_at` (20:55Z to
+    21:00Z). Keep its sibling-swap proof, which is the only one for a sell's `order_type` and for a
+    deferred outcome, but run it on the two cases as the fixture states them, and drop the clock
+    doctoring. DEC-250 item 3's label-against-clock comparison stays proved by
+    `the_builder_and_the_gate_see_one_scene`'s doctored MC-B01.
 - Derive the family-B sibling counts (#331 round-2 review, nit). The `sibling` sweep's
   `siblings == 87` and `siblings == 11` are hand-written, and they alone catch a `sibling` that
   returns `None` for a vocabulary. Replace them with an assertion that every stated enum-valued
