@@ -76,6 +76,8 @@ const CHROMATIC: RampId[] = ["azure", "sun", "teal", "sky", "green", "red", "amb
 const AZURE_TOKENS: TokenName[] = ["primary", "mandate", "mandate-soft", "mandate-strong", "mandate-marker", "mandate-edge", "lapis-line", "selection", "series-1"];
 /** In dark, the account's approval card and its quiet field are calm azure too; in light they are sun and ink. */
 const DARK_AZURE: TokenName[] = ["lapis-strong"];
+/** In dark, the mandate's fields are charcoal like the rest of the surfaces; azure stays in their marks. */
+const DARK_CHARCOAL: TokenName[] = ["mandate", "mandate-soft"];
 /** Sun: the highlight, the second asset series and, in light, the approval card. Dark mode's approval card is a calm azure field. */
 const SUN_TOKENS: Record<ThemeName, TokenName[]> = { light: ["highlight", "lapis-soft", "series-2"], dark: ["highlight", "series-2"] };
 /** Sun as a fill, always under ink type. */
@@ -205,7 +207,7 @@ describe.each(THEMES)("Azure and Sun, %s", (theme) => {
   it("gives azure only to the azure tokens, and sun only to the sun tokens", () => {
     const azure = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "azure");
     expect(azure.filter((n) => !AZURE_TOKENS.includes(n) && !(theme === "dark" && DARK_AZURE.includes(n)))).toEqual([]);
-    for (const n of AZURE_TOKENS) expect(rampOf(refs[n]), n).toBe("azure");
+    for (const n of AZURE_TOKENS) expect(rampOf(refs[n]), n).toBe(theme === "dark" && DARK_CHARCOAL.includes(n) ? "ink" : "azure");
     const sun = TOKEN_NAMES.filter((n) => rampOf(refs[n]) === "sun");
     expect(sun.sort()).toEqual([...SUN_TOKENS[theme]].sort());
   });
@@ -303,8 +305,9 @@ describe("Azure and Sun, the light theme's accent", () => {
 describe("Azure and Sun, the dark theme", () => {
   const refs = PALETTE_DARK.refs;
 
-  it("turns azure bright: azure-400 rules, markers and the account's line, azure-300 labels and links, an azure-850 field, the same sun-300 highlight", () => {
-    expect(refs.mandate).toBe("azure-850");
+  it("turns azure bright: azure-400 rules, markers and the account's line, azure-300 labels and links on charcoal fields, the same sun-300 highlight", () => {
+    expect(refs.mandate).toBe("ink-850");
+    expect(refs["lapis-soft"]).toBe("ink-850");
     expect(refs["mandate-edge"]).toBe("azure-400");
     expect(refs["mandate-marker"]).toBe("azure-400");
     expect(refs["lapis-line"]).toBe("azure-400");

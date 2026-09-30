@@ -31,7 +31,7 @@ export const TOKEN_ROLES: Record<TokenName, { meaning: Meaning; role: string }> 
   "lapis-soft": { meaning: "account", role: "The account's field, pale sun in light and a raised charcoal in dark: the current tab and range pill, an approval card, an account notice" },
   "lapis-strong": { meaning: "account", role: "A pressed primary action, and a quiet field inside an account surface" },
   "lapis-line": { meaning: "account", role: "The account's line: its equity chart, the current tab's bar and pill ring, its legend swatch" },
-  mandate: { meaning: "mandate", role: "Your mandate: the pale azure field the envelope, limits and rails sit on" },
+  mandate: { meaning: "mandate", role: "Your mandate: the field the envelope, limits and rails sit on, pale azure in light and a raised charcoal in dark" },
   "mandate-foreground": { meaning: "mandate", role: "Text on the mandate field" },
   "mandate-muted": { meaning: "mandate", role: "Secondary text on the mandate field" },
   "mandate-strong": { meaning: "mandate", role: "Mandate headings, labels, the \"Your mandate\" tag, the limit post, a level's axis label: azure-800 in light, never lighter" },
