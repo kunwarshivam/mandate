@@ -1216,7 +1216,7 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `conduct_limit_breached`. RC-16 also needs the case file's `not_in_universe` reconciled with the
   gate's `not_in_working_universe` (DEC-199 Q1). All three state more than one proposal, so each
   also waits for E7-4 and E7-5 (DEC-199 item 3).
-- Done in the trading-domain gate driver tightening (branch `cursor/gate-driver-tightening-138b`;
+- Done in the trading-domain gate driver tightening ([#349](https://github.com/kunwarshivam/mandate/pull/349);
   `the_listing_and_market_are_dec_199_item_6s`,
   `the_filled_median_is_the_liquid_collar_tier_to_the_cent`,
   `the_filled_trailing_volume_is_the_order_size_cap_to_the_share`,
