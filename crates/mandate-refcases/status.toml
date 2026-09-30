@@ -67,6 +67,22 @@
 # Family N (stream J, DEC-77 item 3, DEC-154). MC-N01, MC-N14 and MC-N26 stay pending until
 # E6-2's classify decides their first_order_autonomy.
 [mandate]
+'MC-A01' = { status = "passing", story = "E6-2" }
+'MC-A02' = { status = "passing", story = "E6-2" }
+'MC-A03' = { status = "passing", story = "E6-2" }
+'MC-A04' = { status = "passing", story = "E6-2" }
+'MC-A05' = { status = "passing", story = "E6-2" }
+'MC-A06' = { status = "passing", story = "E6-2" }
+'MC-A07' = { status = "passing", story = "E6-2" }
+'MC-A08' = { status = "passing", story = "E6-2" }
+'MC-A09' = { status = "passing", story = "E6-2" }
+'MC-A10' = { status = "passing", story = "E6-2" }
+'MC-A11' = { status = "passing", story = "E6-2" }
+'MC-A12' = { status = "passing", story = "E6-2" }
+'MC-A13' = { status = "passing", story = "E6-2" }
+'MC-A14' = { status = "passing", story = "E6-2" }
+'MC-A15' = { status = "passing", story = "E6-2" }
+'MC-A16' = { status = "passing", story = "E6-2" }
 'MC-N02' = { status = "passing", story = "E17-3" }
 'MC-N03' = { status = "passing", story = "E17-3" }
 'MC-N04' = { status = "passing", story = "E17-3" }
