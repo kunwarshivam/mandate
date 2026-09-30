@@ -346,6 +346,25 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   *Follow-up (#321 review, minor 8):* `recent_timeout` does not say whose `timeout_s` it uses.
   *Follow-up (#321 review, minor 9):* `reference/mandate/mutants.py` runs only in
   `cargo xtask ci nightly`, not in `cargo xtask check`.
+  *Follow-up (#321 round 2, minor 1), owned by the M7 tests correction:* nothing tests that
+  `ApprovalResponded` records the approver count and independence check 7 applied; dropping the
+  member survives the whole fuzz. Assert the recorded quorum against the fuzz's own `own_quorum`,
+  and add a mutant.
+  *Follow-up (#321 round 2, minor 2):* say which stream the policy overlay is folded from.
+  `PolicyChanged` is on the workspace control stream, and §2's copy list for the agent runtime does
+  not include it. State either that the runtime copies it into the agent stream, or that replay
+  reads the recorded quorum rather than re-deriving the overlay. Every interleaving only
+  over-tightens today, because check 7 takes the maximum with the bound values.
+  *Follow-up (#321 round 2, minor 3):* the reference model reads absolute
+  `independent_approval_required` and `two_approver_above_usd` from `PolicyChanged`, where journal §9
+  gives `level`, `diff` and `affected agents`. State how a partial diff resolves, at which level,
+  and whether the agent must be listed in `affected agents`.
+  *Follow-up (#321 round 2, nits):*
+  - reword the admission sentence as "the grants that count … now number check 7's approver count";
+  - say once that "at the effective time" and "folded before the step" coincide because the clock
+    fold advances on every event;
+  - the approval surface shows the current requirement, not only the bound `approvers` (a PX item);
+  - add the per-order approval to §4.3's list of what `independent_approval_required` scopes.
 - **E8-4 (Must)** As an approver, I want notifications through web push, email, and a chat
   channel, with escalation chains and quiet hours.
 - **E8-5 (Must)** As a fund, I want notifications to carry only opaque IDs, with details loaded
