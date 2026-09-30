@@ -1157,8 +1157,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
     stays.
 - Tighten the family-B harness (#331 review, minors 4 and 5 and the nits), in one tests correction
-  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250. *Done (E6-2, the
-  `cursor/family-b-tightening-138b` PR; DEC-250 items 16 to 18), all but the shared gate helpers,
+  of `crates/mandate-refcases/src/mandate/order_builder.rs` and DEC-250. *Done (E6-2,
+  [#346](https://github.com/kunwarshivam/mandate/pull/346); DEC-250 items 16 to 18), all but the shared gate helpers,
   which stay open:*
   - *done:* `an_unreadable_input_is_refused_naming_it` now also sweeps the `gate_state.positions_mv`
     map and its values, `gate_state.last_exit_fill_at` (whole, and a planted entry, since no case
@@ -1186,8 +1186,8 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   `cargo xtask refcases --write`, and the reference checks land together, apart from code (ES-22).
   Whether `session` and `in_close_window` stay case-file inputs at all is a separate question,
   Proposed to the founder in DEC-250.
-- Derive the family-B sibling counts (#331 round-2 review, nit). *Done (E6-2, the
-  `cursor/family-b-tightening-138b` PR; DEC-250 item 18):* the hand-written `siblings == 87` and
+- Derive the family-B sibling counts (#331 round-2 review, nit). *Done (E6-2,
+  [#346](https://github.com/kunwarshivam/mandate/pull/346); DEC-250 item 18):* the hand-written `siblings == 87` and
   `siblings == 11` are replaced by an assertion that every enum-valued expectation a swept case
   states (a word, a null, or a non-empty list of words in some family-B case) has a `sibling` arm,
   `on_timeout` and `action` excepted, so a case that gains or loses an enum expectation needs no
