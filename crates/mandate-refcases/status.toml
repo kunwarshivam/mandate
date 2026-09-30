@@ -106,6 +106,8 @@
 'MC-B19' = { status = "passing", story = "E6-2" }
 'MC-B20' = { status = "passing", story = "E6-2" }
 'MC-B21' = { status = "passing", story = "E6-2" }
+'MC-B22' = { status = "passing", story = "E6-2" }
+'MC-B23' = { status = "passing", story = "E6-2" }
 'MC-B24' = { status = "passing", story = "E6-2" }
 'MC-B25' = { status = "passing", story = "E6-2" }
 'MC-B29' = { status = "passing", story = "E6-2" }
