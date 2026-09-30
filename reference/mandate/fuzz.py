@@ -800,9 +800,13 @@ def fuzz_delegation_changes(n):
         c, _ = classify(m, new)
         if c not in ("risk_reducing", "neutral"):
             continue
-        ids = {d["id"] for d in m["autonomy"]["delegations"] + new["autonomy"]["delegations"]}
+        ids = sorted({d["id"] for d in m["autonomy"]["delegations"] + new["autonomy"]["delegations"]})
+        edges = [T(d[k]) for d in m["autonomy"]["delegations"] for k in ("starts_at", "expires_at")]
         for _ in range(30):
-            t = DELEG_NOW + timedelta(seconds=rng.randint(-2 * 86400, 35 * 86400))
+            if rng.random() < 0.5:
+                t = rng.choice(edges) + timedelta(seconds=rng.choice([-1800, -1, 0, 1, 1800, 43200, 2 * 86400]))
+            else:
+                t = DELEG_NOW + timedelta(seconds=rng.randint(-2 * 86400, 35 * 86400))
             usage = {i: {"orders": rng.randint(0, 3), "total_usd": rng.choice(["0", "100", "900", "2000"])} for i in ids
                      if rng.random() < 0.5}
             st = rand_state(t, usage, trouble_p=0.1)
