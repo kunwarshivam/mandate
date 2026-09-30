@@ -101,6 +101,27 @@ describe("links", () => {
     for (const link of screen.getAllByRole("link", { name: "Sign in" })) expect(link).toHaveAttribute("href", "/login");
   });
 
+  it("offers the guestbook as a button in the hero and again after who it's for", () => {
+    renderLanding();
+    const buttons = screen.getAllByRole("link", { name: "Sign the guestbook" });
+    expect(buttons).toHaveLength(2);
+    for (const a of buttons) expect(a).toHaveAttribute("href", "#beta");
+    expect(buttons[0].closest("header")).not.toBeNull();
+    expect(buttons[1].closest("section")).toHaveAttribute("aria-labelledby", "who");
+  });
+
+  it("echoes the address of the link under the pointer in the status bar, as a browser of the time did", () => {
+    const { container } = renderLanding();
+    const status = container.querySelector("[data-slot=status-text]")!;
+    const link = within(screen.getByRole("navigation", { name: "Contents" })).getByRole("link", { name: "How it works" });
+    fireEvent.pointerOver(link);
+    expect(status).toHaveTextContent("http://www.owlhead.ai/#how");
+    fireEvent.pointerOut(link);
+    expect(status).toHaveTextContent("Document: Done");
+    fireEvent.focusIn(screen.getAllByRole("link", { name: "Sign in" })[0]);
+    expect(status).toHaveTextContent("http://www.owlhead.ai/login");
+  });
+
   it("links nowhere off the page but sign-in: no invented legal pages", () => {
     renderLanding();
     const hrefs = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
@@ -120,7 +141,7 @@ describe("the guestbook", () => {
     fill("ada@example.com");
     fireEvent.click(screen.getByLabelText("Managing money for others"));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
     });
     expect(fetchMock).toHaveBeenCalledWith("/api/beta", expect.objectContaining({ method: "POST" }));
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ email: "ada@example.com", role: "clients", website: "" });
@@ -133,10 +154,11 @@ describe("the guestbook", () => {
     renderLanding();
     fill("ada@example");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
     });
     expect(screen.getByLabelText("Email address:")).toHaveAttribute("aria-invalid", "true");
     expect(document.getElementById("beta-problem")).toHaveTextContent("That email doesn't look right.");
+    expect(document.getElementById("beta-problem")).toHaveAttribute("data-slot", "beta-problem");
   });
 
   it("says to try again when the request can't be saved or sent", async () => {
@@ -144,10 +166,10 @@ describe("the guestbook", () => {
     renderLanding();
     fill("ada@example.com");
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Request access" }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign the guestbook" }));
     });
     expect(document.getElementById("beta-problem")).toHaveTextContent("We couldn't save that just now.");
-    expect(screen.getByRole("button", { name: "Request access" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Sign the guestbook" })).toBeEnabled();
   });
 
   it("carries a field people never see, for bots to fill", () => {
@@ -281,7 +303,7 @@ const LANDING_PAIRS = [
   { fg: "mandate-strong", bg: "card", use: "Links" },
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
-  { fg: "highlight-foreground", bg: "highlight", use: "Request access, the New tag, a hovered link and the volt badge" },
+  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the volt badge" },
   { fg: "card", bg: "foreground", use: "Title bars, the record's column heads and the ink badges" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },
 ] as const;

@@ -85,6 +85,24 @@ test("a contents link scrolls its section to the top of the window", async ({ pa
   await expect.poll(() => page.locator("#how").evaluate((el) => Math.round(el.getBoundingClientRect().top))).toBe(24);
 });
 
+test("the contents selects the section being read, and the status bar shows where a hovered link goes", async ({ page }) => {
+  await open(page, 1440);
+  const contents = page.getByRole("navigation", { name: "Contents" });
+  await page.locator("#safety").evaluate((el) => el.scrollIntoView());
+  await expect(contents.locator("[aria-current=location]")).toHaveText("How it stays in check");
+  await contents.getByRole("link", { name: "The record" }).hover();
+  await expect(page.locator("[data-slot=status-text]")).toHaveText("http://www.owlhead.ai/#record");
+  await page.mouse.move(0, 0);
+  await expect(page.locator("[data-slot=status-text]")).toHaveText("Document: Done");
+});
+
+test("390 px: the record fits the phone without scrolling sideways", async ({ page }) => {
+  await open(page, 390);
+  await page.evaluate(() => document.fonts.ready);
+  const fit = await page.locator("[data-slot=record-trace] table").evaluate((t) => t.scrollWidth <= t.parentElement!.clientWidth);
+  expect(fit).toBe(true);
+});
+
 test("one main landmark, and no site header over the page", async ({ page }) => {
   await open(page, 1440);
   await expect(page.getByRole("main")).toHaveCount(1);
@@ -110,7 +128,7 @@ test("the guestbook sends the email and use, and says you're on the list", async
   await open(page, 390);
   await page.getByLabel("Email address:").fill("ada@example.com");
   await page.getByRole("radio", { name: "Running a trading desk" }).check();
-  await page.getByRole("button", { name: "Request access" }).click();
+  await page.getByRole("button", { name: "Sign the guestbook" }).click();
   await expect(page.locator("[data-slot=beta-done]")).toContainText("We'll write to ada@example.com");
   expect(sent).toEqual({ email: "ada@example.com", role: "desk", website: "" });
 });

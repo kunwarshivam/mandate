@@ -6,14 +6,15 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { OWLHEAD_ASCII } from "./ascii";
 import { BetaForm } from "./beta-form";
-import { BODY, BOLD, H2, LINK, MONO, PIXEL, RAISED, RULE, SUNKEN } from "./letter";
+import { Contents } from "./contents";
+import { BODY, BOLD, BUTTON, H2, LINK, MONO, PIXEL, PLAIN_BUTTON, RAISED, RULE } from "./letter";
 import { RecordTrace } from "./record-trace";
 import { Blink, Browser, Desktop, UnderConstruction, Window } from "./retro";
 import { SiteFooter } from "./site-footer";
 
 export const HEADLINE = "Owlhead";
 export const SUBHEAD = "A trading agent for your own brokerage account. It works inside rules you write, and it writes down every decision it makes.";
-export const UPDATED = "29 September 2026";
+export const UPDATED = "30 September 2026";
 
 type Section = { id: string; title: string; body: ReactNode };
 
@@ -119,6 +120,7 @@ export const SECTIONS: Section[] = [
     id: "who",
     title: "Who it's for",
     body: (
+      <>
       <dl className="grid gap-4">
         {[
           ["You trade your own account.", "The agent does the watching, and asks you only what you've told it to."],
@@ -132,6 +134,13 @@ export const SECTIONS: Section[] = [
           </div>
         ))}
       </dl>
+      <p className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <a href="#beta" className={BUTTON}>
+          Sign the guestbook
+        </a>
+        <span>and tell us which of these you are.</span>
+      </p>
+      </>
     ),
   },
   {
@@ -218,41 +227,24 @@ export function Landing() {
               <span className={cn(RAISED, "bg-highlight px-1.5 text-sm tracking-wide text-highlight-foreground uppercase", PIXEL)}>
                 <Blink>New</Blink>
               </span>
-              <span>
-                Private beta, opening a few people at a time.{" "}
-                <a href="#beta" className={LINK}>
-                  Ask for a place
-                </a>
-                .
-              </span>
+              <span>Private beta, opening a few people at a time.</span>
             </p>
-            <p className="text-[0.9375rem] text-muted-foreground">
-              Last updated {UPDATED}. Already in?{" "}
-              <Link href="/login" className={LINK}>
+            <p className="flex flex-wrap items-center justify-center gap-2" data-slot="hero-actions">
+              <a href="#beta" className={BUTTON}>
+                Sign the guestbook
+              </a>
+              <Link href="/login" className={cn(PLAIN_BUTTON, "h-9")}>
                 Sign in
               </Link>
-              .
             </p>
+            <p className="text-[0.9375rem] text-muted-foreground">Last updated {UPDATED}.</p>
           </header>
 
           <hr className={cn(RULE, "mx-4 sm:mx-8")} />
 
           <div className="grid gap-8 px-4 pb-10 sm:px-8 lg:grid-cols-[15rem_minmax(0,1fr)] lg:gap-12">
             <aside>
-              <nav aria-labelledby="contents-title" className={cn(SUNKEN, "bg-muted px-4 py-3 lg:sticky lg:top-4")}>
-                <h2 id="contents-title" className={cn(B, "pb-1")}>
-                  Contents
-                </h2>
-                <ol className="grid list-decimal gap-0.5 ps-6 text-[1.0625rem]">
-                  {CONTENTS.map((c) => (
-                    <li key={c.id}>
-                      <a href={`#${c.id}`} className={LINK}>
-                        {c.title}
-                      </a>
-                    </li>
-                  ))}
-                </ol>
-              </nav>
+              <Contents items={CONTENTS} />
             </aside>
 
             <main id="main" tabIndex={-1} data-slot="landing" className="min-w-0 outline-none">

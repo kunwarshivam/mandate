@@ -4,6 +4,7 @@ import { OwlheadMark } from "@/components/brand/Logo";
 import { cn } from "@/lib/utils";
 import { MONO, PIXEL, PLAIN_BUTTON, RAISED, SUNKEN } from "./letter";
 import styles from "./letter.module.css";
+import { StatusText } from "./status-text";
 
 export function Blink({ children }: { children: ReactNode }) {
   return <span className={styles.blink}>{children}</span>;
@@ -67,7 +68,8 @@ export const DIRECTORY = [
 
 /**
  * The page open in a browser of 1996: title bar, menus, toolbar, the address, the guide buttons, and
- * a status bar. Only the guide buttons work; the rest is hidden from assistive technology.
+ * a status bar that shows where a link goes. Only the guide buttons work; the rest is hidden from
+ * assistive technology.
  */
 export function Browser({ address, children }: { address: string; children: ReactNode }) {
   return (
@@ -109,9 +111,9 @@ export function Browser({ address, children }: { address: string; children: Reac
         </div>
 
         <nav aria-label="Guides" className="mt-1.5">
-          <ul className="flex flex-wrap gap-1">
+          <ul className="grid grid-cols-2 gap-1 sm:flex sm:flex-wrap">
             {DIRECTORY.map((d) => (
-              <li key={d.href}>
+              <li key={d.href} className="grid">
                 <a href={d.href} className={PLAIN_BUTTON}>
                   {d.label}
                 </a>
@@ -127,7 +129,7 @@ export function Browser({ address, children }: { address: string; children: Reac
         <span className={cn(SUNKEN, "grid w-8 shrink-0 place-items-center")}>
           <Key className="size-4" />
         </span>
-        <span className={cn(SUNKEN, "flex-1 truncate px-2 py-0.5")}>Document: Done</span>
+        <StatusText origin={address} className={cn(SUNKEN, "min-w-0 flex-1 truncate px-2 py-0.5")} />
         <span className={cn(SUNKEN, "hidden w-40 px-2 py-0.5 sm:block")}>Private beta</span>
       </div>
     </div>

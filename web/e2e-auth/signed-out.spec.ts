@@ -20,7 +20,7 @@ test("a signed-out visitor can ask for a place in the private beta", async ({ pa
   await page.route("**/api/beta", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }));
   await page.goto("/");
   await page.getByLabel("Email address:").fill("someone@example.com");
-  await page.getByRole("button", { name: "Request access" }).click();
+  await page.getByRole("button", { name: "Sign the guestbook" }).click();
   await expect(page.locator("[data-slot=beta-done]")).toContainText("You're on the list.");
 });
 
