@@ -18,11 +18,12 @@
 //! before any fact is read, so a fact it stated would be one nobody compared.
 //!
 //! **What the harness fills for a risk-reducing action.** `ActionContext` still needs a value in
-//! every field, so [`unread_facts`] supplies zeros, `crypto`, and an instrument no case names. With
-//! those values MC-A01 to MC-A04 must come back labelled `builtin_risk_reducing`, so a `classify`
-//! that sent a reducing purpose through the rules fails on `by` (`rule:<id>`, `default`, or
-//! `admission_ceiling`). A `classify` that consulted the filled values and still answered with the
-//! built-in would pass here; that no facts and no rules change the answer is `mandate-builder`'s
+//! every field, so [`unread_facts`] supplies zeros, `crypto`, and [`UNREAD_INSTRUMENT`], a
+//! placeholder no opening may name: one that does fails naming its case. With those values MC-A01 to
+//! MC-A04 must come back labelled `builtin_risk_reducing`, so a `classify` that sent a reducing
+//! purpose through the rules fails on `by` (`rule:<id>`, `default`, or `admission_ceiling`). A
+//! `classify` that consulted the filled values and still answered with the built-in would pass here;
+//! that no facts and no rules change the answer is `mandate-builder`'s
 //! `no_rule_set_ever_denies_or_asks_a_reducing_purpose`.
 //!
 //! **The approval is compared both ways.** An ASK must state `approvers_required` and `on_timeout`
@@ -59,7 +60,7 @@ const OPENING_KEYS: &[&str] = &[
 ];
 /// The members an ASK's expectation adds to `decision` and `by`.
 const APPROVAL_KEYS: [&str; 2] = ["approvers_required", "on_timeout"];
-/// The instrument [`unread_facts`] names, which no case in the fixture does.
+/// The instrument [`unread_facts`] names, which [`action`] refuses in every opening.
 const UNREAD_INSTRUMENT: &str = "00000000-0000-4000-8000-000000000000";
 
 /// `kind: autonomy` — one action classified against the case's patched mandate.
@@ -67,13 +68,14 @@ pub(super) fn autonomy_case(fixture: &Json, case: &Json) -> Result<(), String> {
     unknown_members(case, CASE_KEYS)
         .map_err(|unknown| format!("case keys not interpreted: {unknown}"))?;
     let mandate = must_parse(&patched(fixture, case)?)?;
-    let action = action(at_of(case, "action")?)?;
+    let action = action(str_at(case, "id")?, at_of(case, "action")?)?;
     let decided = classify(&mandate.autonomy, &action).map_err(builder)?;
     compare(at_of(case, "expect")?, &decided)
 }
 
-/// The case's `action` as the facts `classify` reads, every member of it read.
-fn action(stated: &Json) -> Result<ActionContext, String> {
+/// Case `id`'s `action` as the facts `classify` reads, every member of it read. An opening may not
+/// name [`UNREAD_INSTRUMENT`], so no case is ever decided against the placeholder by accident.
+fn action(id: &str, stated: &Json) -> Result<ActionContext, String> {
     let purpose = purpose(str_at(stated, "purpose")?)?;
     if purpose.reduces_risk() {
         unknown_members(stated, &["purpose"]).map_err(|unknown| {
@@ -94,12 +96,16 @@ fn action(stated: &Json) -> Result<ActionContext, String> {
             .as_bool()
             .ok_or_else(|| format!("`{key}` is not a boolean"))
     };
+    let instrument = AssetId::parse(str_at(stated, "instrument")?)
+        .map_err(|e| format!("`instrument`: {}", e.code()))?;
+    ensure(instrument != unread_instrument()?, || {
+        format!("{id}: `instrument` names the harness's placeholder {UNREAD_INSTRUMENT}")
+    })?;
     Ok(ActionContext {
         purpose,
         order_usd: usd("order_usd")?,
         combined_score: unit("combined_score")?,
-        instrument: AssetId::parse(str_at(stated, "instrument")?)
-            .map_err(|e| format!("`instrument`: {}", e.code()))?,
+        instrument,
         asset_class: AssetClass::parse(str_at(stated, "asset_class")?)
             .map_err(|e| format!("`asset_class`: {}", e.code()))?,
         session: MarketSession::parse_condition_form(str_at(stated, "session")?)
@@ -122,8 +128,7 @@ fn unread_facts() -> Result<ActionContext, String> {
         purpose: Purpose::Open,
         order_usd: Usd::ZERO,
         combined_score: Unit::ZERO,
-        instrument: AssetId::parse(UNREAD_INSTRUMENT)
-            .map_err(|e| format!("the unread instrument: {}", e.code()))?,
+        instrument: unread_instrument()?,
         asset_class: AssetClass::Crypto,
         session: MarketSession::Crypto,
         first_trade_in_instrument: false,
@@ -136,6 +141,10 @@ fn unread_facts() -> Result<ActionContext, String> {
         bought_today_usd: Usd::ZERO,
         position_pnl_fraction: Signed::ZERO,
     })
+}
+
+fn unread_instrument() -> Result<AssetId, String> {
+    AssetId::parse(UNREAD_INSTRUMENT).map_err(|e| format!("the unread instrument: {}", e.code()))
 }
 
 /// §6.1's six purposes, spelt as the fixture writes them.
@@ -421,6 +430,33 @@ mod tests {
         crate::expect_eq("openings", openings, 12)
     }
 
+    /// No case is decided against the placeholder [`super::unread_facts`] fills: every opening,
+    /// doctored to name it as its `instrument`, fails naming the case and the placeholder.
+    #[test]
+    fn no_opening_may_name_the_unread_instrument() -> Result<(), String> {
+        let fixture = fixture()?;
+        let mut openings = 0_usize;
+        for case in family_a(&fixture)? {
+            let id = id(&case)?;
+            if crate::at(&case, "action")?.get("instrument").is_none() {
+                continue;
+            }
+            let named = doctored(&fixture, &id, "/action/instrument", |i| {
+                *i = json!("00000000-0000-4000-8000-000000000000");
+            })?;
+            fails_naming(
+                run(named, &id),
+                &format!(
+                    "{id}: `instrument` names the harness's placeholder \
+                     00000000-0000-4000-8000-000000000000"
+                ),
+                &format!("{id}: the placeholder named"),
+            )?;
+            openings = openings.saturating_add(1);
+        }
+        crate::expect_eq("openings", openings, 12)
+    }
+
     /// Each stated fact reaches `classify` under its own §6.3 name: the facts the harness builds,
     /// read back through the `Facts` projection a rule reads, equal the fixture's values field by
     /// field. A harness that wired `thesis_confidence` into `drawdown`, say, fails here even where no
@@ -435,7 +471,7 @@ mod tests {
             if stated.as_object().is_some_and(|m| m.len() == 1) {
                 continue;
             }
-            let facts = super::action(stated).map_err(|e| format!("{id}: {e}"))?;
+            let facts = super::action(&id, stated).map_err(|e| format!("{id}: {e}"))?;
             for field in FIELDS {
                 let name = field.as_str();
                 let wanted = &stated[name];
