@@ -350,6 +350,14 @@ fn pending(case: &Json) -> BTreeSet<String> {
         if event == "propose_order" {
             pending_proposal(case, data, expect, &mut note);
         }
+        if event == "broker_account_update" {
+            let members = data.and_then(Json::as_object).unwrap_or(&empty);
+            for key in members.keys() {
+                if let Some(story) = owner(PENDING_ACCOUNT, key) {
+                    note(format!("account update field `{key}`"), story);
+                }
+            }
+        }
     }
     out
 }
