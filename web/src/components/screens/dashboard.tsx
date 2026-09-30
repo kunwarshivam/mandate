@@ -19,6 +19,7 @@ import { decisionHref } from "@/lib/screens";
 import { cn } from "@/lib/utils";
 import { AgentCard } from "./agent-card";
 import { AssetsSection } from "./assets-section";
+import { NewsSection } from "./news-section";
 import { EmptyBoard, Section, SectionLink, WorkspaceGate } from "./common";
 
 /** The rail beside the account chart shows this many requests; the rest are one link away. */
@@ -275,6 +276,7 @@ function Dashboard() {
           ) : null}
         </Section>
 
+        <NewsSection ws={ws} now={now} className="max-lg:hidden" />
       </div>
     </div>
   );
