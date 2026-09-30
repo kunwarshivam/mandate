@@ -1344,6 +1344,7 @@ mod tests {
 
     use serde_json::json;
 
+    use super::{gate, gate_error, instant, market_session, test_default_gate_config};
     use crate::{Json, mandate, read_fixture};
 
     const PLANTED: &str = "zz_planted";
@@ -1356,7 +1357,7 @@ mod tests {
     ];
 
     /// The cases that cannot pass yet, each with what its failure must say.
-    const OWED: [(&str, &[&str]); 9] = [
+    const OWED: [(&str, &[&str]); 7] = [
         ("MC-B17", &["mandate_risk::trim_proposals", "pending E6-4"]),
         ("MC-B30", &["mandate_risk::trim_proposals", "pending E6-4"]),
         ("MC-B31", &["mandate_risk::trim_proposals", "pending E6-4"]),
@@ -1364,6 +1365,14 @@ mod tests {
         ("MC-B26", &["mandate_risk::evaluate", "pending E6-10"]),
         ("MC-B27", &["mandate_risk::evaluate", "pending E6-10"]),
         ("MC-B28", &["mandate_risk::evaluate", "pending E6-10"]),
+    ];
+
+    /// The cases whose clock DEC-250 item 12 moves onto their labels, judged by the fixture's own
+    /// consistency: each passes when its `session` and `in_close_window` agree with the calendar at
+    /// its `now`, and otherwise fails naming the conflict as its needles say. MC-B31 carries the
+    /// same `after_hours` label but is not here: a `trim_to_target` case stops at
+    /// `trim_proposals` before its labels are compared, so it is owed to E6-4 either way.
+    const CLOCKED: [(&str, &[&str]); 2] = [
         (
             "MC-B22",
             &[
@@ -1381,6 +1390,35 @@ mod tests {
             ],
         ),
     ];
+
+    /// Whether case `id`'s `session` and `in_close_window`, defaulting to `regular` and false as
+    /// the case-file header says, agree with `mandate_risk::session_at` at its `now` under the gate
+    /// configuration the harness runs. The labels are compared here rather than by the harness's
+    /// own comparison, so a harness that stops comparing them cannot also change what is expected.
+    fn labels_agree_with_calendar(fixture: &Json, id: &str) -> Result<bool, String> {
+        let case = family_b(fixture)?
+            .into_iter()
+            .find(|c| c["id"] == id)
+            .ok_or_else(|| format!("no case {id}"))?;
+        let input = crate::at(&case, "input")?;
+        let class = match crate::str_at(input, "asset_class")? {
+            "us_equity" => gate::AssetClass::UsEquity,
+            "crypto" => gate::AssetClass::Crypto,
+            other => return Err(format!("{id}: asset class `{other}`")),
+        };
+        let now = instant(crate::at(input, "now")?, "now")?;
+        let clock = gate::session_at(now, &test_default_gate_config()?, class)
+            .map_err(|e| gate_error("session_at", &e))?;
+        let session = input
+            .get("session")
+            .map_or(Some("regular"), Json::as_str)
+            .ok_or_else(|| format!("{id}: `session` is not text"))?;
+        let close_window = input
+            .get("in_close_window")
+            .map_or(Some(false), Json::as_bool)
+            .ok_or_else(|| format!("{id}: `in_close_window` is not a flag"))?;
+        Ok(session == market_session(clock.session).as_str() && close_window == clock.close_window)
+    }
 
     fn fixture() -> Result<Json, String> {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/refcases");
@@ -1621,18 +1659,34 @@ mod tests {
             let result = run(fixture.clone(), &id);
             if PASSING.contains(&id.as_str()) {
                 result.map_err(|e| format!("{id}: {e}"))?;
+            } else if let Some((_, needles)) = CLOCKED.iter().find(|(clocked, _)| *clocked == id) {
+                if labels_agree_with_calendar(&fixture, &id)? {
+                    result.map_err(|e| format!("{id}, its labels agreeing with its clock: {e}"))?;
+                } else {
+                    for needle in *needles {
+                        fails_naming(
+                            result.clone(),
+                            needle,
+                            &format!("{id}, its labels contradicting its clock"),
+                        )?;
+                    }
+                }
             } else {
                 let (_, needles) = OWED
                     .iter()
                     .find(|(owed, _)| *owed == id)
-                    .ok_or_else(|| format!("{id} is neither passing nor owed"))?;
+                    .ok_or_else(|| format!("{id} is neither passing, clocked nor owed"))?;
                 for needle in *needles {
                     fails_naming(result.clone(), needle, &id)?;
                 }
             }
             seen = seen.saturating_add(1);
         }
-        crate::expect_eq("cases listed", PASSING.len() + OWED.len(), seen)
+        crate::expect_eq(
+            "cases listed",
+            PASSING.len() + CLOCKED.len() + OWED.len(),
+            seen,
+        )
     }
 
     /// Every expected member, and every member of a dry run and an outcome, is compared and none is
