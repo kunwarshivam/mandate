@@ -304,7 +304,8 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("bid", opt(DEC)),
         ("bid_size", opt(DEC)),
         ("floor", opt(DEC)),
-        ("user", opt(STR)),
+        ("user", STR),
+        ("step_up_status", one_of("valid", "absent", "stale")),
         ("step_up", opt(STEP_UP)),
     ),
 }
@@ -457,7 +458,7 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     p = draft["payload"]
     out: list[Violation] = []
 
-    def rule(number: int, holds: bool, reason: str, path: str) -> None:
+    def rule(number: int | str, holds: bool, reason: str, path: str) -> None:
         name = f"rule.{number}"
         if not holds and name not in skip:
             out.append(Violation(name, reason, path))
@@ -489,9 +490,13 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
     if event_type == "AgentModeChanged":
         rule(11, strictness(p["to"]) >= strictness(p["lifecycle"]), "schema", "payload.to")
     if event_type == "OwnerExitRequested":
-        members = ("bid", "bid_size", "floor", "user", "step_up")
+        members = ("bid", "bid_size", "floor")
+        if "regress.rule_12_ties_evidence_to_the_bid" in skip:
+            members = (*members, "user", "step_up")
         wrong = [m for m in members if (p[m] is not None) != p["confirmed"]]
         rule(12, not wrong, "schema", f"payload.{wrong[0]}" if wrong else "")
+        valid = p["step_up_status"] == "valid"
+        rule("12.step_up", (p["step_up"] is not None) == valid, "schema", "payload.step_up")
     if event_type == "ModelOutputRecorded" and (p["thesis_id"] is None) != (p["lineage_id"] is None):
         rule(13, False, "schema", "payload.thesis_id" if p["thesis_id"] is None else "payload.lineage_id")
     return out
@@ -563,19 +568,26 @@ WORKSPACE = "ws_01J8Z2"
 AGENT = "agent_a"
 STREAM = f"agent:{WORKSPACE}:{AGENT}"
 INSTRUMENT = "b0b6dd9d-8b9b-48a9-ba46-b9d54906e415"
+HELD_INSTRUMENT = "5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f"
 MANDATE = {"mandate_version": "sha256:" + "5" * 64}
 ACTOR = {"kind": "agent", "id": AGENT, "version": "0.1.0", "build": "sha256:" + "c" * 64}
 INTENT_ID = "01J8Z3M1P0000000000000000X"
-IDS = {
-    1: "01J8Z3JYA000000000000000G1",
-    2: "01J8Z3M0A000000000000000G2",
-    3: "01J8Z3M0R000000000000000G3",
-    4: "01J8Z3M1A000000000000000G4",
-    5: INTENT_ID,
-    6: "01J8ZNB0A000000000000000G6",
-    7: "01J8ZNB0M000000000000000G7",
-    8: "01J8ZNB0R000000000000000G8",
-}
+CHAIN = (
+    ("opened", "01J8Z3JYA000000000000000G1"),
+    ("observation", "01J8Z3M0A000000000000000G2"),
+    ("model_output", "01J8Z3M0R000000000000000G3"),
+    ("decision", "01J8Z3M1A000000000000000G4"),
+    ("intent", INTENT_ID),
+    ("owner_close_in_session", "01J8Z6A0A000000000000000E1"),
+    ("owner_close_in_session_intent", "01J8Z6A0M000000000000000P1"),
+    ("owner_close_confirmed", "01J8ZMR0A000000000000000E2"),
+    ("owner_close_confirmed_intent", "01J8ZMR0M000000000000000P2"),
+    ("kill_switch_mode", "01J8ZNB0A000000000000000M1"),
+    ("owner_kill_switch", "01J8ZNB0M000000000000000K1"),
+    ("kill_switch", "01J8ZNB0R000000000000000K2"),
+)
+SEQ = {name: seq for seq, (name, _) in enumerate(CHAIN, start=1)}
+ID = dict(CHAIN)
 
 QUOTE_SNAPSHOT = {
     "kind": "quote_snapshot",
@@ -602,12 +614,19 @@ DERIVATION = {
         "Illustrative mandate and account values the DecisionMade vector is recomputed from "
         "(mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no "
         "fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). "
-        "The gate dry run and the autonomy result are inputs. The OwnerExitRequested floor is the "
-        "default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier "
-        "(trading spec §5.5, §5.6)."
+        "The gate dry run and the autonomy result are inputs. Gross exposure is the held position's "
+        "quantity x mark. The owner then closes the held position in the regular session without a "
+        "confirmed bid, and after the session closes the opened position (taken as filled) with a "
+        "confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's "
+        ">= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is "
+        "valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 "
+        "America/New_York (EDT, UTC-4, on this date)."
     ),
     "owner_bid": "151",
     "max_exit_offset": "0.03",
+    "step_up_max_age_s": 300,
+    "regular_session_utc": {"open": "2026-09-21T13:30:00.000000000Z", "close": "2026-09-21T20:00:00.000000000Z"},
+    "held": {"instrument_id": HELD_INSTRUMENT, "qty": "5", "mark": "100"},
     "now": "2026-09-21T14:00:00.000000000Z",
     "models": [
         {"model_id": "quant.mean_reversion", "weight": "0.9", "max_output_age_s": 300},
@@ -616,7 +635,6 @@ DERIVATION = {
     "equity": "10000",
     "market_value": "0",
     "working_opening_cost": "0",
-    "gross_exposure": "0",
     "max_position_usd": "5000",
     "max_position_fraction": "0.2",
     "size_factor": "1",
@@ -641,13 +659,13 @@ def artifact_ref(obj: dict) -> str:
     return "sha256:" + sha256_hex(canon_bytes(obj))
 
 
-def event(seq: int, event_type: str, at: str, recorded: str, payload: dict, **envelope) -> dict:
+def event(name: str, event_type: str, at: str, recorded: str, payload: dict, **envelope) -> dict:
     body = {
         "envelope_version": 1,
         "environment": "paper",
-        "event_id": IDS[seq],
+        "event_id": ID[name],
         "stream_id": STREAM,
-        "seq": seq,
+        "seq": SEQ[name],
         "event_type": event_type,
         "schema_version": 1,
         "event_time": at,
@@ -678,9 +696,10 @@ def chain_bodies() -> list[dict]:
         "limit_price": "150",
         "purpose": "open",
     }
-    return [
+    floor = default_floor(DERIVATION)
+    bodies = [
         event(
-            1,
+            "opened",
             "StreamOpened",
             f"{day}13:00:00.000000000Z",
             f"{day}13:00:00.000150000Z",
@@ -688,7 +707,7 @@ def chain_bodies() -> list[dict]:
             clock_source="local",
         ),
         event(
-            2,
+            "observation",
             "ObservationRecorded",
             f"{day}13:59:58.000000000Z",
             f"{day}13:59:58.000200000Z",
@@ -700,7 +719,7 @@ def chain_bodies() -> list[dict]:
             },
         ),
         event(
-            3,
+            "model_output",
             "ModelOutputRecorded",
             f"{day}13:59:59.000000000Z",
             f"{day}13:59:59.000200000Z",
@@ -716,7 +735,7 @@ def chain_bodies() -> list[dict]:
                 "confidence": "0.98",
                 "horizon_s": 86400,
                 "thesis_ref": None,
-                "evidence": [IDS[2]],
+                "evidence": [ID["observation"]],
                 "invalidation": None,
                 "thesis_id": None,
                 "lineage_id": None,
@@ -724,7 +743,7 @@ def chain_bodies() -> list[dict]:
             },
         ),
         event(
-            4,
+            "decision",
             "DecisionMade",
             f"{day}14:00:00.000000000Z",
             f"{day}14:00:00.000100000Z",
@@ -733,7 +752,7 @@ def chain_bodies() -> list[dict]:
                 "exit_conviction": "0.85554",
                 "buy_conviction": "0.75554",
                 "combined_score": "0.882",
-                "outputs_used": [IDS[3]],
+                "outputs_used": [ID["model_output"]],
                 "model_weights": [
                     {"key": "quant.mean_reversion", "value": "0.9"},
                     {"key": "quant.momentum", "value": "0.1"},
@@ -745,48 +764,121 @@ def chain_bodies() -> list[dict]:
             },
         ),
         event(
-            5,
+            "intent",
             "IntentProposed",
             f"{day}14:00:00.000000000Z",
             f"{day}14:00:00.000200000Z",
             dict(decision_action),
-            causation_id=IDS[4],
+            causation_id=ID["decision"],
         ),
         event(
-            6,
+            "owner_close_in_session",
+            "OwnerExitRequested",
+            f"{day}15:00:00.000000000Z",
+            f"{day}15:00:00.000100000Z",
+            {
+                "scope": "instrument",
+                "subject": HELD_INSTRUMENT,
+                "confirmed": False,
+                "bid": None,
+                "bid_size": None,
+                "floor": None,
+                "user": "user_7f3a",
+                "step_up_status": "valid",
+                "step_up": {
+                    "assertion_id": "stepup_4b2d",
+                    "authenticated_at": f"{day}14:59:52.000000000Z",
+                    "method": "webauthn",
+                },
+            },
+        ),
+        event(
+            "owner_close_in_session_intent",
+            "IntentProposed",
+            f"{day}15:00:00.000000000Z",
+            f"{day}15:00:00.000200000Z",
+            {
+                "instrument_id": HELD_INSTRUMENT,
+                "side": "sell",
+                "type": "market",
+                "tif": "day",
+                "qty": DERIVATION["held"]["qty"],
+                "limit_price": None,
+                "purpose": "owner_exit",
+            },
+            causation_id=ID["owner_close_in_session"],
+        ),
+        event(
+            "owner_close_confirmed",
+            "OwnerExitRequested",
+            f"{day}20:10:00.000000000Z",
+            f"{day}20:10:00.000100000Z",
+            {
+                "scope": "instrument",
+                "subject": INSTRUMENT,
+                "confirmed": True,
+                "bid": DERIVATION["owner_bid"],
+                "bid_size": "300",
+                "floor": floor,
+                "user": "user_7f3a",
+                "step_up_status": "valid",
+                "step_up": {
+                    "assertion_id": "stepup_9c1e",
+                    "authenticated_at": f"{day}20:09:45.000000000Z",
+                    "method": "webauthn",
+                },
+            },
+        ),
+        event(
+            "owner_close_confirmed_intent",
+            "IntentProposed",
+            f"{day}20:10:00.000000000Z",
+            f"{day}20:10:00.000200000Z",
+            {
+                "instrument_id": INSTRUMENT,
+                "side": "sell",
+                "type": "limit",
+                "tif": "day",
+                "qty": decision_action["qty"],
+                "limit_price": floor,
+                "purpose": "owner_exit",
+            },
+            causation_id=ID["owner_close_confirmed"],
+        ),
+        event(
+            "kill_switch_mode",
             "AgentModeChanged",
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000100000Z",
             {"from": "normal", "to": "stopped", "reason": "kill_switch", "lifecycle": "normal"},
         ),
         event(
-            7,
+            "owner_kill_switch",
             "OwnerExitRequested",
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000200000Z",
             {
                 "scope": "agent",
                 "subject": AGENT,
-                "confirmed": True,
-                "bid": DERIVATION["owner_bid"],
-                "bid_size": "300",
-                "floor": default_floor(DERIVATION),
+                "confirmed": False,
+                "bid": None,
+                "bid_size": None,
+                "floor": None,
                 "user": "user_7f3a",
-                "step_up": {
-                    "assertion_id": "stepup_9c1e",
-                    "authenticated_at": f"{day}20:29:45.000000000Z",
-                    "method": "webauthn",
-                },
+                "step_up_status": "absent",
+                "step_up": None,
             },
         ),
         event(
-            8,
+            "kill_switch",
             "KillSwitchActivated",
             f"{day}20:30:00.000000000Z",
             f"{day}20:30:00.000300000Z",
-            {"scope": "agent", "subject": AGENT, "initiator": "owner", "mode_event": IDS[6]},
+            {"scope": "agent", "subject": AGENT, "initiator": "owner", "mode_event": ID["kill_switch_mode"]},
         ),
     ]
+    assert [b["seq"] for b in bodies] == list(range(1, len(CHAIN) + 1)), "bodies follow CHAIN's order"
+    return bodies
 
 
 def hash_chain(bodies: list[dict], genesis: str) -> list[dict]:
@@ -831,11 +923,11 @@ def delete(path: str) -> dict:
     return {"path": path, "delete": True}
 
 
-def invalid(name, clause, seq, changes, reason, path):
+def invalid(name, clause, base, changes, reason, path):
     return {
         "name": name,
         "clause": clause,
-        "base_seq": seq,
+        "base_seq": SEQ[base],
         "changes": changes,
         "expect": {"outcome": "Invalid", "reason": reason, "path": path},
     }
@@ -846,12 +938,12 @@ def invalid_drafts() -> list[dict]:
     item-3 contradiction the rulings settle."""
     quote = copy.deepcopy(QUOTE_SNAPSHOT)
     as_of = epoch_seconds("2026-09-21T13:59:58.000000000Z")
-    stepped_up = epoch_seconds("2026-09-21T20:29:45.000000000Z")
+    stepped_up = epoch_seconds("2026-09-21T20:09:45.000000000Z")
     return [
         invalid(
             "owner_exit_floor_absent",
             "§9.1 absent member",
-            7,
+            "owner_close_confirmed",
             [delete("payload.floor")],
             "schema",
             "payload.floor",
@@ -859,7 +951,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_reason_code_absent_on_allow",
             "§9.1 absent member",
-            4,
+            "decision",
             [delete("payload.reason_code")],
             "schema",
             "payload.reason_code",
@@ -867,7 +959,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "reason_code_empty_string_on_allow",
             "§4.2",
-            4,
+            "decision",
             [change("payload.reason_code", "")],
             "non_canonical",
             "payload.reason_code",
@@ -875,22 +967,55 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "owner_exit_unconfirmed_empty_user",
             "§4.2",
-            7,
-            [
-                change("payload.confirmed", False),
-                change("payload.bid", None),
-                change("payload.bid_size", None),
-                change("payload.floor", None),
-                change("payload.user", ""),
-                change("payload.step_up", None),
-            ],
+            "owner_kill_switch",
+            [change("payload.user", "")],
             "non_canonical",
             "payload.user",
         ),
         invalid(
+            "owner_exit_unconfirmed_without_user",
+            "§9.1 OwnerExitRequested",
+            "owner_close_in_session",
+            [change("payload.user", None)],
+            "schema",
+            "payload.user",
+        ),
+        invalid(
+            "owner_exit_step_up_status_unknown",
+            "§9.1 OwnerExitRequested",
+            "owner_kill_switch",
+            [change("payload.step_up_status", "failed")],
+            "non_canonical",
+            "payload.step_up_status",
+        ),
+        invalid(
+            "owner_kill_switch_valid_without_evidence",
+            "§9.1 rule 12",
+            "owner_kill_switch",
+            [change("payload.step_up_status", "valid")],
+            "schema",
+            "payload.step_up",
+        ),
+        invalid(
+            "owner_exit_stale_with_evidence",
+            "§9.1 rule 12",
+            "owner_close_in_session",
+            [change("payload.step_up_status", "stale")],
+            "schema",
+            "payload.step_up",
+        ),
+        invalid(
+            "owner_exit_unconfirmed_with_floor",
+            "§9.1 rule 12",
+            "owner_close_in_session",
+            [change("payload.floor", "146.47")],
+            "schema",
+            "payload.floor",
+        ),
+        invalid(
             "model_output_as_of_in_seconds",
             "§4.7",
-            3,
+            "model_output",
             [change("payload.as_of", str(as_of))],
             "non_canonical",
             "payload.as_of",
@@ -898,7 +1023,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "observation_as_of_as_integer",
             "§4.4",
-            2,
+            "observation",
             [change("payload.as_of", as_of)],
             "schema",
             "payload.as_of",
@@ -906,7 +1031,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "step_up_time_in_seconds",
             "§4.7",
-            7,
+            "owner_close_confirmed",
             [change("payload.step_up.authenticated_at", str(stepped_up))],
             "non_canonical",
             "payload.step_up.authenticated_at",
@@ -914,7 +1039,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "observation_data_inline",
             "§9.1 artifacts",
-            2,
+            "observation",
             [change("payload.data_ref", quote), change("artifact_refs", [])],
             "schema",
             "payload.data_ref",
@@ -922,7 +1047,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "observation_artifact_not_listed",
             "§3 artifact_refs",
-            2,
+            "observation",
             [change("artifact_refs", [])],
             "artifact_refs",
             "artifact_refs",
@@ -930,7 +1055,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_proposed_carries_intent_id",
             "§9.1 IntentProposed",
-            5,
+            "intent",
             [change("payload.intent_id", INTENT_ID)],
             "schema",
             "payload.intent_id",
@@ -938,7 +1063,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_proposed_protective",
             "§9.1 IntentProposed",
-            5,
+            "intent",
             [change("payload.purpose", "protective")],
             "non_canonical",
             "payload.purpose",
@@ -946,7 +1071,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_without_mandate_version",
             "§9 required refs",
-            4,
+            "decision",
             [change("config_refs", {})],
             "missing_config_ref",
             "config_refs.mandate_version",
@@ -954,7 +1079,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_sell_labelled_open",
             "§9.1 rule 1",
-            5,
+            "intent",
             [change("payload.side", "sell")],
             "schema",
             "payload.side",
@@ -962,7 +1087,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_limit_without_price",
             "§9.1 rule 2",
-            5,
+            "intent",
             [change("payload.limit_price", None)],
             "schema",
             "payload.limit_price",
@@ -970,7 +1095,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_market_exit_with_price",
             "§9.1 rule 2",
-            4,
+            "decision",
             [
                 change("payload.side", "sell"),
                 change("payload.type", "market"),
@@ -982,7 +1107,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_market_open",
             "§9.1 rule 3",
-            5,
+            "intent",
             [change("payload.type", "market"), change("payload.limit_price", None)],
             "schema",
             "payload.type",
@@ -990,7 +1115,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_allow_with_reason_code",
             "§9.1 rule 4",
-            4,
+            "decision",
             [change("payload.reason_code", "insufficient_buying_power")],
             "schema",
             "payload.reason_code",
@@ -998,7 +1123,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_deny_with_autonomy",
             "§9.1 rule 5",
-            4,
+            "decision",
             [change("payload.dry_run", "deny"), change("payload.reason_code", "insufficient_buying_power")],
             "schema",
             "payload.autonomy",
@@ -1006,7 +1131,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_defer_on_open",
             "§9.1 rule 6",
-            4,
+            "decision",
             [
                 change("payload.dry_run", "defer"),
                 change("payload.reason_code", "session_not_allowed"),
@@ -1018,7 +1143,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_exit_classified_ask",
             "§9.1 rule 7",
-            4,
+            "decision",
             [
                 change("payload.side", "sell"),
                 change("payload.purpose", "discretionary_exit"),
@@ -1030,7 +1155,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_risk_exit_with_convictions",
             "§9.1 rule 8",
-            4,
+            "decision",
             [change("payload.side", "sell"), change("payload.purpose", "risk_exit")],
             "schema",
             "payload.exit_conviction",
@@ -1038,15 +1163,15 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_outputs_repeated",
             "§9.1 rule 9",
-            4,
-            [change("payload.outputs_used", [IDS[3], IDS[3]])],
+            "decision",
+            [change("payload.outputs_used", [ID["model_output"], ID["model_output"]])],
             "non_canonical",
             "payload.outputs_used",
         ),
         invalid(
             "decision_weights_unsorted",
             "§9.1 rule 9",
-            4,
+            "decision",
             [
                 change(
                     "payload.model_weights",
@@ -1062,7 +1187,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "decision_clips_out_of_order",
             "§9.1 rule 9",
-            4,
+            "decision",
             [change("payload.clips_applied", ["position_cap", "max_order_usd"])],
             "non_canonical",
             "payload.clips_applied",
@@ -1070,7 +1195,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "intent_without_causation",
             "§9.1 rule 10",
-            5,
+            "intent",
             [change("causation_id", None)],
             "schema",
             "causation_id",
@@ -1078,7 +1203,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "mode_looser_than_lifecycle",
             "§9.1 rule 11",
-            6,
+            "kill_switch_mode",
             [change("payload.to", "exits_only"), change("payload.lifecycle", "paused")],
             "schema",
             "payload.to",
@@ -1086,7 +1211,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "mode_lifecycle_exits_only",
             "§9.1 AgentModeChanged",
-            6,
+            "kill_switch_mode",
             [change("payload.lifecycle", "exits_only")],
             "non_canonical",
             "payload.lifecycle",
@@ -1094,7 +1219,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "owner_exit_confirmed_without_floor",
             "§9.1 rule 12",
-            7,
+            "owner_close_confirmed",
             [change("payload.floor", None)],
             "schema",
             "payload.floor",
@@ -1102,7 +1227,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "owner_exit_unconfirmed_with_bid",
             "§9.1 rule 12",
-            7,
+            "owner_close_confirmed",
             [change("payload.confirmed", False)],
             "schema",
             "payload.bid",
@@ -1110,7 +1235,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "model_output_lineage_without_thesis",
             "§9.1 rule 13",
-            3,
+            "model_output",
             [change("payload.lineage_id", "lin_01")],
             "schema",
             "payload.thesis_id",
@@ -1118,7 +1243,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "stream_opened_other_agent",
             "§9.1 rule 14",
-            1,
+            "opened",
             [change("payload.agent_id", "agent_b")],
             "stream_mismatch",
             "stream_id",
@@ -1126,7 +1251,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "kill_switch_other_agent",
             "§9.1 rule 15",
-            8,
+            "kill_switch",
             [change("payload.subject", "agent_b")],
             "stream_mismatch",
             "payload.subject",
@@ -1134,7 +1259,7 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "kill_switch_other_workspace",
             "§9.1 rule 15",
-            8,
+            "kill_switch",
             [change("payload.scope", "workspace"), change("payload.subject", "ws_01J8Z9")],
             "stream_mismatch",
             "payload.subject",
@@ -1142,10 +1267,50 @@ def invalid_drafts() -> list[dict]:
         invalid(
             "owner_exit_other_agent",
             "§9.1 rule 15",
-            7,
+            "owner_kill_switch",
             [change("payload.subject", "agent_b")],
             "stream_mismatch",
             "payload.subject",
+        ),
+    ]
+
+
+def valid(name, clause, base, changes):
+    return {
+        "name": name,
+        "clause": clause,
+        "base_seq": SEQ[base],
+        "changes": changes,
+        "expect": {"outcome": "Valid"},
+    }
+
+
+def valid_drafts() -> list[dict]:
+    """Drafts a rule might be misread to refuse. Each must be accepted: refusing one would hold a
+    reduction (`AGENTS.md` rule 13), or would record less than the owner did."""
+    return [
+        valid(
+            "owner_close_confirmed_bid_stale_step_up",
+            "§9.1 OwnerExitRequested",
+            "owner_close_confirmed",
+            [change("payload.step_up_status", "stale"), change("payload.step_up", None)],
+        ),
+        valid(
+            "owner_kill_switch_confirmed_bid_without_step_up",
+            "§9.1 OwnerExitRequested",
+            "owner_kill_switch",
+            [
+                change("payload.confirmed", True),
+                change("payload.bid", DERIVATION["owner_bid"]),
+                change("payload.bid_size", "300"),
+                change("payload.floor", default_floor(DERIVATION)),
+            ],
+        ),
+        valid(
+            "owner_kill_switch_stale_step_up",
+            "§9.1 OwnerExitRequested",
+            "owner_kill_switch",
+            [change("payload.step_up_status", "stale")],
         ),
     ]
 
@@ -1208,7 +1373,8 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
         ("position_cap", cap - held),
         (
             "gross_exposure_cap",
-            min(dec(d["max_gross_exposure_usd"]), dec(d["equity"])) - dec(d["gross_exposure"]),
+            min(dec(d["max_gross_exposure_usd"]), dec(d["equity"]))
+            - dec(d["held"]["qty"]) * dec(d["held"]["mark"]),
         ),
     ]
     value, clips = delta, []
@@ -1239,12 +1405,60 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
     }
 
 
+def nanos(text: str) -> int:
+    instant, fraction = parse_instant(text)
+    return calendar.timegm(instant.timetuple()) * 10**9 + fraction
+
+
+def check_owner_exits(chain: list[dict], d: dict, decision: dict) -> list[str]:
+    """Trading spec §5.5 and DEC-158 option (c), from the derivation rather than the validator: who
+    asked, with which step-up, and what each owner exit may and may not do."""
+    problems = []
+    bodies = [e["body"] for e in chain]
+    positions = {d["held"]["instrument_id"]: d["held"]["qty"], decision["payload"]["instrument_id"]: decision["payload"]["qty"]}
+    session = nanos(d["regular_session_utc"]["open"]), nanos(d["regular_session_utc"]["close"])
+    for owner in (b for b in bodies if b["event_type"] == "OwnerExitRequested"):
+        p, at = owner["payload"], nanos(owner["event_time"])
+        label = f"OwnerExitRequested seq {owner['seq']}"
+        if p["user"] is None:
+            problems.append(f"{label}: the owner who asked is not recorded")
+        evidence = p["step_up"]
+        if (evidence is not None) != (p["step_up_status"] == "valid"):
+            problems.append(f"{label}: step_up does not match step_up_status")
+        if evidence is not None and not 0 <= at - nanos(evidence["authenticated_at"]) <= d["step_up_max_age_s"] * 10**9:
+            problems.append(f"{label}: step-up recorded as valid is not fresh at the command (DEC-156 item 8)")
+        caused = [b for b in bodies if b["event_type"] == "IntentProposed" and b["causation_id"] == owner["event_id"]]
+        in_session = session[0] <= at < session[1]
+        if p["scope"] != "instrument":
+            if caused:
+                problems.append(f"{label}: a kill switch's flatten is never a proposed intent (§9.1)")
+            continue
+        if len(caused) != 1:
+            problems.append(f"{label}: an owner close of one instrument proposes exactly one intent")
+            continue
+        close = caused[0]["payload"]
+        if (close["instrument_id"], close["side"], close["purpose"]) != (p["subject"], "sell", "owner_exit"):
+            problems.append(f"{label}: its intent is not an owner_exit sell of the named instrument")
+        if close["qty"] != positions.get(p["subject"]):
+            problems.append(f"{label}: its intent does not close the whole position")
+        if p["confirmed"]:
+            floor = dec(d["owner_bid"]) * (1 - dec(d["max_exit_offset"]))
+            if p["bid"] != d["owner_bid"] or dec(p["floor"]) != floor:
+                problems.append(f"{label}: the floor is not the default floor of its confirmed bid")
+            if close["type"] != "limit" or close["limit_price"] is None or dec(close["limit_price"]) < floor:
+                problems.append(f"{label}: its intent may price below the confirmed floor")
+            if in_session:
+                problems.append(f"{label}: the vector's confirmed close is meant to be outside the session")
+        elif not in_session:
+            problems.append(f"{label}: without a confirmed bid an equity owner close sells only in the session")
+    return problems
+
+
 def check_chain(section: dict, v3: dict) -> list[str]:
     """Cross-event facts no single draft check can see. Returns every failure, so seeded bugs can be
     shown to be caught."""
     problems = []
     chain = section["chain"]
-    by_type = {e["event_type"]: e["body"] for e in chain}
     prev = v3["genesis_prev_hash"]
     for i, entry in enumerate(chain, start=1):
         body = entry["body"]
@@ -1272,12 +1486,13 @@ def check_chain(section: dict, v3: dict) -> list[str]:
                 problems.append(f"seq {entry['seq']}: artifact {ref} missing")
     if chain[0]["event_type"] != "StreamOpened":
         problems.append("seq 1 is not StreamOpened")
-    decision = by_type["DecisionMade"]
+    named = {name: chain[seq - 1]["body"] for name, seq in SEQ.items() if seq <= len(chain)}
+    decision = named["decision"]
     expected = recompute_decision(chain, section["artifacts"], section["derivation"])
     for member, value in expected.items():
         if decision["payload"][member] != value:
             problems.append(f"DecisionMade.{member}: {decision['payload'][member]!r} != recomputed {value!r}")
-    intent = by_type["IntentProposed"]
+    intent = named["intent"]
     if intent["causation_id"] != decision["event_id"]:
         problems.append("IntentProposed.causation_id is not the DecisionMade")
     action = {k: decision["payload"][k] for k in intent["payload"]}
@@ -1296,22 +1511,21 @@ def check_chain(section: dict, v3: dict) -> list[str]:
         problems.append("IntentReceived.agent_id is not the agent stream's agent")
     if not intent["recorded_at"] < received["recorded_at"]:
         problems.append("IntentProposed must be recorded before the account stream copies it")
-    mode, switch = by_type["AgentModeChanged"], by_type["KillSwitchActivated"]
+    mode, switch = named["kill_switch_mode"], named["kill_switch"]
     if switch["payload"]["mode_event"] != mode["event_id"] or mode["payload"]["reason"] != "kill_switch":
         problems.append("KillSwitchActivated.mode_event does not name its AgentModeChanged")
     if mode["payload"]["to"] != "stopped":
         problems.append("an owner kill switch's final mode is stopped (trading spec §5.5)")
-    owner = by_type["OwnerExitRequested"]["payload"]
-    derivation = section["derivation"]
-    if owner["bid"] != derivation["owner_bid"] or dec(owner["floor"]) != dec(derivation["owner_bid"]) * (
-        1 - dec(derivation["max_exit_offset"])
-    ):
-        problems.append("OwnerExitRequested.floor is not the default floor of its confirmed bid")
+    problems += check_owner_exits(chain, section["derivation"], decision)
     for case in section["invalid_drafts"]:
         got = violations(apply_changes(chain, case))
         want = case["expect"]
         if len(got) != 1 or (got[0].reason, got[0].path) != (want["reason"], want["path"]):
             problems.append(f"{case['name']}: expected exactly {want['reason']} at {want['path']}, got {got}")
+    for case in section["valid_drafts"]:
+        got = violations(apply_changes(chain, case))
+        if got:
+            problems.append(f"{case['name']}: expected Valid, got {got}")
     for entry in chain:
         got = violations(draft_of(entry["body"]))
         if got:
@@ -1327,14 +1541,24 @@ VALIDATOR_MUTANTS = (
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(1, 15)),
+    "rule.12.step_up",
     "rule.15.agent",
     "rule.15.workspace",
     *REGRESSIONS,
+    "regress.rule_12_ties_evidence_to_the_bid",
 )
 
 
 def draft_named(section: dict, name: str) -> dict:
     return next(d for d in section["invalid_drafts"] if d["name"] == name)
+
+
+def body_named(section: dict, name: str) -> dict:
+    return section["chain"][SEQ[name] - 1]["body"]
+
+
+def payload_named(section: dict, name: str) -> dict:
+    return body_named(section, name)["payload"]
 
 
 def vector_mutants(section: dict) -> list[tuple[str, dict]]:
@@ -1345,39 +1569,61 @@ def vector_mutants(section: dict) -> list[tuple[str, dict]]:
         fn(copy_)
         return copy_
 
+    def decision(s: dict) -> dict:
+        return payload_named(s, "decision")
+
     out = []
     for name, fn in [
         (
             "missing model counted as 0 in buy conviction",
-            lambda s: s["chain"][3]["body"]["payload"].update(
-                buy_conviction=s["chain"][3]["body"]["payload"]["exit_conviction"]
-            ),
+            lambda s: decision(s).update(buy_conviction=decision(s)["exit_conviction"]),
         ),
-        (
-            "combined score from conviction",
-            lambda s: s["chain"][3]["body"]["payload"].update(combined_score="0.8536"),
-        ),
+        ("combined score from conviction", lambda s: decision(s).update(combined_score="0.8536")),
         (
             "every bound listed as a clip",
-            lambda s: s["chain"][3]["body"]["payload"].update(
-                clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]
-            ),
+            lambda s: decision(s).update(clips_applied=["max_order_usd", "position_cap", "gross_exposure_cap"]),
         ),
-        ("quantity not truncated", lambda s: s["chain"][3]["body"]["payload"].update(qty="10.07")),
+        ("quantity not truncated", lambda s: decision(s).update(qty="10.07")),
         (
             "weights of fresh models only",
-            lambda s: s["chain"][3]["body"]["payload"].update(
-                model_weights=[{"key": "quant.mean_reversion", "value": "0.9"}]
-            ),
+            lambda s: decision(s).update(model_weights=[{"key": "quant.mean_reversion", "value": "0.9"}]),
         ),
-        ("intent differs from its decision", lambda s: s["chain"][4]["body"]["payload"].update(qty="11")),
-        ("intent caused by the model output", lambda s: s["chain"][4]["body"].update(causation_id=IDS[3])),
-        ("prev_hash not chained", lambda s: s["chain"][5]["body"].update(prev_hash="0" * 64)),
+        ("intent differs from its decision", lambda s: payload_named(s, "intent").update(qty="11")),
+        (
+            "intent caused by the model output",
+            lambda s: body_named(s, "intent").update(causation_id=ID["model_output"]),
+        ),
+        ("prev_hash not chained", lambda s: body_named(s, "owner_close_in_session").update(prev_hash="0" * 64)),
         ("artifact content changed", lambda s: s["artifacts"][0]["object"].update(ask="150.02")),
-        ("floor not the default", lambda s: s["chain"][6]["body"]["payload"].update(floor="146.46")),
+        ("floor not the default", lambda s: payload_named(s, "owner_close_confirmed").update(floor="146.46")),
         (
             "mode_event names another event",
-            lambda s: s["chain"][7]["body"]["payload"].update(mode_event=IDS[7]),
+            lambda s: payload_named(s, "kill_switch").update(mode_event=ID["owner_kill_switch"]),
+        ),
+        (
+            "confirmed close priced below its floor",
+            lambda s: payload_named(s, "owner_close_confirmed_intent").update(limit_price="146.46"),
+        ),
+        (
+            "owner close of part of the position",
+            lambda s: payload_named(s, "owner_close_in_session_intent").update(qty="4"),
+        ),
+        (
+            "unconfirmed close after the session closes",
+            lambda s: body_named(s, "owner_close_in_session").update(event_time="2026-09-21T20:05:00.000000000Z")
+            or payload_named(s, "owner_close_in_session")["step_up"].update(
+                authenticated_at="2026-09-21T20:04:52.000000000Z"
+            ),
+        ),
+        (
+            "stale step-up recorded as valid",
+            lambda s: payload_named(s, "owner_close_confirmed")["step_up"].update(
+                authenticated_at="2026-09-21T20:04:59.000000000Z"
+            ),
+        ),
+        (
+            "kill switch flatten proposed as an intent",
+            lambda s: body_named(s, "owner_close_confirmed_intent").update(causation_id=ID["owner_kill_switch"]),
         ),
         (
             "invalid draft expects the wrong reason",
@@ -1392,6 +1638,7 @@ def run_mutants(section: dict, v3: dict) -> list[str]:
     escaped = []
     chain = section["chain"]
     cases = [(draft_of(e["body"]), None) for e in chain]
+    cases += [(apply_changes(chain, c), None) for c in section["valid_drafts"]]
     cases += [(apply_changes(chain, c), c["expect"]) for c in section["invalid_drafts"]]
     for mutant in VALIDATOR_MUTANTS:
         skip = frozenset([mutant])
@@ -1426,6 +1673,7 @@ def build_section(v3: dict) -> dict:
         "chain": chain,
         "derivation": DERIVATION,
         "invalid_drafts": invalid_drafts(),
+        "valid_drafts": valid_drafts(),
     }
 
 

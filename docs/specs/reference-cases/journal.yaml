@@ -15,8 +15,9 @@
 # agent stream's `StreamOpened` at seq 1; `artifacts[].canonical` are the stored bytes of each
 # `artifacts[].ref`, so the chain verifies with spec §11 check 6. Each `invalid_drafts` case is the
 # draft of `chain[base_seq - 1].body` (without `seq`, `prev_hash`, `recorded_at`) with each change
-# setting the dotted `path` to `value`; `append` refuses it as `Invalid` with the listed reason
-# and path. `derivation` holds the inputs the `DecisionMade` numbers are recomputed from. The
+# setting the dotted `path` to `value`, or removing it where the change has `delete: true`; `append`
+# refuses it as `Invalid` with the listed reason and path. Each `valid_drafts` case is built the
+# same way and `append` accepts it. `derivation` holds the inputs the chain is recomputed from. The
 # section is additive: `version` stays 3 until the harness reads it (DEC-177).
 
 version: 3
@@ -706,13 +707,163 @@ agent_stream:
     canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z3M1A000000000000000G4","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z3M1P0000000000000000X","event_time":"2026-09-21T14:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"150","purpose":"open","qty":"10","side":"buy","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"f0e66b5780f589da608132d656e24df0d053c47aba4fc48f98882d331748b50f","recorded_at":"2026-09-21T14:00:00.000200000Z","schema_version":1,"seq":5,"stream_id":"agent:ws_01J8Z2:agent_a"}'
     hash: 9cd5108f798d850ca254df208717e0ddfb87cce73a5200ca46568ee3595115d9
   - seq: 6
+    event_type: OwnerExitRequested
+    body:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z6A0A000000000000000E1
+      stream_id: agent:ws_01J8Z2:agent_a
+      seq: 6
+      event_type: OwnerExitRequested
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      recorded_at: '2026-09-21T15:00:00.000100000Z'
+      clock_source: scheduler
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      payload:
+        scope: instrument
+        subject: 5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f
+        confirmed: false
+        bid: null
+        bid_size: null
+        floor: null
+        user: user_7f3a
+        step_up_status: valid
+        step_up:
+          assertion_id: stepup_4b2d
+          authenticated_at: '2026-09-21T14:59:52.000000000Z'
+          method: webauthn
+      artifact_refs: []
+      pii_refs: []
+      prev_hash: 9cd5108f798d850ca254df208717e0ddfb87cce73a5200ca46568ee3595115d9
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0A000000000000000E1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"instrument","step_up":{"assertion_id":"stepup_4b2d","authenticated_at":"2026-09-21T14:59:52.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","user":"user_7f3a"},"pii_refs":[],"prev_hash":"9cd5108f798d850ca254df208717e0ddfb87cce73a5200ca46568ee3595115d9","recorded_at":"2026-09-21T15:00:00.000100000Z","schema_version":1,"seq":6,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: 382b78ed1cf4238bd5476762030ada5d153924b5f460d7f9c390dc2465e04105
+  - seq: 7
+    event_type: IntentProposed
+    body:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8Z6A0M000000000000000P1
+      stream_id: agent:ws_01J8Z2:agent_a
+      seq: 7
+      event_type: IntentProposed
+      schema_version: 1
+      event_time: '2026-09-21T15:00:00.000000000Z'
+      recorded_at: '2026-09-21T15:00:00.000200000Z'
+      clock_source: scheduler
+      causation_id: 01J8Z6A0A000000000000000E1
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      payload:
+        instrument_id: 5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f
+        side: sell
+        type: market
+        tif: day
+        qty: '5'
+        limit_price: null
+        purpose: owner_exit
+      artifact_refs: []
+      pii_refs: []
+      prev_hash: 382b78ed1cf4238bd5476762030ada5d153924b5f460d7f9c390dc2465e04105
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8Z6A0A000000000000000E1","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8Z6A0M000000000000000P1","event_time":"2026-09-21T15:00:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f","limit_price":null,"purpose":"owner_exit","qty":"5","side":"sell","tif":"day","type":"market"},"pii_refs":[],"prev_hash":"382b78ed1cf4238bd5476762030ada5d153924b5f460d7f9c390dc2465e04105","recorded_at":"2026-09-21T15:00:00.000200000Z","schema_version":1,"seq":7,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: af88eaf3885f3ddbf62d68e69f91b08faac98a83cf1f56f97371bd73f10dd60c
+  - seq: 8
+    event_type: OwnerExitRequested
+    body:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZMR0A000000000000000E2
+      stream_id: agent:ws_01J8Z2:agent_a
+      seq: 8
+      event_type: OwnerExitRequested
+      schema_version: 1
+      event_time: '2026-09-21T20:10:00.000000000Z'
+      recorded_at: '2026-09-21T20:10:00.000100000Z'
+      clock_source: scheduler
+      causation_id: null
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      payload:
+        scope: instrument
+        subject: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        confirmed: true
+        bid: '151'
+        bid_size: '300'
+        floor: '146.47'
+        user: user_7f3a
+        step_up_status: valid
+        step_up:
+          assertion_id: stepup_9c1e
+          authenticated_at: '2026-09-21T20:09:45.000000000Z'
+          method: webauthn
+      artifact_refs: []
+      pii_refs: []
+      prev_hash: af88eaf3885f3ddbf62d68e69f91b08faac98a83cf1f56f97371bd73f10dd60c
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0A000000000000000E2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":"151","bid_size":"300","confirmed":true,"floor":"146.47","scope":"instrument","step_up":{"assertion_id":"stepup_9c1e","authenticated_at":"2026-09-21T20:09:45.000000000Z","method":"webauthn"},"step_up_status":"valid","subject":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","user":"user_7f3a"},"pii_refs":[],"prev_hash":"af88eaf3885f3ddbf62d68e69f91b08faac98a83cf1f56f97371bd73f10dd60c","recorded_at":"2026-09-21T20:10:00.000100000Z","schema_version":1,"seq":8,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: a2ce1c07ef83cb360b4453faa990c85ae65c6fbb48cb00b9ed9181197382af94
+  - seq: 9
+    event_type: IntentProposed
+    body:
+      envelope_version: 1
+      environment: paper
+      event_id: 01J8ZMR0M000000000000000P2
+      stream_id: agent:ws_01J8Z2:agent_a
+      seq: 9
+      event_type: IntentProposed
+      schema_version: 1
+      event_time: '2026-09-21T20:10:00.000000000Z'
+      recorded_at: '2026-09-21T20:10:00.000200000Z'
+      clock_source: scheduler
+      causation_id: 01J8ZMR0A000000000000000E2
+      correlation_id: null
+      actor:
+        kind: agent
+        id: agent_a
+        version: 0.1.0
+        build: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+      config_refs:
+        mandate_version: sha256:5555555555555555555555555555555555555555555555555555555555555555
+      payload:
+        instrument_id: b0b6dd9d-8b9b-48a9-ba46-b9d54906e415
+        side: sell
+        type: limit
+        tif: day
+        qty: '10'
+        limit_price: '146.47'
+        purpose: owner_exit
+      artifact_refs: []
+      pii_refs: []
+      prev_hash: a2ce1c07ef83cb360b4453faa990c85ae65c6fbb48cb00b9ed9181197382af94
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":"01J8ZMR0A000000000000000E2","clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZMR0M000000000000000P2","event_time":"2026-09-21T20:10:00.000000000Z","event_type":"IntentProposed","payload":{"instrument_id":"b0b6dd9d-8b9b-48a9-ba46-b9d54906e415","limit_price":"146.47","purpose":"owner_exit","qty":"10","side":"sell","tif":"day","type":"limit"},"pii_refs":[],"prev_hash":"a2ce1c07ef83cb360b4453faa990c85ae65c6fbb48cb00b9ed9181197382af94","recorded_at":"2026-09-21T20:10:00.000200000Z","schema_version":1,"seq":9,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: eea36be61c3789da9efb7feffb55f15e6c2869c9daa711caaa8e21d22f0e176a
+  - seq: 10
     event_type: AgentModeChanged
     body:
       envelope_version: 1
       environment: paper
-      event_id: 01J8ZNB0A000000000000000G6
+      event_id: 01J8ZNB0A000000000000000M1
       stream_id: agent:ws_01J8Z2:agent_a
-      seq: 6
+      seq: 10
       event_type: AgentModeChanged
       schema_version: 1
       event_time: '2026-09-21T20:30:00.000000000Z'
@@ -733,17 +884,17 @@ agent_stream:
         lifecycle: normal
       artifact_refs: []
       pii_refs: []
-      prev_hash: 9cd5108f798d850ca254df208717e0ddfb87cce73a5200ca46568ee3595115d9
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0A000000000000000G6","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"AgentModeChanged","payload":{"from":"normal","lifecycle":"normal","reason":"kill_switch","to":"stopped"},"pii_refs":[],"prev_hash":"9cd5108f798d850ca254df208717e0ddfb87cce73a5200ca46568ee3595115d9","recorded_at":"2026-09-21T20:30:00.000100000Z","schema_version":1,"seq":6,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: 35c079c74fc2785b23423d29b53c21b7c2557b6b8951ef256332814c881669c7
-  - seq: 7
+      prev_hash: eea36be61c3789da9efb7feffb55f15e6c2869c9daa711caaa8e21d22f0e176a
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0A000000000000000M1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"AgentModeChanged","payload":{"from":"normal","lifecycle":"normal","reason":"kill_switch","to":"stopped"},"pii_refs":[],"prev_hash":"eea36be61c3789da9efb7feffb55f15e6c2869c9daa711caaa8e21d22f0e176a","recorded_at":"2026-09-21T20:30:00.000100000Z","schema_version":1,"seq":10,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: f612d0c5c5d8c2ffb77f431d99d9d78f570a8e77b6224977a2c714d403f38b34
+  - seq: 11
     event_type: OwnerExitRequested
     body:
       envelope_version: 1
       environment: paper
-      event_id: 01J8ZNB0M000000000000000G7
+      event_id: 01J8ZNB0M000000000000000K1
       stream_id: agent:ws_01J8Z2:agent_a
-      seq: 7
+      seq: 11
       event_type: OwnerExitRequested
       schema_version: 1
       event_time: '2026-09-21T20:30:00.000000000Z'
@@ -761,28 +912,26 @@ agent_stream:
       payload:
         scope: agent
         subject: agent_a
-        confirmed: true
-        bid: '151'
-        bid_size: '300'
-        floor: '146.47'
+        confirmed: false
+        bid: null
+        bid_size: null
+        floor: null
         user: user_7f3a
-        step_up:
-          assertion_id: stepup_9c1e
-          authenticated_at: '2026-09-21T20:29:45.000000000Z'
-          method: webauthn
+        step_up_status: absent
+        step_up: null
       artifact_refs: []
       pii_refs: []
-      prev_hash: 35c079c74fc2785b23423d29b53c21b7c2557b6b8951ef256332814c881669c7
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0M000000000000000G7","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":"151","bid_size":"300","confirmed":true,"floor":"146.47","scope":"agent","step_up":{"assertion_id":"stepup_9c1e","authenticated_at":"2026-09-21T20:29:45.000000000Z","method":"webauthn"},"subject":"agent_a","user":"user_7f3a"},"pii_refs":[],"prev_hash":"35c079c74fc2785b23423d29b53c21b7c2557b6b8951ef256332814c881669c7","recorded_at":"2026-09-21T20:30:00.000200000Z","schema_version":1,"seq":7,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: ac30a99e80db60cbf81a5b4ff5f8e9775c72da526f4d3d06f496cd86967a438d
-  - seq: 8
+      prev_hash: f612d0c5c5d8c2ffb77f431d99d9d78f570a8e77b6224977a2c714d403f38b34
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{"mandate_version":"sha256:5555555555555555555555555555555555555555555555555555555555555555"},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0M000000000000000K1","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"OwnerExitRequested","payload":{"bid":null,"bid_size":null,"confirmed":false,"floor":null,"scope":"agent","step_up":null,"step_up_status":"absent","subject":"agent_a","user":"user_7f3a"},"pii_refs":[],"prev_hash":"f612d0c5c5d8c2ffb77f431d99d9d78f570a8e77b6224977a2c714d403f38b34","recorded_at":"2026-09-21T20:30:00.000200000Z","schema_version":1,"seq":11,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: aca77e8acec2404864c55f43509c2a16a021a45bd60a37ad08ab5cbf21cba7c2
+  - seq: 12
     event_type: KillSwitchActivated
     body:
       envelope_version: 1
       environment: paper
-      event_id: 01J8ZNB0R000000000000000G8
+      event_id: 01J8ZNB0R000000000000000K2
       stream_id: agent:ws_01J8Z2:agent_a
-      seq: 8
+      seq: 12
       event_type: KillSwitchActivated
       schema_version: 1
       event_time: '2026-09-21T20:30:00.000000000Z'
@@ -800,16 +949,24 @@ agent_stream:
         scope: agent
         subject: agent_a
         initiator: owner
-        mode_event: 01J8ZNB0A000000000000000G6
+        mode_event: 01J8ZNB0A000000000000000M1
       artifact_refs: []
       pii_refs: []
-      prev_hash: ac30a99e80db60cbf81a5b4ff5f8e9775c72da526f4d3d06f496cd86967a438d
-    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0R000000000000000G8","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"KillSwitchActivated","payload":{"initiator":"owner","mode_event":"01J8ZNB0A000000000000000G6","scope":"agent","subject":"agent_a"},"pii_refs":[],"prev_hash":"ac30a99e80db60cbf81a5b4ff5f8e9775c72da526f4d3d06f496cd86967a438d","recorded_at":"2026-09-21T20:30:00.000300000Z","schema_version":1,"seq":8,"stream_id":"agent:ws_01J8Z2:agent_a"}'
-    hash: cae7f81b9a6a14011b094273fdeda8547eb2e09806382475a56bfecd4adc3fa9
+      prev_hash: aca77e8acec2404864c55f43509c2a16a021a45bd60a37ad08ab5cbf21cba7c2
+    canonical: '{"actor":{"build":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc","id":"agent_a","kind":"agent","version":"0.1.0"},"artifact_refs":[],"causation_id":null,"clock_source":"scheduler","config_refs":{},"correlation_id":null,"envelope_version":1,"environment":"paper","event_id":"01J8ZNB0R000000000000000K2","event_time":"2026-09-21T20:30:00.000000000Z","event_type":"KillSwitchActivated","payload":{"initiator":"owner","mode_event":"01J8ZNB0A000000000000000M1","scope":"agent","subject":"agent_a"},"pii_refs":[],"prev_hash":"aca77e8acec2404864c55f43509c2a16a021a45bd60a37ad08ab5cbf21cba7c2","recorded_at":"2026-09-21T20:30:00.000300000Z","schema_version":1,"seq":12,"stream_id":"agent:ws_01J8Z2:agent_a"}'
+    hash: a74f9ce38bc3d6d9531925d71f3b70a460489ea592b93e4f9a2c0657e8db0040
   derivation:
-    note: Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run and the autonomy result are inputs. The OwnerExitRequested floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6).
+    note: Illustrative mandate and account values the DecisionMade vector is recomputed from (mandate spec §8.3); not a mandate reference case. quant.momentum is configured but has no fresh output, so it counts as missing. The ask is the observed quote's (artifact quote_snapshot). The gate dry run and the autonomy result are inputs. Gross exposure is the held position's quantity x mark. The owner then closes the held position in the regular session without a confirmed bid, and after the session closes the opened position (taken as filled) with a confirmed bid, whose floor is the default, bid x (1 - max_exit_offset), for the instrument's >= 50 M USD tier (trading spec §5.5, §5.6); that close's own limit is the floor. Step-up is valid for 300 s after authentication (DEC-156 item 8). The regular session is 09:30 to 16:00 America/New_York (EDT, UTC-4, on this date).
     owner_bid: '151'
     max_exit_offset: '0.03'
+    step_up_max_age_s: 300
+    regular_session_utc:
+      open: '2026-09-21T13:30:00.000000000Z'
+      close: '2026-09-21T20:00:00.000000000Z'
+    held:
+      instrument_id: 5f0c2a4e-7d1b-4c3e-9a8f-2b6d1e0c4a7f
+      qty: '5'
+      mark: '100'
     now: '2026-09-21T14:00:00.000000000Z'
     models:
     - model_id: quant.mean_reversion
@@ -821,7 +978,6 @@ agent_stream:
     equity: '10000'
     market_value: '0'
     working_opening_cost: '0'
-    gross_exposure: '0'
     max_position_usd: '5000'
     max_position_fraction: '0.2'
     size_factor: '1'
@@ -838,7 +994,7 @@ agent_stream:
   invalid_drafts:
   - name: owner_exit_floor_absent
     clause: §9.1 absent member
-    base_seq: 7
+    base_seq: 8
     changes:
     - path: payload.floor
       delete: true
@@ -868,24 +1024,64 @@ agent_stream:
       path: payload.reason_code
   - name: owner_exit_unconfirmed_empty_user
     clause: §4.2
-    base_seq: 7
+    base_seq: 11
     changes:
-    - path: payload.confirmed
-      value: false
-    - path: payload.bid
-      value: null
-    - path: payload.bid_size
-      value: null
-    - path: payload.floor
-      value: null
     - path: payload.user
       value: ''
-    - path: payload.step_up
-      value: null
     expect:
       outcome: Invalid
       reason: non_canonical
       path: payload.user
+  - name: owner_exit_unconfirmed_without_user
+    clause: §9.1 OwnerExitRequested
+    base_seq: 6
+    changes:
+    - path: payload.user
+      value: null
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.user
+  - name: owner_exit_step_up_status_unknown
+    clause: §9.1 OwnerExitRequested
+    base_seq: 11
+    changes:
+    - path: payload.step_up_status
+      value: failed
+    expect:
+      outcome: Invalid
+      reason: non_canonical
+      path: payload.step_up_status
+  - name: owner_kill_switch_valid_without_evidence
+    clause: §9.1 rule 12
+    base_seq: 11
+    changes:
+    - path: payload.step_up_status
+      value: valid
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up
+  - name: owner_exit_stale_with_evidence
+    clause: §9.1 rule 12
+    base_seq: 6
+    changes:
+    - path: payload.step_up_status
+      value: stale
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.step_up
+  - name: owner_exit_unconfirmed_with_floor
+    clause: §9.1 rule 12
+    base_seq: 6
+    changes:
+    - path: payload.floor
+      value: '146.47'
+    expect:
+      outcome: Invalid
+      reason: schema
+      path: payload.floor
   - name: model_output_as_of_in_seconds
     clause: §4.7
     base_seq: 3
@@ -908,10 +1104,10 @@ agent_stream:
       path: payload.as_of
   - name: step_up_time_in_seconds
     clause: §4.7
-    base_seq: 7
+    base_seq: 8
     changes:
     - path: payload.step_up.authenticated_at
-      value: '1790022585'
+      value: '1790021385'
     expect:
       outcome: Invalid
       reason: non_canonical
@@ -1134,7 +1330,7 @@ agent_stream:
       path: causation_id
   - name: mode_looser_than_lifecycle
     clause: §9.1 rule 11
-    base_seq: 6
+    base_seq: 10
     changes:
     - path: payload.to
       value: exits_only
@@ -1146,7 +1342,7 @@ agent_stream:
       path: payload.to
   - name: mode_lifecycle_exits_only
     clause: §9.1 AgentModeChanged
-    base_seq: 6
+    base_seq: 10
     changes:
     - path: payload.lifecycle
       value: exits_only
@@ -1156,7 +1352,7 @@ agent_stream:
       path: payload.lifecycle
   - name: owner_exit_confirmed_without_floor
     clause: §9.1 rule 12
-    base_seq: 7
+    base_seq: 8
     changes:
     - path: payload.floor
       value: null
@@ -1166,7 +1362,7 @@ agent_stream:
       path: payload.floor
   - name: owner_exit_unconfirmed_with_bid
     clause: §9.1 rule 12
-    base_seq: 7
+    base_seq: 8
     changes:
     - path: payload.confirmed
       value: false
@@ -1196,7 +1392,7 @@ agent_stream:
       path: stream_id
   - name: kill_switch_other_agent
     clause: §9.1 rule 15
-    base_seq: 8
+    base_seq: 12
     changes:
     - path: payload.subject
       value: agent_b
@@ -1206,7 +1402,7 @@ agent_stream:
       path: payload.subject
   - name: kill_switch_other_workspace
     clause: §9.1 rule 15
-    base_seq: 8
+    base_seq: 12
     changes:
     - path: payload.scope
       value: workspace
@@ -1218,7 +1414,7 @@ agent_stream:
       path: payload.subject
   - name: owner_exit_other_agent
     clause: §9.1 rule 15
-    base_seq: 7
+    base_seq: 11
     changes:
     - path: payload.subject
       value: agent_b
@@ -1226,3 +1422,36 @@ agent_stream:
       outcome: Invalid
       reason: stream_mismatch
       path: payload.subject
+  valid_drafts:
+  - name: owner_close_confirmed_bid_stale_step_up
+    clause: §9.1 OwnerExitRequested
+    base_seq: 8
+    changes:
+    - path: payload.step_up_status
+      value: stale
+    - path: payload.step_up
+      value: null
+    expect:
+      outcome: Valid
+  - name: owner_kill_switch_confirmed_bid_without_step_up
+    clause: §9.1 OwnerExitRequested
+    base_seq: 11
+    changes:
+    - path: payload.confirmed
+      value: true
+    - path: payload.bid
+      value: '151'
+    - path: payload.bid_size
+      value: '300'
+    - path: payload.floor
+      value: '146.47'
+    expect:
+      outcome: Valid
+  - name: owner_kill_switch_stale_step_up
+    clause: §9.1 OwnerExitRequested
+    base_seq: 11
+    changes:
+    - path: payload.step_up_status
+      value: stale
+    expect:
+      outcome: Valid

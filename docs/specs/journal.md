@@ -350,7 +350,8 @@ This subsection closes the payload schemas of the agent stream's `StreamOpened`,
 `KillSwitchActivated`, and `OwnerExitRequested`. For these events it replaces the "Key payload fields"
 column of §9, and the required `config_refs` stay as §9 lists them. Each schema is `schema_version` 1:
 a record with exactly the listed members, every one present (§4.2). The test vectors' `agent_stream`
-section holds one chain event per schema and an invalid draft for every rule below. The other
+section holds at least one chain event per schema, an invalid draft for every rule below, and valid
+drafts for the cases a rule might be misread to refuse. The other
 agent-stream events are not closed yet: the approval events close with the escalation spec change
 (M7), `ModelInvocationRecorded`, `ThesisProposed`, and `ThesisRevised` with their own stories.
 
@@ -460,18 +461,29 @@ here.
 | `initiator` | `owner` \| `risk_limit` \| `platform_operator` | |
 | `mode_event` | `ulid?` | The `AgentModeChanged` this switch wrote, or `null` if it changed no mode. The executor's `AgentModeApplied` copy carries it as `causation_id` (§2), which is how this stream's fold knows the switch was applied, from its own events (§1 principle 4) |
 
-**`OwnerExitRequested`** (trading spec §5.5, mandate spec §6.1). Recorded whether or not the owner
-confirmed a bid: without confirmation, equity sells wait for the regular session.
+**`OwnerExitRequested`** (trading spec §5.5, mandate spec §5.10, §6.1): the owner's close of a
+position, or the owner's kill switch. Every one records who asked and what step-up they gave,
+whether or not a bid was confirmed. A displayed bid is confirmed only where trading spec §5.5 needs
+one (an equity sold outside the regular session); without confirmation, equity sells wait for the
+regular session. `step_up_status` says which case of
+[DEC-158](../project/04-decision-log.md#decisions) option (c) applied: a kill switch without valid
+step-up still stops the agent and flattens as an automated flatten does, and only the owner-exit
+privileges beyond that need `valid`. A correct writer can meet every rule here for every owner
+exit, whatever its step-up: no member is required that only valid step-up or a confirmed bid would
+supply, and a confirmed bid with `absent` or `stale` step-up is valid, recorded as given, and
+unlocks nothing (mandate spec §6.1) while the exit proceeds. So no step-up state can hold a
+reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cases.
 
 | Member | Type | Meaning |
 |---|---|---|
 | `scope` | `instrument` \| `agent` \| `connection` \| `workspace` | |
 | `subject` | `id` | The instrument ID, or which agent, connection, or workspace: rule 15 |
-| `confirmed` | `boolean` | Rule 12 |
+| `confirmed` | `boolean` | Whether the owner confirmed a displayed bid: rule 12 |
 | `bid`, `bid_size` | `decimal?` | The displayed bid and bid size the owner confirmed |
 | `floor` | `decimal?` | The confirmed floor price, below which the exit price ladder never prices |
-| `user` | `text?` | The confirming user (opaque) |
-| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | The step-up evidence |
+| `user` | `text` | The owner who gave the instruction (opaque), on every owner exit and owner kill switch |
+| `step_up_status` | `valid` \| `absent` \| `stale` | The step-up at the moment the owner committed the command ([DEC-156](../project/04-decision-log.md#decisions) item 8): `valid` evidence, none (`absent`), or evidence older than its freshness window (`stale`): rule 12 |
+| `step_up` | `{assertion_id: text, authenticated_at: timestamp, method: text}?` | The step-up evidence, exactly when `step_up_status` is `valid`: rule 12 |
 
 **Consistency rules** (reason `schema` unless stated; the path is the member named):
 
@@ -493,8 +505,10 @@ confirmed a bid: without confirmation, equity sells wait for the regular session
 10. `IntentProposed`: `causation_id` is non-null — `causation_id`.
 11. `AgentModeChanged`: `to` is at least as strict as `lifecycle` (`normal` < `exits_only` < `paused` <
     `stopped`) — `payload.to`.
-12. `OwnerExitRequested`: `confirmed` is `true` exactly when `bid`, `bid_size`, `floor`, `user`, and
-    `step_up` are all non-null — the first member, in that order, that disagrees.
+12. `OwnerExitRequested`: `confirmed` is `true` exactly when `bid`, `bid_size`, and `floor` are all
+    non-null — the first member, in that order, that disagrees; and `step_up` is non-null exactly
+    when `step_up_status` is `valid` — `payload.step_up`. `confirmed` governs only the bid members:
+    `user` and the step-up are recorded on every owner exit.
 13. `ModelOutputRecorded`: `thesis_id` and `lineage_id` are `null` together — the one that is `null`.
 
 **Subject rules** (reason `stream_mismatch`):
