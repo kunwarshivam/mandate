@@ -191,7 +191,6 @@ fn autonomy_class(old: &Value, new: &Value) -> ChangeClass {
 /// `null` replaced by an object is reported where the `null` was, and the list is in pointer order
 /// whatever order the edits were made in.
 #[test]
-#[ignore = "pending E10-3"]
 fn arrays_are_compared_whole_and_objects_are_walked_to_the_leaf() {
     let old = parse(&base());
     let paths = |new: &Value| -> Vec<String> {
@@ -338,7 +337,6 @@ fn the_version_vector_is_pinned_by_its_literal_digest() {
 /// A document classified against itself changed nothing: neutral, no paths, no step-up. The same
 /// base with one maximum raised is the contrast that makes the first half mean something.
 #[test]
-#[ignore = "pending E10-3"]
 fn an_unchanged_document_is_neutral_with_no_paths() {
     assert_eq!(verdict(&base(), &base()), (Neutral, vec![], false));
     assert_eq!(
@@ -350,7 +348,6 @@ fn an_unchanged_document_is_neutral_with_no_paths() {
 /// §9.2's maximums: larger is increasing, smaller is reducing, each on its own path. The goal's and
 /// the research envelope's maximums need a document that has them.
 #[test]
-#[ignore = "pending E10-3"]
 fn every_maximum_is_increasing_when_raised_and_reducing_when_lowered() {
     let on_base: [(&str, Value, Value); 13] = [
         ("/capital/allocation_usd", s("12000"), s("8000")),
@@ -407,7 +404,6 @@ fn every_maximum_is_increasing_when_raised_and_reducing_when_lowered() {
 /// is, and one set from `null` is a fall. The decimal order is by value, not by text: `9` is below
 /// `10` although it sorts after it.
 #[test]
-#[ignore = "pending E10-3"]
 fn a_null_maximum_is_unbounded_and_values_compare_by_number_not_text() {
     let price = "/goal/max_avg_price";
     one_path(
@@ -433,7 +429,6 @@ fn a_null_maximum_is_unbounded_and_values_compare_by_number_not_text() {
 
 /// §9.2's minimums: smaller is increasing, larger is reducing.
 #[test]
-#[ignore = "pending E10-3"]
 fn every_minimum_is_increasing_when_lowered_and_reducing_when_raised() {
     let on_base: [(&str, Value, Value); 6] = [
         ("/behavior/sizing/entry_threshold", s("0.2"), s("0.4")),
@@ -465,7 +460,6 @@ fn every_minimum_is_increasing_when_lowered_and_reducing_when_raised() {
 /// The ladder row: new actions, or any `at` or `factor` larger, is increasing even when another rung
 /// tightened; otherwise reducing.
 #[test]
-#[ignore = "pending E10-3"]
 fn the_ladder_is_increasing_when_its_actions_change_or_any_at_or_factor_rises() {
     let ladder = "/risk/drawdown_ladder";
     one_path(
@@ -520,7 +514,6 @@ fn the_ladder_is_increasing_when_its_actions_change_or_any_at_or_factor_rises() 
 
 /// `limit_buys` to `trim_to_target` is reducing; the reverse is increasing.
 #[test]
-#[ignore = "pending E10-3"]
 fn scale_action_to_trim_is_reducing_and_back_is_increasing() {
     let path = "/risk/scale_action";
     one_path(
@@ -542,7 +535,6 @@ fn scale_action_to_trim_is_reducing_and_back_is_increasing() {
 /// the same instruments in another order change nothing that matters. An instrument whose id stays
 /// while its symbol changes is a new entry and is increasing, the fail-safe reading (DEC-172 item 1).
 #[test]
-#[ignore = "pending E10-3"]
 fn a_pinned_instrument_added_is_increasing_and_one_removed_is_reducing() {
     let path = "/universe/pinned_instruments";
     let three = arr(vec![
@@ -572,7 +564,6 @@ fn a_pinned_instrument_added_is_increasing_and_one_removed_is_reducing() {
 
 /// An asset class added is increasing; one removed is reducing (MC-C40, MC-C41).
 #[test]
-#[ignore = "pending E10-3"]
 fn an_asset_class_added_is_increasing_and_one_removed_is_reducing() {
     let path = "/universe/asset_classes";
     let both = arr(vec![s("crypto"), s("us_equity")]);
@@ -589,7 +580,6 @@ fn an_asset_class_added_is_increasing_and_one_removed_is_reducing() {
 /// `behavior.research` set from `null` is increasing, because the research agent may now admit;
 /// cleared to `null` it is reducing.
 #[test]
-#[ignore = "pending E10-3"]
 fn research_set_from_null_is_increasing_and_cleared_is_reducing() {
     let path = "/behavior/research";
     let envelope = obj(vec![
@@ -609,7 +599,6 @@ fn research_set_from_null_is_increasing_and_cleared_is_reducing() {
 /// The crypto stop-limit offset: newly set or larger is increasing; cleared or smaller is reducing.
 /// `null` here means "no crypto", not "unbounded", so the maximum row's reading does not apply.
 #[test]
-#[ignore = "pending E10-3"]
 fn a_crypto_stop_limit_offset_set_or_widened_is_increasing() {
     let path = "/protection/crypto_stop_limit_offset";
     one_path(&base(), &[(path, Some(s("0.005")))], path, RiskIncreasing);
@@ -622,7 +611,6 @@ fn a_crypto_stop_limit_offset_set_or_widened_is_increasing() {
 /// `end_date`: later or removed is increasing (MC-C35); earlier, or set where there was none, is
 /// reducing.
 #[test]
-#[ignore = "pending E10-3"]
 fn an_end_date_later_or_removed_is_increasing_and_earlier_is_reducing() {
     let path = "/goal/end_date";
     one_path(
@@ -644,7 +632,6 @@ fn an_end_date_later_or_removed_is_increasing_and_earlier_is_reducing() {
 
 /// Leveraged ETPs on and protection off are increasing; the reverse of each is reducing.
 #[test]
-#[ignore = "pending E10-3"]
 fn leveraged_etps_on_and_protection_off_are_increasing() {
     let etps = "/universe/leveraged_etps_enabled";
     one_path(&base(), &[(etps, Some(b(true)))], etps, RiskIncreasing);
@@ -672,7 +659,6 @@ fn leveraged_etps_on_and_protection_off_are_increasing() {
 /// Notifications and the name: removing a channel is increasing (MC-C08), adding one is neutral
 /// (MC-C07), and quiet hours (MC-C09) and the name (MC-C23) are neutral.
 #[test]
-#[ignore = "pending E10-3"]
 fn a_channel_removed_is_increasing_and_the_neutral_rows_are_neutral() {
     let channels = "/notifications/channels";
     let two = arr(vec![s("email"), s("sms")]);
@@ -702,7 +688,6 @@ fn a_channel_removed_is_increasing_and_the_neutral_rows_are_neutral() {
 /// `take_profit_distance`, the goal type, `on_complete`, and every path the table does not name are
 /// increasing. The allocation lowered beside each is the reducing contrast.
 #[test]
-#[ignore = "pending E10-3"]
 fn every_unlisted_path_is_increasing() {
     let unlisted: [(&str, Value, &str); 11] = [
         (
@@ -784,7 +769,6 @@ fn every_unlisted_path_is_increasing() {
 /// changed with it: a reduction, an increase, or DEC-121's pinning switch. Invalid needs no step-up,
 /// because it is refused. The same reduction without the connection change is the contrast.
 #[test]
-#[ignore = "pending E10-3"]
 fn a_changed_environment_or_connection_is_invalid_whatever_else_changed() {
     let reduce = ("/risk/max_daily_loss", Some(s("0.01")));
     assert_eq!(
@@ -813,7 +797,6 @@ fn a_changed_environment_or_connection_is_invalid_whatever_else_changed() {
 /// admitting flag cleared and `max_instruments` not raised, is one reducing change, although three
 /// of its five paths are increasing on their own rows.
 #[test]
-#[ignore = "pending E10-3"]
 fn pinning_a_research_mandate_is_one_reducing_change() {
     let (old, new) = (research(), pinned(&research()));
     let (class, paths, step_up) = verdict(&old, &new);
@@ -853,7 +836,6 @@ fn pinning_a_research_mandate_is_one_reducing_change() {
 /// removals. It is still not the switch, which is what the first assertion pins. Unpinning is
 /// increasing on its own row whatever the old version's models were.
 #[test]
-#[ignore = "pending E10-3"]
 fn pinning_is_the_switch_only_as_a_whole() {
     let no_agent = edit(
         &research(),
@@ -958,7 +940,6 @@ fn pinning_is_the_switch_only_as_a_whole() {
 /// did not change, is not the switch, so a caller cannot make a change reducing by passing the wrong
 /// list (DEC-172 item 2). The same two documents with their own paths are.
 #[test]
-#[ignore = "pending E10-3"]
 fn the_switch_needs_the_changes_own_paths() {
     let (old, new) = (parse(&research()), parse(&pinned(&research())));
     let changed = changed_paths(&old, &new).expect("two parsed mandates diff");
@@ -994,7 +975,6 @@ fn the_switch_needs_the_changes_own_paths() {
 /// Turning the research agent off without pinning is increasing (MC-C42): the signal-model row stays
 /// fail safe, and only the pinning switch covers the whole mode change.
 #[test]
-#[ignore = "pending E10-3"]
 fn turning_research_off_without_pinning_is_increasing() {
     let off = edit(
         &research(),
@@ -1034,7 +1014,6 @@ fn turning_research_off_without_pinning_is_increasing() {
 /// single-comparison `auto` rule narrowed; an `ask` rule widened with nothing stricter after it
 /// (MC-C05); and `two_approver_above_usd` set or lowered (MC-C28).
 #[test]
-#[ignore = "pending E10-3"]
 fn each_reducing_autonomy_shape_is_reducing() {
     let old = three_rules();
     let without_auto = edit(&old, &[("/autonomy/rules/2", None)]);
@@ -1145,7 +1124,6 @@ fn each_reducing_autonomy_shape_is_reducing() {
 /// condition; the approvers or the timeout changed; a rule renamed; and the two-approver threshold
 /// raised or cleared. (`on_timeout` is the schema's `const: skip`, so no document can change it.)
 #[test]
-#[ignore = "pending E10-3"]
 fn every_other_autonomy_change_is_increasing() {
     let old = three_rules();
     let deny_last = edit(
@@ -1375,7 +1353,6 @@ fn every_other_autonomy_change_is_increasing() {
 /// both sets repeat the id, so the kept ids agree in order, and every new rule equals the first old rule
 /// of its id although a `deny` became an `ask`.
 #[test]
-#[ignore = "pending E10-3"]
 fn identical_rules_are_neutral_and_a_repeated_rule_id_is_increasing() {
     let old = autonomy_of(&three_rules());
     assert_eq!(classify_autonomy(&old, &old).expect("classifies"), Neutral);
@@ -1617,7 +1594,6 @@ fn run(
 /// change with an increasing edit is never classified as not needing step-up, and one without is
 /// never asked for it. The oracle is the hand-written class of each edit, never the classifier.
 #[test]
-#[ignore = "pending E10-3"]
 fn step_up_is_required_exactly_when_some_changed_path_increases_risk() {
     run("step-up", draws(), |draw| {
         let edits = picked(&draw);
@@ -1634,7 +1610,6 @@ fn step_up_is_required_exactly_when_some_changed_path_increases_risk() {
 /// reducing if any is, else neutral; the paths are exactly the edited ones, in pointer order; and the
 /// whole change classifies as the join of classifying each edit alone.
 #[test]
-#[ignore = "pending E10-3"]
 fn the_classification_is_the_join_over_changed_paths() {
     let old = parse(&base());
     run("join", draws(), |draw| {
@@ -1675,7 +1650,6 @@ fn dollars(cents: u64) -> String {
 /// this function's: `tests/risk.rs` pins it under E6-4 (§5.1), and classification reads no state, so
 /// it can trigger or lift nothing (DEC-172 item 7).
 #[test]
-#[ignore = "pending E10-3"]
 fn an_allocation_only_change_is_classified_by_its_direction_alone() {
     let mut runner = runner();
     let amounts = (1u64..100_000_000_000, 1u64..100_000_000_000, draws());
@@ -1994,7 +1968,6 @@ fn changed(old: &Rules, op: u8, k: usize, pick: u32) -> (Rules, bool) {
 /// evaluator. And each of §9.2's reducing shapes, applied once, is classified reducing — without that
 /// half a classifier that called everything increasing would pass.
 #[test]
-#[ignore = "pending E10-3"]
 fn a_reducing_or_neutral_autonomy_change_never_loosens_a_decision() {
     let mut runner = runner();
     let draw = (
