@@ -1540,3 +1540,31 @@ Minor findings from round 2 of the same review (#320 round 2;
   "Close the approval events' schemas in §9.1, with vectors" (b); rule 16 and the chain's causation
   ids (c); one `ask_suppressed` definition, citing mandate spec §6.4, and no hedge (d); and §9.1's
   §6.1 citations name what §6.1 states (e).
+
+Minor and nit findings from round 1 of the independent review of the v0.5 reconciliation
+([#340](https://github.com/kunwarshivam/mandate/pull/340); [DEC-177](04-decision-log.md#decisions)
+item 25; held back by the freeze rule, one row each):
+
+- **Name the members an approved intent is compared on (#340 round 1).** Rule 10 compares the
+  seven intent fields, but the `IntentProposed` sentence and §11's second `intent_action_mismatch`
+  clause mean the five `ApprovalRequested` binds (`instrument_id`, `side`, `qty`, `limit_price`,
+  `purpose`; not `type` or `tif`). List the compared members in both places, so an approved intent
+  is never refused over a `tif` its approval did not bind.
+- **Enforce that `ApprovalRevalidated` precedes its intent in the same batch (#340 round 1).**
+  §9.1 allows an `IntentProposed` caused by an `ApprovalRevalidated` with result `act` "that
+  precedes it in the same batch", and no rule checks either the order or the batch.
+- **State `OwnerCommandIssued`'s scope and subject (#340 round 1).** `check_owner_copies` models the
+  command as carrying `scope` (including `instrument`) and `subject`, which §9's control-stream row
+  does not state; add them to the row, or change the oracle to the members the row names.
+- **Test rule 16's guard and report position (#340 round 1).** No draft shows that rule 16 is
+  checked only on a well-typed payload, or that it reports after the subject rules; add a draft
+  that breaks rule 15 and rule 16 together, and one with an ill-typed payload and no cause, each
+  with a mutant.
+- **A range case with `from_seq` above 1 (#340 round 1).** Every `range_verification` case has
+  `from_seq: 1`, so `mode_event_mismatch.unresolved`'s full-chain guard is untested: add a case
+  verifying from a later seq whose `mode_event` names an earlier event, expecting no failure, with
+  a mutant that drops the guard.
+- **`outside_session_exit_defer_code()` checks with `assert` (#340 round 1),** which `python -O`
+  removes; raise instead.
+- **Note: the `exit_origin` citation fix pulled a round-2 minor forward (#340 round 1, nit).** Item
+  22 corrected the removed-instrument citation that #320 round 2 had backlogged; no action.
