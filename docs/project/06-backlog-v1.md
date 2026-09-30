@@ -1240,6 +1240,27 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   mutates safety-critical `tool` crates on the diff, and ES-13's safety-critical limit applies,
   with DEC-178's `risk_gate.rs` and DEC-250's `order_builder.rs` as recorded exceptions or split.
   Record the reading in a decision-log row in the same change as the xtask edit.
+  *Done (DEC-253):* the flag governs. `mutated_crates` reads `safety_critical` alone, pinned by
+  `the_gate_mutates_every_safety_critical_crate_tool_layer_included`; ADR-0001's ES-11 and ES-13
+  say so, and ES-13 records `risk_gate.rs` and `order_builder.rs` as exceptions, not split.
+- `parse_status` returning an empty map survives every test (DEC-253's proof run: `cargo xtask ci
+  mutants` on a diff touching it missed `replace parse_status -> Result<BTreeMap<String,
+  CaseStatus>, String> with Ok(BTreeMap::new())`). `tests/refcases.rs` treats a case the map does
+  not name as pending and ignores it, so a harness that read no status would run no case and pass,
+  and ES-11's "a passing case never regresses" would hold vacuously. Add a live test in
+  `crates/mandate-refcases/src/lib.rs` that parses a two-suite sample and asserts the whole map,
+  and one that reading the committed `status.toml` yields at least one passing case. Until then
+  the mutation gate fails any change whose diff touches `parse_status`.
+- Family B's harness arm has 13 mutants no live test catches (DEC-253's timing run of the gate over
+  DEC-250's diff of `crates/mandate-refcases/src/mandate/order_builder.rs`: 79 mutants, 40 caught,
+  26 unviable, 13 missed). `scaling_rung` (five: every return value, its `==`, its `&&`) is reached
+  only by the trim cases, which fail pending E6-4, so no live test runs it; `judge`'s
+  `nothing_proposed` guard can be `true`; `Inputs::read`'s `has_prior_fill` default can lose its `!`
+  (DEC-250 item 13: no base rule reads the flag); `listing`'s
+  `qty_increment < 1` (fractionable) can be `==`, `>` or `<=`; and `builder_error` can return any
+  string or flip its `==`. One tests correction of the arm adds doctored-case tests in
+  `crates/mandate-refcases/tests/`, as `mandate_gate_harness.rs` does for families G and F, so each
+  survivor is caught; until then the gate fails any change whose diff touches those lines.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
