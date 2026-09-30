@@ -1118,6 +1118,41 @@ mod tests {
         expect_eq("edited lists", edited.len(), 8 * 2 + 3)
     }
 
+    /// A denial passes only when exactly one check failed, carrying the case's reason: two checks
+    /// failing with that reason, one failing with another reason, and none failing each fail,
+    /// naming the failing checks.
+    #[test]
+    fn a_denial_fails_unless_exactly_one_check_failed_with_its_reason() -> Result<(), String> {
+        let reason = ReasonCode::WorkingOrderLimit;
+        let other = ReasonCode::ConcentrationLimit;
+        compare_checks(
+            &[
+                CheckOutcome::Passed(Check::AccountAndMode),
+                CheckOutcome::Failed(Check::OrderConstraints, reason),
+                CheckOutcome::NotReached(Check::MarkAndCollar),
+            ],
+            Some(reason),
+        )?;
+
+        for list in [
+            vec![
+                CheckOutcome::Failed(Check::OrderConstraints, reason),
+                CheckOutcome::Failed(Check::MarkAndCollar, reason),
+            ],
+            vec![CheckOutcome::Failed(Check::OrderConstraints, other)],
+            vec![CheckOutcome::Passed(Check::OrderConstraints)],
+        ] {
+            let failure = compare_checks(&list, Some(reason))
+                .err()
+                .ok_or_else(|| format!("a denial reporting {list:?} must fail"))?;
+            assert!(
+                failure.starts_with("the one failing check must be "),
+                "the failure must name the failing checks, got: {failure}"
+            );
+        }
+        Ok(())
+    }
+
     /// The members of `configs.test_default.gate` that `GateConfig` does not carry, because another
     /// crate reads them: the data profile, the exit ladder and its step, the stop-limit offset, the
     /// stop watchdog, the protective-replace buffer, the bracket timeout, the unprotected-exposure
