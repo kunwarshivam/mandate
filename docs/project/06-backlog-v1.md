@@ -205,9 +205,13 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   `mandate-journal`, so that the tracer's journal records parse against the journal spec's vectors
   (DEC-168, the coordinator's ruling on #171). *Accepted when:* each agent-stream event the runtime
   and the executor write has a registered schema, tested first against the journal spec's vectors.
-  *Blocked* ([DEC-174](04-decision-log.md#decisions)): journal spec v0.4 closes none of the eleven
-  agent-stream schemas the runtime writes and its vectors hold no agent-stream event, so the tests
-  PR waits for the journal spec change DEC-174 item 4 proposes.
+  *Unblocked in half* ([DEC-177](04-decision-log.md#decisions)): journal spec v0.4 closed none of the
+  eleven agent-stream schemas the runtime writes (DEC-174). Journal spec v0.5 §9.1 closes the agent
+  stream's `StreamOpened`, `ObservationRecorded`, `ModelOutputRecorded`, `DecisionMade`,
+  `IntentProposed`, `AgentModeChanged`, `KillSwitchActivated`, and `OwnerExitRequested`, with
+  vectors in `journal.yaml`'s `agent_stream` section, so their tests can be written first now. The
+  approval events wait for M7's spec change (claim
+  [#213](https://github.com/kunwarshivam/mandate/issues/213)).
 - **E7-10 (Must, M6)** As the founder, I want the control-stream payload schemas registered and mapped
   to stream F's `JournaledFact`, so that `ValidationContext::from_journal` has a production source
   (DEC-168, DEC-169, the coordinator's ruling on #124). *Accepted when:* `AccountSnapshotRecorded`,
@@ -997,3 +1001,38 @@ these to R2, where the fold starts reading `Limits::conditions`):
   and `at_most` in `risk/limits.rs` are `pub(super)` but used only in that file; make them private
   unless R2 uses them. (4) Say why `Limits` keeps `max_loss_from_allocation` as an unparsed
   `SchemaDec` (§5.7's loosening check compares it).
+
+From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
+DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
+risk (rule 3):
+
+- **Stream I: the runtime writes §9.1's payloads.** In `mandate-runtime`'s `step.rs`, `payload.rs`
+  and `state.rs`: `instrument_id` and `limit_price`, with `type` and `tif`, on `DecisionMade` and
+  `IntentProposed`; `null` rather than empty strings (`reason_code` on an allow, the unconfirmed
+  `OwnerExitRequested`); timestamps rather than risk-clock seconds (`ObservationRecorded.as_of`,
+  `ModelOutputRecorded.as_of` and `expires_at`); `data_ref` and `content_hash` as stored artifacts
+  rather than inline data; `DecisionMade`'s convictions, outputs used, model weights, and clips
+  applied; `step_up` as `{assertion_id, authenticated_at, method}`; and the agent stream's
+  `StreamOpened` at seq 1, which nothing writes today.
+- **Stream L: the shell's envelope carries the required `config_refs` and the `artifact_refs`**
+  (DEC-174 item 5). `mandate-shell` writes `config_refs: {}` and `artifact_refs: []` on every draft,
+  so every event that requires `mandate_version` or `model_version` is `missing_config_ref`, and every
+  event with a `ref` member is `artifact_refs`.
+- **Stream K: the executor's account-stream drafts match the registered schemas and vectors**
+  (DEC-174 item 5): `risk_clock` as a timestamp string (`batch.rs` writes an integer), and only on
+  the risk inputs §2 lists; `IntentReceived` as `agent_id`, `instrument_id`, `limit_price`, `type`,
+  and `tif` rather than `agent`, `kind`, `instrument`, and `limit`; `OrderSubmitted` writing `null`
+  for its empty members rather than omitting them (§4.2).
+- **E7-9's tests PR: the harness reads `agent_stream`, then the vectors become version 4.**
+  `mandate-refcases`' journal module reproduces the section's chain and artifacts and refuses each
+  invalid draft with its reason and path; `mandate-journal` gains a boolean type, the schema choice
+  by stream type for `StreamOpened` and `KillSwitchActivated`, and the §9.1 rules. `journal::version`
+  pins 3 and is passing, so the bump is a code PR that accepts 4, then a one-line spec change (ES-22).
+- **The model registry stores each pinned model's content object as an artifact.**
+  `ModelOutputRecorded.content_hash` is a `sha256:` reference, so it is in `artifact_refs` (§3), and
+  §11 check 6 fails `artifact_missing` unless the object is in the artifact store.
+- **Mandate spec §8.2: say what happens to an output outside its ranges** (conviction in [−1, 1],
+  confidence in [0, 1]): ignored with an `ignored` reason, or refused. §9.1 records the values as
+  given and does not rule.
+- **The account stream's `KillSwitchActivated` and `AgentModeApplied` schemas** are not closed by
+  §9.1; they close with the executor's account-stream schemas.
