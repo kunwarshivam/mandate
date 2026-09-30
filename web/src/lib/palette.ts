@@ -30,27 +30,27 @@ export const LIGHTNESS: Record<Step, number> = {
   600: 0.48,
   700: 0.44,
   800: 0.38,
-  850: 0.31,
-  900: 0.24,
-  950: 0.2,
-  975: 0.16,
+  850: 0.29,
+  900: 0.215,
+  950: 0.175,
+  975: 0.135,
 };
 
 /** Chroma rises to a hump in the middle of the ramp and falls off toward white and black. */
 const HUMP: Record<Step, number> = { 50: 0.1, 100: 0.25, 200: 0.45, 300: 0.7, 400: 0.9, 500: 1, 600: 1, 700: 0.92, 800: 0.82, 850: 0.62, 900: 0.42, 950: 0.3, 975: 0.2 };
 
 /**
- * Paper and ink share the cool hue 255. Paper is a cool white; ink deepens to a midnight in dark
- * mode's surfaces (850 to 975, up to C 0.022), so the dark theme is a rich blue-black, not grey.
+ * Paper and ink share the cool hue 255. Paper is a cool white; ink falls to a near-neutral black in
+ * dark mode's surfaces (850 to 975, C 0.008 and less), so the dark theme reads black rather than blue.
  */
 const PAPER_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.006, 400: 0.006, 500: 0.007, 600: 0.007, 700: 0.008, 800: 0.008, 850: 0.008, 900: 0.008, 950: 0.008, 975: 0.008 };
-const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.012, 800: 0.014, 850: 0.02, 900: 0.022, 950: 0.022, 975: 0.02 };
+const INK_CHROMA: Record<Step, number> = { 50: 0.003, 100: 0.004, 200: 0.006, 300: 0.007, 400: 0.008, 500: 0.009, 600: 0.01, 700: 0.01, 800: 0.009, 850: 0.008, 900: 0.007, 950: 0.006, 975: 0.005 };
 
 /**
  * Azure is vivid through the middle of the ramp, where it carries lines, links and labels, and
  * fades at both ends, so the mandate's field is a pale sky in light mode and a calm deep blue in dark.
  */
-const AZURE_CHROMA: Record<Step, number> = { 50: 0.012, 100: 0.03, 200: 0.075, 300: 0.11, 400: 0.15, 500: 0.19, 600: 0.2, 700: 0.18, 800: 0.14, 850: 0.075, 900: 0.055, 950: 0.04, 975: 0.03 };
+const AZURE_CHROMA: Record<Step, number> = { 50: 0.012, 100: 0.03, 200: 0.075, 300: 0.11, 400: 0.15, 500: 0.19, 600: 0.2, 700: 0.18, 800: 0.14, 850: 0.055, 900: 0.04, 950: 0.03, 975: 0.02 };
 
 /** Sun is a sunflower that sRGB only makes vivid when it is light: it peaks at 300, the highlight. */
 const SUN_CHROMA: Record<Step, number> = { 50: 0.015, 100: 0.045, 200: 0.12, 300: 0.17, 400: 0.17, 500: 0.15, 600: 0.13, 700: 0.11, 800: 0.09, 850: 0.06, 900: 0.045, 950: 0.03, 975: 0.02 };
