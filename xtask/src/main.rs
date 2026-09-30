@@ -318,7 +318,10 @@ struct Finding {
 /// Cases for the `.gitleaks.toml` exceptions (DEC-89): a line appended to a file, and the rule that
 /// must report it, or `None` where an exception must allow it. An exception allows its text only in the
 /// files it names, and every other rule still applies there. The values are assembled at run time
-/// so that this source matches no rule.
+/// so that this source matches no rule. The palette rows prove the "Web palette ramp references"
+/// exception (the `lapis` token names contain "api"): the ramp row is allowed in the design-source
+/// file alone, the same row in a stray file is reported, and a real key pasted into that file is
+/// reported too.
 fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let page = concat!(
         "U1BZfDIwMjYtMDktMjRUMTQ6MDA6",
@@ -331,6 +334,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
     let key_id = format!("PK{}", "PLANTEDKEYID000000");
     let sentinel = format!("const KEY: &str = \"PK{}\";", "SENTINELKEYID00000");
     let generic = Some("generic-api-key");
+    let palette = "web/src/lib/palette.ts";
+    let ramp = "  \"lapis-soft\": \"ultramarine-100\",";
+    let palette_key = format!("  \"api-key\": \"{page}\",");
     vec![
         (fixture("page-1.json"), json.clone(), None),
         (fixture("requests.txt"), query.clone(), None),
@@ -350,6 +356,9 @@ fn gitleaks_plants() -> Vec<(String, String, Option<&'static str>)> {
         ),
         ("stray.rs".to_owned(), sentinel, Some("alpaca-key-id")),
         (http.to_owned(), key_id, Some("alpaca-key-id")),
+        (palette.to_owned(), ramp.to_owned(), None),
+        ("stray-palette.ts".to_owned(), ramp.to_owned(), generic),
+        (palette.to_owned(), palette_key, generic),
     ]
 }
 
