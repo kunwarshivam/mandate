@@ -13,8 +13,8 @@ implementation. It:
    an independent path, and checks `IntentProposed` against the account chain's `IntentReceived`;
 5. seeds bugs, into the validator and into the vectors, and requires every one to be caught.
 
-Usage: `generate.py` rewrites the agent-stream section of journal.yaml; `generate.py --check`
-fails if the file differs from what this script generates.
+Usage: `generate.py` (or `generate.py --write`) rewrites the agent-stream section of journal.yaml;
+`generate.py --check` fails if the file differs from what this script generates.
 """
 
 import argparse
@@ -1398,9 +1398,9 @@ def render(v3_text: str, section: dict) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument(
-        "--check", action="store_true", help="fail if journal.yaml is not what this generates"
-    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="fail if journal.yaml is not what this generates")
+    mode.add_argument("--write", action="store_true", help="rewrite the agent_stream section (the default)")
     parser.add_argument("--vectors", type=Path, default=VECTORS, help="the journal.yaml to read or write")
     args = parser.parse_args(argv)
     vectors: Path = args.vectors
