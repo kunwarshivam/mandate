@@ -431,6 +431,7 @@ model gave it; one the agent does not use carries the reason in `ignored`.
 | `dry_run` | `allow` \| `deny` \| `defer` | The gate dry run: rules 4 to 6 |
 | `reason_code` | `id?` | The gate's reason code (trading spec §9.1): rule 4 |
 | `autonomy` | `auto` \| `ask` \| `deny`, or `null` | The §6.2 classification, reached only after an `allow`: rules 5 and 7 |
+| `ask_suppressed` | `budget` \| `skipped_today` \| `recent_timeout`, or `null` | Why an `ask` was classified but not asked ([DEC-156](../project/04-decision-log.md#decisions) item 5; mandate spec §6.4 once M7's change lands), in this precedence: the agent's 10 requests in the risk day are spent; the owner skipped this instrument earlier in the risk day and no version has applied since; an approval for it timed out less than `timeout_s` ago. `null` for every other decision, including an `ask` that was asked. Non-null only when `autonomy` is `ask` and no approval was requested: rule 7 |
 
 **`IntentProposed`**: exactly the `IntentReceived` vector's intent fields less `intent_id`, which is
 this event's `event_id` (§2), and `agent_id`, which is the stream's. The executor's `IntentReceived`
@@ -497,7 +498,10 @@ reduction (`AGENTS.md` rule 13); the test vectors' `valid_drafts` hold these cas
    after a `deny` or `defer` (mandate spec §6.2) — `payload.autonomy`.
 6. `DecisionMade`: `defer` only for `discretionary_exit` — `payload.dry_run`.
 7. `DecisionMade`: a non-null `autonomy` is `auto` unless `purpose` is `open` or `increase` (built-in
-   AUTO, §6.2 step 3) — `payload.autonomy`.
+   AUTO, §6.2 step 3) — `payload.autonomy`; and `ask_suppressed` is non-null only when `autonomy` is
+   `ask` — `payload.ask_suppressed`. So a suppression only ever skips an opening or an increase,
+   never an exit. That no `ApprovalRequested` names a suppressed decision is checked with the
+   approval events (M7).
 8. `DecisionMade`: `exit_conviction`, `buy_conviction`, and `combined_score` are each `null` exactly
    when `purpose` is `risk_exit` — the first offending, in that order.
 9. `DecisionMade`: `outputs_used` strictly ascending, `model_weights` keys strictly ascending by bytes,

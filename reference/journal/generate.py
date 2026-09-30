@@ -236,6 +236,7 @@ IGNORED = one_of(
     "horizon_mismatch",
     "revision_without_predecessor",
 )
+ASK_SUPPRESSED = one_of("budget", "skipped_today", "recent_timeout")
 STEP_UP = rec(("assertion_id", STR), ("authenticated_at", TS), ("method", STR))
 
 SCHEMAS: dict[tuple[str, str], T] = {
@@ -278,6 +279,7 @@ SCHEMAS: dict[tuple[str, str], T] = {
         ("dry_run", one_of("allow", "deny", "defer")),
         ("reason_code", opt(ID)),
         ("autonomy", opt(one_of("auto", "ask", "deny"))),
+        ("ask_suppressed", opt(ASK_SUPPRESSED)),
     ),
     ("agent", "IntentProposed"): rec(
         ("instrument_id", STR),
@@ -475,6 +477,8 @@ def consistency_violations(event_type: str, draft: dict, skip: frozenset[str]) -
         rule(5, (p["autonomy"] is not None) == allow, "schema", "payload.autonomy")
         rule(6, p["dry_run"] != "defer" or p["purpose"] == "discretionary_exit", "schema", "payload.dry_run")
         rule(7, p["autonomy"] in (None, "auto") or p["purpose"] in RISK_ADDING, "schema", "payload.autonomy")
+        asked = p["autonomy"] == "ask"
+        rule("7.ask_suppressed", p["ask_suppressed"] is None or asked, "schema", "payload.ask_suppressed")
         risk_exit = p["purpose"] == "risk_exit"
         wrong = [
             m for m in ("exit_conviction", "buy_conviction", "combined_score") if (p[m] is None) != risk_exit
@@ -761,6 +765,7 @@ def chain_bodies() -> list[dict]:
                 "dry_run": "allow",
                 "reason_code": None,
                 "autonomy": "auto",
+                "ask_suppressed": None,
             },
         ),
         event(
@@ -1162,6 +1167,22 @@ def invalid_drafts() -> list[dict]:
             "payload.autonomy",
         ),
         invalid(
+            "decision_auto_with_ask_suppressed",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.ask_suppressed", "budget")],
+            "schema",
+            "payload.ask_suppressed",
+        ),
+        invalid(
+            "decision_ask_suppressed_unknown_reason",
+            "§9.1 DecisionMade",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "quiet_hours")],
+            "non_canonical",
+            "payload.ask_suppressed",
+        ),
+        invalid(
             "decision_risk_exit_with_convictions",
             "§9.1 rule 8",
             "decision",
@@ -1295,9 +1316,16 @@ def valid(name, clause, base, changes):
 
 
 def valid_drafts() -> list[dict]:
-    """Drafts a rule might be misread to refuse. Each must be accepted: refusing one would hold a
-    reduction (`AGENTS.md` rule 13), or would record less than the owner did."""
+    """Drafts a rule might be misread to refuse. Each must be accepted: refusing an owner exit would
+    hold a reduction (`AGENTS.md` rule 13), and refusing a suppressed ask would leave the skip
+    unrecorded (DEC-156 item 5)."""
     return [
+        valid(
+            "decision_ask_suppressed_by_budget",
+            "§9.1 rule 7",
+            "decision",
+            [change("payload.autonomy", "ask"), change("payload.ask_suppressed", "budget")],
+        ),
         valid(
             "owner_close_confirmed_bid_stale_step_up",
             "§9.1 OwnerExitRequested",
@@ -1411,6 +1439,7 @@ def recompute_decision(chain: list[dict], artifacts: list[dict], d: dict) -> dic
         "dry_run": d["dry_run"],
         "reason_code": None,
         "autonomy": d["autonomy"],
+        "ask_suppressed": None,
     }
 
 
@@ -1550,6 +1579,7 @@ VALIDATOR_MUTANTS = (
     "artifact_refs",
     "config_refs.required",
     *(f"rule.{n}" for n in range(1, 15)),
+    "rule.7.ask_suppressed",
     "rule.12.step_up",
     "rule.15.agent",
     "rule.15.workspace",
