@@ -162,6 +162,7 @@ reason_codes:
   - below_price_floor
   - below_liquidity_floor
   - leveraged_etp_not_enabled
+  - crypto_pair_not_usd     # a crypto opening in a pair not quoted in USD; v1 trades USD pairs only (spec §3.2 item 7)
   - concentration_limit
   - max_order_size          # mandate spec §5.3
   - reentry_cooldown        # mandate spec §5.3
