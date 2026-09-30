@@ -1,0 +1,66 @@
+# Merges a pull request once the coordinator has approved it and CI is green (DEC-175).
+# The coordinating agent adds the `coordinator-approved` label only after the independent review
+# approves (DEC-79) and `fast` and `full` pass; `.github/scripts/merge-approved.sh` re-checks all of
+# it against the pull request's current head before it merges, and does nothing otherwise.
+# A label added before CI finishes merges when the `ci` run completes. A push after the label
+# removes it, so new commits need a new approval.
+# Nothing here checks out or runs the pull request's code: `pull_request_target` and
+# `workflow_run` run this file and the script as they are on `main`.
+name: merge
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions: {}
+
+concurrency:
+  group: merge-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  revoke:
+    if: github.event_name == 'pull_request_target' && github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'coordinator-approved')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+    steps:
+      - name: A push after approval withdraws it
+        run: gh api -X DELETE "repos/$GITHUB_REPOSITORY/issues/$PR/labels/coordinator-approved"
+
+  merge:
+    if: >-
+      (github.event_name == 'pull_request_target' && github.event.action == 'labeled' && github.event.label.name == 'coordinator-approved')
+      || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Merge each approved pull request whose checks are green
+        env:
+          LABELED_PR: ${{ github.event.pull_request.number }}
+          RUN_PRS: ${{ toJSON(github.event.workflow_run.pull_requests.*.number) }}
+        run: |
+          if [ -n "$LABELED_PR" ]; then
+            prs=$LABELED_PR
+          else
+            prs=$(jq -r '.[]' <<<"$RUN_PRS")
+          fi
+          for pr in $prs; do
+            .github/scripts/merge-approved.sh "$pr"
+          done
