@@ -955,6 +955,39 @@ From the independent review of stream G's mandate limits (`mandate-risk`, #160):
   where it is configured or plans the flatten without a floor.
 - Correct the E6-3 brief's test names (#176 round-1 nit 4): the clause table (line 583) and mutant
   row 33 name `properties::an_agent_flatten_never_touches_another_agent`, which lives in `hand.rs`.
+- Delete `crates/mandate-risk/tests/refcases.rs` once the families G and F status rows (DEC-178)
+  have merged: `crates/mandate-refcases/src/mandate/risk_gate.rs` now runs MC-G01 to MC-G16 and
+  MC-F01 to MC-F04 against the same `evaluate` and `agent_flatten`, and the file's own doc says it
+  moves there. Its doc on `FULL_GATE_ONLY` still calls MC-G13 pending on E6-8, which #311 made
+  live; deleting the file retires that too, and moving any figure it pins that
+  `crates/mandate-risk/tests/hand.rs` does not goes in the same tests correction.
+- Reconcile MC-G02 with its header under DEC-176: the header says "every other check passes", yet
+  its working opening order in the proposal's own instrument trips trading-domain §5.3 rule 6
+  (`working_order_limit`), which is why [DEC-150](04-decision-log.md#decisions) item 1 lists it on
+  `FULL_GATE_ONLY`. Stating the same $1,300 as a position (`positions_mv` 1300, no working order in
+  that instrument) keeps `instrument_total` and `gross` at 1500, so the case would pin `gross` on an
+  allow path, the window DEC-150 records, and the entry could expire. Restated, MC-G02 becomes an
+  allowed opening (an increase), so like MC-G13 it runs through checks 5 and 6 and check 7, and the
+  full gate allows it: against the restated state the harness reports the entry expired
+  (DEC-178 item 11). The same pull request deletes the entry, and `FULL_GATE_ONLY` with it if
+  nothing else is listed. The change touches the YAML,
+  the reference implementation's checks, and the regenerated fixtures, so it cannot share a pull
+  request with code (ES-22).
+- Tighten the families G and F harness (#317 re-review, minor 2 and nits 1 to 4), in one tests
+  correction of `crates/mandate-refcases/src/mandate/risk_gate.rs` and DEC-178:
+  - compare `pacing` as `None` on every allowed `gate` case and destructure `Decision`, so a new
+    member does not compile until it is compared; today a `pacing` that always sets
+    `marketable_limit_required` leaves every F, G and L case green, and only `mandate-risk`'s own
+    tests catch it (DEC-178 item 14);
+  - reword DEC-178 item 12: the five non-fixture fields are compared with the same values typed
+    again, because `mandate-risk`'s `test_default_config` is test-only and another crate cannot
+    call it;
+  - add an edit test for item 11's pin on an allowed order's whole `checks` list, which today no
+    harness test of its own guards;
+  - note in item 11 that the pin is only meaningful for an allowed opening (MC-G13), since the gate
+    reports checks 5 to 8 as `Passed` for an exit without running them;
+  - drop the unreachable typed error for an unknown group rank in `Scene::read`, or state why it
+    stays.
 - **RC-22 and RC-25, blocked in the trading-domain harness** (E6-8's implementation PR, DEC-163;
   the gate driver since E6-9, DEC-199). `crates/mandate-refcases/src/trading_domain/gate.rs` now
   decides `propose_order` steps with `mandate_risk::evaluate`, states the market data a case omits
