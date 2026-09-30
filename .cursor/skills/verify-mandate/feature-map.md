@@ -613,9 +613,11 @@ proves each pending test fails on them (DEC-110).
   brief.
 - **Reference cases:** `fixtures/refcases/mandate.json` family N (28 cases: admission, lineage,
   thesis expiry, stagger), through `crates/mandate-refcases/src/mandate/research.rs` in the
-  `mandate` suite (DEC-154). All four kinds are interpreted; MC-N01, MC-N14 and MC-N26 compare
-  everything and then fail naming E6-2's `classify`, so 25 of the 28 pass. The module's in-module tests doctor every expected member of every interpreted
-  case and require it to fail.
+  `mandate` suite (DEC-154). All four kinds are interpreted, and MC-N01, MC-N14 and MC-N26 decide
+  their first order through `mandate-builder`'s `classify` (DEC-179), so all 28 run; the status rows
+  of those three move in a status-only PR. The module's in-module tests doctor every expected member
+  of every interpreted case and require it to fail, and read every first-order fact back from its
+  own §6.3 field.
 - **Run:** `cargo nextest run -p mandate-research` and
   `cargo test -p mandate-refcases -- --include-ignored mandate::MC-N`.
 
