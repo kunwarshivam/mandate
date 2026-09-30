@@ -18,7 +18,7 @@ const CONCENTRATION_PLACES: u32 = 9;
 
 /// The report for `day` (DEC-163 item 8):
 ///
-/// - **Order-to-fill:** per agent and instrument, `orders ÷ max(fills, 1)` truncated, where orders
+/// - **Order-to-fill:** per agent and instrument, `orders ÷ max(fills, 1)` truncated to an integer, where orders
 ///   are the submitted ones less the exit-sequence and kill-switch cancels §9.6 excludes; flagged
 ///   when at least `order_to_fill_min_orders` were sent and the ratio exceeds `order_to_fill_max`,
 ///   compared without dividing, exactly as the gate's own check 6 compares it.
@@ -27,8 +27,10 @@ const CONCENTRATION_PLACES: u32 = 9;
 /// - **Close-window activity:** the counts as folded; any order there is flagged for the owner to
 ///   review, since §9.6 names no count that would be normal.
 /// - **Concentration:** each end-of-day market value as a fraction of its agent's equity, rounded
-///   up so it is never understated, and flagged where it cannot be one: a position worth more than
-///   the agent's equity, or an agent with no positive equity recorded, stated as `1`.
+///   up so it is never understated, and stated as `1` where it cannot be a fraction: a position
+///   worth more than the agent's equity, or an agent with no positive equity recorded. It is a
+///   figure only and never flagged: §3.3 supplies no threshold, and one the platform chose would be
+///   compliance-visible text, so [`SurveillanceBreach::Concentration`] is not raised in v1.
 ///
 /// # Errors
 /// `negative` when more cancels are excluded than orders were submitted or a market value is
@@ -61,11 +63,8 @@ pub(crate) fn report(
     }
     let mut concentration = BTreeMap::new();
     for ((agent, instrument), value) in &input.end_of_day_market_values {
-        let (share, breached) = share_of_equity(input.agent_equity.get(agent), *value)?;
+        let share = share_of_equity(input.agent_equity.get(agent), *value)?;
         concentration.insert((*agent, instrument.clone()), share);
-        if breached {
-            breaches.insert(SurveillanceBreach::Concentration);
-        }
     }
     Ok(SurveillanceReport {
         day,
@@ -89,20 +88,19 @@ fn order_to_fill_of(config: &GateConfig, counts: OrderCounts) -> Result<(u32, bo
     Ok((ratio, breached))
 }
 
-/// `value ÷ equity`, rounded up at 9 places, and whether it crossed the threshold of being no
-/// fraction of equity at all.
+/// `value ÷ equity`, rounded up at 9 places, and `1` where it is no fraction of equity at all.
 ///
 /// `mandate-num` has no conversion from a [`mandate_num::Ratio`] to a [`Fraction`], so the quotient
 /// goes through its canonical text, which is the exact value and which [`Fraction::parse`] reads
-/// back exactly (backlog: the conversion belongs in `mandate-num`).
-fn share_of_equity(equity: Option<&Usd>, value: Usd) -> Result<(Fraction, bool), GateError> {
+/// back exactly; the backlog's "`Ratio` to `Fraction` in `mandate-num`" row retires this.
+fn share_of_equity(equity: Option<&Usd>, value: Usd) -> Result<Fraction, GateError> {
     let Some(equity) = equity.filter(|e| !e.is_negative() && !e.is_zero()) else {
-        return Ok((Fraction::ONE, true));
+        return Ok(Fraction::ONE);
     };
     let ratio = value.ratio_to(*equity, CONCENTRATION_PLACES, Rounding::Ceiling)?;
     match Fraction::parse(&ratio.to_string()) {
-        Ok(share) => Ok((share, false)),
-        Err(NumError::AboveOne) => Ok((Fraction::ONE, true)),
+        Ok(share) => Ok(share),
+        Err(NumError::AboveOne) => Ok(Fraction::ONE),
         Err(other) => Err(other.into()),
     }
 }
@@ -213,10 +211,10 @@ mod tests {
     }
 
     /// Concentration is `value ÷ equity` rounded up: 1 ÷ 3 of equity is 0.333333334, a position of
-    /// exactly the agent's equity is 1 and unflagged, and a position above it, an agent with zero
-    /// equity, or one with no equity recorded is stated as 1 and flagged.
+    /// exactly the agent's equity is 1, and a position above it, an agent with zero equity, or one
+    /// with no equity recorded is stated as 1. None of them is flagged (DEC-163 item 8).
     #[test]
-    fn concentration_is_rounded_up_and_flagged_past_equity() -> Result<(), GateError> {
+    fn concentration_is_rounded_up_stated_and_never_flagged() -> Result<(), GateError> {
         let usd = Usd::parse;
         let mut input = SurveillanceInput::default();
         let values = [
@@ -234,7 +232,7 @@ mod tests {
         input
             .end_of_day_market_values
             .insert((AgentId(5), id("a")?), usd("1")?);
-        let figures = |i: &SurveillanceInput| -> Result<Vec<(Fraction, bool)>, GateError> {
+        let figures = |i: &SurveillanceInput| -> Result<Vec<Fraction>, GateError> {
             (1..=5)
                 .map(|n| share_of_equity(i.agent_equity.get(&AgentId(n)), usd_of(i, n)?))
                 .collect()
@@ -243,13 +241,13 @@ mod tests {
         assert_eq!(
             figures(&input)?,
             vec![
-                (one_third, false),
-                (Fraction::ONE, false),
-                (Fraction::ONE, true),
-                (Fraction::ONE, true),
-                (Fraction::ONE, true),
+                one_third,
+                Fraction::ONE,
+                Fraction::ONE,
+                Fraction::ONE,
+                Fraction::ONE
             ],
-            "rounded up, exactly one unflagged, and past equity or without it flagged"
+            "rounded up, and 1 at, past or without equity"
         );
         let whole = report(day()?, &config()?, &input)?;
         assert_eq!(
@@ -257,8 +255,8 @@ mod tests {
                 whole.concentration.get(&(AgentId(1), id("a")?)),
                 whole.breaches
             ),
-            (Some(&one_third), [SurveillanceBreach::Concentration].into()),
-            "the report states the figure and flags the threshold"
+            (Some(&one_third), BTreeSet::new()),
+            "the report states the figures and flags no concentration"
         );
         let mut negative = SurveillanceInput::default();
         negative

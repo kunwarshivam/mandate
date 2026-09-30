@@ -886,6 +886,9 @@ pub enum SurveillanceBreach {
     OrderToFill,
     SelfTrade,
     CloseWindow,
+    /// Not raised in v1: §3.3 supplies no concentration threshold, and one the platform chose
+    /// would be compliance-visible, so the report states concentration as a figure only (DEC-163
+    /// item 8).
     Concentration,
 }
 
