@@ -1040,26 +1040,35 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
   - DEC-177 item 25(b) and #340's description say three mutants were re-seeded; two were, and the
     third was renamed into `received.intent`'s family, its own mutant still owed (nit);
   - `docs/specs/journal.md`'s rule-16 prose has a 107-character line; rewrap it (nit).
-- **Family B's clock fix follow-ups** (#351 and #347 reviews, minors and nits; the fold-back row
-  from #347 removes `CLOCKED` and closes the first two):
-  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), which deletes the function):* `labels_agree_with_calendar` in `crates/mandate-refcases/src/mandate/order_builder.rs` reaches
-    its answer through the harness's own `mandate_risk::session_at`, `test_default_gate_config()`
+- **Family B's clock fix follow-ups** (#351 and #347 reviews, minors and nits; the fold-back,
+  [#359](https://github.com/kunwarshivam/mandate/pull/359), removed `CLOCKED` and closed three of them):
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), which deletes the function):* `labels_agree_with_calendar` in
+    `crates/mandate-refcases/src/mandate/order_builder.rs` reached its answer through the harness's own `mandate_risk::session_at`, `test_default_gate_config()`
     and `market_session`, so a bug in any of them (the close window set to 0, `AfterHours` mapped to
     `Regular`, or `session::derive` reporting `Regular` after hours) flips oracle and harness
     together; only the literal-clock test caught them. Compute the expected session from a literal
     New York clock, or give each `CLOCKED` row its agreeing instant (#351 review, minor);
-  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359)):* `labels_agree_with_calendar` re-walks `family_b` for a case its caller holds; take `&case`
-    (#351 review, nit);
-  - **open:** `reference/mandate/check_cases.py`'s `calendar_at` assumes a full trading day for every builder
-    case. On 2026-11-26 (closed) and 2026-11-27 (early close 13:00, after hours to 17:00) it
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359)):* `labels_agree_with_calendar` re-walked `family_b` for a case its caller
+    holds; take `&case` (#351 review, nit);
+  - **open:** `reference/mandate/check_cases.py`'s `calendar_at` assumes a full trading day for
+    every builder case. On 2026-11-26 (closed) and 2026-11-27 (early close 13:00, after hours to 17:00) it
     disagrees with `crates/mandate-time/data/us-equities.calendar` both ways. Refuse, naming the
     case, when `now`'s date is not a full day in that calendar, or read the calendar (#347 review,
     minor);
-  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), now 25):* `.cursor/skills/verify-mandate/feature-map.md`'s family-B bullet said 23 pass and that
-    MC-B22 and MC-B23 fail on a contradicting label; after #347 both pass (#347 review, minor);
-  - **open:** `reference/mandate/generate.py`'s `at_now` moves only the outputs' `as_of` and `expires_at`,
-    not `gate_state.last_exit_fill_at`; assert that map is empty, so a later caller cannot move
-    `now` past a re-entry cooldown unnoticed (#347 review, nit).
+  - *done ([#359](https://github.com/kunwarshivam/mandate/pull/359), now 25):* `.cursor/skills/verify-mandate/feature-map.md`'s family-B bullet
+    said 23 pass and that MC-B22 and MC-B23 fail on a contradicting label (#347 review, minor);
+  - **open:** `reference/mandate/generate.py`'s `at_now` moves only the outputs' `as_of` and
+    `expires_at`, not `gate_state.last_exit_fill_at`; assert that map is empty, so a later caller
+    cannot move `now` past a re-entry cooldown unnoticed (#347 review, nit);
+  - **open (#359 review, nits):** DEC-250 item 12's earlier amendment still names
+    `the_two_session_cases_pass_once_now_agrees_with_their_labels` and its MC-B23 doctoring, both
+    gone; the renamed `the_two_session_cases_pass_as_stated_and_compare_every_sibling` repeats what
+    `every_expected_member_is_compared_and_required` and `every_builder_case_passes_or_fails_at_its_owner`
+    already run, so fold it into them or say in its doc that it only names the two comparisons; and
+    `CLOCKED`'s needles asserted the conflict message's whole wording ("states `after_hours`", "the
+    calendar says `regular`"), where MC-B01's doctored proof in `the_builder_and_the_gate_see_one_scene`
+    asserts only the member name, so pin the full message there. Replace `order_builder.rs`'s own
+    `fails_naming` with an exact-message helper, as #360 did for family A.
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
@@ -1593,7 +1602,11 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   verdict brought; (2) name `compare_computed`'s `c` parameter for what it holds (the gate's
   figures); (3) extend the group-id test to a case with two groups, so the rank of a name among
   several is pinned, not only the one group's id; (4) shorten the done row's verbatim "The row as it
-  was" copy to a pointer at #317's re-review.
+  was" copy to a pointer at #317's re-review. From the round-2 review: (5)
+  `a_denial_fails_unless_exactly_one_check_failed_with_its_reason` ends with a bare `Ok(())`; bind
+  its failing shapes to a name and finish with `expect_eq("failing shapes", shapes.len(), 3)`, as its
+  allow sibling counts its edits; (6) DEC-178 item 11 records only the allow pin; add a sentence for
+  the denial pin and its test.
 - **The trading-domain gate driver after its tightening** (#349 review, nits), one tests change to
   `crates/mandate-refcases/src/trading_domain.rs` and its gate tests, plus DEC-199's wording:
   (1) `pending()` counts the second `propose_order` before a backtest case is dispatched, so say in
@@ -1613,6 +1626,18 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   doc or pin it with a test; (3) document `Quorum`'s two public fields as `PolicyOverlay`'s are;
   (4) rewrap the 165-character line the M7 bullet of `.cursor/skills/verify-mandate/feature-map.md`
   gained; (5) DEC-173 item 12 still says `mutants.py` has 50 escalation mutants, which #355 made 52.
+- **Family A's harness after its tightening** (#360 review, nits), one tests change to
+  `crates/mandate-refcases/src/mandate/autonomy.rs` plus DEC-162's wording: (1) DEC-162 item 4 says
+  the property test runs "over generated well-typed policies and facts", but `action_context()` pins
+  `drawdown` and `daily_pnl_fraction` to zero and `well_typed_leaf()` never builds a condition over
+  `instrument`, `session`, `drawdown`, `daily_pnl_fraction` or `position_pnl_fraction`; name the
+  space the strategies cover (the claim holds, since §6.2 step 3 decides on `purpose` first);
+  (2) the module doc names only `no_rule_set_ever_denies_or_asks_a_reducing_purpose`; add
+  `hand::every_reducing_purpose_is_auto_by_the_builtin` for the other three reducing purposes, as the
+  row does; (3) the placeholder refusal is the module's only message prefixed with the case id,
+  which the suite already reports; drop the prefix and the `id` parameter it needed; (4) give
+  `unread_instrument` a doc comment; (5) assert the second premise behind `PLANTED = "input"`, that
+  no `action` or `expect` carries an `input` member.
 
 From E6-4's slice R3 (stream H2; DEC-167 item 7):
 
