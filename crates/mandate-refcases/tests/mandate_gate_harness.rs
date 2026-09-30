@@ -181,8 +181,13 @@ const EVERY_FIGURE: [(&str, &str); 8] = [
 ];
 
 /// Every `gate` case passes as the fixture states it, and fails, naming the member, when its verdict
-/// or reason is edited or dropped, when any `computed` figure it states is edited, and when a figure
-/// it does not state is added.
+/// or reason is edited or dropped, when an opening's `proposed.purpose` is flipped between `open`
+/// and `increase`, when any `computed` figure it states is edited, and when a figure it does not
+/// state is added.
+///
+/// The purpose flip is the one edit outside `expect`: the harness picks the same `Origin` and side
+/// for both purposes, so only the gate's own assignment, from whether the agent holds the
+/// instrument, can tell them apart, and the arm must compare it.
 ///
 /// The added figure is the other direction: a case states only the figures its title is about, so
 /// the arm compares the ones stated, and one the gate did not report, or reported with another value,
@@ -198,7 +203,8 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
         if let Err(failure) = run(fixture.clone(), id) {
             panic!("{id} must pass as the fixture states it: {failure}");
         }
-        let expect = case_of(&fixture, id)["expect"].clone();
+        let case = case_of(&fixture, id);
+        let expect = case["expect"].clone();
         fails_naming(&fixture, id, "verdict", |case| {
             case["expect"]["verdict"] = other_verdict(&expect["verdict"]);
         });
@@ -214,6 +220,17 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
             });
         }
         edits += 4;
+        let flipped = match case["proposed"]["purpose"].as_str() {
+            Some("open") => Some("increase"),
+            Some("increase") => Some("open"),
+            _ => None,
+        };
+        if let Some(flipped) = flipped {
+            fails_naming(&fixture, id, "purpose", |case| {
+                case["proposed"]["purpose"] = json!(flipped);
+            });
+            edits += 1;
+        }
         let stated = expect
             .get("computed")
             .and_then(Json::as_object)
@@ -242,9 +259,10 @@ fn every_gate_case_passes_and_fails_on_each_edited_expectation() {
     }
     assert_eq!(
         edits,
-        16 * 4 + 28 + (16 * 8 - 28),
-        "verdict and reason edited and dropped in each of the 16 cases, the 28 figures they state \
-         edited, and each of the 100 figures they do not state added"
+        16 * 4 + 12 + 28 + (16 * 8 - 28),
+        "verdict and reason edited and dropped in each of the 16 cases, the purpose flipped in the 12 \
+         openings, the 28 figures they state edited, and each of the 100 figures they do not state \
+         added"
     );
 }
 
