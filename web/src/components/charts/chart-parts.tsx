@@ -43,7 +43,7 @@ export function useChartMode(): ThemeMode {
 }
 
 /**
- * A segmented control. The current range sits on the neon volt highlight, in ink type, and the pill
+ * A segmented control. The current range sits on the sun highlight, in ink type, and the pill
  * springs to the next one (350 ms with a little bounce; with reduced motion it jumps). The focus ring
  * stands off the button, so it never reads as a second selection. Each option is a pressed-state
  * button, so the group reads as one control with one choice.

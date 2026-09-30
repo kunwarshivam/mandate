@@ -263,8 +263,8 @@ export function candleData(bars: Array<Bar | DailyBar>): CandlestickData<Time>[]
 }
 
 /**
- * Who a level belongs to decides its look: a dashed grey line with a volt label for the
- * mandate (limits, protection), a solid volt line for the account (average cost), a dashed ink line for a
+ * Who a level belongs to decides its look: a dashed grey line with an azure label for the
+ * mandate (limits, protection), a solid azure line for the account (average cost), a dashed ink line for a
  * proposal the owner is asked about. The mandate's line stays grey so it never reads as the account's.
  */
 export type LevelTone = "mandate" | "account" | "proposal";
@@ -278,7 +278,7 @@ export interface ChartLevel {
   meaning?: string;
 }
 
-/** The line and its axis label. A mandate level's label is a pale volt tag in deep volt type. */
+/** The line and its axis label. A mandate level's label is a pale azure tag in deep azure type. */
 function levelColours(tone: LevelTone): { line: string; label: string; text: string } {
   switch (tone) {
     case "mandate":

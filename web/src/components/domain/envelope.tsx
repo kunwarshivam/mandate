@@ -129,7 +129,7 @@ function PendingBreaches({ agent }: { agent: Agent }) {
 }
 
 /**
- * The envelope: an agent's limits in dollars on one pale volt field, the colour of your mandate.
+ * The envelope: an agent's limits in dollars on one pale azure field, the colour of your mandate.
  * Everything inside sits directly on the field; nothing is boxed inside it. On a wide screen the
  * levels and the rails sit side by side, so the field reads across rather than down.
  */

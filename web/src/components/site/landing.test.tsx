@@ -303,7 +303,7 @@ const LANDING_PAIRS = [
   { fg: "mandate-strong", bg: "card", use: "Links" },
   { fg: "foreground", bg: "muted", use: "The contents frame, the chrome and the guestbook" },
   { fg: "mandate-strong", bg: "muted", use: "Links in the contents frame" },
-  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the volt badge" },
+  { fg: "highlight-foreground", bg: "highlight", use: "The guestbook buttons, the New tag, a hovered link and the sun badge" },
   { fg: "card", bg: "foreground", use: "Title bars, the record's column heads and the ink badges" },
   { fg: "foreground", bg: "warning-soft", use: "The edited line of the record" },
 ] as const;

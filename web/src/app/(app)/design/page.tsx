@@ -37,17 +37,17 @@ const SOURCES: Array<[RestrictionSource, string]> = [
 
 const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: string; className: string; line?: boolean }> = [
   {
-    name: "Volt",
+    name: "Azure",
     meaning: "mandate",
     means: "Your mandate",
-    detail: "Limits, rails, the envelope and the labels of the mandate's price lines, in deep volt on a pale volt field. Where the agent must stay.",
+    detail: "Limits, rails, the envelope and the labels of the mandate's price lines, in deep azure on a pale azure field. Where the agent must stay.",
     className: "bg-mandate text-mandate-strong",
   },
   {
-    name: "Ink, with a volt line",
+    name: "Ink, with an azure line",
     meaning: "account",
     means: "The account",
-    detail: "Primary actions and the paper hatch in ink; the account's equity line and the current tab in volt.",
+    detail: "Primary actions and the paper hatch in ink; the current tab's rule and the account's levels in azure; an approval card on pale sun.",
     className: "bg-lapis text-lapis-foreground",
     line: true,
   },
@@ -56,9 +56,9 @@ const MEANINGS: Array<{ name: string; meaning: Meaning; means: string; detail: s
 ];
 
 const CHART_RULES: Array<[string, string, string]> = [
-  ["bg-lapis-line", "The account", "Account equity: a 2 px volt line over a pale volt fill. The hero of Home."],
-  ["bg-foreground", "An agent", "One agent's equity: a 2 px ink line over the card. The hero of an agent."],
-  ["bg-muted-foreground", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1 px dashed grey price lines with a pale volt axis label in deep volt; a crowded label gives way and the legend names it."],
+  ["bg-gain", "A hero line, up", "Account or agent equity over the range shown: a smooth 2 px line in green when the range ends higher, with no fill, over a dotted rule at the range's opening value."],
+  ["bg-loss", "A hero line, down", "The same line in red when the range ends lower, and in ink when it ends exactly where it began."],
+  ["bg-muted-foreground", "Your mandate", "Loss limits, the lifetime floor, a stop and a take-profit: 1 px dashed grey price lines with a pale azure axis label in deep azure; a crowded label gives way and the legend names it."],
   ["bg-ink", "A proposal", "The limit an agent asks you to approve, dashed, in ink, on a small neutral chart."],
   ["bg-gain", "Up candle", "A candle that closed above its open, with the sign in the readout. Teal when colour-blind friendly is on."],
   ["bg-loss", "Down candle", "A candle that closed below its open. Raspberry in light and orange in dark when colour-blind friendly is on."],
@@ -80,7 +80,7 @@ const DENSITY_ROWS: Array<[string, string]> = [
 
 const DO = [
   "One hero number per screen, set in the hero size, with its change, the word for it and its disclosure on the next line.",
-  "Let space separate things. Reach for a hairline before a box, and for a box only when it carries meaning: the mandate's pale volt, an ink action, a well.",
+  "Let space separate things. Reach for a hairline before a box, and for a box only when it carries meaning: the mandate's pale azure, an ink action, a well.",
   "Check a screen in light and dark: every token has a value in each, and nothing else changes.",
   "Sentence case everywhere. Weight 600 at most in the product.",
   "Tabular figures wherever numbers line up or change.",
@@ -92,7 +92,7 @@ const DONT = [
   "Colour blends, glows, a shadow on anything that does not float, or glass anywhere but the header and the phone tab bar.",
   "Capitals-only labels, heavy rules, or bands of colour as signage.",
   "Confetti, streaks, badges for trading, or any cue that rewards activity.",
-  "Crimson anywhere but the kill switch. Volt outside the volt tokens, as a large block, or, in light mode, as text lighter than deep volt.",
+  "Crimson anywhere but the kill switch. Azure as a large block, sun under anything but ink type, or green and red for anything but a gain and a loss.",
   "Optimistic state: nothing is shown as done before the deployment says so.",
   "Motion on a deadline, a figure the owner is deciding on, or a Stop control.",
 ];
@@ -157,7 +157,7 @@ export default function DesignPage() {
       <header className="grid gap-2">
         <h1 className="text-h1">Design system</h1>
         <p className="max-w-measure text-muted-foreground">
-          Owlhead&apos;s calm system (DEC-204, DEC-205, DEC-214): one hero number per screen, a chart at the centre, generous space and few boxes, in Ink and Volt, light or dark. Colour values live in{" "}
+          Owlhead&apos;s calm system (DEC-204, DEC-205, DEC-217): one hero number per screen, a chart at the centre, generous space and few boxes, in Azure and Sun, light or dark. Colour values live in{" "}
           <code>src/lib/palette.ts</code> and <code>globals.css</code>; a test fails if they drift or a reading pair drops below WCAG AA or APCA. The written rules are in <code>web/DESIGN.md</code>{" "}
           and the palette&apos;s in <code>web/COLOR.md</code>.
         </p>

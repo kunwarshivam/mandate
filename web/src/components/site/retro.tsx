@@ -175,10 +175,10 @@ export function UnderConstruction() {
   );
 }
 
-type Badge = { top: string; bottom: string; tone: "volt" | "ink" | "paper" };
+type Badge = { top: string; bottom: string; tone: "sun" | "ink" | "paper" };
 
 export const BADGES: Badge[] = [
-  { top: "Private", bottom: "beta", tone: "volt" },
+  { top: "Private", bottom: "beta", tone: "sun" },
   { top: "Paper", bottom: "first", tone: "ink" },
   { top: "No", bottom: "withdrawals", tone: "paper" },
   { top: "Any", bottom: "browser", tone: "paper" },
@@ -186,7 +186,7 @@ export const BADGES: Badge[] = [
 ];
 
 const TONE: Record<Badge["tone"], string> = {
-  volt: "bg-highlight text-highlight-foreground",
+  sun: "bg-highlight text-highlight-foreground",
   ink: "bg-foreground text-card",
   paper: "bg-card text-foreground",
 };

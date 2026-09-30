@@ -6,56 +6,61 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 /*
- * Owlhead's calm system in Ink and Volt (DEC-205, web/DESIGN.md, web/COLOR.md). Every colour
- * is a ramp step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift.
- * Colour carries four meanings and nothing else: the mandate tokens (volt) are your mandate,
- * lapis is the account (an ink fill, a volt line), ink is a stopped agent and the Stop
- * control, crimson is the kill switch.
+ * Owlhead's palette, Azure and Sun (DEC-217, web/DESIGN.md, web/COLOR.md). Every colour is a ramp
+ * step from src/lib/palette.ts, in both themes; tokens.test.ts fails when the two drift. Azure is
+ * the action and your mandate, sun the highlight under ink type, green and red a gain and a loss,
+ * the series colours an asset's share, ink a stopped agent and the Stop control, and crimson the
+ * kill switch.
  */
 :root {
   --background: oklch(0.975 0.004 255);
   --card: oklch(0.992 0.003 255);
   --muted: oklch(0.91 0.006 255);
   --border: oklch(0.91 0.006 255);
-  --foreground: oklch(0.2 0.008 255);
-  --muted-foreground: oklch(0.38 0.01 255);
-  --primary: oklch(0.2 0.008 255);
+  --foreground: oklch(0.2 0.022 255);
+  --muted-foreground: oklch(0.38 0.014 255);
+  --primary: oklch(0.48 0.172 258);
   --primary-foreground: oklch(0.992 0.003 255);
-  --lapis: oklch(0.2 0.008 255);
+  --lapis: oklch(0.2 0.022 255);
   --lapis-foreground: oklch(0.992 0.003 255);
   --lapis-muted: oklch(0.91 0.006 255);
-  --lapis-soft: oklch(0.975 0.05 120);
-  --lapis-strong: oklch(0.38 0.01 255);
-  --lapis-line: oklch(0.62 0.14 120);
-  --mandate: oklch(0.975 0.05 120);
-  --mandate-foreground: oklch(0.2 0.008 255);
-  --mandate-muted: oklch(0.38 0.01 255);
-  --mandate-strong: oklch(0.44 0.1 120);
-  --mandate-marker: oklch(0.62 0.14 120);
-  --mandate-edge: oklch(0.62 0.14 120);
-  --mandate-soft: oklch(0.975 0.05 120);
-  --selection: oklch(0.91 0.19 120);
-  --highlight: oklch(0.88 0.2 120);
-  --highlight-foreground: oklch(0.2 0.008 255);
-  --ink: oklch(0.2 0.008 255);
+  --lapis-soft: oklch(0.975 0.03 90);
+  --lapis-strong: oklch(0.38 0.014 255);
+  --lapis-line: oklch(0.48 0.172 258);
+  --mandate: oklch(0.91 0.042 258);
+  --mandate-foreground: oklch(0.2 0.022 255);
+  --mandate-muted: oklch(0.38 0.014 255);
+  --mandate-strong: oklch(0.38 0.136 258);
+  --mandate-marker: oklch(0.48 0.172 258);
+  --mandate-edge: oklch(0.48 0.172 258);
+  --mandate-soft: oklch(0.975 0.011 258);
+  --selection: oklch(0.91 0.042 258);
+  --highlight: oklch(0.88 0.149 90);
+  --highlight-foreground: oklch(0.2 0.022 255);
+  --ink: oklch(0.2 0.022 255);
   --ink-foreground: oklch(0.992 0.003 255);
-  --ink-line: oklch(0.44 0.01 255);
-  --crimson: oklch(0.44 0.173 27);
+  --ink-line: oklch(0.44 0.012 255);
+  --crimson: oklch(0.44 0.171 20);
   --crimson-foreground: oklch(0.992 0.003 255);
-  --crimson-edge: oklch(0.44 0.173 27);
-  --gain: oklch(0.44 0.117 150);
-  --loss: oklch(0.44 0.117 12);
+  --crimson-edge: oklch(0.44 0.171 20);
+  --gain: oklch(0.48 0.128 150);
+  --loss: oklch(0.48 0.128 36);
   --warning: oklch(0.44 0.092 70);
-  --info: oklch(0.38 0.01 255);
-  --gain-soft: oklch(0.975 0.011 150);
-  --loss-soft: oklch(0.975 0.011 12);
+  --info: oklch(0.38 0.014 255);
+  --gain-soft: oklch(0.975 0.012 150);
+  --loss-soft: oklch(0.975 0.012 36);
   --warning-soft: oklch(0.975 0.017 70);
   --info-soft: oklch(0.975 0.004 255);
   --gain-cvd: oklch(0.44 0.072 205);
   --loss-cvd: oklch(0.31 0.099 350);
   --gain-cvd-soft: oklch(0.975 0.024 205);
   --loss-cvd-soft: oklch(0.975 0.013 350);
-  --hatch-ink: oklch(0.2 0.008 255 / 0.3);
+  --series-5: oklch(0.62 0.009 255);
+  --series-4: oklch(0.78 0.117 232);
+  --series-3: oklch(0.62 0.103 192);
+  --series-2: oklch(0.78 0.154 90);
+  --series-1: oklch(0.62 0.19 258);
+  --hatch-ink: oklch(0.2 0.022 255 / 0.3);
   --paper: var(--card);
   --logo: var(--foreground);
   --backdrop: color-mix(in oklch, var(--ink) 40%, transparent);
@@ -125,53 +130,58 @@
 }
 
 /*
- * Dark: ink surfaces, paper type, volt a step lighter for the account's line, the mandate's
+ * Dark: midnight surfaces, paper type, azure a step lighter for the account's line, the mandate's
  * marks and labels. Primary actions and the Stop control turn to a paper fill with ink type; crimson keeps its
  * fill and lightens its edge. Still flat: no shadows, no glows.
  */
 html:root[data-mode="dark"] {
-  --background: oklch(0.16 0.008 255);
-  --card: oklch(0.2 0.008 255);
-  --muted: oklch(0.24 0.01 255);
-  --border: oklch(0.31 0.01 255);
+  --background: oklch(0.16 0.02 255);
+  --card: oklch(0.2 0.022 255);
+  --muted: oklch(0.24 0.022 255);
+  --border: oklch(0.31 0.02 255);
   --foreground: oklch(0.975 0.004 255);
   --muted-foreground: oklch(0.88 0.006 255);
-  --primary: oklch(0.975 0.004 255);
-  --primary-foreground: oklch(0.2 0.008 255);
+  --primary: oklch(0.88 0.057 258);
+  --primary-foreground: oklch(0.2 0.022 255);
   --lapis: oklch(0.975 0.004 255);
-  --lapis-foreground: oklch(0.2 0.008 255);
-  --lapis-muted: oklch(0.31 0.01 255);
-  --lapis-soft: oklch(0.31 0.06 120);
-  --lapis-strong: oklch(0.88 0.006 255);
-  --lapis-line: oklch(0.76 0.17 120);
-  --mandate: oklch(0.31 0.06 120);
+  --lapis-foreground: oklch(0.2 0.022 255);
+  --lapis-muted: oklch(0.31 0.02 255);
+  --lapis-soft: oklch(0.31 0.075 258);
+  --lapis-strong: oklch(0.91 0.042 258);
+  --lapis-line: oklch(0.78 0.109 258);
+  --mandate: oklch(0.31 0.075 258);
   --mandate-foreground: oklch(0.975 0.004 255);
   --mandate-muted: oklch(0.88 0.006 255);
-  --mandate-strong: oklch(0.91 0.19 120);
-  --mandate-marker: oklch(0.76 0.17 120);
-  --mandate-edge: oklch(0.76 0.17 120);
-  --mandate-soft: oklch(0.24 0.045 120);
-  --selection: oklch(0.38 0.075 120);
-  --highlight: oklch(0.88 0.2 120);
-  --highlight-foreground: oklch(0.2 0.008 255);
+  --mandate-strong: oklch(0.88 0.057 258);
+  --mandate-marker: oklch(0.78 0.109 258);
+  --mandate-edge: oklch(0.78 0.109 258);
+  --mandate-soft: oklch(0.24 0.055 258);
+  --selection: oklch(0.38 0.136 258);
+  --highlight: oklch(0.88 0.149 90);
+  --highlight-foreground: oklch(0.2 0.022 255);
   --ink: oklch(0.975 0.004 255);
-  --ink-foreground: oklch(0.2 0.008 255);
+  --ink-foreground: oklch(0.2 0.022 255);
   --ink-line: oklch(0.62 0.007 255);
-  --crimson: oklch(0.44 0.173 27);
+  --crimson: oklch(0.44 0.171 20);
   --crimson-foreground: oklch(0.992 0.003 255);
-  --crimson-edge: oklch(0.76 0.138 27);
-  --gain: oklch(0.88 0.062 150);
-  --loss: oklch(0.88 0.062 12);
+  --crimson-edge: oklch(0.78 0.124 20);
+  --gain: oklch(0.78 0.127 150);
+  --loss: oklch(0.78 0.127 36);
   --warning: oklch(0.88 0.089 70);
   --info: oklch(0.88 0.006 255);
-  --gain-soft: oklch(0.24 0.063 150);
-  --loss-soft: oklch(0.24 0.063 12);
+  --gain-soft: oklch(0.2 0.053 150);
+  --loss-soft: oklch(0.2 0.053 36);
   --warning-soft: oklch(0.24 0.05 70);
-  --info-soft: oklch(0.24 0.01 255);
+  --info-soft: oklch(0.24 0.022 255);
   --gain-cvd: oklch(0.88 0.111 205);
   --loss-cvd: oklch(0.88 0.068 50);
   --gain-cvd-soft: oklch(0.24 0.039 205);
   --loss-cvd-soft: oklch(0.24 0.061 50);
+  --series-5: oklch(0.62 0.007 255);
+  --series-4: oklch(0.88 0.069 232);
+  --series-3: oklch(0.78 0.117 192);
+  --series-2: oklch(0.88 0.149 90);
+  --series-1: oklch(0.78 0.109 258);
   --hatch-ink: oklch(0.62 0.007 255 / 0.4);
   --paper: var(--mandate);
   --backdrop: color-mix(in oklch, var(--background) 72%, transparent);
@@ -232,7 +242,7 @@ html:has([data-slot="response-bar"]) [role="region"][aria-label="Notifications"]
 
 /*
  * Colour-blind friendly (web/COLOR.md): a gain turns teal, and a loss raspberry in light or orange in
- * dark, which stay apart from each other, from volt and from crimson under deuteranopia,
+ * dark, which stay apart from each other, from azure and from crimson under deuteranopia,
  * protanopia and tritanopia. Charts read the same attribute, since a canvas cannot read CSS.
  */
 html:root[data-cvd="on"] {

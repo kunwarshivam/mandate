@@ -29,7 +29,7 @@ describe("/design brand specimen", () => {
     const palette = screen.getByRole("list", { name: "Brand palette" });
     const text = within(palette).getAllByRole("listitem").map((li) => li.textContent);
     expect(text).toHaveLength(6);
-    for (const hex of ["#14161A", "#FBFDFE", "#7C9217", "#4C5A09", "#F2FCD7", "#0B0D11"]) expect(text.join(" ")).toContain(hex);
+    for (const hex of ["#0F1720", "#FBFDFE", "#0858BC", "#043E89", "#FED254", "#080E16"]) expect(text.join(" ")).toContain(hex);
     expect(text[0]).toContain(`${hexContrast(INK, OFF_WHITE).toFixed(2)}:1 on off-white`);
     expect(hexContrast(INK, OFF_WHITE)).toBeGreaterThanOrEqual(15);
     expect(hexContrast(OFF_WHITE, NIGHT)).toBeGreaterThanOrEqual(15);

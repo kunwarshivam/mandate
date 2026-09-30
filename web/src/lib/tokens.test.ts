@@ -64,7 +64,7 @@ describe("colour tokens", () => {
   it.each(THEMES)("keeps crimson for the kill switch distinct from the colour of a loss in %s", (theme) => {
     for (const kill of ["crimson", "crimson-edge"]) {
       expect(tokenValue(kill, theme)).not.toBe(tokenValue("loss", theme));
-      expect(parseOklch(tokenValue(kill, theme)).h - parseOklch(tokenValue("loss", theme)).h).toBeGreaterThanOrEqual(15);
+      expect(Math.abs(parseOklch(tokenValue(kill, theme)).h - parseOklch(tokenValue("loss", theme)).h)).toBeGreaterThanOrEqual(15);
     }
   });
 
