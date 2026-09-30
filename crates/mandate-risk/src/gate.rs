@@ -304,14 +304,16 @@ pub(crate) fn assign_purpose(origin: Origin, side: Side, qty: Qty, position: Qty
 /// eligibility floor and where it sits in check 2; and for E6-8, each conduct boundary a mutant or
 /// a planted bug crossed: a locked and a crossed quote, both collar ends, each participation cap
 /// alone, the order-to-fill maximum, the opposite-fill interval's last instant, the collar pricing
-/// only a discretionary exit, a slice only below the proposal and never of a risk exit, an unknown
-/// median's narrower collar, and the resting time's end.
+/// only a discretionary exit, a slice only below the proposal and never of a risk exit, no slice
+/// from a zero cap and none below `min_order_size`, an unknown median's narrower collar, and the
+/// resting time's end.
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
 
     use mandate_num::{Fraction, Price, Ratio, Usd};
     use mandate_time::UtcNanos;
+    use proptest::prelude::*;
 
     use super::*;
     use crate::floor;
@@ -2534,6 +2536,101 @@ mod tests {
         Ok(())
     }
 
+    /// The origins of the exits a participation cap paces: the owner's two and the three
+    /// discretionary ones.
+    const PACED_EXITS: [Origin; 5] = [
+        Origin::OwnerKillSwitch,
+        Origin::OwnerClose,
+        Origin::OrderBuilder,
+        Origin::GoalCompletion,
+        Origin::RemovedInstrument,
+    ];
+
+    /// A cap that works out to zero slices nothing and names nothing, exactly as a missing volume
+    /// does, for every paced exit (DEC-163 item 4): an order cap of `0.05 × 0`, one of `0.05 × 19`
+    /// truncated to 0 whole shares, and a daily cap of 10 used up or overdrawn today. The exit of 10
+    /// goes whole at its own limit, never as an order of 0.
+    #[test]
+    fn a_zero_cap_slices_no_exit_of_any_kind() -> Result<(), GateError> {
+        let exit = |origin: Origin, trailing: &str, today: &str| -> Result<_, GateError> {
+            let mut o = allowing()?.selling(origin)?;
+            o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
+            o.market.adv_20d = Some(Qty::parse("200")?);
+            o.conduct
+                .participation_today
+                .insert(id("a")?, Qty::parse(today)?);
+            let d = o.decide()?;
+            Ok((origin, d.verdict, d.pacing))
+        };
+        for origin in PACED_EXITS {
+            assert_eq!(
+                vec![
+                    exit(origin, "0", "0")?,
+                    exit(origin, "19", "0")?,
+                    exit(origin, "200", "10")?,
+                    exit(origin, "200", "12")?,
+                ],
+                vec![(origin, Verdict::Allow, None); 4],
+                "a zero order cap, one truncated to zero, and a used-up or overdrawn daily cap \
+                 slice nothing"
+            );
+        }
+        Ok(())
+    }
+
+    /// A cap above zero but below `min_order_size` slices at `min_order_size`, never below it
+    /// (DEC-163 item 4): with a minimum of 3, an order cap of 2 slices an exit of 10 to 3, a cap of
+    /// exactly 3 slices to 3, and an order cap of 1 with 2 left of the daily cap slices to 3 naming
+    /// both; an exit of 2, smaller than the minimum, goes whole. With the fixture's minimum of 1,
+    /// an order cap of exactly 1 slices to 1, and a fractional cap of 0.5 slices to 1.
+    #[test]
+    fn a_cap_below_the_minimum_slices_at_the_minimum() -> Result<(), GateError> {
+        let exit = |origin: Origin, qty: &str, minimum: &str, trailing: &str, today: &str| {
+            let mut o = allowing()?.selling(origin)?;
+            o.proposed.qty = Qty::parse(qty)?;
+            o.instrument.min_order_size = Qty::parse(minimum)?;
+            o.instrument.fractionable = true;
+            o.market.trailing_5m_volume = Some(Qty::parse(trailing)?);
+            o.market.adv_20d = Some(Qty::parse("200")?);
+            o.conduct
+                .participation_today
+                .insert(id("a")?, Qty::parse(today)?);
+            let d = o.decide()?;
+            Ok::<_, GateError>((d.verdict, d.pacing.map(|p| (p.qty, p.applied))))
+        };
+        let order = crate::PacingControl::OrderSizeParticipation;
+        let daily = crate::PacingControl::DailyParticipation;
+        let sliced = |qty: &str, applied: &[crate::PacingControl]| -> Result<_, GateError> {
+            Ok((
+                Verdict::Allow,
+                Some((Qty::parse(qty)?, applied.iter().copied().collect())),
+            ))
+        };
+        for origin in PACED_EXITS {
+            assert_eq!(
+                [
+                    exit(origin, "10", "3", "40", "0")?,
+                    exit(origin, "10", "3", "60", "0")?,
+                    exit(origin, "10", "3", "20", "8")?,
+                    exit(origin, "2", "3", "20", "8")?,
+                    exit(origin, "10", "1", "20", "0")?,
+                    exit(origin, "10", "1", "10", "0")?,
+                ],
+                [
+                    sliced("3", &[order])?,
+                    sliced("3", &[order])?,
+                    sliced("3", &[order, daily])?,
+                    (Verdict::Allow, None),
+                    sliced("1", &[order])?,
+                    sliced("1", &[order])?,
+                ],
+                "{origin:?}: a cap below or at the minimum slices at the minimum; an exit below \
+                 the minimum goes whole"
+            );
+        }
+        Ok(())
+    }
+
     /// §9.6 for a collar: an equity whose 20-day median dollar volume is unknown takes the narrower
     /// `collar_liquid_x` (DEC-163 item 2). An opening in it never reaches the collar, since the
     /// eligibility floor denies it first, so a discretionary sell at 98 shows it: with bid 99.95 it
@@ -2557,6 +2654,64 @@ mod tests {
             "an unknown median prices by the liquid collar, a known low one by the other"
         );
         Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// Over every exit origin, volume, day's participation, minimum, quantity and increment,
+        /// an allowed exit is sent as an order the broker takes: above zero, at most what was
+        /// proposed, and at least `min_order_size` unless the proposed exit is itself smaller
+        /// (`AGENTS.md` rule 13, DEC-163 item 4). The bound is computed from the inputs, not from
+        /// the gate's own slice.
+        #[test]
+        fn an_allowed_exit_is_never_below_its_minimum_or_zero(
+            origin in prop::sample::select(vec![
+                Origin::OwnerKillSwitch, Origin::OwnerClose, Origin::OrderBuilder,
+                Origin::GoalCompletion, Origin::RemovedInstrument, Origin::RiskEngine,
+                Origin::ProtectiveLeg,
+            ]),
+            trailing in prop::option::of(0_u32..400),
+            adv in prop::option::of(0_u32..400),
+            today in 0_u32..30,
+            minimum_tenths in 1_u32..60,
+            qty_tenths in 1_u32..=100,
+            fractionable in any::<bool>(),
+        ) {
+            let fail = |e: GateError| TestCaseError::fail(e.to_string());
+            let tenths = |n: u32| match n % 10 {
+                0 => Qty::parse(&(n / 10).to_string()),
+                part => Qty::parse(&format!("{}.{part}", n / 10)),
+            };
+            let mut o = allowing().map_err(fail)?.selling(origin).map_err(fail)?;
+            let proposed = tenths(qty_tenths).map_err(|e| fail(e.into()))?;
+            let minimum = tenths(minimum_tenths).map_err(|e| fail(e.into()))?;
+            o.proposed.qty = proposed;
+            o.instrument.min_order_size = minimum;
+            o.instrument.fractionable = fractionable;
+            o.market.trailing_5m_volume = trailing
+                .map(|v| Qty::parse(&v.to_string()))
+                .transpose()
+                .map_err(|e| fail(e.into()))?;
+            o.market.adv_20d = adv
+                .map(|v| Qty::parse(&v.to_string()))
+                .transpose()
+                .map_err(|e| fail(e.into()))?;
+            o.conduct.participation_today.insert(
+                id("a").map_err(fail)?,
+                Qty::parse(&today.to_string()).map_err(|e| fail(e.into()))?,
+            );
+            let d = o.decide().map_err(fail)?;
+            prop_assert_eq!(d.verdict, Verdict::Allow, "an exit is never denied");
+            let sent = d.pacing.map_or(proposed, |p| p.qty);
+            prop_assert!(
+                sent > Qty::ZERO && sent <= proposed && sent >= minimum.min(proposed),
+                "sent {:?} of {:?} with a minimum of {:?}",
+                sent,
+                proposed,
+                minimum
+            );
+        }
     }
 
     /// §9.6's minimum resting time of 2 s on a cancel at 15:00:00: an opening order resting since

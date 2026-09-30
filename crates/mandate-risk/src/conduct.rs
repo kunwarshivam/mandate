@@ -292,9 +292,14 @@ fn on_grid(input: &GateInput<'_>, price: Price, adverse: Adverse) -> Result<Pric
 /// The participation caps slice an exit to the smaller of `order_size_participation ×
 /// trailing_5m_volume` and what is left of `daily_participation × adv_20d` today, truncated to the
 /// instrument's increment; the rest is re-proposed in a later interval or on a later day (§9.6,
-/// DEC-129 item 11). Each control whose cap is below the proposed quantity is named in
-/// [`Pacing::applied`], so a slice says every limit it met. A volume the executor could not supply
-/// slices nothing (DEC-163 item 4), and a slice may be zero (DEC-163 item 6).
+/// DEC-129 item 11). Each control whose cap binds is named in [`Pacing::applied`], so a slice says
+/// every limit it met.
+///
+/// A slice is never an order the broker would refuse, which would deny the exit (`AGENTS.md` rule
+/// 13, DEC-163 item 4): a cap that works out to zero, like a volume the executor could not supply,
+/// slices nothing, and a cap above zero but below the instrument's `min_order_size` slices at
+/// `min_order_size`. A cap binds only where that slice is below the proposed quantity, so an exit
+/// smaller than `min_order_size` goes whole.
 fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
     let proposed = input.proposed.qty;
     let increment = if input.instrument.fractionable {
@@ -320,9 +325,11 @@ fn slice(input: &GateInput<'_>, pacing: &mut Pacing) -> Result<(), GateError> {
             left.portion(Fraction::ONE, increment)?,
         ));
     }
+    let minimum = input.instrument.min_order_size;
     for (control, cap) in caps {
-        if cap < proposed {
-            pacing.qty = pacing.qty.min(cap);
+        let slice = cap.max(minimum);
+        if cap > Qty::ZERO && slice < proposed {
+            pacing.qty = pacing.qty.min(slice);
             pacing.applied.insert(control);
         }
     }
