@@ -263,7 +263,7 @@ queue ([coordination playbook](.cursor/skills/mandate-mode/playbooks/coordinatio
 - [Documentation index](docs/README.md) and [High-Level Design](docs/HLD.md)
 - Architecture decisions: [ADR-0001 engineering setup](docs/adr/0001-engineering-setup.md),
   [ADR-0002 autonomous ideation and retail](docs/adr/0002-autonomous-ideation-and-retail.md),
-  [ADR-0003 earned autonomy](docs/adr/0003-earned-autonomy.md) (Proposed)
+  [ADR-0003 earned autonomy](docs/adr/0003-earned-autonomy.md)
 - Product: [vision](docs/product/01-vision-and-strategy.md), [PRD v1](docs/product/04-prd-v1.md),
   [roadmap](docs/product/05-roadmap.md), [compliance](docs/product/08-compliance-and-regulatory.md)
 - Project: [milestones](docs/project/02-milestones-and-wbs.md), [RAID log](docs/project/03-raid-log.md),
