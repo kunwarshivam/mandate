@@ -548,8 +548,9 @@ fn long(view: &ExecutorState, instrument: &InstrumentId) -> Qty {
     view.positions
         .get(instrument)
         .copied()
-        .filter(|held| *held > SignedQty::ZERO)
-        .map_or(Qty::ZERO, SignedQty::abs)
+        .unwrap_or(SignedQty::ZERO)
+        .max(SignedQty::ZERO)
+        .abs()
 }
 
 /// The unfilled quantity every live protective order in `instrument` covers.
@@ -792,12 +793,8 @@ fn oco(id: ClientOrderId, instrument: &InstrumentId, legs: OcoLegs) -> SubmitOrd
     }
 }
 
-/// §5.4's bound: at `max_unprotected_s` the exit is cancelled (its confirmation re-places
-/// protection through [`settle`]) and the owner alerted once. An exit with no order yet — waiting
-/// on an opening, or held at the gate — has nothing to cancel at the broker and is abandoned
-/// instead, so [`settle`] re-places protection in the same step rather than leaving the position
-/// unprotected for as long as the hold lasts (#286 round 2, M2′; rule 3). A handed-on sequence's
-/// exits are the ones beside its passive exit ([`cancel_beside`]).
+/// §5.4's bound: at `max_unprotected_s` the sequence's exits are ended ([`end_exits`]) — their
+/// confirmations re-place protection through [`settle`] — and the owner alerted once.
 pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     let now = batch.at().secs();
     let limit = batch.ports.config.max_unprotected_s;
@@ -813,26 +810,8 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
         .map(|interval| interval.instrument.clone())
         .collect();
     for instrument in due {
-        match batch.view.exiting.get(&instrument).cloned() {
-            Some(sequence) if handed(&batch.view, &sequence) => cancel_beside(batch, &instrument)?,
-            Some(sequence) => {
-                let id = ClientOrderId::for_intent(&sequence.intent)?;
-                let received = batch
-                    .view
-                    .intents
-                    .get(&sequence.intent)
-                    .is_some_and(|record| record.outcome == IntentOutcome::Received);
-                if batch.view.orders.contains_key(&id) {
-                    if ask_cancel(batch, &id)? {
-                        batch.broker(BrokerRequest::Cancel {
-                            client_order_id: id,
-                        });
-                    }
-                } else if received {
-                    abandon(batch, &sequence.intent, "unprotected_interval_limit")?;
-                }
-            }
-            None => {}
+        if batch.view.exiting.contains_key(&instrument) {
+            end_exits(batch, &instrument)?;
         }
         let alerted = changed(batch, &instrument, "interval_limit", Vec::new())?;
         batch.notify(alerted, "unprotected_interval_limit");
@@ -840,14 +819,14 @@ pub(crate) fn bound(batch: &mut Batch<'_, '_>) -> Result<(), ExecutorError> {
     Ok(())
 }
 
-/// The bound on a handed-on sequence ([`passive_exit`]): its own exit rests as protection and is
-/// left alone; every exit selling beside it is cancelled, or abandoned if it has no order yet, so
-/// [`settle`] re-places protection for what they leave unsold (#286 round 2, M1′). An order back
-/// in `Intent` has nothing at the broker to cancel and ends with its resubmission.
-fn cancel_beside(
-    batch: &mut Batch<'_, '_>,
-    instrument: &InstrumentId,
-) -> Result<(), ExecutorError> {
+/// The bound's end of every exit in `instrument`, since [`settle`] re-places protection only once
+/// none is working or waiting: each working one is cancelled, and each with no order yet —
+/// waiting on an opening, or held at the gate — has nothing to cancel at the broker and is
+/// abandoned, so protection returns in the same step rather than after the hold (#286 round 2,
+/// M2′; rule 3). A handed-on passive exit ([`passive_exit`]) rests as protection and is left
+/// alone (M1′). An order back in `Intent` has nothing at the broker to cancel and ends with its
+/// resubmission.
+fn end_exits(batch: &mut Batch<'_, '_>, instrument: &InstrumentId) -> Result<(), ExecutorError> {
     let working: Vec<ClientOrderId> = batch
         .view
         .orders
@@ -3932,7 +3911,8 @@ mod sequence_tests {
     /// #286 round 2, M2′, the reviewer's first path: a passive exit waits on its agent's opening,
     /// which the broker never had. Once the OCO's cancel is confirmed the passive sequence opens
     /// its interval; at rule 5's bound the opening is queried as an `Unknown`, the query 404s and
-    /// the gate holds the exit on the `Unknown`; at `max_unprotected_s` the bound fires.
+    /// the gate holds the exit on the `Unknown`; at `max_unprotected_s` the bound fires. An
+    /// interval the instrument had before, ended, is no open one.
     #[test]
     fn a_passive_exit_waiting_on_an_opening_that_404s_is_bounded() -> Result<(), ExecutorError> {
         let (config, fees) = (executor_config(), fees()?);
@@ -3943,15 +3923,34 @@ mod sequence_tests {
             config: &config,
             fees: &fees,
         };
-        let mut executor = protected_with_an_opening(&ports, "agent-a", false)?;
-        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, &ports)?;
+        for earlier in [false, true] {
+            let mut executor = protected_with_an_opening(&ports, "agent-a", false)?;
+            if earlier {
+                for action in ["unprotected_start", "unprotected_end"] {
+                    committed(
+                        &mut executor,
+                        "ProtectionChanged",
+                        vec![("instrument", text("AAPL")), ("action", text(action))],
+                    )?;
+                }
+            }
+            a_passive_exit_waits_on_a_404_until_the_bound(executor, &ports)?;
+        }
+        Ok(())
+    }
+
+    fn a_passive_exit_waits_on_a_404_until_the_bound(
+        mut executor: Executor,
+        ports: &Ports<'_>,
+    ) -> Result<(), ExecutorError> {
+        let asked = executor.run(sell(EXIT, "5", "160", Purpose::DiscretionaryExit)?, ports)?;
         assert_eq!(actions(&asked), vec!["passive_start"]);
         assert_eq!(open_interval(&executor), None, "the OCO still rests");
-        let confirmed = executor.run(cancel_accepted(OCO), &ports)?;
+        let confirmed = executor.run(cancel_accepted(OCO), ports)?;
         assert_eq!(actions(&confirmed), vec!["cancelled", "unprotected_start"]);
         assert_eq!(submitted(&confirmed), 0, "the exit waits on the opening");
         assert_eq!(open_interval(&executor), Some((0, false)));
-        let overdue = executor.run(Input::Tick(RiskClock::from_secs(15)), &ports)?;
+        let overdue = executor.run(Input::Tick(RiskClock::from_secs(15)), ports)?;
         assert_eq!(queried(&overdue), vec![BUY]);
         assert_eq!(verdicts(&overdue), vec!["hold"]);
         assert!(actions(&overdue).is_empty(), "{:?}", drafted(&overdue));
@@ -3959,11 +3958,11 @@ mod sequence_tests {
             Input::Broker(Ok(BrokerOutcome::Absent {
                 client_order_id: BUY.to_owned(),
             })),
-            &ports,
+            ports,
         )?;
         assert!(submitted(&absent) == 0 && actions(&absent).is_empty());
         assert_eq!(open_interval(&executor), Some((0, false)), "opened once");
-        assert_bound_fired_at_30(&mut executor, &ports)
+        assert_bound_fired_at_30(&mut executor, ports)
     }
 
     /// #286 round 2, M2′, the reviewer's second path: another agent's opening in the instrument
@@ -4038,6 +4037,32 @@ mod sequence_tests {
         )?;
         let later = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
         assert!(actions(&later).is_empty(), "{:?}", drafted(&later));
+        assert_eq!(stop_covered(&executor)?, position(&executor)?);
+        Ok(())
+    }
+
+    /// §5.4's bound ends every exit in the instrument, not the sequence's alone: `settle`
+    /// re-places protection only once none is working, so one left working would leave the
+    /// position unprotected past the bound (#286 round 2, M1′ and M2′).
+    #[test]
+    fn the_bound_ends_every_exit_in_the_instrument() -> Result<(), ExecutorError> {
+        with_ports!(ports);
+        let mut executor = protected(&ports)?;
+        executor.run(quote("150")?, &ports)?;
+        executor.run(sell(EXIT, "3", "139", Purpose::RiskExit)?, &ports)?;
+        executor.run(sell(SECOND, "2", "139", Purpose::RiskExit)?, &ports)?;
+        let gone = executor.run(cancel_accepted(OCO), &ports)?;
+        assert_eq!(submitted(&gone), 2);
+        let due = executor.run(Input::Tick(RiskClock::from_secs(30)), &ports)?;
+        let mut cancelled = cancels(&due);
+        cancelled.sort_unstable();
+        let (first, second) = (format!("md-{SECOND}"), format!("md-{EXIT}"));
+        assert_eq!(cancelled, vec![first.as_str(), second.as_str()]);
+        assert_eq!(actions(&due), vec!["interval_limit"]);
+        executor.run(cancel_accepted(&first), &ports)?;
+        assert_eq!(stop_covered(&executor)?, Qty::ZERO, "one exit still works");
+        let ended = executor.run(cancel_accepted(&second), &ports)?;
+        assert_eq!(actions(&ended), vec!["placed", "unprotected_end"]);
         assert_eq!(stop_covered(&executor)?, position(&executor)?);
         Ok(())
     }
