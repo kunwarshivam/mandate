@@ -992,6 +992,27 @@ From the independent reviews of stream K's tests (`mandate-executor`, `mandate-a
     code changes; say so (nit);
   - the E6-3 brief's check-2 row carries an inline parenthetical in an otherwise bare list of
     codes; the Story column already names E6-10 (nit).
+- **DEC-253's mutation-scope wording** (#345 review, minors and nits), one docs change:
+  - ADR-0001 ES-13 names `risk_gate.rs` and `order_builder.rs` as the recorded exceptions, but
+    ES-13's limit is per change, so read alone it licenses a later 900-line change to either file.
+    Say the exceptions are the two merged changes that added them, and that neither exempts a
+    later change (minor 1);
+  - the `verify-mandate` skill's rule 5 states that pending-only harness lines survive the gate but
+    not the remedy. Add: drive the line from a live doctored-case test in
+    `crates/mandate-refcases/tests/`, as `mandate_gate_harness.rs` does (DEC-253 item 2) (minor 2);
+  - DEC-253 item 3 splits a large harness arm into stacked 400-line PRs without saying each slice
+    must carry the doctored-case tests item 2 requires, or the gate fails it (minor 3);
+  - the family-B survivors row calls the `listing` site `qty_increment < 1`; the code reads
+    `stated.increment < one` (nit);
+  - "the 14 mutants that survive in merged harness code" is what two sampled diffs found, not a
+    census; say so where it is repeated (nit);
+  - the xtask fixture names a crate `core`, shadowing `std`'s; `base` or `product` reads better
+    (nit);
+  - `mutated_crates` no longer parses `layer`, so a typo there surfaces in `lint`, not `mutants`;
+    intended, recorded so it is not mistaken for an oversight (nit).
+  Also worth knowing: a change that touches only `crates/mandate-refcases/tests/` never starts the
+  gate, so a tests correction that kills survivors proves it by re-running the gate over the
+  original diff locally.
 - **E7-4 slice 1's tests correction:** close the do-nothing gap in `mandate-executor`'s generator
   properties. 29 of the 33 pass when every reachable stub returns `Ok(())`, so a no-op executor
   would satisfy them; each property must also assert a positive effect a no-op cannot produce
