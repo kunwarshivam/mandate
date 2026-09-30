@@ -761,6 +761,22 @@ fn states_are_equal_whichever_clock_they_hold() -> Result<(), String> {
     Ok(())
 }
 
+/// A state prints what it folded and what it reports, and not the clock it borrows, which has no
+/// `Debug` of its own; `assert_eq!` on two states relies on this to say how they differ.
+#[test]
+fn a_state_prints_its_fold_and_snapshot_and_not_its_clock() -> Result<(), String> {
+    let state = open(&ladder_only(&[])?, &equity()?, &Every)?;
+    let printed = format!("{state:?}");
+    assert!(printed.starts_with("RiskState { fold: Fold {"), "{printed}");
+    assert!(
+        printed.contains(&format!("snapshot: {:?}", state.snapshot())),
+        "{printed}"
+    );
+    assert!(printed.ends_with(", .. }"), "{printed}");
+    assert!(!printed.contains("clock"), "{printed}");
+    Ok(())
+}
+
 /// One input to the lift property: a mark at one of three bids after a gap.
 #[derive(Debug, Clone, Copy)]
 enum Level {
