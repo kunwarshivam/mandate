@@ -180,10 +180,11 @@ Stories follow "As a … I want … so that …" with acceptance criteria.
   RC-15 passes.
 - **E6-10 (Must)** As an owner, I want the gate to admit crypto **USD pairs only** (trading-domain
   §3.2 item 7), so that an agent cannot open a stablecoin-quoted pair the floor was never written
-  for. Needs a quote-currency input: `InstrumentSnapshot` carries none and `AssetId` is a UUID, so
-  today nothing tells BTC/USD from BTC/USDT. Until it lands the gate keeps a crypto opening owed at
-  check 2 and refuses it fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a
-  non-USD pair is denied, a USD pair passes the floor, and check 2 is whole for crypto.
+  for. `AssetId` is a UUID, so the quote currency is its own input,
+  `InstrumentSnapshot::quote_currency`, where only a stated USD admits (DEC-254). Until the
+  implementation reads it the gate keeps a crypto opening owed at check 2 and refuses it
+  fail-closed (DEC-129 item 34). *Accepted when:* a crypto opening in a non-USD pair is denied, a
+  USD pair passes the floor, and check 2 is whole for crypto (`crates/mandate-risk/tests/usd_pairs.rs`).
 - **E6-11 (Must)** As an owner, I want the daily surveillance report delivered to me and a conduct
   breach to move the agent to `exits_only`, so that §9.6's "breach → agent `exits_only`" and its
   "threshold breaches are routed to the owner, whose acknowledgment is journaled" hold. E6-8 computes
