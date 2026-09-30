@@ -1349,18 +1349,22 @@ From E6-4's slice R2 (stream H2; DEC-167 item 6):
   a limit on one print, which DEC-63 rules out. The crate follows the spec (DEC-167 item 6), and no
   reference case changes either way. Drop `"fill"` from the tuple and regenerate with
   `reference/mandate/generate.py`, which must leave `fixtures/refcases/mandate.json` unchanged.
-- **The three `ref.py` readings the #124 handover left for R3 and R4.** (1) R3: a daily hard breach
-  pending at the rollover is popped into the rollover record and never read again, so `hard_breach`
-  can stay applied with nothing to clear it; keep it pending under the new day and record the reading
-  as a DEC-167 item. (2) R3: the renewal's `acked` is always false, since only a `flatten_and_pause`
-  daily is acknowledged; write it as false. (3) R4: settling time before an allocation change only
-  when `at > self.t` is equivalent to settling always; settle always. Handover items 4 (one cash sum)
-  and 5 (the post-loop lift reset) are R2's and are in `risk/fold.rs`.
-- **No MC-R case passes until R3 (R3's status PR).** Every equity case builds on `two_stock_swing`,
-  whose goal is `profit_stop` (R3), and every crypto case opens with `risk_day_started` (R3). With
-  the profit stop stubbed out locally, MC-R01 to MC-R04, MC-R18, and MC-R19 match every expectation on
-  R2's spine. R3's PR runs `cargo test -p mandate-refcases --test refcases -- --include-ignored
-  mandate::MC-R` and proposes the passing ones for `status.toml` (founder-owned).
+- **The `ref.py` reading the #124 handover left for R4.** Settling time before an allocation change
+  only when `at > self.t` is equivalent to settling always; settle always. Readings 1 and 2 were
+  R3's and are DEC-167 item 7 (a) and (c); handover items 4 (one cash sum) and 5 (the post-loop lift
+  reset) are R2's and are in `risk/fold.rs`.
+- **R3's status PR: fifteen MC-R cases pass.** MC-R01 to MC-R08, MC-R13, MC-R15, MC-R18 to MC-R20,
+  MC-R22, and MC-R24 pass `cargo test -p mandate-refcases --test refcases -- --include-ignored
+  mandate::MC-R` on R3 (DEC-167 item 7 (l)); proposing them for `status.toml` is founder-owned.
+
+From E6-4's slice R3 (stream H2; DEC-167 item 7):
+
+- **`ref.py` drops a daily hard wait at the rollover (reference fix).** `RiskState.step` pops
+  `hard_first["max_daily_loss"]` into the rollover record and never reads it again, so `hard_breach`
+  can stay applied with nothing to clear it. The crate keeps the wait under the new day (DEC-167
+  item 7 (a)). Keep it in `hard_first` and regenerate with `reference/mandate/generate.py`, which must
+  leave `fixtures/refcases/mandate.json` unchanged (checked from the crate's side: putting `ref.py`'s
+  reading into the fold leaves the same fifteen MC-R cases passing).
 
 From journal spec v0.5 §9.1, the agent-stream payload schemas ([DEC-177](04-decision-log.md#decisions);
 DEC-174 items 4 and 5). Until each lands, the drafts it names stay refused at `append`, which adds no
