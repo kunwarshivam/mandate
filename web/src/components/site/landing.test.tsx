@@ -355,20 +355,6 @@ describe("the desktop's other things", () => {
     expect(screen.queryByRole("complementary", { name: "Owl assistant" })).toBeNull();
     expect(win("Tour.mp4 - Media Player")).toBeVisible();
   });
-
-  it("previews the Flying Owls screen saver from Display, and a key wakes the desktop", async () => {
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
-    const now = vi.spyOn(performance, "now");
-    now.mockReturnValue(0);
-    const { container } = renderLanding();
-    await press(within(screen.getByRole("list", { name: "Desktop" })).getByRole("button", { name: "Display" }));
-    await press(within(win("Display Properties")).getByRole("button", { name: "Preview" }));
-    expect(container.ownerDocument.querySelector("[data-slot=screen-saver]")).not.toBeNull();
-    now.mockReturnValue(1000);
-    await act(async () => fireEvent.keyDown(window, { key: "a" }));
-    expect(container.ownerDocument.querySelector("[data-slot=screen-saver]")).toBeNull();
-    vi.restoreAllMocks();
-  });
 });
 
 describe("Winamp's playlist", () => {

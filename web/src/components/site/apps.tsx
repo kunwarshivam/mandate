@@ -35,8 +35,6 @@ Tour.mp4 is a minute on what Owlhead does. Minesweeper is the beginner's board, 
 
 The owl in the corner has tips. Right-click the desktop and pick Ask the owl to bring it back.
 
-Leave the desktop alone for a minute and the owls fly. Change that in Display, under Screen saver.
-
 Winamp is Webamp, the open source Winamp 2 for the browser. Its playlist is public domain recordings from Wikimedia Commons: records made from 1916 to 1925 by Bessie Smith and Louis Armstrong, George Gershwin with Paul Whiteman, Scott Joplin, Mamie Smith, Al Jolson, the Original Dixieland Jass Band and Enrico Caruso, and classics played by the US Air Force and Marine bands.`;
 
 /** Notepad, open on the readme. */

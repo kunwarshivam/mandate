@@ -1,6 +1,7 @@
 "use client";
 
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { OwlheadMark } from "@/components/brand/Logo";
@@ -13,7 +14,6 @@ import { MediaPlayer } from "./media-player";
 import { Minesweeper } from "./minesweeper";
 import { BIN, BIN_EMPTY, BOLT, BOOK, FILM, HELP, KEY, LEDGER, MINE, MONITOR, NOTE, PICTURE, PixelIcon, type Sprite } from "./pixel-icons";
 import { TitleBar, WINDOW_BUTTON } from "./retro";
-import { ScreenSaver, useIdle, useSaver } from "./screensaver";
 import { ThemeSwitch } from "./theme-switch";
 import { DisplayProperties, Wallpaper } from "./wallpaper";
 import type { AmpState } from "./winamp";
@@ -357,8 +357,6 @@ export function Desktop({ home }: { home: ReactNode }) {
   const [ampAnchor, setAmpAnchor] = useState<HTMLElement | null>(null);
   const [bin, setBin] = useState(DISCARDED);
   const [helper, setHelper] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const saver = useSaver();
   const front = frontmost(state);
   const startRef = useRef<HTMLDivElement>(null);
 
@@ -388,12 +386,6 @@ export function Desktop({ home }: { home: ReactNode }) {
     return () => clearTimeout(t);
   }, []);
 
-  const idle = useCallback(() => {
-    if (![...document.querySelectorAll("video, audio")].some((m) => !(m as HTMLMediaElement).paused)) setSaving(true);
-  }, []);
-  const wake = useCallback(() => setSaving(false), []);
-  useIdle(saver.minutes, saver.kind === "owls" && !saving && !off, idle);
-
   const openApp = (id: AppId, hash?: string) => {
     dispatch({ type: "open", id });
     setStart(false);
@@ -415,6 +407,7 @@ export function Desktop({ home }: { home: ReactNode }) {
     if ("amp" in s) {
       setAmpLoaded(true);
       setAmp("open");
+      setHelper(false);
     }
   };
 
@@ -422,7 +415,7 @@ export function Desktop({ home }: { home: ReactNode }) {
     home,
     readme: <Notepad />,
     owl: <PictureViewer />,
-    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} onPreview={() => setSaving(true)} />,
+    display: <DisplayProperties onDone={() => dispatch({ type: "close", id: "display" })} />,
     tour: <MediaPlayer />,
     mines: <Minesweeper />,
     bin: <RecycleBin items={bin} onEmpty={() => setBin([])} />,
@@ -469,7 +462,7 @@ export function Desktop({ home }: { home: ReactNode }) {
         }}
       >
         <Wallpaper />
-        <div ref={setAmpAnchor} aria-hidden className="pointer-events-none absolute inset-y-0 right-4 w-[275px] max-sm:inset-x-0 max-sm:mx-auto" />
+        <div ref={setAmpAnchor} aria-hidden className="pointer-events-none absolute inset-y-0 right-4 w-[275px] sm:right-[8rem] max-sm:inset-x-0 max-sm:mx-auto" />
         {ampLoaded && ampAnchor && <Winamp anchor={ampAnchor} state={amp} onState={setAmp} />}
 
         <ul aria-label="Desktop" className="grid content-start gap-1 p-2 max-sm:grid-cols-4 sm:h-full sm:grid-flow-col sm:auto-cols-[6.5rem] sm:grid-rows-[repeat(auto-fill,5.25rem)]" data-slot="desktop-icons">
@@ -604,27 +597,27 @@ export function Desktop({ home }: { home: ReactNode }) {
         </div>
       </div>
 
-      {saving && <ScreenSaver onWake={wake} />}
-
-      {off && (
-        <button
-          type="button"
-          autoFocus
-          onClick={() => {
-            setOff(false);
-            dispatch({ type: "reset" });
-          }}
-          className={cn(MONO, "fixed inset-0 z-[100] grid cursor-pointer place-content-center gap-4 bg-ink p-6 text-center text-[clamp(1.75rem,4.5vw,3rem)] leading-tight text-highlight outline-none")}
-          data-slot="shut-down"
-        >
-          <span>
-            It&apos;s now safe to turn off
-            <br />
-            your computer.
-          </span>
-          <span className="text-xl text-ink-foreground">Click anywhere to start Owlhead again.</span>
-        </button>
-      )}
+      {off &&
+        createPortal(
+          <button
+            type="button"
+            autoFocus
+            onClick={() => {
+              setOff(false);
+              dispatch({ type: "reset" });
+            }}
+            className={cn(MONO, "fixed inset-0 z-[100] grid cursor-pointer place-content-center gap-4 bg-ink p-6 text-center text-[clamp(1.75rem,4.5vw,3rem)] leading-tight text-highlight outline-none")}
+            data-slot="shut-down"
+          >
+            <span>
+              It&apos;s now safe to turn off
+              <br />
+              your computer.
+            </span>
+            <span className="text-xl text-ink-foreground">Click anywhere to start Owlhead again.</span>
+          </button>,
+          document.body,
+        )}
     </div>
   );
 }

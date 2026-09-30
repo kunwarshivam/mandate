@@ -6,7 +6,6 @@ import { cn } from "@/lib/utils";
 import { type Artwork, DAY, NIGHT, WALLPAPERS, artwork } from "./art";
 import { BOLD, BUTTON, LINK, PIXEL, SUNKEN } from "./letter";
 import styles from "./letter.module.css";
-import { SaverSettings } from "./screensaver";
 
 const AUTO = "auto";
 
@@ -64,8 +63,8 @@ function Credit({ art }: { art: Artwork }) {
   );
 }
 
-/** Display Properties: pick the wallpaper from the Met's paintings and prints, shown on a small monitor, and the screen saver. */
-export function DisplayProperties({ onDone, onPreview }: { onDone: () => void; onPreview: () => void }) {
+/** Display Properties: pick the wallpaper from the Met's paintings and prints, shown on a small monitor. */
+export function DisplayProperties({ onDone }: { onDone: () => void }) {
   const choice = useWallpaper();
   const shown = artwork(choice === AUTO ? DAY : choice);
   return (
@@ -99,8 +98,6 @@ export function DisplayProperties({ onDone, onPreview }: { onDone: () => void; o
       ) : (
         <Credit art={shown} />
       )}
-
-      <SaverSettings onPreview={onPreview} />
 
       <p className="flex justify-end">
         <button type="button" onClick={onDone} className={BUTTON}>

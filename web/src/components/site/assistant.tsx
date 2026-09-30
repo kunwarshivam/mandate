@@ -14,7 +14,7 @@ export const TIPS = [
   "In the beta, agents trade on paper, with simulated money.",
   "As losses reach levels you set, it trades smaller, then only sells, then closes out and pauses.",
   "It can't take money out of your account, and it can't change its own rules.",
-  "Right-click the desktop for more. Leave it alone for a minute and the owls fly.",
+  "Right-click the desktop for more. Try Minesweeper, or the Recycle Bin.",
 ];
 
 export const GREETING = "It looks like you're trying to let an AI trade for you. Would you like help?";
